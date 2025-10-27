@@ -1,13 +1,12 @@
-# =======================================================
-# 🔹 Google Analytics 4 (GA4) 접속자 추적 코드
-# =======================================================
 import streamlit as st
 import streamlit.components.v1 as components
 
-GA_MEASUREMENT_ID = "G-3PLRGRT2RL"  # ✅ 이두영님 전용 측정 ID
+# ✅ 페이지 설정은 반드시 첫 Streamlit 호출로
+st.set_page_config(page_title="Swing Picker Web v3.0.2 FullSync", layout="wide")
 
+# --- GA4 ---
+GA_MEASUREMENT_ID = "G-3PLRGRT2RL"
 GA_SCRIPT = f"""
-<!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -19,3 +18,5 @@ GA_SCRIPT = f"""
 """
 st.markdown(GA_SCRIPT, unsafe_allow_html=True)
 
+# ✅ 화면 살아있는지 즉시 표시(임시)
+st.write("✅ App loaded")
