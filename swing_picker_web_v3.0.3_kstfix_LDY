@@ -1,0 +1,173 @@
+import streamlit as st
+import pandas as pd
+import datetime as dt
+import pytz
+import math
+import time
+from pykrx import stock
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# ---------------- 기본 설정 ----------------
+st.set_page_config(page_title="Swing Picker Web v3.0.3 (LDY Edition)", layout="wide")
+
+st.title("📈 Swing Picker Web v3.0.3 (KST Fix · LDY Edition)")
+st.write("거래대금 + 기술지표 기반 자동 스윙 종목 추천 (한국시간 대응판)")
+
+DEFAULTS = {
+    "MARKETS": ["KOSPI", "KOSDAQ"],
+    "TOP_TURNOVER": 120,
+    "TOP_N": 10,
+    "LOOKBACK_DAYS": 63,
+    "VOL_RATIO_MIN": 1.5,
+    "RET5_MAX": 8.0,
+    "RET10_MAX": 15.0,
+    "EXCLUDE_HARD_DROP": True,
+    "HARD_DROP_5D": -10.0,
+    "REQUEST_DELAY_SEC": 0.22,
+    "MAX_WORKERS": 6,
+}
+
+KST = pytz.timezone("Asia/Seoul")
+
+# ---------------- 유틸 ----------------
+def last_trading_day_kst(use_yesterday: bool = True):
+    """한국시간 기준으로 전일/금일 거래일 반환"""
+    now = dt.datetime.now(KST)
+    if use_yesterday:
+        target = now - dt.timedelta(days=1)
+    else:
+        if now.hour < 16:
+            target = now - dt.timedelta(days=1)
+        else:
+            target = now
+    while target.weekday() >= 5:
+        target -= dt.timedelta(days=1)
+    return target.strftime("%Y%m%d")
+
+def normalize_ohlcv_columns(df: pd.DataFrame):
+    m = {"open": "시가", "high": "고가", "low": "저가", "close": "종가", "volume": "거래량", "amount": "거래대금"}
+    cols = {c: c for c in df.columns}
+    for c in df.columns:
+        lc = str(c).lower()
+        for k, v in m.items():
+            if k in lc:
+                cols[c] = v
+                break
+    df = df.rename(columns=cols)
+    if "거래대금" not in df.columns and {"종가", "거래량"}.issubset(df.columns):
+        df["거래대금"] = df["종가"] * df["거래량"]
+    return df
+
+def get_top_turnover_stocks(end, markets, top_turnover):
+    all_df = []
+    for m in markets:
+        df = stock.get_market_ohlcv_by_ticker(end, market=m)
+        df = normalize_ohlcv_columns(df)
+        df["시장"] = m
+        all_df.append(df)
+        time.sleep(DEFAULTS["REQUEST_DELAY_SEC"])
+    df_all = pd.concat(all_df)
+    df_all["거래대금(억)"] = df_all["거래대금"] / 1e8
+    return df_all.sort_values("거래대금(억)", ascending=False).head(int(top_turnover))
+
+def rsi_series(close: pd.Series, period=14):
+    delta = close.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    roll_up = up.ewm(alpha=1/period, adjust=False).mean()
+    roll_down = down.ewm(alpha=1/period, adjust=False).mean().replace(0, 1e-9)
+    rs = roll_up / roll_down
+    return 100 - (100 / (1 + rs))
+
+def macd_series(close: pd.Series, fast=12, slow=26, signal=9):
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    macd = ema_fast - ema_slow
+    sig = macd.ewm(span=signal, adjust=False).mean()
+    hist = macd - sig
+    return macd, sig, hist
+
+def analyze_stock(df: pd.DataFrame, code: str, name: str):
+    if df is None or len(df) < 40:
+        return None
+    try:
+        c = df["종가"].astype(float)
+        o = df["시가"].astype(float)
+        v = df["거래량"].astype(float)
+        ret5 = c.pct_change(5).iloc[-1] * 100
+        ret10 = c.pct_change(10).iloc[-1] * 100
+        v20 = v.iloc[-20:].mean()
+        vr = (v.iloc[-3:].mean() / v20) if v20 > 0 else 0.0
+        if ret5 < DEFAULTS["HARD_DROP_5D"]:
+            return None
+        ma20 = c.rolling(20).mean()
+        rsi = rsi_series(c, 14).iloc[-1]
+        macd, sig, hist = macd_series(c)
+        macd_hist = hist.iloc[-1]
+        conds = [ret5 <= DEFAULTS["RET5_MAX"], ret10 <= DEFAULTS["RET10_MAX"], vr >= DEFAULTS["VOL_RATIO_MIN"], rsi < 70, macd_hist > 0]
+        if all(conds):
+            last = c.iloc[-1]
+            buy = round(last * 0.98)
+            sell = round(last * 1.10)
+            return {
+                "종목명": name,
+                "종목코드": code,
+                "현재가": f"{last:,.0f}",
+                "추천매수가": f"{buy:,}",
+                "추천매도가": f"{sell:,}",
+                "5일수익률(%)": f"{ret5:.2f}",
+                "10일수익률(%)": f"{ret10:.2f}",
+                "거래량배수": f"{vr:.2f}",
+                "RSI14": f"{rsi:.1f}",
+                "MACD_hist": f"{macd_hist:.4f}",
+            }
+    except Exception:
+        return None
+    return None
+
+# ---------------- Streamlit UI ----------------
+col1, col2 = st.columns(2)
+with col1:
+    top_turnover = st.number_input("거래대금 상위 N", value=DEFAULTS["TOP_TURNOVER"], min_value=50, max_value=500)
+    topn = st.number_input("추천 종목 수", value=DEFAULTS["TOP_N"], min_value=5, max_value=50)
+with col2:
+    use_yesterday = st.checkbox("전일 기준으로 조회", value=True)
+    lookback = st.number_input("조회일수(LOOKBACK)", value=DEFAULTS["LOOKBACK_DAYS"], min_value=30, max_value=200)
+
+if st.button("🔍 스캔 시작"):
+    st.info("데이터 수집 및 분석 중... (1~3분 소요)")
+    end = last_trading_day_kst(use_yesterday)
+    start = (dt.datetime.strptime(end, "%Y%m%d") - dt.timedelta(days=int(lookback))).strftime("%Y%m%d")
+    top_df = get_top_turnover_stocks(end, DEFAULTS["MARKETS"], top_turnover)
+    codes = list(top_df.index)
+    name_map = {c: stock.get_market_ticker_name(c) for c in codes}
+
+    results = []
+    with ThreadPoolExecutor(max_workers=DEFAULTS["MAX_WORKERS"]) as ex:
+        fut = {ex.submit(stock.get_market_ohlcv_by_date, start, end, c): c for c in codes}
+        for f in as_completed(fut):
+            code = fut[f]
+            try:
+                df2 = normalize_ohlcv_columns(f.result())
+                res = analyze_stock(df2, code, name_map.get(code, code))
+                if res:
+                    results.append(res)
+            except Exception:
+                pass
+
+    if results:
+        df_res = pd.DataFrame(results).head(topn)
+        st.success(f"✅ 분석 완료! 추천 종목 {len(df_res)}개 발견")
+        st.dataframe(df_res, use_container_width=True)
+    else:
+        st.warning("⚠️ 조건에 맞는 종목이 없습니다.")
+
+# ---------------- 푸터 (브랜딩) ----------------
+st.markdown(
+    """
+    <div style='text-align: right; color: gray; font-size: 14px; margin-top: 25px;'>
+        Made by <b>LDY</b> — Swing Picker Web © 2025
+    </div>
+    """,
+    unsafe_allow_html=True
+)
