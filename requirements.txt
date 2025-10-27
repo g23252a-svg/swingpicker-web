@@ -3,3 +3,4 @@ pykrx
 pandas
 numpy
 requests
+setuptools
