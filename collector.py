@@ -18,14 +18,14 @@ def load_universe_ohlcv(lookback_days=60):
 
     log("🔍 거래대금 상위 300 종목 선정 중...")
 
-    # ✅ pykrx 1.0.51 문법에 맞게 (market= 제거)
-    kospi = stock.get_market_trading_value_by_date(end, end, "KOSPI")
-    kosdaq = stock.get_market_trading_value_by_date(end, end, "KOSDAQ")
+    # ✅ 거래대금 기준 종목 데이터 (이게 진짜 올바른 함수!)
+    kospi = stock.get_market_trading_volume_by_ticker(end, "KOSPI")
+    kosdaq = stock.get_market_trading_volume_by_ticker(end, "KOSDAQ")
 
     df_all = pd.concat([kospi, kosdaq])
 
     # ✅ 거래대금 컬럼명 자동 탐색
-    candidates = [c for c in df_all.columns if "거래대금" in c or "금액" in c]
+    candidates = [c for c in df_all.columns if "거래대금" in c or "금액" in c or "대금" in c]
     if not candidates:
         raise KeyError(f"❌ 거래대금 관련 컬럼을 찾을 수 없습니다. (현재 컬럼: {list(df_all.columns)})")
 
