@@ -18,9 +18,9 @@ def load_universe_ohlcv(lookback_days=60):
 
     log("🔍 거래대금 상위 300 종목 선정 중...")
 
-    # ✅ 거래대금 기준 종목 데이터 (이게 진짜 올바른 함수!)
-    kospi = stock.get_market_trading_volume_by_ticker(end, "KOSPI")
-    kosdaq = stock.get_market_trading_volume_by_ticker(end, "KOSDAQ")
+    # ✅ pykrx 1.0.51 정확한 함수 (이게 맞음!)
+    kospi = stock.get_market_trading_value_by_ticker(end, "KOSPI")
+    kosdaq = stock.get_market_trading_value_by_ticker(end, "KOSDAQ")
 
     df_all = pd.concat([kospi, kosdaq])
 
