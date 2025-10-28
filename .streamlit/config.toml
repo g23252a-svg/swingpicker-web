@@ -1,4 +1,3 @@
-# .streamlit/config.toml
 [server]
 headless = true
 port = 8501
@@ -17,3 +16,6 @@ font = "sans serif"
 [client]
 toolbarMode = "minimal"
 
+[runner]
+magicEnabled = true
+fastReruns = true
