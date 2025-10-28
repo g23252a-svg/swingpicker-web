@@ -17,7 +17,3 @@ font = "sans serif"
 [client]
 toolbarMode = "minimal"
 
-[runner]
-magicEnabled = true
-fastReruns = true
-script = "swing_picker_web_v3.0.3_kstfix_LDY.py"
