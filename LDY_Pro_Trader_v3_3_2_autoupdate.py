@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.3.2 (Auto Update + Robust Name Map)
+LDY Pro Trader v3.3.3 (Auto Update + Robust Name Map + Number Format)
 - 추천 CSV: data/recommend_latest.csv (remote 우선)
 - 이름맵:   data/krx_codes.csv (remote 우선) → FDR → pykrx 순 폴백
 - OHLCV만 와도 화면에서 지표/EBS/추천가 생성
 - 거래대금(억원) 안전 보강, 안전 정렬
+- 표에 표시되는 가격/억원 숫자에 천단위 콤마 적용 (Streamlit column_config)
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
@@ -23,8 +24,8 @@ try:
 except Exception:
     FDR_OK = False
 
-st.set_page_config(page_title="LDY Pro Trader v3.3.2 (Auto Update)", layout="wide")
-st.title("📈 LDY Pro Trader v3.3.2 (Auto Update)")
+st.set_page_config(page_title="LDY Pro Trader v3.3.3 (Auto Update)", layout="wide")
+st.title("📈 LDY Pro Trader v3.3.3 (Auto Update)")
 st.caption("매일 장마감 후 자동 업데이트되는 스윙 추천 종목 리스트 | Made by LDY")
 
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -165,7 +166,11 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
         last["손절가"]     = round(stp,2)   if not math.isnan(stp)   else np.nan
         return last
 
-    out = g.apply(_feat).reset_index(drop=True)
+    # pandas 2.3 경고 회피
+    try:
+        out = g.apply(_feat, include_groups=False).reset_index(drop=True)
+    except TypeError:
+        out = g.apply(_feat).reset_index(drop=True)
 
     # 거래대금(억원) 최신행 보강
     tail = raw.groupby("종목코드").tail(1).copy()
@@ -343,7 +348,51 @@ for c in cols:
     if c not in view.columns: view[c]=np.nan
 
 st.write(f"📋 총 {len(latest):,}개 / 표시 {min(len(view), int(topn)):,}개")
-st.dataframe(view[cols].head(int(topn)), width="stretch", height=640)
+
+# ── 숫자 포맷(콤마) 적용을 위한 캐스팅 ──
+view_fmt = view[cols].head(int(topn)).copy()
+
+# 가격/정수류 → Int64 (NaN 허용 정수)
+for c in ["종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS"]:
+    if c in view_fmt.columns:
+        view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce").round(0).astype("Int64")
+
+# 억원/지표류 → float
+for c in ["거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"]:
+    if c in view_fmt.columns:
+        view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce")
+
+st.dataframe(
+    view_fmt,
+    width="stretch",
+    height=640,
+    hide_index=True,
+    column_config={
+        # 텍스트
+        "통과":         st.column_config.TextColumn(" "),
+        "시장":         st.column_config.TextColumn("시장"),
+        "종목명":       st.column_config.TextColumn("종목명"),
+        "종목코드":     st.column_config.TextColumn("종목코드"),
+        "근거":         st.column_config.TextColumn("근거"),
+        # 가격/정수(콤마)
+        "종가":          st.column_config.NumberColumn("종가",           format="%,d"),
+        "추천매수가":    st.column_config.NumberColumn("추천매수가",     format="%,d"),
+        "손절가":        st.column_config.NumberColumn("손절가",         format="%,d"),
+        "추천매도가1":   st.column_config.NumberColumn("추천매도가1",    format="%,d"),
+        "추천매도가2":   st.column_config.NumberColumn("추천매도가2",    format="%,d"),
+        "EBS":          st.column_config.NumberColumn("EBS",            format="%d"),
+        # 억원/지표 (콤마·소수)
+        "거래대금(억원)": st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"),
+        "시가총액(억원)": st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"),
+        "RSI14":        st.column_config.NumberColumn("RSI14",          format="%.1f"),
+        "乖離%":         st.column_config.NumberColumn("乖離%",           format="%.2f"),
+        "MACD_hist":    st.column_config.NumberColumn("MACD_hist",      format="%.4f"),
+        "MACD_slope":   st.column_config.NumberColumn("MACD_slope",     format="%.5f"),
+        "Vol_Z":        st.column_config.NumberColumn("Vol_Z",          format="%.2f"),
+        "ret_5d_%":     st.column_config.NumberColumn("ret_5d_%",       format="%.2f"),
+        "ret_10d_%":    st.column_config.NumberColumn("ret_10d_%",      format="%.2f"),
+    },
+)
 
 st.download_button(
     "📥 현재 보기 다운로드 (CSV)",
