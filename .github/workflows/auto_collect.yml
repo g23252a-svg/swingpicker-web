@@ -11,11 +11,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python - <<'PY'
-import pykrx, sys
+import pykrx
 print("pykrx version:", pykrx.__version__)
 PY
 
@@ -38,22 +40,22 @@ PY
       - name: List outputs
         run: |
           ls -alh data || true
-          head -n 5 data/recommend_latest.csv || true
-          head -n 5 data/krx_codes.csv || true
+          [ -f data/recommend_latest.csv ] && head -n 5 data/recommend_latest.csv
+          [ -f data/krx_codes.csv ] && head -n 5 data/krx_codes.csv
 
       - name: Commit & Push CSV
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
 
-          # data/*.csv 이 없으면 add를 건너뛰도록
           shopt -s nullglob
           files=(data/*.csv)
           if (( ${#files[@]} )); then
             git add "${files[@]}"
             git status -s
-            git commit -m "chore: add CSV $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || echo "no changes"
-            git push || echo "no push"
+            git commit -m "chore: add CSV $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
+            git push || true
           else
             echo "No CSV files to commit."
           fi
