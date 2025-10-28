@@ -90,9 +90,9 @@ def load_universe_ohlcv(lookback_days: int = LOOKBACK_DAYS) -> pd.DataFrame:
 
     df_all = pd.concat(results, ignore_index=True)
     if "거래대금" in df_all.columns:
-    df_all["거래대금(억원)"] = (df_all["거래대금"] / 1e8).round(2)
+        df_all["거래대금(억원)"] = (df_all["거래대금"] / 1e8).round(2)
 elif "거래대금(원)" in df_all.columns:
-    df_all["거래대금(억원)"] = (df_all["거래대금(원)"] / 1e8).round(2)
+        df_all["거래대금(억원)"] = (df_all["거래대금(원)"] / 1e8).round(2)
 else:
     print("⚠️ 거래대금 컬럼이 감지되지 않았습니다.")
     df_all["거래대금(억원)"] = np.nan
