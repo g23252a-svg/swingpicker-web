@@ -1,6 +1,5 @@
 import os
 import time
-import math
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -13,7 +12,7 @@ from pykrx import stock
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).date()
 DATA_DIR = "data"
-LOOKBACK_DAYS = 30  # 최근 30일 기준 데이터
+LOOKBACK_DAYS = 30  # 최근 30일 기준
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------
@@ -29,7 +28,7 @@ def get_ohlcv(ticker: str, start: str, end: str):
         return pd.DataFrame()
 
 # ---------------------------------------------------------------------
-# 📊 상위 거래대금 종목 선정 + 병렬 수집
+# 📊 거래대금 상위 300종목 추출
 # ---------------------------------------------------------------------
 def load_universe_ohlcv(lookback_days: int = 30):
     end = TODAY.strftime("%Y%m%d")
@@ -38,31 +37,27 @@ def load_universe_ohlcv(lookback_days: int = 30):
     print(f"[{datetime.now(KST)}] 전종목 수집 시작…")
     print(f"[{datetime.now(KST)}] 🔍 거래대금 상위 300 종목 선정 중...")
 
-    # 거래대금 데이터 가져오기
-    df_all = stock.get_market_trading_value_by_ticker(end)
+    # ✅ 최신 pykrx 버전용 함수 (get_market_trading_value_by_date)
+    df_all = stock.get_market_trading_value_by_date(end, market="ALL")
     df_all = df_all.reset_index()
 
-    # 컬럼 정규화 (pykrx 버전에 따라 다름)
+    # 거래대금 컬럼 정리
     if "거래대금" in df_all.columns:
         df_all["거래대금(억원)"] = (df_all["거래대금"] / 1e8).round(2)
-    elif "거래대금(원)" in df_all.columns:
-        df_all["거래대금(억원)"] = (df_all["거래대금(원)"] / 1e8).round(2)
     else:
-        print("⚠️ 거래대금 컬럼이 감지되지 않아 0으로 처리합니다.")
+        print("⚠️ 거래대금 컬럼이 감지되지 않아 0 처리")
         df_all["거래대금(억원)"] = 0
 
     df_ranked = (
-        df_all.groupby("티커")["거래대금(억원)"]
-        .sum()
-        .sort_values(ascending=False)
+        df_all.sort_values("거래대금(억원)", ascending=False)
         .head(300)
-        .reset_index()
+        .reset_index(drop=True)
     )
 
     tickers = df_ranked["티커"].tolist()
     print(f"✅ {len(tickers)}개 종목 선택 완료")
 
-    # 병렬 수집
+    # 병렬 OHLCV 수집
     ohlcv_list = []
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(get_ohlcv, t, start, end): t for t in tickers}
@@ -79,10 +74,9 @@ def load_universe_ohlcv(lookback_days: int = 30):
     return df_merged
 
 # ---------------------------------------------------------------------
-# 💹 매수 신호 로직 (기본 버전)
+# 💹 매수 신호 로직
 # ---------------------------------------------------------------------
 def generate_recommendations(df: pd.DataFrame):
-    # 종가 기준 단순 이동평균 비교
     result = []
     for ticker, grp in df.groupby("티커"):
         grp = grp.sort_values("날짜")
@@ -93,7 +87,7 @@ def generate_recommendations(df: pd.DataFrame):
         ma20 = grp["종가"].rolling(20).mean().iloc[-1]
         last_close = grp["종가"].iloc[-1]
 
-        # 매수 조건: 5일선이 20일선을 상향 돌파 + 거래량 증가
+        # 매수 조건: 단기 상향 돌파 + 거래량 증가
         if ma5 > ma20 and grp["거래량"].iloc[-1] > grp["거래량"].iloc[-2]:
             result.append(
                 {
