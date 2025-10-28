@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 LDY Pro Trader: Nightly Collector (KRX)
-- 매일 장마감 후: 유동성 상위(TV 상위) 종목 N개 선정
-- 각 종목 60거래일 OHLCV 수집 → 당일 스냅샷 지표/점수(EBS) 계산
-- 추천 매수/매도/손절 가격까지 포함한 CSV 저장 (data/recommend_YYYYMMDD.csv, recommend_latest.csv)
+- '가장 최근 실제 거래일'을 자동 탐색해 그 날짜 기준으로 유동성 상위 N개 선정
+- 각 종목 60거래일 OHLCV 수집 → 지표/점수(EBS) + 추천 매수/손절/매도 계산
+- CSV 저장: data/recommend_YYYYMMDD.csv, data/recommend_latest.csv
 """
 
 from __future__ import annotations
 
 import os
 import time
-import math
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -19,7 +18,7 @@ from pykrx import stock
 # ------------------------------- 설정 -------------------------------
 KST = timezone(timedelta(hours=9))
 
-LOOKBACK_DAYS = 60          # 조회 일수
+LOOKBACK_DAYS = 60          # 조회 일수(캘린더 기준)
 TOP_N = 600                 # 거래대금 상위 샘플 크기(300~800 권장)
 MIN_TURNOVER_EOK = 50       # 거래대금 하한(억원)
 MIN_MCAP_EOK = 1000         # 시총 하한(억원)
@@ -59,24 +58,20 @@ def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
     return atr
 
 def round_to_tick(price: float) -> int:
-    # 간단 틱 반올림: 10원 단위
+    # 간단 틱(10원) 반올림
     return int(round(price / 10.0) * 10)
 
-# ------------------------------- 상위 N 추출 -------------------------------
+# ------------------------------- 거래일/상위 N 추출 -------------------------------
 def _prep_ohlcv_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    get_market_ohlcv_by_ticker 결과를 ['종목코드','거래대금(원)']로 정리
-    """
+    """get_market_ohlcv_by_ticker 결과를 ['종목코드','거래대금(원)']로 정리"""
     if df is None or df.empty:
         return pd.DataFrame(columns=["종목코드", "거래대금(원)"])
     df = df.reset_index().rename(columns={"티커": "종목코드"}, errors="ignore")
-    # 혹시 '종목코드'가 없으면 첫 컬럼으로 보정
     if "종목코드" not in df.columns:
         df.insert(0, "종목코드", df.iloc[:, 0])
-    # 거래대금 컬럼 찾기
     cand = [c for c in df.columns if "거래대금" in str(c)]
     if not cand:
-        # 없다면 종가*거래량으로 근사
+        # 최후수단: 종가*거래량 근사
         if "종가" in df.columns and "거래량" in df.columns:
             df["거래대금(원)"] = df["종가"].astype("float64") * df["거래량"].astype("float64")
         else:
@@ -88,10 +83,7 @@ def _prep_ohlcv_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
-    """
-    KOSPI/KOSDAQ 당일 티커별 OHLCV에서 '거래대금(원)' 기준 상위 N 추출.
-    반환: ['종목코드','거래대금(원)']
-    """
+    """KOSPI/KOSDAQ 당일 티커별 OHLCV에서 '거래대금(원)' 기준 상위 N 추출."""
     kospi = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market="KOSPI")
     kosdaq = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market="KOSDAQ")
     k1 = _prep_ohlcv_by_ticker(kospi)
@@ -105,6 +97,28 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
     )
     return all_df
 
+def find_last_trading_day_with_data(base_dt: datetime, max_back_days: int = 7) -> str:
+    """
+    오늘(또는 기준시각) 포함하여 뒤로 1일씩 물러나며
+    '거래대금 합계 > 0' 인 날짜를 찾는다.
+    반환: 'YYYYMMDD'
+    """
+    for i in range(max_back_days + 1):
+        d = (base_dt - timedelta(days=i)).strftime("%Y%m%d")
+        try:
+            kospi = stock.get_market_ohlcv_by_ticker(d, market="KOSPI")
+            kosdaq = stock.get_market_ohlcv_by_ticker(d, market="KOSDAQ")
+            k1 = _prep_ohlcv_by_ticker(kospi)
+            k2 = _prep_ohlcv_by_ticker(kosdaq)
+            merged = pd.concat([k1, k2], ignore_index=True)
+            tv_sum = float(merged["거래대금(원)"].fillna(0).sum())
+            if tv_sum > 0:
+                return d
+        except Exception:
+            pass
+    # 못 찾으면 어제 날짜라도 반환
+    return (base_dt - timedelta(days=1)).strftime("%Y%m%d")
+
 # ------------------------------- 보조: 시장/이름/시총 -------------------------------
 def get_market_map(date_yyyymmdd: str):
     kospi = set(stock.get_market_ticker_list(date_yyyymmdd, market="KOSPI"))
@@ -113,7 +127,8 @@ def get_market_map(date_yyyymmdd: str):
 
 def get_name(ticker: str) -> str:
     try:
-        return stock.get_market_ticker_name(ticker) or ""
+        nm = stock.get_market_ticker_name(ticker)
+        return nm if nm is not None else ""
     except Exception:
         return ""
 
@@ -129,17 +144,28 @@ def get_mcap_eok(date_yyyymmdd: str, ticker: str) -> float:
 # ------------------------------- 메인 로직 -------------------------------
 def main():
     log("전종목 수집 시작…")
-    end_dt = datetime.now(KST)
-    start_dt = end_dt - timedelta(days=LOOKBACK_DAYS)
-    end_s = end_dt.strftime("%Y%m%d")
-    start_s = start_dt.strftime("%Y%m%d")
 
+    now = datetime.now(KST)
+    # 1) '실제 거래 데이터가 존재하는 가장 최근 영업일' 확정
+    trade_date = find_last_trading_day_with_data(now, max_back_days=7)
+    log(f"📅 거래 기준일 확정: {trade_date}")
+
+    # 2) 상위 N 선정 (trade_date 기준)
     log("🔍 거래대금 상위 종목 선정 중…")
-    top_df = pick_top_by_trading_value(end_s, TOP_N)
+    top_df = pick_top_by_trading_value(trade_date, TOP_N)
     tickers = top_df["종목코드"].tolist()
     log(f"✅ TOP {len(tickers)} 종목 선정 완료")
 
-    kospi_set, kosdaq_set = get_market_map(end_s)
+    # 3) OHLCV 조회 구간 (trade_date를 end로 고정)
+    end_dt = datetime.strptime(trade_date, "%Y%m%d").replace(tzinfo=KST)
+    start_dt = end_dt - timedelta(days=LOOKBACK_DAYS)
+    start_s = start_dt.strftime("%Y%m%d")
+    end_s = trade_date
+
+    kospi_set, kosdaq_set = get_market_map(trade_date)
+
+    # 디버깅용 카운터
+    cnt_turnover = cnt_mcap = cnt_nan_ind = 0
 
     rows = []
     for i, t in enumerate(tickers, 1):
@@ -149,16 +175,14 @@ def main():
             if ohlcv is None or ohlcv.empty:
                 continue
             ohlcv = ohlcv.reset_index()
-            # 첫 컬럼 이름을 '날짜'로 통일
             if "날짜" not in ohlcv.columns:
                 ohlcv.rename(columns={ohlcv.columns[0]: "날짜"}, inplace=True)
             ohlcv["날짜"] = pd.to_datetime(ohlcv["날짜"])
 
-            # 지표 계산용 시리즈
             close = ohlcv["종가"].astype(float)
-            high = ohlcv["고가"].astype(float)
-            low  = ohlcv["저가"].astype(float)
-            vol  = ohlcv["거래량"].astype(float)
+            high  = ohlcv["고가"].astype(float)
+            low   = ohlcv["저가"].astype(float)
+            vol   = ohlcv["거래량"].astype(float)
 
             ma20 = close.rolling(20).mean()
             ma60 = close.rolling(60).mean()
@@ -175,7 +199,6 @@ def main():
             vol_z = vol / (vol.rolling(20).mean())
             disp = (close / ma20 - 1.0) * 100  # 乖離%
 
-            # 스냅샷
             last = ohlcv.iloc[-1]
             c = float(last["종가"])
             v_z = float(vol_z.iloc[-1]) if not np.isnan(vol_z.iloc[-1]) else np.nan
@@ -190,22 +213,26 @@ def main():
             ret5 = (close.pct_change(5).iloc[-1] * 100) if len(close) >= 6 else np.nan
             ret10 = (close.pct_change(10).iloc[-1] * 100) if len(close) >= 11 else np.nan
 
-            # 시장/종목명/시총(억원)/거래대금(억원)
+            # 시장/종목명/시총/거래대금(억원)
             mkt = "KOSPI" if t in kospi_set else ("KOSDAQ" if t in kosdaq_set else "기타")
-            name = get_name(t)  # 바로 이름 채워 CSV에 포함
+            name = get_name(t) or t  # 이름 못 받으면 티커로 대체
             tv_eok = float(top_df.loc[top_df["종목코드"] == t, "거래대금(원)"].values[0]) / 1e8
-            mcap_eok = get_mcap_eok(end_s, t)
+            mcap_eok = get_mcap_eok(trade_date, t)
 
-            # 필터 (개잡주 컷)
+            # 필터
             if tv_eok < MIN_TURNOVER_EOK:
+                cnt_turnover += 1
                 continue
             if not np.isnan(mcap_eok) and mcap_eok < MIN_MCAP_EOK:
+                cnt_mcap += 1
+                continue
+            if np.isnan(atr) or np.isnan(m20):
+                cnt_nan_ind += 1
                 continue
 
-            # EBS 점수 (급등 '초입' 스코어)
+            # EBS (급등 초입 스코어)
             score = 0
             reason = []
-
             if RSI_LOW <= rsi_v <= RSI_HIGH:
                 score += 1; reason.append("RSI 45~65")
             if macd_sl > 0:
@@ -221,10 +248,7 @@ def main():
             if not np.isnan(ret5) and ret5 < 10:
                 score += 1; reason.append("과열X")
 
-            # 추천가(보수적 규칙)
-            if np.isnan(atr) or np.isnan(m20):
-                continue
-
+            # 추천가(보수적)
             buy = min(c, m20 * 1.01)
             stop = buy - 1.5 * atr
             tgt1 = buy + (buy - stop) * 1.0   # R:R=1
@@ -262,15 +286,16 @@ def main():
         time.sleep(SLEEP_SEC)
 
     if not rows:
+        log(f"필터 컷 통계 ▶ 거래대금<{MIN_TURNOVER_EOK}억: {cnt_turnover}, "
+            f"시총<{MIN_MCAP_EOK}억: {cnt_mcap}, 지표 NaN: {cnt_nan_ind}")
         raise RuntimeError("수집 결과가 비었습니다.")
 
-    df_out = pd.DataFrame(rows)
-    # 기본 정렬: EBS desc → 거래대금 desc
-    df_out = df_out.sort_values(["EBS", "거래대금(억원)"], ascending=[False, False]).reset_index(drop=True)
+    df_out = pd.DataFrame(rows).sort_values(
+        ["EBS", "거래대금(억원)"], ascending=[False, False]
+    ).reset_index(drop=True)
 
     ensure_dir(OUT_DIR)
-    today = end_dt.strftime("%Y%m%d")
-    path_day = os.path.join(OUT_DIR, f"recommend_{today}.csv")
+    path_day = os.path.join(OUT_DIR, f"recommend_{trade_date}.csv")
     path_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
     df_out.to_csv(path_day, index=False, encoding="utf-8-sig")
     df_out.to_csv(path_latest, index=False, encoding="utf-8-sig")
