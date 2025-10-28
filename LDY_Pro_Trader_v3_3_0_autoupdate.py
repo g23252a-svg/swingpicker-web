@@ -1,24 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.3.0 (Auto Update + Name Enrich)
+LDY Pro Trader v3.3.1 (Auto Update + Name Enrich + Safe Sort/Turnover Fallback)
 - GitHub raw CSV 우선 로드, 실패시 로컬 data/recommend_latest.csv 폴백
 - CSV가 원시 OHLCV만 있어도 화면에서 RSI/MACD/ATR/MA/VolZ/수익률 → EBS/추천가 산출
 - 종목명 없으면 pykrx로 실시간 매핑(6자리 0패딩 포함, 캐시)
-- EBS가 전혀 없으면 ‘초입 후보만’ 필터 자동 비활성화
+- 거래대금(억원) 없을 때도 안전 보강: 거래대금(원) 또는 거래량*종가로 계산
+- 정렬 시 컬럼 없으면 안전 폴백( KeyError 방지 )
 - 'use_container_width' 경고 대응: width="stretch" 사용
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
 from datetime import datetime
-# pykrx 옵션: 없더라도 앱은 동작(이름 매핑만 생략)
+
+# pykrx(선택): 없더라도 앱은 동작(이름 매핑만 생략)
 try:
     from pykrx import stock
     PYKRX_OK = True
 except Exception:
     PYKRX_OK = False
 
-st.set_page_config(page_title="LDY Pro Trader v3.3.0 (Auto Update)", layout="wide")
-st.title("📈 LDY Pro Trader v3.3.0 (Auto Update)")
+st.set_page_config(page_title="LDY Pro Trader v3.3.1 (Auto Update)", layout="wide")
+st.title("📈 LDY Pro Trader v3.3.1 (Auto Update)")
 st.caption("매일 장마감 후 자동 업데이트되는 스윙 추천 종목 리스트 | Made by LDY")
 
 RAW_URL = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -70,47 +72,68 @@ def atr14(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14):
 # ------------------------- 정규화/보강 -------------------------
 def z6(x) -> str:
     s = str(x)
-    # 이미 6자리면 그대로, 짧으면 0패딩
     return s.zfill(6) if s.isdigit() else s
 
+def ensure_turnover_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    거래대금(억원) 보강:
+    1) 거래대금(억원) 있으면 유지
+    2) 거래대금(원) 있으면 /1e8
+    3) 거래량 & 종가 있으면 거래량*종가 /1e8
+    """
+    if "거래대금(억원)" not in df.columns:
+        base = None
+        if "거래대금(원)" in df.columns:
+            base = pd.to_numeric(df["거래대금(원)"], errors="coerce")
+        elif all(c in df.columns for c in ["거래량","종가"]):
+            vol = pd.to_numeric(df["거래량"], errors="coerce")
+            cls = pd.to_numeric(df["종가"], errors="coerce")
+            base = vol * cls
+        if base is not None:
+            df["거래대금(억원)"] = (base / 1e8).round(2)
+    return df
+
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    # 이름 표준화
+    # 컬럼명 통일
     colmap = {
         "Date":"날짜","date":"날짜",
         "Code":"종목코드","티커":"종목코드","ticker":"종목코드",
         "Name":"종목명","name":"종목명",
         "Open":"시가","High":"고가","Low":"저가","Close":"종가","Volume":"거래량",
-        "거래대금":"거래대금(원)",
+        "거래대금":"거래대금(원)",  # pykrx 일괄 대응
         "시가총액":"시가총액(원)"
     }
     for k,v in colmap.items():
         if k in df.columns and v not in df.columns:
             df = df.rename(columns={k:v})
-    # 거래대금(억원) 생성
-    if "거래대금(억원)" not in df.columns:
-        base = "거래대금(원)" if "거래대금(원)" in df.columns else ("거래대금" if "거래대금" in df.columns else None)
-        if base:
-            df["거래대금(억원)"] = (pd.to_numeric(df[base], errors="coerce")/1e8).round(2)
+
     # 타입 캐스팅
-    for c in ["시가","고가","저가","종가","거래량","거래대금(억원)"]:
+    for c in ["시가","고가","저가","종가","거래량","거래대금(원)","시가총액(원)"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
+
     # 날짜
     if "날짜" in df.columns:
         try:
             df["날짜"] = pd.to_datetime(df["날짜"])
         except Exception:
             pass
-    # 코드 6자리 패딩
+
+    # 코드 6자리
     if "종목코드" in df.columns:
         df["종목코드"] = df["종목코드"].astype(str).str.replace(".0","", regex=False).map(z6)
     else:
         df["종목코드"] = None
-    # 기본 보강
+
+    # 시장/종목명 기본값
     if "시장" not in df.columns:
         df["시장"] = "ALL"
     if "종목명" not in df.columns:
         df["종목명"] = None
+
+    # 거래대금(억원) 보강
+    df = ensure_turnover_cols(df)
+
     return df
 
 @st.cache_data(ttl=300, show_spinner=True)
@@ -118,7 +141,8 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
     must = {"종목코드","날짜","시가","고가","저가","종가"}
     if not must.issubset(set(raw.columns)):
         return raw
-    g = raw.sort_values(["종목코드","날짜"]).groupby("종목코드", group_keys=False)
+    raw = raw.sort_values(["종목코드","날짜"])
+    g = raw.groupby("종목코드", group_keys=False)
 
     def _feat(x: pd.DataFrame):
         x = x.copy()
@@ -135,39 +159,45 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
 
         last = x.iloc[-1:].copy()
         e = 0; why=[]
-        # 7점제
-        c1 = 45 <= (last["RSI14"].iloc[0] if not np.isnan(last["RSI14"].iloc[0]) else -999) <= 65; e += int(c1);  why.append("RSI 45~65" if c1 else "")
-        c2 = (last["MACD_slope"].iloc[0] if not np.isnan(last["MACD_slope"].iloc[0]) else -999) > 0; e+=int(c2); why.append("MACD↑" if c2 else "")
+        def nz(v, fallback=-999): 
+            return v if (v is not None and not (isinstance(v, float) and math.isnan(v))) else fallback
+
+        rsi_v = nz(last["RSI14"].iloc[0])
+        c1 = 45 <= rsi_v <= 65; e += int(c1);  why.append("RSI 45~65" if c1 else "")
+        c2 = nz(last["MACD_slope"].iloc[0]) > 0; e+=int(c2); why.append("MACD↑" if c2 else "")
         close, ma20 = last["종가"].iloc[0], last["MA20"].iloc[0]
-        c3 = (not np.isnan(ma20)) and (0.99*ma20 <= close <= 1.04*ma20); e+=int(c3); why.append("MA20±4%" if c3 else "")
-        c4 = (last["Vol_Z"].iloc[0] if not np.isnan(last["Vol_Z"].iloc[0]) else -999) > 1.2; e+=int(c4); why.append("VolZ>1.2" if c4 else "")
+        c3 = (not math.isnan(ma20)) and (0.99*ma20 <= close <= 1.04*ma20); e+=int(c3); why.append("MA20±4%" if c3 else "")
+        c4 = nz(last["Vol_Z"].iloc[0]) > 1.2; e+=int(c4); why.append("VolZ>1.2" if c4 else "")
         m20_prev = x["MA20"].iloc[-2] if len(x)>=2 else np.nan
-        c5 = (not np.isnan(m20_prev)) and (last["MA20"].iloc[0] - m20_prev > 0); e+=int(c5); why.append("MA20↑" if c5 else "")
-        c6 = (last["MACD_hist"].iloc[0] if not np.isnan(last["MACD_hist"].iloc[0]) else -999) > 0; e+=int(c6); why.append("MACD>0" if c6 else "")
-        r5 = last["ret_5d_%"].iloc[0]; c7 = (not np.isnan(r5)) and (r5 < 10); e+=int(c7); why.append("5d<10%" if c7 else "")
+        c5 = (not math.isnan(m20_prev)) and (last["MA20"].iloc[0] - m20_prev > 0); e+=int(c5); why.append("MA20↑" if c5 else "")
+        c6 = nz(last["MACD_hist"].iloc[0]) > 0; e+=int(c6); why.append("MACD>0" if c6 else "")
+        r5 = last["ret_5d_%"].iloc[0]; c7 = (not math.isnan(r5)) and (r5 < 10); e+=int(c7); why.append("5d<10%" if c7 else "")
 
         last["EBS"] = e
         last["근거"] = " / ".join([w for w in why if w])
 
         atr = last["ATR14"].iloc[0]
-        if np.isnan(atr) or np.isnan(ma20) or np.isnan(close) or atr <= 0:
+        if math.isnan(atr) or math.isnan(ma20) or math.isnan(close) or atr <= 0:
             entry=t1=t2=stp=np.nan
         else:
             band_low, band_high = ma20 - 0.5*atr, ma20 + 0.5*atr
             entry = min(max(close, band_low), band_high)
             t1, t2, stp = entry + 1.0*atr, entry + 1.8*atr, entry - 1.2*atr
-        last["추천매수가"] = round(entry,2) if not np.isnan(entry) else np.nan
-        last["추천매도가1"] = round(t1,2) if not np.isnan(t1) else np.nan
-        last["추천매도가2"] = round(t2,2) if not np.isnan(t2) else np.nan
-        last["손절가"] = round(stp,2) if not np.isnan(stp) else np.nan
+        last["추천매수가"] = round(entry,2) if not math.isnan(entry) else np.nan
+        last["추천매도가1"] = round(t1,2) if not math.isnan(t1) else np.nan
+        last["추천매도가2"] = round(t2,2) if not math.isnan(t2) else np.nan
+        last["손절가"] = round(stp,2) if not math.isnan(stp) else np.nan
         return last
 
     out = g.apply(_feat).reset_index(drop=True)
 
-    if "거래대금(억원)" not in out.columns and "거래대금(원)" in raw.columns:
-        tv = raw.sort_values(["종목코드","날짜"]).groupby("종목코드").tail(1)[["종목코드","거래대금(원)"]]
-        tv["거래대금(억원)"] = (pd.to_numeric(tv["거래대금(원)"], errors="coerce")/1e8).round(2)
-        out = out.merge(tv[["종목코드","거래대금(억원)"]], on="종목코드", how="left")
+    # 거래대금(억원) 최신행 보강
+    if "거래대금(억원)" not in out.columns:
+        # raw에서 최신행 추출 후 계산
+        tail = raw.groupby("종목코드").tail(1).copy()
+        tail = ensure_turnover_cols(tail)
+        if "거래대금(억원)" in tail.columns:
+            out = out.merge(tail[["종목코드","거래대금(억원)"]], on="종목코드", how="left")
 
     if "시가총액(억원)" not in out.columns:
         out["시가총액(억원)"] = np.nan
@@ -192,7 +222,6 @@ def name_map_from_pykrx(codes: list[str]) -> dict:
 def fill_names(df: pd.DataFrame) -> pd.DataFrame:
     if "종목코드" not in df.columns:
         return df
-    # 이미 이름 있으면 유지, 없는 것만 매핑
     need = df[df["종목명"].isna() | (df["종목명"]=="")]["종목코드"].dropna().astype(str).map(z6).unique().tolist()
     if len(need)==0:
         return df
@@ -230,7 +259,7 @@ else:
     with st.status("🧮 원시 OHLCV → 지표/점수/추천가 생성 중...", expanded=False):
         df = enrich_from_ohlcv(df_raw)
 
-# 최신 일자 1행씩
+# 최신 일자만 집계
 if "날짜" in df.columns:
     latest_by_code = df.sort_values(["종목코드","날짜"]).groupby("종목코드").tail(1).copy()
 else:
@@ -240,7 +269,8 @@ else:
 with st.status("🏷️ 종목명 매핑 중...", expanded=False):
     latest_by_code = fill_names(latest_by_code)
 
-# 안전 캐스팅
+# 안전 캐스팅 + 거래대금(억원) 최종 보강(한 번 더)
+latest_by_code = ensure_turnover_cols(latest_by_code)
 for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가"]:
     if c in latest_by_code.columns:
         latest_by_code[c] = pd.to_numeric(latest_by_code[c], errors="coerce")
@@ -280,21 +310,33 @@ if q_text:
     code_hit = view["종목코드"].fillna("").astype(str).str.contains(q, na=False)
     view = view[name_hit | code_hit]
 
-# 정렬
-if sort_key == "EBS▼" and "EBS" in view.columns:
-    view = view.sort_values(["EBS","거래대금(억원)"], ascending=[False, False])
-elif sort_key == "거래대금▼" and "거래대금(억원)" in view.columns:
-    view = view.sort_values("거래대금(억원)", ascending=False)
-elif sort_key == "시가총액▼" and "시가총액(억원)" in view.columns:
-    view = view.sort_values("시가총액(억원)", ascending=False, na_position="last")
-elif sort_key == "RSI▲" and "RSI14" in view.columns:
-    view = view.sort_values("RSI14", ascending=True, na_position="last")
-elif sort_key == "RSI▼" and "RSI14" in view.columns:
-    view = view.sort_values("RSI14", ascending=False, na_position="last")
-elif sort_key == "종가▲" and "종가" in view.columns:
-    view = view.sort_values("종가", ascending=True, na_position="last")
-elif sort_key == "종가▼" and "종가" in view.columns:
-    view = view.sort_values("종가", ascending=False, na_position="last")
+# 안전 정렬
+def safe_sort(dfv: pd.DataFrame, key: str) -> pd.DataFrame:
+    try:
+        if key == "EBS▼" and "EBS" in dfv.columns:
+            by = ["EBS"] + (["거래대금(억원)"] if "거래대금(억원)" in dfv.columns else [])
+            return dfv.sort_values(by=by, ascending=[False] + [False]* (len(by)-1))
+        if key == "거래대금▼" and "거래대금(억원)" in dfv.columns:
+            return dfv.sort_values("거래대금(억원)", ascending=False)
+        if key == "시가총액▼" and "시가총액(억원)" in dfv.columns:
+            return dfv.sort_values("시가총액(억원)", ascending=False, na_position="last")
+        if key == "RSI▲" and "RSI14" in dfv.columns:
+            return dfv.sort_values("RSI14", ascending=True, na_position="last")
+        if key == "RSI▼" and "RSI14" in dfv.columns:
+            return dfv.sort_values("RSI14", ascending=False, na_position="last")
+        if key == "종가▲" and "종가" in dfv.columns:
+            return dfv.sort_values("종가", ascending=True, na_position="last")
+        if key == "종가▼" and "종가" in dfv.columns:
+            return dfv.sort_values("종가", ascending=False, na_position="last")
+    except Exception:
+        pass
+    # 폴백: 가능한 컬럼 우선순위
+    for alt in ["EBS","거래대금(억원)","시가총액(억원)","종가"]:
+        if alt in dfv.columns:
+            return dfv.sort_values(alt, ascending=False, na_position="last")
+    return dfv
+
+view = safe_sort(view, sort_key)
 
 # 표시 컬럼
 show_cols = [
