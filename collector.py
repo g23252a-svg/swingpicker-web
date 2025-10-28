@@ -1,129 +1,63 @@
 import os
-import numpy as np
+import time
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pykrx import stock
 
-# ---------------------------------------------------------------------
-# ⚙️ 설정
-# ---------------------------------------------------------------------
 KST = timezone(timedelta(hours=9))
-TODAY = datetime.now(KST).date()
-DATA_DIR = "data"
-LOOKBACK_DAYS = 30  # 최근 30일 기준
-os.makedirs(DATA_DIR, exist_ok=True)
+LOOKBACK_DAYS = 60
 
-# ---------------------------------------------------------------------
-# 🧩 OHLCV 수집 함수
-# ---------------------------------------------------------------------
-def get_ohlcv(ticker: str, start: str, end: str):
-    try:
-        df = stock.get_market_ohlcv_by_date(start, end, ticker)
-        df["티커"] = ticker
-        return df
-    except Exception as e:
-        print(f"❌ {ticker} 수집 실패: {e}")
-        return pd.DataFrame()
+def log(msg):
+    now = datetime.now(KST)
+    print(f"[{now}] {msg}")
 
-# ---------------------------------------------------------------------
-# 📊 거래대금 상위 300 종목 추출
-# ---------------------------------------------------------------------
-def load_universe_ohlcv(lookback_days: int = 30):
-    end = TODAY.strftime("%Y%m%d")
-    start = (TODAY - timedelta(days=lookback_days)).strftime("%Y%m%d")
+def load_universe_ohlcv(lookback_days=60):
+    """거래대금 상위 300종목 선정 후 OHLCV 병합"""
+    end = datetime.now(KST).strftime("%Y%m%d")
+    start = (datetime.now(KST) - timedelta(days=lookback_days)).strftime("%Y%m%d")
 
-    print(f"[{datetime.now(KST)}] 전종목 수집 시작…")
-    print(f"[{datetime.now(KST)}] 🔍 거래대금 상위 300 종목 선정 중...")
+    log("🔍 거래대금 상위 300 종목 선정 중...")
 
-    # ✅ 최신 pykrx 버전(1.0.51)에서는 market 인자 제거됨
-    # 전체 시장 거래대금 데이터를 get_market_trading_value_by_ticker()로 가져옴
-    df_all = stock.get_market_trading_value_by_ticker(end)
-    df_all = df_all.reset_index()
+    # ✅ 최신 pykrx 호환 코드
+    kospi = stock.get_market_trading_value_by_date(end, end, "KOSPI")
+    kosdaq = stock.get_market_trading_value_by_date(end, end, "KOSDAQ")
 
-    # 거래대금 컬럼 정리
+    df_all = pd.concat([kospi, kosdaq])
+
+    # 열 이름이 다를 경우 자동 대응
     if "거래대금" in df_all.columns:
         df_all["거래대금(억원)"] = (df_all["거래대금"] / 1e8).round(2)
     elif "거래대금(원)" in df_all.columns:
         df_all["거래대금(억원)"] = (df_all["거래대금(원)"] / 1e8).round(2)
     else:
-        print("⚠️ 거래대금 컬럼이 감지되지 않아 0으로 처리합니다.")
-        df_all["거래대금(억원)"] = 0
+        raise KeyError("❌ 거래대금 컬럼을 찾을 수 없습니다.")
 
-    # 상위 300개 추출
-    df_ranked = (
-        df_all.sort_values("거래대금(억원)", ascending=False)
-        .head(300)
-        .reset_index(drop=True)
-    )
+    df_all = df_all.sort_values("거래대금(억원)", ascending=False).head(300)
+    tickers = df_all.index.to_list()
+    log("✅ 300개 종목 선택 완료")
 
-    tickers = df_ranked["티커"].tolist()
-    print(f"✅ {len(tickers)}개 종목 선택 완료")
+    dfs = []
+    for t in tickers:
+        try:
+            ohlcv = stock.get_market_ohlcv_by_date(start, end, t)
+            ohlcv["종목코드"] = t
+            dfs.append(ohlcv)
+        except Exception as e:
+            log(f"⚠️ {t} 수집 실패: {e}")
+        time.sleep(0.1)
 
-    # 병렬 OHLCV 수집
-    ohlcv_list = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(get_ohlcv, t, start, end): t for t in tickers}
-        for f in as_completed(futures):
-            result = f.result()
-            if not result.empty:
-                ohlcv_list.append(result)
+    df_all = pd.concat(dfs)
+    log(f"📊 총 {len(df_all)}개 데이터 수집 완료")
+    return df_all
 
-    if not ohlcv_list:
-        print("⚠️ OHLCV 데이터가 비어 있습니다.")
-        return pd.DataFrame()
-
-    df_merged = pd.concat(ohlcv_list)
-    df_merged.reset_index(inplace=True)
-    df_merged.rename(columns={"index": "날짜"}, inplace=True)
-
-    print(f"✅ {len(df_merged)}행 데이터 수집 완료")
-    return df_merged
-
-# ---------------------------------------------------------------------
-# 💹 매수 신호 로직
-# ---------------------------------------------------------------------
-def generate_recommendations(df: pd.DataFrame):
-    result = []
-    for ticker, grp in df.groupby("티커"):
-        grp = grp.sort_values("날짜")
-        if len(grp) < 10:
-            continue
-
-        ma5 = grp["종가"].rolling(5).mean().iloc[-1]
-        ma20 = grp["종가"].rolling(20).mean().iloc[-1]
-        last_close = grp["종가"].iloc[-1]
-
-        if ma5 > ma20 and grp["거래량"].iloc[-1] > grp["거래량"].iloc[-2]:
-            result.append(
-                {
-                    "티커": ticker,
-                    "종목명": stock.get_market_ticker_name(ticker),
-                    "종가": int(last_close),
-                    "추천매수가": round(last_close * 0.99, 1),
-                    "추천사유": "5일선 상향돌파 + 거래량 증가",
-                }
-            )
-
-    return pd.DataFrame(result)
-
-# ---------------------------------------------------------------------
-# 🧾 메인 실행부
-# ---------------------------------------------------------------------
 def main():
+    log("전종목 수집 시작…")
     df = load_universe_ohlcv(LOOKBACK_DAYS)
-    if df.empty:
-        print("❌ 데이터 수집 실패. 종료합니다.")
-        return
+    today = datetime.now(KST).strftime("%Y%m%d")
+    out_path = f"recommend_{today}.csv"
+    df.to_csv(out_path, encoding="utf-8-sig")
+    log(f"💾 {out_path} 저장 완료")
 
-    df_rec = generate_recommendations(df)
-
-    save_path = os.path.join(DATA_DIR, f"recommend_{TODAY.strftime('%Y%m%d')}.csv")
-    df_rec.to_csv(save_path, index=False, encoding="utf-8-sig")
-
-    print(f"💾 저장 완료: {save_path}")
-    print(f"🚀 총 추천 종목 수: {len(df_rec)}개")
-
-# ---------------------------------------------------------------------
 if __name__ == "__main__":
     main()
