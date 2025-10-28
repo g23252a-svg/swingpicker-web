@@ -148,45 +148,44 @@ def load_full_ohlcv_from_repo() -> pd.DataFrame:
     return pd.DataFrame()
 
 def generate_sample_universe(n_tickers=200, lookback=60) -> pd.DataFrame:
-    """랜덤 기반 샘플 종목 생성 (길이 mismatch 방지 완전 안전 버전 v2)"""
-    idx = pd.date_range(end=datetime.now(KST).date(), periods=lookback, freq="D")
+    """랜덤 기반 샘플 종목 생성 (Cloud 환경 완전 대응형)"""
+    idx = pd.date_range(end=datetime.now(KST).date(), periods=lookback, freq="D").to_list()
     all_rows = []
     rng = np.random.default_rng(42)
 
     for i in range(n_tickers):
         base = float(rng.uniform(3_000, 150_000))
-        close = pd.Series(base * (1 + rng.normal(0, 0.01, lookback)).cumprod(), index=idx)
-        close = close.clip(500, None)
+        close = np.clip(base * np.cumprod(1 + rng.normal(0, 0.01, lookback)), 500, None)
 
-        # 시가/고가/저가 모두 동일 길이로 생성
         high = close * (1 + rng.uniform(0.003, 0.02))
         low = close * (1 - rng.uniform(0.003, 0.02))
         open_ = close * (1 + rng.normal(0, 0.002, lookback))
-        vol = pd.Series(rng.normal(1.5e6, 5e5, lookback)).clip(1e5, None).round()
-        tnov = (close.values * vol.values) / 1e8
+        vol = np.clip(rng.normal(1.5e6, 5e5, lookback), 1e5, None).round()
+        tnov = np.round((close * vol) / 1e8, 2)
+        mcap = float(rng.uniform(1500, 200000))
 
         mk = "KOSPI" if i % 2 == 0 else "KOSDAQ"
         code = f"{i:06d}"
         name = f"SYM{i:03d}"
-        mcap = float(rng.uniform(1500, 200000))
 
-        # ★ 모든 컬럼 길이를 len(idx)와 동일하게 맞춰서 DataFrame 생성
         df = pd.DataFrame({
             "날짜": idx,
-            "시장": [mk] * lookback,
-            "종목명": [name] * lookback,
-            "종목코드": [code] * lookback,
+            "시장": [mk for _ in range(lookback)],
+            "종목명": [name for _ in range(lookback)],
+            "종목코드": [code for _ in range(lookback)],
             "시가": open_.round(0),
             "고가": high.round(0),
             "저가": low.round(0),
             "종가": close.round(0),
             "거래량": vol,
-            "거래대금(억원)": np.round(tnov, 2),
-            "시가총액(억원)": [mcap] * lookback
-        })
+            "거래대금(억원)": tnov,
+            "시가총액(억원)": [mcap for _ in range(lookback)],
+        }, index=range(lookback))
         all_rows.append(df)
 
-    return pd.concat(all_rows, ignore_index=True)
+    df_final = pd.concat(all_rows, ignore_index=True)
+    return df_final.reset_index(drop=True)
+
 
 
 
