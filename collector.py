@@ -102,7 +102,7 @@ def load_universe_ohlcv(lookback_days=LOOKBACK_DAYS) -> pd.DataFrame:
     tickers = kospi + kosdaq
 
     # 먼저 당일 거래대금 상위 컷을 위해 today 기준 스냅샷
-    today_df = stock.get_market_trading_value_by_date(end, market="ALL")  # 거래대금 상위 선별
+    today_df = stock.get_market_trading_value_by_date(end)  # market 인자 제거
     if today_df is None or today_df.empty:
         # 백업: 전종목 강행
         candidates = tickers
