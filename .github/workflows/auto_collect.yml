@@ -2,15 +2,14 @@ name: Auto Collect and Push CSV
 
 on:
   schedule:
-    - cron: "10 7 * * 1-5"   # 매일 한국시간 16:10 자동 실행
-  workflow_dispatch:          # 수동 실행 버튼도 활성화
+    - cron: "0 14 * * *"   # UTC 14시 = 한국시간 23시 (매일 밤 11시 실행)
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -18,18 +17,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run collector.py
-        run: |
-          python collector.py
-
-      - name: Commit and push new CSV
-        run: |
-          git config user.name "LDY-AutoBot"
-          git config user.email "ldybotofficial@example.com"
-          git add daily_output/*.csv
-          git commit -m "Auto-update $(date +'%Y-%m-%d %H:%M')"
-          git push
+      - name: Run Collector
+        run: python collector.py
