@@ -247,3 +247,42 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# --- 이름맵 생성 & 저장: data/krx_codes.csv ---
+def build_name_map_and_save():
+    import time
+    from datetime import datetime
+    try:
+        from pykrx import stock
+    except Exception:
+        return  # pykrx 없으면 스킵
+
+    today = datetime.now().strftime("%Y%m%d")
+    codes = []
+    for m in ["KOSPI", "KOSDAQ", "KONEX"]:
+        try:
+            lst = stock.get_market_ticker_list(today, market=m)
+            codes.extend([(c, m) for c in lst])
+        except Exception:
+            pass
+
+    rows = []
+    for t, m in codes:
+        try:
+            nm = stock.get_market_ticker_name(t)
+        except Exception:
+            nm = None
+        rows.append({"종목코드": str(t).zfill(6), "종목명": nm, "시장": m})
+        time.sleep(0.01)  # 과다호출 방지
+
+    import pandas as pd, os
+    os.makedirs("data", exist_ok=True)
+    pd.DataFrame(rows).drop_duplicates("종목코드").to_csv(
+        "data/krx_codes.csv", index=False, encoding="utf-8-sig"
+    )
+
+# (collector.py의 main() 마지막 저장 직후에 호출)
+build_name_map_and_save()
+
+
+
