@@ -362,11 +362,13 @@ for c in ["거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_
     if c in view_fmt.columns:
         view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce")
 
-st.dataframe(
+st.data_editor(
     view_fmt,
     width="stretch",
     height=640,
     hide_index=True,
+    disabled=True,          # 읽기 전용 표
+    num_rows="fixed",
     column_config={
         # 텍스트
         "통과":         st.column_config.TextColumn(" "),
