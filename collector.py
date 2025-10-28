@@ -1,7 +1,6 @@
 import os
 import time
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta, timezone
 from pykrx import stock
 
@@ -19,23 +18,23 @@ def load_universe_ohlcv(lookback_days=60):
 
     log("🔍 거래대금 상위 300 종목 선정 중...")
 
-    # ✅ 최신 pykrx 호환 코드
-    kospi = stock.get_market_trading_value_by_date(end, end, "KOSPI")
-    kosdaq = stock.get_market_trading_value_by_date(end, end, "KOSDAQ")
+    # ✅ pykrx 1.0.51 기준: market 인자 사용 가능
+    kospi = stock.get_market_trading_value_by_date(end, end, market="KOSPI")
+    kosdaq = stock.get_market_trading_value_by_date(end, end, market="KOSDAQ")
 
     df_all = pd.concat([kospi, kosdaq])
 
-    # 열 이름이 다를 경우 자동 대응
-    if "거래대금" in df_all.columns:
-        df_all["거래대금(억원)"] = (df_all["거래대금"] / 1e8).round(2)
-    elif "거래대금(원)" in df_all.columns:
-        df_all["거래대금(억원)"] = (df_all["거래대금(원)"] / 1e8).round(2)
-    else:
-        raise KeyError("❌ 거래대금 컬럼을 찾을 수 없습니다.")
+    # ✅ 거래대금 컬럼명 자동 탐색
+    candidates = [c for c in df_all.columns if "거래대금" in c or "금액" in c]
+    if not candidates:
+        raise KeyError(f"❌ 거래대금 관련 컬럼을 찾을 수 없습니다. (현재 컬럼: {list(df_all.columns)})")
+
+    value_col = candidates[0]
+    df_all["거래대금(억원)"] = (df_all[value_col] / 1e8).round(2)
 
     df_all = df_all.sort_values("거래대금(억원)", ascending=False).head(300)
     tickers = df_all.index.to_list()
-    log("✅ 300개 종목 선택 완료")
+    log(f"✅ 300개 종목 선택 완료")
 
     dfs = []
     for t in tickers:
@@ -45,7 +44,7 @@ def load_universe_ohlcv(lookback_days=60):
             dfs.append(ohlcv)
         except Exception as e:
             log(f"⚠️ {t} 수집 실패: {e}")
-        time.sleep(0.1)
+        time.sleep(0.05)
 
     df_all = pd.concat(dfs)
     log(f"📊 총 {len(df_all)}개 데이터 수집 완료")
