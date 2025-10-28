@@ -1,6 +1,6 @@
 streamlit==1.50.0
-pykrx
-pandas
-numpy
-requests
-setuptools
+pandas==2.3.3
+numpy==2.3.4
+pykrx==1.0.51
+matplotlib==3.10.7
+pytz==2025.2
