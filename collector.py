@@ -1,5 +1,4 @@
 import os
-import time
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -28,7 +27,7 @@ def get_ohlcv(ticker: str, start: str, end: str):
         return pd.DataFrame()
 
 # ---------------------------------------------------------------------
-# 📊 거래대금 상위 300종목 추출
+# 📊 거래대금 상위 300 종목 추출
 # ---------------------------------------------------------------------
 def load_universe_ohlcv(lookback_days: int = 30):
     end = TODAY.strftime("%Y%m%d")
@@ -37,17 +36,29 @@ def load_universe_ohlcv(lookback_days: int = 30):
     print(f"[{datetime.now(KST)}] 전종목 수집 시작…")
     print(f"[{datetime.now(KST)}] 🔍 거래대금 상위 300 종목 선정 중...")
 
-    # ✅ 최신 pykrx 버전용 함수 (get_market_trading_value_by_date)
-    df_all = stock.get_market_trading_value_by_date(end, market="ALL")
-    df_all = df_all.reset_index()
+    # ✅ KOSPI + KOSDAQ 모두 불러오기
+    df_kospi = stock.get_market_trading_value_by_date(end, market="KOSPI")
+    df_kosdaq = stock.get_market_trading_value_by_date(end, market="KOSDAQ")
+
+    # 일부 pykrx 버전에서는 market 인자 미지원 — 예외 처리
+    if isinstance(df_kospi, pd.DataFrame) is False:
+        df_kospi = stock.get_market_trading_value_by_date(end)
+    if isinstance(df_kosdaq, pd.DataFrame) is False:
+        df_kosdaq = pd.DataFrame()
+
+    # 통합
+    df_all = pd.concat([df_kospi, df_kosdaq]).reset_index()
 
     # 거래대금 컬럼 정리
     if "거래대금" in df_all.columns:
         df_all["거래대금(억원)"] = (df_all["거래대금"] / 1e8).round(2)
+    elif "거래대금(원)" in df_all.columns:
+        df_all["거래대금(억원)"] = (df_all["거래대금(원)"] / 1e8).round(2)
     else:
-        print("⚠️ 거래대금 컬럼이 감지되지 않아 0 처리")
+        print("⚠️ 거래대금 컬럼이 감지되지 않아 0으로 처리합니다.")
         df_all["거래대금(억원)"] = 0
 
+    # 상위 300개 추출
     df_ranked = (
         df_all.sort_values("거래대금(억원)", ascending=False)
         .head(300)
@@ -87,7 +98,6 @@ def generate_recommendations(df: pd.DataFrame):
         ma20 = grp["종가"].rolling(20).mean().iloc[-1]
         last_close = grp["종가"].iloc[-1]
 
-        # 매수 조건: 단기 상향 돌파 + 거래량 증가
         if ma5 > ma20 and grp["거래량"].iloc[-1] > grp["거래량"].iloc[-2]:
             result.append(
                 {
