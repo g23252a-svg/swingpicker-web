@@ -1,17 +1,12 @@
-# .github/workflows/auto_collect.yml
 name: Auto Collect and Push CSV
 
 permissions:
-  contents: write   # CSV 커밋/푸시 권한
+  contents: write
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # UTC 14:00 = KST 23:00 매일
+    - cron: "0 14 * * *"   # UTC 14:00 = KST 23:00
   workflow_dispatch:
-
-concurrency:
-  group: auto-collect-csv
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -26,29 +21,39 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
       - name: Install Dependencies
         run: |
           python -V
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -c "import pykrx; import sys; print('pykrx', __import__('pykrx').__version__, 'python', sys.version)"
+          python - <<'PY'
+import pykrx, sys
+print("pykrx version:", pykrx.__version__)
+PY
 
       - name: Run Collector
         run: python collector.py
 
-      - name: List outputs (for debug)
+      - name: List outputs
         run: |
           ls -alh data || true
           head -n 5 data/recommend_latest.csv || true
-          test -f data/krx_codes.csv && head -n 5 data/krx_codes.csv || true
+          head -n 5 data/krx_codes.csv || true
 
       - name: Commit & Push CSV
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/recommend_*.csv data/recommend_latest.csv data/krx_codes.csv
-          git status -s
-          git commit -m "chore: add CSV $(date -u +'%Y-%m-%d')" || echo "no changes"
-          git push || echo "no push"
+
+          # data/*.csv 이 없으면 add를 건너뛰도록
+          shopt -s nullglob
+          files=(data/*.csv)
+          if (( ${#files[@]} )); then
+            git add "${files[@]}"
+            git status -s
+            git commit -m "chore: add CSV $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || echo "no changes"
+            git push || echo "no push"
+          else
+            echo "No CSV files to commit."
+          fi
