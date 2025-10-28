@@ -1,8 +1,12 @@
+# .github/workflows/auto_collect.yml
 name: Auto Collect and Push CSV
+
+permissions:
+  contents: write   # CSV 커밋/푸시 권한
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # UTC 14시 = 한국시간 23시 (매일 밤 11시 실행)
+    - cron: "0 14 * * *"   # UTC 14:00 = KST 23:00
   workflow_dispatch:
 
 jobs:
@@ -11,6 +15,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -19,8 +25,24 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          python -V
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -c "import pykrx; print('pykrx version:', pykrx.__version__)"
+
+      - name: Show collector head (확인용)
+        run: sed -n '1,120p' collector.py
 
       - name: Run Collector
         run: python collector.py
+
+      - name: List outputs
+        run: ls -alh data && head -n 5 data/recommend_latest.csv
+
+      - name: Commit & Push CSV
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: add CSV $(date -u +%F)" || echo "no changes"
+          git push
