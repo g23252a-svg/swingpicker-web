@@ -18,9 +18,9 @@ def load_universe_ohlcv(lookback_days=60):
 
     log("🔍 거래대금 상위 300 종목 선정 중...")
 
-    # ✅ pykrx 1.0.51 기준: market 인자 사용 가능
-    kospi = stock.get_market_trading_value_by_date(end, end, market="KOSPI")
-    kosdaq = stock.get_market_trading_value_by_date(end, end, market="KOSDAQ")
+    # ✅ pykrx 1.0.51 문법에 맞게 (market= 제거)
+    kospi = stock.get_market_trading_value_by_date(end, end, "KOSPI")
+    kosdaq = stock.get_market_trading_value_by_date(end, end, "KOSDAQ")
 
     df_all = pd.concat([kospi, kosdaq])
 
