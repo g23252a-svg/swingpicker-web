@@ -6,8 +6,12 @@ permissions:
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # UTC 14:00 = KST 23:00
+    - cron: "0 14 * * *"   # UTC 14:00 = KST 23:00 매일
   workflow_dispatch:
+
+concurrency:
+  group: auto-collect-csv
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -22,63 +26,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install Dependencies
         run: |
           python -V
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -c "import pykrx; print('pykrx version:', pykrx.__version__)"
-
-      - name: Show collector head (확인용)
-        run: sed -n '1,120p' collector.py
+          python -c "import pykrx; import sys; print('pykrx', __import__('pykrx').__version__, 'python', sys.version)"
 
       - name: Run Collector
         run: python collector.py
 
-      - name: List outputs
-        run: ls -alh data && head -n 5 data/recommend_latest.csv
-
-      - name: Commit & Push CSV
+      - name: List outputs (for debug)
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore: add CSV $(date -u +%F)" || echo "no changes"
-          git push
-
-
-name: Auto Collect and Push CSV
-
-on:
-  schedule:
-    - cron: "0 14 * * *"  # 매일 23시 KST
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Collector
-        run: python collector.py
+          ls -alh data || true
+          head -n 5 data/recommend_latest.csv || true
+          test -f data/krx_codes.csv && head -n 5 data/krx_codes.csv || true
 
       - name: Commit & Push CSV
         run: |
           git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/recommend_*.csv data/recommend_latest.csv data/krx_codes.csv
           git status -s
           git commit -m "chore: add CSV $(date -u +'%Y-%m-%d')" || echo "no changes"
