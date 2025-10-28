@@ -1,0 +1,23 @@
+# .streamlit/config.toml
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = false
+fileWatcherType = "auto"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#4CAF50"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+
+[runner]
+magicEnabled = true
+fastReruns = true
+script = "swing_picker_web_v3.0.3_kstfix_LDY.py"
