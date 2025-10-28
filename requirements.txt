@@ -5,3 +5,4 @@ pykrx==1.0.51
 matplotlib==3.10.7
 pytz==2025.2
 setuptools==80.9.0
+openpyxl
