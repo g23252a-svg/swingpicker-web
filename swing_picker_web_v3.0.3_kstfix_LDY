@@ -4,14 +4,20 @@ import datetime as dt
 import pytz
 import math
 import time
-from pykrx import stock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ---------------- 기본 설정 ----------------
-st.set_page_config(page_title="Swing Picker Web v3.0.3 (LDY Edition)", layout="wide")
+# pykrx 불안정 대응
+try:
+    from pykrx import stock
+except Exception:
+    st.error("⚠️ pykrx 모듈을 불러오는 데 실패했습니다. requirements.txt에 pykrx==1.0.51이 포함되어 있는지 확인해주세요.")
+    st.stop()
 
-st.title("📈 Swing Picker Web v3.0.3 (KST Fix · LDY Edition)")
-st.write("거래대금 + 기술지표 기반 자동 스윙 종목 추천 (한국시간 대응판)")
+# ---------------- 기본 설정 ----------------
+st.set_page_config(page_title="Swing Picker Web v3.0.3a (LDY Edition)", layout="wide")
+
+st.title("📈 Swing Picker Web v3.0.3a (KST Fix · LDY Edition)")
+st.caption("거래대금 + 기술지표 기반 자동 스윙 종목 추천 (한국시간 대응 안정화판)")
 
 DEFAULTS = {
     "MARKETS": ["KOSPI", "KOSDAQ"],
@@ -24,36 +30,30 @@ DEFAULTS = {
     "EXCLUDE_HARD_DROP": True,
     "HARD_DROP_5D": -10.0,
     "REQUEST_DELAY_SEC": 0.22,
-    "MAX_WORKERS": 6,
+    "MAX_WORKERS": 5,
 }
 
 KST = pytz.timezone("Asia/Seoul")
 
 # ---------------- 유틸 ----------------
 def last_trading_day_kst(use_yesterday: bool = True):
-    """한국시간 기준으로 전일/금일 거래일 반환"""
     now = dt.datetime.now(KST)
     if use_yesterday:
         target = now - dt.timedelta(days=1)
     else:
-        if now.hour < 16:
-            target = now - dt.timedelta(days=1)
-        else:
-            target = now
+        target = now - dt.timedelta(days=1) if now.hour < 16 else now
     while target.weekday() >= 5:
         target -= dt.timedelta(days=1)
     return target.strftime("%Y%m%d")
 
 def normalize_ohlcv_columns(df: pd.DataFrame):
-    m = {"open": "시가", "high": "고가", "low": "저가", "close": "종가", "volume": "거래량", "amount": "거래대금"}
-    cols = {c: c for c in df.columns}
-    for c in df.columns:
-        lc = str(c).lower()
-        for k, v in m.items():
-            if k in lc:
-                cols[c] = v
-                break
-    df = df.rename(columns=cols)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    mapping = {"open": "시가", "high": "고가", "low": "저가", "close": "종가", "volume": "거래량", "amount": "거래대금"}
+    for k, v in mapping.items():
+        for col in df.columns:
+            if k in col.lower():
+                df = df.rename(columns={col: v})
     if "거래대금" not in df.columns and {"종가", "거래량"}.issubset(df.columns):
         df["거래대금"] = df["종가"] * df["거래량"]
     return df
@@ -61,12 +61,17 @@ def normalize_ohlcv_columns(df: pd.DataFrame):
 def get_top_turnover_stocks(end, markets, top_turnover):
     all_df = []
     for m in markets:
-        df = stock.get_market_ohlcv_by_ticker(end, market=m)
-        df = normalize_ohlcv_columns(df)
-        df["시장"] = m
-        all_df.append(df)
-        time.sleep(DEFAULTS["REQUEST_DELAY_SEC"])
-    df_all = pd.concat(all_df)
+        try:
+            df = stock.get_market_ohlcv_by_ticker(end, market=m)
+            df = normalize_ohlcv_columns(df)
+            df["시장"] = m
+            all_df.append(df)
+            time.sleep(DEFAULTS["REQUEST_DELAY_SEC"])
+        except Exception:
+            pass
+    if not all_df:
+        return pd.DataFrame()
+    df_all = pd.concat(all_df, ignore_index=False)
     df_all["거래대금(억)"] = df_all["거래대금"] / 1e8
     return df_all.sort_values("거래대금(억)", ascending=False).head(int(top_turnover))
 
@@ -88,7 +93,7 @@ def macd_series(close: pd.Series, fast=12, slow=26, signal=9):
     return macd, sig, hist
 
 def analyze_stock(df: pd.DataFrame, code: str, name: str):
-    if df is None or len(df) < 40:
+    if df is None or df.empty or len(df) < 40:
         return None
     try:
         c = df["종가"].astype(float)
@@ -100,21 +105,17 @@ def analyze_stock(df: pd.DataFrame, code: str, name: str):
         vr = (v.iloc[-3:].mean() / v20) if v20 > 0 else 0.0
         if ret5 < DEFAULTS["HARD_DROP_5D"]:
             return None
-        ma20 = c.rolling(20).mean()
         rsi = rsi_series(c, 14).iloc[-1]
-        macd, sig, hist = macd_series(c)
+        _, _, hist = macd_series(c)
         macd_hist = hist.iloc[-1]
-        conds = [ret5 <= DEFAULTS["RET5_MAX"], ret10 <= DEFAULTS["RET10_MAX"], vr >= DEFAULTS["VOL_RATIO_MIN"], rsi < 70, macd_hist > 0]
-        if all(conds):
+        if (ret5 <= DEFAULTS["RET5_MAX"]) and (ret10 <= DEFAULTS["RET10_MAX"]) and (vr >= DEFAULTS["VOL_RATIO_MIN"]) and (rsi < 70) and (macd_hist > 0):
             last = c.iloc[-1]
-            buy = round(last * 0.98)
-            sell = round(last * 1.10)
             return {
                 "종목명": name,
                 "종목코드": code,
                 "현재가": f"{last:,.0f}",
-                "추천매수가": f"{buy:,}",
-                "추천매도가": f"{sell:,}",
+                "추천매수가": f"{round(last*0.98):,}",
+                "추천매도가": f"{round(last*1.10):,}",
                 "5일수익률(%)": f"{ret5:.2f}",
                 "10일수익률(%)": f"{ret10:.2f}",
                 "거래량배수": f"{vr:.2f}",
@@ -123,9 +124,9 @@ def analyze_stock(df: pd.DataFrame, code: str, name: str):
             }
     except Exception:
         return None
-    return None
 
 # ---------------- Streamlit UI ----------------
+st.divider()
 col1, col2 = st.columns(2)
 with col1:
     top_turnover = st.number_input("거래대금 상위 N", value=DEFAULTS["TOP_TURNOVER"], min_value=50, max_value=500)
@@ -139,8 +140,18 @@ if st.button("🔍 스캔 시작"):
     end = last_trading_day_kst(use_yesterday)
     start = (dt.datetime.strptime(end, "%Y%m%d") - dt.timedelta(days=int(lookback))).strftime("%Y%m%d")
     top_df = get_top_turnover_stocks(end, DEFAULTS["MARKETS"], top_turnover)
+    if top_df.empty:
+        st.warning("⚠️ 거래대금 데이터를 불러올 수 없습니다.")
+        st.stop()
+
     codes = list(top_df.index)
-    name_map = {c: stock.get_market_ticker_name(c) for c in codes}
+    name_map = {}
+    for c in codes:
+        try:
+            name_map[c] = stock.get_market_ticker_name(c)
+            time.sleep(0.05)
+        except Exception:
+            name_map[c] = c
 
     results = []
     with ThreadPoolExecutor(max_workers=DEFAULTS["MAX_WORKERS"]) as ex:
@@ -160,9 +171,9 @@ if st.button("🔍 스캔 시작"):
         st.success(f"✅ 분석 완료! 추천 종목 {len(df_res)}개 발견")
         st.dataframe(df_res, use_container_width=True)
     else:
-        st.warning("⚠️ 조건에 맞는 종목이 없습니다.")
+        st.warning("⚠️ 조건을 만족하는 종목이 없습니다.")
 
-# ---------------- 푸터 (브랜딩) ----------------
+# ---------------- 푸터 ----------------
 st.markdown(
     """
     <div style='text-align: right; color: gray; font-size: 14px; margin-top: 25px;'>
