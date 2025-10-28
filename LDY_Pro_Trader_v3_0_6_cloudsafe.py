@@ -148,7 +148,7 @@ def load_full_ohlcv_from_repo() -> pd.DataFrame:
     return pd.DataFrame()
 
 def generate_sample_universe(n_tickers=200, lookback=60) -> pd.DataFrame:
-    """랜덤 기반 샘플 종목 생성 (길이 mismatch 방지 완전 안전 버전)"""
+    """랜덤 기반 샘플 종목 생성 (길이 mismatch 방지 완전 안전 버전 v2)"""
     idx = pd.date_range(end=datetime.now(KST).date(), periods=lookback, freq="D")
     all_rows = []
     rng = np.random.default_rng(42)
@@ -157,32 +157,37 @@ def generate_sample_universe(n_tickers=200, lookback=60) -> pd.DataFrame:
         base = float(rng.uniform(3_000, 150_000))
         close = pd.Series(base * (1 + rng.normal(0, 0.01, lookback)).cumprod(), index=idx)
         close = close.clip(500, None)
+
+        # 시가/고가/저가 모두 동일 길이로 생성
         high = close * (1 + rng.uniform(0.003, 0.02))
         low = close * (1 - rng.uniform(0.003, 0.02))
+        open_ = close * (1 + rng.normal(0, 0.002, lookback))
         vol = pd.Series(rng.normal(1.5e6, 5e5, lookback)).clip(1e5, None).round()
         tnov = (close.values * vol.values) / 1e8
 
         mk = "KOSPI" if i % 2 == 0 else "KOSDAQ"
         code = f"{i:06d}"
         name = f"SYM{i:03d}"
-        mcap = float(rng.uniform(1500, 200000))  # ★스칼라로 고정★
+        mcap = float(rng.uniform(1500, 200000))
 
+        # ★ 모든 컬럼 길이를 len(idx)와 동일하게 맞춰서 DataFrame 생성
         df = pd.DataFrame({
             "날짜": idx,
-            "시장": mk,
-            "종목명": name,
-            "종목코드": code,
-            "시가": (close * 0.995).round(0),
+            "시장": [mk] * lookback,
+            "종목명": [name] * lookback,
+            "종목코드": [code] * lookback,
+            "시가": open_.round(0),
             "고가": high.round(0),
             "저가": low.round(0),
             "종가": close.round(0),
             "거래량": vol,
             "거래대금(억원)": np.round(tnov, 2),
-            "시가총액(억원)": mcap,   # ★길이 동일하게 브로드캐스트 가능★
+            "시가총액(억원)": [mcap] * lookback
         })
         all_rows.append(df)
 
     return pd.concat(all_rows, ignore_index=True)
+
 
 
 # 1) pykrx 시도
