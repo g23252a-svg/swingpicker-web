@@ -36,18 +36,10 @@ def load_universe_ohlcv(lookback_days: int = 30):
     print(f"[{datetime.now(KST)}] 전종목 수집 시작…")
     print(f"[{datetime.now(KST)}] 🔍 거래대금 상위 300 종목 선정 중...")
 
-    # ✅ KOSPI + KOSDAQ 모두 불러오기
-    df_kospi = stock.get_market_trading_value_by_date(end, market="KOSPI")
-    df_kosdaq = stock.get_market_trading_value_by_date(end, market="KOSDAQ")
-
-    # 일부 pykrx 버전에서는 market 인자 미지원 — 예외 처리
-    if isinstance(df_kospi, pd.DataFrame) is False:
-        df_kospi = stock.get_market_trading_value_by_date(end)
-    if isinstance(df_kosdaq, pd.DataFrame) is False:
-        df_kosdaq = pd.DataFrame()
-
-    # 통합
-    df_all = pd.concat([df_kospi, df_kosdaq]).reset_index()
+    # ✅ 최신 pykrx 버전(1.0.51)에서는 market 인자 제거됨
+    # 전체 시장 거래대금 데이터를 get_market_trading_value_by_ticker()로 가져옴
+    df_all = stock.get_market_trading_value_by_ticker(end)
+    df_all = df_all.reset_index()
 
     # 거래대금 컬럼 정리
     if "거래대금" in df_all.columns:
@@ -76,6 +68,10 @@ def load_universe_ohlcv(lookback_days: int = 30):
             result = f.result()
             if not result.empty:
                 ohlcv_list.append(result)
+
+    if not ohlcv_list:
+        print("⚠️ OHLCV 데이터가 비어 있습니다.")
+        return pd.DataFrame()
 
     df_merged = pd.concat(ohlcv_list)
     df_merged.reset_index(inplace=True)
