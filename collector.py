@@ -39,7 +39,7 @@ def load_universe_ohlcv(lookback_days: int = 30):
     print(f"[{datetime.now(KST)}] 🔍 거래대금 상위 300 종목 선정 중...")
 
     # 거래대금 데이터 가져오기
-    df_all = stock.get_market_trading_value_by_date(start, end)
+    df_all = stock.get_market_trading_value_by_ticker(end)
     df_all = df_all.reset_index()
 
     # 컬럼 정규화 (pykrx 버전에 따라 다름)
