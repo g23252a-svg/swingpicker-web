@@ -23,8 +23,10 @@ MIN_TURNOVER_EOK = 50      # 거래대금 하한(억원)
 MIN_MCAP_EOK = 1000        # 시총 하한(억원)
 RSI_LOW, RSI_HIGH = 45, 65 # RSI 범위
 PASS_SCORE = 4             # 통과점수(최종 EBS)
-SLEEP_SEC = 0.02           # API call 간 짧은 딜레이
+SLEEP_SEC = 0.05           # API call 간 딜레이(안정성)
 OUT_DIR = "data"
+
+UTF8 = "utf-8-sig"
 
 # ------------------------------- 유틸 -------------------------------
 def log(msg: str):
@@ -57,7 +59,7 @@ def calc_atr(high, low, close, period: int = 14):
     return atr
 
 def round_to_tick(price: float) -> int:
-    # 간단한 틱(원) 반올림: 10원 단위
+    # 간단 틱(10원 단위)
     return int(round(price / 10.0) * 10)
 
 # ------------------------------- 기준일 결정 -------------------------------
@@ -66,7 +68,6 @@ def resolve_trade_date() -> str:
     장마감 집계 시차를 고려해서, 데이터가 비었으면 하루씩 뒤로 가며 최근 영업일을 찾는다.
     반환: 'YYYYMMDD'
     """
-    # 기본: KST 18시 전이면 전일, 이후면 당일
     now = datetime.now(KST)
     d = now.date()
     if now.hour < 18:
@@ -75,32 +76,23 @@ def resolve_trade_date() -> str:
     for _ in range(7):
         ymd = d.strftime("%Y%m%d")
         try:
-            # KOSPI당일 틱커 OHLCV로 유효성 판단
             tmp = stock.get_market_ohlcv_by_ticker(ymd, market="KOSPI")
             if tmp is not None and not tmp.empty and "거래대금" in tmp.columns:
                 return ymd
         except Exception:
             pass
         d = d - timedelta(days=1)
-
-    # 최후 보루: 오늘 문자열이라도 반환
     return datetime.now(KST).strftime("%Y%m%d")
 
 # ------------------------------- 상위 TV 선정 -------------------------------
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
-    """
-    get_market_ohlcv_by_ticker(날짜, 시장)로 거래대금 상위 종목을 선정 (pykrx 시그니처 이슈 제거)
-    반환: ['종목코드','거래대금(원)']
-    """
     frames = []
     for m in ["KOSPI", "KOSDAQ"]:
         try:
             df = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market=m)
             if df is None or df.empty:
                 continue
-            # 인덱스가 티커, 컬럼에 '거래대금' 존재
-            df = df.reset_index()  # '티커' 컬럼 생성
-            # 컬럼명 통일
+            df = df.reset_index()  # '티커' -> 컬럼
             if "티커" in df.columns:
                 df.rename(columns={"티커": "종목코드"}, inplace=True)
             if "거래대금(원)" not in df.columns and "거래대금" in df.columns:
@@ -124,14 +116,9 @@ def get_market_map(date_yyyymmdd: str):
     return kospi, kosdaq
 
 def get_name_map_cached(date_yyyymmdd: str) -> dict:
-    """
-    data/krx_codes.csv 가 있으면 우선 사용, 없으면 pykrx로 즉시 생성 후 사용.
-    """
     ensure_dir(OUT_DIR)
     map_path = os.path.join(OUT_DIR, "krx_codes.csv")
     mp = {}
-
-    # 파일이 있으면 사용
     if os.path.exists(map_path):
         try:
             df = pd.read_csv(map_path, dtype={"종목코드":"string"})
@@ -140,7 +127,6 @@ def get_name_map_cached(date_yyyymmdd: str) -> dict:
         except Exception:
             mp = {}
 
-    # 부족하면 즉시 빌드
     if not mp:
         rows = []
         for m in ["KOSPI", "KOSDAQ", "KONEX"]:
@@ -157,9 +143,8 @@ def get_name_map_cached(date_yyyymmdd: str) -> dict:
                 time.sleep(0.002)
         if rows:
             df = pd.DataFrame(rows).drop_duplicates("종목코드")
-            df.to_csv(map_path, index=False, encoding="utf-8-sig")
+            df.to_csv(map_path, index=False, encoding=UTF8)
             mp = {str(r["종목코드"]).zfill(6): r["종목명"] for _, r in df.iterrows()}
-
     return mp
 
 def get_mcap_eok(date_yyyymmdd: str, ticker: str) -> float:
@@ -168,6 +153,23 @@ def get_mcap_eok(date_yyyymmdd: str, ticker: str) -> float:
         return float(cap["시가총액"].iloc[0]) / 1e8
     except Exception:
         return np.nan
+
+# ------------------------------- CP949 안전 치환 -------------------------------
+def make_cp949_safe(df: pd.DataFrame) -> pd.DataFrame:
+    df2 = df.copy()
+    # 컬럼명 치환
+    df2.columns = [c.replace("乖離%", "괴리_%") for c in df2.columns]
+    # 값 치환
+    if "통과" in df2.columns:
+        df2["통과"] = df2["통과"].replace({"🚀초입": "초입"})
+    if "근거" in df2.columns and df2["근거"].dtype == object:
+        df2["근거"] = (
+            df2["근거"]
+            .str.replace("MACD↑", "MACD상승", regex=False)
+            .str.replace("거래량↑", "거래량증가", regex=False)
+            .str.replace("과열X", "과열아님", regex=False)
+        )
+    return df2
 
 # ------------------------------- 메인 로직 -------------------------------
 def main():
@@ -207,9 +209,9 @@ def main():
 
             # 지표 산출
             close = ohlcv["종가"].astype(float)
-            high = ohlcv["고가"].astype(float)
-            low  = ohlcv["저가"].astype(float)
-            vol  = ohlcv["거래량"].astype(float)
+            high  = ohlcv["고가"].astype(float)
+            low   = ohlcv["저가"].astype(float)
+            vol   = ohlcv["거래량"].astype(float)
 
             if len(close) < 20:
                 continue
@@ -258,17 +260,17 @@ def main():
             if RSI_LOW <= rsi_v <= RSI_HIGH:
                 score += 1; reason.append("RSI 45~65")
             if macd_sl > 0:
-                score += 1; reason.append("MACD↑")
+                score += 1; reason.append("MACD상승")          # ↑ → 안전 문자열
             if not np.isnan(disp_v) and -1.0 <= disp_v <= 4.0:
                 score += 1; reason.append("MA20 근처")
             if v_z > 1.2:
-                score += 1; reason.append("거래량↑")
+                score += 1; reason.append("거래량증가")         # ↑ → 안전 문자열
             if not np.isnan(m20) and not np.isnan(m60) and m20 > m60:
                 score += 1; reason.append("상승구조")
             if macd_h > 0:
                 score += 1; reason.append("MACD>sig")
             if not np.isnan(ret5) and ret5 < 10:
-                score += 1; reason.append("과열X")
+                score += 1; reason.append("과열아님")           # X → 안전 문자열
 
             if np.isnan(atr) or np.isnan(m20):
                 continue
@@ -291,14 +293,14 @@ def main():
                 "거래대금(억원)": round(tv_eok, 2),
                 "시가총액(억원)": None if np.isnan(mcap_eok) else round(mcap_eok, 1),
                 "RSI14": None if np.isnan(rsi_v) else round(rsi_v, 1),
-                "乖離%": None if np.isnan(disp_v) else round(disp_v, 2),
+                "乖離%": None if np.isnan(disp_v) else round(disp_v, 2),   # 원본(UTF-8 본)
                 "MACD_hist": None if np.isnan(macd_h) else round(macd_h, 4),
                 "MACD_slope": None if np.isnan(macd_sl) else round(macd_sl, 5),
                 "Vol_Z": None if np.isnan(v_z) else round(v_z, 2),
                 "ret_5d_%": None if np.isnan(ret5) else round(ret5, 2),
                 "ret_10d_%": None if np.isnan(ret10) else round(ret10, 2),
                 "EBS": int(score),
-                "통과": "🚀초입" if score >= PASS_SCORE else "",
+                "통과": "초입" if score >= PASS_SCORE else "",             # 이모지 제거(안전)
                 "근거": ", ".join(reason),
                 "추천매수가": buy,
                 "추천매도가1": tgt1,
@@ -316,14 +318,5 @@ def main():
     df_out = df_out.sort_values(["EBS", "거래대금(억원)"], ascending=[False, False]).reset_index(drop=True)
 
     ensure_dir(OUT_DIR)
-    path_day    = os.path.join(OUT_DIR, f"recommend_{trade_ymd}.csv")
-    path_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
-    df_out.to_csv(path_day, index=False, encoding="utf-8-sig")
-    df_out.to_csv(path_latest, index=False, encoding="utf-8-sig")
-    log(f"💾 저장 완료: {path_day} (+ {path_latest})")
-
-    # 이름맵 보강 저장
-    _ = get_name_map_cached(trade_ymd)  # data/krx_codes.csv 생성/갱신
-
-if __name__ == "__main__":
-    main()
+    path_day_utf8    = os.path.join(OUT_DIR, f"recommend_{trade_ymd}.csv")
+    path_latest_utf8 = os.path.join(OUT_DIR, "recommend_latest.
