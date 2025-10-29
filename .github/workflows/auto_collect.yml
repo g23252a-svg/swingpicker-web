@@ -12,11 +12,12 @@ permissions:
 
 concurrency:
   group: auto-collect-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true   # 동시에 두 실행이 겹치지 않게
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Repository
@@ -31,21 +32,38 @@ jobs:
           python-version: "3.11"
 
       - name: Install Dependencies
+        env:
+          PYTHONUTF8: "1"
         run: |
           python -V
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -c "import pykrx, pandas; print('pykrx', pykrx.__version__); print('pandas', pandas.__version__)"
+          python - <<'PY'
+import pykrx, pandas
+print("pykrx:", pykrx.__version__)
+print("pandas:", pandas.__version__)
+PY
 
       - name: Run Collector
         env:
           PYTHONUNBUFFERED: "1"
-        run: python collector.py
+        run: |
+          mkdir -p data
+          python collector.py
+
+      # ▼ CSV 내용이 동일해도 매일 최소 1커밋 보장 → Streamlit 재시작 보장
+      - name: Touch daily redeploy marker
+        run: |
+          mkdir -p data
+          date +'%Y-%m-%d %H:%M:%S %Z' > data/.redeploy_marker
 
       - name: Show outputs
         run: |
           ls -alh data || true
+          echo "[HEAD of recommend_latest.csv]"
           head -n 5 data/recommend_latest.csv || true
+          echo "[HEAD of recommend_latest_cp949.csv]"
+          head -n 5 data/recommend_latest_cp949.csv || true
 
       - name: Commit & Push CSV
         env:
@@ -54,12 +72,8 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 변경사항이 있을 때만 커밋/푸시
-          if git status --porcelain | grep -q .; then
-            git add -A
-            git commit -m "chore: add CSV $(date +'%Y-%m-%d %H:%M:%S %Z')"
-            git pull --rebase
-            git push
-          else
-            echo "No changes; skip commit."
-          fi
+          git add -A
+          git commit -m "chore: data update $(date +'%Y-%m-%d %H:%M:%S %Z')" || echo "No changes to commit."
+          # 원격 변경이 있어도 자동 스태시/리베이스로 충돌 최소화
+          git pull --rebase --autostash || echo "Rebase skipped or no remote changes."
+          git push || echo "Push failed or nothing to push."
