@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.3.3 (Auto Update + Robust Name Map + Number Format)
+LDY Pro Trader v3.3.3 (Auto Update + Robust Name Map + Number Format + EBS+)
 - 추천 CSV: data/recommend_latest.csv (remote 우선)
 - 이름맵:   data/krx_codes.csv (remote 우선) → FDR → pykrx 순 폴백
 - OHLCV만 와도 화면에서 지표/EBS/추천가 생성
 - 거래대금(억원) 안전 보강, 안전 정렬
-- 표에 표시되는 가격/억원 숫자에 천단위 콤마 적용 (Streamlit column_config)
+- 표에 표시되는 숫자(가격/억원) 천단위 콤마 + 소수 포맷 정교화
+- collector가 생성한 EBS_PLUS, HitProb_%(heuristic) 컬럼 자동 인식/표시/정렬
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
@@ -150,7 +151,7 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
         m20p = x["MA20"].iloc[-2] if len(x)>=2 else np.nan
         c5 = nz(m20p) and (last["MA20"].iloc[0] - m20p > 0); e+=int(c5); why.append("MA20↑" if c5 else "")
         c6 = nz(last["MACD_hist"].iloc[0]) and last["MACD_hist"].iloc[0] > 0; e+=int(c6); why.append("MACD>0" if c6 else "")
-        r5 = last["ret_5d_%"].iloc[0];    c7 = nz(r5) and r5 < 10;        e+=int(c7); why.append("5d<10%" if c7 else "")
+        r5 = last["ret_5d_%"].iloc[0];    c7 = nz(r5) and r5 < 10;        e+=int(c7); why.append("5d<10%")
         last["EBS"] = e; last["근거"] = " / ".join([w for w in why if w])
 
         atr = last["ATR14"].iloc[0]
@@ -166,13 +167,11 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
         last["손절가"]     = round(stp,2)   if not math.isnan(stp)   else np.nan
         return last
 
-    # pandas 2.3 경고 회피
     try:
         out = g.apply(_feat, include_groups=False).reset_index(drop=True)
     except TypeError:
         out = g.apply(_feat).reset_index(drop=True)
 
-    # 거래대금(억원) 최신행 보강
     tail = raw.groupby("종목코드").tail(1).copy()
     tail = ensure_turnover(tail)
     if "거래대금(억원)" in tail.columns:
@@ -213,7 +212,7 @@ def load_name_map() -> pd.DataFrame | None:
         except Exception:
             pass
 
-    # 3) pykrx 개별 조회(네트워크 차단 환경이면 실패 가능)
+    # 3) pykrx 개별 조회
     if PYKRX_OK:
         today = datetime.now().strftime("%Y%m%d")
         rows = []
@@ -272,25 +271,29 @@ else:
 # 최신 행만
 latest = df.sort_values(["종목코드","날짜"]).groupby("종목코드").tail(1) if "날짜" in df.columns else df.copy()
 
-# 이름 매핑 (레포/ FDR / pykrx)
+# 이름 매핑
 with st.status("🏷️ 종목명 매핑 중...", expanded=False):
     latest = apply_names(latest)
 
 # 숫자 캐스팅 & 거래대금 보강
 latest = ensure_turnover(latest)
-for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가"]:
+num_cols = ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z",
+            "ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가",
+            "EBS_PLUS","HitProb_%(heuristic)"]
+for c in num_cols:
     if c in latest.columns:
         latest[c] = pd.to_numeric(latest[c], errors="coerce")
 
 # ------------- UI -------------
 with st.expander("🔍 보기/필터", expanded=True):
-    c1,c2,c3,c4,c5 = st.columns([1,1,1,1,2])
+    c1,c2,c3,c4,c5 = st.columns([1,1,1.2,1,2])
     with c1:
         only_entry = st.checkbox("🚀 초입 후보만 (EBS≥4)", value=("EBS" in latest.columns))
     with c2:
         min_turn = st.slider("최소 거래대금(억원)", 0, 5000, 50, step=10)
     with c3:
-        sort_key = st.selectbox("정렬", ["EBS▼","거래대금▼","시가총액▼","RSI▲","RSI▼","종가▲","종가▼"], index=0)
+        sort_opts = ["EBS+▼","확률▼","EBS▼","거래대금▼","시가총액▼","RSI▲","RSI▼","종가▲","종가▼"]
+        sort_key = st.selectbox("정렬", sort_opts, index=0)
     with c4:
         topn = st.slider("표시 수(Top N)", 10, 500, 200, step=10)
     with c5:
@@ -310,6 +313,14 @@ if q_text:
 
 def safe_sort(dfv, key):
     try:
+        if key=="EBS+▼" and "EBS_PLUS" in dfv.columns:
+            by = ["EBS_PLUS","EBS","거래대금(억원)"]
+            by = [b for b in by if b in dfv.columns]
+            return dfv.sort_values(by=by, ascending=[False]*len(by))
+        if key=="확률▼" and "HitProb_%(heuristic)" in dfv.columns:
+            by = ["HitProb_%(heuristic)","EBS_PLUS","거래대금(억원)"]
+            by = [b for b in by if b in dfv.columns]
+            return dfv.sort_values(by=by, ascending=[False]*len(by))
         if key=="EBS▼" and "EBS" in dfv.columns:
             by = ["EBS"] + (["거래대금(억원)"] if "거래대금(억원)" in dfv.columns else [])
             return dfv.sort_values(by=by, ascending=[False]+[False]*(len(by)-1))
@@ -327,7 +338,7 @@ def safe_sort(dfv, key):
             return dfv.sort_values("종가", ascending=False, na_position="last")
     except Exception:
         pass
-    for alt in ["EBS","거래대금(억원)","시가총액(억원)","종가"]:
+    for alt in ["EBS_PLUS","EBS","거래대금(억원)","시가총액(억원)","종가"]:
         if alt in dfv.columns:
             return dfv.sort_values(alt, ascending=False, na_position="last")
     return dfv
@@ -337,13 +348,16 @@ view = safe_sort(view, sort_key)
 if "EBS" in view.columns:
     view["통과"] = np.where(view["EBS"]>=PASS_SCORE, "🚀", "")
 
-cols = [
+# 표시 컬럼 구성 (있으면 보여주기)
+base_cols = [
     "통과","시장","종목명","종목코드",
     "종가","추천매수가","손절가","추천매도가1","추천매도가2",
     "거래대금(억원)","시가총액(억원)",
     "EBS","근거",
     "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
 ]
+extra_cols = [c for c in ["EBS_PLUS","HitProb_%(heuristic)"] if c in view.columns]
+cols = [c for c in base_cols if c in view.columns] + extra_cols
 for c in cols:
     if c not in view.columns: view[c]=np.nan
 
@@ -357,43 +371,65 @@ for c in ["종가","추천매수가","손절가","추천매도가1","추천매�
     if c in view_fmt.columns:
         view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce").round(0).astype("Int64")
 
-# 억원/지표류 → float
-for c in ["거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"]:
+# 억원/지표류 → float (collector와 소수 자리 맞춤)
+if "거래대금(억원)" in view_fmt.columns:
+    view_fmt["거래대금(억원)"] = pd.to_numeric(view_fmt["거래대금(억원)"], errors="coerce")  # collector: round(?, 2)
+if "시가총액(억원)" in view_fmt.columns:
+    view_fmt["시가총액(억원)"] = pd.to_numeric(view_fmt["시가총액(억원)"], errors="coerce")  # collector: round(?, 1)
+for c in ["RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS_PLUS","HitProb_%(heuristic)"]:
     if c in view_fmt.columns:
         view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce")
+
+# 컬럼 설정
+colcfg = {
+    # 텍스트
+    "통과":         st.column_config.TextColumn(" "),
+    "시장":         st.column_config.TextColumn("시장"),
+    "종목명":       st.column_config.TextColumn("종목명"),
+    "종목코드":     st.column_config.TextColumn("종목코드"),
+    "근거":         st.column_config.TextColumn("근거"),
+    # 가격/정수(콤마)
+    "종가":          st.column_config.NumberColumn("종가",           format="%,d"),
+    "추천매수가":    st.column_config.NumberColumn("추천매수가",     format="%,d"),
+    "손절가":        st.column_config.NumberColumn("손절가",         format="%,d"),
+    "추천매도가1":   st.column_config.NumberColumn("추천매도가1",    format="%,d"),
+    "추천매도가2":   st.column_config.NumberColumn("추천매도가2",    format="%,d"),
+    "EBS":          st.column_config.NumberColumn("EBS",            format="%d"),
+}
+# 억원/지표 (콤마·소수) — collector의 반올림 자리수와 일치
+if "거래대금(억원)" in view_fmt.columns:
+    colcfg["거래대금(억원)"] = st.column_config.NumberColumn("거래대금(억원)", format="%,.2f")
+if "시가총액(억원)" in view_fmt.columns:
+    colcfg["시가총액(억원)"] = st.column_config.NumberColumn("시가총액(억원)", format="%,.1f")
+
+for c, f in [
+    ("RSI14","%.1f"),
+    ("乖離%","%.2f"),
+    ("MACD_hist","%.4f"),
+    ("MACD_slope","%.5f"),
+    ("Vol_Z","%.2f"),
+    ("ret_5d_%","%.2f"),
+    ("ret_10d_%","%.2f"),
+    ("EBS_PLUS","%.1f"),
+]:
+    if c in view_fmt.columns:
+        colcfg[c] = st.column_config.NumberColumn(c, format=f)
+
+# 확률은 진행바로 가독성↑
+if "HitProb_%(heuristic)" in view_fmt.columns:
+    colcfg["HitProb_%(heuristic)"] = st.column_config.ProgressColumn(
+        "HitProb(%)",
+        min_value=0, max_value=100, format="%.0f"
+    )
 
 st.data_editor(
     view_fmt,
     width="stretch",
     height=640,
     hide_index=True,
-    disabled=True,          # 읽기 전용 표
+    disabled=True,
     num_rows="fixed",
-    column_config={
-        # 텍스트
-        "통과":         st.column_config.TextColumn(" "),
-        "시장":         st.column_config.TextColumn("시장"),
-        "종목명":       st.column_config.TextColumn("종목명"),
-        "종목코드":     st.column_config.TextColumn("종목코드"),
-        "근거":         st.column_config.TextColumn("근거"),
-        # 가격/정수(콤마)
-        "종가":          st.column_config.NumberColumn("종가",           format="%,d"),
-        "추천매수가":    st.column_config.NumberColumn("추천매수가",     format="%,d"),
-        "손절가":        st.column_config.NumberColumn("손절가",         format="%,d"),
-        "추천매도가1":   st.column_config.NumberColumn("추천매도가1",    format="%,d"),
-        "추천매도가2":   st.column_config.NumberColumn("추천매도가2",    format="%,d"),
-        "EBS":          st.column_config.NumberColumn("EBS",            format="%d"),
-        # 억원/지표 (콤마·소수)
-        "거래대금(억원)": st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"),
-        "시가총액(억원)": st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"),
-        "RSI14":        st.column_config.NumberColumn("RSI14",          format="%.1f"),
-        "乖離%":         st.column_config.NumberColumn("乖離%",           format="%.2f"),
-        "MACD_hist":    st.column_config.NumberColumn("MACD_hist",      format="%.4f"),
-        "MACD_slope":   st.column_config.NumberColumn("MACD_slope",     format="%.5f"),
-        "Vol_Z":        st.column_config.NumberColumn("Vol_Z",          format="%.2f"),
-        "ret_5d_%":     st.column_config.NumberColumn("ret_5d_%",       format="%.2f"),
-        "ret_10d_%":    st.column_config.NumberColumn("ret_10d_%",      format="%.2f"),
-    },
+    column_config=colcfg,
 )
 
 st.download_button(
@@ -409,4 +445,5 @@ with st.expander("ℹ️ EBS 구성(급등 초입 로직)", expanded=False):
 - 점수(0~7): RSI 45~65 / MACD↑ / MA20±4% / VolZ>1.2 / MA20↑ / MACD>0 / 5d<10%
 - 통과: **EBS ≥ 4**
 - 추천가: ATR/MA20 기반 (엔트리=MA20±0.5ATR, T1=+1.0ATR, T2=+1.8ATR, 손절=−1.2ATR)
+- 참고: EBS+는 RS/베이스 품질/볼륨/레짐 등을 합성한 가중 점수(0~100), HitProb는 UI용 휴리스틱(%)
 """)
