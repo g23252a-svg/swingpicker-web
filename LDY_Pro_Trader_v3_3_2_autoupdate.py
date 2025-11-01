@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.4.0 (Auto Update + Now-Ready Score)
+LDY Pro Trader v3.3.4 (Auto Update + ERS + RR/여유 필터 + 콤마 포맷)
 - 추천 CSV: data/recommend_latest.csv (remote 우선)
 - 이름맵:   data/krx_codes.csv (remote 우선) → FDR → pykrx 순 폴백
 - OHLCV만 와도 화면에서 지표/EBS/추천가 생성
-- 숫자(가격/억원) 콤마 포맷 + 진입지수(ERS), RR, 근접도 추가
-- Top Picks(지금 진입 유효 + 높은 ERS) 상단 강조
+- '진입 준비도(ERS)'와 RR/손절·목표 여유%를 계산해 Top Picks/Now 리스트 제공
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
@@ -24,15 +23,16 @@ try:
 except Exception:
     FDR_OK = False
 
-st.set_page_config(page_title="LDY Pro Trader v3.4.0 (Auto Update)", layout="wide")
-st.title("📈 LDY Pro Trader v3.4.0 (Auto Update)")
-st.caption("매일 장마감 후 자동 업데이트되는 스윙 추천 종목 리스트 | Made by LDY")
+st.set_page_config(page_title="LDY Pro Trader v3.3.4 (Auto Update)", layout="wide")
+st.title("📈 LDY Pro Trader v3.3.4 (Auto Update)")
+st.caption("매일 장마감 후 자동 업데이트되는 스윙 추천 종목 리스트 | ERS/RR 필터 내장 — Made by LDY")
 
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 LOCAL_RAW = "data/recommend_latest.csv"
 CODES_URL = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/krx_codes.csv"
 LOCAL_MAP = "data/krx_codes.csv"
-PASS_SCORE = 4
+
+PASS_SCORE = 4  # EBS 컷
 
 # ---------------- IO ----------------
 @st.cache_data(ttl=300)
@@ -184,6 +184,7 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
 # -------- name map (robust) --------
 @st.cache_data(ttl=6*60*60)
 def load_name_map() -> pd.DataFrame | None:
+    # 1) repo data/krx_codes.csv
     try:
         m = load_csv_url(CODES_URL)
         if {"종목코드","종목명"}.issubset(m.columns):
@@ -200,6 +201,7 @@ def load_name_map() -> pd.DataFrame | None:
         except Exception:
             pass
 
+    # 2) FDR
     if FDR_OK:
         try:
             lst = fdr.StockListing("KRX")
@@ -209,6 +211,7 @@ def load_name_map() -> pd.DataFrame | None:
         except Exception:
             pass
 
+    # 3) pykrx
     if PYKRX_OK:
         today = datetime.now().strftime("%Y%m%d")
         rows = []
@@ -253,7 +256,7 @@ except Exception:
 
 df_raw = normalize_cols(df_raw)
 
-# 이미 완제품인지 체크
+# 완제품 여부 확인
 has_ebs  = "EBS" in df_raw.columns and df_raw["EBS"].notna().any()
 has_reco = all(c in df_raw.columns for c in ["추천매수가","추천매도가1","추천매도가2","손절가"]) and \
            df_raw[["추천매수가","추천매도가1","추천매도가2","손절가"]].notna().any().any()
@@ -273,92 +276,65 @@ with st.status("🏷️ 종목명 매핑 중...", expanded=False):
 
 # 숫자 캐스팅 & 거래대금 보강
 latest = ensure_turnover(latest)
-for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가","ATR14","MA20"]:
+for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가"]:
     if c in latest.columns:
         latest[c] = pd.to_numeric(latest[c], errors="coerce")
 
-# ---------------- Now-Readiness metrics ----------------
-def _clip(x, lo, hi): 
-    return np.minimum(np.maximum(x, lo), hi)
+# ---------- 파생: RR/여유/ERS ----------
+def compute_risk_fields(x: pd.DataFrame) -> pd.DataFrame:
+    v = x.copy()
+    # 기본 값 확보
+    entry = v.get("추천매수가")
+    stop  = v.get("손절가")
+    t1    = v.get("추천매도가1")
+    close = v.get("종가")
 
-def compute_now_metrics(dfv: pd.DataFrame, entry_mode: str) -> pd.DataFrame:
-    out = dfv.copy()
+    # 결측 방어: 엔트리 없으면 종가 사용
+    v["entry_used"] = np.where(pd.notna(entry), entry, close)
 
-    # 진입가 기준
-    if entry_mode == "추격(현재가)":
-        out["진입가_사용"] = out["종가"]
-    else:
-        out["진입가_사용"] = out["추천매수가"]
+    # 손절/목표 결측 보정 (없으면 계산 불가 → NaN 유지)
+    v["stop_used"]  = stop
+    v["t1_used"]    = t1
 
-    # RR 계산 (목표1/손절)
-    e = pd.to_numeric(out["진입가_사용"], errors="coerce")
-    t1 = pd.to_numeric(out["추천매도가1"], errors="coerce")
-    stp = pd.to_numeric(out["손절가"], errors="coerce")
-    c = pd.to_numeric(out["종가"], errors="coerce")
-
-    rr = (t1 - e) / (e - stp)
-    rr = rr.where((e.notna()) & (t1.notna()) & (stp.notna()) & ((e - stp) > 0), np.nan)
-    out["RR"] = rr
-
-    # 근접도: ATR14가 있으면 |c-e| / (1.5*ATR) → 0(멀다)~1(가깝다)
-    if "ATR14" in out.columns and out["ATR14"].notna().any():
-        prox = 1.0 - (np.abs(c - e) / (1.5 * out["ATR14"]))
-        out["근접도"] = _clip(prox, 0.0, 1.0)
-    else:
-        # 대안: |c-e|/e 를 2% 스케일에 맵핑
-        prox = 1.0 - (np.abs(c - e) / (0.02 * e))
-        out["근접도"] = _clip(prox, 0.0, 1.0)
-
-    # 목표/손절 여유 (현재가 기준)
-    out["목표여유_%"] = (t1 - c) / c
-    out["손절여유_%"] = (c - stp) / c
-
-    # 보조 스코어
-    # RR 스코어(0~1): RR 0~2.5 구간 선형
-    rr_score = _clip(rr / 2.5, 0, 1)
-
-    # 마진 스코어(0~1): 목표여유 0~3% 구간 선형
-    margin_score = _clip(out["목표여유_%"] / 0.03, 0, 1)
-
-    # RSI 스코어(0~1): 55 중심 ±30 폭
-    rsi = pd.to_numeric(out.get("RSI14", np.nan), errors="coerce")
-    rsi_score = 1 - _clip(np.abs(rsi - 55) / 30.0, 0, 1)
-
-    # 거래량/모멘텀 스코어
-    volz = pd.to_numeric(out.get("Vol_Z", np.nan), errors="coerce")
-    vol_score = _clip(volz / 1.5, 0, 1)  # Vol_Z≈1.5 이상이면 만점
-
-    macd_h = pd.to_numeric(out.get("MACD_hist", np.nan), errors="coerce")
-    macd_sl = pd.to_numeric(out.get("MACD_slope", np.nan), errors="coerce")
-    mom_score = ((macd_sl > 0).astype(float) + (macd_h > 0).astype(float)) / 2.0
-
-    ebs = pd.to_numeric(out.get("EBS", np.nan), errors="coerce")
-    ebs_score = _clip(ebs / 7.0, 0, 1)
-
-    # 진입지수 ERS (0~1)
-    ERS = (
-        0.35 * rr_score +
-        0.25 * out["근접도"].fillna(0) +
-        0.10 * margin_score.fillna(0) +
-        0.10 * rsi_score.fillna(0) +
-        0.05 * vol_score.fillna(0) +
-        0.05 * mom_score.fillna(0) +
-        0.10 * ebs_score.fillna(0)
+    # 최소 스탑 폭 보정(앱 레벨): max(2%*entry, 50원) — ATR 미존재 환경 대비
+    # 수집기에서 ATR기반 최소폭을 이미 적용했다면 보정이 걸리지 않을 수 있음
+    v["min_stop_gap"] = v["entry_used"] * 0.02
+    v["stop_used"] = np.where(
+        pd.notna(v["stop_used"]) & pd.notna(v["entry_used"]),
+        np.maximum(v["stop_used"], v["entry_used"] - np.maximum(v["min_stop_gap"], 50.0)),
+        v["stop_used"]
     )
-    out["진입지수"] = ERS
 
-    # 지금 진입 유효(목표1 ≥ 현재가, 현재가 > 손절)
-    out["지금진입유효"] = (out["목표여유_%"] > 0) & (out["손절여유_%"] > 0) & rr.notna()
-
-    # 신호 레이블
-    cond_now = out["지금진입유효"] & (out["진입지수"] >= 0.65)
-    cond_wait = (out["진입지수"] >= 0.50)
-    out["진입신호"] = np.select(
-        [cond_now, cond_wait],
-        ["✅ Now", "⚠️ 대기"],
-        default="⛔ Pass"
+    # 여유% & RR
+    v["손절여유_%"]  = (v["entry_used"] - v["stop_used"]) / v["entry_used"] * 100.0
+    v["목표1여유_%"] = (v["t1_used"]    - v["entry_used"]) / v["entry_used"] * 100.0
+    v["RR"] = np.where(
+        (pd.notna(v["t1_used"]) & pd.notna(v["stop_used"]) & (v["entry_used"] > v["stop_used"])),
+        (v["t1_used"] - v["entry_used"]) / (v["entry_used"] - v["stop_used"]),
+        np.nan
     )
-    return out
+
+    # ERS (Entry Readiness Score, 0~1)
+    # - rr_norm: RR 1.5~3.0 구간 선호
+    rr_norm = ((v["RR"] - 1.5) / (3.0 - 1.5)).clip(lower=0, upper=1)
+
+    # - near_entry: 엔트리 근접도 (±0.8% 이내면 만점)
+    v["entry_gap_%"] = (v["entry_used"] - v["종가"]) / v["entry_used"] * 100.0
+    near_entry = (1 - (v["entry_gap_%"].abs() / 0.8)).clip(lower=0, upper=1)
+
+    # - trend_norm: EBS 0~7 → 0~1 정규화(컷 4↑ 가점)
+    ebs = pd.to_numeric(v.get("EBS"), errors="coerce").fillna(0)
+    trend_norm = (ebs.clip(lower=0, upper=7) / 7.0)
+
+    # - vol_norm: Vol_Z 1.0~2.0 → 0~1 (없으면 0.5)
+    volz = pd.to_numeric(v.get("Vol_Z"), errors="coerce")
+    vol_norm = ((volz - 1.0) / 1.0).clip(lower=0, upper=1)
+    vol_norm = vol_norm.fillna(0.5)
+
+    v["ERS"] = (0.40 * rr_norm) + (0.30 * near_entry) + (0.20 * trend_norm) + (0.10 * vol_norm)
+    return v
+
+latest = compute_risk_fields(latest)
 
 # ------------- UI -------------
 with st.expander("🔍 보기/필터", expanded=True):
@@ -368,19 +344,24 @@ with st.expander("🔍 보기/필터", expanded=True):
     with c2:
         min_turn = st.slider("최소 거래대금(억원)", 0, 5000, 50, step=10)
     with c3:
-        entry_mode = st.selectbox("진입가 기준", ["기본(추천매수)", "추격(현재가)"], index=0)
+        sort_key = st.selectbox("정렬", ["ERS▼","RR▼","EBS▼","거래대금▼","시가총액▼","종가▲","종가▼"], index=0)
     with c4:
-        min_rr = st.slider("최소 RR(목표1/손절)", 0.0, 3.0, 0.0, 0.1)
+        topn = st.slider("표시 수(Top N)", 10, 500, 200, step=10)
     with c5:
         q_text = st.text_input("🔎 종목명/코드 검색", value="", placeholder="예: 삼성전자 또는 005930")
 
-c6,c7,c8 = st.columns([1,1,1])
-with c6:
-    sort_key = st.selectbox("정렬", ["진입지수▼","EBS▼","거래대금▼","시가총액▼","RSI▲","RSI▼","종가▲","종가▼"], index=0)
-with c7:
-    only_now = st.checkbox("지금 진입 유효만(목표1≥현재가 & 현재가>손절)", value=False)
-with c8:
-    min_ers = st.slider("최소 진입지수(0~1)", 0.0, 1.0, 0.0, 0.05)
+with st.expander("🛠 Top Picks 조건", expanded=True):
+    c1,c2,c3,c4,c5 = st.columns(5)
+    with c1:
+        rr_min = st.slider("최소 RR", 1.0, 3.0, 1.8, 0.1)
+    with c2:
+        stop_min = st.slider("손절여유 ≥ (%)", 0.0, 5.0, 2.0, 0.1)
+    with c3:
+        tgt_min = st.slider("목표1여유 ≥ (%)", 0.0, 10.0, 4.0, 0.1)
+    with c4:
+        ers_min = st.slider("ERS ≥", 0.00, 1.00, 0.65, 0.01)
+    with c5:
+        band = st.slider("Now 근접 밴드(±%)", 0.2, 2.0, 0.8, 0.1)
 
 view = latest.copy()
 if only_entry and "EBS" in view.columns:
@@ -394,20 +375,13 @@ if q_text:
         view["종목코드"].fillna("").astype(str).str.contains(q)
     ]
 
-# Now metrics
-view = compute_now_metrics(view, entry_mode)
-
-# RR 필터 & 지금 진입 유효 필터 & ERS 필터
-view = view[ (view["RR"].fillna(-1) >= float(min_rr)) ]
-if only_now:
-    view = view[ view["지금진입유효"] ]
-if min_ers > 0:
-    view = view[ view["진입지수"].fillna(0) >= float(min_ers) ]
-
+# 정렬
 def safe_sort(dfv, key):
     try:
-        if key=="진입지수▼" and "진입지수" in dfv.columns:
-            return dfv.sort_values(["진입지수","RR","거래대금(억원)"], ascending=[False,False,False], na_position="last")
+        if key=="ERS▼" and "ERS" in dfv.columns:
+            return dfv.sort_values(["ERS","RR","거래대금(억원)"], ascending=[False,False,False])
+        if key=="RR▼" and "RR" in dfv.columns:
+            return dfv.sort_values(["RR","ERS"], ascending=[False,False])
         if key=="EBS▼" and "EBS" in dfv.columns:
             by = ["EBS"] + (["거래대금(억원)"] if "거래대금(억원)" in dfv.columns else [])
             return dfv.sort_values(by=by, ascending=[False]+[False]*(len(by)-1))
@@ -415,82 +389,73 @@ def safe_sort(dfv, key):
             return dfv.sort_values("거래대금(억원)", ascending=False)
         if key=="시가총액▼" and "시가총액(억원)" in dfv.columns:
             return dfv.sort_values("시가총액(억원)", ascending=False, na_position="last")
-        if key=="RSI▲" and "RSI14" in dfv.columns:
-            return dfv.sort_values("RSI14", ascending=True, na_position="last")
-        if key=="RSI▼" and "RSI14" in dfv.columns:
-            return dfv.sort_values("RSI14", ascending=False, na_position="last")
         if key=="종가▲" and "종가" in dfv.columns:
             return dfv.sort_values("종가", ascending=True, na_position="last")
         if key=="종가▼" and "종가" in dfv.columns:
             return dfv.sort_values("종가", ascending=False, na_position="last")
     except Exception:
         pass
-    for alt in ["진입지수","EBS","거래대금(억원)","시가총액(억원)","종가"]:
+    for alt in ["ERS","RR","EBS","거래대금(억원)","시가총액(억원)","종가"]:
         if alt in dfv.columns:
             return dfv.sort_values(alt, ascending=False, na_position="last")
     return dfv
 
 view = safe_sort(view, sort_key)
 
-# Top Picks 강조
-top_show = view.copy()
-top_show = top_show[top_show["지금진입유효"]].sort_values(["진입지수","RR","거래대금(억원)"], ascending=[False,False,False]).head(5)
+if "EBS" in view.columns:
+    view["통과"] = np.where(view["EBS"]>=PASS_SCORE, "🚀", "")
 
-st.write(f"📋 총 {len(latest):,}개 / 필터 후 {len(view):,}개 표시")
-
-if len(top_show):
-    best = top_show.iloc[0]
-    cA, cB = st.columns([2,3])
-    with cA:
-        st.success(f"🥇 **지금 베스트**: {best.get('종목명','?')} ({best.get('종목코드','')})")
-        st.metric("진입지수(0~1)", f"{best.get('진입지수',0):.2f}")
-        st.metric("RR(목표1/손절)", f"{best.get('RR',np.nan):.2f}")
-        st.metric("근접도(0~1)", f"{best.get('근접도',0):.2f}")
-    with cB:
-        st.write("**Top 5 Now Picks**")
-        cols_top = ["진입신호","종목명","종목코드","진입지수","RR","종가","추천매수가","손절가","추천매도가1","목표여유_%","손절여유_%"]
-        for c in cols_top:
-            if c not in top_show.columns: top_show[c]=np.nan
-        small = top_show[cols_top].copy()
-        small["목표여유_%"] = (small["목표여유_%"]*100).round(2)
-        small["손절여유_%"] = (small["손절여유_%"]*100).round(2)
-        st.dataframe(
-            small,
-            use_container_width=True,
-            hide_index=True
-        )
-
-# ---- 표 본문 ----
-cols = [
-    "진입신호",
-    "시장","종목명","종목코드",
+# 공통 컬럼
+base_cols = [
+    "통과","시장","종목명","종목코드",
     "종가","추천매수가","손절가","추천매도가1","추천매도가2",
-    "RR","근접도","진입지수","목표여유_%","손절여유_%",
     "거래대금(억원)","시가총액(억원)",
     "EBS","근거",
     "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
 ]
-for c in cols:
-    if c not in view.columns: view[c]=np.nan
+risk_cols = ["ERS","RR","손절여유_%","목표1여유_%","entry_gap_%"]
+derived_cols = ["entry_used","stop_used","t1_used"]
 
-view_fmt = view[cols].copy()
+for c in base_cols + risk_cols + derived_cols:
+    if c not in view.columns: view[c] = np.nan
 
-# 타입 캐스팅/표시 포맷
-for c in ["종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS"]:
-    if c in view_fmt.columns: view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce").round(0).astype("Int64")
-for c in ["RR","근접도","진입지수","목표여유_%","손절여유_%","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"]:
-    if c in view_fmt.columns: view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce")
+st.write(f"📋 총 {len(latest):,}개 / 표시 {min(len(view), int(topn)):,}개")
 
+# ── 숫자 포맷(콤마) 적용 ──
+def cast_and_format(dfv: pd.DataFrame) -> pd.DataFrame:
+    v = dfv.copy()
+    # 정수류
+    for c in ["종가","추천매수가","손절가","추천매도가1","추천매도가2","entry_used","stop_used","t1_used","EBS"]:
+        if c in v.columns:
+            v[c] = pd.to_numeric(v[c], errors="coerce").round(0).astype("Int64")
+    # 실수류
+    for c in ["거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","ERS","RR","손절여유_%","목표1여유_%","entry_gap_%"]:
+        if c in v.columns:
+            v[c] = pd.to_numeric(v[c], errors="coerce")
+    return v
+
+# ===== Top Picks (조건 충족) =====
+qual = view.copy()
+qual = qual[
+    (qual["RR"] >= rr_min) &
+    (qual["손절여유_%"] >= stop_min) &
+    (qual["목표1여유_%"] >= tgt_min) &
+    (qual["ERS"] >= ers_min)
+].copy()
+qual = qual.sort_values(["ERS","RR","거래대금(억원)"], ascending=[False,False,False])
+
+st.subheader("⭐ Top Picks (조건 충족)")
+qp = cast_and_format(qual[base_cols + risk_cols].head(int(topn)))
 st.data_editor(
-    view_fmt,
+    qp,
     width="stretch",
-    height=680,
+    height=420,
     hide_index=True,
     disabled=True,
     num_rows="fixed",
     column_config={
         # 텍스트
-        "진입신호":     st.column_config.TextColumn("신호"),
+        "통과":         st.column_config.TextColumn(" "),
         "시장":         st.column_config.TextColumn("시장"),
         "종목명":       st.column_config.TextColumn("종목명"),
         "종목코드":     st.column_config.TextColumn("종목코드"),
@@ -502,13 +467,7 @@ st.data_editor(
         "추천매도가1":   st.column_config.NumberColumn("추천매도가1",    format="%,d"),
         "추천매도가2":   st.column_config.NumberColumn("추천매도가2",    format="%,d"),
         "EBS":          st.column_config.NumberColumn("EBS",            format="%d"),
-        # RR/근접/지수
-        "RR":           st.column_config.NumberColumn("RR(목표1/손절)",  format="%.2f"),
-        "근접도":        st.column_config.NumberColumn("근접도(0~1)",     format="%.2f"),
-        "진입지수":      st.column_config.NumberColumn("진입지수(0~1)",   format="%.2f"),
-        "목표여유_%":     st.column_config.NumberColumn("목표여유(%)",     format="%.2f"),
-        "손절여유_%":     st.column_config.NumberColumn("손절여유(%)",     format="%.2f"),
-        # 억원/지표
+        # 억원/지표/파생
         "거래대금(억원)": st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"),
         "시가총액(억원)": st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"),
         "RSI14":        st.column_config.NumberColumn("RSI14",          format="%.1f"),
@@ -518,20 +477,122 @@ st.data_editor(
         "Vol_Z":        st.column_config.NumberColumn("Vol_Z",          format="%.2f"),
         "ret_5d_%":     st.column_config.NumberColumn("ret_5d_%",       format="%.2f"),
         "ret_10d_%":    st.column_config.NumberColumn("ret_10d_%",      format="%.2f"),
+        "ERS":          st.column_config.NumberColumn("ERS",            format="%.2f"),
+        "RR":           st.column_config.NumberColumn("RR",             format="%.2f"),
+        "손절여유_%":     st.column_config.NumberColumn("손절여유(%)",     format="%.2f"),
+        "목표1여유_%":    st.column_config.NumberColumn("목표1여유(%)",    format="%.2f"),
+        "entry_gap_%":   st.column_config.NumberColumn("엔트리괴리(%)",     format="%.2f"),
+    },
+)
+
+# ===== ✅ Now (엔트리 근접 + 조건 충족) =====
+now_mask = view["entry_gap_%"].abs() <= band
+now_df = view[now_mask].copy()
+now_df = now_df[
+    (now_df["RR"] >= rr_min) &
+    (now_df["손절여유_%"] >= stop_min) &
+    (now_df["목표1여유_%"] >= tgt_min) &
+    (now_df["ERS"] >= ers_min)
+].sort_values(["ERS","RR","거래대금(억원)"], ascending=[False,False,False])
+
+st.subheader("✅ Now (엔트리 근접 & 조건 충족)")
+npv = cast_and_format(now_df[base_cols + risk_cols].head(50))
+st.data_editor(
+    npv,
+    width="stretch",
+    height=320,
+    hide_index=True,
+    disabled=True,
+    num_rows="fixed",
+    column_config={
+        "통과":         st.column_config.TextColumn(" "),
+        "시장":         st.column_config.TextColumn("시장"),
+        "종목명":       st.column_config.TextColumn("종목명"),
+        "종목코드":     st.column_config.TextColumn("종목코드"),
+        "근거":         st.column_config.TextColumn("근거"),
+        "종가":          st.column_config.NumberColumn("종가",           format="%,d"),
+        "추천매수가":    st.column_config.NumberColumn("추천매수가",     format="%,d"),
+        "손절가":        st.column_config.NumberColumn("손절가",         format="%,d"),
+        "추천매도가1":   st.column_config.NumberColumn("추천매도가1",    format="%,d"),
+        "추천매도가2":   st.column_config.NumberColumn("추천매도가2",    format="%,d"),
+        "EBS":          st.column_config.NumberColumn("EBS",            format="%d"),
+        "거래대금(억원)": st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"),
+        "시가총액(억원)": st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"),
+        "RSI14":        st.column_config.NumberColumn("RSI14",          format="%.1f"),
+        "乖離%":         st.column_config.NumberColumn("乖離%",           format="%.2f"),
+        "MACD_hist":    st.column_config.NumberColumn("MACD_hist",      format="%.4f"),
+        "MACD_slope":   st.column_config.NumberColumn("MACD_slope",     format="%.5f"),
+        "Vol_Z":        st.column_config.NumberColumn("Vol_Z",          format="%.2f"),
+        "ret_5d_%":     st.column_config.NumberColumn("ret_5d_%",       format="%.2f"),
+        "ret_10d_%":    st.column_config.NumberColumn("ret_10d_%",      format="%.2f"),
+        "ERS":          st.column_config.NumberColumn("ERS",            format="%.2f"),
+        "RR":           st.column_config.NumberColumn("RR",             format="%.2f"),
+        "손절여유_%":     st.column_config.NumberColumn("손절여유(%)",     format="%.2f"),
+        "목표1여유_%":    st.column_config.NumberColumn("목표1여유(%)",    format="%.2f"),
+        "entry_gap_%":   st.column_config.NumberColumn("엔트리괴리(%)",     format="%.2f"),
+    },
+)
+
+# ===== 전체 테이블 =====
+st.subheader("📋 전체 리스트")
+cols_all = base_cols + risk_cols
+view_fmt = cast_and_format(view[cols_all].head(int(topn)))
+st.data_editor(
+    view_fmt,
+    width="stretch",
+    height=640,
+    hide_index=True,
+    disabled=True,
+    num_rows="fixed",
+    column_config={
+        "통과":         st.column_config.TextColumn(" "),
+        "시장":         st.column_config.TextColumn("시장"),
+        "종목명":       st.column_config.TextColumn("종목명"),
+        "종목코드":     st.column_config.TextColumn("종목코드"),
+        "근거":         st.column_config.TextColumn("근거"),
+        "종가":          st.column_config.NumberColumn("종가",           format="%,d"),
+        "추천매수가":    st.column_config.NumberColumn("추천매수가",     format="%,d"),
+        "손절가":        st.column_config.NumberColumn("손절가",         format="%,d"),
+        "추천매도가1":   st.column_config.NumberColumn("추천매도가1",    format="%,d"),
+        "추천매도가2":   st.column_config.NumberColumn("추천매도가2",    format="%,d"),
+        "EBS":          st.column_config.NumberColumn("EBS",            format="%d"),
+        "거래대금(억원)": st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"),
+        "시가총액(억원)": st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"),
+        "RSI14":        st.column_config.NumberColumn("RSI14",          format="%.1f"),
+        "乖離%":         st.column_config.NumberColumn("乖離%",           format="%.2f"),
+        "MACD_hist":    st.column_config.NumberColumn("MACD_hist",      format="%.4f"),
+        "MACD_slope":   st.column_config.NumberColumn("MACD_slope",     format="%.5f"),
+        "Vol_Z":        st.column_config.NumberColumn("Vol_Z",          format="%.2f"),
+        "ret_5d_%":     st.column_config.NumberColumn("ret_5d_%",       format="%.2f"),
+        "ret_10d_%":    st.column_config.NumberColumn("ret_10d_%",      format="%.2f"),
+        "ERS":          st.column_config.NumberColumn("ERS",            format="%.2f"),
+        "RR":           st.column_config.NumberColumn("RR",             format="%.2f"),
+        "손절여유_%":     st.column_config.NumberColumn("손절여유(%)",     format="%.2f"),
+        "목표1여유_%":    st.column_config.NumberColumn("목표1여유(%)",    format="%.2f"),
+        "entry_gap_%":   st.column_config.NumberColumn("엔트리괴리(%)",     format="%.2f"),
     },
 )
 
 st.download_button(
     "📥 현재 보기 다운로드 (CSV)",
     data=view_fmt.to_csv(index=False, encoding="utf-8-sig"),
-    file_name="ldy_entry_candidates_now_ready.csv",
+    file_name="ldy_entry_candidates.csv",
     mime="text/csv"
 )
 
-with st.expander("ℹ️ 지표/점수 설명", expanded=False):
+with st.expander("ℹ️ 로직 설명 (EBS/ERS/RR)", expanded=False):
     st.markdown("""
-**RR(목표1/손절)** = (목표가1 − 진입가) / (진입가 − 손절가)  
-**근접도(0~1)** = 현재가가 진입가에 얼마나 가까운지 (1에 가까울수록 좋음)  
-**진입지수(0~1)** = RR·근접도·목표여유·RSI·거래량·모멘텀·EBS를 종합한 즉시 진입 적합도  
-**지금진입유효** = 목표가1 ≥ 현재가 이고 현재가 > 손절가 인 경우
-""")
+**EBS (0~7)**  
+- RSI 45~65 / MACD상승 / MA20±4% / 거래량증가(Vol_Z>1.2) / MA20↑ / MACD>sig / 5d<10%
+
+**RR (Risk-Reward)**  
+- RR = (T1−엔트리) / (엔트리−손절)  
+- 앱 레벨에서 최소 스탑폭을 **max(2%*엔트리, 50원)** 으로 보정(수집기는 ATR 기반 최소폭 권장)
+
+**ERS (0~1)**  
+- 0.40×RR정규화(1.5~3.0) + 0.30×엔트리근접(±0.8%) + 0.20×EBS정규화 + 0.10×거래량 추세(Vol_Z)
+- 기본 Top Picks 컷: RR≥1.8, 손절여유≥2%, 목표1여유≥4%, ERS≥0.65
+
+**Now 섹션**  
+- 엔트리괴리(|Entry−Close|/Entry) ≤ **±{band:.1f}%** & Top Picks 조건 충족
+""".format(band=band))
