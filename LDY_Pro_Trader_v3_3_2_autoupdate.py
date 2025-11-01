@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.3.4 (Auto Update + Robust Name Map + Number Format + 추격 진입 모드)
+LDY Pro Trader v3.4.0 (Auto Update + Now-Ready Score)
 - 추천 CSV: data/recommend_latest.csv (remote 우선)
 - 이름맵:   data/krx_codes.csv (remote 우선) → FDR → pykrx 순 폴백
-- collector CSV(완제품) 또는 원시 OHLCV 모두 지원
-- '풀백' + '추격' 2가지 진입 모드 지원
-- 지금 진입 유효(목표가1 ≥ 종가) 필터 & RR(목표1/손절) 필터 제공
-- 표 숫자(가격/억원)에 천단위 콤마 적용 (Streamlit column_config)
+- OHLCV만 와도 화면에서 지표/EBS/추천가 생성
+- 숫자(가격/억원) 콤마 포맷 + 진입지수(ERS), RR, 근접도 추가
+- Top Picks(지금 진입 유효 + 높은 ERS) 상단 강조
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
@@ -25,8 +24,8 @@ try:
 except Exception:
     FDR_OK = False
 
-st.set_page_config(page_title="LDY Pro Trader v3.3.4 (Auto Update)", layout="wide")
-st.title("📈 LDY Pro Trader v3.3.4 (Auto Update)")
+st.set_page_config(page_title="LDY Pro Trader v3.4.0 (Auto Update)", layout="wide")
+st.title("📈 LDY Pro Trader v3.4.0 (Auto Update)")
 st.caption("매일 장마감 후 자동 업데이트되는 스윙 추천 종목 리스트 | Made by LDY")
 
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -119,11 +118,6 @@ def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = ensure_turnover(df)
     return df
 
-def round_to_tick(price: float) -> int:
-    # 단순 10원 틱 적용(간이)
-    if pd.isna(price): return np.nan
-    return int(round(float(price) / 10.0) * 10)
-
 # --------- enrich from OHLCV ----------
 @st.cache_data(ttl=300)
 def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
@@ -177,7 +171,6 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
     except TypeError:
         out = g.apply(_feat).reset_index(drop=True)
 
-    # 거래대금(억원) 최신행 보강
     tail = raw.groupby("종목코드").tail(1).copy()
     tail = ensure_turnover(tail)
     if "거래대금(억원)" in tail.columns:
@@ -191,7 +184,6 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
 # -------- name map (robust) --------
 @st.cache_data(ttl=6*60*60)
 def load_name_map() -> pd.DataFrame | None:
-    # 1) repo의 data/krx_codes.csv 우선
     try:
         m = load_csv_url(CODES_URL)
         if {"종목코드","종목명"}.issubset(m.columns):
@@ -208,7 +200,6 @@ def load_name_map() -> pd.DataFrame | None:
         except Exception:
             pass
 
-    # 2) FDR 폴백
     if FDR_OK:
         try:
             lst = fdr.StockListing("KRX")
@@ -218,7 +209,6 @@ def load_name_map() -> pd.DataFrame | None:
         except Exception:
             pass
 
-    # 3) pykrx 개별 조회
     if PYKRX_OK:
         today = datetime.now().strftime("%Y%m%d")
         rows = []
@@ -277,7 +267,7 @@ else:
 # 최신 행만
 latest = df.sort_values(["종목코드","날짜"]).groupby("종목코드").tail(1) if "날짜" in df.columns else df.copy()
 
-# 이름 매핑 (레포/ FDR / pykrx)
+# 이름 매핑
 with st.status("🏷️ 종목명 매핑 중...", expanded=False):
     latest = apply_names(latest)
 
@@ -287,79 +277,88 @@ for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離
     if c in latest.columns:
         latest[c] = pd.to_numeric(latest[c], errors="coerce")
 
-# ---------- 추격 모드(표시용) 계산 ----------
-def infer_ma20_from_disp(c: float, disp_pct: float):
-    if pd.isna(c) or pd.isna(disp_pct): return np.nan
-    try:
-        return float(c) / (1.0 + float(disp_pct)/100.0)
-    except ZeroDivisionError:
-        return np.nan
+# ---------------- Now-Readiness metrics ----------------
+def _clip(x, lo, hi): 
+    return np.minimum(np.maximum(x, lo), hi)
 
-def infer_atr_proxy(row: pd.Series):
-    # 우선 ATR14 있으면 그걸 사용
-    if "ATR14" in row and pd.notna(row["ATR14"]) and row["ATR14"] > 0:
-        return float(row["ATR14"])
-    buy  = pd.to_numeric(row.get("추천매수가"), errors="coerce")
-    stop = pd.to_numeric(row.get("손절가"), errors="coerce")
-    t1   = pd.to_numeric(row.get("추천매도가1"), errors="coerce")
-    t2   = pd.to_numeric(row.get("추천매도가2"), errors="coerce")
-    cand = []
-    if pd.notna(buy) and pd.notna(stop) and buy > stop:
-        cand.append((buy - stop) / 1.5)     # buy - stop = 1.5 * ATR
-    if pd.notna(buy) and pd.notna(t1) and t1 > buy:
-        cand.append((t1 - buy) / 1.5)       # t1 - buy = 1.5 * ATR
-    if pd.notna(buy) and pd.notna(t2) and t2 > buy:
-        cand.append((t2 - buy) / 3.0)       # t2 - buy = 3 * ATR
-    if not cand:
-        return np.nan
-    return float(np.nanmedian(cand))
-
-def compute_chase_set(dfv: pd.DataFrame) -> pd.DataFrame:
+def compute_now_metrics(dfv: pd.DataFrame, entry_mode: str) -> pd.DataFrame:
     out = dfv.copy()
-    c   = pd.to_numeric(out.get("종가"), errors="coerce")
-    disp = pd.to_numeric(out.get("乖離%"), errors="coerce")
-    ma20_est = pd.Series(np.nan, index=out.index)
-    if "MA20" in out.columns and out["MA20"].notna().any():
-        ma20_est = pd.to_numeric(out["MA20"], errors="coerce")
+
+    # 진입가 기준
+    if entry_mode == "추격(현재가)":
+        out["진입가_사용"] = out["종가"]
     else:
-        ma20_est = c / (1.0 + disp/100.0)  # 乖離%로 MA20 추정
+        out["진입가_사용"] = out["추천매수가"]
 
-    atr_proxy = out.apply(infer_atr_proxy, axis=1)
-    # chase 계산
-    buy_chase  = c
-    stop_chase = np.maximum(c - 1.2*atr_proxy, ma20_est*0.97)
-    t1_chase   = c + 1.0*atr_proxy
-    t2_chase   = c + 1.8*atr_proxy
+    # RR 계산 (목표1/손절)
+    e = pd.to_numeric(out["진입가_사용"], errors="coerce")
+    t1 = pd.to_numeric(out["추천매도가1"], errors="coerce")
+    stp = pd.to_numeric(out["손절가"], errors="coerce")
+    c = pd.to_numeric(out["종가"], errors="coerce")
 
-    # 틱 반올림
-    out["추천매수가(추격)"]  = buy_chase.round(0).astype("Int64")
-    out["손절가(추격)"]      = pd.Series([round_to_tick(x) for x in stop_chase], index=out.index).astype("Int64")
-    out["추천매도가1(추격)"] = pd.Series([round_to_tick(x) for x in t1_chase],   index=out.index).astype("Int64")
-    out["추천매도가2(추격)"] = pd.Series([round_to_tick(x) for x in t2_chase],   index=out.index).astype("Int64")
+    rr = (t1 - e) / (e - stp)
+    rr = rr.where((e.notna()) & (t1.notna()) & (stp.notna()) & ((e - stp) > 0), np.nan)
+    out["RR"] = rr
 
-    # RR(목표1/손절)
-    # 풀백 RR
-    pb_buy  = pd.to_numeric(out.get("추천매수가"), errors="coerce")
-    pb_stop = pd.to_numeric(out.get("손절가"), errors="coerce")
-    pb_t1   = pd.to_numeric(out.get("추천매도가1"), errors="coerce")
-    out["RR(풀백)"] = np.where(
-        (pb_buy.notna()) & (pb_stop.notna()) & (pb_t1.notna()) & (pb_buy > pb_stop),
-        (pb_t1 - pb_buy) / (pb_buy - pb_stop),
-        np.nan
+    # 근접도: ATR14가 있으면 |c-e| / (1.5*ATR) → 0(멀다)~1(가깝다)
+    if "ATR14" in out.columns and out["ATR14"].notna().any():
+        prox = 1.0 - (np.abs(c - e) / (1.5 * out["ATR14"]))
+        out["근접도"] = _clip(prox, 0.0, 1.0)
+    else:
+        # 대안: |c-e|/e 를 2% 스케일에 맵핑
+        prox = 1.0 - (np.abs(c - e) / (0.02 * e))
+        out["근접도"] = _clip(prox, 0.0, 1.0)
+
+    # 목표/손절 여유 (현재가 기준)
+    out["목표여유_%"] = (t1 - c) / c
+    out["손절여유_%"] = (c - stp) / c
+
+    # 보조 스코어
+    # RR 스코어(0~1): RR 0~2.5 구간 선형
+    rr_score = _clip(rr / 2.5, 0, 1)
+
+    # 마진 스코어(0~1): 목표여유 0~3% 구간 선형
+    margin_score = _clip(out["목표여유_%"] / 0.03, 0, 1)
+
+    # RSI 스코어(0~1): 55 중심 ±30 폭
+    rsi = pd.to_numeric(out.get("RSI14", np.nan), errors="coerce")
+    rsi_score = 1 - _clip(np.abs(rsi - 55) / 30.0, 0, 1)
+
+    # 거래량/모멘텀 스코어
+    volz = pd.to_numeric(out.get("Vol_Z", np.nan), errors="coerce")
+    vol_score = _clip(volz / 1.5, 0, 1)  # Vol_Z≈1.5 이상이면 만점
+
+    macd_h = pd.to_numeric(out.get("MACD_hist", np.nan), errors="coerce")
+    macd_sl = pd.to_numeric(out.get("MACD_slope", np.nan), errors="coerce")
+    mom_score = ((macd_sl > 0).astype(float) + (macd_h > 0).astype(float)) / 2.0
+
+    ebs = pd.to_numeric(out.get("EBS", np.nan), errors="coerce")
+    ebs_score = _clip(ebs / 7.0, 0, 1)
+
+    # 진입지수 ERS (0~1)
+    ERS = (
+        0.35 * rr_score +
+        0.25 * out["근접도"].fillna(0) +
+        0.10 * margin_score.fillna(0) +
+        0.10 * rsi_score.fillna(0) +
+        0.05 * vol_score.fillna(0) +
+        0.05 * mom_score.fillna(0) +
+        0.10 * ebs_score.fillna(0)
     )
-    # 추격 RR
-    ch_stop = pd.to_numeric(out["손절가(추격)"], errors="coerce")
-    ch_t1   = pd.to_numeric(out["추천매도가1(추격)"], errors="coerce")
-    out["RR(추격)"] = np.where(
-        (c.notna()) & (ch_stop.notna()) & (ch_t1.notna()) & (c > ch_stop),
-        (ch_t1 - c) / (c - ch_stop),
-        np.nan
+    out["진입지수"] = ERS
+
+    # 지금 진입 유효(목표1 ≥ 현재가, 현재가 > 손절)
+    out["지금진입유효"] = (out["목표여유_%"] > 0) & (out["손절여유_%"] > 0) & rr.notna()
+
+    # 신호 레이블
+    cond_now = out["지금진입유효"] & (out["진입지수"] >= 0.65)
+    cond_wait = (out["진입지수"] >= 0.50)
+    out["진입신호"] = np.select(
+        [cond_now, cond_wait],
+        ["✅ Now", "⚠️ 대기"],
+        default="⛔ Pass"
     )
-    # 보조: 추정 MA20
-    out["MA20(추정)"] = ma20_est
     return out
-
-latest = compute_chase_set(latest)
 
 # ------------- UI -------------
 with st.expander("🔍 보기/필터", expanded=True):
@@ -369,19 +368,19 @@ with st.expander("🔍 보기/필터", expanded=True):
     with c2:
         min_turn = st.slider("최소 거래대금(억원)", 0, 5000, 50, step=10)
     with c3:
-        sort_key = st.selectbox("정렬", ["EBS▼","거래대금▼","시가총액▼","RSI▲","RSI▼","종가▲","종가▼"], index=0)
+        entry_mode = st.selectbox("진입가 기준", ["기본(추천매수)", "추격(현재가)"], index=0)
     with c4:
-        topn = st.slider("표시 수(Top N)", 10, 500, 200, step=10)
+        min_rr = st.slider("최소 RR(목표1/손절)", 0.0, 3.0, 0.0, 0.1)
     with c5:
         q_text = st.text_input("🔎 종목명/코드 검색", value="", placeholder="예: 삼성전자 또는 005930")
 
-    c6, c7, c8 = st.columns([1,1,1])
-    with c6:
-        mode = st.radio("진입 기준", ["풀백(기본)", "추격"], horizontal=True)
-    with c7:
-        only_now = st.checkbox("지금 진입 유효(목표가1 ≥ 종가)", value=False)
-    with c8:
-        min_rr = st.slider("최소 RR(목표1/손절)", 0.0, 3.0, 0.0, step=0.1)
+c6,c7,c8 = st.columns([1,1,1])
+with c6:
+    sort_key = st.selectbox("정렬", ["진입지수▼","EBS▼","거래대금▼","시가총액▼","RSI▲","RSI▼","종가▲","종가▼"], index=0)
+with c7:
+    only_now = st.checkbox("지금 진입 유효만(목표1≥현재가 & 현재가>손절)", value=False)
+with c8:
+    min_ers = st.slider("최소 진입지수(0~1)", 0.0, 1.0, 0.0, 0.05)
 
 view = latest.copy()
 if only_entry and "EBS" in view.columns:
@@ -395,8 +394,20 @@ if q_text:
         view["종목코드"].fillna("").astype(str).str.contains(q)
     ]
 
+# Now metrics
+view = compute_now_metrics(view, entry_mode)
+
+# RR 필터 & 지금 진입 유효 필터 & ERS 필터
+view = view[ (view["RR"].fillna(-1) >= float(min_rr)) ]
+if only_now:
+    view = view[ view["지금진입유효"] ]
+if min_ers > 0:
+    view = view[ view["진입지수"].fillna(0) >= float(min_ers) ]
+
 def safe_sort(dfv, key):
     try:
+        if key=="진입지수▼" and "진입지수" in dfv.columns:
+            return dfv.sort_values(["진입지수","RR","거래대금(억원)"], ascending=[False,False,False], na_position="last")
         if key=="EBS▼" and "EBS" in dfv.columns:
             by = ["EBS"] + (["거래대금(억원)"] if "거래대금(억원)" in dfv.columns else [])
             return dfv.sort_values(by=by, ascending=[False]+[False]*(len(by)-1))
@@ -414,83 +425,90 @@ def safe_sort(dfv, key):
             return dfv.sort_values("종가", ascending=False, na_position="last")
     except Exception:
         pass
-    for alt in ["EBS","거래대금(억원)","시가총액(억원)","종가"]:
+    for alt in ["진입지수","EBS","거래대금(억원)","시가총액(억원)","종가"]:
         if alt in dfv.columns:
             return dfv.sort_values(alt, ascending=False, na_position="last")
     return dfv
 
-# 지금 진입 유효 / RR 필터
-if only_now:
-    base_t1 = view["추천매도가1(추격)"] if (mode=="추격" and "추천매도가1(추격)" in view.columns) else view["추천매도가1"]
-    view = view[ pd.to_numeric(base_t1, errors="coerce") >= pd.to_numeric(view["종가"], errors="coerce") ]
-
-if min_rr > 0:
-    rr_col = "RR(추격)" if mode=="추격" else "RR(풀백)"
-    if rr_col in view.columns:
-        view = view[ pd.to_numeric(view[rr_col], errors="coerce") >= float(min_rr) ]
-
 view = safe_sort(view, sort_key)
 
-if "EBS" in view.columns:
-    view["통과"] = np.where(view["EBS"]>=PASS_SCORE, "🚀", "")
+# Top Picks 강조
+top_show = view.copy()
+top_show = top_show[top_show["지금진입유효"]].sort_values(["진입지수","RR","거래대금(억원)"], ascending=[False,False,False]).head(5)
 
-# 표시 컬럼
-base_cols = [
-    "통과","시장","종목명","종목코드",
-    "종가","거래대금(억원)","시가총액(억원)",
-    "EBS","근거","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
-]
-pullback_cols = ["추천매수가","손절가","추천매도가1","추천매도가2","RR(풀백)"]
-chase_cols    = ["추천매수가(추격)","손절가(추격)","추천매도가1(추격)","추천매도가2(추격)","RR(추격)"]
+st.write(f"📋 총 {len(latest):,}개 / 필터 후 {len(view):,}개 표시")
 
-cols = base_cols + pullback_cols + [c for c in chase_cols if c in view.columns]
+if len(top_show):
+    best = top_show.iloc[0]
+    cA, cB = st.columns([2,3])
+    with cA:
+        st.success(f"🥇 **지금 베스트**: {best.get('종목명','?')} ({best.get('종목코드','')})")
+        st.metric("진입지수(0~1)", f"{best.get('진입지수',0):.2f}")
+        st.metric("RR(목표1/손절)", f"{best.get('RR',np.nan):.2f}")
+        st.metric("근접도(0~1)", f"{best.get('근접도',0):.2f}")
+    with cB:
+        st.write("**Top 5 Now Picks**")
+        cols_top = ["진입신호","종목명","종목코드","진입지수","RR","종가","추천매수가","손절가","추천매도가1","목표여유_%","손절여유_%"]
+        for c in cols_top:
+            if c not in top_show.columns: top_show[c]=np.nan
+        small = top_show[cols_top].copy()
+        small["목표여유_%"] = (small["목표여유_%"]*100).round(2)
+        small["손절여유_%"] = (small["손절여유_%"]*100).round(2)
+        st.dataframe(
+            small,
+            use_container_width=True,
+            hide_index=True
+        )
 
-for c in cols:
-    if c not in view.columns:
-        view[c] = np.nan
-
-st.write(f"📋 총 {len(latest):,}개 / 표시 {min(len(view), int(topn)):,}개")
-
-# ── 숫자 포맷(콤마) 적용을 위한 캐스팅 ──
-view_fmt = view[cols].head(int(topn)).copy()
-
-# 가격/정수류 → Int64 (NaN 허용 정수)
-int_like_cols = [
+# ---- 표 본문 ----
+cols = [
+    "진입신호",
+    "시장","종목명","종목코드",
     "종가","추천매수가","손절가","추천매도가1","추천매도가2",
-    "추천매수가(추격)","손절가(추격)","추천매도가1(추격)","추천매도가2(추격)","EBS"
+    "RR","근접도","진입지수","목표여유_%","손절여유_%",
+    "거래대금(억원)","시가총액(억원)",
+    "EBS","근거",
+    "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
 ]
-for c in int_like_cols:
-    if c in view_fmt.columns:
-        view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce").round(0).astype("Int64")
+for c in cols:
+    if c not in view.columns: view[c]=np.nan
 
-# 억원/지표류 → float
-float_cols = ["거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","RR(풀백)","RR(추격)"]
-for c in float_cols:
-    if c in view_fmt.columns:
-        view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce")
+view_fmt = view[cols].copy()
+
+# 타입 캐스팅/표시 포맷
+for c in ["종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS"]:
+    if c in view_fmt.columns: view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce").round(0).astype("Int64")
+for c in ["RR","근접도","진입지수","목표여유_%","손절여유_%","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"]:
+    if c in view_fmt.columns: view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce")
 
 st.data_editor(
     view_fmt,
     width="stretch",
-    height=640,
+    height=680,
     hide_index=True,
-    disabled=True,          # 읽기 전용 표
+    disabled=True,
     num_rows="fixed",
     column_config={
         # 텍스트
-        "통과":         st.column_config.TextColumn(" "),
+        "진입신호":     st.column_config.TextColumn("신호"),
         "시장":         st.column_config.TextColumn("시장"),
         "종목명":       st.column_config.TextColumn("종목명"),
         "종목코드":     st.column_config.TextColumn("종목코드"),
         "근거":         st.column_config.TextColumn("근거"),
         # 가격/정수(콤마)
         "종가":          st.column_config.NumberColumn("종가",           format="%,d"),
-        "추천매수가":    st.column_config.NumberColumn("추천매수가(풀백)",format="%,d"),
-        "손절가":        st.column_config.NumberColumn("손절가(풀백)",    format="%,d"),
-        "추천매도가1":   st.column_config.NumberColumn("목표가1(풀백)",   format="%,d"),
-        "추천매도가2":   st.column_config.NumberColumn("목표가2(풀백)",   format="%,d"),
+        "추천매수가":    st.column_config.NumberColumn("추천매수가",     format="%,d"),
+        "손절가":        st.column_config.NumberColumn("손절가",         format="%,d"),
+        "추천매도가1":   st.column_config.NumberColumn("추천매도가1",    format="%,d"),
+        "추천매도가2":   st.column_config.NumberColumn("추천매도가2",    format="%,d"),
         "EBS":          st.column_config.NumberColumn("EBS",            format="%d"),
-        # 억원/지표 (콤마·소수)
+        # RR/근접/지수
+        "RR":           st.column_config.NumberColumn("RR(목표1/손절)",  format="%.2f"),
+        "근접도":        st.column_config.NumberColumn("근접도(0~1)",     format="%.2f"),
+        "진입지수":      st.column_config.NumberColumn("진입지수(0~1)",   format="%.2f"),
+        "목표여유_%":     st.column_config.NumberColumn("목표여유(%)",     format="%.2f"),
+        "손절여유_%":     st.column_config.NumberColumn("손절여유(%)",     format="%.2f"),
+        # 억원/지표
         "거래대금(억원)": st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"),
         "시가총액(억원)": st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"),
         "RSI14":        st.column_config.NumberColumn("RSI14",          format="%.1f"),
@@ -500,35 +518,20 @@ st.data_editor(
         "Vol_Z":        st.column_config.NumberColumn("Vol_Z",          format="%.2f"),
         "ret_5d_%":     st.column_config.NumberColumn("ret_5d_%",       format="%.2f"),
         "ret_10d_%":    st.column_config.NumberColumn("ret_10d_%",      format="%.2f"),
-        # 추격 세트(콤마)
-        "추천매수가(추격)":  st.column_config.NumberColumn("추천매수가(추격)",  format="%,d"),
-        "손절가(추격)":      st.column_config.NumberColumn("손절가(추격)",      format="%,d"),
-        "추천매도가1(추격)": st.column_config.NumberColumn("목표가1(추격)",     format="%,d"),
-        "추천매도가2(추격)": st.column_config.NumberColumn("목표가2(추격)",     format="%,d"),
-        # RR
-        "RR(풀백)":     st.column_config.NumberColumn("RR(풀백: 목표1/손절)",   format="%.2f"),
-        "RR(추격)":     st.column_config.NumberColumn("RR(추격: 목표1/손절)",   format="%.2f"),
     },
 )
 
 st.download_button(
     "📥 현재 보기 다운로드 (CSV)",
     data=view_fmt.to_csv(index=False, encoding="utf-8-sig"),
-    file_name="ldy_entry_candidates.csv",
+    file_name="ldy_entry_candidates_now_ready.csv",
     mime="text/csv"
 )
 
-with st.expander("ℹ️ EBS & 진입 로직", expanded=False):
+with st.expander("ℹ️ 지표/점수 설명", expanded=False):
     st.markdown("""
-**EBS(0~7)**: RSI 45~65 / MACD↑ / MA20±4% / VolZ>1.2 / MA20↑ / MACD>0 / 5d<10%  
-**통과 기준**: EBS ≥ 4  
-
-**풀백 진입**: MA20±0.5ATR 부근 진입, T1=+1.0ATR, T2=+1.8ATR, 손절=−1.2ATR  
-**추격 진입(표시용)**: 현재가 기준 T1=+1.0×ATR(추정), T2=+1.8×ATR(추정), 손절=max(현재가−1.2×ATR, MA20×0.97)  
-- ATR이 CSV에 없으면, `추천가/손절/목표가` 관계식으로 ATR을 **추정**하고,  
-- MA20이 없으면 乖離%로 MA20을 **역산**하여 사용합니다.  
-
-**필터**  
-- “지금 진입 유효”: (선택한 진입 모드의) `목표가1 ≥ 종가`  
-- “최소 RR”: (목표1−진입) / (진입−손절) ≥ 설정값
+**RR(목표1/손절)** = (목표가1 − 진입가) / (진입가 − 손절가)  
+**근접도(0~1)** = 현재가가 진입가에 얼마나 가까운지 (1에 가까울수록 좋음)  
+**진입지수(0~1)** = RR·근접도·목표여유·RSI·거래량·모멘텀·EBS를 종합한 즉시 진입 적합도  
+**지금진입유효** = 목표가1 ≥ 현재가 이고 현재가 > 손절가 인 경우
 """)
