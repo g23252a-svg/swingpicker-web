@@ -2,7 +2,7 @@
 """
 LDY Pro Trader v3.4 (Auto Update)
 - 추천 CSV 원격 로드 → 이름맵 보강 → EV_SCORE 계산 → Top Picks 필터/정렬 제공
-- NumberColumn 타입과 데이터 dtype을 엄격하게 맞춰 Streamlit 오류 방지
+- ✅ NumberColumn 타입과 데이터 dtype을 엄격하게 맞춰 Streamlit 오류 방지 (정수/실수/문자 분리, inf→NaN)
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
@@ -33,7 +33,7 @@ def log_src(df: pd.DataFrame, src: str, url_or_path: str):
     st.info(f"상태 ✅ 데이터 로드: {src}\n\n{url_or_path}")
     st.success(f"📅 표시시각: {pd.Timestamp.now(tz='Asia/Seoul').strftime('%Y-%m-%d %H:%M')} · 행수: {len(df):,}")
 
-# -------- name map (optional, 있으면 사용) --------
+# -------- name map (optional) --------
 def z6(x) -> str:
     s = str(x); return s.zfill(6) if s.isdigit() else s
 
@@ -63,20 +63,16 @@ def apply_names(df: pd.DataFrame) -> pd.DataFrame:
 # -------- EV_SCORE 계산 --------
 def compute_evs(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    # 필요한 컬럼이 없으면 계산 skip
     need = ["EBS","추천매수가","손절가","추천매도가1","종가","거래대금(억원)"]
-    if not set(need).issubset(out.columns):
-        for c in need:
-            if c not in out.columns: out[c] = np.nan
+    for c in need:
+        if c not in out.columns: out[c] = np.nan
 
-    # 숫자 캐스팅
     num_cols = ["EBS","추천매수가","손절가","추천매도가1","추천매도가2","종가","거래대금(억원)",
                 "NOW_ENTRY_%","STOP_BUF_%","T1_BUF_%","MIN_RR","NOW_TICKS"]
     for c in num_cols:
         if c in out.columns:
             out[c] = pd.to_numeric(out[c], errors="coerce")
 
-    # collector가 계산했을 수도 있으나, 없으면 앱에서 계산
     miss_now = out["NOW_ENTRY_%"].isna().all() if "NOW_ENTRY_%" in out.columns else True
     if miss_now:
         out["NOW_ENTRY_%"] = (out["종가"] - out["추천매수가"]) / out["추천매수가"] * 100.0
@@ -87,22 +83,18 @@ def compute_evs(df: pd.DataFrame) -> pd.DataFrame:
     if "MIN_RR" not in out.columns or out["MIN_RR"].isna().all():
         out["MIN_RR"] = out["T1_BUF_%"] / out["STOP_BUF_%"]
 
-    # EV_SCORE (0~100): EBS/RR/여유/근접/유동성 가중
+    # inf → NaN (분모 0 등)
+    out.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+    # EV_SCORE
     EBS_norm  = (out["EBS"] / 7.0).clip(0, 1)
     RR_norm   = (out["MIN_RR"] / 2.0).clip(0, 1)         # RR=2.0에서 만점
     STOP_norm = (out["STOP_BUF_%"] / 4.0).clip(0, 1)     # 4%에서 만점
     T1_norm   = (out["T1_BUF_%"]   / 8.0).clip(0, 1)     # 8%에서 만점
-    PROX_norm = (1 - (out["NOW_ENTRY_%"].abs() / 3.0)).clip(0, 1)  # ±3% 이내가 만점
-    LIQ_norm  = np.tanh((out["거래대금(억원)"].fillna(0)) / 500.0)  # 500억 넘어가면 점차 포화
+    PROX_norm = (1 - (out["NOW_ENTRY_%"].abs() / 3.0)).clip(0, 1)  # ±3% 이내 만점
+    LIQ_norm  = np.tanh((out["거래대금(억원)"].fillna(0)) / 500.0)
 
-    ev = (
-        0.25 * EBS_norm +
-        0.25 * RR_norm  +
-        0.15 * STOP_norm +
-        0.15 * T1_norm  +
-        0.10 * PROX_norm +
-        0.10 * LIQ_norm
-    ) * 100.0
+    ev = (0.25*EBS_norm + 0.25*RR_norm + 0.15*STOP_norm + 0.15*T1_norm + 0.10*PROX_norm + 0.10*LIQ_norm) * 100.0
     out["EV_SCORE"] = np.round(ev, 1)
     return out
 
@@ -119,19 +111,8 @@ except Exception:
 df = apply_names(df_raw)
 df = compute_evs(df)
 
-# 숫자형 엄격 캐스팅 (Data Editor 타입 오류 방지)
-int_cols  = ["EBS","NOW_TICKS"]
-for c in int_cols:
-    if c in df.columns: df[c] = pd.to_numeric(df[c], errors="coerce").round(0).astype("Int64")
-
-float_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)","시가총액(억원)",
-              "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%",
-              "NOW_ENTRY_%","STOP_BUF_%","T1_BUF_%","MIN_RR","EV_SCORE"]
-for c in float_cols:
-    if c in df.columns: df[c] = pd.to_numeric(df[c], errors="coerce")
-
-text_cols = ["시장","종목명","종목코드","근거","통과"]
-for c in text_cols:
+# 문자형 고정
+for c in ["시장","종목명","종목코드","근거","통과"]:
     if c in df.columns: df[c] = df[c].astype("string")
 
 # ---------------- UI ----------------
@@ -148,7 +129,6 @@ with st.expander("🔍 보기/필터", expanded=True):
         topn = st.slider("표시 수(Top N)", 10, 500, 200, step=10)
     q = st.text_input("🔎 종목명/코드 검색", value="", placeholder="예: 삼성전자 또는 005930")
 
-# Top Picks 조건
 with st.expander("🛠 Top Picks 조건", expanded=(mode=="Top Picks")):
     c1,c2,c3,c4,c5 = st.columns(5)
     with c1:
@@ -159,7 +139,7 @@ with st.expander("🛠 Top Picks 조건", expanded=(mode=="Top Picks")):
         t1_buf = st.slider("목표1여유 ≥ (%)", 0.00, 10.00, 3.00, step=0.25)
     with c4:
         ers_min = st.slider("ERS ≥", 0.00, 3.00, 0.80, step=0.05,
-                            help="ERS = (EBS/7) * MIN_RR 의 간단 지표(앱 내 계산)")
+                            help="ERS = (EBS/7) * MIN_RR (간단 가중치)")
     with c5:
         prox = st.slider("Now 근접 밴드(±%)", 0.00, 3.00, 1.00, step=0.10)
 
@@ -173,17 +153,17 @@ if q:
         view["종목코드"].fillna("").str.contains(qq)
     ]
 
-# ERS 계산(간단형)
+# ERS 계산
 view["ERS"] = (pd.to_numeric(view["EBS"], errors="coerce")/7.0) * pd.to_numeric(view["MIN_RR"], errors="coerce")
 
-# 모드별 필터
+# Top Picks 필터
 if mode == "Top Picks":
     view = view[
-        (view["MIN_RR"] >= rr_min) &
-        (view["STOP_BUF_%"] >= stop_buf) &
-        (view["T1_BUF_%"] >= t1_buf) &
-        (view["ERS"] >= ers_min) &
-        (view["NOW_ENTRY_%"].abs() <= prox)
+        (pd.to_numeric(view["MIN_RR"], errors="coerce") >= rr_min) &
+        (pd.to_numeric(view["STOP_BUF_%"], errors="coerce") >= stop_buf) &
+        (pd.to_numeric(view["T1_BUF_%"], errors="coerce") >= t1_buf) &
+        (pd.to_numeric(view["ERS"], errors="coerce") >= ers_min) &
+        (pd.to_numeric(view["NOW_ENTRY_%"], errors="coerce").abs() <= prox)
     ]
 
 # 정렬
@@ -214,16 +194,28 @@ for c in cols:
 
 st.write(f"📋 총 {len(df):,}개 / 표시 {min(len(view), int(topn)):,}개")
 
+# ----- ✅ 타입/값 표준화 (여기가 핵심 수정) -----
 view_fmt = view[cols].head(int(topn)).copy()
+# inf → NaN
+view_fmt.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-# 타입 재확인 (편집기 타입오류 방지)
-for c in ["EBS","NOW_TICKS"]:
+# 텍스트 → string
+text_cols = ["통과","시장","종목명","종목코드","근거"]
+for c in text_cols:
+    if c in view_fmt.columns: view_fmt[c] = view_fmt[c].astype("string")
+
+# 정수(NumberColumn "%d" / "%,d"용) → Int64
+int_cols = ["EBS","NOW_TICKS","종가","추천매수가","손절가","추천매도가1","추천매도가2"]
+for c in int_cols:
     if c in view_fmt.columns:
         view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce").round(0).astype("Int64")
-num_cols = [c for c in view_fmt.columns if c not in ["통과","시장","종목명","종목코드","근거"]]
-for c in num_cols:
-    view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce")
 
+# 실수(NumberColumn "%.xf"용) → float64
+float_cols = [c for c in view_fmt.columns if c not in text_cols + int_cols]
+for c in float_cols:
+    view_fmt[c] = pd.to_numeric(view_fmt[c], errors="coerce").astype("float64")
+
+# ----- 렌더 -----
 st.data_editor(
     view_fmt,
     width="stretch",
@@ -278,6 +270,6 @@ with st.expander("ℹ️ 점수/지표 설명", expanded=False):
 - **EBS(0~7)**: RSI 45~65 / MACD상승 / MA20 근처 / 거래량증가 / 상승구조 / MACD>sig / 5d<10% 1점씩
 - **EV_SCORE(0~100)**: EBS·RR·손절여유·목표1여유·근접성·유동성 종합 점수
 - **RR(목표1/손절)**: (목표1여유%) / (손절여유%)
-- **Now-Entry(%)**: (종가−추천매수)/추천매수×100, **Now-Entry(틱)**: 틱(10원) 기준 차이
+- **Now-Entry(%)**: (종가 − 추천매수) / 추천매수 × 100, **Now-Entry(틱)**: 틱(10원) 기준 차이
 - 컷(권장): 거래대금 ≥ 50억, 시총 ≥ 1,000억
 """)
