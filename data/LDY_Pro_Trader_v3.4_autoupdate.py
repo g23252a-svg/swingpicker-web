@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.4.1 (Auto Update + EV Score + Top Picks)
-- 추천 CSV: data/recommend_latest.csv (remote 우선)
-- 이름맵:   data/krx_codes.csv (remote 우선) → FDR → pykrx 순 폴백
-- OHLCV만 와도 화면에서 지표/EBS/추천가 생성
-- EV_SCORE / ERS / RR1 / 여유% 계산 및 Top Picks 탭 제공
-- 엔트리 산출: MA20 중심 밴드(= MA20을 ±0.5*ATR로 클램프) → Now%가 의미 있게 분포
-- Streamlit DuplicateElementId 방지: 각 표/위젯에 고유 key 사용
+LDY Pro Trader v3.4.2 (Auto Update + EV Score + Top Picks)
+- 결측 추천가(엔트리/손절/목표1) 자동 보정: OHLCV가 부족해도 EV가 0만 찍히지 않도록 기본값 생성
+- EV 게이트: MACD_hist/RSI가 NaN이어도 페널티로 반영(=0.90), slope≤0는 강펀치(×0.75)
+- Streamlit DuplicateElementId 방지 유지
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
@@ -26,8 +23,8 @@ except Exception:
     FDR_OK = False
 
 # ---------------- page ----------------
-st.set_page_config(page_title="LDY Pro Trader v3.4.1 (Auto Update)", layout="wide")
-st.title("📈 LDY Pro Trader v3.4.1 (Auto Update)")
+st.set_page_config(page_title="LDY Pro Trader v3.4.2 (Auto Update)", layout="wide")
+st.title("📈 LDY Pro Trader v3.4.2 (Auto Update)")
 st.caption("매일 장마감 후 자동 업데이트되는 스윙 추천 종목 리스트 | EV스코어·TopPick 내장")
 
 # ---------------- constants ----------------
@@ -36,6 +33,11 @@ LOCAL_RAW = "data/recommend_latest.csv"
 CODES_URL = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/krx_codes.csv"
 LOCAL_MAP = "data/krx_codes.csv"
 PASS_SCORE = 4
+
+# 결측 보정 기본값(엔트리 기준 %)
+DEF_T1_PCT = 0.06   # +6% 목표1
+DEF_SL_PCT = 0.03   # -3% 손절
+# ATR이 있으면 ATR 기반(엔트리±), 없으면 위 % 사용
 
 # ---------------- IO helpers ----------------
 @st.cache_data(ttl=300)
@@ -159,7 +161,6 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
         if any([not nz(atr), not nz(ma20), not nz(close)]) or atr <= 0:
             entry=t1=t2=stp=np.nan
         else:
-            # ★ Entry = MA20 중심을 ±0.5*ATR 밴드로 클램프 (close가 밴드 안이면 entry=MA20)
             band_lo, band_hi = ma20 - 0.5*atr, ma20 + 0.5*atr
             base_entry = ma20
             entry = min(max(base_entry, band_lo), band_hi)
@@ -188,7 +189,6 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
 # -------- name map (robust) --------
 @st.cache_data(ttl=6*60*60)
 def load_name_map() -> pd.DataFrame | None:
-    # 1) repo의 data/krx_codes.csv 우선
     try:
         m = load_csv_url(CODES_URL)
         if {"종목코드","종목명"}.issubset(m.columns):
@@ -204,8 +204,6 @@ def load_name_map() -> pd.DataFrame | None:
                 return m[["종목코드","종목명"]].drop_duplicates("종목코드")
         except Exception:
             pass
-
-    # 2) FDR 폴백
     if FDR_OK:
         try:
             lst = fdr.StockListing("KRX")
@@ -214,8 +212,6 @@ def load_name_map() -> pd.DataFrame | None:
             return m.drop_duplicates("종목코드")
         except Exception:
             pass
-
-    # 3) pykrx 폴백
     if PYKRX_OK:
         today = datetime.now().strftime("%Y%m%d")
         rows = []
@@ -248,6 +244,41 @@ def apply_names(df: pd.DataFrame) -> pd.DataFrame:
     df["종목명"] = df["종목명"].fillna("(이름없음)")
     return df
 
+# -------- 결측 추천가 보정(핵심) --------
+def fill_reco_if_missing(df: pd.DataFrame) -> pd.DataFrame:
+    """추천매수가/손절가/목표1 결측 시 기본 규칙으로 자동 생성"""
+    df = df.copy()
+    for col in ["종가","추천매수가","손절가","추천매도가1","추천매도가2","ATR14","MA20"]:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    close = pd.to_numeric(df["종가"], errors="coerce")
+    entry = pd.to_numeric(df["추천매수가"], errors="coerce")
+    stop  = pd.to_numeric(df["손절가"], errors="coerce")
+    t1    = pd.to_numeric(df["추천매도가1"], errors="coerce")
+    t2    = pd.to_numeric(df["추천매도가2"], errors="coerce")
+    atr   = pd.to_numeric(df.get("ATR14"), errors="coerce")
+    ma20  = pd.to_numeric(df.get("MA20"), errors="coerce")
+
+    # entry 결측 → MA20이 있으면 MA20을 ±0.5*ATR로 클램프, 없으면 close 사용
+    use_atr = atr.notna() & (atr > 0) & ma20.notna()
+    entry_calc = np.where(use_atr, np.clip(ma20, ma20 - 0.5*atr, ma20 + 0.5*atr), close)
+    df.loc[entry.isna(), "추천매수가"] = np.round(entry_calc[entry.isna()], 0)
+
+    # stop/t1 결측 → ATR 있으면 ATR 기반, 없으면 % 기반
+    entry = pd.to_numeric(df["추천매수가"], errors="coerce")  # 업데이트된 entry 다시 로드
+    use_atr = atr.notna() & (atr > 0) & entry.notna()
+
+    stop_calc = np.where(use_atr, entry - 1.2*atr, entry * (1 - DEF_SL_PCT))
+    t1_calc   = np.where(use_atr, entry + 1.0*atr, entry * (1 + DEF_T1_PCT))
+    t2_calc   = np.where(use_atr, entry + 1.8*atr, entry * (1 + DEF_T1_PCT*1.8))
+
+    df.loc[stop.isna() & entry.notna(), "손절가"]      = np.round(stop_calc[stop.isna() & entry.notna()], 0)
+    df.loc[t1.isna()   & entry.notna(), "추천매도가1"] = np.round(t1_calc[t1.isna()   & entry.notna()], 0)
+    df.loc[t2.isna()   & entry.notna(), "추천매도가2"] = np.round(t2_calc[t2.isna()   & entry.notna()], 0)
+
+    return df
+
 # ---------------- load raw ----------------
 try:
     df_raw = load_csv_url(RAW_URL); log_src(df_raw, "remote", RAW_URL)
@@ -260,7 +291,7 @@ except Exception:
 
 df_raw = normalize_cols(df_raw)
 
-# 완제품인지 체크
+# 완제품 체크 → 미완이면 enrich 시도, 그래도 비면 보정 채움
 has_ebs  = "EBS" in df_raw.columns and df_raw["EBS"].notna().any()
 has_reco = all(c in df_raw.columns for c in ["추천매수가","추천매도가1","추천매도가2","손절가"]) and \
            df_raw[["추천매수가","추천매도가1","추천매도가2","손절가"]].notna().any().any()
@@ -270,6 +301,8 @@ if has_ebs and has_reco:
 else:
     with st.status("🧮 원시 OHLCV → 지표/점수/추천가 생성 중...", expanded=False):
         df = enrich_from_ohlcv(df_raw)
+    # 여전히 추천가가 비어있으면 기본 규칙으로 생성
+    df = fill_reco_if_missing(df)
 
 # 최신 행만
 latest = df.sort_values(["종목코드","날짜"]).groupby("종목코드").tail(1) if "날짜" in df.columns else df.copy()
@@ -280,7 +313,7 @@ with st.status("🏷️ 종목명 매핑 중...", expanded=False):
 
 # 숫자 캐스팅 & 거래대금 보강
 latest = ensure_turnover(latest)
-for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가"]:
+for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가","ATR14","MA20"]:
     if c in latest.columns:
         latest[c] = pd.to_numeric(latest[c], errors="coerce")
 
@@ -295,20 +328,16 @@ def _clip01(x):
 def make_ev_score(df: pd.DataFrame) -> pd.Series:
     """
     기대값 기반 EV 점수 0~100.
-    필요한 컬럼(단위 주의):
-      - RR1: (목표1-엔트리)/(엔트리-손절)  ex) 1.8
-      - T1여유%: (T1-현재가)/현재가 * 100
-      - SL여유%: (현재가-손절)/현재가 * 100
-      - ERS: 0~3
-      - Now%: |현재가-엔트리|/엔트리 * 100
-      - 거래대금(억원), MACD_hist, MACD_slope, RSI14
+    NaN은 보수적으로 페널티 처리.
     """
-    rr1  = _clip01((pd.to_numeric(df.get("RR1"), errors="coerce") - 1.0) / (3.0 - 1.0))
-    t1r  = _clip01(pd.to_numeric(df.get("T1여유%"), errors="coerce") / 8.0)     # 8%에서 1.0
-    slr  = _clip01(pd.to_numeric(df.get("SL여유%"), errors="coerce") / 4.0)     # 4%에서 1.0
-    ers  = _clip01(pd.to_numeric(df.get("ERS"), errors="coerce") / 3.0)         # 0~1
-    near = _clip01(1.0 - (pd.to_numeric(df.get("Now%"), errors="coerce").abs() / 1.0))  # ±1% 근접=1
-    liq  = _clip01(np.log10(pd.to_numeric(df.get("거래대금(억원)"), errors="coerce")+1) / 3.0)
+    rr1  = (pd.to_numeric(df.get("RR1"), errors="coerce") - 1.0) / (3.0 - 1.0)
+    rr1  = np.vectorize(_clip01)(rr1)
+
+    t1r  = np.vectorize(_clip01)(pd.to_numeric(df.get("T1여유%"), errors="coerce") / 8.0)   # 8%에서 1.0
+    slr  = np.vectorize(_clip01)(pd.to_numeric(df.get("SL여유%"), errors="coerce") / 4.0)   # 4%에서 1.0
+    ers  = np.vectorize(_clip01)(pd.to_numeric(df.get("ERS"), errors="coerce") / 3.0)
+    near = np.vectorize(_clip01)(1.0 - (pd.to_numeric(df.get("Now%"), errors="coerce").abs() / 1.0))  # ±1% 근접=1
+    liq  = np.vectorize(_clip01)(np.log10(pd.to_numeric(df.get("거래대금(억원)"), errors="coerce").fillna(0) + 1) / 3.0)
 
     base = 0.25*rr1 + 0.20*t1r + 0.15*slr + 0.20*ers + 0.10*near + 0.10*liq
 
@@ -316,14 +345,20 @@ def make_ev_score(df: pd.DataFrame) -> pd.Series:
     slope = pd.to_numeric(df.get("MACD_slope"), errors="coerce")
     rsi   = pd.to_numeric(df.get("RSI14"), errors="coerce")
 
+    # NaN도 페널티: >조건을 만족하지 않으면 페널티로 간주
+    cond_hist_pos = (hist > 0)
+    cond_slope_pos = (slope > 0)
+    cond_rsi_in = (rsi >= 45) & (rsi <= 68)
+
     gate = np.ones(len(df), dtype=float)
-    gate *= np.where(hist  <= 0, 0.90, 1.00)                     # 온건
-    gate *= np.where(slope <= 0, 0.75, 1.00)                     # 강한 페널티
-    gate *= np.where((rsi < 45) | (rsi > 68), 0.90, 1.00)        # 온건
+    gate *= np.where(cond_hist_pos.fillna(False), 1.00, 0.90)  # hist 양수 아니면 0.90
+    gate *= np.where(cond_slope_pos.fillna(False), 1.00, 0.75) # slope 양수 아니면 0.75
+    gate *= np.where(cond_rsi_in.fillna(False), 1.00, 0.90)    # RSI 범위 밖/NaN 0.90
 
     ev_raw = base * gate
     ev = (100.0 * ev_raw).clip(0, 100).round(1)
 
+    # 상위 퍼센타일 기준 리스케일 (스코어가 과도하게 낮게 몰리는 것 완화)
     try:
         p95 = np.nanpercentile(ev, 95)
         if p95 > 0:
@@ -337,7 +372,7 @@ def make_ev_score(df: pd.DataFrame) -> pd.Series:
 def add_eval_columns(df_in: pd.DataFrame, near_band_pct: float) -> pd.DataFrame:
     """RR1/여유%/ERS/EV_SCORE 계산 컬럼 추가"""
     df = df_in.copy()
-    for col in ["종가","추천매수가","손절가","추천매도가1","RSI14","MACD_slope","EBS","MACD_hist","거래대금(억원)"]:
+    for col in ["종가","추천매수가","손절가","추천매도가1","RSI14","MACD_slope","MACD_hist","EBS","거래대금(억원)"]:
         if col not in df.columns:
             df[col] = np.nan
 
@@ -361,14 +396,10 @@ def add_eval_columns(df_in: pd.DataFrame, near_band_pct: float) -> pd.DataFrame:
     rsi_ok  = ((rsi_v >= 45) & (rsi_v <= 65)).astype(int)
     df["ERS"] = (ebs_ok + macd_ok + rsi_ok).astype(float)
 
-    # EV_SCORE
-    # near_band_pct는 EV 내부에서 ±1% 기준으로 처리하므로 여기서는 사용하지 않음 (UI는 필터링 용)
     df["EV_SCORE"] = make_ev_score(df)
-
     return df
 
 def cast_for_editor(df):
-    """data_editor 타입/포맷 안정화를 위한 캐스팅"""
     df = df.copy()
     int_like = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS"]
     for c in int_like:
@@ -387,20 +418,17 @@ def column_config_for(df):
     cfg = {}
     def add(name, col):
         if name in df.columns: cfg[name]=col
-    # text
     add("통과",       st.column_config.TextColumn(" "))
     add("시장",       st.column_config.TextColumn("시장"))
     add("종목명",     st.column_config.TextColumn("종목명"))
     add("종목코드",   st.column_config.TextColumn("종목코드"))
     add("근거",       st.column_config.TextColumn("근거"))
-    # ints (comma)
     add("종가",        st.column_config.NumberColumn("종가",           format="%,d"))
     add("추천매수가",  st.column_config.NumberColumn("추천매수가",     format="%,d"))
     add("손절가",      st.column_config.NumberColumn("손절가",         format="%,d"))
     add("추천매도가1", st.column_config.NumberColumn("추천매도가1",    format="%,d"))
     add("추천매도가2", st.column_config.NumberColumn("추천매도가2",    format="%,d"))
     add("EBS",        st.column_config.NumberColumn("EBS",            format="%d"))
-    # floats
     add("거래대금(억원)", st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"))
     add("시가총액(억원)", st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"))
     add("RSI14",      st.column_config.NumberColumn("RSI14",          format="%.1f"))
@@ -421,7 +449,7 @@ def column_config_for(df):
 def render_table(df, *, key: str, height=620):
     st.data_editor(
         df,
-        key=key,                     # 고유 키(중복 방지)
+        key=key,
         width="stretch",
         height=height,
         hide_index=True,
@@ -495,10 +523,8 @@ with tab1:
     with c5:
         near_band = st.slider("Now 근접 밴드(±%)", 0.00, 3.00, 0.00, step=0.10, key="tp_near")
 
-    # 점수 컬럼 추가
     scored = add_eval_columns(view_base, near_band)
 
-    # Top Picks 필터링
     tp = scored.copy()
     tp = tp[tp["EBS"] >= PASS_SCORE]
     tp = tp.dropna(subset=["추천매수가","손절가","추천매도가1","종가"])
@@ -514,10 +540,8 @@ with tab1:
     if near_band > 0:
         tp = tp[tp["Now%"] <= near_band]
 
-    # 정렬/표시
     tp = safe_sort(tp, sort_key).head(int(topn))
 
-    # 통과마크
     if "EBS" in tp.columns:
         tp["통과"] = np.where(tp["EBS"]>=PASS_SCORE, "🚀", "")
 
@@ -545,7 +569,6 @@ with tab1:
     )
 
 with tab2:
-    # 전체 보기: EV 컬럼만 추가(필터는 공통으로 적용됨)
     scored_all = add_eval_columns(view_base, near_band_pct=0.0)
     view = safe_sort(scored_all, sort_key).head(int(topn))
 
@@ -575,15 +598,14 @@ with tab2:
         key="dl_full_view",
     )
 
-# ---------------- help ----------------
 with st.expander("ℹ️ 점수/지표 설명", expanded=False):
     st.markdown("""
-**EBS(0~7)**: RSI 45~65 / MACD↑ / MA20±4% / VolZ>1.2 / MA20↑ / MACD>0 / 5d<10% 항목 충족 개수  
-**RR1**: (목표1−추천매수) / (추천매수−손절) — 1.5 이상이면 손절 대비 목표1 보상이 좋은 편  
-**Now%**: |현재가−추천매수|/추천매수×100 — 낮을수록 엔트리에 근접  
-**T1여유%**: (목표1−현재가)/현재가×100 — 너무 작으면 이미 늦었을 수 있음  
-**SL여유%**: (현재가−손절)/현재가×100 — 0에 가까우면 리스크 큼  
-**ERS(0~3)**: EBS 통과(≥4) + MACD_slope>0 + RSI 45~65 각 1점씩  
-**EV_SCORE(0~100)**: 0.25·RR + 0.20·T1여유 + 0.15·SL여유 + 0.20·ERS + 0.10·근접 + 0.10·유동성;  
-                     이후 MACD_slope≤0(×0.75), hist≤0/RSI이탈(×0.9) 페널티 후 p95 리스케일
+**EBS(0~7)**: RSI 45~65 / MACD↑ / MA20±4% / VolZ>1.2 / MA20↑ / MACD>0 / 5d<10%  
+**RR1**: (목표1−추천매수) / (추천매수−손절)  
+**Now%**: |현재가−추천매수|/추천매수×100  
+**T1여유%**: (목표1−현재가)/현재가×100  
+**SL여유%**: (현재가−손절)/현재가×100  
+**ERS(0~3)**: EBS 통과(≥4) + MACD_slope>0 + RSI 45~65  
+**EV_SCORE**: 0.25·RR + 0.20·T1여유 + 0.15·SL여유 + 0.20·ERS + 0.10·근접 + 0.10·유동성  
+→ 이후 MACD_hist 양수 아님 ×0.90, MACD_slope≤0 ×0.75, RSI 범위 밖/NaN ×0.90, p95 리스케일
 """)
