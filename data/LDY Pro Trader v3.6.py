@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.6 (Auto Update + EV + Top Picks + BUY_RANK)
+LDY Pro Trader v3.5 (Auto Update, No Sliders, Top10 Only)
+- 가중치/페널티 슬라이더 제거, TOP 10 즉시 노출
+- EV_SCORE: 퍼센타일 정규화 + 고정 가중치(사용자 조정 불가)
 - 추천 CSV: data/recommend_latest.csv (remote 우선)
-- 이름맵:   data/krx_codes.csv (remote 우선) → FDR → pykrx
-- EV_SCORE: near_band=0일 때 가중치 재배분(만점 100 유지), RR 동적 클립
-- 🏆 종합순위(전체): BUY_SCORE(0~100), BUY_RANK(1=최상) 추가
+- 이름맵:   data/krx_codes.csv (remote 우선) → FDR → pykrx 폴백
+- OHLCV만 와도 화면에서 지표/EBS/추천가 생성
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
@@ -24,16 +25,16 @@ except Exception:
     FDR_OK = False
 
 # ---------------- page ----------------
-st.set_page_config(page_title="LDY Pro Trader v3.6 (Auto Update)", layout="wide")
-st.title("📈 LDY Pro Trader v3.6 (Auto Update)")
-st.caption("매일 장마감 후 자동 업데이트 — EV스코어·TopPick·BUY_RANK(종합순위)")
+st.set_page_config(page_title="LDY Pro Trader v3.5 (Top10)", layout="wide")
+st.title("📈 LDY Pro Trader v3.5 (Top 10 Auto)")
+st.caption("장마감 후 자동 업데이트 | 가중치/페널티 조정 없이 Top 10만 한눈에!")
 
 # ---------------- constants ----------------
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 LOCAL_RAW = "data/recommend_latest.csv"
 CODES_URL = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/krx_codes.csv"
 LOCAL_MAP = "data/krx_codes.csv"
-PASS_SCORE = 4  # EBS 합격선
+PASS_SCORE = 4  # EBS 통과 기준(고정)
 
 # ---------------- IO helpers ----------------
 @st.cache_data(ttl=300)
@@ -181,10 +182,10 @@ def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
         out["시장"] = "ALL"
     return out
 
-# -------- name map --------
+# -------- name map (robust) --------
 @st.cache_data(ttl=6*60*60)
 def load_name_map() -> pd.DataFrame | None:
-    # 1) repo
+    # 1) repo의 data/krx_codes.csv 우선
     try:
         m = load_csv_url(CODES_URL)
         if {"종목코드","종목명"}.issubset(m.columns):
@@ -192,7 +193,6 @@ def load_name_map() -> pd.DataFrame | None:
             return m[["종목코드","종목명"]].drop_duplicates("종목코드")
     except Exception:
         pass
-    # 2) local
     if os.path.exists(LOCAL_MAP):
         try:
             m = load_csv_path(LOCAL_MAP)
@@ -201,7 +201,8 @@ def load_name_map() -> pd.DataFrame | None:
                 return m[["종목코드","종목명"]].drop_duplicates("종목코드")
         except Exception:
             pass
-    # 3) FDR
+
+    # 2) FDR 폴백
     if FDR_OK:
         try:
             lst = fdr.StockListing("KRX")
@@ -210,7 +211,8 @@ def load_name_map() -> pd.DataFrame | None:
             return m.drop_duplicates("종목코드")
         except Exception:
             pass
-    # 4) pykrx
+
+    # 3) pykrx 폴백
     if PYKRX_OK:
         today = datetime.now().strftime("%Y%m%d")
         rows = []
@@ -255,12 +257,16 @@ except Exception:
 
 df_raw = normalize_cols(df_raw)
 
-# 완제품 여부
+# 완제품인지 체크
 has_ebs  = "EBS" in df_raw.columns and df_raw["EBS"].notna().any()
 has_reco = all(c in df_raw.columns for c in ["추천매수가","추천매도가1","추천매도가2","손절가"]) and \
            df_raw[["추천매수가","추천매도가1","추천매도가2","손절가"]].notna().any().any()
 
-df = df_raw.copy() if (has_ebs and has_reco) else enrich_from_ohlcv(df_raw)
+if has_ebs and has_reco:
+    df = df_raw.copy()
+else:
+    with st.status("🧮 원시 OHLCV → 지표/점수/추천가 생성 중...", expanded=False):
+        df = enrich_from_ohlcv(df_raw)
 
 # 최신 행만
 latest = df.sort_values(["종목코드","날짜"]).groupby("종목코드").tail(1) if "날짜" in df.columns else df.copy()
@@ -275,33 +281,18 @@ for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離
     if c in latest.columns:
         latest[c] = pd.to_numeric(latest[c], errors="coerce")
 
-# ---------------- helper: scoring ----------------
-def compute_rr1_series(df: pd.DataFrame) -> pd.Series:
-    entry = pd.to_numeric(df.get("추천매수가"), errors="coerce")
-    stop  = pd.to_numeric(df.get("손절가"), errors="coerce")
-    t1    = pd.to_numeric(df.get("추천매도가1"), errors="coerce")
-    rr_den = (entry - stop)
-    rr1 = (t1 - entry) / rr_den.replace(0, np.nan)
-    rr1 = rr1.mask((entry.isna()) | (stop.isna()) | (t1.isna()))
-    return rr1
+# ---------------- scoring (고정식, 무슬라이더) ----------------
+def _safe_pct_cap(s: pd.Series, q=90, floor=1.0):
+    s = pd.to_numeric(s, errors="coerce")
+    if s.notna().sum() == 0:
+        return 1.0
+    cap = np.nanpercentile(s, q)
+    if not np.isfinite(cap) or cap <= 0:
+        cap = floor
+    return max(float(cap), floor)
 
-def pct_norm(s: pd.Series, low=5, high=95, invert=False) -> pd.Series:
-    x = pd.to_numeric(s, errors="coerce")
-    if x.dropna().empty:
-        return pd.Series(np.nan, index=s.index)
-    lo = np.nanpercentile(x, low)
-    hi = np.nanpercentile(x, high)
-    if not np.isfinite(hi) or not np.isfinite(lo) or hi <= lo:
-        return pd.Series(np.nan, index=s.index)
-    n = (x - lo) / (hi - lo)
-    n = np.clip(n, 0, 1)
-    return 1 - n if invert else n
-
-def add_eval_columns(df_in: pd.DataFrame, near_band_pct: float, rr_clip: float = 3.0) -> pd.DataFrame:
-    """RR1/여유%/ERS/EV_SCORE + near_band=0이면 가중치 재배분(만점 100 유지)"""
+def add_eval_columns(df_in: pd.DataFrame) -> pd.DataFrame:
     df = df_in.copy()
-
-    # 안전 기본값
     for col in ["종가","추천매수가","손절가","추천매도가1","RSI14","MACD_slope","EBS"]:
         if col not in df.columns:
             df[col] = np.nan
@@ -311,94 +302,62 @@ def add_eval_columns(df_in: pd.DataFrame, near_band_pct: float, rr_clip: float =
     stop  = pd.to_numeric(df["손절가"], errors="coerce")
     t1    = pd.to_numeric(df["추천매도가1"], errors="coerce")
 
-    # RR1
     rr_den = (entry - stop)
     rr1 = (t1 - entry) / rr_den.replace(0, np.nan)
     rr1 = rr1.mask((entry.isna()) | (stop.isna()) | (t1.isna()))
     df["RR1"] = rr1
 
-    # 근접/여유(%)
-    df["Now%"]    = np.where((entry > 0) & np.isfinite(entry), (close.sub(entry).abs() / entry) * 100, np.nan)
-    df["T1여유%"] = np.where((close > 0) & np.isfinite(close), (t1.sub(close) / close) * 100, np.nan)
-    df["SL여유%"] = np.where((close > 0) & np.isfinite(close), ((close - stop) / close) * 100, np.nan)
+    df["Now%"]   = ((close - entry).abs() / entry * 100).replace([np.inf,-np.inf], np.nan)
+    df["T1여유%"] = ((t1 - close) / close * 100).replace([np.inf,-np.inf], np.nan)
+    df["SL여유%"] = ((close - stop) / close * 100).replace([np.inf,-np.inf], np.nan)
 
-    # ERS (0~3)
-    ebs_ok  = (pd.to_numeric(df.get("EBS"), errors="coerce") >= PASS_SCORE).astype(int)
+    # ERS(0~3): EBS 통과 + MACD_slope>0 + RSI(45~65)
+    ebs_ok  = (df.get("EBS", np.nan) >= PASS_SCORE).astype(int)
     macd_ok = (pd.to_numeric(df.get("MACD_slope"), errors="coerce") > 0).astype(int)
-    rsi_val = pd.to_numeric(df.get("RSI14"), errors="coerce")
-    rsi_ok  = ((rsi_val >= 45) & (rsi_val <= 65)).astype(int)
+    rsi_ok  = ((pd.to_numeric(df.get("RSI14"), errors="coerce") >= 45) &
+               (pd.to_numeric(df.get("RSI14"), errors="coerce") <= 65)).astype(int)
     df["ERS"] = (ebs_ok + macd_ok + rsi_ok).astype(float)
 
-    # ----- EV 가중치 (near_band=0이면 재배분) -----
-    w = dict(rr=0.35, sl=0.20, t1=0.20, near=0.15, ers=0.10)
-    if not near_band_pct or near_band_pct <= 0:
-        alive = w["rr"] + w["sl"] + w["t1"] + w["ers"]  # 0.85
-        scale = 1.0 / alive
-        w["rr"]*=scale; w["sl"]*=scale; w["t1"]*=scale; w["ers"]*=scale; w["near"]=0.0
+    # ---- 퍼센타일 기반 정규화(데이터 분포 자동적응) ----
+    rr_cap   = _safe_pct_cap(df["RR1"],    q=90, floor=1.0)
+    t1_cap   = _safe_pct_cap(df["T1여유%"], q=90, floor=5.0)
+    sl_cap   = _safe_pct_cap(df["SL여유%"], q=90, floor=3.0)
+    near_cap = _safe_pct_cap(df["Now%"],   q=75, floor=1.0)  # 근접도는 낮을수록 좋음 → 75p를 절단값
 
-    rr_cap   = rr_clip if (isinstance(rr_clip,(int,float)) and rr_clip>0) else 3.0
-    rr_norm  = np.clip(df["RR1"], 0, rr_cap) / rr_cap
-    sl_norm  = np.clip(df["SL여유%"]/5,  0, 1)
-    t1_norm  = np.clip(df["T1여유%"]/10, 0, 1)
-    near_norm= np.clip(1 - (df["Now%"] / near_band_pct), 0, 1) if (near_band_pct and near_band_pct>0) else 0.0
-    ers_norm = np.clip(df["ERS"]/3, 0, 1)
+    rr_norm   = np.clip(df["RR1"] / rr_cap, 0, 1)
+    t1_norm   = np.clip(df["T1여유%"] / t1_cap, 0, 1)
+    sl_norm   = np.clip(df["SL여유%"] / sl_cap, 0, 1)
+    near_norm = np.clip(1 - (df["Now%"] / near_cap), 0, 1)
+    ers_norm  = np.clip(df["ERS"] / 3.0, 0, 1)
 
-    ev_raw = (w["rr"]*rr_norm + w["sl"]*sl_norm + w["t1"]*t1_norm + w["near"]*near_norm + w["ers"]*ers_norm)
-    df["EV_SCORE"] = np.round(np.where(np.isfinite(ev_raw), ev_raw*100, 0), 1)
+    # ---- 고정 가중치 (사용자 조정 불가) ----
+    # 리워드/위험 비중을 가장 크게, 그다음 목표여유/손절여유/근접/ERS
+    ev = 100 * (0.35*rr_norm + 0.25*t1_norm + 0.20*sl_norm + 0.15*near_norm + 0.05*ers_norm)
+    df["EV_SCORE"] = np.round(ev, 1)
     return df
 
-def compute_buy_score(df_in: pd.DataFrame, *, near_band_pct: float, rr_clip: float, weights: dict) -> pd.DataFrame:
-    """
-    BUY_SCORE(0~100) = 긍정(가중합) - 페널티, 분위수 정규화 활용
-    weights keys: ev, rr, near, t1, sl, ers, liq, pen_macd, pen_rsi, pen_ext
-    """
-    d = add_eval_columns(df_in, near_band_pct=near_band_pct, rr_clip=rr_clip).copy()
+scored = add_eval_columns(latest)
 
-    rr_n   = np.clip(d["RR1"], 0, rr_clip) / rr_clip
-    near_n = pct_norm(d["Now%"],    low=5,  high=95, invert=True)
-    t1_n   = pct_norm(d["T1여유%"], low=5,  high=95, invert=False)
-    sl_n   = pct_norm(d["SL여유%"], low=5,  high=95, invert=False)
-    ev_n   = pd.to_numeric(d["EV_SCORE"], errors="coerce")/100
-    ers_n  = pd.to_numeric(d["ERS"],      errors="coerce")/3
-    liq_n  = pct_norm(d["거래대금(억원)"], low=10, high=90, invert=False)
+# Top 10 추출 규칙(최소한의 퀄리티 게이트만 고정 적용)
+tp = scored.copy()
+tp = tp.dropna(subset=["추천매수가","손절가","추천매도가1","종가"])
+tp = tp[tp["EBS"] >= PASS_SCORE]                 # EBS 통과
+tp = tp.sort_values("EV_SCORE", ascending=False, na_position="last").head(10)
 
-    macd_pen = (pd.to_numeric(d.get("MACD_slope"), errors="coerce") <= 0).astype(float)
-    rsi      = pd.to_numeric(d.get("RSI14"), errors="coerce")
-    rsi_pen  = (~((rsi >= 45) & (rsi <= 65))).astype(float)
-    # 과열/이격 과대(乖離%) 페널티: 상단 꼬리 구간을 0~1로 매핑하여 차감
-    ext_pen  = pct_norm(pd.to_numeric(d.get("乖離%"), errors="coerce").abs(), low=70, high=99, invert=False)
+# 통과 마크 및 순위
+tp["통과"] = np.where(tp["EBS"]>=PASS_SCORE, "🚀", "")
+tp.insert(0, "순위", range(1, len(tp)+1))
 
-    pos = (
-        weights["ev"]*ev_n.fillna(0)   +
-        weights["rr"]*rr_n.fillna(0)   +
-        weights["near"]*near_n.fillna(0) +
-        weights["t1"]*t1_n.fillna(0)   +
-        weights["sl"]*sl_n.fillna(0)   +
-        weights["ers"]*ers_n.fillna(0) +
-        weights["liq"]*liq_n.fillna(0)
-    )
-    neg = (
-        weights["pen_macd"]*macd_pen.fillna(0) +
-        weights["pen_rsi"] *rsi_pen.fillna(0)  +
-        weights["pen_ext"] *ext_pen.fillna(0)
-    )
-
-    score = 100*np.clip(pos - neg, 0, None)
-    d["BUY_SCORE"] = np.round(score, 1)
-    d["BUY_RANK"]  = d["BUY_SCORE"].rank(method="min", ascending=False).astype("Int64")
-    return d
-
+# ---------------- 표 렌더링 ----------------
 def cast_for_editor(df):
     df = df.copy()
-    int_like = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS","BUY_RANK"]
-    for c in int_like:
+    # 정수류
+    for c in ["종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").round(0).astype("Int64")
-    float_like = [
-        "거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope",
-        "Vol_Z","ret_5d_%","ret_10d_%","EV_SCORE","ERS","RR1","Now%","T1여유%","SL여유%","BUY_SCORE"
-    ]
-    for c in float_like:
+    # 실수류
+    for c in ["거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z",
+              "ret_5d_%","ret_10d_%","EV_SCORE","ERS","RR1","Now%","T1여유%","SL여유%"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
@@ -407,17 +366,27 @@ def column_config_for(df):
     cfg = {}
     def add(name, col):
         if name in df.columns: cfg[name]=col
+    # text
+    add("순위",       st.column_config.NumberColumn("순위", format="%d"))
     add("통과",       st.column_config.TextColumn(" "))
     add("시장",       st.column_config.TextColumn("시장"))
     add("종목명",     st.column_config.TextColumn("종목명"))
     add("종목코드",   st.column_config.TextColumn("종목코드"))
     add("근거",       st.column_config.TextColumn("근거"))
+    # ints (comma)
     add("종가",        st.column_config.NumberColumn("종가",           format="%,d"))
     add("추천매수가",  st.column_config.NumberColumn("추천매수가",     format="%,d"))
     add("손절가",      st.column_config.NumberColumn("손절가",         format="%,d"))
     add("추천매도가1", st.column_config.NumberColumn("추천매도가1",    format="%,d"))
     add("추천매도가2", st.column_config.NumberColumn("추천매도가2",    format="%,d"))
     add("EBS",        st.column_config.NumberColumn("EBS",            format="%d"))
+    # floats
+    add("EV_SCORE",   st.column_config.NumberColumn("EV_SCORE",       format="%.1f"))
+    add("ERS",        st.column_config.NumberColumn("ERS",            format="%.2f"))
+    add("RR1",        st.column_config.NumberColumn("RR(목표1/손절)",  format="%.2f"))
+    add("Now%",       st.column_config.NumberColumn("Now근접(%)",       format="%.2f"))
+    add("T1여유%",    st.column_config.NumberColumn("목표1여유(%)",     format="%.2f"))
+    add("SL여유%",    st.column_config.NumberColumn("손절여유(%)",      format="%.2f"))
     add("거래대금(억원)", st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"))
     add("시가총액(억원)", st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"))
     add("RSI14",      st.column_config.NumberColumn("RSI14",          format="%.1f"))
@@ -427,232 +396,60 @@ def column_config_for(df):
     add("Vol_Z",      st.column_config.NumberColumn("Vol_Z",          format="%.2f"))
     add("ret_5d_%",   st.column_config.NumberColumn("ret_5d_%",       format="%.2f"))
     add("ret_10d_%",  st.column_config.NumberColumn("ret_10d_%",      format="%.2f"))
-    add("EV_SCORE",   st.column_config.NumberColumn("EV_SCORE",       format="%.1f"))
-    add("ERS",        st.column_config.NumberColumn("ERS",            format="%.2f"))
-    add("RR1",        st.column_config.NumberColumn("RR1(목표1/손절)", format="%.2f"))
-    add("Now%",       st.column_config.NumberColumn("Now 근접(%)",      format="%.2f"))
-    add("T1여유%",    st.column_config.NumberColumn("목표1여유(%)",     format="%.2f"))
-    add("SL여유%",    st.column_config.NumberColumn("손절여유(%)",      format="%.2f"))
-    add("BUY_SCORE",  st.column_config.NumberColumn("BUY_SCORE",      format="%.1f"))
-    add("BUY_RANK",   st.column_config.NumberColumn("BUY_RANK",       format="%d"))
     return cfg
 
-def render_table(df, *, key: str, height=620):
-    st.data_editor(
-        df, key=key, width="stretch", height=height, hide_index=True,
-        disabled=True, num_rows="fixed", column_config=column_config_for(df),
-    )
+st.subheader("🟢 Top 10 (자동 랭킹)", anchor=False)
+top_cols = [
+    "순위","통과","시장","종목명","종목코드",
+    "종가","추천매수가","손절가","추천매도가1","추천매도가2",
+    "EV_SCORE","ERS","RR1","Now%","T1여유%","SL여유%",
+    "거래대금(억원)","시가총액(억원)",
+    "EBS","근거","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
+]
+for c in top_cols:
+    if c not in tp.columns: tp[c]=np.nan
 
-def safe_sort(dfv, key):
-    try:
-        if key=="EV_SCORE▼" and "EV_SCORE" in dfv.columns:
-            return dfv.sort_values("EV_SCORE", ascending=False, na_position="last")
-        if key=="EBS▼" and "EBS" in dfv.columns:
-            by = ["EBS"] + (["거래대금(억원)"] if "거래대금(억원)" in dfv.columns else [])
-            return dfv.sort_values(by=by, ascending=[False]+[False]*(len(by)-1))
-        if key=="거래대금▼" and "거래대금(억원)" in dfv.columns:
-            return dfv.sort_values("거래대금(억원)", ascending=False)
-        if key=="시가총액▼" and "시가총액(억원)" in dfv.columns:
-            return dfv.sort_values("시가총액(억원)", ascending=False, na_position="last")
-        if key=="RSI▲" and "RSI14" in dfv.columns:
-            return dfv.sort_values("RSI14", ascending=True, na_position="last")
-        if key=="RSI▼" and "RSI14" in dfv.columns:
-            return dfv.sort_values("RSI14", ascending=False, na_position="last")
-        if key=="종가▲" and "종가" in dfv.columns:
-            return dfv.sort_values("종가", ascending=True, na_position="last")
-        if key=="종가▼" and "종가" in dfv.columns:
-            return dfv.sort_values("종가", ascending=False, na_position="last")
-    except Exception:
-        pass
-    for alt in ["BUY_SCORE","EV_SCORE","EBS","거래대금(억원)","시가총액(억원)","종가"]:
-        if alt in dfv.columns:
-            return dfv.sort_values(alt, ascending=False, na_position="last")
-    return dfv
+tp_fmt = cast_for_editor(tp[top_cols])
+st.data_editor(
+    tp_fmt,
+    key="tbl_top10",
+    width="stretch", height=560,
+    hide_index=True, disabled=True, num_rows="fixed",
+    column_config=column_config_for(tp_fmt),
+)
 
-# ---------------- Filters (공통) ----------------
-with st.container():
-    c1, c2, c3, c4 = st.columns([1,1,1,2])
-    with c1:
-        min_turn = st.slider("최소 거래대금(억원)", 0, 5000, 0, step=50, key="flt_turn")
-    with c2:
-        sort_key = st.selectbox("정렬", ["BUY_SCORE▼","EV_SCORE▼","EBS▼","거래대금▼","시가총액▼","RSI▲","RSI▼","종가▲","종가▼"], index=0, key="flt_sort")
-    with c3:
-        topn = st.slider("표시 수(Top N)", 10, 500, 200, step=10, key="flt_topn")
-    with c4:
-        q_text = st.text_input("🔎 종목명/코드 검색", value="", placeholder="예: 삼성전자 또는 005930", key="flt_query")
+# 다운로드 (Top10 / 전체랭크)
+st.download_button(
+    "📥 Top 10 다운로드 (CSV)",
+    data=tp[top_cols].to_csv(index=False, encoding="utf-8-sig"),
+    file_name="ldy_top10.csv",
+    mime="text/csv",
+    key="dl_top10",
+)
 
-view_base = latest.copy()
-if "거래대금(억원)" in view_base.columns:
-    view_base = view_base[view_base["거래대금(억원)"] >= float(min_turn)]
-if q_text:
-    q = q_text.strip().lower()
-    view_base = view_base[
-        view_base["종목명"].fillna("").astype(str).str.lower().str.contains(q) |
-        view_base["종목코드"].fillna("").astype(str).str.contains(q)
-    ]
+# 전체 랭크도 백그라운드 계산하여 파일로만 제공(화면은 Top10만)
+rank_all = scored.copy()
+rank_all = rank_all.dropna(subset=["추천매수가","손절가","추천매도가1","종가"])
+rank_all = rank_all[rank_all["EBS"] >= PASS_SCORE]
+rank_all = rank_all.sort_values("EV_SCORE", ascending=False, na_position="last")
+rank_all.insert(0, "순위", range(1, len(rank_all)+1))
 
-# RR 분포 기반 동적 상한
-_rr_all = compute_rr1_series(view_base)
-_rr_p95 = float(np.nanpercentile(_rr_all.dropna(), 95)) if _rr_all.dropna().size>0 else 1.5
-_rr_slider_max = float(max(1.0, min(3.0, round(_rr_p95 + 0.5, 2))))  # 상한 3.0
+st.download_button(
+    "📥 전체 랭킹 (CSV)",
+    data=rank_all[top_cols].to_csv(index=False, encoding="utf-8-sig"),
+    file_name="ldy_full_rank.csv",
+    mime="text/csv",
+    key="dl_full",
+)
 
-# ---------------- Tabs ----------------
-tab0, tab1, tab2 = st.tabs(["🏆 종합순위(전체)", "🟢 Top Picks", "📋 전체 보기"])
-
-with tab0:
-    st.subheader("🏆 종합순위(전체) — BUY_RANK", anchor=False)
-
-    c1, c2, c3 = st.columns([1,1,2])
-    with c1:
-        near_band_for_buy = st.slider("Now 근접 밴드(±%)", 0.00, 3.00, 0.00, step=0.10, key="mr_near")
-        rr_dyn_for_buy    = st.checkbox("RR 동적 클립(p95)", value=True, key="mr_rrdyn")
-    with c2:
-        rr_min_for_view   = st.slider("최소 RR(목표1/손절)", 0.50, _rr_slider_max, 0.80, step=0.10, key="mr_rrmin")
-        ers_min_for_view  = st.slider("ERS ≥", 0.00, 3.00, 0.50, step=0.50, key="mr_ersmin")
-    with c3:
-        st.markdown("**⚖️ 스코어 가중치**")
-        w_ev   = st.slider("EV",        0.0, 1.0, 0.30, 0.05, key="w_ev")
-        w_rr   = st.slider("RR",        0.0, 1.0, 0.20, 0.05, key="w_rr")
-        w_near = st.slider("근접",        0.0, 1.0, 0.15, 0.05, key="w_near")
-        w_t1   = st.slider("목표1여유",     0.0, 1.0, 0.10, 0.05, key="w_t1")
-        w_sl   = st.slider("손절여유",      0.0, 1.0, 0.10, 0.05, key="w_sl")
-        w_ers  = st.slider("ERS",       0.0, 1.0, 0.10, 0.05, key="w_ers")
-        w_liq  = st.slider("유동성(거래대금)", 0.0, 1.0, 0.05, 0.05, key="w_liq")
-        st.markdown("**🚫 페널티 가중치**")
-        p_macd = st.slider("MACD≤0",    0.0, 1.0, 0.15, 0.05, key="p_macd")
-        p_rsi  = st.slider("RSI 이탈",    0.0, 1.0, 0.10, 0.05, key="p_rsi")
-        p_ext  = st.slider("乖離 과열",    0.0, 1.0, 0.10, 0.05, key="p_ext")
-
-    rr_clip_val = _rr_p95 if rr_dyn_for_buy and np.isfinite(_rr_p95) and _rr_p95>0 else 3.0
-    weights = dict(ev=w_ev, rr=w_rr, near=w_near, t1=w_t1, sl=w_sl, ers=w_ers, liq=w_liq,
-                   pen_macd=p_macd, pen_rsi=p_rsi, pen_ext=p_ext)
-
-    scored_buy = compute_buy_score(
-        view_base, near_band_pct=near_band_for_buy, rr_clip=rr_clip_val, weights=weights
-    )
-
-    # 기본 뷰 필터 (너무 이른/늦은 시그널 제거용 권장 필터)
-    vb = scored_buy.copy()
-    vb = vb.dropna(subset=["추천매수가","손절가","추천매도가1","종가"])
-    if rr_min_for_view > 0:
-        vb = vb[vb["RR1"] >= rr_min_for_view]
-    if ers_min_for_view > 0:
-        vb = vb[vb["ERS"] >= ers_min_for_view]
-    if near_band_for_buy > 0:
-        vb = vb[vb["Now%"] <= near_band_for_buy]
-
-    # 랭크 및 정렬
-    vb = vb.sort_values(["BUY_SCORE","EV_SCORE","거래대금(억원)"], ascending=[False,False,False])
-    vb["BUY_RANK"] = vb["BUY_SCORE"].rank(method="min", ascending=False).astype("Int64")
-
-    # 표 렌더링
-    cols = [
-        "BUY_RANK","BUY_SCORE","시장","종목명","종목코드",
-        "종가","추천매수가","손절가","추천매도가1","추천매도가2",
-        "RR1","Now%","T1여유%","SL여유%","EV_SCORE","ERS",
-        "거래대금(억원)","시가총액(억원)","EBS","근거","RSI14","乖離%","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
-    ]
-    for c in cols:
-        if c not in vb.columns: vb[c]=np.nan
-
-    st.write(f"📋 총 {len(view_base):,}개 / 표시 {min(len(vb), int(topn)):,}개")
-    render_table(cast_for_editor(vb[cols].head(int(topn))), key="tbl_master_rank_v36")
-
-    st.download_button(
-        "📥 종합순위 다운로드 (CSV)",
-        data=vb[cols].to_csv(index=False, encoding="utf-8-sig"),
-        file_name="ldy_buy_ranking.csv",
-        mime="text/csv",
-        key="dl_master_rank_v36",
-    )
-
-    # Top 3 요약
-    if len(vb):
-        st.markdown("---")
-        top3 = vb.head(3)[["종목명","종목코드","BUY_RANK","BUY_SCORE","EV_SCORE","RR1","Now%","T1여유%","SL여유%","ERS","거래대금(억원)"]]
-        st.write("🥇 Top 3 한눈에")
-        render_table(cast_for_editor(top3), key="tbl_master_top3_v36", height=200)
-
-with tab1:
-    st.subheader("🛠 Top Picks 조건", anchor=False)
-    c1, c2, c3 = st.columns([1,1,1])
-    with c1:
-        rr_min = st.slider("최소 RR(목표1/손절)", 0.50, _rr_slider_max, 1.00, step=0.10, key="tp_rr")
-        near_band = st.slider("Now 근접 밴드(±%)", 0.00, 3.00, 0.00, step=0.10, key="tp_near")
-    with c2:
-        sl_min = st.slider("손절여유 ≥ (%)", 0.00, 10.00, 0.00, step=0.50, key="tp_sl")
-        t1_min = st.slider("목표1여유 ≥ (%)", 0.00, 15.00, 0.00, step=0.50, key="tp_t1")
-    with c3:
-        ers_min = st.slider("ERS ≥", 0.00, 3.00, 1.00, step=0.50, key="tp_ers")
-        use_rr_dyn = st.checkbox("RR 동적 클립(p95)", value=True, key="tp_rr_dyn")
-
-    rr_clip_val = _rr_p95 if use_rr_dyn and np.isfinite(_rr_p95) and _rr_p95>0 else 3.0
-    scored = add_eval_columns(view_base, near_band_pct=near_band, rr_clip=rr_clip_val)
-
-    tp = scored.copy()
-    tp = tp[tp["EBS"] >= PASS_SCORE]
-    tp = tp.dropna(subset=["추천매수가","손절가","추천매도가1","종가"])
-    if rr_min > 0:  tp = tp[tp["RR1"] >= rr_min]
-    if ers_min > 0: tp = tp[tp["ERS"] >= ers_min]
-    if sl_min > 0:  tp = tp[tp["SL여유%"] >= sl_min]
-    if t1_min > 0:  tp = tp[tp["T1여유%"] >= t1_min]
-    if near_band > 0: tp = tp[tp["Now%"] <= near_band]
-
-    tp = safe_sort(tp, sort_key).head(int(topn))
-    if "EBS" in tp.columns:
-        tp["통과"] = np.where(tp["EBS"]>=PASS_SCORE, "🚀", "")
-
-    cols = [
-        "통과","시장","종목명","종목코드",
-        "종가","추천매수가","손절가","추천매도가1","추천매도가2",
-        "EV_SCORE","ERS","RR1","Now%","T1여유%","SL여유%",
-        "거래대금(억원)","시가총액(억원)","EBS","근거",
-        "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
-    ]
-    for c in cols:
-        if c not in tp.columns: tp[c]=np.nan
-
-    st.write(f"📋 총 {len(view_base):,}개 / 표시 {min(len(tp), int(topn)):,}개")
-    render_table(cast_for_editor(tp[cols]), key="tbl_top_picks_v36")
-    st.download_button(
-        "📥 Top Picks 다운로드 (CSV)",
-        data=tp[cols].to_csv(index=False, encoding="utf-8-sig"),
-        file_name="ldy_top_picks.csv",
-        mime="text/csv",
-        key="dl_top_picks_v36",
-    )
-
-with tab2:
-    scored_all = add_eval_columns(view_base, near_band_pct=0.0, rr_clip=(_rr_p95 if _rr_p95>0 else 3.0))
-    view = safe_sort(scored_all, sort_key).head(int(topn))
-    if "EBS" in view.columns:
-        view["통과"] = np.where(view["EBS"]>=PASS_SCORE, "🚀", "")
-
-    cols = [
-        "통과","시장","종목명","종목코드",
-        "종가","추천매수가","손절가","추천매도가1","추천매도가2",
-        "EV_SCORE","ERS","RR1","Now%","T1여유%","SL여유%",
-        "거래대금(억원)","시가총액(억원)",
-        "EBS","근거",
-        "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"
-    ]
-    for c in cols:
-        if c not in view.columns: view[c]=np.nan
-
-    st.write(f"📋 총 {len(view_base):,}개 / 표시 {min(len(view), int(topn)):,}개")
-    render_table(cast_for_editor(view[cols]), key="tbl_full_view_v36")
-    st.download_button(
-        "📥 전체 보기 다운로드 (CSV)",
-        data=view[cols].to_csv(index=False, encoding="utf-8-sig"),
-        file_name="ldy_entry_candidates.csv",
-        mime="text/csv",
-        key="dl_full_view_v36",
-    )
-
-# ---------------- help ----------------
 with st.expander("ℹ️ 점수/지표 설명", expanded=False):
     st.markdown("""
-**BUY_SCORE(0~100)**: EV/RR/근접/목표1여유/손절여유/ERS/유동성(+) − MACD≤0/RSI이탈/과열乖離 페널티(−)  
-**BUY_RANK**: BUY_SCORE 내림차순 랭킹 (1 = 최상)  
-권장 필터: 거래대금 하한, RR≥0.8, ERS≥0.5, Now%≤2%  
+**EBS(0~7)**: RSI 45~65 / MACD↑ / MA20±4% / VolZ>1.2 / MA20↑ / MACD>0 / 5d<10%  
+**RR1**: (목표1−추천매수) / (추천매수−손절) — 보상/위험 비율  
+**Now%**: 현재가 vs 추천매수 괴리(%) — 낮을수록 엔트리에 근접  
+**T1여유%**: 목표1까지 여유(%)  
+**SL여유%**: 손절까지 여유(%)  
+**ERS(0~3)**: EBS 통과(≥4) + MACD_slope>0 + RSI 45~65 각 1점씩  
+**EV_SCORE(0~100)**: 퍼센타일 정규화한 지표에 고정 가중치로 산출(사용자 조정 불가)  
+- 가중치: RR 0.35, 목표여유 0.25, 손절여유 0.20, 근접도 0.15, ERS 0.05
 """)
