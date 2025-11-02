@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v3.5 — MOMO Top10 (No Sliders)
-- 매일 장마감 후 업데이트된 CSV(recommend_latest.csv)를 기반으로
-  EV_SCORE + MOMO_SCORE를 결합한 GLOBAL_SCORE로 단일 Top10 출력
-- 급등 직전/직후 '폭발(momentum burst)' 신호를 강하게 반영
-- 슬라이더/가중치 UI 제거, 고정 컷(거래대금, EBS)만 적용
+LDY Pro Trader v4.0 — Global Rank (Single Composite Score)
+- 한 화면: '오늘의 GLOBAL TOP 10'만 고정 노출 (가중치/슬라이더 없음)
+- 모든 지표(리스크·보상·유동성·모멘텀·과열/과매수·근접도 등) → 단일 점수 LDY_SCORE(0~100)
+- LDY_RANK = LDY_SCORE 내림차순 순위 (1위가 가장 유망)
+- 유동성 하드컷: KOSPI≥200억, KOSDAQ≥100억 (비면 자동 완화)
 """
 
 import os, io, math, requests, numpy as np, pandas as pd, streamlit as st
 from datetime import datetime
 
-# ---------- Optional deps (fallback용) ----------
+# -------- Optional deps (이름 맵 폴백용) --------
 try:
     from pykrx import stock
     PYKRX_OK = True
@@ -23,69 +23,65 @@ try:
 except Exception:
     FDR_OK = False
 
-# ---------- Page ----------
-st.set_page_config(page_title="LDY Pro Trader v3.5 — MOMO Top10", layout="wide")
-st.title("📈 LDY Pro Trader v3.5 — MOMO Top10")
-st.caption("급등 추세 포착용 단일 Top10 | EV_SCORE × MOMO_SCORE")
+# -------- Page --------
+st.set_page_config(page_title="LDY Pro Trader v4.0 — Global Rank", layout="wide")
+st.title("🏆 LDY Pro Trader v4.0 — Global Rank")
+st.caption("모든 지표를 단일 점수로 종합 → 1위가 가장 유망한 종목")
 
-# ---------- Constants ----------
+# -------- Constants --------
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 LOCAL_RAW = "data/recommend_latest.csv"
 CODES_URL = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/krx_codes.csv"
 LOCAL_MAP = "data/krx_codes.csv"
 
-PASS_SCORE_EBS = 4          # Top Picks 기본 컷
-MIN_TURNOVER   = 100        # (억원) 유동성 컷(고정)
-NEAR_BAND_DEF  = 1.5        # Now 근접도 밴드(%), EV_SCORE 내부에서 사용
+PASS_EBS = 4                 # 품질 게이트
+MIN_TURN_KOSPI = 200.0       # 유동성 하드컷
+MIN_TURN_KOSDAQ = 100.0
+MIN_TURN_DEFAULT = 100.0
 
-# ---------- IO helpers ----------
+# 고정 가중치(합=1.0) — 조정 UI 없음
+W_RR   = 0.25  # 보상대비위험 (RR1)
+W_T1   = 0.18  # 목표1 여유
+W_SL   = 0.12  # 손절 여유
+W_NEAR = 0.12  # 현재가-추천가 근접
+W_MOM  = 0.10  # 모멘텀(ERS+MACD_slope+RSI중심 보너스)
+W_LIQ  = 0.13  # 유동성(거래대금 퍼센타일)
+W_TEC  = 0.10  # 기술균형(VolZ 스윗스팟 +乖離 안정)
+
+# 페널티(점수에서 직접 차감, 0~30 범위 가정)
+P_OVERHEAT_5D = 6.0   # 단기 과열(ret_5d_%) 과도 시
+P_OVERHEAT_10D= 6.0   # 중기 과열(ret_10d_%)
+P_RSI_OUT     = 4.0   # RSI 45~65 벗어남
+P_MACD_NEG    = 4.0   # MACD 기울기 음수
+P_NEAR_FAR    = 4.0   # 엔트리에서 너무 멀어짐
+P_LIQ_LOW     = 4.0   # 유동성 하위권
+P_VOL_SPIKE   = 2.0   # 변동성 과도 스파이크(VolZ≫)
+
+# -------- IO helpers --------
 @st.cache_data(ttl=300)
 def load_csv_url(url: str) -> pd.DataFrame:
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
+    r = requests.get(url, timeout=30); r.raise_for_status()
     return pd.read_csv(io.BytesIO(r.content))
 
 @st.cache_data(ttl=300)
 def load_csv_path(path: str) -> pd.DataFrame:
-    return pd.read_csv(path)
+    return pd.read_csv(path, encoding="utf-8")
 
 def log_src(df: pd.DataFrame, src: str, url_or_path: str):
     st.info(f"상태 ✅ 데이터 로드: {src}\n\n{url_or_path}")
     st.success(f"📅 표시시각: {pd.Timestamp.now(tz='Asia/Seoul').strftime('%Y-%m-%d %H:%M')} · 행수: {len(df):,}")
 
-# ---------- Utils ----------
+# -------- Utils --------
 def z6(x) -> str:
     s = str(x)
     return s.zfill(6) if s.isdigit() else s
-
-def ema(s: pd.Series, span: int):
-    return s.ewm(span=span, adjust=False, min_periods=span).mean()
-
-def rsi14(close: pd.Series, period=14):
-    d = close.diff()
-    up, dn = d.clip(lower=0), -d.clip(upper=0)
-    au, ad = up.rolling(period).mean(), dn.rolling(period).mean()
-    rs = au / ad.replace(0, np.nan)
-    return 100 - 100/(1+rs)
-
-def macd_feats(close: pd.Series):
-    e12, e26 = ema(close,12), ema(close,26)
-    macd = e12 - e26
-    sig  = macd.ewm(span=9, adjust=False, min_periods=9).mean()
-    hist = macd - sig
-    return hist, hist.diff()
-
-def atr14(h, l, c, period=14):
-    prev = c.shift(1)
-    tr = pd.concat([(h-l), (h-prev).abs(), (l-prev).abs()], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
 
 def ensure_turnover(df: pd.DataFrame) -> pd.DataFrame:
     if "거래대금(억원)" not in df.columns:
         base = None
         if "거래대금(원)" in df.columns:
             base = pd.to_numeric(df["거래대금(원)"], errors="coerce")
-        elif all(x in df.columns for x in ["거래량","종가"]):
+        elif all(c in df.columns for c in ["거래량","종가"]):
             base = pd.to_numeric(df["거래량"], errors="coerce") * pd.to_numeric(df["종가"], errors="coerce")
         if base is not None:
             df["거래대금(억원)"] = (base/1e8).round(2)
@@ -94,7 +90,7 @@ def ensure_turnover(df: pd.DataFrame) -> pd.DataFrame:
 def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     cmap = {
         "Date":"날짜","date":"날짜",
-        "Code":"종목코드","티커":"종목코드","ticker":"종목코드",
+        "Code":"종목को드","티커":"종목코드","ticker":"종목코드",
         "Name":"종목명","name":"종목명",
         "Open":"시가","High":"고가","Low":"저가","Close":"종가","Volume":"거래량",
         "거래대금":"거래대금(원)","시가총액":"시가총액(원)"
@@ -102,7 +98,6 @@ def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     for k,v in cmap.items():
         if k in df.columns and v not in df.columns:
             df = df.rename(columns={k:v})
-
     if "날짜" in df.columns:
         try: df["날짜"] = pd.to_datetime(df["날짜"])
         except: pass
@@ -114,80 +109,16 @@ def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
         df["시장"] = "ALL"
     if "종목명" not in df.columns:
         df["종목명"] = None
-
-    for c in ["시가","고가","저가","종가","거래량","거래대금(원)","시가총액(원)"]:
+    for c in ["시가","고가","저가","종가","거래량","거래대금(원)","시가총액(원)","거래대금(억원)","시가총액(억원)",
+              "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS",
+              "추천매수가","추천매도가1","추천매도가2","손절가"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = ensure_turnover(df)
-    return df
+    return ensure_turnover(df)
 
-# ---------- Enrich from OHLCV (fallback) ----------
-@st.cache_data(ttl=300)
-def enrich_from_ohlcv(raw: pd.DataFrame) -> pd.DataFrame:
-    need = {"종목코드","날짜","시가","고가","저가","종가"}
-    if not need.issubset(set(raw.columns)):
-        return raw
-    raw = raw.sort_values(["종목코드","날짜"])
-    g = raw.groupby("종목코드", group_keys=False)
-
-    def _feat(x: pd.DataFrame):
-        x = x.copy()
-        x["MA20"] = x["종가"].rolling(20).mean()
-        x["ATR14"] = atr14(x["고가"], x["저가"], x["종가"], 14)
-        x["RSI14"] = rsi14(x["종가"])
-        hist, slope = macd_feats(x["종가"]); x["MACD_hist"], x["MACD_slope"] = hist, slope
-        x["Vol_Z"] = (x["거래량"] - x["거래량"].rolling(20).mean())/x["거래량"].rolling(20).std()
-        x["乖離%"] = (x["종가"]/x["MA20"] - 1)*100
-        x["ret_5d_%"]  = (x["종가"]/x["종가"].shift(5)  - 1)*100
-        x["ret_10d_%"] = (x["종가"]/x["종가"].shift(10) - 1)*100
-
-        last = x.iloc[-1:].copy()
-        e, why = 0, []
-        def nz(v): 
-            return not (isinstance(v,float) and math.isnan(v))
-        rsi = last["RSI14"].iloc[0];      c1 = nz(rsi) and 45<=rsi<=65;  e+=int(c1); why.append("RSI 45~65" if c1 else "")
-        c2 = nz(last["MACD_slope"].iloc[0]) and last["MACD_slope"].iloc[0] > 0; e+=int(c2); why.append("MACD상승" if c2 else "")
-        close, ma20 = last["종가"].iloc[0], last["MA20"].iloc[0]
-        c3 = nz(ma20) and (0.99*ma20 <= close <= 1.04*ma20); e+=int(c3); why.append("MA20 근처" if c3 else "")
-        c4 = nz(last["Vol_Z"].iloc[0]) and last["Vol_Z"].iloc[0] > 1.2; e+=int(c4); why.append("거래량증가" if c4 else "")
-        m20p = x["MA20"].iloc[-2] if len(x)>=2 else np.nan
-        c5 = nz(m20p) and (last["MA20"].iloc[0] - m20p > 0); e+=int(c5); why.append("상승구조" if c5 else "")
-        c6 = nz(last["MACD_hist"].iloc[0]) and last["MACD_hist"].iloc[0] > 0; e+=int(c6); why.append("MACD>sig" if c6 else "")
-        r5 = last["ret_5d_%"].iloc[0];    c7 = nz(r5) and r5 < 10;        e+=int(c7); why.append("과열아님" if c7 else "")
-        last["EBS"] = e; last["근거"] = ", ".join([w for w in why if w])
-
-        atr = last["ATR14"].iloc[0]
-        if any([not nz(atr), not nz(ma20), not nz(close)]) or atr <= 0:
-            entry=t1=t2=stp=np.nan
-        else:
-            band_lo, band_hi = ma20-0.5*atr, ma20+0.5*atr
-            entry = min(max(close, band_lo), band_hi)
-            t1, t2, stp = entry+1.0*atr, entry+1.8*atr, entry-1.2*atr
-        last["추천매수가"] = round(entry,2) if not math.isnan(entry) else np.nan
-        last["추천매도가1"] = round(t1,2)   if not math.isnan(t1)    else np.nan
-        last["추천매도가2"] = round(t2,2)   if not math.isnan(t2)    else np.nan
-        last["손절가"]     = round(stp,2)   if not math.isnan(stp)   else np.nan
-        return last
-
-    try:
-        out = g.apply(_feat, include_groups=False).reset_index(drop=True)
-    except TypeError:
-        out = g.apply(_feat).reset_index(drop=True)
-
-    tail = raw.groupby("종목코드").tail(1).copy()
-    tail = ensure_turnover(tail)
-    if "거래대금(억원)" in tail.columns:
-        out = out.merge(tail[["종목코드","거래대금(억원)"]], on="종목코드", how="left")
-    if "시가총액(억원)" not in out.columns:
-        out["시가총액(억원)"] = np.nan
-    if "시장" not in out.columns:
-        out["시장"] = "ALL"
-    return out
-
-# ---------- Name map ----------
+# -------- 이름맵 --------
 @st.cache_data(ttl=6*60*60)
 def load_name_map() -> pd.DataFrame | None:
-    # 1) repo map
     try:
         m = load_csv_url(CODES_URL)
         if {"종목코드","종목명"}.issubset(m.columns):
@@ -203,7 +134,6 @@ def load_name_map() -> pd.DataFrame | None:
                 return m[["종목코드","종목명"]].drop_duplicates("종목코드")
         except Exception:
             pass
-    # 2) FDR
     if FDR_OK:
         try:
             lst = fdr.StockListing("KRX")
@@ -212,21 +142,16 @@ def load_name_map() -> pd.DataFrame | None:
             return m.drop_duplicates("종목코드")
         except Exception:
             pass
-    # 3) pykrx
     if PYKRX_OK:
         today = datetime.now().strftime("%Y%m%d")
         rows = []
         try:
             for mk in ["KOSPI","KOSDAQ","KONEX"]:
-                try:
-                    lst = stock.get_market_ticker_list(today, market=mk)
-                except Exception:
-                    lst = []
+                lst = stock.get_market_ticker_list(today, market=mk) or []
                 for t in lst:
-                    try:
-                        nm = stock.get_market_ticker_name(t)
-                    except Exception:
-                        nm = None
+                    nm = None
+                    try: nm = stock.get_market_ticker_name(t)
+                    except Exception: pass
                     rows.append({"종목코드": str(t).zfill(6), "종목명": nm})
             m = pd.DataFrame(rows).dropna().drop_duplicates("종목코드")
             return m if len(m) else None
@@ -245,249 +170,251 @@ def apply_names(df: pd.DataFrame) -> pd.DataFrame:
     df["종목명"] = df["종목명"].fillna("(이름없음)")
     return df
 
-# ---------- EV_SCORE ----------
-def add_eval_columns(df_in: pd.DataFrame, near_band_pct: float = NEAR_BAND_DEF) -> pd.DataFrame:
-    df = df_in.copy()
-    for col in ["종가","추천매수가","손절가","추천매도가1","RSI14","MACD_slope","EBS"]:
-        if col not in df.columns:
-            df[col] = np.nan
-
-    close = pd.to_numeric(df["종가"], errors="coerce")
-    entry = pd.to_numeric(df["추천매수가"], errors="coerce")
-    stop  = pd.to_numeric(df["손절가"], errors="coerce")
-    t1    = pd.to_numeric(df["추천매도가1"], errors="coerce")
-
-    rr_den = (entry - stop)
-    rr1 = (t1 - entry) / rr_den.replace(0, np.nan)
-    rr1 = rr1.mask((entry.isna()) | (stop.isna()) | (t1.isna()))
-    df["RR1"] = rr1
-
-    df["Now%"]   = (close.sub(entry).abs() / entry * 100).replace([np.inf, -np.inf], np.nan)
-    df["T1여유%"] = (t1.sub(close) / close * 100).replace([np.inf, -np.inf], np.nan)
-    df["SL여유%"] = (close.sub(stop) / close * 100).replace([np.inf, -np.inf], np.nan)
-
-    ebs_ok  = (pd.to_numeric(df.get("EBS"), errors="coerce") >= PASS_SCORE_EBS).astype(int)
-    macd_ok = (pd.to_numeric(df.get("MACD_slope"), errors="coerce") > 0).astype(int)
-    rsi_ok  = ((pd.to_numeric(df.get("RSI14"), errors="coerce") >= 45) & (pd.to_numeric(df.get("RSI14"), errors="coerce") <= 65)).astype(int)
-    df["ERS"] = (ebs_ok + macd_ok + rsi_ok).astype(float)
-
-    rr_norm   = np.clip(df["RR1"], 0, 3) / 3
-    sl_norm   = np.clip(df["SL여유%"]/5, 0, 1)
-    t1_norm   = np.clip(df["T1여유%"]/10, 0, 1)
-    near_norm = 0.0
-    if near_band_pct and near_band_pct > 0:
-        near_norm = np.clip(1 - (df["Now%"] / near_band_pct), 0, 1)
-    ers_norm  = np.clip(df["ERS"]/3, 0, 1)
-
-    ev = 100*(0.35*rr_norm + 0.20*sl_norm + 0.20*t1_norm + 0.15*near_norm + 0.10*ers_norm)
-    df["EV_SCORE"] = np.round(ev.fillna(0), 1)
-
-    return df
-
-# ---------- MOMO_SCORE ----------
-def _scale_01(s, lo, hi):
-    v = pd.to_numeric(s, errors="coerce")
-    return np.clip((v - lo) / max(1e-9, (hi - lo)), 0, 1)
-
-def _log_liq(x):
-    v = pd.to_numeric(x, errors="coerce")
-    return _scale_01(np.log1p(v*1e8), np.log1p(1e10), np.log1p(1.5e12))  # 100억~1500억
-
-def add_momo_columns(df_in: pd.DataFrame) -> pd.DataFrame:
-    df = df_in.copy()
-    for c in ["종가","시가","고가","저가","RSI14","MACD_slope","乖離%","ret_5d_%","거래대금(억원)","Vol_Z"]:
-        if c not in df.columns: df[c] = np.nan
-
-    close = pd.to_numeric(df["종가"], errors="coerce")
-    volz  = pd.to_numeric(df["Vol_Z"], errors="coerce")
-    rsi   = pd.to_numeric(df["RSI14"], errors="coerce")
-    kairi = pd.to_numeric(df["乖離%"], errors="coerce")
-    r5    = pd.to_numeric(df["ret_5d_%"], errors="coerce")
-    mslope= pd.to_numeric(df["MACD_slope"], errors="coerce")
-    turn  = pd.to_numeric(df["거래대금(억원)"], errors="coerce")
-
-    # (A) Breakout proxy
-    bo_rsi   = _scale_01(rsi, 55, 70)
-    bo_kairi = (kairi.between(2, 8)).astype(float) * _scale_01(kairi, 2, 8)
-    bo_r5    = (r5.between(3, 12)).astype(float) * _scale_01(r5, 3, 12)
-    breakout = (0.4*bo_rsi + 0.3*bo_kairi + 0.3*bo_r5)
-
-    # (B) 거래대금/볼륨 확장
-    volx = _scale_01(volz, 1.5, 4.0)
-    liq  = _log_liq(turn)
-    expansion = (0.6*volx + 0.4*liq)
-
-    # (C) 트렌드 품질
-    macd_ok = (mslope > 0).astype(float)
-    rsi_mid = _scale_01(rsi, 50, 65)
-    rsi_hot_penalty = (rsi > 75).astype(float)*0.4
-    trend = np.clip(0.5*macd_ok + 0.5*rsi_mid - rsi_hot_penalty, 0, 1)
-
-    # (D) squeeze→release (없으면 0)
-    squeeze_release = 0.0
-    if "BB_Width" in df.columns and "%B" in df.columns:
-        bbw = _scale_01(df["BB_Width"], df["BB_Width"].quantile(0.05), df["BB_Width"].quantile(0.6))
-        pb  = _scale_01(df["%B"], 0.8, 1.0)
-        squeeze_release = (1 - bbw) * pb
-
-    # (E) 페널티
-    overhead_pen = ((kairi < -8).astype(float)*0.3 + (kairi > 12).astype(float)*0.3)
-    low_liq_pen  = (turn < MIN_TURNOVER).astype(float)*0.4
-    penalty = np.clip(overhead_pen + low_liq_pen, 0, 1)
-
-    momo = 100*(0.35*breakout + 0.30*expansion + 0.25*trend + 0.10*squeeze_release)
-    momo = momo * (1 - 0.6*penalty)
-    df["MOMO_SCORE"] = np.round(momo.fillna(0), 1)
-    return df
-
-# ---------- GLOBAL_SCORE ----------
-def add_global_score(df_in: pd.DataFrame) -> pd.DataFrame:
-    df = df_in.copy()
-    if "EV_SCORE" not in df.columns:
-        df["EV_SCORE"] = 0.0
-    df = add_momo_columns(df)
-    glob = 0.6*pd.to_numeric(df["MOMO_SCORE"], errors="coerce") + \
-           0.4*pd.to_numeric(df["EV_SCORE"], errors="coerce")
-    df["GLOBAL_SCORE"] = np.round(glob.fillna(0), 1)
-    return df
-
-# ---------- Table formatting ----------
-def cast_for_editor(df):
-    df = df.copy()
-    int_like = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS"]
-    for c in int_like:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").round(0).astype("Int64")
-    float_like = ["거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope",
-                  "Vol_Z","ret_5d_%","ret_10d_%","EV_SCORE","MOMO_SCORE","GLOBAL_SCORE",
-                  "ERS","RR1","Now%","T1여유%","SL여유%"]
-    for c in float_like:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
-
-def column_config_for(df):
-    cfg = {}
-    def add(name, col):
-        if name in df.columns: cfg[name]=col
-    add("시장",       st.column_config.TextColumn("시장"))
-    add("종목명",     st.column_config.TextColumn("종목명"))
-    add("종목코드",   st.column_config.TextColumn("종목코드"))
-    add("근거",       st.column_config.TextColumn("근거"))
-
-    add("종가",        st.column_config.NumberColumn("종가",           format="%,d"))
-    add("추천매수가",  st.column_config.NumberColumn("추천매수가",     format="%,d"))
-    add("손절가",      st.column_config.NumberColumn("손절가",         format="%,d"))
-    add("추천매도가1", st.column_config.NumberColumn("추천매도가1",    format="%,d"))
-    add("추천매도가2", st.column_config.NumberColumn("추천매도가2",    format="%,d"))
-
-    add("거래대금(억원)", st.column_config.NumberColumn("거래대금(억원)",  format="%,.0f"))
-    add("시가총액(억원)", st.column_config.NumberColumn("시가총액(억원)",  format="%,.0f"))
-
-    add("GLOBAL_SCORE", st.column_config.NumberColumn("GLOBAL",        format="%.1f"))
-    add("MOMO_SCORE",   st.column_config.NumberColumn("MOMO",          format="%.1f"))
-    add("EV_SCORE",     st.column_config.NumberColumn("EV",            format="%.1f"))
-
-    add("RR1",        st.column_config.NumberColumn("RR(목표1/손절)",    format="%.2f"))
-    add("T1여유%",    st.column_config.NumberColumn("목표1여유(%)",      format="%.2f"))
-    add("SL여유%",    st.column_config.NumberColumn("손절여유(%)",      format="%.2f"))
-    add("Now%",       st.column_config.NumberColumn("Now 근접(%)",       format="%.2f"))
-
-    add("RSI14",      st.column_config.NumberColumn("RSI14",          format="%.1f"))
-    add("MACD_slope", st.column_config.NumberColumn("MACD_slope",     format="%.5f"))
-    add("Vol_Z",      st.column_config.NumberColumn("Vol_Z",          format="%.2f"))
-    add("乖離%",       st.column_config.NumberColumn("乖離%",           format="%.2f"))
-    add("ret_5d_%",   st.column_config.NumberColumn("5d수익(%)",       format="%.2f"))
-    add("ret_10d_%",  st.column_config.NumberColumn("10d수익(%)",      format="%.2f"))
-    add("EBS",        st.column_config.NumberColumn("EBS",            format="%d"))
-    return cfg
-
-def render_table(df, *, key: str, height=560):
-    st.data_editor(
-        df,
-        key=key,
-        width="stretch",
-        height=height,
-        hide_index=True,
-        disabled=True,
-        num_rows="fixed",
-        column_config=column_config_for(df),
-    )
-
-# ---------- Load raw ----------
+# -------- Load --------
 try:
     df_raw = load_csv_url(RAW_URL); log_src(df_raw, "remote", RAW_URL)
 except Exception:
     if os.path.exists(LOCAL_RAW):
         df_raw = load_csv_path(LOCAL_RAW); log_src(df_raw, "local", LOCAL_RAW)
     else:
-        st.error("❌ CSV가 없습니다. Actions에서 collector가 data/recommend_latest.csv를 올렸는지 확인하세요.")
+        st.error("❌ CSV가 없습니다. Actions 수집 상태를 확인하세요.")
         st.stop()
 
-df_raw = normalize_cols(df_raw)
+df = normalize_cols(df_raw)
+df = apply_names(df)
 
-# 완제품(EBS/추천가) 여부 체크
-has_ebs  = "EBS" in df_raw.columns and df_raw["EBS"].notna().any()
-has_reco = all(c in df_raw.columns for c in ["추천매수가","추천매도가1","추천매도가2","손절가"]) and \
-           df_raw[["추천매수가","추천매도가1","추천매도가2","손절가"]].notna().any().any()
-
-if has_ebs and has_reco:
-    df = df_raw.copy()
-else:
-    with st.status("🧮 원시 OHLCV → 지표/점수/추천가 생성 중...", expanded=False):
-        df = enrich_from_ohlcv(df_raw)
-
+# 최신행만 사용
 latest = df.sort_values(["종목코드","날짜"]).groupby("종목코드").tail(1) if "날짜" in df.columns else df.copy()
 
-with st.status("🏷️ 종목명 매핑 중...", expanded=False):
-    latest = apply_names(latest)
+# -------- 하드 유동성 컷 --------
+def liquidity_gate(x: pd.Series, market: pd.Series) -> pd.Series:
+    min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
+    mins = market.map(min_map).fillna(MIN_TURN_DEFAULT)
+    return x >= mins
 
-latest = ensure_turnover(latest)
-for c in ["종가","거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","추천매수가","추천매도가1","추천매도가2","손절가"]:
-    if c in latest.columns:
-        latest[c] = pd.to_numeric(latest[c], errors="coerce")
+# -------- 정규화 유틸 --------
+def cap_q(s: pd.Series, q=90, floor=1.0):
+    s = pd.to_numeric(s, errors="coerce")
+    if s.notna().sum()==0: return floor
+    c = np.nanpercentile(s, q)
+    if not np.isfinite(c) or c<=0: c=floor
+    return max(float(c), floor)
 
-# ---------- Scoring & Ranking ----------
-scored = add_eval_columns(latest, near_band_pct=NEAR_BAND_DEF)
-scored = add_global_score(scored)
+def pct_norm_pos(s: pd.Series, q=90, floor=1.0):
+    # 양수만 인정(음수→0), q-캡으로 0~1 스케일
+    s = pd.to_numeric(s, errors="coerce").clip(lower=0)
+    cap = cap_q(s, q=q, floor=floor)
+    return np.clip(s / cap, 0, 1)
 
-# 고정 컷: 거래대금, EBS
-if "거래대금(억원)" in scored.columns:
-    scored = scored[scored["거래대금(억원)"] >= MIN_TURNOVER]
-if "EBS" in scored.columns:
-    scored = scored[scored["EBS"] >= PASS_SCORE_EBS]
+def inv_dist_norm(dist: pd.Series, cap):
+    # 0일수록 1, cap 넘으면 0
+    d = pd.to_numeric(dist, errors="coerce")
+    return np.clip(1 - (d / cap), 0, 1)
 
-ranked = scored.sort_values(
-    ["GLOBAL_SCORE","MOMO_SCORE","EV_SCORE","거래대금(억원)"],
-    ascending=[False, False, False, False]
-).head(10)
+# -------- Composite Score --------
+def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
+    x = lat.copy()
 
-# ---------- View ----------
-st.subheader("🔥 MOMO Top 10 (급등 추세 포착용)", anchor=False)
-cols_out = [
-    "시장","종목명","종목코드","종가",
-    "GLOBAL_SCORE","MOMO_SCORE","EV_SCORE",
-    "RR1","T1여유%","SL여유%","Now%",
-    "RSI14","MACD_slope","Vol_Z","乖離%","ret_5d_%","거래대금(억원)",
-    "EBS","근거",
-]
-for c in cols_out:
-    if c not in ranked.columns: ranked[c]=np.nan
+    # 필수 수치
+    for c in ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","RSI14","MACD_slope","Vol_Z","乖離%","ret_5d_%","ret_10d_%","EBS"]:
+        if c not in x.columns: x[c]=np.nan
 
-render_table(cast_for_editor(ranked[cols_out]), key="tbl_momo_top10")
+    close = pd.to_numeric(x["종가"], errors="coerce")
+    entry = pd.to_numeric(x["추천매수가"], errors="coerce")
+    stop  = pd.to_numeric(x["손절가"], errors="coerce")
+    t1    = pd.to_numeric(x["추천매도가1"], errors="coerce")
+    turn  = pd.to_numeric(x["거래대금(억원)"], errors="coerce")
+    rsi   = pd.to_numeric(x["RSI14"], errors="coerce")
+    slope = pd.to_numeric(x["MACD_slope"], errors="coerce")
+    volz  = pd.to_numeric(x["Vol_Z"], errors="coerce")
+    kairi = pd.to_numeric(x["乖離%"], errors="coerce")
+    r5    = pd.to_numeric(x["ret_5d_%"], errors="coerce")
+    r10   = pd.to_numeric(x["ret_10d_%"], errors="coerce")
+    ebs   = pd.to_numeric(x["EBS"], errors="coerce").fillna(0)
 
-st.download_button(
-    "📥 MOMO Top 10 (CSV)",
-    data=ranked[cols_out].to_csv(index=False, encoding="utf-8-sig"),
-    file_name="ldy_momo_top10.csv",
-    mime="text/csv",
-    key="dl_momo_top10",
+    # RR1, 여유, 근접
+    rr_den = (entry - stop)
+    rr1 = (t1 - entry) / rr_den.replace(0, np.nan)
+    rr1 = rr1.mask(entry.isna() | stop.isna() | t1.isna())
+    now_gap = (close - entry).abs() / entry * 100
+    t1_room = (t1 - close) / close * 100
+    sl_room = (close - stop) / close * 100
+
+    # 정규화(상한=분포 기반, 과한 outlier 방지)
+    rr_norm   = pct_norm_pos(rr1, q=90, floor=1.0)
+    t1_norm   = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1)
+    sl_norm   = np.clip(sl_room / cap_q(sl_room, q=90, floor=3.0), 0, 1)
+    near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0))
+    # 모멘텀 묶음: ERS(=EBS≥4 + slope>0 + RSI in-band) + slope(양수부분) + RSI 중심보너스
+    ers_bits = (ebs>=PASS_EBS).astype(int) + (slope>0).astype(int) + ((rsi>=45)&(rsi<=65)).astype(int)
+    ers_norm = np.clip(ers_bits/3.0, 0, 1)
+    slope_pos_norm = pct_norm_pos(slope, q=90, floor=1.0)
+    rsi_center = 1 - np.minimum((rsi-55).abs()/10, 1)           # 55에 가까울수록 1 (±10 범위)
+    rsi_center = rsi_center.clip(lower=0, upper=1).fillna(0)
+    mom_norm = np.clip(0.5*ers_norm + 0.3*slope_pos_norm + 0.2*rsi_center, 0, 1)
+
+    # 유동성: 거래대금 퍼센타일 스케일
+    if turn.notna().any():
+        lo = np.nanpercentile(turn, 30)
+        hi = np.nanpercentile(turn, 90)
+        span = max(hi - lo, 1e-9)
+        liq_norm = np.clip((turn - lo) / span, 0, 1)
+    else:
+        liq_norm = pd.Series(0.0, index=x.index)
+
+    # 기술 균형: VolZ 스윗스팟(≈1) +乖離 안정(절대乖離 낮을수록)
+    vol_sweet = 1 - np.minimum((volz - 1).abs()/3, 1)           # 1에 가까울수록 좋음
+    vol_sweet = vol_sweet.clip(0,1).fillna(0)
+    kairi_norm = 1 - np.minimum(kairi.abs()/cap_q(kairi.abs(), q=80, floor=3.0), 1)
+    kairi_norm = kairi_norm.clip(0,1).fillna(0)
+    tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1)
+
+    # 가중합 (0~100)
+    base_score = 100*(W_RR*rr_norm + W_T1*t1_norm + W_SL*sl_norm + W_NEAR*near_norm + W_MOM*mom_norm + W_LIQ*liq_norm + W_TEC*tec_norm)
+
+    # 페널티 (점수 차감)
+    pen = pd.Series(0.0, index=x.index)
+
+    # 단기/중기 과열
+    pen += P_OVERHEAT_5D * np.clip((r5 - 10)/10, 0, 1)      # 5일 +10% 초과부터 최대 패널티
+    pen += P_OVERHEAT_10D* np.clip((r10 - 20)/20, 0, 1)     # 10일 +20% 초과부터
+
+    # RSI 밴드 이탈(45~65)
+    rsi_out = (rsi < 45) | (rsi > 65)
+    pen += P_RSI_OUT * rsi_out.astype(float)
+
+    # MACD 기울기 음수
+    pen += P_MACD_NEG * (slope < 0).astype(float)
+
+    # 엔트리와 괴리 과다
+    near_cap = cap_q(now_gap, q=75, floor=1.0)
+    pen += P_NEAR_FAR * np.clip((now_gap - near_cap)/near_cap, 0, 1)
+
+    # 유동성 하위권 (하위 20%)
+    if turn.notna().any():
+        p20 = np.nanpercentile(turn, 20)
+        pen += P_LIQ_LOW * (turn < p20).astype(float)
+
+    # 변동성 스파이크 (VolZ > 3)
+    pen += P_VOL_SPIKE * (volz > 3).astype(float)
+
+    score = np.clip(base_score - pen, 0, 100)
+    x["RR1"]      = rr1
+    x["Now%"]     = now_gap
+    x["T1여유%"]   = t1_room
+    x["SL여유%"]   = sl_room
+    x["ERS"]      = ers_bits.astype(float)
+    x["LDY_SCORE"]= score.round(1)
+
+    # 하드 유동성 컷(기본), 비면 완화용 플래그
+    gate_ok = liquidity_gate(x["거래대금(억원)"], x["시장"])
+    x["_GATE_OK"] = gate_ok.fillna(False)
+
+    # 랭크(내림차순)
+    x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
+    x["LDY_RANK"] = range(1, len(x)+1)
+    return x
+
+scored = build_global_score(latest)
+
+# 기본 필터: 추천가/손절/목표1 모두 있어야 랭킹 포함
+scored = scored.dropna(subset=["추천매수가","손절가","추천매도가1","종가"])
+
+# 품질게이트(EBS) & 유동성 하드컷
+base = scored[ (pd.to_numeric(scored.get("EBS"), errors="coerce") >= PASS_EBS) & (scored["_GATE_OK"]) ].copy()
+
+# 비거나 Top10 미만이면 자동 완화(EBS≥3 + 유동성 완화: KOSPI150/KOSDAQ80)
+if len(base) < 10:
+    fb = scored[ pd.to_numeric(scored.get("EBS"), errors="coerce") >= (PASS_EBS-1) ].copy()
+    # 완화 컷
+    MIN_KOSPI_F, MIN_KOSDAQ_F = 150.0, 80.0
+    mm = {"KOSPI": MIN_KOSPI_F, "KOSDAQ": MIN_KOSDAQ_F}
+    fb["_min_turn"] = fb["시장"].map(mm).fillna(MIN_TURN_DEFAULT)
+    fb = fb[ fb["거래대금(억원)"] >= fb["_min_turn"] ]
+    base_codes = set(base["종목코드"])
+    fill = fb[~fb["종목코드"].isin(base_codes)]
+    base = pd.concat([base, fill]).sort_values("LDY_SCORE", ascending=False).head(50)
+
+# 최종 Top 10
+top10 = base.sort_values("LDY_SCORE", ascending=False, na_position="last").head(10).copy()
+top10["통과"] = np.where(pd.to_numeric(top10.get("EBS"), errors="coerce") >= PASS_EBS, "🚀", "")
+
+# -------- Render --------
+def colcfg(df):
+    cfg={}
+    def add(k, col):
+        if k in df.columns: cfg[k]=col
+    add("LDY_RANK",  st.column_config.NumberColumn("RANK", format="%d"))
+    add("통과",       st.column_config.TextColumn(" "))
+    add("시장",       st.column_config.TextColumn("시장"))
+    add("종목명",     st.column_config.TextColumn("종목명"))
+    add("종목코드",   st.column_config.TextColumn("종목코드"))
+    add("LDY_SCORE", st.column_config.NumberColumn("LDY_SCORE", format="%.1f"))
+    add("종가",        st.column_config.NumberColumn("종가", format="%,d"))
+    add("추천매수가",  st.column_config.NumberColumn("추천매수가", format="%,d"))
+    add("손절가",      st.column_config.NumberColumn("손절가", format="%,d"))
+    add("추천매도가1", st.column_config.NumberColumn("목표1", format="%,d"))
+    add("추천매도가2", st.column_config.NumberColumn("목표2", format="%,d"))
+    add("RR1",       st.column_config.NumberColumn("RR1", format="%.2f"))
+    add("Now%",      st.column_config.NumberColumn("엔트리근접(%)", format="%.2f"))
+    add("T1여유%",    st.column_config.NumberColumn("목표1여유(%)", format="%.2f"))
+    add("SL여유%",    st.column_config.NumberColumn("손절여유(%)", format="%.2f"))
+    add("ERS",       st.column_config.NumberColumn("ERS", format="%.0f"))
+    add("거래대금(억원)", st.column_config.NumberColumn("거래대금(억원)", format="%,.0f"))
+    add("시가총액(억원)", st.column_config.NumberColumn("시가총액(억원)", format="%,.0f"))
+    add("RSI14",     st.column_config.NumberColumn("RSI14", format="%.1f"))
+    add("乖離%",      st.column_config.NumberColumn("乖離%", format="%.2f"))
+    add("MACD_slope",st.column_config.NumberColumn("MACD_slope", format="%.5f"))
+    add("Vol_Z",     st.column_config.NumberColumn("Vol_Z", format="%.2f"))
+    add("ret_5d_%",  st.column_config.NumberColumn("5일수익%", format="%.2f"))
+    add("ret_10d_%", st.column_config.NumberColumn("10일수익%", format="%.2f"))
+    add("EBS",       st.column_config.NumberColumn("EBS", format="%d"))
+    add("근거",       st.column_config.TextColumn("근거"))
+    return cfg
+
+st.subheader("오늘의 GLOBAL TOP 10", anchor=False)
+cols = ["LDY_RANK","통과","시장","종목명","종목코드","LDY_SCORE",
+        "종가","추천매수가","손절가","추천매도가1","추천매도가2",
+        "RR1","Now%","T1여유%","SL여유%","ERS",
+        "거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS","근거"]
+for c in cols:
+    if c not in top10.columns: top10[c]=np.nan
+
+# 형식 안정화
+fmt = top10.copy()
+int_cols = ["LDY_RANK","종가","추천매수가","손절가","추천매도가1","추천매도가2","EBS"]
+for c in int_cols:
+    if c in fmt.columns:
+        fmt[c] = pd.to_numeric(fmt[c], errors="coerce").round(0).astype("Int64")
+float_cols = ["LDY_SCORE","RR1","Now%","T1여유%","SL여유%","거래대금(억원)","시가총액(억원)",
+              "RSI14","乖離%","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%"]
+for c in float_cols:
+    if c in fmt.columns:
+        fmt[c] = pd.to_numeric(fmt[c], errors="coerce")
+
+st.data_editor(
+    fmt[cols],
+    key="tbl_global_top10",
+    width="stretch", height=520,
+    hide_index=True, disabled=True, num_rows="fixed",
+    column_config=colcfg(fmt),
 )
 
-with st.expander("ℹ️ 스코어 해석 가이드"):
-    st.markdown("""
-**GLOBAL_SCORE = 0.6·MOMO + 0.4·EV**  
-- **MOMO_SCORE(0~100)**: 돌파(신고가 프록시), 거래대금/볼륨 확장, 트렌드 품질, 스퀴즈→확장(+), 과열/저유동(–)  
-- **EV_SCORE(0~100)**: RR(목표1/손절), 손절여유·목표여유, Now 근접도(±1.5%), ERS(=EBS 컷+MACD_slope+RSI)  
-**추천 운용**: Top10 중 **Now% ≤ 1.0~1.5**, **SL여유% ≥ 3**, **Vol_Z ≥ 2**, **RSI 55~70** 우선 검토.
-""")
+st.download_button(
+    "📥 GLOBAL TOP 10 (CSV)",
+    data=top10[cols].to_csv(index=False, encoding="utf-8-sig"),
+    file_name="ldy_global_top10.csv",
+    mime="text/csv",
+    key="dl_global_top10",
+)
+
+# 전체 랭킹 CSV 다운만 제공(화면표시는 Top10만)
+st.download_button(
+    "📥 전체 랭킹 (CSV, 최대 2,000행)",
+    data=scored.sort_values("LDY_SCORE", ascending=False).head(2000)[cols].to_csv(index=False, encoding="utf-8-sig"),
+    file_name="ldy_global_rank_full.csv",
+    mime="text/csv",
+    key="dl_global_full",
+)
+
+st.caption("※ 품질게이트: EBS≥4 + 유동성 하드컷 기본 / 후보가 부족하면 자동 완화(EBS≥3, 완화 유동성)")
