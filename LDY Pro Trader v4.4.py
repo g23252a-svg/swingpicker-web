@@ -504,14 +504,45 @@ st.download_button(
     key="dl_global_top10_v44",
 )
 
-# 전체 랭킹(최대 2,000행) — 화면표시는 Top10만
-full_cols = list(dict.fromkeys(cols_download))  # 중복제거 순서보존
+# ===== [FIX] 전체 랭킹 CSV: 누락 컬럼 자동 보강 후 내보내기 =====
+def ensure_all_columns(df: pd.DataFrame, wanted: list[str]) -> pd.DataFrame:
+    out = df.copy()
+    missing = [c for c in wanted if c not in out.columns]
+    # 디버그 겸 화면에 경고
+    if missing:
+        st.warning("⚠️ 내보내기 누락 컬럼 자동 보강: " + ", ".join(missing))
+    for c in missing:
+        out[c] = np.nan
+    # 정렬된 고정 컬럼 순서로 반환
+    return out[wanted]
+
+# Top10에서 쓰던 고정 표시 컬럼(순서 그대로 재사용)
+full_cols = [
+    "LDY_RANK","통과","시장","종목명","종목코드","LDY_SCORE",
+    "종가","추천매수가","손절가","추천매도가1","추천매도가2",
+    "RR1","Now%","T1여유%","SL여유%","ERS",
+    "거래대금(억원)","시가총액(억원)","RSI14","乖離%","MACD_slope",
+    "Vol_Z","ret_5d_%","ret_10d_%","EBS","근거"
+]
+
+# 전체 랭킹 데이타 준비
+export_df = scored.sort_values("LDY_SCORE", ascending=False, na_position="last").copy()
+
+# '통과' 칼럼이 없는 경우(Top10에서만 만들었을 수 있음) → 전체에도 생성
+if "통과" not in export_df.columns:
+    export_df["통과"] = np.where(
+        pd.to_numeric(export_df.get("EBS"), errors="coerce") >= PASS_EBS, "🚀", ""
+    )
+
+# 컬럼 자동 보강 후, 상위 N행만 내보내기
+export_ready = ensure_all_columns(export_df, full_cols).head(2000)
+
 st.download_button(
     "📥 전체 랭킹 (CSV, 최대 2,000행)",
-    data=scored.sort_values("LDY_SCORE", ascending=False).head(2000)[full_cols].to_csv(index=False, encoding="utf-8-sig"),
+    data=export_ready.to_csv(index=False, encoding="utf-8-sig"),
     file_name="ldy_global_rank_full.csv",
     mime="text/csv",
-    key="dl_global_full_v44",
+    key="dl_global_full",
 )
+# ===============================================================
 
-st.caption("※ 품질게이트: EBS≥4 + 유동성 하드컷 기본 / 후보가 부족하면 자동 완화(EBS≥3, 완화 유동성). trade_logs.csv 있으면 P_hit 교정 적용.")
