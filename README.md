@@ -24,9 +24,16 @@
 * **Instant Chart:** HTS 없이 웹에서 즉시 60일 캔들 차트 및 진입가/손절가 확인
 * **Strategy Tags:** 돌파(BRK), 눌림(PULL) 등 전략별 자동 태깅
 
-## 🛠️ 설치 및 실행 (How to Run)
+## 🛠️ 실행 방법 (Usage)
 
-### 로컬 실행 (Local)
+### 🌐 웹에서 바로 보기 (Live Demo)
+복잡한 설치 과정 없이, 아래 버튼을 눌러 실시간 분석 결과를 확인하세요.
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ldy-quant.streamlit.app)
+
+### 💻 로컬 실행 (Local Installation)
+직접 코드를 수정하거나 로컬 환경에서 실행하려면 아래 순서를 따르세요.
+
 ```bash
 # 1. 레포지토리 클론
 git clone [https://github.com/g23252a-svg/swingpicker-web.git](https://github.com/g23252a-svg/swingpicker-web.git)
@@ -36,6 +43,7 @@ cd swingpicker-web
 pip install -r requirements.txt
 
 # 3. 수집기 실행 (데이터 생성)
+# (약 5~10분 소요, 완료 후 data 폴더에 csv 생성됨)
 python collector.py
 
 # 4. 대시보드 실행
