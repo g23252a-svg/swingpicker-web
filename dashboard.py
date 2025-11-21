@@ -100,19 +100,19 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty:
         return go.Figure()
 
-    # 캔들 차트 생성 (호버 텍스트 한글화 적용)
+    # [수정됨] tooltip 옵션 제거 및 hovertemplate으로 한글화 적용
     fig = go.Figure(data=[go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'],
         low=df['Low'], close=df['Close'],
-        name="주가", # 범례 이름 한글화
+        name="주가", 
         increasing_line_color='#ef5350', # 빨강 (상승)
         decreasing_line_color='#2979ff', # 파랑 (하락)
-        tooltip="x+y+text"
+        # 툴팁 내용 한글화 (날짜, 시가, 고가, 저가, 종가)
+        hovertemplate="<b>날짜: %{x|%Y-%m-%d}</b><br>시가: %{open:,}원<br>고가: %{high:,}원<br>저가: %{low:,}원<br>종가: %{close:,}원<extra></extra>"
     )])
 
     # 가로선 (진입/손절/목표) - 한글 라벨 적용
-    # (가격, 라벨, 선스타일, 색상)
     lines = [
         (entry, "🔵진입", "dash", "blue"),
         (stop, "🔴손절", "dot", "red"),
@@ -127,35 +127,38 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
                           annotation_position="top right",
                           annotation_font=dict(size=12, color=color))
 
-    # 이동평균선 (20일선, 60일선) - 한글 이름 적용
+    # 이동평균선 (20일선, 60일선)
     ma20 = df['Close'].rolling(20).mean()
     ma60 = df['Close'].rolling(60).mean()
     
     fig.add_trace(go.Scatter(
         x=df.index, y=ma20, 
         line=dict(color='orange', width=1.5), 
-        name='20일선 (생명선)'
+        name='20일선 (생명선)',
+        hovertemplate="20일선: %{y:,.0f}원<extra></extra>"
     ))
     fig.add_trace(go.Scatter(
         x=df.index, y=ma60, 
         line=dict(color='purple', width=1.5), 
-        name='60일선 (수급선)'
+        name='60일선 (수급선)',
+        hovertemplate="60일선: %{y:,.0f}원<extra></extra>"
     ))
 
-    # 레이아웃 설정 (날짜 포맷, 한글 제목 등)
+    # 레이아웃 설정
     fig.update_layout(
         title=dict(
             text=f"<b>{name}</b> ({code}) 일봉 차트",
             font=dict(size=20)
         ),
         yaxis_title="주가 (원)",
-        xaxis_tickformat = '%Y-%m-%d', # 날짜를 2025-11-21 형식으로 변환
+        yaxis_tickformat = ',', # Y축 가격에 콤마 찍기
+        xaxis_tickformat = '%Y-%m-%d', # 날짜 포맷
         xaxis_rangeslider_visible=False,
         template="plotly_dark",
         height=500,
         margin=dict(l=20, r=20, t=50, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        hovermode="x unified" # 마우스 올리면 모든 정보가 한 번에 보이게 설정
+        hovermode="x unified" # 마우스 올리면 통합 툴팁 표시
     )
     return fig
 
