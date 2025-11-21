@@ -469,7 +469,7 @@ if sel:
 # [Section 3] Table View
 st.subheader("📋 Daily Top 10 List", anchor=False)
 
-# [수정됨] 표 헤더와 용어를 100% 일치시켰습니다.
+# [v4.6 추가] 친절한 용어 설명 (접었다 폈다 하는 박스)
 with st.expander("❓ 표에 나오는 용어가 무슨 뜻인가요? (클릭)", expanded=False):
     st.markdown("""
     - **종합점수 (Score):** AI가 산출한 투자 매력도 (100점 만점)
@@ -489,8 +489,12 @@ if auth_status == "free":
     """)
 
 # ---------------------------------------------------------------------------
-# [데이터 포맷팅] 콤마(,) 찍기
+# [데이터 포맷팅] 콤마(,) 찍기 & 순위 재정렬(Reset Index)
 safe_view_df = view_df.copy()
+
+# 👇 [핵심 수정] 순위를 1부터 다시 매깁니다 (Re-ranking)
+safe_view_df = safe_view_df.reset_index(drop=True)
+safe_view_df["LDY_RANK"] = safe_view_df.index + 1  # 0부터 시작하니까 +1 해서 1등부터 표시
 
 price_cols = ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]
 for c in price_cols:
@@ -507,7 +511,6 @@ for c in float_cols:
 if "MFI14" in safe_view_df.columns:
      safe_view_df["MFI14"] = pd.to_numeric(safe_view_df["MFI14"], errors='coerce').fillna(0.0).apply(lambda x: f"{x:.1f}")
 
-# LDY_SCORE는 Progress Bar를 위해 '숫자'로 유지해야 함 (문자열 변환 안 함)
 if "LDY_SCORE" in safe_view_df.columns:
      safe_view_df["LDY_SCORE"] = pd.to_numeric(safe_view_df["LDY_SCORE"], errors='coerce').fillna(0.0)
 # ---------------------------------------------------------------------------
@@ -518,9 +521,8 @@ disp_cols = [
     "거래대금(억원)","ret_5d_%","WHY"
 ]
 
-# 👇 [여기가 핵심] 컬럼 이름 한글화 + 툴팁(help) 추가
 col_config = {
-    "LDY_RANK": st.column_config.NumberColumn("순위"),
+    "LDY_RANK": st.column_config.NumberColumn("순위", format="%d"),
     "LDY_SCORE": st.column_config.ProgressColumn("종합점수", help="AI가 분석한 투자 매력도 (100점 만점)", format="%.1f", min_value=0, max_value=100),
     "P_hit": st.column_config.NumberColumn("성공확률(%)", help="과거 패턴 매칭 시 예상 성공률"),
     
@@ -543,7 +545,6 @@ st.dataframe(
     column_config=col_config,
     height=400 if auth_status in ["admin", "member"] else 200 
 )
-
 # [Section 4] Downloads (관리자 전용 기능)
 if auth_status == "admin":
     full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
