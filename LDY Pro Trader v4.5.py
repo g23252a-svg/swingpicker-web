@@ -464,4 +464,4 @@ st.dataframe(
 
 # [Section 4] Downloads
 full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
-st.download_button("📥 Download Full Rank (CSV)", full_export.to_csv(index=False, encoding="utf-8-sig"), "ldy_rank_v45.csv")
+st.download_button("📥 Download Full Rank (CSV)", full_export.to_csv(index=False, encoding="cp949"), "ldy_rank_v45.csv")
