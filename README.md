@@ -34,7 +34,7 @@
 
 ```bash
 # 1. 레포지토리 클론
-git clone [https://github.com/g23252a-svg/swingpicker-web.git](https://github.com/g23252a-svg/swingpicker-web.git)
+git clone https://github.com/g23252a-svg/swingpicker-web.git
 cd swingpicker-web
 
 # 2. 필수 패키지 설치
