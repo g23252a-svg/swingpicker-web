@@ -372,6 +372,25 @@ top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100 # Simplifie
 
 # -------- UI Rendering --------
 
+# [관리자 잠금 로직 추가] ==========================================
+with st.sidebar:
+    st.divider()
+    st.header("🔐 관리자 / 유료회원")
+    admin_pw = st.text_input("비밀번호 입력", type="password", placeholder="Password")
+    
+    # 👇 여기에 본인이 원하는 비밀번호를 적으세요
+    SECRET_KEY = "2022322" 
+    
+    if admin_pw == SECRET_KEY:
+        is_admin = True
+        st.success("🔓 잠금 해제되었습니다.")
+        view_df = top10  # 전체 다 보여줌
+    else:
+        is_admin = False
+        st.info("🔒 무료 버전 (Top 3 공개)")
+        view_df = top10.head(3)  # 상위 3개만 자름
+# ================================================================
+
 # [Section 1] Market Radar
 kp_st, kp_df, kq_st, kq_df = get_market_status()
 col_m1, col_m2 = st.columns(2)
@@ -388,11 +407,11 @@ if kp_st == "Bear" and kq_st == "Bear":
 st.divider()
 
 # [Section 2] Instant Chart & Analysis
-st.subheader("🔭 Instant Analysis", anchor=False)
+st.subheader("🔭 Instant Analysis (상세 분석)", anchor=False)
 
-# Selection
-options = top10.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['ROUTE']}", axis=1).tolist()
-sel = st.selectbox("종목을 선택하여 상세 차트와 코멘트를 확인하세요:", options, index=0)
+# view_df(3개 혹은 전체)만 선택 옵션에 나옴
+options = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['ROUTE']}", axis=1).tolist()
+sel = st.selectbox("종목을 선택하여 상세 차트와 코멘트를 확인하세요:", options, index=0 if options else None)
 
 if sel:
     code = sel.split("(")[1].split(")")[0]
@@ -436,9 +455,16 @@ if sel:
 # [Section 3] Table View
 st.subheader("📋 Daily Top 10 List", anchor=False)
 
+# 관리자가 아니면 블러 처리된 느낌을 주기 위해 안내 메시지 표시
+if not is_admin:
+    st.warning("🔒 **무료 버전은 상위 3개 종목만 공개됩니다.**")
+    st.markdown("""
+    > **나머지 7개 종목과 전체 데이터를 보고 싶으신가요?** > 🚀 **[LDY Pro Trader 정식 버전 구매하기 (링크)](https://your-sales-link.com)** > *서버비 0원, 평생 소장 가능한 소스코드 패키지를 제공합니다.*
+    """)
+
 disp_cols = [
     "LDY_RANK","통과","ROUTE","시장","종목명","종목코드","LDY_SCORE","P_hit",
-    "종가","추천매수가","손절가","추천매도가1","RR1","Now%","ERS",
+    "종가","추천매수가","손절가","추천매도가1","RR1","Now%","MFI14", 
     "거래대금(억원)","ret_5d_%","WHY"
 ]
 
@@ -451,24 +477,28 @@ col_config = {
     "손절가": st.column_config.NumberColumn("Stop", format="%,d"),
     "추천매도가1": st.column_config.NumberColumn("Target", format="%,d"),
     "Now%": st.column_config.NumberColumn("Gap%", format="%.2f"),
+    "MFI14": st.column_config.NumberColumn("MFI(자금)", format="%.1f"),
     "거래대금(억원)": st.column_config.NumberColumn("Amt(억)", format="%,d"),
 }
 
+# view_df (필터링된 데이터) 사용
 st.dataframe(
-    top10[disp_cols],
+    view_df[disp_cols],
     hide_index=True,
     use_container_width=True,
     column_config=col_config,
-    height=400
+    height=400 if is_admin else 200 # 무료일 땐 표 높이를 줄임
 )
 
-# [Section 4] Downloads
-full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
-csv_data = full_export.to_csv(index=False).encode('utf-8-sig')  # 문자열을 utf-8-sig '바이트'로 변환
-
-st.download_button(
-    label="📥 Download Full Rank (CSV)",
-    data=csv_data,
-    file_name="ldy_rank_v45.csv",
-    mime="text/csv"
-)
+# [Section 4] Downloads (관리자만 다운로드 가능하게 막기)
+if is_admin:
+    full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
+    csv_data = full_export.to_csv(index=False).encode('utf-8-sig')
+    st.download_button(
+        label="📥 Download Full Rank (CSV)",
+        data=csv_data,
+        file_name="ldy_rank_v46.csv",
+        mime="text/csv"
+    )
+else:
+    st.button("📥 Download Full Rank (CSV)", disabled=True, help="유료 버전에서만 다운로드가 가능합니다.")
