@@ -507,8 +507,9 @@ for c in float_cols:
 if "MFI14" in safe_view_df.columns:
      safe_view_df["MFI14"] = pd.to_numeric(safe_view_df["MFI14"], errors='coerce').fillna(0.0).apply(lambda x: f"{x:.1f}")
 
+# LDY_SCORE는 Progress Bar를 위해 '숫자'로 유지해야 함 (문자열 변환 안 함)
 if "LDY_SCORE" in safe_view_df.columns:
-     safe_view_df["LDY_SCORE"] = pd.to_numeric(safe_view_df["LDY_SCORE"], errors='coerce').fillna(0.0).apply(lambda x: f"{x:.1f}")
+     safe_view_df["LDY_SCORE"] = pd.to_numeric(safe_view_df["LDY_SCORE"], errors='coerce').fillna(0.0)
 # ---------------------------------------------------------------------------
 
 disp_cols = [
@@ -535,9 +536,6 @@ col_config = {
     "WHY": st.column_config.TextColumn("상세분석", width="medium", help="MOM:힘, LIQ:거래량, TEC:기술적, PEN:감점"),
 }
 
-# LDY_SCORE는 숫자형으로 복구 (Progress Bar용)
-safe_view_df["LDY_SCORE"] = pd.to_numeric(view_df["LDY_SCORE"], errors='coerce').fillna(0)
-
 st.dataframe(
     safe_view_df[disp_cols],
     hide_index=True,
@@ -546,19 +544,20 @@ st.dataframe(
     height=400 if auth_status in ["admin", "member"] else 200 
 )
 
-# 주의: LDY_SCORE는 위에서 문자열로 바꾸지 말고 숫자 그대로 두어야 Progress Bar가 작동함
-# 따라서 위 코드에서 LDY_SCORE 변환 부분은 주석 처리하거나 삭제하고, 
-# safe_view_df["LDY_SCORE"]는 건드리지 않는 것이 좋습니다.
-# (위 코드에서는 편의상 변환했지만, Progress Bar를 살리기 위해 아래에서 다시 복구)
-safe_view_df["LDY_SCORE"] = pd.to_numeric(view_df["LDY_SCORE"], errors='coerce').fillna(0)
-
-st.dataframe(
-    safe_view_df[disp_cols],
-    hide_index=True,
-    use_container_width=True,
-    column_config=col_config,
-    height=400 if auth_status in ["admin", "member"] else 200 
-)
+# [Section 4] Downloads (관리자 전용 기능)
+if auth_status == "admin":
+    full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
+    csv_data = full_export.to_csv(index=False).encode('utf-8-sig')
+    st.download_button(
+        label="📥 데이터 다운로드 (Admin Only)",
+        data=csv_data,
+        file_name="ldy_rank_v46.csv",
+        mime="text/csv"
+    )
+elif auth_status == "member":
+    st.button("📥 데이터 다운로드", disabled=True, help="데이터 다운로드는 관리자 전용 기능입니다.")
+else:
+    st.button("📥 전체 데이터 다운로드 (유료 전용)", disabled=True)
 
 # [Section 4] Downloads (관리자 전용 기능)
 if auth_status == "admin":
