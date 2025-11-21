@@ -46,6 +46,8 @@ python collector.py
 
 # 4. 대시보드 실행
 streamlit run dashboard.py
+
+
 📂 폴더 구조 (Structure)
 collector.py: 데이터 수집 및 퀀트 스코어링 엔진 (Backend)
 
@@ -54,7 +56,6 @@ dashboard.py: 웹 대시보드 및 차트 시각화 (Frontend)
 data/: 수집된 추천 종목 CSV 파일 저장소
 
 .github/workflows/: 매일 자동 실행을 위한 스케줄러 설정
-
 
 ⚠️ 면책 조항 (Disclaimer)
 본 소프트웨어는 투자를 위한 보조 도구이며, 투자 자문이나 권유가 아닙니다. 본 프로그램이 제공하는 데이터에 의한 투자 결과에 대한 법적 책임은 사용자에게 있습니다.
