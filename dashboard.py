@@ -372,23 +372,37 @@ top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100 # Simplifie
 
 # -------- UI Rendering --------
 
-# [관리자 잠금 로직 추가] ==========================================
+# [관리자/유료회원 권한 관리 로직] ====================================
 with st.sidebar:
     st.divider()
-    st.header("🔐 관리자 / 유료회원")
-    admin_pw = st.text_input("비밀번호 입력", type="password", placeholder="Password")
+    st.header("🔐 로그인 (Login)")
+    input_pw = st.text_input("비밀번호를 입력하세요", type="password", placeholder="Password")
     
-    # 👇 여기에 본인이 원하는 비밀번호를 적으세요
-    SECRET_KEY = "2022322" 
+    # 👇 1. 관리자 비밀번호 (다운로드 권한 O)
+    ADMIN_KEY = "2022322"
     
-    if admin_pw == SECRET_KEY:
-        is_admin = True
-        st.success("🔓 잠금 해제되었습니다.")
-        view_df = top10  # 전체 다 보여줌
+    # 👇 2. 유료회원 비밀번호 (매달 변경 가능, 6자리 예시)
+    MEMBER_KEY = "240521" 
+    
+    # 권한 상태 변수 초기화
+    auth_status = "free" # 기본은 무료
+    
+    if input_pw == ADMIN_KEY:
+        auth_status = "admin"
+        st.success("✅ 관리자 모드 (다운로드 가능)")
+        view_df = top10  # 전체 공개
+        
+    elif input_pw == MEMBER_KEY:
+        auth_status = "member"
+        st.success("🎉 환영합니다! (유료 회원)")
+        view_df = top10  # 전체 공개
+        
     else:
-        is_admin = False
+        auth_status = "free"
+        if input_pw: # 비밀번호를 쳤는데 틀린 경우
+            st.error("❌ 비밀번호가 일치하지 않습니다.")
         st.info("🔒 무료 버전 (Top 3 공개)")
-        view_df = top10.head(3)  # 상위 3개만 자름
+        view_df = top10.head(3)  # 3개만 공개
 # ================================================================
 
 # [Section 1] Market Radar
@@ -490,15 +504,17 @@ st.dataframe(
     height=400 if is_admin else 200 # 무료일 땐 표 높이를 줄임
 )
 
-# [Section 4] Downloads (관리자만 다운로드 가능하게 막기)
-if is_admin:
+# [Section 4] Downloads (관리자 전용 기능)
+if auth_status == "admin":
     full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
     csv_data = full_export.to_csv(index=False).encode('utf-8-sig')
     st.download_button(
-        label="📥 Download Full Rank (CSV)",
+        label="📥 데이터 다운로드 (Admin Only)",
         data=csv_data,
         file_name="ldy_rank_v46.csv",
         mime="text/csv"
     )
+elif auth_status == "member":
+    st.button("📥 데이터 다운로드", disabled=True, help="데이터 다운로드는 관리자 전용 기능입니다.")
 else:
-    st.button("📥 Download Full Rank (CSV)", disabled=True, help="유료 버전에서만 다운로드가 가능합니다.")
+    st.button("📥 전체 데이터 다운로드 (유료 전용)", disabled=True)
