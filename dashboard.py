@@ -100,42 +100,62 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty:
         return go.Figure()
 
+    # 캔들 차트 생성 (호버 텍스트 한글화 적용)
     fig = go.Figure(data=[go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'],
         low=df['Low'], close=df['Close'],
-        name=name,
-        increasing_line_color='#ef5350', # Red (KR style up)
-        decreasing_line_color='#2979ff'  # Blue (KR style down)
+        name="주가", # 범례 이름 한글화
+        increasing_line_color='#ef5350', # 빨강 (상승)
+        decreasing_line_color='#2979ff', # 파랑 (하락)
+        tooltip="x+y+text"
     )])
 
-    # 가로선 (Entry, Stop, Target)
-    colors = {"Entry": "blue", "Stop": "red", "Target1": "green", "Target2": "green"}
+    # 가로선 (진입/손절/목표) - 한글 라벨 적용
+    # (가격, 라벨, 선스타일, 색상)
     lines = [
-        (entry, "Entry", "dash", "blue"),
-        (stop, "Stop", "dot", "red"),
-        (target1, "Tgt1", "dot", "green"),
-        (target2, "Tgt2", "dot", "green")
+        (entry, "🔵진입", "dash", "blue"),
+        (stop, "🔴손절", "dot", "red"),
+        (target1, "🟢목표1", "dot", "green"),
+        (target2, "🟢목표2", "dot", "green")
     ]
     
     for val, label, dash, color in lines:
         if pd.notna(val) and val > 0:
             fig.add_hline(y=val, line_dash=dash, line_color=color, 
-                          annotation_text=f"{label}: {val:,.0f}", annotation_position="top right")
+                          annotation_text=f"{label}: {val:,.0f}", 
+                          annotation_position="top right",
+                          annotation_font=dict(size=12, color=color))
 
-    # 이동평균선 (20, 60)
+    # 이동평균선 (20일선, 60일선) - 한글 이름 적용
     ma20 = df['Close'].rolling(20).mean()
     ma60 = df['Close'].rolling(60).mean()
-    fig.add_trace(go.Scatter(x=df.index, y=ma20, line=dict(color='orange', width=1), name='MA20'))
-    fig.add_trace(go.Scatter(x=df.index, y=ma60, line=dict(color='purple', width=1), name='MA60'))
+    
+    fig.add_trace(go.Scatter(
+        x=df.index, y=ma20, 
+        line=dict(color='orange', width=1.5), 
+        name='20일선 (생명선)'
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=ma60, 
+        line=dict(color='purple', width=1.5), 
+        name='60일선 (수급선)'
+    ))
 
+    # 레이아웃 설정 (날짜 포맷, 한글 제목 등)
     fig.update_layout(
-        title=f"<b>{name}</b> ({code}) - Daily Chart",
+        title=dict(
+            text=f"<b>{name}</b> ({code}) 일봉 차트",
+            font=dict(size=20)
+        ),
+        yaxis_title="주가 (원)",
+        xaxis_tickformat = '%Y-%m-%d', # 날짜를 2025-11-21 형식으로 변환
         xaxis_rangeslider_visible=False,
         template="plotly_dark",
         height=500,
-        margin=dict(l=20, r=20, t=40, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hovermode="x unified" # 마우스 올리면 모든 정보가 한 번에 보이게 설정
     )
     return fig
 
@@ -421,7 +441,7 @@ if kp_st == "Bear" and kq_st == "Bear":
 st.divider()
 
 # [Section 2] Instant Chart & Analysis
-st.subheader("🔭 Instant Analysis (상세 분석)", anchor=False)
+st.subheader("🔭 종목 상세 차트 (60일)", anchor=False)
 
 # view_df(3개 혹은 전체)만 선택 옵션에 나옴
 options = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['ROUTE']}", axis=1).tolist()
