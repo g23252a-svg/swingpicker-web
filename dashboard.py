@@ -85,13 +85,19 @@ def get_market_status():
     return kp_stat, kp_diff, kq_stat, kq_diff
 
 # -------- Helpers: Charting (v4.6 NEW) --------
-@st.cache_data(ttl=600) # 차트는 10분 캐시
+@st.cache_data(ttl=600)
 def get_stock_chart_data(code):
     if not FDR_OK: return None
     try:
-        # 넉넉히 4달치 가져와서 60일 표시
-        start_date = datetime.now() - timedelta(days=120)
+        # 1. 넉넉하게 1년치 데이터를 가져옵니다. (이동평균선 계산용)
+        start_date = datetime.now() - timedelta(days=365)
         df = fdr.DataReader(code, start_date)
+
+        # 2. 여기서 미리 이동평균선을 계산합니다.
+        df['MA20'] = df['Close'].rolling(window=20).mean()
+        df['MA60'] = df['Close'].rolling(window=60).mean()
+
+        # 3. 계산이 끝난 데이터 중 최근 60일치만 잘라서 반환합니다.
         return df.tail(60)
     except:
         return None
@@ -100,19 +106,18 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty:
         return go.Figure()
 
-    # [수정됨] tooltip 옵션 제거 및 hovertemplate으로 한글화 적용
+    # 캔들 차트 생성
     fig = go.Figure(data=[go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'],
         low=df['Low'], close=df['Close'],
         name="주가", 
-        increasing_line_color='#ef5350', # 빨강 (상승)
-        decreasing_line_color='#2979ff', # 파랑 (하락)
-        # 툴팁 내용 한글화 (날짜, 시가, 고가, 저가, 종가)
+        increasing_line_color='#ef5350', # 빨강
+        decreasing_line_color='#2979ff', # 파랑
         hovertemplate="<b>날짜: %{x|%Y-%m-%d}</b><br>시가: %{open:,}원<br>고가: %{high:,}원<br>저가: %{low:,}원<br>종가: %{close:,}원<extra></extra>"
     )])
 
-    # 가로선 (진입/손절/목표) - 한글 라벨 적용
+    # 가로선 (진입/손절/목표)
     lines = [
         (entry, "🔵진입", "dash", "blue"),
         (stop, "🔴손절", "dot", "red"),
@@ -127,38 +132,38 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
                           annotation_position="top right",
                           annotation_font=dict(size=12, color=color))
 
-    # 이동평균선 (20일선, 60일선)
-    ma20 = df['Close'].rolling(20).mean()
-    ma60 = df['Close'].rolling(60).mean()
-    
-    fig.add_trace(go.Scatter(
-        x=df.index, y=ma20, 
-        line=dict(color='orange', width=1.5), 
-        name='20일선 (생명선)',
-        hovertemplate="20일선: %{y:,.0f}원<extra></extra>"
-    ))
-    fig.add_trace(go.Scatter(
-        x=df.index, y=ma60, 
-        line=dict(color='purple', width=1.5), 
-        name='60일선 (수급선)',
-        hovertemplate="60일선: %{y:,.0f}원<extra></extra>"
-    ))
+    # [수정됨] 이동평균선: 데이터프레임에 있는 'MA20', 'MA60' 컬럼을 그대로 사용
+    if 'MA20' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['MA20'], 
+            line=dict(color='orange', width=1.5), 
+            name='20일선 (생명선)',
+            hovertemplate="20일선: %{y:,.0f}원<extra></extra>"
+        ))
+        
+    if 'MA60' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['MA60'], 
+            line=dict(color='purple', width=1.5), 
+            name='60일선 (수급선)',
+            hovertemplate="60일선: %{y:,.0f}원<extra></extra>"
+        ))
 
-    # 레이아웃 설정
+    # 레이아웃
     fig.update_layout(
         title=dict(
             text=f"<b>{name}</b> ({code}) 일봉 차트",
             font=dict(size=20)
         ),
         yaxis_title="주가 (원)",
-        yaxis_tickformat = ',', # Y축 가격에 콤마 찍기
-        xaxis_tickformat = '%Y-%m-%d', # 날짜 포맷
+        yaxis_tickformat = ',', 
+        xaxis_tickformat = '%Y-%m-%d',
         xaxis_rangeslider_visible=False,
         template="plotly_dark",
         height=500,
         margin=dict(l=20, r=20, t=50, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        hovermode="x unified" # 마우스 올리면 통합 툴팁 표시
+        hovermode="x unified"
     )
     return fig
 
