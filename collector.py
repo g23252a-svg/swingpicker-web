@@ -72,7 +72,26 @@ def calc_mfi(high, low, close, vol, period=14):
     return mfi
 
 def round_to_tick(price: float) -> int:
-    return int(round(price / 10.0) * 10)
+    """
+    한국 주식 시장 호가 단위(Tick Size)에 맞춰 가격을 보정합니다.
+    (KOSPI/KOSDAQ 통합 기준)
+    """
+    if price < 2000: 
+        tick = 1
+    elif price < 5000: 
+        tick = 5
+    elif price < 20000: 
+        tick = 10
+    elif price < 50000: 
+        tick = 50
+    elif price < 200000: 
+        tick = 100
+    elif price < 500000: 
+        tick = 500  # 에이피알은 여기에 해당 (500원 단위)
+    else: 
+        tick = 1000
+        
+    return int(round(price / tick) * tick)
 
 def _safe_sum(x) -> float:
     return pd.to_numeric(x, errors="coerce").fillna(0).sum()
