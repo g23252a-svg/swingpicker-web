@@ -1,4 +1,8 @@
 streamlit>=1.34
 pandas>=2.2
 numpy>=1.26
+requests>=2.31
+plotly>=5.20.0
+finance-datareader>=0.9.6
 pykrx==1.0.51
+tqdm>=4.66
