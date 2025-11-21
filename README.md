@@ -4,8 +4,6 @@
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.34+-FF4B4B.svg)
 ![Status](https://img.shields.io/badge/Status-Active-success.svg)
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ldy-quant.streamlit.app)
-
 
 ## 📈 개요 (Overview)
 **LDY Pro Trader**는 직장인을 위한 자동화된 스윙 트레이딩 분석 시스템입니다.  
