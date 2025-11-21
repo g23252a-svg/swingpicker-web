@@ -469,6 +469,18 @@ if sel:
 # [Section 3] Table View
 st.subheader("📋 Daily Top 10 List", anchor=False)
 
+# [v4.6 추가] 친절한 용어 설명 (접었다 폈다 하는 박스)
+with st.expander("❓ 표에 나오는 용어가 무슨 뜻인가요? (클릭)", expanded=False):
+    st.markdown("""
+    - **Score (점수):** AI가 산출한 종합 매력도 (100점 만점)
+    - **Prob (확률):** 과거 데이터 기반 상승 성공 확률
+    - **RR (손익비):** 내가 감수할 손실 대비 기대 수익의 비율 (1.2 이상이면 좋음)
+    - **MFI (수급):** '돈의 힘'을 나타내는 지표. **60 이상**이면 세력 매집 구간
+    - **WHY (분석요약):** 점수 산정 근거
+        - `MOM`: 모멘텀(상승 힘) / `LIQ`: 유동성(거래대금)
+        - `TEC`: 기술적 위치 / `PEN`: 과열 패널티(감점)
+    """)
+
 # 관리자가 아니면 블러 처리된 느낌을 주기 위해 안내 메시지 표시
 if auth_status == "free":
     st.warning("🔒 **무료 버전은 상위 3개 종목만 공개됩니다.**")
@@ -477,33 +489,26 @@ if auth_status == "free":
     """)
 
 # ---------------------------------------------------------------------------
-# [수정됨] 콤마를 강제로 찍는 확실한 방법 (문자열 포맷팅)
+# [데이터 포맷팅] 콤마(,) 찍기
 safe_view_df = view_df.copy()
 
-# 1. 가격 컬럼 (정수 + 콤마)
 price_cols = ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]
 for c in price_cols:
     if c in safe_view_df.columns:
-        # 숫자로 변환 후, 파이썬 f-string으로 콤마를 직접 찍어버림 (예: 262,500)
         safe_view_df[c] = pd.to_numeric(safe_view_df[c], errors='coerce').fillna(0)
-        # 포맷팅 적용 (천 단위 콤마) -> 이제부터는 숫자가 아니라 문자열임
         safe_view_df[c] = safe_view_df[c].apply(lambda x: f"{int(x):,}")
 
-# 2. 실수 컬럼 (소수점 2자리)
 float_cols = ["Now%", "ret_5d_%", "RR1"]
 for c in float_cols:
     if c in safe_view_df.columns:
         safe_view_df[c] = pd.to_numeric(safe_view_df[c], errors='coerce').fillna(0.0)
         safe_view_df[c] = safe_view_df[c].apply(lambda x: f"{x:.2f}")
 
-# 3. MFI (소수점 1자리)
 if "MFI14" in safe_view_df.columns:
      safe_view_df["MFI14"] = pd.to_numeric(safe_view_df["MFI14"], errors='coerce').fillna(0.0).apply(lambda x: f"{x:.1f}")
 
-# 4. Score (소수점 1자리)
 if "LDY_SCORE" in safe_view_df.columns:
      safe_view_df["LDY_SCORE"] = pd.to_numeric(safe_view_df["LDY_SCORE"], errors='coerce').fillna(0.0).apply(lambda x: f"{x:.1f}")
-
 # ---------------------------------------------------------------------------
 
 disp_cols = [
@@ -512,25 +517,34 @@ disp_cols = [
     "거래대금(억원)","ret_5d_%","WHY"
 ]
 
-# 컬럼 설정 (이제 데이터 자체가 콤마가 찍힌 문자열이라 format 옵션 불필요)
+# 👇 [여기가 핵심] 컬럼 이름 한글화 + 툴팁(help) 추가
 col_config = {
-    "LDY_RANK": st.column_config.NumberColumn("RANK"),
-    # LDY_SCORE는 Progress Bar를 유지하기 위해 문자열 변환에서 제외하거나, 
-    # 위에서 변환하지 말고 여기서 format을 쓰는 게 낫지만, 
-    # 확실한 통일성을 위해 그냥 텍스트로 보여주는 게 깔끔할 수도 있음. 
-    # 하지만 Progress Bar가 예쁘니 스코어만 예외처리 합니다.
-    "LDY_SCORE": st.column_config.ProgressColumn("Score", format="%.1f", min_value=0, max_value=100), 
-    "P_hit": st.column_config.NumberColumn("Prob(%)", format="%.1f"),
+    "LDY_RANK": st.column_config.NumberColumn("순위"),
+    "LDY_SCORE": st.column_config.ProgressColumn("종합점수", help="AI가 분석한 투자 매력도 (100점 만점)", format="%.1f", min_value=0, max_value=100),
+    "P_hit": st.column_config.NumberColumn("성공확률(%)", help="과거 패턴 매칭 시 예상 성공률"),
     
-    # 나머지는 이미 텍스트로 변환되었으므로 TextColumn으로 처리
-    "종가": st.column_config.TextColumn("Close"),
-    "추천매수가": st.column_config.TextColumn("Entry"),
-    "손절가": st.column_config.TextColumn("Stop"),
-    "추천매도가1": st.column_config.TextColumn("Target"),
-    "Now%": st.column_config.TextColumn("Gap%"),
-    "MFI14": st.column_config.TextColumn("MFI(자금)"),
-    "거래대금(억원)": st.column_config.TextColumn("Amt(억)"),
+    "종가": st.column_config.TextColumn("현재가"),
+    "추천매수가": st.column_config.TextColumn("진입가", help="분할 매수 권장 가격"),
+    "손절가": st.column_config.TextColumn("손절가", help="이 가격 이탈 시 기계적 매도 요망"),
+    "추천매도가1": st.column_config.TextColumn("목표가", help="1차 수익 실현 목표가"),
+    
+    "RR1": st.column_config.TextColumn("손익비", help="기대수익 / 손실위험 비율 (높을수록 좋음)"),
+    "Now%": st.column_config.TextColumn("괴리율", help="현재가와 진입가의 차이 (%)"),
+    "MFI14": st.column_config.TextColumn("수급(MFI)", help="자금 유입 강도 (60이상: 세력 매집)"),
+    "거래대금(억원)": st.column_config.TextColumn("대금(억)"),
+    "WHY": st.column_config.TextColumn("상세분석", width="medium", help="MOM:힘, LIQ:거래량, TEC:기술적, PEN:감점"),
 }
+
+# LDY_SCORE는 숫자형으로 복구 (Progress Bar용)
+safe_view_df["LDY_SCORE"] = pd.to_numeric(view_df["LDY_SCORE"], errors='coerce').fillna(0)
+
+st.dataframe(
+    safe_view_df[disp_cols],
+    hide_index=True,
+    use_container_width=True,
+    column_config=col_config,
+    height=400 if auth_status in ["admin", "member"] else 200 
+)
 
 # 주의: LDY_SCORE는 위에서 문자열로 바꾸지 말고 숫자 그대로 두어야 Progress Bar가 작동함
 # 따라서 위 코드에서 LDY_SCORE 변환 부분은 주석 처리하거나 삭제하고, 
