@@ -476,6 +476,25 @@ if auth_status == "free":
     > **나머지 7개 종목과 전체 데이터를 보고 싶으신가요?** > 🚀 **[LDY Pro Trader 정식 버전 구매하기 (링크)](https://your-sales-link.com)** > *서버비 0원, 평생 소장 가능한 소스코드 패키지를 제공합니다.*
     """)
 
+# ---------------------------------------------------------------------------
+# [수정됨] 콤마 표시를 위한 강제 형변환 (이 부분이 핵심입니다!)
+# 데이터를 수정하기 위해 복사본을 만듭니다.
+safe_view_df = view_df.copy()
+
+# 가격 컬럼들을 강제로 '정수(int)'로 변환합니다.
+price_cols = ["종가", "추천매수가", "손절가", "추천매도가1"]
+for c in price_cols:
+    if c in safe_view_df.columns:
+        # 에러 방지를 위해 숫자가 아닌 건 0으로 바꾸고 정수로 변환
+        safe_view_df[c] = pd.to_numeric(safe_view_df[c], errors='coerce').fillna(0).astype(int)
+
+# 거래대금 같은 실수(소수점) 컬럼도 숫자로 확실히 변환
+float_cols = ["거래대금(억원)", "Now%", "MFI14", "LDY_SCORE", "P_hit"]
+for c in float_cols:
+    if c in safe_view_df.columns:
+        safe_view_df[c] = pd.to_numeric(safe_view_df[c], errors='coerce').fillna(0.0)
+# ---------------------------------------------------------------------------
+
 disp_cols = [
     "LDY_RANK","통과","ROUTE","시장","종목명","종목코드","LDY_SCORE","P_hit",
     "종가","추천매수가","손절가","추천매도가1","RR1","Now%","MFI14", 
@@ -487,7 +506,7 @@ col_config = {
     "LDY_SCORE": st.column_config.ProgressColumn("Score", format="%.1f", min_value=0, max_value=100),
     "P_hit": st.column_config.NumberColumn("Prob(%)", format="%.1f"),
     
-    # 👇 여기 가격 관련 컬럼들에 '%,d' 포맷을 적용했습니다.
+    # 👇 이제 확실히 숫자가 되었으므로 콤마(,)가 적용됩니다.
     "종가": st.column_config.NumberColumn("Close", format="%,d"),
     "추천매수가": st.column_config.NumberColumn("Entry", format="%,d"),
     "손절가": st.column_config.NumberColumn("Stop", format="%,d"),
@@ -495,16 +514,16 @@ col_config = {
     
     "Now%": st.column_config.NumberColumn("Gap%", format="%.2f"),
     "MFI14": st.column_config.NumberColumn("MFI(자금)", format="%.1f"),
-    "거래대금(억원)": st.column_config.NumberColumn("Amt(억)", format="%,d"),
+    "거래대금(억원)": st.column_config.NumberColumn("Amt(억)", format="%,d"), # 억 단위도 콤마
 }
 
-# view_df (필터링된 데이터) 사용
+# safe_view_df (형변환된 데이터) 사용
 st.dataframe(
-    view_df[disp_cols],
+    safe_view_df[disp_cols],
     hide_index=True,
     use_container_width=True,
     column_config=col_config,
-    height=400 if auth_status in ["admin", "member"] else 200 # 무료일 땐 표 높이를 줄임
+    height=400 if auth_status in ["admin", "member"] else 200 
 )
 
 # [Section 4] Downloads (관리자 전용 기능)
