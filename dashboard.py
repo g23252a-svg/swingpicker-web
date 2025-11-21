@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v4.5 — Global Rank (Market Radar + Instant Chart + Context)
+LDY Pro Trader v4.6 — Global Rank (Market Radar + Instant Chart + Context)
 - Market Radar: KOSPI/KOSDAQ 이동평균선 기반 시장 국면(Bull/Bear) 실시간 판단
 - Instant Chart: Top 10 종목 클릭 시 최근 60일 캔들 차트 및 진입/청산 라인 시각화
 - Scoring: 기존 v4.4의 복합 점수(LDY_SCORE) 알고리즘 계승
@@ -25,8 +25,8 @@ except Exception:
     PYKRX_OK = False
 
 # -------- Page Config --------
-st.set_page_config(page_title="LDY Pro Trader v4.5", layout="wide", page_icon="📈")
-st.title("🏆 LDY Pro Trader v4.5")
+st.set_page_config(page_title="LDY Pro Trader v4.6", layout="wide", page_icon="📈")
+st.title("🏆 LDY Pro Trader v4.6")
 st.caption("Global Rank Scoring + Market Radar + Instant Chart Visualization")
 
 # -------- Constants --------
@@ -59,7 +59,7 @@ def load_csv_path(path: str) -> pd.DataFrame:
 def log_src(df: pd.DataFrame, src: str):
     st.toast(f"Data Loaded: {src} ({len(df)} rows)", icon="✅")
 
-# -------- Helpers: Market Radar (v4.5 NEW) --------
+# -------- Helpers: Market Radar (v4.6 NEW) --------
 @st.cache_data(ttl=3600)
 def get_market_status():
     """KOSPI, KOSDAQ 지수의 20일선 위/아래 여부 판단"""
@@ -84,7 +84,7 @@ def get_market_status():
     kq_stat, kq_diff = _check('KQ11') # KOSDAQ
     return kp_stat, kp_diff, kq_stat, kq_diff
 
-# -------- Helpers: Charting (v4.5 NEW) --------
+# -------- Helpers: Charting (v4.6 NEW) --------
 @st.cache_data(ttl=600) # 차트는 10분 캐시
 def get_stock_chart_data(code):
     if not FDR_OK: return None
