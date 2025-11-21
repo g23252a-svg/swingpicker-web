@@ -552,24 +552,20 @@ if auth_status == "admin":
         label="📥 데이터 다운로드 (Admin Only)",
         data=csv_data,
         file_name="ldy_rank_v46.csv",
-        mime="text/csv"
+        mime="text/csv",
+        key="btn_admin_download"  # 👈 에러 방지용 고유키 추가
     )
 elif auth_status == "member":
-    st.button("📥 데이터 다운로드", disabled=True, help="데이터 다운로드는 관리자 전용 기능입니다.")
+    st.button(
+        "📥 데이터 다운로드", 
+        disabled=True, 
+        help="데이터 다운로드는 관리자 전용 기능입니다.",
+        key="btn_member_download" # 👈 에러 방지용 고유키 추가
+    )
 else:
-    st.button("📥 전체 데이터 다운로드 (유료 전용)", disabled=True)
+    st.button(
+        "📥 전체 데이터 다운로드 (유료 전용)", 
+        disabled=True,
+        key="btn_free_download"   # 👈 에러 방지용 고유키 추가
+    )
 
-# [Section 4] Downloads (관리자 전용 기능)
-if auth_status == "admin":
-    full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
-    csv_data = full_export.to_csv(index=False).encode('utf-8-sig')
-    st.download_button(
-        label="📥 데이터 다운로드 (Admin Only)",
-        data=csv_data,
-        file_name="ldy_rank_v46.csv",
-        mime="text/csv"
-    )
-elif auth_status == "member":
-    st.button("📥 데이터 다운로드", disabled=True, help="데이터 다운로드는 관리자 전용 기능입니다.")
-else:
-    st.button("📥 전체 데이터 다운로드 (유료 전용)", disabled=True)
