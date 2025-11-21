@@ -464,4 +464,11 @@ st.dataframe(
 
 # [Section 4] Downloads
 full_export = scored.sort_values("LDY_SCORE", ascending=False).head(2000)
-st.download_button("📥 Download Full Rank (CSV)", full_export.to_csv(index=False, encoding="cp949"), "ldy_rank_v45.csv")
+csv_data = full_export.to_csv(index=False).encode('utf-8-sig')  # 문자열을 utf-8-sig '바이트'로 변환
+
+st.download_button(
+    label="📥 Download Full Rank (CSV)",
+    data=csv_data,
+    file_name="ldy_rank_v45.csv",
+    mime="text/csv"
+)
