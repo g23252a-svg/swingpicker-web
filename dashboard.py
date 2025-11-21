@@ -382,7 +382,7 @@ with st.sidebar:
     ADMIN_KEY = "2022322"
     
     # 👇 2. 유료회원 비밀번호 (매달 변경 가능, 6자리 예시)
-    MEMBER_KEY = "240521" 
+    MEMBER_KEY = "251121" 
     
     # 권한 상태 변수 초기화
     auth_status = "free" # 기본은 무료
