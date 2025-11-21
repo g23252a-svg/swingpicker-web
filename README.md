@@ -45,7 +45,7 @@ pip install -r requirements.txt
 python collector.py
 
 # 4. 대시보드 실행
-streamlit run dashboard.py'''
+streamlit run dashboard.py```
 
 📂 폴더 구조 (Structure)
 collector.py: 데이터 수집 및 퀀트 스코어링 엔진 (Backend)
