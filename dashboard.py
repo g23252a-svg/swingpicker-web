@@ -486,10 +486,13 @@ col_config = {
     "LDY_RANK": st.column_config.NumberColumn("RANK", format="%d"),
     "LDY_SCORE": st.column_config.ProgressColumn("Score", format="%.1f", min_value=0, max_value=100),
     "P_hit": st.column_config.NumberColumn("Prob(%)", format="%.1f"),
+    
+    # 👇 여기 가격 관련 컬럼들에 '%,d' 포맷을 적용했습니다.
     "종가": st.column_config.NumberColumn("Close", format="%,d"),
     "추천매수가": st.column_config.NumberColumn("Entry", format="%,d"),
     "손절가": st.column_config.NumberColumn("Stop", format="%,d"),
     "추천매도가1": st.column_config.NumberColumn("Target", format="%,d"),
+    
     "Now%": st.column_config.NumberColumn("Gap%", format="%.2f"),
     "MFI14": st.column_config.NumberColumn("MFI(자금)", format="%.1f"),
     "거래대금(억원)": st.column_config.NumberColumn("Amt(억)", format="%,d"),
