@@ -178,7 +178,7 @@ def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     
     target_cols = ["시가","고가","저가","종가","거래량","거래대금(원)","시가총액(원)","거래대금(억원)","시가총액(억원)",
                    "RSI14","乖離%","MACD_hist","MACD_slope","Vol_Z","ret_5d_%","ret_10d_%","EBS",
-                   "추천매수가","추천매도가1","추천매도가2","손절가"]
+                   "추천매수가","추천매도가1","추천매도가2","손절가","MFI14"]
     for c in target_cols:
         if c in df.columns: df[c] = nz_num(df[c])
     return ensure_turnover(df)
@@ -260,7 +260,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     x = lat.copy()
     # 필요한 컬럼 보정
     cols = ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","시가총액(억원)",
-            "RSI14","MACD_slope","Vol_Z","乖離%","ret_5d_%","ret_10d_%","EBS","MACD_hist"]
+            "RSI14","MACD_slope","Vol_Z","乖離%","ret_5d_%","ret_10d_%","EBS","MACD_hist","MFI14"]
     for c in cols: 
         if c not in x.columns: x[c] = np.nan
 
@@ -381,8 +381,8 @@ with st.sidebar:
     # 👇 1. 관리자 비밀번호 (다운로드 권한 O)
     ADMIN_KEY = "2022322"
     
-    # 👇 2. 유료회원 비밀번호 (매달 변경 가능, 6자리 예시)
-    MEMBER_KEY = "251121" 
+    # 👇 2. 유료회원 비밀번호 (매달 변경 가능)
+    MEMBER_KEY = "240521" 
     
     # 권한 상태 변수 초기화
     auth_status = "free" # 기본은 무료
@@ -470,7 +470,7 @@ if sel:
 st.subheader("📋 Daily Top 10 List", anchor=False)
 
 # 관리자가 아니면 블러 처리된 느낌을 주기 위해 안내 메시지 표시
-if not is_admin:
+if auth_status == "free":
     st.warning("🔒 **무료 버전은 상위 3개 종목만 공개됩니다.**")
     st.markdown("""
     > **나머지 7개 종목과 전체 데이터를 보고 싶으신가요?** > 🚀 **[LDY Pro Trader 정식 버전 구매하기 (링크)](https://your-sales-link.com)** > *서버비 0원, 평생 소장 가능한 소스코드 패키지를 제공합니다.*
@@ -501,7 +501,7 @@ st.dataframe(
     hide_index=True,
     use_container_width=True,
     column_config=col_config,
-    height=400 if is_admin else 200 # 무료일 땐 표 높이를 줄임
+    height=400 if auth_status in ["admin", "member"] else 200 # 무료일 땐 표 높이를 줄임
 )
 
 # [Section 4] Downloads (관리자 전용 기능)
