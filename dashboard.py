@@ -60,17 +60,34 @@ def log_src(df: pd.DataFrame, src: str):
     st.toast(f"Data Loaded: {src} ({len(df)} rows)", icon="✅")
 
 # -------- Helpers: Market Radar (v4.6 NEW) --------
+
+# [FIXED] 마지막 영업일(금요일)을 찾는 헬퍼 함수 추가
+def get_last_business_date(d=datetime.now()):
+    d = d.date()
+    if d.weekday() == 5:  # Saturday (토요일)이면 금요일로 돌림
+        d -= timedelta(days=1)
+    elif d.weekday() == 6:  # Sunday (일요일)이면 금요일로 돌림
+        d -= timedelta(days=2)
+    return d.strftime("%Y%m%d")
+
+
 @st.cache_data(ttl=3600)
 def get_market_status():
     """KOSPI, KOSDAQ 지수의 20일선 위/아래 여부 판단"""
     if not FDR_OK:
         return "Unknown", 0.0, "Unknown", 0.0
     
+    # [수정] 마지막 영업일을 기준으로 데이터를 가져오도록 end= 인자를 추가합니다.
+    end_date_str = get_last_business_date()
+    
     def _check(ticker):
         try:
-            df = fdr.DataReader(ticker, datetime.now().year - 1)
+            # end= 인자를 사용하여 주말에도 금요일 종가까지만 안전하게 가져옵니다.
+            df = fdr.DataReader(ticker, datetime.now().year - 1, end=end_date_str)
+            
             if df.empty: return "Unknown", 0.0
-            # 최근 60일치만
+
+            # 최근 60일치만 사용 (MA20 계산을 위해)
             df = df.tail(60)
             ma20 = df['Close'].rolling(20).mean().iloc[-1]
             curr = df['Close'].iloc[-1]
@@ -78,6 +95,7 @@ def get_market_status():
             status = "Bull" if diff > 0 else "Bear"
             return status, diff
         except:
+            # 네트워크 오류 시에만 'Error' 표시
             return "Error", 0.0
 
     kp_stat, kp_diff = _check('KS11') # KOSPI
