@@ -321,31 +321,32 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     t1_room = ((t1 - close) / close * 100)
     sl_room = ((close - stop) / close * 100)
 
-    # 정규화
-    rr_norm   = pct_norm_pos(rr1, q=90, floor=1.0)
-    t1_norm   = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1)
-    sl_norm   = np.clip(sl_room / cap_q(sl_room, q=90, floor=3.0), 0, 1)
-    near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0))
+    # 정규화 (NaN 방지 위해 .fillna(0) 추가)
+    rr_norm   = pct_norm_pos(rr1, q=90, floor=1.0).fillna(0)
+    t1_norm   = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1).fillna(0)
+    sl_norm   = np.clip(sl_room / cap_q(sl_room, q=90, floor=3.0), 0, 1).fillna(0)
+    near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0)).fillna(0)
     
+    # ERS는 이미 ers_norm에서 .fillna(0) 처리가 들어갔을 가능성이 높지만, 안전하게 재처리합니다.
     ers_bits = (ebs>=PASS_EBS).astype(int) + (slope>0).astype(int) + ((rsi>=45)&(rsi<=65)).astype(int)
-    ers_norm = np.clip(ers_bits/3.0, 0, 1)
-    slope_pos_norm = pct_norm_pos(slope, q=90, floor=1.0)
+    ers_norm = np.clip(ers_bits/3.0, 0, 1).fillna(0)
+    slope_pos_norm = pct_norm_pos(slope, q=90, floor=1.0).fillna(0)
     rsi_center = (1 - np.minimum((rsi-55).abs()/10, 1)).clip(0,1).fillna(0)
-    mom_norm = np.clip(0.5*ers_norm + 0.3*slope_pos_norm + 0.2*rsi_center, 0, 1)
+    mom_norm = np.clip(0.5*ers_norm + 0.3*slope_pos_norm + 0.2*rsi_center, 0, 1).fillna(0)
 
-    # 유동성
+    # 유동성: 거래대금 퍼센타일 스케일
     if turn.notna().any():
         lo = np.nanpercentile(turn, 30) if np.isfinite(np.nanpercentile(turn.dropna(), 30)) else np.nanmin(turn)
         hi = np.nanpercentile(turn, 90) if np.isfinite(np.nanpercentile(turn.dropna(), 90)) else np.nanmax(turn)
         span = max(hi - lo, 1e-9)
-        liq_norm = np.clip((turn - lo) / span, 0, 1)
+        liq_norm = np.clip((turn - lo) / span, 0, 1).fillna(0)
     else:
-        liq_norm = pd.Series(0.0, index=x.index)
+        liq_norm = pd.Series(0.0, index=x.index) # 이미 0이지만 명시
 
-    # 기술
+    # 기술 균형: VolZ≈1 + |乖離| 작을수록 좋음
     vol_sweet = (1 - np.minimum((volz - 1).abs()/3, 1)).clip(0,1).fillna(0)
     kairi_norm = (1 - np.minimum(kairi.abs()/cap_q(kairi.abs(), q=80, floor=3.0), 1)).clip(0,1).fillna(0)
-    tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1)
+    tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1).fillna(0)
 
     # 점수 합산
     base_score = (100*W_RR*rr_norm) + (100*W_T1*t1_norm) + (100*W_SL*sl_norm) + \
