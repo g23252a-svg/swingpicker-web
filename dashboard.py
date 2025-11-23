@@ -378,11 +378,11 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     x["LDY_RANK"] = range(1, len(x)+1)
 
     x["WHY"] = (
-        "MOM+" + (100*W_MOM*mom_norm).round(0).astype(int).astype(str) + " "
-        "LIQ+" + (100*W_LIQ*liq_norm).round(0).astype(int).astype(str) + " "
-        "TEC+" + (100*W_TEC*tec_norm).round(0).astype(int).astype(str) + " "
-        "PEN-" + pen.round(0).astype(int).astype(str)
-    )
+    "MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " "
+    "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " "
+    "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " "
+    "PEN-" + pen.round(0).fillna(0).astype(int).astype(str)
+)
     return x
 
 # -------- Main Execution --------
