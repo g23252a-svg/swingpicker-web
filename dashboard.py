@@ -304,11 +304,12 @@ def route_tag(row) -> str:
 
 def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     x = lat.copy()
-    # 필요한 컬럼 보정
-    cols = ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","시가총액(억원)",
-            "RSI14","MACD_slope","Vol_Z","乖離%","ret_5d_%","ret_10d_%","EBS","MACD_hist","MFI14"]
-    for c in cols: 
-        if c not in x.columns: x[c] = np.nan
+
+    # 1. [핵심 FIX] 필수 컬럼 초기화 (collector에서 빠뜨려도 계산되도록 보장)
+    required_cols = ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","시가총액(억원)",
+                     "RSI14","MACD_slope","Vol_Z","乖離%","ret_5d_%","ret_10d_%","EBS","MACD_hist","MFI14"] 
+    for c in required_cols: 
+        if c not in x.columns: x[c] = np.nan # CSV에 없으면 NaN으로 초기화
 
     close, entry, stop, t1 = nz_num(x["종가"]), nz_num(x["추천매수가"]), nz_num(x["손절가"]), nz_num(x["추천매도가1"])
     turn, rsi, slope, volz = nz_num(x["거래대금(억원)"]), nz_num(x["RSI14"]), nz_num(x["MACD_slope"]), nz_num(x["Vol_Z"])
@@ -321,34 +322,33 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     t1_room = ((t1 - close) / close * 100)
     sl_room = ((close - stop) / close * 100)
 
-    # 정규화 (NaN 방지 위해 .fillna(0) 추가)
+    # 정규화 (모든 값에 .fillna(0)을 적용하여 NaN이 최종 점수를 오염시키는 것을 방지)
     rr_norm   = pct_norm_pos(rr1, q=90, floor=1.0).fillna(0)
     t1_norm   = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1).fillna(0)
     sl_norm   = np.clip(sl_room / cap_q(sl_room, q=90, floor=3.0), 0, 1).fillna(0)
     near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0)).fillna(0)
     
-    # ERS는 이미 ers_norm에서 .fillna(0) 처리가 들어갔을 가능성이 높지만, 안전하게 재처리합니다.
     ers_bits = (ebs>=PASS_EBS).astype(int) + (slope>0).astype(int) + ((rsi>=45)&(rsi<=65)).astype(int)
     ers_norm = np.clip(ers_bits/3.0, 0, 1).fillna(0)
     slope_pos_norm = pct_norm_pos(slope, q=90, floor=1.0).fillna(0)
     rsi_center = (1 - np.minimum((rsi-55).abs()/10, 1)).clip(0,1).fillna(0)
     mom_norm = np.clip(0.5*ers_norm + 0.3*slope_pos_norm + 0.2*rsi_center, 0, 1).fillna(0)
 
-    # 유동성: 거래대금 퍼센타일 스케일
+    # 유동성 (Liquidity)
     if turn.notna().any():
         lo = np.nanpercentile(turn, 30) if np.isfinite(np.nanpercentile(turn.dropna(), 30)) else np.nanmin(turn)
         hi = np.nanpercentile(turn, 90) if np.isfinite(np.nanpercentile(turn.dropna(), 90)) else np.nanmax(turn)
         span = max(hi - lo, 1e-9)
         liq_norm = np.clip((turn - lo) / span, 0, 1).fillna(0)
     else:
-        liq_norm = pd.Series(0.0, index=x.index) # 이미 0이지만 명시
+        liq_norm = pd.Series(0.0, index=x.index)
 
-    # 기술 균형: VolZ≈1 + |乖離| 작을수록 좋음
+    # 기술 균형 (Technical)
     vol_sweet = (1 - np.minimum((volz - 1).abs()/3, 1)).clip(0,1).fillna(0)
     kairi_norm = (1 - np.minimum(kairi.abs()/cap_q(kairi.abs(), q=80, floor=3.0), 1)).clip(0,1).fillna(0)
     tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1).fillna(0)
 
-    # 점수 합산
+    # 점수 합산 (base_score가 0.0 이상이 되도록 보장)
     base_score = (100*W_RR*rr_norm) + (100*W_T1*t1_norm) + (100*W_SL*sl_norm) + \
                  (100*W_NEAR*near_norm) + (100*W_MOM*mom_norm) + (100*W_LIQ*liq_norm) + (100*W_TEC*tec_norm)
 
@@ -378,12 +378,13 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
     x["LDY_RANK"] = range(1, len(x)+1)
 
+    # WHY 문자열 (모든 component가 0으로 채워지도록 보강됨)
     x["WHY"] = (
-    "MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " "
-    "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " "
-    "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " "
-    "PEN-" + pen.round(0).fillna(0).astype(int).astype(str)
-)
+        "MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " "
+        "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " "
+        "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " "
+        "PEN-" + pen.round(0).fillna(0).astype(int).astype(str)
+    )
     return x
 
 # -------- Main Execution --------
