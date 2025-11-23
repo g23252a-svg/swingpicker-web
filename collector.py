@@ -346,23 +346,23 @@ def main():
             tgt1 = round_to_tick(tgt1); tgt2 = round_to_tick(tgt2)
 
             rows.append({
-                "시장": mkt, "종목명": name, "종목코드": str(t).zfill(6),
-                "종가": int(cur_c),
-                "거래대금(억원)": round(tv_eok, 2),
-                "시가총액(억원)": None if np.isnan(mcap_eok) else round(mcap_eok, 1),
-                "RSI14": round(v_rsi, 1),
-                "수급강도(MFI)": round(v_mfi, 1),  
-                "이격도%": round(v_disp, 2),      
-                "MACD_Hist": round(v_hist, 4),   
-                "MACD_Slope": round(v_slp, 5),  
-                "거래량강도(VolZ)": round(v_volz, 2), 
-                "수익률_5일%": round(ret5, 2),
-                "수익률_10일%": round(ret10, 2),
-                "EBS": int(score),
-                "통과": "★" if score >= PASS_SCORE else "",
-                "근거": ", ".join(reason),
-                "추천매수가": buy, "손절가": stop, "추천매도가1": tgt1, "추천매도가2": tgt2
-            })
+                "시장": mkt, "종목명": name, "종목코드": str(t).zfill(6),
+                "종가": int(cur_c),
+                "거래대금(억원)": round(tv_eok, 2),
+                "시가총액(억원)": None if np.isnan(mcap_eok) else round(mcap_eok, 1),
+                "RSI14": round(v_rsi, 1),
+                "수급강도(MFI)": round(v_mfi, 1),  # MFI14 -> 수급강도(MFI)
+                "이격도%": round(v_disp, 2),      # 乖離% -> 이격도%
+                "MACD_Hist": round(v_hist, 4),   # MACD_hist -> MACD_Hist
+                "MACD_Slope": round(v_slp, 5),  # MACD_slope -> MACD_Slope
+                "거래량강도(VolZ)": round(v_volz, 2), # Vol_Z -> 거래량강도(VolZ)
+                "수익률_5일%": round(ret5, 2),
+                "수익률_10일%": round(ret10, 2),
+                "EBS": int(score),
+                "통과": "★" if score >= PASS_SCORE else "",
+                "근거": ", ".join(reason),
+                "추천매수가": buy, "손절가": stop, "추천매도가1": tgt1, "추천매도가2": tgt2
+            })
 
         except Exception as e:
             # log(f"⚠️ {t} Err: {e}")
