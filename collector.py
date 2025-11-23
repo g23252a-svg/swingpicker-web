@@ -21,7 +21,7 @@ from tqdm import tqdm  # 진행률 표시
 KST = timezone(timedelta(hours=9))
 
 # [v4.6 Update] MA120 계산을 위해 룩백 기간 확장 (60 -> 150)
-LOOKBACK_DAYS = 150         
+LOOKBACK_DAYS = 250         
 TOP_N = 600                 # 거래대금 상위 샘플
 MIN_TURNOVER_EOK = 50       # 거래대금 하한(억원)
 MIN_MCAP_EOK = 1000         # 시총 하한(억원)
@@ -335,10 +335,18 @@ def main():
             
             # --- Entry/Target ---
             atr = float(atr14.iloc[-1])
-            buy  = min(cur_c, v_m20 * 1.015) # 20일선보다 약간 위까지 허용
+
+            # [FIXED] ATR이 NaN이거나 0이면 최소값(1원)을 할당하여 로직 붕괴를 방지합니다.
+            if np.isnan(atr) or atr <= 0:
+            atr = 1.0 
+
+            buy  = min(cur_c, v_m20 * 1.015) # 20일선보다 약간 위까지 허용
             stop = max(buy - 2.0 * atr, v_m20 * 0.96) # 여유 조금 더 줌
             tgt1 = buy + (buy - stop) * 1.2
             tgt2 = buy + (buy - stop) * 2.2
+            
+            buy = round_to_tick(buy); stop = round_to_tick(stop)
+            tgt1 = round_to_tick(tgt1); tgt2 = round_to_tick(tgt2)
             
             buy = round_to_tick(buy); stop = round_to_tick(stop)
             tgt1 = round_to_tick(tgt1); tgt2 = round_to_tick(tgt2)
