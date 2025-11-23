@@ -538,11 +538,14 @@ if auth_status == "free":
 
 # ---------------------------------------------------------------------------
 # [데이터 포맷팅] 콤마(,) 찍기 & 순위 재정렬(Reset Index)
-safe_view_df = view_df.copy()
-
-# 👇 [핵심 수정] 순위를 1부터 다시 매깁니다 (Re-ranking)
-safe_view_df = safe_view_df.reset_index(drop=True)
-safe_view_df["LDY_RANK"] = safe_view_df.index + 1  # 0부터 시작하니까 +1 해서 1등부터 표시
+if view_df is None or view_df.empty:
+    # 데이터가 없을 경우 빈 데이터프레임으로 초기화 (에러 방지)
+    safe_view_df = pd.DataFrame(columns=disp_cols)
+else:
+    safe_view_df = view_df.copy()
+    # 👇 [핵심 수정] 순위를 1부터 다시 매깁니다 (Re-ranking)
+    safe_view_df = safe_view_df.reset_index(drop=True)
+    safe_view_df["LDY_RANK"] = safe_view_df.index + 1
 
 price_cols = ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]
 for c in price_cols:
