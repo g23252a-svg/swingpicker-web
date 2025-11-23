@@ -331,11 +331,15 @@ def main():
             if ret5 < 12: score += 1; reason.append("과열X")
             
             # --- Entry/Target ---
-            atr = float(atr14.iloc[-1])
+            # ATR 값을 안전하게 가져옵니다. (데이터가 없으면 기본값 1.0)
+            try:
+                atr = float(atr14.iloc[-1])
+            except:
+                atr = 1.0
 
-            # [FIXED] ATR이 NaN이거나 0이면 최소값(1원)을 할당하여 로직 붕괴를 방지합니다.
-            if np.isnan(atr) or atr <= 0:
-                atr = 1.0 
+            # ATR이 NaN이거나 0이면 최소값(1원)을 할당
+            if np.isnan(atr) or atr <= 0:
+                atr = 1.0
 
             buy  = min(cur_c, v_m20 * 1.015) # 20일선보다 약간 위까지 허용
             stop = max(buy - 2.0 * atr, v_m20 * 0.96) # 여유 조금 더 줌
