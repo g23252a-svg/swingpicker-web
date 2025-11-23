@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 LDY Pro Trader v4.6: Nightly Collector (Enhanced Logic)
-... (생략)
+- Update: v4.6 (Added MA120 Trend, MFI Quality, BB Squeeze)
+- 데이터 수집: 최근 250거래일(MA120 계산용) OHLCV 확보
 """
+
 import os
 import time
 import math
@@ -15,7 +17,7 @@ from tqdm import tqdm  # 진행률 표시
 # ------------------------------- 설정 -------------------------------
 KST = timezone(timedelta(hours=9))
 
-# [v4.6 Update] MA120 계산을 위해 룩백 기간 확장 (60 -> 250)
+# [v4.6 Update] MA120 계산 안정성을 위해 룩백 기간 확장
 LOOKBACK_DAYS = 250         
 TOP_N = 600
 MIN_TURNOVER_EOK = 50
@@ -299,7 +301,7 @@ def main():
             # Filter: Basic
             if tv_eok < MIN_TURNOVER_EOK or (not np.isnan(mcap_eok) and mcap_eok < MIN_MCAP_EOK):
                 continue
-            if np.isnan(v_m20) or atr14.iloc[-1] <= 0: continue
+            # [OLD] if np.isnan(v_m20) or atr14.iloc[-1] <= 0: continue <-- 이 라인은 버그의 원인이었음
 
             # --- EBS Scoring (v4.6 Enhanced) ---
             score = 0
@@ -349,11 +351,11 @@ def main():
                 "거래대금(억원)": round(tv_eok, 2),
                 "시가총액(억원)": None if np.isnan(mcap_eok) else round(mcap_eok, 1),
                 "RSI14": round(v_rsi, 1),
-                "수급강도(MFI)": round(v_mfi, 1),  # MFI14 -> 수급강도(MFI)
-                "이격도%": round(v_disp, 2),      # 乖離% -> 이격도%
-                "MACD_Hist": round(v_hist, 4),   # MACD_hist -> MACD_Hist
-                "MACD_Slope": round(v_slp, 5),  # MACD_slope -> MACD_Slope
-                "거래량강도(VolZ)": round(v_volz, 2), # Vol_Z -> 거래량강도(VolZ)
+                "수급강도(MFI)": round(v_mfi, 1),  
+                "이격도%": round(v_disp, 2),      
+                "MACD_Hist": round(v_hist, 4),   
+                "MACD_Slope": round(v_slp, 5),  
+                "거래량강도(VolZ)": round(v_volz, 2), 
                 "수익률_5일%": round(ret5, 2),
                 "수익률_10일%": round(ret10, 2),
                 "EBS": int(score),
@@ -404,7 +406,7 @@ if __name__ == "__main__":
 
 ```python
 # [수정 전]
-# if np.isnan(v_m20) or atr14.iloc[-1] <= 0: continue 
+# if np.isnan(v_m20) or atr14.iloc[-1] <= 0: continue <-- 이 라인이 핵심 버그
 
 # [수정 후] 계산이 불가능해도 종목을 버리지 않고, 그냥 지표값을 NaN으로 유지하고 넘어갑니다.
 # 330행: 지표가 없다고 종목을 건너뛰지 않습니다. (강제 continue 제거)
