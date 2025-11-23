@@ -57,7 +57,9 @@ def get_market_status():
             if np.isnan(ma20) or ma20 == 0: return "Unknown", 0.0
             return "Bull" if ((curr - ma20)/ma20) > 0 else "Bear", ((curr-ma20)/ma20)*100
         except: return "Error", 0.0
-    kp_st, kp_diff = _check('KS11')
+    
+    # [FIXED] 변수명 오타 수정 (kp_st -> kp_stat)
+    kp_stat, kp_diff = _check('KS11') 
     kq_stat, kq_diff = _check('KQ11')
     return kp_stat, kp_diff, kq_stat, kq_diff
 
@@ -99,12 +101,9 @@ def ensure_turnover(df):
     return df
 
 def normalize_cols(df):
-    # [Mapping Updated] collector.py에서 바뀐 한글 컬럼명 반영
-    # (乖離% -> 이격도, Vol_Z -> 거래강도)
     return ensure_turnover(df)
 
 def apply_names(df):
-    # (이름 맵핑 로직 생략 - 원본 그대로 유지)
     return df
 
 def liquidity_gate(x_turn, market):
@@ -122,8 +121,8 @@ def pct_norm_pos(s, q=90, floor=1.0):
 def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
 
 def route_tag(row):
-    rsi = row.get("RSI14", np.nan); slope = row.get("MACD_Slope", np.nan) # Name Changed
-    kairi = row.get("이격도", np.nan); r5 = row.get("ret_5d_%", np.nan) # Name Changed
+    rsi = row.get("RSI14", np.nan); slope = row.get("MACD_Slope", np.nan) 
+    kairi = row.get("이격도", np.nan); r5 = row.get("ret_5d_%", np.nan) 
     near = row.get("Now%", np.nan)
     if pd.notna(r5) and pd.notna(near) and pd.notna(slope):
         if (r5 >= 3) and (near <= 0.7) and (slope > 0) and (abs(kairi) <= 6): return "🔼 BRK (돌파)"
@@ -133,7 +132,6 @@ def route_tag(row):
 
 def build_global_score(lat):
     x = lat.copy()
-    # [Update] 컬럼명 변경 반영
     required = ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","RSI14","MACD_Slope","거래강도","이격도","ret_5d_%","ret_10d_%","EBS","MACD_Hist","MFI14"]
     for c in required:
         if c not in x.columns: x[c] = np.nan
@@ -196,8 +194,7 @@ except:
     else: st.error("❌ 데이터 없음"); st.stop()
 
 df = normalize_cols(df_raw)
-# apply_names(df)  <-- 원본에 종목명이 이미 있으므로 생략 가능하거나 필요시 추가
-latest = df.copy() # collector에서 이미 최신값만 줌
+latest = df.copy()
 
 scored = build_global_score(latest)
 base = scored[(scored["EBS"] >= PASS_EBS) & (scored["_GATE_OK"])].copy()
@@ -218,10 +215,10 @@ with st.sidebar:
         if input_pw: st.error("❌ 불일치")
         st.info("🔒 무료 (Top 3)")
 
-kp_st, kp_df, kq_st, kq_df = get_market_status()
+kp_st, kp_diff, kq_st, kq_diff = get_market_status()
 c1, c2 = st.columns(2)
-c1.metric("KOSPI (MA20)", f"{kp_st}", f"{kp_df:.2f}%", delta_color="off" if kp_st=="Bull" else "inverse")
-c2.metric("KOSDAQ (MA20)", f"{kq_st}", f"{kq_df:.2f}%", delta_color="off" if kq_st=="Bull" else "inverse")
+c1.metric("KOSPI (MA20)", f"{kp_st}", f"{kp_diff:.2f}%", delta_color="off" if kp_st=="Bull" else "inverse")
+c2.metric("KOSDAQ (MA20)", f"{kq_st}", f"{kq_diff:.2f}%", delta_color="off" if kq_st=="Bull" else "inverse")
 if kp_st == "Bear" and kq_st == "Bear": st.warning("🚨 약세장 경보")
 
 st.divider(); st.subheader("🔭 종목 상세 차트 (60일)", anchor=False)
@@ -244,6 +241,9 @@ if sel:
         c_c, c_d = st.columns(2); c_c.metric("목표", f"{row['추천매도가1']:,}"); c_d.metric("RR", f"{row['RR1']:.2f}")
 
 st.subheader("📋 Daily Top 10 List", anchor=False)
+with st.expander("❓ 용어 설명", expanded=False):
+    st.markdown("- **Score:** 종합점수 / **MFI:** 수급강도(60↑ 좋음) / **RR:** 손익비")
+
 if auth_status == "free": st.warning("🔒 무료 버전: Top 3만 공개")
 
 safe_view = view_df.copy().reset_index(drop=True)
@@ -271,3 +271,7 @@ st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_
 if auth_status == "admin":
     csv = scored.to_csv(index=False).encode('utf-8-sig')
     st.download_button("📥 전체 다운로드 (Admin)", csv, "ldy_rank.csv", "text/csv", key="admin_dl")
+elif auth_status == "member":
+    st.button("📥 다운로드 제한 (Member)", disabled=True, key="member_dl")
+else:
+    st.button("📥 다운로드 제한 (Free)", disabled=True, key="free_dl")
