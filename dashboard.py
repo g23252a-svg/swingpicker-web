@@ -64,12 +64,27 @@ def get_market_status():
 def get_stock_chart_data(code):
     if not FDR_OK: return None
     try:
-        start_date = datetime.now() - timedelta(days=365)
-        df = fdr.DataReader(code, start_date)
+        # [핵심 수정 1] 종목코드를 강제로 문자열로 바꾸고 6자리(00...)로 채움
+        code_str = str(code).zfill(6)
+        
+        # [핵심 수정 2] 날짜를 확실한 문자열 포맷(YYYY-MM-DD)으로 변환
+        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        
+        # 데이터 가져오기
+        df = fdr.DataReader(code_str, start_date)
+        
+        if df is None or df.empty:
+            return None
+
+        # 이동평균선 계산
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
+        
         return df.tail(60)
-    except: return None
+    except Exception as e:
+        # 에러 발생 시 터미널에 원인 출력 (디버깅용)
+        print(f"⚠️ 차트 로딩 실패 ({code}): {e}")
+        return None
 
 def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty: return go.Figure()
