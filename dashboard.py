@@ -120,6 +120,9 @@ def route_tag(row):
     near = row.get("Now%", np.nan)
     mfi = row.get("MFI14", np.nan)
     
+    if pd.isna(slope): slope = row.get("MACD_slope", np.nan)
+    if pd.isna(kairi): kairi = row.get("乖離%", np.nan)
+    
     if pd.notna(r5) and pd.notna(slope):
         if (r5 >= 3) and (slope > 0) and (abs(kairi) <= 8): return "🔼 BRK (돌파)"
     if pd.notna(rsi):
@@ -136,9 +139,13 @@ def build_global_score(lat):
     for c in required:
         if c not in x.columns: x[c] = np.nan
 
+    slope_col = "MACD_Slope" if "MACD_Slope" in x.columns and x["MACD_Slope"].notna().any() else "MACD_slope"
+    kairi_col = "이격도" if "이격도" in x.columns and x["이격도"].notna().any() else "乖離%"
+    vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].notna().any() else "Vol_Z"
+
     close, entry, stop, t1 = nz_num(x["종가"]), nz_num(x["추천매수가"]), nz_num(x["손절가"]), nz_num(x["추천매도가1"])
-    turn, rsi, slope, volz = nz_num(x["거래대금(억원)"]), nz_num(x["RSI14"]), nz_num(x["MACD_Slope"]), nz_num(x["거래강도"])
-    kairi, r5, ebs = nz_num(x["이격도"]), nz_num(x["ret_5d_%"]), nz_num(x["EBS"]).fillna(0)
+    turn, rsi, slope, volz = nz_num(x["거래대금(억원)"]), nz_num(x["RSI14"]), nz_num(x[slope_col]), nz_num(x[vol_col])
+    kairi, r5, ebs = nz_num(x[kairi_col]), nz_num(x["ret_5d_%"]), nz_num(x["EBS"]).fillna(0)
 
     rr_den = (entry - stop)
     rr1 = ((t1 - entry) / rr_den.replace(0, np.nan)).mask(entry.isna() | stop.isna() | t1.isna())
@@ -181,6 +188,7 @@ def build_global_score(lat):
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
     x["LDY_RANK"] = range(1, len(x)+1)
+    
     x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " "
                 "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " "
                 "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " "
@@ -215,16 +223,14 @@ with st.sidebar:
         if input_pw: st.error("❌ 불일치")
         st.info("🔒 무료 (Top 3)")
 
-# [FIXED] 변수명 오타 수정 완료 (kp_st, kp_df 등)
-kp_st, kp_diff, kq_st, kq_diff = get_market_status()
+kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
 c1, c2 = st.columns(2)
-c1.metric("KOSPI (MA20)", f"{kp_st}", f"{kp_diff:.2f}%", delta_color="off" if kp_st=="Bull" else "inverse")
-c2.metric("KOSDAQ (MA20)", f"{kq_st}", f"{kq_diff:.2f}%", delta_color="off" if kq_st=="Bull" else "inverse")
-if kp_st == "Bear" and kq_st == "Bear": st.warning("🚨 약세장 경보")
+c1.metric("KOSPI (MA20)", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if kp_stat=="Bull" else "inverse")
+c2.metric("KOSDAQ (MA20)", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if kq_stat=="Bull" else "inverse")
+if kp_stat == "Bear" and kq_stat == "Bear": st.warning("🚨 약세장 경보")
 
 st.divider()
 
-# [v4.7 NEW] 섹터(테마) 랭킹 표시
 st.subheader("🔥 오늘의 주도 테마 (Hot Sectors)", anchor=False)
 if "업종" in base.columns:
     sector_counts = base["업종"].value_counts().head(5)
@@ -238,7 +244,6 @@ else:
 
 st.divider()
 
-# [섹션 2 - 상세 차트]
 st.subheader("🔭 종목 상세 차트 (60일)", anchor=False)
 if top10.empty:
     view_df = pd.DataFrame(columns=["종목명","종목코드","ROUTE"])
@@ -250,8 +255,11 @@ opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['RO
 sel = st.selectbox("종목 선택", opts, index=0 if opts else None)
 
 if sel:
-    code = sel.split("(")[1].split(")")[0]
-    row = top10[top10["종목코드"]==code].iloc[0]
+    # [FIX] 안전하게 인덱스로 데이터 찾기 (문자열 파싱 에러 방지)
+    sel_idx = opts.index(sel)
+    row = view_df.iloc[sel_idx]
+    code = row['종목코드']
+    
     c1, c2 = st.columns([2, 1])
     with c1:
         chart_df = get_stock_chart_data(code)
@@ -283,14 +291,10 @@ for c in price_cols:
 for c in ["MFI14", "LDY_SCORE", "P_hit"]:
     if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0)
 
-# [1. 보여줄 컬럼 정의]
-cols = ["LDY_RANK","통과","ROUTE","업종","시장","종목명","종목코드","LDY_SCORE","P_hit",
-        "종가","추천매수가","손절가","추천매도가1","추천매도가2","RR1","MFI14","거래대금(억원)","WHY"]
-
-# [2. 에러 방지] 실제 데이터에 있는 컬럼만 남기기
+cols = ["LDY_RANK","통과","ROUTE","업종","시장","종목명","종목코드","LDY_SCORE","P_hit","종가","추천매수가","손절가","추천매도가1","추천매도가2","RR1","MFI14","거래대금(억원)","WHY"]
+# [Fix] 데이터에 없는 컬럼은 자동으로 제외 (KeyError 방지)
 cols = [c for c in cols if c in safe_view.columns]
 
-# [3. 컬럼 설정 정의 (먼저 해야 함!)]
 cfg = {
     "LDY_RANK": st.column_config.NumberColumn("순위"),
     "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
@@ -304,11 +308,8 @@ cfg = {
     "WHY": st.column_config.TextColumn("분석", width="medium"),
     "업종": st.column_config.TextColumn("업종")
 }
-
-# [4. 표 그리기 (설정 정의 후에 실행)]
 st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
 
-# [5. 다운로드 버튼]
 if auth_status == "admin":
     csv = scored.to_csv(index=False).encode('utf-8-sig')
     st.download_button("📥 전체 다운로드 (Admin)", csv, "ldy_rank.csv", "text/csv", key="admin_dl")
