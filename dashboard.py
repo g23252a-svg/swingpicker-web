@@ -283,15 +283,14 @@ for c in price_cols:
 for c in ["MFI14", "LDY_SCORE", "P_hit"]:
     if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0)
 
+# [1. 보여줄 컬럼 정의]
 cols = ["LDY_RANK","통과","ROUTE","업종","시장","종목명","종목코드","LDY_SCORE","P_hit",
         "종가","추천매수가","손절가","추천매도가1","추천매도가2","RR1","MFI14","거래대금(억원)","WHY"]
-# 2. [핵심 수정] 실제 데이터에 존재하는 컬럼만 남기기 (에러 방지)
-# CSV가 아직 업데이트 안 돼서 '업종' 컬럼이 없으면, 알아서 빼고 보여줍니다.
+
+# [2. 에러 방지] 실제 데이터에 있는 컬럼만 남기기
 cols = [c for c in cols if c in safe_view.columns]
 
-# 4. 표 그리기
-st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
-
+# [3. 컬럼 설정 정의 (먼저 해야 함!)]
 cfg = {
     "LDY_RANK": st.column_config.NumberColumn("순위"),
     "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
@@ -305,8 +304,11 @@ cfg = {
     "WHY": st.column_config.TextColumn("분석", width="medium"),
     "업종": st.column_config.TextColumn("업종")
 }
+
+# [4. 표 그리기 (설정 정의 후에 실행)]
 st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
 
+# [5. 다운로드 버튼]
 if auth_status == "admin":
     csv = scored.to_csv(index=False).encode('utf-8-sig')
     st.download_button("📥 전체 다운로드 (Admin)", csv, "ldy_rank.csv", "text/csv", key="admin_dl")
