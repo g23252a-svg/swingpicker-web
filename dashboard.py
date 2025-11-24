@@ -246,16 +246,31 @@ if kp_stat == "Bear" and kq_stat == "Bear": st.warning("🚨 약세장 경보")
 
 st.divider()
 
+# [v4.7 NEW] 섹터(테마) 랭킹 표시
 st.subheader("🔥 오늘의 주도 테마 (Hot Sectors)", anchor=False)
 if "업종" in base.columns:
-    sector_counts = base["업종"].value_counts().head(5)
-    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
-    cols = [sc1, sc2, sc3, sc4, sc5]
-    for i, (sec_name, count) in enumerate(sector_counts.items()):
-        if i < 5:
-            cols[i].metric(f"{i+1}위", sec_name, f"{count}종목")
+    # 1. 업종별 개수 세기
+    sector_counts = base["업종"].value_counts()
+    
+    # 2. [핵심 수정] '기타'나 'nan'은 순위에서 제외하기 (의미 없는 정보 삭제)
+    if "기타" in sector_counts.index:
+        sector_counts = sector_counts.drop("기타")
+    
+    # 3. 상위 5개만 자르기
+    top_sectors = sector_counts.head(5)
+    
+    # 4. 화면 표시
+    if not top_sectors.empty:
+        cols = st.columns(5)
+        for i, (sec_name, count) in enumerate(top_sectors.items()):
+            if i < 5:
+                # 1위는 빨간색으로 강조
+                delta_color = "inverse" if i == 0 else "off" 
+                cols[i].metric(f"{i+1}위", sec_name, f"{count}종목", delta_color=delta_color)
+    else:
+        st.info("뚜렷한 주도 테마가 없습니다.")
 else:
-    st.info("섹터 정보가 수집되지 않았습니다.")
+    st.info("섹터 정보가 수집되지 않았습니다. (Collector 실행 필요)")
 
 st.divider()
 
