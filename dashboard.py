@@ -49,23 +49,44 @@ def get_last_business_date(d=datetime.now()):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    if not FDR_OK: return "Unknown", 0.0, "Unknown", 0.0
-    end_date_str = get_last_business_date()
+    """
+    KOSPI, KOSDAQ 지수의 20일선 위/아래 여부 판단
+    (날짜 지정 없이 최신 데이터 200개를 가져와서 마지막 값을 사용)
+    """
+    if not FDR_OK:
+        return "Unknown", 0.0, "Unknown", 0.0
     
     def _check(ticker):
         try:
-            start_date = datetime.now().year - 2
-            df = fdr.DataReader(ticker, str(start_date), end=end_date_str)
-            if df.empty or len(df) < 60: return "Unknown", 0.0
+            # 1. [핵심 수정] 날짜 지정 제거 -> 최근 데이터 300개 가져오기
+            # end 날짜를 지정하지 않으면 라이브러리가 알아서 '오늘'까지 가져옵니다.
+            # start도 넉넉하게 잡습니다.
+            df = fdr.DataReader(ticker) 
+            
+            if df is None or df.empty:
+                return "Error", 0.0
+
+            # 2. 최근 60일치만 잘라서 계산 (속도 최적화)
             df = df.tail(60)
+            
+            # 3. MA20 계산
             ma20 = df['Close'].rolling(20).mean().iloc[-1]
             curr = df['Close'].iloc[-1]
-            if np.isnan(ma20) or ma20 == 0: return "Unknown", 0.0
-            return "Bull" if ((curr - ma20)/ma20) > 0 else "Bear", ((curr-ma20)/ma20)*100
-        except: return "Error", 0.0
-    
-    kp_stat, kp_diff = _check('KS11')
-    kq_stat, kq_diff = _check('KQ11')
+            
+            # 4. 데이터 유효성 검사
+            if pd.isna(ma20) or ma20 == 0:
+                return "Unknown", 0.0
+
+            # 5. 판별
+            diff = ((curr - ma20) / ma20) * 100
+            status = "Bull" if diff > 0 else "Bear"
+            return status, diff
+            
+        except Exception:
+            return "Error", 0.0
+
+    kp_stat, kp_diff = _check('KS11') # KOSPI
+    kq_stat, kq_diff = _check('KQ11') # KOSDAQ
     return kp_stat, kp_diff, kq_stat, kq_diff
 
 @st.cache_data(ttl=600)
