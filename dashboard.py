@@ -215,10 +215,11 @@ with st.sidebar:
         if input_pw: st.error("❌ 불일치")
         st.info("🔒 무료 (Top 3)")
 
-kp_st, kp_diff, kq_st, kq_df = get_market_status()
+# [FIXED] 변수명 오타 수정 완료 (kp_st, kp_df 등)
+kp_st, kp_diff, kq_st, kq_diff = get_market_status()
 c1, c2 = st.columns(2)
-c1.metric("KOSPI (MA20)", f"{kp_st}", f"{kp_df:.2f}%", delta_color="off" if kp_st=="Bull" else "inverse")
-c2.metric("KOSDAQ (MA20)", f"{kq_st}", f"{kq_df:.2f}%", delta_color="off" if kq_st=="Bull" else "inverse")
+c1.metric("KOSPI (MA20)", f"{kp_st}", f"{kp_diff:.2f}%", delta_color="off" if kp_st=="Bull" else "inverse")
+c2.metric("KOSDAQ (MA20)", f"{kq_st}", f"{kq_diff:.2f}%", delta_color="off" if kq_st=="Bull" else "inverse")
 if kp_st == "Bear" and kq_st == "Bear": st.warning("🚨 약세장 경보")
 
 st.divider()
