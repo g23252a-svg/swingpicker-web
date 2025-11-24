@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v4.6: Nightly Collector (Final Complete Version)
-- Update: v4.6 (Added MA120 Trend, MFI Quality, BB Squeeze)
-- Fix: Realistic Stop Loss (-7% Cap) & Target Calculation
+LDY Pro Trader v4.7: Nightly Collector (Sector Ranking Added)
+- Update: v4.7 (Sector Info, Realistic Stop Loss, Dynamic Target)
 """
 
 import os
@@ -13,11 +12,11 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from pykrx import stock
 from tqdm import tqdm
+import FinanceDataReader as fdr # 섹터 정보 수집용
 
 # ------------------------------- 설정 -------------------------------
 KST = timezone(timedelta(hours=9))
 
-# 데이터 조회 기간 확장 (MA120 계산 및 안정성 확보)
 LOOKBACK_DAYS = 250          
 TOP_N = 600                 
 MIN_TURNOVER_EOK = 50       
@@ -140,6 +139,21 @@ def get_mcap_eok_from_map(mcap_map: dict, ticker: str) -> float:
     v = mcap_map.get(str(ticker).zfill(6))
     return float(v) if (v is not None and v > 0) else np.nan
 
+# [v4.7 New] 업종(Sector) 정보 가져오기
+def get_sector_map():
+    try:
+        # KRX 전체 종목 리스트에서 업종 정보 추출
+        df = fdr.StockListing('KRX')
+        # 종목코드 6자리 맞춤
+        df['Code'] = df['Code'].astype(str).str.zfill(6)
+        # 딕셔너리로 변환 {코드: 업종}
+        sector_map = dict(zip(df['Code'], df['Sector']))
+        log(f"📋 업종 정보 로드 완료 ({len(sector_map)}개)")
+        return sector_map
+    except Exception as e:
+        log(f"⚠️ 업종 정보 로드 실패: {e}")
+        return {}
+
 # ------------------------------- 상위 TV 선정 -------------------------------
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
     frames = []
@@ -195,7 +209,7 @@ def get_name_map_cached(date_yyyymmdd: str) -> dict:
 
 # ------------------------------- 메인 로직 -------------------------------
 def main():
-    log("🚀 LDY Collector v4.6 시작...")
+    log("🚀 LDY Collector v4.7 시작...")
 
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
@@ -207,6 +221,7 @@ def main():
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
+    sector_map = get_sector_map() # [New] 섹터 정보 로드
 
     # 넉넉히 가져와서 MA120 계산
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
@@ -229,14 +244,14 @@ def main():
             l = ohlcv["저가"].astype(float)
             v = ohlcv["거래량"].astype(float)
 
-            # --- 지표 계산 (v4.6) ---
+            # --- 지표 계산 ---
             ma20  = c.rolling(20).mean()
             ma60  = c.rolling(60).mean()
-            ma120 = c.rolling(120).mean() # [New] 장기 추세
+            ma120 = c.rolling(120).mean()
             
             atr14 = calc_atr(h, l, c, 14)
             rsi14 = calc_rsi(c, 14)
-            mfi14 = calc_mfi(h, l, c, v, 14) # [New] 자금 질
+            mfi14 = calc_mfi(h, l, c, v, 14)
 
             # MACD
             ema12 = ema(c, 12); ema26 = ema(c, 26)
@@ -249,7 +264,7 @@ def main():
             vol_z = v / (v.rolling(20).mean())
             disp  = (c / ma20 - 1.0) * 100
 
-            # Bollinger Band Squeeze [New]
+            # Bollinger Band Squeeze
             std20 = c.rolling(20).std()
             bb_up = ma20 + (std20 * 2)
             bb_lo = ma20 - (std20 * 2)
@@ -279,10 +294,12 @@ def main():
             # Info
             mkt = "KOSPI" if t in kospi_set else ("KOSDAQ" if t in kosdaq_set else "기타")
             name = name_map.get(str(t).zfill(6), "") or stock.get_market_ticker_name(t)
+            sector = sector_map.get(str(t).zfill(6), "기타") # [New] 업종 정보
+            
             tv_eok = float(top_df.loc[top_df["종목코드"]==t, "거래대금(원)"].values[0])/1e8
             mcap_eok = get_mcap_eok_from_map(mcap_map, t)
 
-            # Filter: Basic (거래대금, 시총 컷)
+            # Filter: Basic
             if tv_eok < MIN_TURNOVER_EOK or (not np.isnan(mcap_eok) and mcap_eok < MIN_MCAP_EOK):
                 continue
             
@@ -301,7 +318,7 @@ def main():
             if cur_c > v_m120: 
                 score += 1; reason.append("장기추세(120↑)") 
             else:
-                score -= 1 # 역배열 감점
+                score -= 1 
             
             if v_mfi > 60: 
                 score += 1; reason.append("자금유입(MFI)")
@@ -312,46 +329,42 @@ def main():
             if v_hist > 0: score += 1; reason.append("MACD>Sig")
             if ret5 < 12: score += 1; reason.append("과열X")
             
-            # --- [FIX] Entry/Target Logic (현실적 손절/목표가) ---
-            
-            # 1. ATR 안전 확보
+            # --- Entry/Target Logic (현실적 보정) ---
             try: atr = float(atr14.iloc[-1])
             except: atr = 0.0
-            # ATR이 너무 작으면 주가의 3%를 기본 변동폭으로 사용
             if np.isnan(atr) or atr <= 0: atr = cur_c * 0.03
 
-            # 2. 진입가 (Entry)
-            # 20일선 위에 있으면 눌림목(20일선) 공략, 아니면 현재가
+            # 진입가
             if v_m20 > 0 and cur_c > v_m20:
                 buy = min(cur_c, v_m20 * 1.03) 
             else:
                 buy = cur_c
 
-            # 3. 손절가 (Stop Loss) -3% ~ -7% 캡 적용
+            # 손절가 (-3% ~ -7% 캡)
             raw_stop = buy - (2.0 * atr)
-            
-            # 강제 보정: 손절폭이 -7%를 넘으면 -7%로 제한
             max_loss_limit = buy * 0.93
-            if raw_stop < max_loss_limit:
-                raw_stop = max_loss_limit
-                
-            # 논리 체크: 손절가는 무조건 매수가보다 낮아야 함 (최소 -3% 간격)
-            if raw_stop >= buy * 0.97:
-                raw_stop = buy * 0.97
-            
+            if raw_stop < max_loss_limit: raw_stop = max_loss_limit
+            if raw_stop >= buy * 0.97: raw_stop = buy * 0.97
             stop = raw_stop
 
-            # 4. 목표가 (Target)
+            # 목표가 (Score 기반 다이나믹 타겟)
             risk = buy - stop
-            tgt1 = buy + (risk * 1.5)  # 1차: 손절폭의 1.5배
-            tgt2 = buy + (risk * 3.0)  # 2차: 손절폭의 3배
+            # 점수가 높으면 목표가 상향
+            if score >= 80: 
+                rr1, rr2 = 2.0, 4.0
+            elif score >= 70:
+                rr1, rr2 = 1.5, 3.0
+            else:
+                rr1, rr2 = 1.2, 2.5
+                
+            tgt1 = buy + (risk * rr1)
+            tgt2 = buy + (risk * rr2)
             
-            # 호가 단위 적용
             buy = round_to_tick(buy); stop = round_to_tick(stop)
             tgt1 = round_to_tick(tgt1); tgt2 = round_to_tick(tgt2)
 
             rows.append({
-                "시장": mkt, "종목명": name, "종목코드": str(t).zfill(6),
+                "시장": mkt, "종목명": name, "종목코드": str(t).zfill(6), "업종": sector, # [New] 업종 추가
                 "종가": int(cur_c),
                 "거래대금(억원)": round(tv_eok, 2),
                 "시가총액(억원)": None if np.isnan(mcap_eok) else round(mcap_eok, 1),
@@ -370,7 +383,6 @@ def main():
             })
 
         except Exception as e:
-            # log(f"Skipped {t}: {e}")
             pass
         time.sleep(SLEEP_SEC)
 
