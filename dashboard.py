@@ -49,19 +49,38 @@ def get_last_business_date(d=datetime.now()):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    if not FDR_OK: return "Unknown", 0.0, "Unknown", 0.0
+    # 1. [핵심] 변수 미리 만들기 (에러 방지용 초기화)
+    kp_stat, kp_diff = "Unknown", 0.0
+    kq_stat, kq_diff = "Unknown", 0.0
+    
+    if not FDR_OK:
+        return kp_stat, kp_diff, kq_stat, kq_diff
+    
+    # 내부 함수 정의
     def _check(ticker):
         try:
+            # 날짜 지정 없이 최신 데이터 다 가져오기 (주말/공휴일 에러 방지)
             df = fdr.DataReader(ticker)
-            if df.empty: return "Error", 0.0
+            if df is None or df.empty:
+                return "Error", 0.0
+            
             df = df.tail(60)
             ma20 = df['Close'].rolling(20).mean().iloc[-1]
             curr = df['Close'].iloc[-1]
-            if np.isnan(ma20) or ma20 == 0: return "Unknown", 0.0
-            return "Bull" if ((curr - ma20)/ma20) > 0 else "Bear", ((curr-ma20)/ma20)*100
-        except: return "Error", 0.0
-    kp_st, kp_diff = _check('KS11')
-    kq_st, kq_diff = _check('KQ11')
+            
+            if pd.isna(ma20) or ma20 == 0:
+                return "Unknown", 0.0
+            
+            diff = ((curr - ma20) / ma20) * 100
+            status = "Bull" if diff > 0 else "Bear"
+            return status, diff
+        except:
+            return "Error", 0.0
+    
+    # 2. 값 덮어쓰기 (들여쓰기 주의: def _check 밖으로 나와야 함)
+    kp_stat, kp_diff = _check('KS11')
+    kq_stat, kq_diff = _check('KQ11')
+    
     return kp_stat, kp_diff, kq_stat, kq_diff
 
 # [v4.8 NEW] 슈퍼트렌드 계산 함수
