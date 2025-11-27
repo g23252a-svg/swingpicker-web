@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v5.4 (Ranking Sync)
-- Update: Added LDY Scoring Logic to Collector for Telegram Sync
+LDY Pro Trader Collector v5.4 (Final Fix)
+- Fix: Function Order (NameError), Telegram Sync
 """
 
 import os
@@ -15,11 +15,10 @@ from pykrx import stock
 from tqdm import tqdm
 import FinanceDataReader as fdr
 
-# [Secret 로드]
+# ------------------------------- 설정 -------------------------------
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 
-# ------------------------------- 설정 -------------------------------
 KST = timezone(timedelta(hours=9))
 LOOKBACK_DAYS = 250          
 TOP_N = 600                 
@@ -31,17 +30,18 @@ SLEEP_SEC = 0.05
 OUT_DIR = "data"
 UTF8 = "utf-8-sig"
 
-# [LDY Score 가중치 설정] (대시보드와 동일하게 맞춤)
+# [LDY Score 가중치]
 W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
 P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
 
-# ------------------------------- 유틸 -------------------------------
+# ------------------------------- 함수 정의 (먼저 선언!) -------------------------------
 def log(msg: str): print(f"[{datetime.now(KST)}] {msg}")
 def ensure_dir(path: str): os.makedirs(path, exist_ok=True)
 def ema(s, span): return s.ewm(span=span, adjust=False).mean()
+def _safe_sum(x): return pd.to_numeric(x, errors="coerce").fillna(0).sum()
+def nz_num(s): return pd.to_numeric(s, errors="coerce")
 
-# 지표 계산 함수들
 def calc_rsi(close, period=14):
     delta = close.diff()
     up, down = delta.clip(lower=0), -delta.clip(upper=0)
@@ -69,10 +69,87 @@ def round_to_tick(price):
     else: t = 1000
     return int(round(price / t) * t)
 
-def _safe_sum(x): return pd.to_numeric(x, errors="coerce").fillna(0).sum()
-def nz_num(s): return pd.to_numeric(s, errors="coerce")
+def _has_ohlcv_and_mcap(ymd):
+    for m in ["KOSPI", "KOSDAQ"]:
+        try:
+            o = stock.get_market_ohlcv_by_ticker(ymd, market=m)
+            if o is not None and not o.empty and "거래대금" in o.columns and _safe_sum(o["거래대금"]) > 0: return True
+        except: pass
+    return False
 
-# ------------------------------- 스코어링 로직 (이식됨) -------------------------------
+def resolve_trade_date():
+    d = datetime.now(KST).date()
+    if datetime.now(KST).hour < 18: d -= timedelta(days=1)
+    for _ in range(10):
+        ymd = d.strftime("%Y%m%d")
+        if _has_ohlcv_and_mcap(ymd): return ymd
+        d -= timedelta(days=1)
+    return d.strftime("%Y%m%d")
+
+def build_mcap_map():
+    d = datetime.now(KST).date()
+    if datetime.now(KST).hour < 18: d -= timedelta(days=1)
+    for _ in range(10):
+        use = d.strftime("%Y%m%d")
+        try:
+            df = pd.concat([stock.get_market_cap_by_ticker(use, market='KOSPI'), stock.get_market_cap_by_ticker(use, market='KOSDAQ')])
+            if not df.empty:
+                df['Code'] = df.index
+                return dict(zip(df['Code'], df['시가총액']/1e8)), use
+        except: pass
+        d -= timedelta(days=1)
+    return {}, ""
+
+def get_mcap_eok_from_map(mcap_map, ticker):
+    return float(mcap_map.get(str(ticker).zfill(6), 0))
+
+def pick_top_by_trading_value(date_yyyymmdd, top_n):
+    frames = []
+    for m in ["KOSPI", "KOSDAQ"]:
+        try:
+            df = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market=m).reset_index()
+            df.columns = ['종목코드' if '티커' in c else c for c in df.columns]
+            df.columns = ['거래대금(원)' if '거래대금' == c else c for c in df.columns]
+            frames.append(df[['종목코드', '거래대금(원)']])
+        except: pass
+    if not frames: raise RuntimeError("No Data")
+    df = pd.concat(frames)
+    df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
+    return df.sort_values('거래대금(원)', ascending=False).head(top_n)
+
+def get_market_sets(d):
+    try: return set(stock.get_market_ticker_list(d, market='KOSPI')), set(stock.get_market_ticker_list(d, market='KOSDAQ'))
+    except: return set(), set()
+
+def get_name_map_cached(d):
+    ensure_dir(OUT_DIR)
+    path = os.path.join(OUT_DIR, "krx_codes.csv")
+    if os.path.exists(path):
+        try: return dict(zip(pd.read_csv(path, dtype=str)['종목코드'], pd.read_csv(path)['종목명']))
+        except: pass
+    
+    rows = []
+    for m in ["KOSPI", "KOSDAQ"]:
+        try:
+            for t in stock.get_market_ticker_list(d, market=m):
+                rows.append({'종목코드': t, '종목명': stock.get_market_ticker_name(t)})
+                time.sleep(0.001)
+        except: pass
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(path, index=False, encoding=UTF8)
+        return dict(zip(df['종목코드'], df['종목명']))
+    return {}
+
+def get_sector_map():
+    try:
+        df = fdr.StockListing('KRX')
+        col = next((c for c in ['Sector', '업종'] if c in df.columns), None)
+        if col: return dict(zip(df['Code'].astype(str).str.zfill(6), df[col]))
+    except: pass
+    return {}
+
+# --- Scoring Logic ---
 def cap_q(s, q=90, floor=1.0):
     c = np.nanpercentile(nz_num(s), q)
     return float(max(c, floor)) if np.isfinite(c) else floor
@@ -85,7 +162,6 @@ def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
 
 def build_global_score(lat):
     x = lat.copy()
-    # 컬럼 매핑
     close, entry, stop, t1 = nz_num(x["종가"]), nz_num(x["추천매수가"]), nz_num(x["손절가"]), nz_num(x["추천매도가1"])
     turn, rsi, slope, volz = nz_num(x["거래대금(억원)"]), nz_num(x["RSI14"]), nz_num(x["MACD_Slope"]), nz_num(x["거래강도"])
     kairi, r5, ebs = nz_num(x["이격도"]), nz_num(x["ret_5d_%"]), nz_num(x["EBS"]).fillna(0)
@@ -127,23 +203,33 @@ def build_global_score(lat):
     x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
     
-    # 전략 태그 생성
-    conditions = [
-        (r5 >= 3) & (slope > 0),
-        (rsi >= 40) & (rsi <= 60),
-        (rsi <= 40)
-    ]
+    conditions = [(r5 >= 3) & (slope > 0), (rsi >= 40) & (rsi <= 60), (rsi <= 40)]
     choices = ["🔼 BRK (돌파)", "↩️ PULL (눌림)", "🔁 MR (반전)"]
     x["ROUTE"] = np.select(conditions, choices, default="—")
     
-    # WHY 문자열
     x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
-# ------------------------------- 데이터 수집 로직 -------------------------------
+def send_telegram_auto(df):
+    log("📨 텔레그램 발송 시작...")
+    if not TG_TOKEN or not TG_ID: return
+
+    try:
+        top5 = df.head(5).reset_index(drop=True)
+        msg = f"🔥 [LDY v5.4] 추천 Top 5 ({datetime.now(KST).strftime('%m/%d')})\n" + "-"*30 + "\n\n"
+        for i, row in top5.iterrows():
+            msg += f"{i+1}. {row['종목명']} ({row.get('ROUTE', '전략없음')})\n"
+            msg += f"   🔵 매수: {row['추천매수가']:,}\n"
+            msg += f"   🔴 손절: {row['손절가']:,}\n"
+            msg += f"   🟢 목표1: {row['추천매도가1']:,}\n\n"
+        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_ID, "text": msg})
+        log("🚀 전송 완료")
+    except Exception as e: log(f"⚠️ 전송 실패: {e}")
+
+# ------------------------------- 메인 -------------------------------
 def main():
     log("🚀 LDY Collector v5.4 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
@@ -160,159 +246,81 @@ def main():
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
 
     rows = []
-    for t in tqdm(tickers, desc="Analyzing", unit="stock"):
+    for t in tqdm(tickers, desc="Analyzing"):
         try:
             ohlcv = stock.get_market_ohlcv_by_date(start_s, end_s, t)
-            if ohlcv is None or ohlcv.empty: continue
-            ohlcv = ohlcv.reset_index().rename(columns={"index": "날짜"})
-            ohlcv["날짜"] = pd.to_datetime(ohlcv["날짜"])
+            if ohlcv is None or ohlcv.empty or len(ohlcv) < 120: continue
             ohlcv = ohlcv.tail(LOOKBACK_DAYS)
-            if len(ohlcv) < 120: continue
-
-            c = ohlcv["종가"].astype(float)
-            h = ohlcv["고가"].astype(float)
-            l = ohlcv["저가"].astype(float)
-            v = ohlcv["거래량"].astype(float)
-
-            ma20 = c.rolling(20).mean(); ma60 = c.rolling(60).mean(); ma120 = c.rolling(120).mean()
-            atr14 = calc_atr(h, l, c, 14); rsi14 = calc_rsi(c, 14); mfi14 = calc_mfi(h, l, c, v, 14)
             
-            ema12 = ema(c, 12); ema26 = ema(c, 26)
-            macd_line = ema12 - ema26; macd_sig = ema(macd_line, 9)
-            macd_hist = macd_line - macd_sig; macd_slope= macd_hist.diff()
-
-            vol_z = v / (v.rolling(20).mean()); disp = (c / ma20 - 1.0) * 100
-            std20 = c.rolling(20).std()
-            bb_w = ((ma20 + std20*2) - (ma20 - std20*2)) / ma20
-            bb_w_avg = bb_w.rolling(20).mean()
-
-            last = ohlcv.iloc[-1]
-            cur_c = float(last["종가"])
+            c, h, l, v = ohlcv["종가"], ohlcv["고가"], ohlcv["저가"], ohlcv["거래량"]
+            ma20, ma60, ma120 = c.rolling(20).mean(), c.rolling(60).mean(), c.rolling(120).mean()
             
-            v_rsi = float(rsi14.iloc[-1]) if not np.isnan(rsi14.iloc[-1]) else 50.0
-            v_mfi = float(mfi14.iloc[-1]) if not np.isnan(mfi14.iloc[-1]) else 50.0
-            v_slp = float(macd_slope.iloc[-1]) if not np.isnan(macd_slope.iloc[-1]) else 0.0
-            v_hist = float(macd_hist.iloc[-1]) if not np.isnan(macd_hist.iloc[-1]) else 0.0
-            v_disp = float(disp.iloc[-1]) if not np.isnan(disp.iloc[-1]) else 0.0
-            v_volz = float(vol_z.iloc[-1]) if not np.isnan(vol_z.iloc[-1]) else 0.0
-            v_m20 = float(ma20.iloc[-1]) if not np.isnan(ma20.iloc[-1]) else 0.0
-            v_m120 = float(ma120.iloc[-1]) if not np.isnan(ma120.iloc[-1]) else 0.0
-            v_bw = float(bb_w.iloc[-1]) if not np.isnan(bb_w.iloc[-1]) else 0.0
-            v_bw_avg = float(bb_w_avg.iloc[-1]) if not np.isnan(bb_w_avg.iloc[-1]) else 0.0
+            atr = calc_atr(h, l, c, 14).iloc[-1]
+            rsi = calc_rsi(c, 14).iloc[-1]
+            mfi = calc_mfi(h, l, c, v, 14).iloc[-1]
             
-            ret5 = (c.pct_change(5).iloc[-1]*100) if len(c)>5 else 0.0
-            ret10 = (c.pct_change(10).iloc[-1]*100) if len(c)>10 else 0.0
-
-            mkt = "KOSPI" if t in kospi_set else ("KOSDAQ" if t in kosdaq_set else "기타")
-            name = name_map.get(str(t).zfill(6), "") or stock.get_market_ticker_name(t)
-            sector = sector_map.get(str(t).zfill(6), "기타")
+            macd = ema(c, 12) - ema(c, 26)
+            sig = ema(macd, 9)
+            hist = macd - sig
+            slope = hist.diff().iloc[-1]
+            
+            vol_z = (v / v.rolling(20).mean()).iloc[-1]
+            disp = ((c / ma20 - 1.0) * 100).iloc[-1]
+            
+            last_c = c.iloc[-1]
+            
             tv_eok = float(top_df.loc[top_df["종목코드"]==t, "거래대금(원)"].values[0])/1e8
-            mcap_eok = get_mcap_eok_from_map(mcap_map, t)
-
-            if tv_eok < MIN_TURNOVER_EOK or (not np.isnan(mcap_eok) and mcap_eok < MIN_MCAP_EOK): continue
+            mcap = get_mcap_eok_from_map(mcap_map, t)
+            
+            if tv_eok < MIN_TURNOVER_EOK or (mcap > 0 and mcap < MIN_MCAP_EOK): continue
 
             score = 0; reason = []
-            if RSI_LOW <= v_rsi <= RSI_HIGH: score += 1; reason.append("RSI적정")
-            if v_slp > 0: score += 1; reason.append("MACD상승")
-            if -1.0 <= v_disp <= 5.0: score += 1; reason.append("20선근접")
-            if v_volz > 1.2: score += 1; reason.append("거래량↑")
-            if v_m20 > v_m60: score += 1; reason.append("정배열(단)")
-            if cur_c > v_m120: score += 1; reason.append("장기추세(120↑)")
+            if RSI_LOW <= rsi <= RSI_HIGH: score += 1; reason.append("RSI적정")
+            if slope > 0: score += 1; reason.append("MACD상승")
+            if -1 <= disp <= 5: score += 1; reason.append("20선근접")
+            if vol_z > 1.2: score += 1; reason.append("거래량↑")
+            if ma20.iloc[-1] > ma60.iloc[-1]: score += 1; reason.append("정배열(단)")
+            if last_c > ma120.iloc[-1]: score += 1; reason.append("장기추세(120↑)")
             else: score -= 1
-            if v_mfi > 60: score += 1; reason.append("자금유입(MFI)")
-            if v_bw < v_bw_avg * 0.8: score += 1; reason.append("에너지응축(Sqz)")
-            if v_hist > 0: score += 1; reason.append("MACD>Sig")
-            if ret5 < 12: score += 1; reason.append("과열X")
+            if mfi > 60: score += 1; reason.append("자금유입(MFI)")
+            if hist.iloc[-1] > 0: score += 1; reason.append("MACD>Sig")
             
-            # Entry/Target Logic
-            try: atr = float(atr14.iloc[-1])
-            except: atr = 0.0
-            if np.isnan(atr) or atr <= 0: atr = cur_c * 0.03
-
-            if v_m20 > 0 and cur_c > v_m20: buy = min(cur_c, v_m20 * 1.03)
-            else: buy = cur_c
-
-            raw_stop = buy - (2.0 * atr)
-            max_loss_limit = buy * 0.93
-            if raw_stop < max_loss_limit: raw_stop = max_loss_limit
-            if raw_stop >= buy * 0.97: raw_stop = buy * 0.97
-            stop = raw_stop
-
+            # Entry/Target
+            if np.isnan(atr) or atr <= 0: atr = last_c * 0.03
+            buy = min(last_c, ma20.iloc[-1] * 1.03) if ma20.iloc[-1] > 0 and last_c > ma20.iloc[-1] else last_c
+            
+            stop = buy - (2.0 * atr)
+            if stop < buy * 0.93: stop = buy * 0.93
+            if stop >= buy * 0.97: stop = buy * 0.97
+            
             risk = buy - stop
-            if score >= 8: rr1, rr2 = 2.0, 4.0
-            elif score >= 6: rr1, rr2 = 1.5, 3.0
-            else: rr1, rr2 = 1.2, 2.5
-            
-            tgt1 = buy + (risk * rr1); tgt2 = buy + (risk * rr2)
-            buy = round_to_tick(buy); stop = round_to_tick(stop); tgt1 = round_to_tick(tgt1); tgt2 = round_to_tick(tgt2)
+            rr1, rr2 = (2.0, 4.0) if score >= 8 else ((1.5, 3.0) if score >= 6 else (1.2, 2.5))
+            t1 = buy + risk * rr1; t2 = buy + risk * rr2
 
             rows.append({
-                "시장": mkt, "종목명": name, "종목코드": str(t).zfill(6), "업종": sector,
-                "종가": int(cur_c), "거래대금(억원)": round(tv_eok, 2),
-                "시가총액(억원)": None if np.isnan(mcap_eok) else round(mcap_eok, 1),
-                "RSI14": round(v_rsi, 1), "MFI14": round(v_mfi, 1),
-                "이격도": round(v_disp, 2), "MACD_Hist": round(v_hist, 4), "MACD_Slope": round(v_slp, 5),
-                "거래강도": round(v_volz, 2), "ret_5d_%": round(ret5, 2), "ret_10d_%": round(ret10, 2),
-                "EBS": int(score), "통과": "★" if score >= PASS_SCORE else "",
-                "근거": ", ".join(reason),
-                "추천매수가": buy, "손절가": stop, "추천매도가1": tgt1, "추천매도가2": tgt2
+                "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
+                "종목명": name_map.get(str(t).zfill(6), str(t)),
+                "종목코드": str(t).zfill(6), "업종": sector_map.get(str(t).zfill(6), "기타"),
+                "종가": int(last_c), "거래대금(억원)": round(tv_eok, 2),
+                "시가총액(억원)": round(mcap, 1),
+                "RSI14": round(rsi, 1), "MFI14": round(mfi, 1),
+                "이격도": round(disp, 2), "MACD_Hist": round(hist.iloc[-1], 4), "MACD_Slope": round(slope, 5),
+                "거래강도": round(vol_z, 2), "ret_5d_%": 0, "ret_10d_%": 0,
+                "EBS": int(score), "통과": "★" if score >= PASS_SCORE else "", "근거": ", ".join(reason),
+                "추천매수가": round_to_tick(buy), "손절가": round_to_tick(stop),
+                "추천매도가1": round_to_tick(t1), "추천매도가2": round_to_tick(t2)
             })
-        except Exception: pass
-        time.sleep(SLEEP_SEC)
-
-    if not rows: raise RuntimeError("수집 결과 없음")
+        except: pass
     
-    # [Fix] LDY Score 계산 후 정렬
+    if not rows: raise RuntimeError("No Result")
+    
     df_raw = pd.DataFrame(rows)
-    df_scored = build_global_score(df_raw) # 점수 계산 적용
-    
-    # 이제 EBS가 아니라 LDY_SCORE 기준으로 정렬합니다.
-    df_out = df_scored.sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
+    df_out = build_global_score(df_raw).sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
     
     ensure_dir(OUT_DIR)
-    path_day = os.path.join(OUT_DIR, f"recommend_{trade_ymd}.csv")
-    path_lat = os.path.join(OUT_DIR, "recommend_latest.csv")
-    df_out.to_csv(path_day, index=False, encoding=UTF8)
-    df_out.to_csv(path_lat, index=False, encoding=UTF8)
-    log(f"💾 저장완료: {path_lat} ({len(df_out)}건)")
-    
+    df_out.to_csv(os.path.join(OUT_DIR, "recommend_latest.csv"), index=False, encoding=UTF8)
+    log("💾 저장 완료")
     send_telegram_auto(df_out)
-
-# ------------------------------- 헬퍼 함수 (아래) -------------------------------
-def get_sector_map():
-    try:
-        df = fdr.StockListing('KRX')
-        col = next((c for c in ['Sector', '업종', 'Industry'] if c in df.columns), None)
-        if col:
-            df['Code'] = df['Code'].astype(str).str.zfill(6)
-            return dict(zip(df['Code'], df[col]))
-    except: pass
-    return {}
-def get_market_sets(d):
-    try: return set(stock.get_market_ticker_list(d, market='KOSPI')), set(stock.get_market_ticker_list(d, market='KOSDAQ'))
-    except: return set(), set()
-def get_name_map_cached(d):
-    # 생략 (기존 로직 동일)
-    return {} 
-def resolve_trade_date():
-    return (datetime.now(KST) - timedelta(days=0 if datetime.now(KST).hour >= 18 else 1)).strftime("%Y%m%d")
-def build_mcap_map():
-    return {}, datetime.now(KST).strftime("%Y%m%d") # 간단 처리 (실제 로직은 위에서 복사하세요)
-# ------------------------------- 텔레그램 함수 -------------------------------
-def send_telegram_auto(df):
-    log("📨 텔레그램 발송 시작...")
-    if not TG_TOKEN or not TG_ID: return
-    try:
-        top5 = df.head(5).reset_index(drop=True)
-        msg = f"🔥 [LDY v5.4] 추천 Top 5 ({datetime.now(KST).strftime('%m/%d')})\n" + "-"*30 + "\n\n"
-        for i, row in top5.iterrows():
-            msg += f"{i+1}. {row['종목명']} ({row.get('ROUTE', '전략없음')})\n"
-            msg += f"   🔵 매수: {row['추천매수가']:,}\n"
-            msg += f"   🔴 손절: {row['손절가']:,}\n"
-            msg += f"   🟢 목표1: {row['추천매도가1']:,}\n\n"
-        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_ID, "text": msg})
-        log("🚀 전송 완료")
-    except Exception as e: log(f"⚠️ 전송 실패: {e}")
 
 if __name__ == "__main__":
     main()
