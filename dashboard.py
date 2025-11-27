@@ -285,85 +285,104 @@ with st.sidebar:
 # [메인 섹션 - 포트폴리오 진단]
 if user_input:
     st.subheader("🧐 포트폴리오 AI 진단", anchor=False)
-    try:
-        portfolio_data = []
-        total_buy = 0
-        total_eval = 0
+    
+    # [디버깅] 입력값 확인용 메시지 (나중에 지우셔도 됩니다)
+    # st.info(f"입력된 데이터: {user_input}") 
+
+    portfolio_data = []
+    total_buy = 0
+    total_eval = 0
+    
+    lines = user_input.strip().split('\n')
+    
+    for i, line in enumerate(lines):
+        if ":" not in line: continue
         
-        # 1. 입력 파싱 및 데이터 매칭
-        lines = user_input.strip().split('\n')
-        for line in lines:
-            if ":" not in line: continue
-            code, avg_price, qty = line.split(':')
-            code = code.strip().zfill(6)
-            avg_price = float(avg_price)
-            qty = int(qty)
+        try:
+            parts = line.split(':')
+            if len(parts) != 3:
+                st.warning(f"⚠️ {i+1}번째 줄 형식 오류: '종목코드:평단가:수량' 순서로 입력해주세요.")
+                continue
+                
+            code, avg_price, qty = parts
+            code = code.strip().zfill(6) # 5935 -> 005935 변환
+            avg_price = float(avg_price.replace(',', '')) # 콤마 있어도 처리
+            qty = int(qty.replace(',', ''))
             
-            # 현재가 찾기 (scored 데이터에서 검색)
+            # 1. 추천 리스트(scored)에서 찾기
             target_row = scored[scored['종목코드'] == code]
             
             if not target_row.empty:
-                cur_price = int(target_row.iloc[0]['종가'])
-                name = target_row.iloc[0]['종목명']
-                score = target_row.iloc[0]['LDY_SCORE']
-                route = target_row.iloc[0]['ROUTE']
+                # 추천 리스트에 있는 경우 (상세 정보 활용)
+                row = target_row.iloc[0]
+                cur_price = int(row['종가'])
+                name = row['종목명']
+                score = row['LDY_SCORE']
                 
-                # 평가액 계산
-                eval_amt = cur_price * qty
-                buy_amt = avg_price * qty
-                profit = eval_amt - buy_amt
-                profit_rate = (profit / buy_amt) * 100
-                
-                # AI 조언
+                # AI 진단 로직
                 if score >= 80: advice = "🔥 강력 홀딩 (상위권)"
                 elif score >= 60: advice = "✅ 보유 (양호)"
                 elif score >= 40: advice = "⚠️ 관망 (추세 약함)"
                 else: advice = "🚨 매도 검토 (위험)"
                 
                 # 손절가 체크
-                stop_price = target_row.iloc[0]['손절가']
-                if cur_price < stop_price: advice = "💀 손절가 이탈! (즉시 매도)"
-                
-                total_buy += buy_amt
-                total_eval += eval_amt
-                
-                portfolio_data.append({
-                    "종목명": name,
-                    "현재가": f"{cur_price:,}",
-                    "평단가": f"{int(avg_price):,}",
-                    "수익률": f"{profit_rate:.2f}%",
-                    "LDY점수": score,
-                    "AI진단": advice
-                })
-            else:
-                # 데이터에 없는 종목 (실시간 조회 시도)
-                try:
-                    cur_price = fdr.DataReader(code).iloc[-1]['Close']
-                    eval_amt = cur_price * qty
-                    buy_amt = avg_price * qty
-                    total_buy += buy_amt
-                    total_eval += eval_amt
-                    portfolio_data.append({
-                        "종목명": code, "현재가": f"{int(cur_price):,}", "평단가": f"{int(avg_price):,}",
-                        "수익률": f"{(eval_amt-buy_amt)/buy_amt*100:.2f}%", "LDY점수": "-", "AI진단": "❓ 데이터 없음"
-                    })
-                except: pass
+                if cur_price < row['손절가']: 
+                    advice = f"💀 손절가({row['손절가']:,}) 이탈! 매도 권장"
 
-        # 2. 계좌 요약 표시
-        if total_buy > 0:
-            total_profit = total_eval - total_buy
-            total_rate = (total_profit / total_buy) * 100
+            else:
+                # 2. 추천 리스트에 없는 경우 (실시간 조회 시도)
+                # st.toast(f"{code} 실시간 조회 중...") # 로딩 표시
+                try:
+                    if not FDR_OK: raise Exception("FDR 라이브러리 없음")
+                    df_rt = fdr.DataReader(code)
+                    if df_rt.empty: raise Exception("데이터 없음")
+                    
+                    cur_price = int(df_rt.iloc[-1]['Close'])
+                    name = stock.get_market_ticker_name(code) if PYKRX_OK else code
+                    score = "-"
+                    advice = "🔍 분석 대상 아님 (단순 조회)"
+                except Exception as e:
+                    st.error(f"❌ {code} 조회 실패: 종목코드를 확인해주세요. ({e})")
+                    continue
+
+            # 수익률 계산
+            eval_amt = cur_price * qty
+            buy_amt = avg_price * qty
+            profit = eval_amt - buy_amt
+            profit_rate = (profit / buy_amt) * 100
             
-            c1, c2, c3 = st.columns(3)
-            c1.metric("총 매수금액", f"{int(total_buy):,}원")
-            c2.metric("총 평가금액", f"{int(total_eval):,}원")
-            c3.metric("총 수익률", f"{total_rate:.2f}%", f"{int(total_profit):,}원")
+            total_buy += buy_amt
+            total_eval += eval_amt
             
-            st.dataframe(pd.DataFrame(portfolio_data), hide_index=True, use_container_width=True)
+            portfolio_data.append({
+                "종목명": name,
+                "현재가": f"{cur_price:,}원",
+                "평단가": f"{int(avg_price):,}원",
+                "수익률": f"{profit_rate:+.2f}%",
+                "평가손익": f"{int(profit):,}원",
+                "LDY점수": score,
+                "AI진단": advice
+            })
             
-    except Exception as e:
-        st.error(f"입력 형식을 확인해주세요: {e}")
-    
+        except Exception as e:
+            st.error(f"⚠️ 처리 중 오류 발생 ({line}): {e}")
+
+    # 3. 결과 표시
+    if portfolio_data:
+        # 요약 메트릭
+        total_profit = total_eval - total_buy
+        total_rate = (total_profit / total_buy) * 100 if total_buy > 0 else 0
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("총 매수금액", f"{int(total_buy):,}원")
+        c2.metric("총 평가금액", f"{int(total_eval):,}원")
+        c3.metric("총 수익률", f"{total_rate:+.2f}%", f"{int(total_profit):,}원")
+        
+        # 상세 표
+        st.dataframe(pd.DataFrame(portfolio_data), hide_index=True, use_container_width=True)
+    else:
+        st.info("👈 왼쪽 사이드바에 보유 종목을 입력하고 Enter를 누르세요.")
+
     st.divider()
 
 # [기존 섹션 유지]
