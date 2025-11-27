@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v5.3 (Final)
-- Features: Sector Info, Realistic Stop Loss, Telegram Auto-Alert
+LDY Pro Trader Collector v5.3 (Final Fixed)
+- Fix: Sector Info Retrieval (업종 정보 수집 강화)
+- Features: Realistic Stop Loss, Telegram Auto-Alert
 """
 
 import os
@@ -9,16 +10,16 @@ import time
 import math
 import numpy as np
 import pandas as pd
-import requests  # 텔레그램 전송용
+import requests
 from datetime import datetime, timedelta, timezone
 from pykrx import stock
 from tqdm import tqdm
 import FinanceDataReader as fdr
 
 # ==============================================================================
-# [보안 수정] 토큰을 코드에 직접 적지 않고, 환경변수(Secrets)에서 가져옵니다.
+# [보안 설정] 깃허브 Secrets에서 토큰을 가져옵니다.
 # ==============================================================================
-TG_TOKEN = os.environ.get("TG_TOKEN") 
+TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 # ==============================================================================
 
@@ -146,12 +147,35 @@ def get_mcap_eok_from_map(mcap_map: dict, ticker: str) -> float:
     v = mcap_map.get(str(ticker).zfill(6))
     return float(v) if (v is not None and v > 0) else np.nan
 
+# [Fix] 업종 정보 수집 강화 (Fallback 추가)
 def get_sector_map():
     try:
+        # 1. KRX 전체 시도
         df = fdr.StockListing('KRX')
-        df['Code'] = df['Code'].astype(str).str.zfill(6)
-        return dict(zip(df['Code'], df['Sector']))
-    except: return {}
+        
+        # 컬럼명 확인 (Sector, 업종, Industry 중 하나)
+        col = next((c for c in ['Sector', '업종', 'Industry'] if c in df.columns), None)
+        
+        if not col:
+            # 2. 실패 시 KOSPI/KOSDAQ 각각 시도
+            df1 = fdr.StockListing('KOSPI')
+            df2 = fdr.StockListing('KOSDAQ')
+            df = pd.concat([df1, df2])
+            col = next((c for c in ['Sector', '업종', 'Industry'] if c in df.columns), None)
+        
+        if col:
+            df['Code'] = df['Code'].astype(str).str.zfill(6)
+            # NaN 제거
+            df = df.dropna(subset=[col])
+            sector_map = dict(zip(df['Code'], df[col]))
+            log(f"📋 업종 정보 로드 완료 ({len(sector_map)}개)")
+            return sector_map
+        else:
+            log("⚠️ 업종 컬럼을 찾을 수 없음 (fdr 버전 확인 필요)")
+            return {}
+    except Exception as e:
+        log(f"⚠️ 업종 정보 로드 실패: {e}")
+        return {}
 
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
     frames = []
@@ -202,7 +226,7 @@ def get_name_map_cached(date_yyyymmdd: str) -> dict:
         mp = {str(r["종목코드"]).zfill(6): r["종목명"] for _, r in df.iterrows()}
     return mp
 
-# [New] 텔레그램 자동 전송 함수 (목표가 1, 2 추가)
+# [New] 텔레그램 자동 전송 함수 (목표1,2 포함)
 def send_telegram_auto(df):
     if not TG_TOKEN or not TG_ID:
         log("⚠️ 텔레그램 토큰 미설정으로 알림 발송 건너뜀")
@@ -221,8 +245,8 @@ def send_telegram_auto(df):
             route = row['ROUTE']
             buy = row['추천매수가']
             stop = row['손절가']
-            t1 = row['추천매도가1'] # 추가
-            t2 = row['추천매도가2'] # 추가
+            t1 = row['추천매도가1']
+            t2 = row['추천매도가2']
             
             msg += f"{rank}. {name} ({code})\n"
             msg += f"   🎯 전략: {route}\n"
@@ -256,7 +280,7 @@ def main():
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-    sector_map = get_sector_map()
+    sector_map = get_sector_map() # 업종 맵 (강화됨)
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
@@ -321,7 +345,7 @@ def main():
 
             mkt = "KOSPI" if t in kospi_set else ("KOSDAQ" if t in kosdaq_set else "기타")
             name = name_map.get(str(t).zfill(6), "") or stock.get_market_ticker_name(t)
-            sector = sector_map.get(str(t).zfill(6), "기타")
+            sector = sector_map.get(str(t).zfill(6), "기타") # [New] 업종 적용
             
             tv_eok = float(top_df.loc[top_df["종목코드"]==t, "거래대금(원)"].values[0])/1e8
             mcap_eok = get_mcap_eok_from_map(mcap_map, t)
@@ -413,7 +437,7 @@ def main():
     df_out.to_csv(path_lat, index=False, encoding=UTF8)
     log(f"💾 저장완료: {path_lat} ({len(df_out)}건)")
     
-    # 텔레그램 발송 [New]
+    # 텔레그램 발송
     send_telegram_auto(df_out)
 
 if __name__ == "__main__":
