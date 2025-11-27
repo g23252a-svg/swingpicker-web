@@ -202,7 +202,7 @@ def get_name_map_cached(date_yyyymmdd: str) -> dict:
         mp = {str(r["종목코드"]).zfill(6): r["종목명"] for _, r in df.iterrows()}
     return mp
 
-# [New] 텔레그램 자동 전송 함수
+# [New] 텔레그램 자동 전송 함수 (목표가 1, 2 추가)
 def send_telegram_auto(df):
     if not TG_TOKEN or not TG_ID:
         log("⚠️ 텔레그램 토큰 미설정으로 알림 발송 건너뜀")
@@ -221,8 +221,8 @@ def send_telegram_auto(df):
             route = row['ROUTE']
             buy = row['추천매수가']
             stop = row['손절가']
-            t1 = row['추천매도가1']
-            t2 = row['추천매도가2']
+            t1 = row['추천매도가1'] # 추가
+            t2 = row['추천매도가2'] # 추가
             
             msg += f"{rank}. {name} ({code})\n"
             msg += f"   🎯 전략: {route}\n"
