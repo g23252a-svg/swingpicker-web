@@ -36,15 +36,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -c "import pykrx, pandas; print('pykrx', pykrx.__version__); print('pandas', pandas.__version__)"
+
       - name: Run Collector
         env:
           PYTHONUNBUFFERED: "1"
+          # 👇 [핵심 수정] 깃허브 Secrets에서 토큰을 가져와서 환경변수로 넣어줌
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_ID: ${{ secrets.TG_ID }}
         run: python collector.py
 
       - name: Show outputs
         run: |
           ls -alh data || true
           head -n 5 data/recommend_latest.csv || true
+
       - name: Commit & Push CSV
         env:
           TZ: Asia/Seoul
