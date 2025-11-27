@@ -210,15 +210,12 @@ def get_name_map_cached(date_yyyymmdd: str) -> dict:
         mp = {str(r["종목코드"]).zfill(6): r["종목명"] for _, r in df.iterrows()}
     return mp
 
-# [핵심] 텔레그램 자동 전송 (디버깅용 로그 추가)
+# [Modified] 텔레그램 자동 전송 함수 (ROUTE 컬럼 부재 시 예외 처리)
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
     
-    if not TG_TOKEN:
-        log("⚠️ [오류] TG_TOKEN이 없습니다. Secrets 설정을 확인하세요.")
-        return
-    if not TG_ID:
-        log("⚠️ [오류] TG_ID가 없습니다. Secrets 설정을 확인하세요.")
+    if not TG_TOKEN or not TG_ID:
+        log("⚠️ [오류] TG_TOKEN 또는 TG_ID가 설정되지 않았습니다.")
         return
 
     try:
@@ -231,14 +228,21 @@ def send_telegram_auto(df):
             rank = i + 1
             name = row['종목명']
             code = row['종목코드']
-            route = row['ROUTE']
+            
+            # [Fix] ROUTE 컬럼이 없으면 '근거' 컬럼의 첫 번째 항목 사용
+            if 'ROUTE' in row:
+                strategy = row['ROUTE']
+            else:
+                # 근거가 "RSI적정, MACD상승..." 형태라면 앞부분만 따옴
+                strategy = row.get('근거', '전략없음').split(',')[0]
+
             buy = row['추천매수가']
             stop = row['손절가']
             t1 = row['추천매도가1']
             t2 = row['추천매도가2']
             
             msg += f"{rank}. {name} ({code})\n"
-            msg += f"   🎯 전략: {route}\n"
+            msg += f"   🎯 전략: {strategy}\n"
             msg += f"   🔵 매수: {buy:,}\n"
             msg += f"   🔴 손절: {stop:,}\n"
             msg += f"   🟢 목표1: {t1:,}\n"
