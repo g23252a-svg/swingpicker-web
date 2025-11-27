@@ -1,20 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v4.7 (Final + Sector Ranking)
+LDY Pro Trader v4.8 (Visual Sniper Edition)
+- New: SuperTrend Indicator (Chart), Pentagonal Radar Chart (Stats)
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+# 1. 라이브러리 로드
 try: import FinanceDataReader as fdr; FDR_OK = True
 except: FDR_OK = False
 try: from pykrx import stock; PYKRX_OK = True
 except: PYKRX_OK = False
 
-st.set_page_config(page_title="LDY Pro Trader v4.7", layout="wide", page_icon="📈")
-st.title("🏆 LDY Pro Trader v4.7")
-st.caption("Global Rank Scoring + Market Radar + Sector Trend + Instant Chart")
+# 2. 페이지 설정
+st.set_page_config(page_title="LDY Pro Trader v4.8", layout="wide", page_icon="🎯")
+st.title("🏆 LDY Pro Trader v4.8")
+st.caption("Visual Sniper: SuperTrend Chart + Radar Analysis")
 
+# 3. 상수 및 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 LOCAL_RAW = "data/recommend_latest.csv"
 CODES_URL = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/krx_codes.csv"
@@ -26,6 +30,7 @@ W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.
 P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
 
+# 4. 데이터 로딩 함수
 @st.cache_data(ttl=600)
 def load_csv_url(url):
     r = requests.get(url, timeout=30); r.raise_for_status()
@@ -47,7 +52,7 @@ def get_market_status():
     if not FDR_OK: return "Unknown", 0.0, "Unknown", 0.0
     def _check(ticker):
         try:
-            df = fdr.DataReader(ticker) # 날짜 지정 없이 최신 다 가져옴
+            df = fdr.DataReader(ticker)
             if df.empty: return "Error", 0.0
             df = df.tail(60)
             ma20 = df['Close'].rolling(20).mean().iloc[-1]
@@ -55,53 +60,157 @@ def get_market_status():
             if np.isnan(ma20) or ma20 == 0: return "Unknown", 0.0
             return "Bull" if ((curr - ma20)/ma20) > 0 else "Bear", ((curr-ma20)/ma20)*100
         except: return "Error", 0.0
-    
-    kp_stat, kp_diff = _check('KS11') 
-    kq_stat, kq_diff = _check('KQ11')
+    kp_st, kp_diff = _check('KS11')
+    kq_st, kq_diff = _check('KQ11')
     return kp_stat, kp_diff, kq_stat, kq_diff
+
+# [v4.8 NEW] 슈퍼트렌드 계산 함수
+def calculate_supertrend(df, period=10, multiplier=3):
+    high = df['High']; low = df['Low']; close = df['Close']
+    
+    # ATR 계산
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
+
+    # Basic Bands
+    hl2 = (high + low) / 2
+    basic_upper = hl2 + (multiplier * atr)
+    basic_lower = hl2 - (multiplier * atr)
+
+    # Final Bands
+    final_upper = pd.Series(0.0, index=df.index)
+    final_lower = pd.Series(0.0, index=df.index)
+    supertrend = pd.Series(0.0, index=df.index)
+    trend = pd.Series(1, index=df.index) # 1: Up, -1: Down
+
+    for i in range(period, len(df)):
+        # Upper Band Logic
+        if basic_upper.iloc[i] < final_upper.iloc[i-1] or close.iloc[i-1] > final_upper.iloc[i-1]:
+            final_upper.iloc[i] = basic_upper.iloc[i]
+        else:
+            final_upper.iloc[i] = final_upper.iloc[i-1]
+
+        # Lower Band Logic
+        if basic_lower.iloc[i] > final_lower.iloc[i-1] or close.iloc[i-1] < final_lower.iloc[i-1]:
+            final_lower.iloc[i] = basic_lower.iloc[i]
+        else:
+            final_lower.iloc[i] = final_lower.iloc[i-1]
+
+        # Trend Logic
+        if trend.iloc[i-1] == 1: # Up
+            if close.iloc[i] < final_lower.iloc[i-1]:
+                trend.iloc[i] = -1
+            else:
+                trend.iloc[i] = 1
+        else: # Down
+            if close.iloc[i] > final_upper.iloc[i-1]:
+                trend.iloc[i] = 1
+            else:
+                trend.iloc[i] = -1
+        
+        if trend.iloc[i] == 1:
+            supertrend.iloc[i] = final_lower.iloc[i]
+        else:
+            supertrend.iloc[i] = final_upper.iloc[i]
+            
+    df['SuperTrend'] = supertrend
+    df['Trend'] = trend
+    return df
 
 @st.cache_data(ttl=600)
 def get_stock_chart_data(code):
     if not FDR_OK: return None
     try:
-        # [핵심 수정 1] 종목코드를 강제로 문자열로 바꾸고 6자리(00...)로 채움
         code_str = str(code).zfill(6)
-        
-        # [핵심 수정 2] 날짜를 확실한 문자열 포맷(YYYY-MM-DD)으로 변환
         start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-        
-        # 데이터 가져오기
         df = fdr.DataReader(code_str, start_date)
+        if df is None or df.empty: return None
         
-        if df is None or df.empty:
-            return None
-
-        # 이동평균선 계산
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
         
-        return df.tail(60)
-    except Exception as e:
-        # 에러 발생 시 터미널에 원인 출력 (디버깅용)
-        print(f"⚠️ 차트 로딩 실패 ({code}): {e}")
-        return None
+        # [v4.8] 슈퍼트렌드 계산 추가
+        df = calculate_supertrend(df)
+        
+        return df.tail(80) # 넉넉하게 80일
+    except: return None
+
+# [v4.8 NEW] 레이더 차트 그리기
+def plot_radar_chart(row):
+    # 5각형 스탯 계산 (0~100점)
+    stats = {
+        "모멘텀 (Power)": min(100, (row.get("ret_5d_%", 0) + 5) * 10), # 최근 수익률 반영
+        "수급 (Money)": row.get("MFI14", 50),
+        "가성비 (Value)": min(100, row.get("RR1", 1) * 50), # 손익비 반영
+        "안전성 (Safety)": 100 - (row.get("이격도", 0) * 2), # 이격도 낮을수록 안전
+        "종합 (Score)": row.get("LDY_SCORE", 0)
+    }
+    
+    # 데이터 정제 (음수 방지 및 100점 캡)
+    values = [max(0, min(100, v)) for v in stats.values()]
+    categories = list(stats.keys())
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=values,
+        theta=categories,
+        fill='toself',
+        name=row['종목명'],
+        line_color='#00CC96',
+        fillcolor='rgba(0, 204, 150, 0.3)'
+    ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 100], color="gray"),
+            bgcolor='rgba(0,0,0,0)'
+        ),
+        showlegend=False,
+        margin=dict(l=20, r=20, t=20, b=20),
+        height=300,
+        template="plotly_dark",
+        paper_bgcolor='rgba(0,0,0,0)'
+    )
+    return fig
 
 def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty: return go.Figure()
+
     fig = go.Figure(data=[go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         name="주가", increasing_line_color='#ef5350', decreasing_line_color='#2979ff',
-        hovertemplate="<b>날짜: %{x|%Y-%m-%d}</b><br>시가: %{open:,}원<br>고가: %{high:,}원<br>저가: %{low:,}원<br>종가: %{close:,}원<extra></extra>"
+        hovertemplate="<b>%{x|%Y-%m-%d}</b><br>종가: %{close:,}원<extra></extra>"
     )])
-    lines = [(entry, "🔵진입", "dash", "blue"), (stop, "🔴손절", "dot", "red"), (target1, "🟢목표1", "dot", "green"), (target2, "🟢목표2", "dot", "green")]
+
+    # [v4.8] 슈퍼트렌드 라인 추가
+    # 상승구간(Green), 하락구간(Red) 분리
+    up_trend = df[df['Trend'] == 1]
+    down_trend = df[df['Trend'] == -1]
+    
+    fig.add_trace(go.Scatter(
+        x=up_trend.index, y=up_trend['SuperTrend'],
+        mode='markers', marker=dict(color='green', size=2), name='상승추세 지지선'
+    ))
+    fig.add_trace(go.Scatter(
+        x=down_trend.index, y=down_trend['SuperTrend'],
+        mode='markers', marker=dict(color='red', size=2), name='하락추세 저항선'
+    ))
+
+    lines = [(entry, "🔵진입", "dash", "blue"), (stop, "🔴손절", "dot", "red"), (target1, "🟢목표1", "dot", "green")]
     for val, label, dash, color in lines:
         if pd.notna(val) and val > 0:
             fig.add_hline(y=val, line_dash=dash, line_color=color, annotation_text=f"{label}: {val:,.0f}", annotation_position="top right", annotation_font=dict(size=12, color=color))
-    if 'MA20' in df.columns: fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20일선 (생명선)', hovertemplate="20일선: %{y:,.0f}원<extra></extra>"))
-    if 'MA60' in df.columns: fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='purple', width=1.5), name='60일선 (수급선)', hovertemplate="60일선: %{y:,.0f}원<extra></extra>"))
-    fig.update_layout(title=dict(text=f"<b>{name}</b> ({code}) 일봉 차트", font=dict(size=20)), yaxis_title="주가 (원)", yaxis_tickformat=',', xaxis_tickformat='%Y-%m-%d', xaxis_rangeslider_visible=False, template="plotly_dark", height=500, margin=dict(l=20,r=20,t=50,b=20), legend=dict(orientation="h",y=1.02,x=1), hovermode="x unified")
+    
+    if 'MA20' in df.columns: fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='orange', width=1), name='20일선'))
+    if 'MA60' in df.columns: fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='purple', width=1), name='60일선'))
+    
+    fig.update_layout(title=dict(text=f"<b>{name}</b> ({code})", font=dict(size=20)), yaxis_title="주가", yaxis_tickformat=',', xaxis_tickformat='%Y-%m-%d', xaxis_rangeslider_visible=False, template="plotly_dark", height=500, margin=dict(l=20,r=20,t=40,b=20), legend=dict(orientation="h",y=1.02,x=1), hovermode="x unified")
     return fig
 
+# 5. 데이터 처리 유틸
 def z6(x): return str(x).zfill(6) if str(x).isdigit() else str(x)
 def nz_num(s): return pd.to_numeric(s, errors="coerce")
 def ensure_turnover(df):
@@ -111,22 +220,17 @@ def ensure_turnover(df):
         elif "거래량" in df.columns and "종가" in df.columns: base = nz_num(df["거래량"]) * nz_num(df["종가"])
         if base is not None: df["거래대금(억원)"] = (base/1e8).round(2)
     return df
-
 def normalize_cols(df): return ensure_turnover(df)
 def apply_names(df): return df
-
 def liquidity_gate(x_turn, market):
     min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
     return nz_num(x_turn) >= market.map(min_map).fillna(MIN_TURN_DEFAULT)
-
 def cap_q(s, q=90, floor=1.0):
     c = np.nanpercentile(nz_num(s), q)
     return float(max(c, floor)) if np.isfinite(c) else floor
-
 def pct_norm_pos(s, q=90, floor=1.0):
     s = nz_num(s).clip(lower=0)
     return np.clip(s / cap_q(s, q, floor), 0, 1)
-
 def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
 
 def route_tag(row):
@@ -145,7 +249,6 @@ def route_tag(row):
     if pd.notna(rsi) and (rsi <= 40): return "🔁 MR (반전)"
     if pd.notna(mfi) and (mfi >= 60): return "🐳 WHALE (수급)"
     if pd.notna(slope) and slope > 0: return "📈 TREND (추세)"
-    
     return "—"
 
 def build_global_score(lat):
@@ -210,7 +313,7 @@ def build_global_score(lat):
                 "PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
-# -------- Main Execution --------
+# 6. 메인 실행 및 UI
 try: df_raw = load_csv_url(RAW_URL); log_src(df_raw, "Remote")
 except: 
     if os.path.exists(LOCAL_RAW): df_raw = load_csv_path(LOCAL_RAW); log_src(df_raw, "Local")
@@ -240,76 +343,51 @@ with st.sidebar:
 
 kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
 c1, c2 = st.columns(2)
-c1.metric("KOSPI (MA20)", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if kp_stat=="Bull" else "inverse")
-c2.metric("KOSDAQ (MA20)", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if kq_stat=="Bull" else "inverse")
-if kp_stat == "Bear" and kq_stat == "Bear": st.warning("🚨 약세장 경보")
+c1.metric("KOSPI", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if kp_stat=="Bull" else "inverse")
+c2.metric("KOSDAQ", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if kq_stat=="Bull" else "inverse")
 
 st.divider()
-
-# [v4.7 NEW] 섹터(테마) 랭킹 표시
-st.subheader("🔥 오늘의 주도 테마 (Hot Sectors)", anchor=False)
+st.subheader("🔥 오늘의 주도 테마", anchor=False)
 if "업종" in base.columns:
-    # 1. 업종별 개수 세기
-    sector_counts = base["업종"].value_counts()
-    
-    # 2. [핵심 수정] '기타'나 'nan'은 순위에서 제외하기 (의미 없는 정보 삭제)
-    if "기타" in sector_counts.index:
-        sector_counts = sector_counts.drop("기타")
-    
-    # 3. 상위 5개만 자르기
+    sector_counts = base["업종"].fillna("미분류").value_counts()
+    if "기타" in sector_counts.index and len(sector_counts) > 1: sector_counts = sector_counts.drop("기타")
     top_sectors = sector_counts.head(5)
-    
-    # 4. 화면 표시
     if not top_sectors.empty:
         cols = st.columns(5)
         for i, (sec_name, count) in enumerate(top_sectors.items()):
-            if i < 5:
-                # 1위는 빨간색으로 강조
-                delta_color = "inverse" if i == 0 else "off" 
-                cols[i].metric(f"{i+1}위", sec_name, f"{count}종목", delta_color=delta_color)
-    else:
-        st.info("뚜렷한 주도 테마가 없습니다.")
-else:
-    st.info("섹터 정보가 수집되지 않았습니다. (Collector 실행 필요)")
+            if i < 5: cols[i].metric(f"{i+1}위", sec_name, f"{count}종목", delta_color="inverse" if i==0 else "off")
+    else: st.info("데이터 부족")
+else: st.info("섹터 정보 없음")
 
 st.divider()
-
-st.subheader("🔭 종목 상세 차트 (60일)", anchor=False)
-if top10.empty:
-    view_df = pd.DataFrame(columns=["종목명","종목코드","ROUTE"])
-    st.warning("데이터가 충분하지 않습니다.")
-else:
-    view_df = top10 if auth_status != "free" else top10.head(3)
-
-opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['ROUTE']}", axis=1).tolist()
+st.subheader("🔭 종목 상세 분석 (Visual Sniper)", anchor=False)
+view_df = top10 if auth_status != "free" else top10.head(3)
+opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']})", axis=1).tolist()
 sel = st.selectbox("종목 선택", opts, index=0 if opts else None)
 
 if sel:
-    # [FIX] 안전하게 인덱스로 데이터 찾기 (문자열 파싱 에러 방지)
     sel_idx = opts.index(sel)
     row = view_df.iloc[sel_idx]
     code = row['종목코드']
     
+    # [v4.8] 레이아웃 개선: 차트 + 레이더 차트 동시 배치
     c1, c2 = st.columns([2, 1])
     with c1:
         chart_df = get_stock_chart_data(code)
         if chart_df is not None:
             st.plotly_chart(plot_interactive_chart(chart_df, code, row['종목명'], row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
-        else: st.info("차트 데이터 없음")
+        else: st.info("차트 로딩 실패")
     with c2:
-        st.markdown(f"### {row['종목명']}"); st.caption(f"Score: {row['LDY_SCORE']}")
-        st.write(f"**전략:** `{row['ROUTE']}`"); st.write(f"**근거:** {row['근거']}")
-        c_a, c_b = st.columns(2); c_a.metric("진입", f"{row['추천매수가']:,}"); c_b.metric("손절", f"{row['손절가']:,}", delta="Stop")
-        c_c, c_d = st.columns(2); c_c.metric("목표1", f"{row['추천매도가1']:,}"); c_d.metric("목표2", f"{row['추천매도가2']:,}")
+        # [v4.8] 레이더 차트 & 상세 정보
+        st.markdown(f"### {row['종목명']}")
+        st.plotly_chart(plot_radar_chart(row), use_container_width=True)
+        
+        st.info(f"**전략:** `{row['ROUTE']}`")
+        c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop")
 
 st.subheader("📋 Daily Top 10 List", anchor=False)
-with st.expander("❓ 용어 설명 (클릭)", expanded=False):
-    st.markdown("""
-    - **종합점수:** AI 투자 매력도 (100점 만점)
-    - **MFI:** 수급강도 (60↑ 좋음)
-    - **RR:** 손익비 (1.2↑ 권장)
-    - **상세분석:** MOM(힘), LIQ(거래량), TEC(기술), PEN(감점)
-    """)
+with st.expander("❓ 용어 설명", expanded=False):
+    st.markdown("- **Score:** 종합점수 / **MFI:** 수급 / **SuperTrend:** 차트 위 초록/빨강 점선 (초록=상승)")
 
 if auth_status == "free": st.warning("🔒 무료 버전: Top 3만 공개")
 
@@ -321,10 +399,8 @@ for c in price_cols:
 for c in ["MFI14", "LDY_SCORE", "P_hit"]:
     if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0)
 
-cols = ["LDY_RANK","통과","ROUTE","업종","시장","종목명","종목코드","LDY_SCORE","P_hit","종가","추천매수가","손절가","추천매도가1","추천매도가2","RR1","MFI14","거래대금(억원)","WHY"]
-# [Fix] 데이터에 없는 컬럼은 자동으로 제외 (KeyError 방지)
+cols = ["LDY_RANK","통과","ROUTE","업종","종목명","종목코드","LDY_SCORE","P_hit","종가","추천매수가","손절가","추천매도가1","MFI14","WHY"]
 cols = [c for c in cols if c in safe_view.columns]
-
 cfg = {
     "LDY_RANK": st.column_config.NumberColumn("순위"),
     "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
@@ -332,11 +408,9 @@ cfg = {
     "종가": st.column_config.TextColumn("현재가"),
     "추천매수가": st.column_config.TextColumn("진입가"),
     "손절가": st.column_config.TextColumn("손절가"),
-    "추천매도가1": st.column_config.TextColumn("목표1"),
-    "추천매도가2": st.column_config.TextColumn("목표2"),
+    "추천매도가1": st.column_config.TextColumn("목표가"),
     "MFI14": st.column_config.NumberColumn("MFI", format="%.1f"),
-    "WHY": st.column_config.TextColumn("분석", width="medium"),
-    "업종": st.column_config.TextColumn("업종")
+    "WHY": st.column_config.TextColumn("분석", width="medium")
 }
 st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
 
