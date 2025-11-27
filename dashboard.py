@@ -465,6 +465,8 @@ if sel:
     sel_idx = opts.index(sel)
     row = view_df.iloc[sel_idx]
     code = row['종목코드']
+    
+    # 레이아웃 개선 (왼쪽: 차트 / 오른쪽: 정보)
     c1, c2 = st.columns([2, 1])
     with c1:
         chart_df = get_stock_chart_data(code)
@@ -472,9 +474,21 @@ if sel:
             st.plotly_chart(plot_interactive_chart(chart_df, code, row['종목명'], row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
         else: st.info("차트 로딩 실패")
     with c2:
-        st.markdown(f"### {row['종목명']}"); st.plotly_chart(plot_radar_chart(row), use_container_width=True)
+        st.markdown(f"### {row['종목명']}")
+        st.plotly_chart(plot_radar_chart(row), use_container_width=True)
+        
         st.info(f"**전략:** `{row['ROUTE']}`")
-        c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop")
+        
+        # [FIX] 진입/손절 + 목표1/목표2 추가
+        c_a, c_b = st.columns(2)
+        c_a.metric("🔵 진입가", f"{row['추천매수가']:,}원")
+        c_b.metric("🔴 손절가", f"{row['손절가']:,}원", delta="Stop Loss", delta_color="inverse")
+        
+        st.divider() # 구분선 추가
+        
+        c_c, c_d = st.columns(2)
+        c_c.metric("🟢 목표1", f"{row['추천매도가1']:,}원", delta="Target 1")
+        c_d.metric("🟢 목표2", f"{row['추천매도가2']:,}원", delta="Target 2")
 
 # [섹션 3] 리스트
 st.subheader("📋 Daily Top 10 List", anchor=False)
