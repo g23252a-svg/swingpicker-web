@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v5.5 (Final)
-- Fix: Sector Info Retrieval (Robust Fallback)
-- Features: Realistic Stop Loss, Telegram Auto-Alert
+LDY Pro Trader Collector v5.6 (Sector Fix)
+- Update: Robust Sector Data Collection (KOSPI/KOSDAQ Merge Strategy)
 """
 
 import os
@@ -106,43 +105,37 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# [핵심 FIX] 업종 정보 수집 강화
+# [핵심 FIX] 업종 정보 수집 함수 재설계
 def get_sector_map():
     sector_map = {}
     try:
-        # 시도 1: KRX 전체
-        log("📋 업종 정보 수집 중 (KRX)...")
-        df = fdr.StockListing('KRX')
+        log("📋 업종 정보 수집 중 (KOSPI/KOSDAQ 분리)...")
         
-        # 컬럼명 후보군 (라이브러리 버전에 따라 다름)
-        candidates = ['Sector', '업종', 'Industry', 'IndustryCode']
-        col = next((c for c in candidates if c in df.columns), None)
+        # 1. KOSPI, KOSDAQ 각각 수집 후 병합 (가장 안정적)
+        df_kospi = fdr.StockListing('KOSPI')
+        df_kosdaq = fdr.StockListing('KOSDAQ')
+        df = pd.concat([df_kospi, df_kosdaq])
+
+        # 2. 가능한 모든 업종 컬럼명 검색
+        target_cols = ['Sector', '업종', 'Industry', 'Wics']
+        col = next((c for c in target_cols if c in df.columns), None)
         
         if col:
-            # Code 컬럼 정규화
-            code_col = 'Code' if 'Code' in df.columns else 'Symbol'
+            # 코드 컬럼 찾기 (Code 혹은 Symbol)
+            code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
+            
+            # 전처리: 코드는 6자리 문자열, 업종 없는 행 제거
             df[code_col] = df[code_col].astype(str).str.zfill(6)
-            df = df.dropna(subset=[col]) # 업종 없는거 제거
+            df = df.dropna(subset=[col])
+            
             sector_map = dict(zip(df[code_col], df[col]))
-            log(f"✅ 업종 정보 {len(sector_map)}건 로드 성공")
-            return sector_map
+            log(f"✅ 업종 정보 로드 성공: {len(sector_map)}개 종목")
+        else:
+            log("⚠️ 업종 컬럼을 찾을 수 없습니다. (데이터 구조 변경됨)")
+            
     except Exception as e:
-        log(f"⚠️ KRX 로드 실패: {e}")
+        log(f"⚠️ 업종 정보 로드 실패: {e}")
 
-    # 시도 2: KOSPI/KOSDAQ 개별 시도 (Fallback)
-    if not sector_map:
-        try:
-            log("🔄 KOSPI/KOSDAQ 개별 수집 시도...")
-            df1 = fdr.StockListing('KOSPI')
-            df2 = fdr.StockListing('KOSDAQ')
-            df = pd.concat([df1, df2])
-            col = next((c for c in ['Sector', '업종'] if c in df.columns), None)
-            if col:
-                df['Code'] = df['Code'].astype(str).str.zfill(6)
-                sector_map = dict(zip(df['Code'], df[col]))
-                log(f"✅ 개별 수집 성공: {len(sector_map)}건")
-        except: pass
-        
     return sector_map
 
 def pick_top_by_trading_value(date_yyyymmdd, top_n):
@@ -183,7 +176,7 @@ def get_name_map_cached(d):
         return dict(zip(df['종목코드'], df['종목명']))
     return {}
 
-# --- Scoring Logic (Synced with Dashboard) ---
+# --- Scoring Logic ---
 def cap_q(s, q=90, floor=1.0):
     c = np.nanpercentile(nz_num(s), q)
     return float(max(c, floor)) if np.isfinite(c) else floor
@@ -196,7 +189,6 @@ def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
 
 def build_global_score(lat):
     x = lat.copy()
-    # 컬럼 매핑
     close, entry, stop, t1 = nz_num(x["종가"]), nz_num(x["추천매수가"]), nz_num(x["손절가"]), nz_num(x["추천매도가1"])
     turn, rsi, slope, volz = nz_num(x["거래대금(억원)"]), nz_num(x["RSI14"]), nz_num(x["MACD_Slope"]), nz_num(x["거래강도"])
     kairi, r5, ebs = nz_num(x["이격도"]), nz_num(x["ret_5d_%"]), nz_num(x["EBS"]).fillna(0)
@@ -238,7 +230,6 @@ def build_global_score(lat):
     x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
     
-    # 전략 태그
     conditions = [
         (r5 >= 3) & (slope > 0),
         (rsi >= 40) & (rsi <= 60),
@@ -247,52 +238,68 @@ def build_global_score(lat):
     choices = ["🔼 BRK (돌파)", "↩️ PULL (눌림)", "🔁 MR (반전)"]
     x["ROUTE"] = np.select(conditions, choices, default="—")
     
-    # WHY 문자열
     x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
+# [Fixed] 텔레그램 자동 전송 함수 (순위 오류 수정 + 전략 태그 적용)
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
+    
     if not TG_TOKEN or not TG_ID:
-        log("⚠️ [오류] TG_TOKEN/ID 미설정")
+        log("⚠️ [오류] TG_TOKEN 또는 TG_ID가 설정되지 않았습니다.")
         return
 
     try:
-        # [Fix] LDY_SCORE 기준 정렬 후 상위 5개 (EBS 기준 아님!)
-        top5 = df.sort_values("LDY_SCORE", ascending=False).head(5).reset_index(drop=True)
+        # 1. 상위 5개 선정 및 인덱스 초기화 (순위 1~5 보장)
+        top5 = df.head(5).reset_index(drop=True)
         
         trade_date = datetime.now(KST).strftime('%Y-%m-%d')
-        msg = f"🔥 [LDY v5.5] 추천 Top 5 ({trade_date})\n"
+        msg = f"🔥 [LDY v5.6] 추천 Top 5 ({trade_date})\n"
         msg += "-" * 30 + "\n\n"
         
         for i, row in top5.iterrows():
             rank = i + 1
             name = row['종목명']
             code = row['종목코드']
-            route = row.get('ROUTE', '전략없음')
+            
+            rsi = row.get('RSI14', 50)
+            slope = row.get('MACD_Slope', 0)
+            kairi = row.get('이격도', 0) if '이격도' in row else row.get('乖離%', 0)
+            r5 = row.get('ret_5d_%', 0)
+            mfi = row.get('MFI14', 0)
+            
+            if r5 >= 3 and slope > 0: route = "🔼 BRK (돌파)"
+            elif 40 <= rsi <= 60: route = "↩️ PULL (눌림)"
+            elif rsi <= 40: route = "🔁 MR (반전)"
+            elif mfi >= 60: route = "🐳 WHALE (수급)"
+            else: route = "📈 TREND (추세)"
+
             buy = row['추천매수가']
             stop = row['손절가']
             t1 = row['추천매도가1']
+            t2 = row['추천매도가2']
             
             msg += f"{rank}. {name} ({code})\n"
             msg += f"   🎯 전략: {route}\n"
             msg += f"   🔵 매수: {buy:,}\n"
             msg += f"   🔴 손절: {stop:,}\n"
-            msg += f"   🟢 목표1: {t1:,}\n\n"
+            msg += f"   🟢 목표1: {t1:,}\n"
+            msg += f"   🟢 목표2: {t2:,}\n\n"
             
         url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
         data = {"chat_id": TG_ID, "text": msg}
         requests.post(url, data=data)
-        log("🚀 전송 완료")
+        log("🚀 텔레그램 전송 성공!")
+            
     except Exception as e:
-        log(f"⚠️ 전송 실패: {e}")
+        log(f"⚠️ 텔레그램 로직 에러: {e}")
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
-    log("🚀 LDY Collector v5.5 시작...")
+    log("🚀 LDY Collector v5.6 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd}")
@@ -304,7 +311,7 @@ def main():
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
     
-    # [핵심] 업종 맵 확보
+    # [핵심] 업종 맵 확보 (강화됨)
     sector_map = get_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
@@ -373,7 +380,7 @@ def main():
                 "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
                 "종목명": name_map.get(str(t).zfill(6), str(t)),
                 "종목코드": str(t).zfill(6),
-                "업종": sector_map.get(str(t).zfill(6), "기타"), # [Fix] 업종 정보 매핑
+                "업종": sector_map.get(str(t).zfill(6), "기타"), # [Fix] 업종 정보 매핑 (없으면 기타)
                 "종가": int(last_c), "거래대금(억원)": round(tv_eok, 2),
                 "시가총액(억원)": round(mcap, 1),
                 "RSI14": round(rsi, 1), "MFI14": round(mfi, 1),
@@ -387,13 +394,14 @@ def main():
     if not rows: raise RuntimeError("No Result")
     
     df_raw = pd.DataFrame(rows)
+    # LDY SCORE 계산 및 정렬
     df_out = build_global_score(df_raw).sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
     
     ensure_dir(OUT_DIR)
     df_out.to_csv(os.path.join(OUT_DIR, "recommend_latest.csv"), index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건)")
     
-    # [핵심] 대시보드 순위와 동일하게 LDY_SCORE 순으로 발송
+    # 텔레그램 발송 (정렬된 데이터로)
     send_telegram_auto(df_out)
 
 if __name__ == "__main__":
