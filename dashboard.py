@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.4 (Visual Master & Profit Hunter)
-- New: Sector Treemap, Profit Calculator, Portfolio Card View
+LDY Pro Trader v5.5 (Open Beta)
+- All Features Unlocked: No Password, Full Access
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px # 트리맵용
+import plotly.express as px
 from datetime import datetime, timedelta
 
 # 1. 라이브러리 로드
@@ -15,9 +15,9 @@ try: from pykrx import stock; PYKRX_OK = True
 except: PYKRX_OK = False
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v5.4", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v5.4")
-st.caption("Visual Master: Sector Treemap & AI Portfolio Management")
+st.set_page_config(page_title="LDY Pro Trader", layout="wide", page_icon="💎")
+st.title("🏆 LDY Pro Trader v5.5 (Open Beta)")
+st.caption("Free for Everyone: AI Quant Analysis & Portfolio Manager")
 
 # 3. 상수 및 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -43,7 +43,6 @@ def load_csv_path(path): return pd.read_csv(path, encoding="utf-8")
 
 def log_src(df, src): st.toast(f"Data Loaded: {src} ({len(df)} rows)", icon="✅")
 
-# 포트폴리오 저장/로드
 def load_portfolio_file():
     if os.path.exists(PORTFOLIO_FILE):
         try:
@@ -59,18 +58,6 @@ def save_portfolio_file(text_data):
         return True
     except: return False
 
-# 텔레그램 전송
-def send_telegram_msg(token, chat_id, message):
-    if not token or not chat_id: return False, "토큰/ID 누락"
-    try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        data = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
-        requests.post(url, data=data)
-        return True, "전송 완료"
-    except Exception as e:
-        return False, str(e)
-
-# 종목명 -> 코드 변환
 @st.cache_data(ttl=3600)
 def get_code_map():
     if FDR_OK:
@@ -110,7 +97,6 @@ def get_market_status():
     kq_stat, kq_diff = _check('KQ11')
     return kp_stat, kp_diff, kq_stat, kq_diff
 
-# 공포/탐욕 지수
 @st.cache_data(ttl=3600)
 def get_fear_greed_index():
     if not FDR_OK: return 50, "Neutral"
@@ -158,29 +144,19 @@ def plot_fear_greed_gauge(score):
     fig.update_layout(height=250, margin=dict(l=20,r=20,t=40,b=20), paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"})
     return fig
 
-# [v5.4 NEW] 섹터 트리맵 시각화
 def plot_sector_treemap(df):
     if '업종' not in df.columns: return None
-    # 데이터 전처리
     df_map = df.copy()
     df_map['업종'] = df_map['업종'].fillna('기타')
-    df_map = df_map[df_map['업종'] != '기타'] # 기타 제외하고 의미있는 것만
-    
+    df_map = df_map[df_map['업종'] != '기타']
     if df_map.empty: return None
-    
-    # 트리맵 생성
     fig = px.treemap(
-        df_map, 
-        path=['업종', '종목명'], 
-        values='거래대금(억원)',
-        color='LDY_SCORE',
-        color_continuous_scale='RdYlGn', # 초록(낮음) ~ 빨강(높음)
-        title="<b>🔥 시장 주도 섹터 지도 (Size:거래대금 / Color:점수)</b>"
+        df_map, path=['업종', '종목명'], values='거래대금(억원)', color='LDY_SCORE',
+        color_continuous_scale='RdYlGn', title="<b>🔥 시장 주도 섹터 지도 (Size:거래대금 / Color:점수)</b>"
     )
     fig.update_layout(margin=dict(t=50, l=10, r=10, b=10), height=400)
     return fig
 
-# 슈퍼트렌드
 def calculate_supertrend(df, period=10, multiplier=3):
     high = df['High']; low = df['Low']; close = df['Close']
     tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
@@ -221,7 +197,6 @@ def get_stock_chart_data(code):
         return df.tail(80)
     except: return None
 
-# 레이더 차트
 def plot_radar_chart(row):
     stats = {
         "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
@@ -341,10 +316,8 @@ def build_global_score(lat):
     pen += P_OVERHEAT_5D * np.clip((r5 - 10)/10, 0, 1)
     pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
-    
     score = np.clip(base_score - pen, 0, 100)
-    x["RR1"] = rr1; x["Now%"] = now_gap
-    x["LDY_SCORE"] = score.round(1)
+    x["RR1"] = rr1; x["Now%"] = now_gap; x["LDY_SCORE"] = score.round(1)
     x["ROUTE"] = (x.apply(route_tag, axis=1) if len(x) else "—")
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
@@ -368,43 +341,19 @@ top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
 # [사이드바]
 with st.sidebar:
-    st.divider(); st.header("🔐 로그인")
-    input_pw = st.text_input("비밀번호", type="password")
-    ADMIN_KEY, MEMBER_KEY = "2022322", "240521"
-    auth_status = "free"
-    if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자")
-    elif input_pw == MEMBER_KEY: auth_status = "member"; st.success("🎉 유료회원")
-    else: 
-        auth_status = "free"
-        if input_pw: st.error("❌ 불일치")
-        st.info("🔒 무료 (Top 3)")
-        
-    # [v5.4] 포트폴리오 (자동저장 + 텔레그램)
-    st.divider(); st.subheader("💼 내 자산 & 알림")
+    # [v5.4] 포트폴리오 (자동저장 + 카드뷰)
+    st.header("💼 내 자산 분석")
     saved_pf = load_portfolio_file()
     pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=120)
-    c1, c2 = st.columns(2)
-    run_pf = c1.button("💾 저장/분석", type="primary")
-    with st.expander("🔔 텔레그램 봇 설정"):
-        tg_token = st.text_input("Bot Token", type="password")
-        tg_chat_id = st.text_input("Chat ID")
-        send_btn = st.button("🚀 Top 5 전송")
+    run_pf = st.button("💾 저장/분석", type="primary")
+    st.caption("입력 예시:\n삼성전자:78000:10\n035420:261000:5")
 
-# [기능 실행 로직]
 if run_pf: save_portfolio_file(pf_input)
-if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v5.4] 오늘의 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
-    for i in range(min(5, len(top10))):
-        row = top10.iloc[i]
-        msg += f"{i+1}. {row['종목명']} ({row['ROUTE']})\n"
-        msg += f"   매수: {row['추천매수가']:,} / 손절: {row['손절가']:,}\n\n"
-    ok, res = send_telegram_msg(tg_token, tg_chat_id, msg)
-    if ok: st.toast("전송 완료!", icon="✅")
-    else: st.error(f"전송 실패: {res}")
 
 # [메인 화면]
 kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
 st.plotly_chart(plot_fear_greed_gauge(get_fear_greed_index()[0]), use_container_width=True)
+
 c1, c2 = st.columns(2)
 c1.metric("KOSPI", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if kp_stat=="Bull" else "inverse")
 c2.metric("KOSDAQ", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if kq_stat=="Bull" else "inverse")
@@ -485,7 +434,7 @@ if top10.empty:
     view_df = pd.DataFrame(columns=["종목명","종목코드","ROUTE"])
     st.warning("데이터가 충분하지 않습니다.")
 else:
-    view_df = top10 if auth_status != "free" else top10.head(3)
+    view_df = top10 # 전체 공개 (비밀번호 없음)
 
 opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['ROUTE']}", axis=1).tolist()
 sel = st.selectbox("종목 선택", opts, index=0 if opts else None)
@@ -519,8 +468,6 @@ st.subheader("📋 Daily Top 10 List", anchor=False)
 with st.expander("❓ 용어 설명", expanded=False):
     st.markdown("- **Score:** 종합점수 / **MFI:** 수급 / **SuperTrend:** 차트 위 초록/빨강 점선 (초록=상승)")
 
-if auth_status == "free": st.warning("🔒 무료 버전: Top 3만 공개")
-
 safe_view = view_df.copy().reset_index(drop=True)
 safe_view["LDY_RANK"] = safe_view.index + 1
 price_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)"]
@@ -546,10 +493,5 @@ cfg = {
 }
 st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
 
-if auth_status == "admin":
-    csv = scored.to_csv(index=False).encode('utf-8-sig')
-    st.download_button("📥 전체 다운로드 (Admin)", csv, "ldy_rank.csv", "text/csv", key="admin_dl")
-elif auth_status == "member":
-    st.button("📥 다운로드 제한 (Member)", disabled=True, key="member_dl")
-else:
-    st.button("📥 다운로드 제한 (Free)", disabled=True, key="free_dl")
+csv = scored.to_csv(index=False).encode('utf-8-sig')
+st.download_button("📥 전체 다운로드", csv, "ldy_rank.csv", "text/csv")
