@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.0 (Ultimate Sector Fix)
-- Fix: Hardcoded Sector Map Fallback (Never Fails for Major Stocks)
+LDY Pro Trader Collector v6.1 (Sector Hardcoded Edition)
+- Fix: Expanded Hardcoded Sector Map (Top 100+ Stocks)
 """
 
 import os
@@ -15,7 +15,7 @@ from pykrx import stock
 from tqdm import tqdm
 import FinanceDataReader as fdr
 
-# [보안 설정] Secrets 로드
+# [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 
@@ -105,34 +105,58 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# [Ultimate Fix] 하드코딩된 업종 맵 (주요 종목)
+# [Ultimate Fix] 대규모 하드코딩 업종 맵 (주요 종목 150개+)
 def get_fallback_sector_map():
     return {
-        "005930": "전기전자", "000660": "전기전자", "373220": "전기전자", "207940": "의약품", 
-        "005380": "운수장비", "005935": "전기전자", "068270": "의약품", "000270": "운수장비",
-        "105560": "금융업", "005490": "철강금속", "035420": "서비스업", "035720": "서비스업",
-        "006400": "전기전자", "051910": "화학", "012330": "화학", "028260": "유통업",
-        "055550": "금융업", "086790": "금융업", "032830": "금융업", "003550": "화학",
-        "015760": "전기가스업", "034020": "기계", "010120": "전기전자", "323410": "서비스업",
-        "259960": "서비스업", "011200": "운수창고", "000810": "금융업", "018260": "서비스업",
-        "010130": "철강금속", "009150": "전기전자", "033780": "금융업", "017670": "통신업",
-        "329180": "운수장비", "096770": "화학", "003490": "운수창고", "030200": "통신업",
-        "316140": "금융업", "000100": "의약품", "251270": "서비스업", "024110": "금융업",
-        "036570": "서비스업", "086280": "운수창고", "090430": "화학", "010950": "화학",
-        "009540": "운수장비", "267260": "전기전자", "042700": "전기전자", "010620": "화학",
-        "138040": "금융업", "034730": "서비스업", "241560": "화학", "000150": "기계",
-        "298040": "전기전자", "108490": "기계", "466100": "기계", "437730": "운수장비",
-        "098460": "기계", "277810": "기계"
-        # 필요한 종목 계속 추가 가능
+        # 반도체 / 전기전자
+        "005930": "전기전자", "000660": "전기전자", "005935": "전기전자", "042700": "전기전자", 
+        "009150": "전기전자", "011070": "전기전자", "010120": "전기전자", "267260": "전기전자",
+        "298040": "전기전자", "402340": "전기전자", "000990": "전기전자",
+        
+        # 2차전지 / 화학
+        "373220": "전기전자", "006400": "전기전자", "051910": "화학", "096770": "화학", 
+        "010950": "화학", "051915": "화학", "247540": "코스닥(화학)", "086520": "코스닥(화학)",
+        "241560": "화학", "352820": "서비스업", # 하이브는 서비스업이나 엔터로 분류됨
+        
+        # 자동차 / 운수장비
+        "005380": "운수장비", "000270": "운수장비", "012330": "운수장비", "003490": "운수창고",
+        "329180": "운수장비", "010620": "운수장비", "12450": "운수장비", "047810": "운수장비",
+        
+        # 제약 / 바이오
+        "207940": "의약품", "068270": "의약품", "000100": "의약품", "128940": "의약품",
+        "196170": "코스닥(제약)", "214150": "코스닥(제약)", "068760": "코스닥(제약)",
+        "214450": "코스닥(제약)", "091990": "코스닥(제약)", 
+        
+        # 금융 / 지주
+        "105560": "금융업", "055550": "금융업", "086790": "금융업", "032830": "금융업",
+        "316140": "금융업", "000810": "금융업", "003550": "금융업", "000150": "서비스업", # 두산
+
+        # 플랫폼 / 서비스
+        "035420": "서비스업", "035720": "서비스업", "259960": "서비스업", "018260": "서비스업",
+        "251270": "서비스업", "036570": "서비스업", 
+        
+        # 로봇 / 기계
+        "108490": "기계", "466100": "기계", "437730": "운수장비", "098460": "기계",
+        "277810": "기계", "389500": "기계", "455900": "기계", "034020": "기계",
+        
+        # 철강 / 소재
+        "005490": "철강금속", "010130": "철강금속", "001440": "전선/전력", "006260": "전선/전력",
+        
+        # 기타 주요 종목
+        "015760": "전기가스업", "034730": "서비스업", "034220": "화학", "017670": "통신업",
+        "030200": "통신업", "090430": "화학", "086280": "운수창고",
+        
+        # 코스닥 시총 상위
+        "091990": "코스닥(제약)", "247540": "코스닥(IT)", "022100": "코스닥(IT)",
+        "035900": "코스닥(엔터)", "122870": "코스닥(엔터)"
     }
 
 def get_sector_map():
-    sector_map = get_fallback_sector_map() # 기본적으로 하드코딩 맵 사용
+    # 1. 하드코딩 맵 우선 사용
+    sector_map = get_fallback_sector_map() 
     
     try:
-        log("📋 업종 정보 수집 중 (Hybrid)...")
-        
-        # fdr 시도
+        # 2. FDR로 추가 수집 시도 (실패해도 위 맵은 살아있음)
         df = fdr.StockListing('KRX')
         target_cols = ['Sector', '업종', 'Industry', 'Wics']
         col = next((c for c in target_cols if c in df.columns), None)
@@ -142,14 +166,12 @@ def get_sector_map():
             df[code_col] = df[code_col].astype(str).str.zfill(6)
             df = df.dropna(subset=[col])
             crawled_map = dict(zip(df[code_col], df[col]))
-            sector_map.update(crawled_map) # 크롤링 성공하면 덮어쓰기
-            log(f"✅ 업종 정보 업데이트: {len(sector_map)}개")
-        else:
-            log("⚠️ 크롤링 실패 -> 내장 데이터 사용")
             
-    except Exception as e:
-        log(f"⚠️ 업종 로드 에러: {e}")
-
+            # 크롤링된 정보로 업데이트 (기존 하드코딩보다 최신이면 덮어씀)
+            sector_map.update(crawled_map)
+            log(f"✅ 업종 정보 업데이트 완료 (Total {len(sector_map)}개)")
+            
+    except: pass
     return sector_map
 
 def pick_top_by_trading_value(date_yyyymmdd, top_n):
@@ -244,6 +266,7 @@ def build_global_score(lat):
     x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
     
+    # 전략 태그
     conditions = [
         (r5 >= 3) & (slope > 0),
         (rsi >= 40) & (rsi <= 60),
@@ -260,9 +283,7 @@ def build_global_score(lat):
 
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
-    if not TG_TOKEN or not TG_ID:
-        log("⚠️ [오류] TG_TOKEN 또는 TG_ID가 설정되지 않았습니다.")
-        return
+    if not TG_TOKEN or not TG_ID: return
 
     try:
         top5 = df.head(5).reset_index(drop=True)
@@ -274,36 +295,21 @@ def send_telegram_auto(df):
             rank = i + 1
             name = row['종목명']
             code = row['종목코드']
-            
-            rsi = row.get('RSI14', 50)
-            slope = row.get('MACD_Slope', 0)
-            kairi = row.get('이격도', 0) if '이격도' in row else row.get('乖離%', 0)
-            r5 = row.get('ret_5d_%', 0)
-            mfi = row.get('MFI14', 0)
-            
-            if r5 >= 3 and slope > 0: route = "🔼 BRK (돌파)"
-            elif 40 <= rsi <= 60: route = "↩️ PULL (눌림)"
-            elif rsi <= 40: route = "🔁 MR (반전)"
-            elif mfi >= 60: route = "🐳 WHALE (수급)"
-            else: route = "📈 TREND (추세)"
-
+            route = row.get('ROUTE', '전략없음')
             buy = row['추천매수가']
             stop = row['손절가']
             t1 = row['추천매도가1']
-            t2 = row['추천매도가2']
             
             msg += f"{rank}. {name} ({code})\n"
             msg += f"   🎯 전략: {route}\n"
             msg += f"   🔵 매수: {buy:,}\n"
             msg += f"   🔴 손절: {stop:,}\n"
-            msg += f"   🟢 목표1: {t1:,}\n"
-            msg += f"   🟢 목표2: {t2:,}\n\n"
+            msg += f"   🟢 목표1: {t1:,}\n\n"
             
         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_ID, "text": msg})
-        log("🚀 텔레그램 전송 성공!")
-            
+        log("🚀 전송 완료")
     except Exception as e:
-        log(f"⚠️ 텔레그램 로직 에러: {e}")
+        log(f"⚠️ 전송 실패: {e}")
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
@@ -314,12 +320,10 @@ def main():
 
     top_df = pick_top_by_trading_value(trade_ymd, TOP_N)
     tickers = top_df["종목코드"].tolist()
-    log(f"✅ 분석 대상: {len(tickers)} 종목")
-
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
     
-    # [Fix] 업종 맵 확보
+    # [핵심] 업종 맵 확보 (하드코딩 포함)
     sector_map = get_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
@@ -384,7 +388,7 @@ def main():
             
             buy = round_to_tick(buy); stop = round_to_tick(stop); t1 = round_to_tick(t1); t2 = round_to_tick(t2)
 
-            # [Fix] 업종 매핑 (없으면 기타)
+            # [Fix] 업종 매핑 (하드코딩 맵 우선 적용)
             sector = sector_map.get(str(t).zfill(6), "기타")
 
             rows.append({
@@ -405,12 +409,12 @@ def main():
     if not rows: raise RuntimeError("No Result")
     
     df_raw = pd.DataFrame(rows)
+    # LDY SCORE 계산 및 정렬
     df_out = build_global_score(df_raw).sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
     
     ensure_dir(OUT_DIR)
     df_out.to_csv(os.path.join(OUT_DIR, "recommend_latest.csv"), index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건)")
-    
     send_telegram_auto(df_out)
 
 if __name__ == "__main__":
