@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v5.9 (Sector Ultimate Fix)
-- Fix: Pykrx Bypassed Sector Retrieval (No Web Crawling Error)
+LDY Pro Trader Collector v6.0 (Ultimate Sector Fix)
+- Fix: Hardcoded Sector Map Fallback (Never Fails for Major Stocks)
 """
 
 import os
@@ -105,39 +105,48 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# [Ultimate Fix] 업종 정보 수집 (Pykrx Multi-Source)
-def get_sector_map():
-    sector_map = {}
-    try:
-        log("📋 업종 정보 수집 중 (Pykrx)...")
-        today = datetime.now(KST).strftime("%Y%m%d")
-        
-        # KOSPI
-        try:
-            # 주의: pykrx의 get_market_cap_by_ticker 등은 업종을 안 줌.
-            # 대신 주식 종목 검색기(StockListing) 대신 Fundamental 정보를 긁어야 함.
-            # 하지만 가장 확실한 건 fdr.StockListing('KRX') 임.
-            # fdr이 실패하면 -> 하드코딩된 대형주 리스트라도 넣어야 하나, 
-            # 여기서는 '개별 종목 조회' 시에 업종을 가져오는 방식으로 우회.
-            
-            # 1. FDR 재시도 (가장 좋음)
-            df = fdr.StockListing('KRX')
-            if 'Sector' in df.columns:
-                df = df.dropna(subset=['Sector'])
-                sector_map.update(dict(zip(df['Code'].astype(str).str.zfill(6), df['Sector'])))
-            elif '업종' in df.columns:
-                df = df.dropna(subset=['업종'])
-                sector_map.update(dict(zip(df['Symbol'].astype(str).str.zfill(6), df['업종'])))
-                
-        except: pass
+# [Ultimate Fix] 하드코딩된 업종 맵 (주요 종목)
+def get_fallback_sector_map():
+    return {
+        "005930": "전기전자", "000660": "전기전자", "373220": "전기전자", "207940": "의약품", 
+        "005380": "운수장비", "005935": "전기전자", "068270": "의약품", "000270": "운수장비",
+        "105560": "금융업", "005490": "철강금속", "035420": "서비스업", "035720": "서비스업",
+        "006400": "전기전자", "051910": "화학", "012330": "화학", "028260": "유통업",
+        "055550": "금융업", "086790": "금융업", "032830": "금융업", "003550": "화학",
+        "015760": "전기가스업", "034020": "기계", "010120": "전기전자", "323410": "서비스업",
+        "259960": "서비스업", "011200": "운수창고", "000810": "금융업", "018260": "서비스업",
+        "010130": "철강금속", "009150": "전기전자", "033780": "금융업", "017670": "통신업",
+        "329180": "운수장비", "096770": "화학", "003490": "운수창고", "030200": "통신업",
+        "316140": "금융업", "000100": "의약품", "251270": "서비스업", "024110": "금융업",
+        "036570": "서비스업", "086280": "운수창고", "090430": "화학", "010950": "화학",
+        "009540": "운수장비", "267260": "전기전자", "042700": "전기전자", "010620": "화학",
+        "138040": "금융업", "034730": "서비스업", "241560": "화학", "000150": "기계",
+        "298040": "전기전자", "108490": "기계", "466100": "기계", "437730": "운수장비",
+        "098460": "기계", "277810": "기계"
+        # 필요한 종목 계속 추가 가능
+    }
 
-        # 2. 실패 시, 주요 종목만이라도 채워넣기 (안전장치)
-        # 수집된 종목들에 대해서만 Loop 돌면서 업종 확인 (느리지만 확실함)
-        # 하지만 Top N 전체를 돌면 너무 느리므로, 대시보드에서 '기타'로 처리하는게 나을 수도 있음.
+def get_sector_map():
+    sector_map = get_fallback_sector_map() # 기본적으로 하드코딩 맵 사용
+    
+    try:
+        log("📋 업종 정보 수집 중 (Hybrid)...")
         
-        if not sector_map:
-             log("⚠️ FDR 업종 수집 실패. 섹터 정보가 비어있을 수 있습니다.")
-             
+        # fdr 시도
+        df = fdr.StockListing('KRX')
+        target_cols = ['Sector', '업종', 'Industry', 'Wics']
+        col = next((c for c in target_cols if c in df.columns), None)
+        
+        if col:
+            code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
+            df[code_col] = df[code_col].astype(str).str.zfill(6)
+            df = df.dropna(subset=[col])
+            crawled_map = dict(zip(df[code_col], df[col]))
+            sector_map.update(crawled_map) # 크롤링 성공하면 덮어쓰기
+            log(f"✅ 업종 정보 업데이트: {len(sector_map)}개")
+        else:
+            log("⚠️ 크롤링 실패 -> 내장 데이터 사용")
+            
     except Exception as e:
         log(f"⚠️ 업종 로드 에러: {e}")
 
@@ -235,7 +244,6 @@ def build_global_score(lat):
     x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
     
-    # 전략 태그
     conditions = [
         (r5 >= 3) & (slope > 0),
         (rsi >= 40) & (rsi <= 60),
@@ -244,14 +252,12 @@ def build_global_score(lat):
     choices = ["🔼 BRK (돌파)", "↩️ PULL (눌림)", "🔁 MR (반전)"]
     x["ROUTE"] = np.select(conditions, choices, default="—")
     
-    # WHY 문자열
     x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
-# [Fixed] 텔레그램 자동 전송 함수 (순위 오류 수정 + 전략 태그 적용)
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
     if not TG_TOKEN or not TG_ID:
@@ -259,10 +265,9 @@ def send_telegram_auto(df):
         return
 
     try:
-        # 1. 상위 5개 선정 및 인덱스 초기화 (순위 1~5 보장)
         top5 = df.head(5).reset_index(drop=True)
         trade_date = datetime.now(KST).strftime('%Y-%m-%d')
-        msg = f"🔥 [LDY v5.8] 추천 Top 5 ({trade_date})\n"
+        msg = f"🔥 [LDY v5.9] 추천 Top 5 ({trade_date})\n"
         msg += "-" * 30 + "\n\n"
         
         for i, row in top5.iterrows():
@@ -302,7 +307,7 @@ def send_telegram_auto(df):
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
-    log("🚀 LDY Collector v5.8 시작...")
+    log("🚀 LDY Collector v5.9 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd}")
@@ -314,7 +319,7 @@ def main():
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
     
-    # [핵심] 업종 맵 확보
+    # [Fix] 업종 맵 확보
     sector_map = get_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
@@ -379,14 +384,14 @@ def main():
             
             buy = round_to_tick(buy); stop = round_to_tick(stop); t1 = round_to_tick(t1); t2 = round_to_tick(t2)
 
-            # [Fix] 업종 데이터 매핑 적용
+            # [Fix] 업종 매핑 (없으면 기타)
             sector = sector_map.get(str(t).zfill(6), "기타")
 
             rows.append({
                 "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
                 "종목명": name_map.get(str(t).zfill(6), str(t)),
                 "종목코드": str(t).zfill(6),
-                "업종": sector, # 드디어 업종이 들어갑니다!
+                "업종": sector, 
                 "종가": int(last_c), "거래대금(억원)": round(tv_eok, 2),
                 "시가총액(억원)": round(mcap, 1),
                 "RSI14": round(rsi, 1), "MFI14": round(mfi, 1),
@@ -400,14 +405,12 @@ def main():
     if not rows: raise RuntimeError("No Result")
     
     df_raw = pd.DataFrame(rows)
-    # LDY SCORE 계산 및 정렬
     df_out = build_global_score(df_raw).sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
     
     ensure_dir(OUT_DIR)
     df_out.to_csv(os.path.join(OUT_DIR, "recommend_latest.csv"), index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건)")
     
-    # 텔레그램 발송
     send_telegram_auto(df_out)
 
 if __name__ == "__main__":
