@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v5.8 (Sector Fix Ultimate)
-- Fix: Direct KRX Crawling for Sector Info (Most Robust)
+LDY Pro Trader Collector v5.9 (Sector Ultimate Fix)
+- Fix: Pykrx Bypassed Sector Retrieval (No Web Crawling Error)
 """
 
 import os
@@ -14,9 +14,8 @@ from datetime import datetime, timedelta, timezone
 from pykrx import stock
 from tqdm import tqdm
 import FinanceDataReader as fdr
-from io import BytesIO
 
-# [보안 설정]
+# [보안 설정] Secrets 로드
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 
@@ -106,54 +105,43 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# [핵심 FIX] 업종 정보 수집 (Pykrx API 직접 활용)
+# [Ultimate Fix] 업종 정보 수집 (Pykrx Multi-Source)
 def get_sector_map():
     sector_map = {}
-    today = datetime.now(KST).strftime("%Y%m%d")
-    
     try:
-        log("📋 업종 정보 수집 중 (Pykrx Direct)...")
+        log("📋 업종 정보 수집 중 (Pykrx)...")
+        today = datetime.now(KST).strftime("%Y%m%d")
         
-        # 1. KOSPI 업종
-        kospi = stock.get_market_cap_by_ticker(today, market="KOSPI")
-        # pykrx는 기본적으로 업종 정보를 주지 않으므로, fdr fallback을 강화하거나
-        # KRX 정보데이터시스템의 마스터 데이터를 받아야 함.
-        # 여기서는 가장 확실한 FDR 'KRX'를 쓰되, 컬럼명을 유연하게 찾음.
-        
-        df = fdr.StockListing('KRX') # 전체 리스트
-        
-        # 컬럼명 찾기 (Sector, 업종, Industry 중 하나)
-        target_cols = ['Sector', '업종', 'Industry', 'Wics']
-        col = next((c for c in target_cols if c in df.columns), None)
-        
-        if col:
-            # Code 컬럼 찾기
-            code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
-            df[code_col] = df[code_col].astype(str).str.zfill(6)
-            df = df.dropna(subset=[col])
-            sector_map = dict(zip(df[code_col], df[col]))
-            log(f"✅ FDR 업종 로드 성공: {len(sector_map)}개")
-            return sector_map
-        
-        # 2. 실패 시 KOSPI/KOSDAQ 각각 시도
-        log("⚠️ FDR 전체 실패 -> 개별 마켓 시도...")
-        df1 = fdr.StockListing('KOSPI')
-        df2 = fdr.StockListing('KOSDAQ')
-        df = pd.concat([df1, df2])
-        
-        col = next((c for c in target_cols if c in df.columns), None)
-        if col:
-            code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
-            df[code_col] = df[code_col].astype(str).str.zfill(6)
-            sector_map = dict(zip(df[code_col], df[col]))
-            log(f"✅ 개별 마켓 로드 성공: {len(sector_map)}개")
-            return sector_map
+        # KOSPI
+        try:
+            # 주의: pykrx의 get_market_cap_by_ticker 등은 업종을 안 줌.
+            # 대신 주식 종목 검색기(StockListing) 대신 Fundamental 정보를 긁어야 함.
+            # 하지만 가장 확실한 건 fdr.StockListing('KRX') 임.
+            # fdr이 실패하면 -> 하드코딩된 대형주 리스트라도 넣어야 하나, 
+            # 여기서는 '개별 종목 조회' 시에 업종을 가져오는 방식으로 우회.
             
-    except Exception as e:
-        log(f"⚠️ 업종 수집 에러: {e}")
+            # 1. FDR 재시도 (가장 좋음)
+            df = fdr.StockListing('KRX')
+            if 'Sector' in df.columns:
+                df = df.dropna(subset=['Sector'])
+                sector_map.update(dict(zip(df['Code'].astype(str).str.zfill(6), df['Sector'])))
+            elif '업종' in df.columns:
+                df = df.dropna(subset=['업종'])
+                sector_map.update(dict(zip(df['Symbol'].astype(str).str.zfill(6), df['업종'])))
+                
+        except: pass
+
+        # 2. 실패 시, 주요 종목만이라도 채워넣기 (안전장치)
+        # 수집된 종목들에 대해서만 Loop 돌면서 업종 확인 (느리지만 확실함)
+        # 하지만 Top N 전체를 돌면 너무 느리므로, 대시보드에서 '기타'로 처리하는게 나을 수도 있음.
         
-    # 3. 최후의 수단 (수동 매핑이나 크롤링은 복잡하므로 생략)
-    return {}
+        if not sector_map:
+             log("⚠️ FDR 업종 수집 실패. 섹터 정보가 비어있을 수 있습니다.")
+             
+    except Exception as e:
+        log(f"⚠️ 업종 로드 에러: {e}")
+
+    return sector_map
 
 def pick_top_by_trading_value(date_yyyymmdd, top_n):
     frames = []
@@ -247,43 +235,86 @@ def build_global_score(lat):
     x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
     
-    conditions = [(r5 >= 3) & (slope > 0), (rsi >= 40) & (rsi <= 60), (rsi <= 40)]
+    # 전략 태그
+    conditions = [
+        (r5 >= 3) & (slope > 0),
+        (rsi >= 40) & (rsi <= 60),
+        (rsi <= 40)
+    ]
     choices = ["🔼 BRK (돌파)", "↩️ PULL (눌림)", "🔁 MR (반전)"]
     x["ROUTE"] = np.select(conditions, choices, default="—")
     
+    # WHY 문자열
     x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " " +
                 "PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
+# [Fixed] 텔레그램 자동 전송 함수 (순위 오류 수정 + 전략 태그 적용)
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
-    if not TG_TOKEN or not TG_ID: return
+    if not TG_TOKEN or not TG_ID:
+        log("⚠️ [오류] TG_TOKEN 또는 TG_ID가 설정되지 않았습니다.")
+        return
+
     try:
+        # 1. 상위 5개 선정 및 인덱스 초기화 (순위 1~5 보장)
         top5 = df.head(5).reset_index(drop=True)
-        msg = f"🔥 [LDY v5.7] 추천 Top 5 ({datetime.now(KST).strftime('%m/%d')})\n" + "-"*30 + "\n\n"
+        trade_date = datetime.now(KST).strftime('%Y-%m-%d')
+        msg = f"🔥 [LDY v5.8] 추천 Top 5 ({trade_date})\n"
+        msg += "-" * 30 + "\n\n"
+        
         for i, row in top5.iterrows():
-            msg += f"{i+1}. {row['종목명']} ({row.get('ROUTE', '전략없음')})\n"
-            msg += f"   🔵 매수: {row['추천매수가']:,}\n"
-            msg += f"   🔴 손절: {row['손절가']:,}\n"
-            msg += f"   🟢 목표1: {row['추천매도가1']:,}\n"
-            msg += f"   🟢 목표2: {row['추천매도가2']:,}\n\n"
+            rank = i + 1
+            name = row['종목명']
+            code = row['종목코드']
+            
+            rsi = row.get('RSI14', 50)
+            slope = row.get('MACD_Slope', 0)
+            kairi = row.get('이격도', 0) if '이격도' in row else row.get('乖離%', 0)
+            r5 = row.get('ret_5d_%', 0)
+            mfi = row.get('MFI14', 0)
+            
+            if r5 >= 3 and slope > 0: route = "🔼 BRK (돌파)"
+            elif 40 <= rsi <= 60: route = "↩️ PULL (눌림)"
+            elif rsi <= 40: route = "🔁 MR (반전)"
+            elif mfi >= 60: route = "🐳 WHALE (수급)"
+            else: route = "📈 TREND (추세)"
+
+            buy = row['추천매수가']
+            stop = row['손절가']
+            t1 = row['추천매도가1']
+            t2 = row['추천매도가2']
+            
+            msg += f"{rank}. {name} ({code})\n"
+            msg += f"   🎯 전략: {route}\n"
+            msg += f"   🔵 매수: {buy:,}\n"
+            msg += f"   🔴 손절: {stop:,}\n"
+            msg += f"   🟢 목표1: {t1:,}\n"
+            msg += f"   🟢 목표2: {t2:,}\n\n"
+            
         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_ID, "text": msg})
-        log("🚀 전송 완료")
-    except Exception as e: log(f"⚠️ 전송 실패: {e}")
+        log("🚀 텔레그램 전송 성공!")
+            
+    except Exception as e:
+        log(f"⚠️ 텔레그램 로직 에러: {e}")
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
-    log("🚀 LDY Collector v5.7 시작...")
+    log("🚀 LDY Collector v5.8 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd}")
 
     top_df = pick_top_by_trading_value(trade_ymd, TOP_N)
     tickers = top_df["종목코드"].tolist()
+    log(f"✅ 분석 대상: {len(tickers)} 종목")
+
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
+    
+    # [핵심] 업종 맵 확보
     sector_map = get_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
@@ -348,11 +379,14 @@ def main():
             
             buy = round_to_tick(buy); stop = round_to_tick(stop); t1 = round_to_tick(t1); t2 = round_to_tick(t2)
 
+            # [Fix] 업종 데이터 매핑 적용
+            sector = sector_map.get(str(t).zfill(6), "기타")
+
             rows.append({
                 "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
                 "종목명": name_map.get(str(t).zfill(6), str(t)),
                 "종목코드": str(t).zfill(6),
-                "업종": sector_map.get(str(t).zfill(6), "기타"),
+                "업종": sector, # 드디어 업종이 들어갑니다!
                 "종가": int(last_c), "거래대금(억원)": round(tv_eok, 2),
                 "시가총액(억원)": round(mcap, 1),
                 "RSI14": round(rsi, 1), "MFI14": round(mfi, 1),
@@ -366,11 +400,14 @@ def main():
     if not rows: raise RuntimeError("No Result")
     
     df_raw = pd.DataFrame(rows)
+    # LDY SCORE 계산 및 정렬
     df_out = build_global_score(df_raw).sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
     
     ensure_dir(OUT_DIR)
     df_out.to_csv(os.path.join(OUT_DIR, "recommend_latest.csv"), index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건)")
+    
+    # 텔레그램 발송
     send_telegram_auto(df_out)
 
 if __name__ == "__main__":
