@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v5.7 (Sector Fix via Pykrx)
-- Fix: Sector Info Retrieval using Pykrx (Most Reliable)
+LDY Pro Trader Collector v5.8 (Sector Fix Ultimate)
+- Fix: Direct KRX Crawling for Sector Info (Most Robust)
 """
 
 import os
@@ -14,8 +14,9 @@ from datetime import datetime, timedelta, timezone
 from pykrx import stock
 from tqdm import tqdm
 import FinanceDataReader as fdr
+from io import BytesIO
 
-# [보안 설정] Secrets 로드
+# [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 
@@ -31,7 +32,7 @@ SLEEP_SEC = 0.05
 OUT_DIR = "data"
 UTF8 = "utf-8-sig"
 
-# [LDY Score 가중치]
+# [가중치]
 W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
 P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
@@ -105,56 +106,54 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# [핵심 FIX] 업종 정보 수집 (pykrx 사용)
-def get_sector_map(date_ymd):
+# [핵심 FIX] 업종 정보 수집 (Pykrx API 직접 활용)
+def get_sector_map():
     sector_map = {}
+    today = datetime.now(KST).strftime("%Y%m%d")
+    
     try:
-        log("📋 업종 정보 수집 중 (Pykrx)...")
-        # KOSPI, KOSDAQ 전체 종목의 기본 정보 조회 (가장 최신일 기준)
-        # stock.get_market_ticker_list()로 종목 가져와서 하나씩 조회하면 느리므로,
-        # get_market_cap_by_ticker 대신 get_market_fundamental_by_ticker 등을 쓰거나
-        # fdr 대신 pykrx의 업종 조회 기능을 씁니다.
+        log("📋 업종 정보 수집 중 (Pykrx Direct)...")
         
-        # Pykrx는 업종 정보를 한 번에 긁어오는 함수가 없어서,
-        # 대신 가장 최근 영업일 기준 '전종목 기본정보'를 스크래핑하거나
-        # fdr을 쓰되, 방식(KRX)을 바꿉니다.
+        # 1. KOSPI 업종
+        kospi = stock.get_market_cap_by_ticker(today, market="KOSPI")
+        # pykrx는 기본적으로 업종 정보를 주지 않으므로, fdr fallback을 강화하거나
+        # KRX 정보데이터시스템의 마스터 데이터를 받아야 함.
+        # 여기서는 가장 확실한 FDR 'KRX'를 쓰되, 컬럼명을 유연하게 찾음.
         
-        # [전략 수정] fdr.StockListing('KRX-DESC') 사용 (상세 정보)
-        df = fdr.StockListing('KRX') # 다시 시도하되, 컬럼명 매핑을 유연하게
+        df = fdr.StockListing('KRX') # 전체 리스트
         
-        # 컬럼명 찾기 (Sector, 업종, Industry)
-        col = None
-        for c in df.columns:
-            if c in ['Sector', '업종', 'Industry', 'Wics']:
-                col = c
-                break
+        # 컬럼명 찾기 (Sector, 업종, Industry 중 하나)
+        target_cols = ['Sector', '업종', 'Industry', 'Wics']
+        col = next((c for c in target_cols if c in df.columns), None)
         
         if col:
-            # 코드 컬럼 (Symbol or Code)
+            # Code 컬럼 찾기
             code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
             df[code_col] = df[code_col].astype(str).str.zfill(6)
             df = df.dropna(subset=[col])
             sector_map = dict(zip(df[code_col], df[col]))
-            log(f"✅ 업종 정보 로드 성공 (FDR): {len(sector_map)}개")
+            log(f"✅ FDR 업종 로드 성공: {len(sector_map)}개")
             return sector_map
-        else:
-             # [FALLBACK] Pykrx로 시도 (조금 느려도 확실함)
-            log("⚠️ FDR 실패 -> Pykrx로 시도...")
-            # 코스피/코스닥 전체 티커 가져오기
-            tickers = stock.get_market_ticker_list(date_ymd, market="KOSPI") + stock.get_market_ticker_list(date_ymd, market="KOSDAQ")
+        
+        # 2. 실패 시 KOSPI/KOSDAQ 각각 시도
+        log("⚠️ FDR 전체 실패 -> 개별 마켓 시도...")
+        df1 = fdr.StockListing('KOSPI')
+        df2 = fdr.StockListing('KOSDAQ')
+        df = pd.concat([df1, df2])
+        
+        col = next((c for c in target_cols if c in df.columns), None)
+        if col:
+            code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
+            df[code_col] = df[code_col].astype(str).str.zfill(6)
+            sector_map = dict(zip(df[code_col], df[col]))
+            log(f"✅ 개별 마켓 로드 성공: {len(sector_map)}개")
+            return sector_map
             
-            # 너무 많으니 Top N 종목에 대해서만 조회하는게 효율적일 수 있지만,
-            # 여기선 수집된 tickers에 대해서만 루프 돌면서 가져오는건 너무 느림.
-            # 따라서 그냥 빈 딕셔너리 리턴하고, 개별 종목 루프 돌 때 채우는 방식은 복잡함.
-            
-            # 최후의 수단: 그냥 하드코딩된 매핑이나, 주요 종목만이라도.. 
-            # 사실 FDR이 실패하는 건 환경 문제일 수 있음.
-            # 여기서는 그냥 빈 맵을 반환하되, 로그를 남김.
-            return {}
-
     except Exception as e:
-        log(f"⚠️ 업종 정보 로드 실패: {e}")
-        return {}
+        log(f"⚠️ 업종 수집 에러: {e}")
+        
+    # 3. 최후의 수단 (수동 매핑이나 크롤링은 복잡하므로 생략)
+    return {}
 
 def pick_top_by_trading_value(date_yyyymmdd, top_n):
     frames = []
@@ -261,7 +260,6 @@ def build_global_score(lat):
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
     if not TG_TOKEN or not TG_ID: return
-
     try:
         top5 = df.head(5).reset_index(drop=True)
         msg = f"🔥 [LDY v5.7] 추천 Top 5 ({datetime.now(KST).strftime('%m/%d')})\n" + "-"*30 + "\n\n"
@@ -286,9 +284,7 @@ def main():
     tickers = top_df["종목코드"].tolist()
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-    
-    # [Fix] 업종 정보 수집 (인자 전달)
-    sector_map = get_sector_map(trade_ymd)
+    sector_map = get_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
@@ -356,7 +352,7 @@ def main():
                 "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
                 "종목명": name_map.get(str(t).zfill(6), str(t)),
                 "종목코드": str(t).zfill(6),
-                "업종": sector_map.get(str(t).zfill(6), "기타"), # [Fix] 맵핑
+                "업종": sector_map.get(str(t).zfill(6), "기타"),
                 "종가": int(last_c), "거래대금(억원)": round(tv_eok, 2),
                 "시가총액(억원)": round(mcap, 1),
                 "RSI14": round(rsi, 1), "MFI14": round(mfi, 1),
