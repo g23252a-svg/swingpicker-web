@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.6 (Smart Controller)
-- New: Excel-like Portfolio Editor, Smart Filters, RR Visual Bar
+LDY Pro Trader v5.6 (Open Beta Ultimate)
+- New: Excel-like Portfolio Editor, Smart Filters, Risk-Reward Bar
+- Free: No Password Required
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -16,8 +17,8 @@ except: PYKRX_OK = False
 
 # 2. 페이지 설정
 st.set_page_config(page_title="LDY Pro Trader v5.6", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v5.6")
-st.caption("Smart Controller: Excel Portfolio, Custom Filters & Visual Risk")
+st.title("🏆 LDY Pro Trader v5.6 (Open Beta)")
+st.caption("Free for Everyone: Smart Filters & Visual Risk Analysis")
 
 # 3. 상수 및 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -41,16 +42,15 @@ def load_csv_path(path): return pd.read_csv(path, encoding="utf-8")
 
 def log_src(df, src): st.toast(f"Data Loaded: {src} ({len(df)} rows)", icon="✅")
 
-# [v5.6] 포트폴리오 로드/저장 (JSON 구조 변경)
+# 포트폴리오 로드/저장 (JSON)
 def load_portfolio():
     if os.path.exists(PORTFOLIO_FILE):
         try:
             with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # 데이터프레임으로 변환
                 return pd.DataFrame(data)
         except: pass
-    # 기본 템플릿
+    # 기본 예시 데이터 (처음 쓰는 사람용)
     return pd.DataFrame([
         {"종목명": "삼성전자", "평단가": 70000, "수량": 10},
         {"종목명": "NAVER", "평단가": 200000, "수량": 5}
@@ -58,14 +58,13 @@ def load_portfolio():
 
 def save_portfolio(df):
     try:
-        # DataFrame -> List of Dicts 변환 후 저장
         data = df.to_dict(orient="records")
         with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
         return True
     except: return False
 
-# 종목명 -> 코드 변환
+# 종목코드 맵핑
 @st.cache_data(ttl=3600)
 def get_code_map():
     if FDR_OK:
@@ -135,7 +134,7 @@ def plot_fear_greed_gauge(score):
     fig = go.Figure(go.Indicator(
         mode = "gauge+number+delta", value = score,
         domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': "Market Fear & Greed", 'font': {'size': 24}},
+        title = {'text': "Market Fear & Greed Index", 'font': {'size': 24}},
         delta = {'reference': 50, 'increasing': {'color': "red"}, 'decreasing': {'color': "blue"}},
         gauge = {
             'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "white"},
@@ -239,31 +238,12 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     fig.update_layout(title=dict(text=f"<b>{name}</b> ({code})", font=dict(size=20)), yaxis_title="주가", yaxis_tickformat=',', xaxis_tickformat='%Y-%m-%d', xaxis_rangeslider_visible=False, template="plotly_dark", height=500, margin=dict(l=20,r=20,t=40,b=20), legend=dict(orientation="h",y=1.02,x=1), hovermode="x unified")
     return fig
 
-# [v5.6 NEW] 손익비(RR) 시각화 바
+# [v5.6 NEW] 손익비 바
 def plot_risk_reward_bar(buy, stop, target1, target2):
     fig = go.Figure()
-    
-    # 손절 구간 (Red)
-    fig.add_trace(go.Bar(
-        y=["Price"], x=[buy - stop], orientation='h', name='Risk',
-        marker=dict(color='red', line=dict(width=0)),
-        text=f"Risk -{int(((buy-stop)/buy)*100)}%", textposition='auto'
-    ))
-    
-    # 1차 수익 구간 (Light Green)
-    fig.add_trace(go.Bar(
-        y=["Price"], x=[target1 - buy], orientation='h', name='Reward 1',
-        marker=dict(color='lightgreen', line=dict(width=0)),
-        text=f"T1 +{int(((target1-buy)/buy)*100)}%", textposition='auto'
-    ))
-    
-    # 2차 수익 구간 (Dark Green)
-    fig.add_trace(go.Bar(
-        y=["Price"], x=[target2 - target1], orientation='h', name='Reward 2',
-        marker=dict(color='green', line=dict(width=0)),
-        text=f"T2 +{int(((target2-buy)/buy)*100)}%", textposition='auto'
-    ))
-    
+    fig.add_trace(go.Bar(y=["Price"], x=[buy - stop], orientation='h', name='Risk', marker=dict(color='red'), text=f"Risk -{int(((buy-stop)/buy)*100)}%", textposition='auto'))
+    fig.add_trace(go.Bar(y=["Price"], x=[target1 - buy], orientation='h', name='Reward 1', marker=dict(color='lightgreen'), text=f"T1 +{int(((target1-buy)/buy)*100)}%", textposition='auto'))
+    fig.add_trace(go.Bar(y=["Price"], x=[target2 - target1], orientation='h', name='Reward 2', marker=dict(color='green'), text=f"T2 +{int(((target2-buy)/buy)*100)}%", textposition='auto'))
     fig.update_layout(barmode='stack', showlegend=False, height=100, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(visible=False), yaxis=dict(visible=False))
     return fig
 
@@ -352,8 +332,10 @@ def build_global_score(lat):
     pen += P_OVERHEAT_5D * np.clip((r5 - 10)/10, 0, 1)
     pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
+    
     score = np.clip(base_score - pen, 0, 100)
-    x["RR1"] = rr1; x["Now%"] = now_gap; x["LDY_SCORE"] = score.round(1)
+    x["RR1"] = rr1; x["Now%"] = now_gap
+    x["LDY_SCORE"] = score.round(1)
     x["ROUTE"] = (x.apply(route_tag, axis=1) if len(x) else "—")
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
@@ -375,11 +357,9 @@ if len(base) < 10: base = scored.head(20)
 top10 = base.head(10).copy()
 top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
-# [사이드바]
+# [사이드바 - 엑셀형 포트폴리오]
 with st.sidebar:
-    st.header("💼 내 자산 (Smart Portfolio)")
-    
-    # [v5.6] 엑셀형 데이터 에디터
+    st.header("💼 내 자산 (Excel Editor)")
     loaded_df = load_portfolio()
     edited_df = st.data_editor(loaded_df, num_rows="dynamic", key="pf_editor", use_container_width=True)
     
@@ -387,18 +367,6 @@ with st.sidebar:
         save_portfolio(edited_df)
         st.success("저장 완료!")
         st.rerun()
-        
-    # [v5.6] 로그인
-    st.divider(); st.subheader("🔐 로그인")
-    input_pw = st.text_input("비밀번호", type="password")
-    ADMIN_KEY, MEMBER_KEY = "2022322", "240521"
-    auth_status = "free"
-    if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자")
-    elif input_pw == MEMBER_KEY: auth_status = "member"; st.success("🎉 유료회원")
-    else: 
-        auth_status = "free"
-        if input_pw: st.error("❌ 불일치")
-        st.info("🔒 무료 (Top 3)")
 
 # [메인 화면]
 kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
@@ -409,8 +377,6 @@ c1.metric("KOSPI", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if kp_stat
 c2.metric("KOSDAQ", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if kq_stat=="Bull" else "inverse")
 
 st.divider()
-
-# 섹터 랭킹
 st.subheader("🔥 오늘의 주도 테마", anchor=False)
 if "업종" in base.columns:
     sector_counts = base["업종"].fillna("미분류").value_counts()
@@ -469,20 +435,17 @@ if not edited_df.empty:
             total_buy += buy_amt; total_eval += eval_amt
             
         c1, c2, c3 = st.columns(3)
-        tot_profit = total_eval - total_buy
-        tot_rate = (tot_profit / total_buy * 100) if total_buy > 0 else 0
+        tot_rate = (total_eval - total_buy) / total_buy * 100 if total_buy > 0 else 0
         c1.metric("총 매수", f"{int(total_buy):,}원")
         c2.metric("총 평가", f"{int(total_eval):,}원")
-        c3.metric("총 수익", f"{tot_rate:.2f}%", f"{int(tot_profit):,}원", delta_color="normal")
+        c3.metric("총 수익", f"{tot_rate:.2f}%", f"{int(total_eval-total_buy):,}원", delta_color="normal")
         st.dataframe(pd.DataFrame(pf_list), hide_index=True, use_container_width=True)
     except Exception as e: st.error(f"분석 실패: {e}")
 
 st.divider()
 
-# [v5.6] 스마트 조건 검색 (Smart Filters)
+# [v5.6] 스마트 조건 검색
 st.subheader("🔭 종목 상세 분석 (Smart Filter)", anchor=False)
-
-# 필터 UI
 if not top10.empty:
     all_routes = ["전체"] + list(top10['ROUTE'].unique())
     all_sectors = ["전체"] + list(top10['업종'].unique()) if '업종' in top10.columns else ["전체"]
@@ -491,7 +454,6 @@ if not top10.empty:
     filter_route = c1.selectbox("전략 필터", all_routes)
     filter_sector = c2.selectbox("업종 필터", all_sectors)
     
-    # 필터링
     filtered_df = top10.copy()
     if filter_route != "전체": filtered_df = filtered_df[filtered_df['ROUTE'] == filter_route]
     if filter_sector != "전체": filtered_df = filtered_df[filtered_df['업종'] == filter_sector]
@@ -500,7 +462,7 @@ if not top10.empty:
         st.warning("조건에 맞는 종목이 없습니다.")
         view_df = pd.DataFrame()
     else:
-        view_df = filtered_df if auth_status != "free" else filtered_df.head(3)
+        view_df = filtered_df
 else:
     view_df = pd.DataFrame()
 
@@ -521,22 +483,16 @@ if not view_df.empty:
         with c2:
             st.markdown(f"### {row['종목명']}"); st.plotly_chart(plot_radar_chart(row), use_container_width=True)
             st.info(f"**전략:** `{row['ROUTE']}` / **업종:** {row.get('업종','-')}")
-            
-            # [v5.6 NEW] 손익비(RR) 비주얼 바
             st.plotly_chart(plot_risk_reward_bar(row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
-            
             c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop")
 
 st.subheader("📋 Daily Top 10 List", anchor=False)
 with st.expander("❓ 용어 설명", expanded=False):
     st.markdown("- **Score:** 종합점수 / **MFI:** 수급 / **SuperTrend:** 차트 위 초록/빨강 점선 (초록=상승)")
 
-if auth_status == "free": st.warning("🔒 무료 버전: Top 3만 공개")
-
 # 리스트 필터링 적용
 list_view = filtered_df if not filtered_df.empty else top10
 list_view = list_view.reset_index(drop=True)
-if auth_status == "free": list_view = list_view.head(3)
 
 safe_view = list_view.copy()
 safe_view["LDY_RANK"] = safe_view.index + 1
@@ -563,10 +519,5 @@ cfg = {
 }
 st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
 
-if auth_status == "admin":
-    csv = scored.to_csv(index=False).encode('utf-8-sig')
-    st.download_button("📥 전체 다운로드 (Admin)", csv, "ldy_rank.csv", "text/csv", key="admin_dl")
-elif auth_status == "member":
-    st.button("📥 다운로드 제한 (Member)", disabled=True, key="member_dl")
-else:
-    st.button("📥 다운로드 제한 (Free)", disabled=True, key="free_dl")
+csv = scored.to_csv(index=False).encode('utf-8-sig')
+st.download_button("📥 전체 다운로드", csv, "ldy_rank.csv", "text/csv")
