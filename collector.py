@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.1 (Sector Hardcoded Edition)
-- Fix: Expanded Hardcoded Sector Map (Top 100+ Stocks)
+LDY Pro Trader Collector v5.7 (AI Narrative Edition)
+- New: AI Analysis Comment Generation (Rule-based NLP)
+- Fix: Robust Sector Mapping (Hardcoded + Crawling)
+- Feature: Telegram sends AI comments
 """
 
 import os
@@ -105,72 +107,37 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# [Ultimate Fix] 대규모 하드코딩 업종 맵 (주요 종목 150개+)
+# [Sector Map] 하드코딩 + 크롤링 하이브리드
 def get_fallback_sector_map():
     return {
-        # 반도체 / 전기전자
-        "005930": "전기전자", "000660": "전기전자", "005935": "전기전자", "042700": "전기전자", 
-        "009150": "전기전자", "011070": "전기전자", "010120": "전기전자", "267260": "전기전자",
-        "298040": "전기전자", "402340": "전기전자", "000990": "전기전자",
-        
-        # 2차전지 / 화학
-        "373220": "전기전자", "006400": "전기전자", "051910": "화학", "096770": "화학", 
-        "010950": "화학", "051915": "화학", "247540": "코스닥(화학)", "086520": "코스닥(화학)",
-        "241560": "화학", "352820": "서비스업", # 하이브는 서비스업이나 엔터로 분류됨
-        
-        # 자동차 / 운수장비
-        "005380": "운수장비", "000270": "운수장비", "012330": "운수장비", "003490": "운수창고",
-        "329180": "운수장비", "010620": "운수장비", "12450": "운수장비", "047810": "운수장비",
-        
-        # 제약 / 바이오
-        "207940": "의약품", "068270": "의약품", "000100": "의약품", "128940": "의약품",
-        "196170": "코스닥(제약)", "214150": "코스닥(제약)", "068760": "코스닥(제약)",
-        "214450": "코스닥(제약)", "091990": "코스닥(제약)", 
-        
-        # 금융 / 지주
-        "105560": "금융업", "055550": "금융업", "086790": "금융업", "032830": "금융업",
-        "316140": "금융업", "000810": "금융업", "003550": "금융업", "000150": "서비스업", # 두산
-
-        # 플랫폼 / 서비스
-        "035420": "서비스업", "035720": "서비스업", "259960": "서비스업", "018260": "서비스업",
-        "251270": "서비스업", "036570": "서비스업", 
-        
-        # 로봇 / 기계
-        "108490": "기계", "466100": "기계", "437730": "운수장비", "098460": "기계",
-        "277810": "기계", "389500": "기계", "455900": "기계", "034020": "기계",
-        
-        # 철강 / 소재
-        "005490": "철강금속", "010130": "철강금속", "001440": "전선/전력", "006260": "전선/전력",
-        
-        # 기타 주요 종목
-        "015760": "전기가스업", "034730": "서비스업", "034220": "화학", "017670": "통신업",
-        "030200": "통신업", "090430": "화학", "086280": "운수창고",
-        
-        # 코스닥 시총 상위
-        "091990": "코스닥(제약)", "247540": "코스닥(IT)", "022100": "코스닥(IT)",
-        "035900": "코스닥(엔터)", "122870": "코스닥(엔터)"
+        "005930": "전기전자", "000660": "전기전자", "373220": "전기전자", "207940": "의약품", 
+        "005380": "운수장비", "005935": "전기전자", "068270": "의약품", "000270": "운수장비",
+        "105560": "금융업", "005490": "철강금속", "035420": "서비스업", "035720": "서비스업",
+        "006400": "전기전자", "051910": "화학", "012330": "화학", "028260": "유통업",
+        "055550": "금융업", "086790": "금융업", "032830": "금융업", "003550": "화학",
+        "015760": "전기가스업", "034020": "기계", "010120": "전기전자", "323410": "서비스업",
+        "259960": "서비스업", "011200": "운수창고", "000810": "금융업", "018260": "서비스업",
+        "010130": "철강금속", "009150": "전기전자", "033780": "금융업", "017670": "통신업",
+        "329180": "운수장비", "096770": "화학", "003490": "운수창고", "030200": "통신업",
+        "316140": "금융업", "000100": "의약품", "251270": "서비스업", "024110": "금융업",
+        "036570": "서비스업", "086280": "운수창고", "090430": "화학", "010950": "화학",
+        "009540": "운수장비", "267260": "전기전자", "042700": "전기전자", "010620": "화학",
+        "138040": "금융업", "034730": "서비스업", "241560": "화학", "000150": "기계",
+        "298040": "전기전자", "108490": "기계", "466100": "기계", "437730": "운수장비",
+        "098460": "기계", "277810": "기계", "352820": "서비스업", "253450": "서비스업"
     }
 
 def get_sector_map():
-    # 1. 하드코딩 맵 우선 사용
-    sector_map = get_fallback_sector_map() 
-    
+    sector_map = get_fallback_sector_map()
     try:
-        # 2. FDR로 추가 수집 시도 (실패해도 위 맵은 살아있음)
         df = fdr.StockListing('KRX')
         target_cols = ['Sector', '업종', 'Industry', 'Wics']
         col = next((c for c in target_cols if c in df.columns), None)
-        
         if col:
             code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
             df[code_col] = df[code_col].astype(str).str.zfill(6)
             df = df.dropna(subset=[col])
-            crawled_map = dict(zip(df[code_col], df[col]))
-            
-            # 크롤링된 정보로 업데이트 (기존 하드코딩보다 최신이면 덮어씀)
-            sector_map.update(crawled_map)
-            log(f"✅ 업종 정보 업데이트 완료 (Total {len(sector_map)}개)")
-            
+            sector_map.update(dict(zip(df[code_col], df[col])))
     except: pass
     return sector_map
 
@@ -211,6 +178,30 @@ def get_name_map_cached(d):
         df.to_csv(path, index=False, encoding=UTF8)
         return dict(zip(df['종목코드'], df['종목명']))
     return {}
+
+# [v5.7 NEW] AI 코멘트 생성 함수
+def generate_ai_comment(mfi, rsi, slope, disp, score):
+    comment = ""
+    
+    # 1. 수급 분석
+    if mfi >= 70: comment += "💰 외국인/기관의 강력한 수급이 집중되고 있습니다. "
+    elif mfi >= 60: comment += "💸 자금 유입이 꾸준히 이어지고 있습니다. "
+    
+    # 2. 추세/모멘텀 분석
+    if slope > 100: comment += "🚀 상승 에너지가 폭발적으로 증가하는 중입니다. "
+    elif slope > 0: comment += "📈 상승 추세가 견고하게 유지되고 있습니다. "
+    
+    # 3. 위치 분석
+    if -2 <= disp <= 2: comment += "✅ 20일선 부근의 안전한 눌림목 구간입니다."
+    elif disp > 5: comment += "⚠️ 단기 급등으로 인한 조정 가능성을 염두에 두세요."
+    elif disp < -5: comment += "📉 과매도 구간으로 기술적 반등이 기대됩니다."
+    
+    # 4. 점수 요약
+    if score >= 90: comment += " (강력 매수 추천)"
+    elif score >= 80: comment += " (매수 유효)"
+    
+    return comment if comment else "특이사항 없음. 기술적 지표를 참고하세요."
+
 
 # --- Scoring Logic ---
 def cap_q(s, q=90, floor=1.0):
@@ -266,21 +257,20 @@ def build_global_score(lat):
     x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
     
-    # 전략 태그
-    conditions = [
-        (r5 >= 3) & (slope > 0),
-        (rsi >= 40) & (rsi <= 60),
-        (rsi <= 40)
-    ]
+    conditions = [(r5 >= 3) & (slope > 0), (rsi >= 40) & (rsi <= 60), (rsi <= 40)]
     choices = ["🔼 BRK (돌파)", "↩️ PULL (눌림)", "🔁 MR (반전)"]
     x["ROUTE"] = np.select(conditions, choices, default="—")
     
-    x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " " +
-                "LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " " +
-                "TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " " +
-                "PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
+    # [v5.7] AI 코멘트 생성 적용
+    x["AI_COMMENT"] = x.apply(lambda row: generate_ai_comment(
+        row.get("MFI14", 50), row.get("RSI14", 50), 
+        row.get("MACD_Slope", 0), row.get("이격도", 0), 
+        row.get("LDY_SCORE", 0)
+    ), axis=1)
+
     return x
 
+# [v5.7] 텔레그램 전송 (AI 코멘트 포함)
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
     if not TG_TOKEN or not TG_ID: return
@@ -288,7 +278,7 @@ def send_telegram_auto(df):
     try:
         top5 = df.head(5).reset_index(drop=True)
         trade_date = datetime.now(KST).strftime('%Y-%m-%d')
-        msg = f"🔥 [LDY v5.9] 추천 Top 5 ({trade_date})\n"
+        msg = f"🔥 [LDY v5.7] 추천 Top 5 ({trade_date})\n"
         msg += "-" * 30 + "\n\n"
         
         for i, row in top5.iterrows():
@@ -297,23 +287,21 @@ def send_telegram_auto(df):
             code = row['종목코드']
             route = row.get('ROUTE', '전략없음')
             buy = row['추천매수가']
-            stop = row['손절가']
-            t1 = row['추천매도가1']
+            comment = row.get('AI_COMMENT', '')
             
             msg += f"{rank}. {name} ({code})\n"
-            msg += f"   🎯 전략: {route}\n"
-            msg += f"   🔵 매수: {buy:,}\n"
-            msg += f"   🔴 손절: {stop:,}\n"
-            msg += f"   🟢 목표1: {t1:,}\n\n"
+            msg += f"   🎯전략: {route}\n"
+            msg += f"   💬AI: {comment}\n"
+            msg += f"   🔵매수: {buy:,}\n"
+            msg += f"   🔴손절: {row['손절가']:,} / 🟢목표: {row['추천매도가1']:,}\n\n"
             
         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_ID, "text": msg})
         log("🚀 전송 완료")
-    except Exception as e:
-        log(f"⚠️ 전송 실패: {e}")
+    except Exception as e: log(f"⚠️ 전송 실패: {e}")
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
-    log("🚀 LDY Collector v5.9 시작...")
+    log("🚀 LDY Collector v5.7 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd}")
@@ -322,8 +310,6 @@ def main():
     tickers = top_df["종목코드"].tolist()
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-    
-    # [핵심] 업종 맵 확보 (하드코딩 포함)
     sector_map = get_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
@@ -372,7 +358,6 @@ def main():
             if mfi > 60: score += 1; reason.append("자금유입(MFI)")
             if hist.iloc[-1] > 0: score += 1; reason.append("MACD>Sig")
             
-            # Entry/Target
             try: atr = float(atr)
             except: atr = 0.0
             if np.isnan(atr) or atr <= 0: atr = last_c * 0.03
@@ -388,7 +373,6 @@ def main():
             
             buy = round_to_tick(buy); stop = round_to_tick(stop); t1 = round_to_tick(t1); t2 = round_to_tick(t2)
 
-            # [Fix] 업종 매핑 (하드코딩 맵 우선 적용)
             sector = sector_map.get(str(t).zfill(6), "기타")
 
             rows.append({
@@ -409,7 +393,6 @@ def main():
     if not rows: raise RuntimeError("No Result")
     
     df_raw = pd.DataFrame(rows)
-    # LDY SCORE 계산 및 정렬
     df_out = build_global_score(df_raw).sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
     
     ensure_dir(OUT_DIR)
