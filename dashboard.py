@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.8 (UI Polished)
-- Fix: LDY Score Rounding (%.1f) & Progress Bar Added
-- Features: Subscription, Visual Charts, Portfolio, AI Narrative
+LDY Pro Trader v5.9 (Bug Fix Edition)
+- Fix: LDY Score Rounding in Treemap
+- Fix: Missing ROUTE Tag Calculation
+- Features: Subscription, Visual Charts, Portfolio
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -16,9 +17,9 @@ try: from pykrx import stock; PYKRX_OK = True
 except: PYKRX_OK = False
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v5.8", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v5.8")
-st.caption("Subscription Service: AI Quant Analysis & Asset Management")
+st.set_page_config(page_title="LDY Pro Trader v5.9", layout="wide", page_icon="💎")
+st.title("🏆 LDY Pro Trader v5.9")
+st.caption("AI Quant Investment Solution")
 
 # 3. 전역 상수 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -101,8 +102,8 @@ def get_last_business_date(d=datetime.now()):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    kp_stat, kp_diff = "Unknown", 0.0
-    kq_stat, kq_diff = "Unknown", 0.0
+    kp_stat, kp_diff = "대기중", 0.0
+    kq_stat, kq_diff = "대기중", 0.0
     if not FDR_OK: return kp_stat, kp_diff, kq_stat, kq_diff
     def _check(ticker):
         try:
@@ -120,7 +121,6 @@ def get_market_status():
     kq_stat, kq_diff = _check('KQ11')
     return kp_stat, kp_diff, kq_stat, kq_diff
 
-# 공포/탐욕 지수
 @st.cache_data(ttl=3600)
 def get_fear_greed_index():
     if not FDR_OK: return 50, "Neutral"
@@ -170,7 +170,11 @@ def plot_sector_treemap(df):
     df_map = df.copy()
     df_map['업종'] = df_map['업종'].fillna('기타')
     df_map = df_map[df_map['업종'] != '기타']
-    if 'LDY_SCORE' in df_map.columns: df_map['LDY_SCORE'] = df_map['LDY_SCORE'].round(1)
+    
+    # [FIX] LDY_SCORE 반올림 적용 (소수점 1자리)
+    if 'LDY_SCORE' in df_map.columns: 
+        df_map['LDY_SCORE'] = pd.to_numeric(df_map['LDY_SCORE'], errors='coerce').fillna(0).round(1)
+        
     if df_map.empty: return None
     fig = px.treemap(
         df_map, path=['업종', '종목명'], values='거래대금(억원)', color='LDY_SCORE',
@@ -275,6 +279,20 @@ def liquidity_gate(x_turn, market):
     min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
     return nz_num(x_turn) >= market.map(min_map).fillna(MIN_TURN_DEFAULT)
 
+# [FIX] ROUTE 계산 함수 (공란 방지)
+def route_tag(row):
+    r5 = row.get("ret_5d_%", 0)
+    slope = row.get("MACD_Slope", 0)
+    rsi = row.get("RSI14", 50)
+    mfi = row.get("MFI14", 50)
+    
+    if r5 >= 3 and slope > 0: return "🔼 BRK (돌파)"
+    if 40 <= rsi <= 60: return "↩️ PULL (눌림)"
+    if rsi <= 40: return "🔁 MR (반전)"
+    if mfi >= 60: return "🐳 WHALE (수급)"
+    if slope > 0: return "📈 TREND (추세)"
+    return "—"
+
 def build_global_score(lat):
     x = lat.copy()
     req = ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","RSI14","MACD_Slope","거래강도","이격도","ret_5d_%","ret_10d_%","EBS","MACD_Hist","MFI14"]
@@ -328,19 +346,13 @@ def build_global_score(lat):
     
     score = np.clip(base_score - pen, 0, 100)
     x["RR1"] = rr1; x["Now%"] = now_gap
-    x["LDY_SCORE"] = score.round(1)
+    x["LDY_SCORE"] = score.round(1) # [Fix] 점수 반올림 적용
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
     x["LDY_RANK"] = range(1, len(x)+1)
     
     if "AI_COMMENT" in x.columns: x["WHY"] = x["AI_COMMENT"]
     return x
-
-def route_tag(row):
-    r5 = row.get("ret_5d_%", 0)
-    slope = row.get("MACD_Slope", 0)
-    if r5 >= 3 and slope > 0: return "🔼 BRK (돌파)"
-    return "↩️ PULL (눌림)"
 
 # 6. 메인 실행
 try: df_raw = load_csv_url(RAW_URL); log_src(df_raw, "Remote")
@@ -351,6 +363,9 @@ except:
 df = normalize_cols(df_raw)
 latest = df.copy()
 scored = build_global_score(latest)
+
+# [Fix] ROUTE 태그 계산 적용 (이제 빈 칸 안 나옴)
+scored["ROUTE"] = scored.apply(route_tag, axis=1)
 base = scored[(scored["EBS"] >= PASS_EBS) & (scored["_GATE_OK"])].copy()
 if len(base) < 20: base = scored.head(20)
 top10 = base.head(20).copy()
@@ -360,6 +375,7 @@ top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 with st.sidebar:
     st.header("🔐 로그인")
     input_pw = st.text_input("비밀번호 입력", type="password", placeholder="비밀번호를 입력하세요")
+    
     auth_status = "free"
     if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자 로그인")
     elif input_pw == KEY_PRO: auth_status = "pro"; st.success("🥇 Pro 멤버십")
@@ -380,7 +396,7 @@ with st.sidebar:
     if auth_status in ["pro", "prime", "admin"]:
         st.divider(); st.subheader("💼 내 자산 관리")
         saved_pf = load_portfolio_file()
-        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=120)
+        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=100)
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
     
     if auth_status in ["prime", "admin"]:
@@ -402,7 +418,6 @@ with tab1:
     c_gauge, c_map = st.columns([1, 1.5])
     with c_gauge:
         st.plotly_chart(plot_fear_greed_gauge(get_fear_greed_index()[0]), use_container_width=True)
-        st.caption("시장 공포/탐욕 지수")
     with c_map:
         st.markdown("##### 🔥 오늘의 주도 섹터")
         if "업종" in base.columns:
@@ -437,11 +452,12 @@ with tab2:
                 st.info(f"💬 **AI:** {ai_cmt}")
                 st.plotly_chart(plot_risk_reward_bar(row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
             else:
-                st.warning("🔒 상세 AI 분석은 Pro 등급부터 확인 가능합니다.")
+                st.warning("🔒 상세 분석은 Pro 등급부터 확인 가능합니다.")
             c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop", delta_color="inverse")
 
     st.divider()
     st.subheader("📋 Daily Top List", anchor=False)
+    
     safe_view = view_df.copy().reset_index(drop=True)
     safe_view.set_index("종목명", inplace=True)
     
@@ -453,7 +469,7 @@ with tab2:
     cols = ["ROUTE","업종","종목코드","LDY_SCORE","종가","추천매수가","손절가","추천매도가1"]
     cols = [c for c in cols if c in safe_view.columns]
     
-    # [Fix] 컬럼 설정 (점수 반올림 등)
+    # [FIX] Score 반올림 표시 설정
     cfg = {
         "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
         "종가": st.column_config.TextColumn("현재가"),
