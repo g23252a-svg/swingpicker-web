@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.8 (Subscription Final)
-- Tiers: Free (Top3), Pro (Full), Prime (Full + Down + Alert)
-- Features: All Visualizations Included
+LDY Pro Trader v5.8 (Final Hotfix)
+- Fix: NameError (sl_norm Missing Variable Resolved)
+- Features: Subscription, Visual Charts, AI Narrative
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -16,16 +16,16 @@ try: from pykrx import stock; PYKRX_OK = True
 except: PYKRX_OK = False
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v5.8", layout="wide", page_icon="🔐")
+st.set_page_config(page_title="LDY Pro Trader v5.8", layout="wide", page_icon="💰")
 st.title("🏆 LDY Pro Trader v5.8")
-st.caption("AI Quant Investment Solution")
+st.caption("Subscription Service: AI Quant Analysis & Asset Management")
 
-# 3. 상수 및 설정
+# 3. 전역 상수 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 LOCAL_RAW = "data/recommend_latest.csv"
 PORTFOLIO_FILE = "my_portfolio.json"
 
-# [비밀번호 설정]
+# [비밀번호]
 KEY_PRO = "2024"
 KEY_PRIME = "2025"
 ADMIN_KEY = "2022322"
@@ -96,8 +96,8 @@ def get_last_business_date(d=datetime.now()):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    kp_stat, kp_diff = "대기중", 0.0
-    kq_stat, kq_diff = "대기중", 0.0
+    kp_stat, kp_diff = "Unknown", 0.0
+    kq_stat, kq_diff = "Unknown", 0.0
     if not FDR_OK: return kp_stat, kp_diff, kq_stat, kq_diff
     def _check(ticker):
         try:
@@ -147,11 +147,14 @@ def plot_fear_greed_gauge(score):
         domain = {'x': [0, 1], 'y': [0, 1]},
         title = {'text': "시장 공포/탐욕 지수", 'font': {'size': 20}},
         delta = {'reference': 50, 'increasing': {'color': "red"}, 'decreasing': {'color': "blue"}},
-        gauge = {'axis': {'range': [None, 100]}, 'bar': {'color': "rgba(0,0,0,0)"}, 
-                 'steps': [{'range': [0, 25], 'color': '#4D96FF'}, {'range': [25, 45], 'color': '#87CEEB'},
-                           {'range': [45, 55], 'color': '#D3D3D3'}, {'range': [55, 75], 'color': '#FFB347'},
-                           {'range': [75, 100], 'color': '#FF6B6B'}],
-                 'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': score}}
+        gauge = {
+            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "white"},
+            'bar': {'color': "rgba(0,0,0,0)"}, 
+            'steps': [{'range': [0, 25], 'color': '#4D96FF'}, {'range': [25, 45], 'color': '#87CEEB'},
+                      {'range': [45, 55], 'color': '#D3D3D3'}, {'range': [55, 75], 'color': '#FFB347'},
+                      {'range': [75, 100], 'color': '#FF6B6B'}],
+            'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': score}
+        }
     ))
     fig.update_layout(height=200, margin=dict(l=20,r=20,t=40,b=20))
     return fig
@@ -283,14 +286,33 @@ def build_global_score(lat):
     rr_den = (entry - stop)
     rr1 = ((t1 - entry) / rr_den.replace(0, np.nan)).mask(entry.isna() | stop.isna() | t1.isna())
     now_gap = ((close - entry).abs() / entry * 100)
-    
+    t1_room = ((t1 - close) / close * 100)
+    sl_room = ((close - stop) / close * 100)
+
     def cap_q(s, q=90, f=1.0): return float(max(np.nanpercentile(nz_num(s), q), f))
     def pct_norm(s, q=90, f=1.0): return np.clip(nz_num(s).clip(lower=0) / cap_q(s, q, f), 0, 1)
     def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
 
     rr_norm = pct_norm(rr1)
-    t1_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
+    t1_norm = np.clip(t1_room / cap_q(t1_room, 90, 5.0), 0, 1)
+    # [FIX] sl_norm 정의 완료!
+    sl_norm = np.clip(sl_room / cap_q(sl_room, 90, 3.0), 0, 1)
+    near_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
     
+    ers_bits = (ebs>=PASS_EBS).astype(int) + (slope>0).astype(int) + ((rsi>=45)&(rsi<=65)).astype(int)
+    ers_norm = np.clip(ers_bits/3.0, 0, 1)
+    slope_pos_norm = pct_norm(slope)
+    mom_norm = np.clip(0.5*ers_norm + 0.3*slope_pos_norm, 0, 1)
+
+    if turn.notna().any():
+        lo, hi = np.nanpercentile(turn, 30), np.nanpercentile(turn, 90)
+        liq_norm = np.clip((turn - lo) / max(hi-lo, 1e-9), 0, 1)
+    else: liq_norm = 0.0
+
+    vol_sweet = (1 - np.minimum((volz - 1).abs()/3, 1)).clip(0,1)
+    kairi_norm = (1 - np.minimum(kairi.abs()/cap_q(kairi.abs(), 80, 3.0), 1)).clip(0,1)
+    tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1)
+
     base_score = (100*W_RR*rr_norm) + (100*W_T1*t1_norm) + (100*W_SL*sl_norm) + \
                  (100*W_NEAR*near_norm) + (100*W_MOM*mom_norm) + (100*W_LIQ*liq_norm) + (100*W_TEC*tec_norm)
     
@@ -306,10 +328,7 @@ def build_global_score(lat):
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
     x["LDY_RANK"] = range(1, len(x)+1)
     
-    if "AI_COMMENT" in x.columns:
-        x["WHY"] = x["AI_COMMENT"]
-    else:
-        x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
+    if "AI_COMMENT" in x.columns: x["WHY"] = x["AI_COMMENT"]
     return x
 
 def route_tag(row):
@@ -354,11 +373,10 @@ with st.sidebar:
         if input_pw: st.error("❌ 불일치")
         st.caption("🔒 Free 모드 (기능 제한)")
     
-    # 포트폴리오 및 알림 (유료)
     if auth_status in ["pro", "prime", "admin"]:
         st.divider(); st.subheader("💼 내 자산 관리")
         saved_pf = load_portfolio_file()
-        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=120)
+        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10")
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
     
     if auth_status in ["prime", "admin"]:
@@ -389,17 +407,15 @@ with tab1:
         else: st.info("섹터 정보 없음")
 
 with tab2:
-    # 권한 제한
     if auth_status == "free":
         view_df = top10.head(3)
         st.info("🔒 Free 버전: Top 3 종목만 공개됩니다.")
     else:
         view_df = top10
 
-    opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['ROUTE']}", axis=1).tolist()
+    opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']})", axis=1).tolist()
     sel = st.selectbox("종목 선택", opts)
     if sel:
-        # [FIX] 인덱스 매칭 (IndexError 해결)
         sel_idx = opts.index(sel)
         row = view_df.iloc[sel_idx]
         code = row['종목코드']
@@ -420,17 +436,14 @@ with tab2:
 
     st.divider()
     st.subheader("📋 Daily Top List", anchor=False)
-    
     safe_view = view_df.copy().reset_index(drop=True)
     safe_view.set_index("종목명", inplace=True)
-    
     price_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)"]
     for c in price_cols: 
         if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
     cols = ["ROUTE","업종","종목코드","LDY_SCORE","종가","추천매수가","손절가","추천매도가1"]
     cols = [c for c in cols if c in safe_view.columns]
-    
     st.dataframe(safe_view[cols], use_container_width=True)
     
     if auth_status in ["prime", "admin"]:
