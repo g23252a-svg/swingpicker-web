@@ -353,31 +353,84 @@ top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
 # [사이드바]
 with st.sidebar:
-    st.subheader("💎 프리미엄 구독 안내")
-    c1, c2, c3 = st.columns(3)
-    with c1: st.info("**Free**\n\nTop 3\n무료")
-    with c2: st.warning("**Pro**\n\n2.9만\n전체열람")
-    with c3: st.error("**Prime**\n\n5.9만\n풀패키지")
-    kakao_url = "https://open.kakao.com/o/g6enIm4h"
-    st.link_button("👉 구독 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
-
-    st.divider()
-    st.subheader("🔐 로그인")
-    input_pw = st.text_input("비밀번호", type="password")
+    st.header("🔐 로그인")
+    input_pw = st.text_input("비밀번호 입력", type="password", placeholder="비밀번호를 입력하세요")
+    
+    # 관리자/등급 키 설정
+    ADMIN_KEY = "2022322"
+    KEY_PRO = "2024"
+    KEY_PRIME = "2025"
     
     auth_status = "free"
-    if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자")
-    elif input_pw == KEY_PRO: auth_status = "pro"; st.success("🥇 Pro 회원")
-    elif input_pw == KEY_PRIME: auth_status = "prime"; st.success("👑 Prime 회원")
+    if input_pw == ADMIN_KEY: 
+        auth_status = "admin"
+        st.success("✅ 관리자 로그인")
+    elif input_pw == KEY_PRO: 
+        auth_status = "pro"
+        st.success("🥇 Pro 멤버십 적용됨")
+    elif input_pw == KEY_PRIME: 
+        auth_status = "prime"
+        st.success("👑 Prime 멤버십 적용됨")
     else: 
-        if input_pw: st.error("❌ 불일치")
-        st.caption("🔒 Free 모드 (기능 제한)")
+        auth_status = "free"
+        if input_pw: st.error("❌ 잘못된 비밀번호")
+        st.info("🔒 현재 **Free 모드** (기능 제한)")
+
+    # -------------------------------------------------------
+    # [NEW] 유료 구독 안내 (카드형 디자인)
+    # -------------------------------------------------------
+    st.divider()
+    st.subheader("💎 멤버십 안내")
+
+    # 1. Free 등급
+    with st.container(border=True):
+        st.markdown("### 🌱 **Free (무료)**")
+        st.markdown("`체험판`")
+        st.markdown("""
+        - 📋 **Top 3** 종목만 공개
+        - 🔭 기본 차트 열람
+        - ❌ 포트폴리오/알림 불가
+        """)
+
+    # 2. Pro 등급
+    with st.container(border=True):
+        st.markdown("### 🚀 **Pro (2.9만/월)**")
+        st.markdown("`실전 투자자용`")
+        st.markdown("""
+        - 🔓 **Top 20 전체 종목** 공개
+        - 💼 **내 포트폴리오 AI 진단**
+        - 📈 슈퍼트렌드/레이더 차트
+        """)
+
+    # 3. Prime 등급
+    with st.container(border=True):
+        st.markdown("### 👑 **Prime (5.9만/월)**")
+        st.markdown("`전업/전문가용`")
+        st.markdown("""
+        - ✅ **Pro 기능 전체 포함**
+        - 🔔 **매일 텔레그램 자동 알림**
+        - 📥 **원본 데이터(CSV) 다운로드**
+        - ⚡ 신규 기능 베타 테스트
+        """)
+
+    # 구독 문의 버튼
+    kakao_url = "https://open.kakao.com/o/g6enIm4h"
+    st.link_button("👉 **구독 신청 / 문의하기 (카톡)**", kakao_url, type="primary", use_container_width=True)
     
+    # -------------------------------------------------------
+    
+    # (로그인 시에만 보이는 기능)
     if auth_status in ["pro", "prime", "admin"]:
         st.divider(); st.subheader("💼 내 자산 관리")
         saved_pf = load_portfolio_file()
-        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10")
+        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=100)
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
+    
+    if auth_status in ["prime", "admin"]:
+        with st.expander("🔔 텔레그램 봇 설정"):
+            tg_token = st.text_input("Bot Token", type="password")
+            tg_chat_id = st.text_input("Chat ID")
+            send_btn = st.button("🚀 테스트 전송")
     
     if auth_status in ["prime", "admin"]:
         with st.expander("🔔 텔레그램"):
