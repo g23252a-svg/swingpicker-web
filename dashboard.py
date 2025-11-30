@@ -395,7 +395,7 @@ with st.sidebar:
         st.markdown("### 👑 **Prime (5.9만)**")
         st.markdown("`전업 투자자`\n- ✅ Pro 기능 포함\n- 🔔 텔레그램 알림")
     
-    kakao_url = "https://open.kakao.com/o/g6enIm4h"
+    kakao_url = "https://open.kakao.com/o/szBsnn4h"
     st.link_button("👉 구독 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
     
     # 유료 기능 (로그인 시에만)
