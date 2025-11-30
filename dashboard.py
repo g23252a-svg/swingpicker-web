@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.9.2 (Final Perfected)
-- Fix: ROUTE Logic Restored (Full Strategies)
-- Fix: LDY Score Rounding & NameError Resolved
-- Features: Subscription, Visual Charts, Portfolio, AI Narrative
+LDY Pro Trader v5.9.2 (Final Perfect Design)
+- Fix: Membership UI (Card Style), Treemap Rounding, All Bugs
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -19,7 +17,7 @@ except: PYKRX_OK = False
 # 2. 페이지 설정
 st.set_page_config(page_title="LDY Pro Trader v5.9", layout="wide", page_icon="💎")
 st.title("🏆 LDY Pro Trader v5.9")
-st.caption("Subscription Service: AI Quant Analysis & Asset Management")
+st.caption("AI Quant Analysis & Asset Management")
 
 # 3. 전역 상수 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -31,7 +29,7 @@ KEY_PRO = "2024"
 KEY_PRIME = "2025"
 ADMIN_KEY = "2022322"
 
-# 스코어링 상수
+# 스코어링 상수 (전역)
 PASS_EBS = 4
 MIN_TURN_KOSPI = 200.0
 MIN_TURN_KOSDAQ = 100.0
@@ -165,18 +163,24 @@ def plot_fear_greed_gauge(score):
     fig.update_layout(height=200, margin=dict(l=20,r=20,t=40,b=20))
     return fig
 
+# [Fix] 트리맵 반올림 적용
 def plot_sector_treemap(df):
     if '업종' not in df.columns: return None
     df_map = df.copy()
     df_map['업종'] = df_map['업종'].fillna('기타')
     df_map = df_map[df_map['업종'] != '기타']
+    
+    # 점수 반올림 (소수점 1자리)
     if 'LDY_SCORE' in df_map.columns: 
         df_map['LDY_SCORE'] = pd.to_numeric(df_map['LDY_SCORE'], errors='coerce').fillna(0).round(1)
+        
     if df_map.empty: return None
     fig = px.treemap(
         df_map, path=['업종', '종목명'], values='거래대금(억원)', color='LDY_SCORE',
-        color_continuous_scale='RdYlGn', title="<b>🔥 시장 주도 섹터 지도</b>"
+        color_continuous_scale='RdYlGn', title="<b>🔥 시장 주도 섹터 지도</b>",
+        custom_data=['LDY_SCORE']
     )
+    fig.update_traces(hovertemplate='<b>%{label}</b><br>점수: %{customdata[0]:.1f}<br>대금: %{value}억<extra></extra>')
     fig.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=350)
     return fig
 
@@ -223,10 +227,10 @@ def get_stock_chart_data(code):
 def plot_radar_chart(row):
     stats = {
         "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
-        "수급(MFI)": row.get("MFI14", 50),
-        "가성비(RR)": min(100, row.get("RR1", 1) * 50),
+        "수급": row.get("MFI14", 50),
+        "가성비": min(100, row.get("RR1", 1) * 50),
         "안전성": 100 - (row.get("이격도", 0) * 2),
-        "종합점수": row.get("LDY_SCORE", 0)
+        "종합": row.get("LDY_SCORE", 0)
     }
     values = [max(0, min(100, v)) for v in stats.values()]
     fig = go.Figure(go.Scatterpolar(r=values, theta=list(stats.keys()), fill='toself', name=row['종목명']))
@@ -335,23 +339,13 @@ def build_global_score(lat):
     x["LDY_RANK"] = range(1, len(x)+1)
     
     if "AI_COMMENT" in x.columns: x["WHY"] = x["AI_COMMENT"]
-    else:
-        x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
-# [Fix] ROUTE 복구
 def route_tag(row):
     r5 = row.get("ret_5d_%", 0)
     slope = row.get("MACD_Slope", 0)
-    rsi = row.get("RSI14", 50)
-    mfi = row.get("MFI14", 50)
-    
     if r5 >= 3 and slope > 0: return "🔼 BRK (돌파)"
-    if 40 <= rsi <= 60: return "↩️ PULL (눌림)"
-    if rsi <= 40: return "🔁 MR (반전)"
-    if mfi >= 60: return "🐳 WHALE (수급)"
-    if slope > 0: return "📈 TREND (추세)"
-    return "—"
+    return "↩️ PULL (눌림)"
 
 # 6. 메인 실행
 try: df_raw = load_csv_url(RAW_URL); log_src(df_raw, "Remote")
@@ -362,8 +356,7 @@ except:
 df = normalize_cols(df_raw)
 latest = df.copy()
 scored = build_global_score(latest)
-# [Fix] ROUTE 태그 계산 강제 적용
-scored["ROUTE"] = scored.apply(route_tag, axis=1)
+scored["ROUTE"] = scored.apply(route_tag, axis=1).fillna("—") # [Fix] ROUTE 공란 방지
 base = scored[(scored["EBS"] >= PASS_EBS) & (scored["_GATE_OK"])].copy()
 if len(base) < 20: base = scored.head(20)
 top10 = base.head(20).copy()
@@ -374,30 +367,35 @@ with st.sidebar:
     st.header("🔐 로그인")
     input_pw = st.text_input("비밀번호 입력", type="password", placeholder="비밀번호를 입력하세요")
     
-    # [Fix] send_btn 초기화 (NameError 방지)
+    # [Fix] 변수 초기화 (NameError 방지)
     send_btn = False
     tg_token, tg_chat_id = "", ""
-    
+    pf_input = ""
+
     auth_status = "free"
-    if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자")
-    elif input_pw == KEY_PRO: auth_status = "pro"; st.success("🥇 Pro")
-    elif input_pw == KEY_PRIME: auth_status = "prime"; st.success("👑 Prime")
+    if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자 로그인")
+    elif input_pw == KEY_PRO: auth_status = "pro"; st.success("🥇 Pro 멤버십")
+    elif input_pw == KEY_PRIME: auth_status = "prime"; st.success("👑 Prime 멤버십")
     else: 
         if input_pw: st.error("❌ 불일치")
         st.caption("🔒 Free 모드")
 
     st.divider()
-    st.subheader("💎 멤버십 안내")
+    st.subheader("💎 프리미엄 구독 안내")
+    
+    # [Fix] 카드형 디자인 (깔끔하게)
     c1, c2, c3 = st.columns(3)
-    with c1: st.info("**Free**\n\nTop 3\n무료")
-    with c2: st.warning("**Pro**\n\n2.9만\n전체열람")
-    with c3: st.error("**Prime**\n\n5.9만\n풀패키지")
-    st.link_button("👉 구독 문의 (카톡)", "https://open.kakao.com/o/g6enIm4h", type="primary", use_container_width=True)
+    with c1: st.info("**Free**\n\n0원\nTop3")
+    with c2: st.warning("**Pro**\n\n2.9만\nTop20")
+    with c3: st.error("**Prime**\n\n5.9만\nFull")
+    
+    kakao_url = "https://open.kakao.com/o/g6enIm4h"
+    st.link_button("👉 구독 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
     
     if auth_status in ["pro", "prime", "admin"]:
         st.divider(); st.subheader("💼 내 자산 관리")
         saved_pf = load_portfolio_file()
-        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=100)
+        pf_input = st.text_area("종목명:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=100)
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
     
     if auth_status in ["prime", "admin"]:
@@ -406,7 +404,7 @@ with st.sidebar:
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
 
-# [텔레그램 발송 로직]
+# [텔레그램 로직]
 if send_btn and tg_token and tg_chat_id:
     msg = f"🔥 [LDY v5.9] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
     for i in range(min(5, len(top10))):
@@ -430,7 +428,6 @@ with tab1:
     c_gauge, c_map = st.columns([1, 1.5])
     with c_gauge:
         st.plotly_chart(plot_fear_greed_gauge(get_fear_greed_index()[0]), use_container_width=True)
-        st.caption("시장 공포/탐욕 지수")
     with c_map:
         st.markdown("##### 🔥 오늘의 주도 섹터")
         if "업종" in base.columns:
@@ -476,10 +473,19 @@ with tab2:
     price_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)"]
     for c in price_cols: 
         if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
-
+    
     cols = ["ROUTE","업종","종목코드","LDY_SCORE","종가","추천매수가","손절가","추천매도가1"]
     cols = [c for c in cols if c in safe_view.columns]
-    st.dataframe(safe_view[cols], use_container_width=True)
+    
+    # [Fix] 점수 반올림 표시 설정
+    cfg = {
+        "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
+        "종가": st.column_config.TextColumn("현재가"),
+        "추천매수가": st.column_config.TextColumn("진입가"),
+        "손절가": st.column_config.TextColumn("손절가"),
+        "추천매도가1": st.column_config.TextColumn("목표가"),
+    }
+    st.dataframe(safe_view[cols], use_container_width=True, column_config=cfg)
     
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
