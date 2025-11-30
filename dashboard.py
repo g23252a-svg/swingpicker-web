@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.8 (Final Hotfix)
-- Fix: NameError (sl_norm Missing Variable Resolved)
-- Features: Subscription, Visual Charts, AI Narrative
+LDY Pro Trader v5.9 (Subscription & Visual Master)
+- Tiers: Free (Top3), Pro (Full), Prime (Full + Down)
+- Features: All Charts, Portfolio, KakaoTalk Link
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -16,8 +16,8 @@ try: from pykrx import stock; PYKRX_OK = True
 except: PYKRX_OK = False
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v5.8", layout="wide", page_icon="💰")
-st.title("🏆 LDY Pro Trader v5.8")
+st.set_page_config(page_title="LDY Pro Trader v5.9", layout="wide", page_icon="🔐")
+st.title("🏆 LDY Pro Trader v5.9")
 st.caption("Subscription Service: AI Quant Analysis & Asset Management")
 
 # 3. 전역 상수 설정
@@ -96,8 +96,8 @@ def get_last_business_date(d=datetime.now()):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    kp_stat, kp_diff = "Unknown", 0.0
-    kq_stat, kq_diff = "Unknown", 0.0
+    kp_stat, kp_diff = "대기중", 0.0
+    kq_stat, kq_diff = "대기중", 0.0
     if not FDR_OK: return kp_stat, kp_diff, kq_stat, kq_diff
     def _check(ticker):
         try:
@@ -256,18 +256,17 @@ def plot_risk_reward_bar(buy, stop, target1, target2):
     fig.update_layout(barmode='stack', showlegend=False, height=80, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(visible=False), yaxis=dict(visible=False))
     return fig
 
-# 5. 유틸
-def z6(x): return str(x).zfill(6) if str(x).isdigit() else str(x)
-def nz_num(s): return pd.to_numeric(s, errors="coerce")
-def ensure_turnover(df):
+def normalize_cols(df):
     if "거래대금(억원)" not in df.columns and "거래대금(원)" in df.columns:
         df["거래대금(억원)"] = (nz_num(df["거래대금(원)"])/1e8).round(2)
     return df
-def normalize_cols(df): return ensure_turnover(df)
 
 def liquidity_gate(x_turn, market):
     min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
     return nz_num(x_turn) >= market.map(min_map).fillna(MIN_TURN_DEFAULT)
+
+def z6(x): return str(x).zfill(6) if str(x).isdigit() else str(x)
+def nz_num(s): return pd.to_numeric(s, errors="coerce")
 
 def build_global_score(lat):
     x = lat.copy()
@@ -295,7 +294,6 @@ def build_global_score(lat):
 
     rr_norm = pct_norm(rr1)
     t1_norm = np.clip(t1_room / cap_q(t1_room, 90, 5.0), 0, 1)
-    # [FIX] sl_norm 정의 완료!
     sl_norm = np.clip(sl_room / cap_q(sl_room, 90, 3.0), 0, 1)
     near_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
     
@@ -354,83 +352,32 @@ top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 # [사이드바]
 with st.sidebar:
     st.header("🔐 로그인")
-    input_pw = st.text_input("비밀번호 입력", type="password", placeholder="비밀번호를 입력하세요")
-    
-    # 관리자/등급 키 설정
-    ADMIN_KEY = "2022322"
-    KEY_PRO = "2024"
-    KEY_PRIME = "2025"
-    
+    input_pw = st.text_input("비밀번호", type="password")
     auth_status = "free"
-    if input_pw == ADMIN_KEY: 
-        auth_status = "admin"
-        st.success("✅ 관리자 로그인")
-    elif input_pw == KEY_PRO: 
-        auth_status = "pro"
-        st.success("🥇 Pro 멤버십 적용됨")
-    elif input_pw == KEY_PRIME: 
-        auth_status = "prime"
-        st.success("👑 Prime 멤버십 적용됨")
+    if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자")
+    elif input_pw == KEY_PRO: auth_status = "pro"; st.success("🥇 Pro")
+    elif input_pw == KEY_PRIME: auth_status = "prime"; st.success("👑 Prime")
     else: 
-        auth_status = "free"
-        if input_pw: st.error("❌ 잘못된 비밀번호")
-        st.info("🔒 현재 **Free 모드** (기능 제한)")
+        if input_pw: st.error("❌ 불일치")
+        st.caption("🔒 Free 모드")
 
-    # -------------------------------------------------------
-    # [NEW] 유료 구독 안내 (카드형 디자인)
-    # -------------------------------------------------------
     st.divider()
-    st.subheader("💎 멤버십 안내")
-
-    # 1. Free 등급
+    st.subheader("💎 프리미엄 구독 안내")
+    # 카드형 디자인
     with st.container(border=True):
-        st.markdown("### 🌱 **Free (무료)**")
-        st.markdown("`체험판`")
-        st.markdown("""
-        - 📋 **Top 3** 종목만 공개
-        - 🔭 기본 차트 열람
-        - ❌ 포트폴리오/알림 불가
-        """)
-
-    # 2. Pro 등급
+        st.markdown("### 🌱 **Free (무료)**\n`Top 3` | ❌ 알림/분석")
     with st.container(border=True):
-        st.markdown("### 🚀 **Pro (2.9만/월)**")
-        st.markdown("`실전 투자자용`")
-        st.markdown("""
-        - 🔓 **Top 20 전체 종목** 공개
-        - 💼 **내 포트폴리오 AI 진단**
-        - 📈 슈퍼트렌드/레이더 차트
-        """)
-
-    # 3. Prime 등급
+        st.markdown("### 🚀 **Pro (2.9만)**\n`Top 20` | 💼 포트폴리오")
     with st.container(border=True):
-        st.markdown("### 👑 **Prime (5.9만/월)**")
-        st.markdown("`전업/전문가용`")
-        st.markdown("""
-        - ✅ **Pro 기능 전체 포함**
-        - 🔔 **매일 텔레그램 자동 알림**
-        - 📥 **원본 데이터(CSV) 다운로드**
-        - ⚡ 신규 기능 베타 테스트
-        """)
-
-    # 구독 문의 버튼
-    kakao_url = "https://open.kakao.com/o/g6enIm4h"
-    st.link_button("👉 **구독 신청 / 문의하기 (카톡)**", kakao_url, type="primary", use_container_width=True)
+        st.markdown("### 👑 **Prime (5.9만)**\n`Full` | 🔔 텔레그램 | 📥 CSV")
     
-    # -------------------------------------------------------
-    
-    # (로그인 시에만 보이는 기능)
+    st.link_button("👉 구독 문의 (카톡)", "https://open.kakao.com/o/g6enIm4h", type="primary", use_container_width=True)
+
     if auth_status in ["pro", "prime", "admin"]:
         st.divider(); st.subheader("💼 내 자산 관리")
         saved_pf = load_portfolio_file()
-        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=100)
+        pf_input = st.text_area("종목명:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10")
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
-    
-    if auth_status in ["prime", "admin"]:
-        with st.expander("🔔 텔레그램 봇 설정"):
-            tg_token = st.text_input("Bot Token", type="password")
-            tg_chat_id = st.text_input("Chat ID")
-            send_btn = st.button("🚀 테스트 전송")
     
     if auth_status in ["prime", "admin"]:
         with st.expander("🔔 텔레그램"):
@@ -446,7 +393,6 @@ with tab1:
     c1, c2 = st.columns(2)
     c1.metric("KOSPI", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if "상승" in kp_stat else "inverse")
     c2.metric("KOSDAQ", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if "상승" in kq_stat else "inverse")
-    
     st.divider()
     c_gauge, c_map = st.columns([1, 1.5])
     with c_gauge:
@@ -460,17 +406,11 @@ with tab1:
         else: st.info("섹터 정보 없음")
 
 with tab2:
-    # 권한에 따른 데이터 제한
     if auth_status == "free":
-        view_df = latest.head(3)  # 무료: 상위 3개
+        view_df = top10.head(3)
         st.info("🔒 Free 버전: Top 3 종목만 공개됩니다.")
     else:
-        # Pro/Prime/Admin: 전체 데이터(Top 20 이상) 공개
-        view_df = latest.head(20) # 20개까지 보여줌
-        if auth_status == "pro":
-            st.success("🥇 Pro 회원: Top 20 전체 열람 중")
-        elif auth_status == "prime":
-            st.success("👑 Prime 회원: 풀 패키지 적용 중")
+        view_df = top10
 
     opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']})", axis=1).tolist()
     sel = st.selectbox("종목 선택", opts)
@@ -478,7 +418,6 @@ with tab2:
         sel_idx = opts.index(sel)
         row = view_df.iloc[sel_idx]
         code = row['종목코드']
-        
         c1, c2 = st.columns([2, 1])
         with c1:
             chart_df = get_stock_chart_data(code)
