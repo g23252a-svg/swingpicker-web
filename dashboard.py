@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.9.1 (Final Perfect Fix)
-- Fix: NameError (send_btn), Missing ROUTE logic, Score Rounding
+LDY Pro Trader v5.8 (UI Polished)
+- Fix: LDY Score Rounding (%.1f) & Progress Bar Added
 - Features: Subscription, Visual Charts, Portfolio, AI Narrative
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
@@ -16,8 +16,8 @@ try: from pykrx import stock; PYKRX_OK = True
 except: PYKRX_OK = False
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v5.9", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v5.9")
+st.set_page_config(page_title="LDY Pro Trader v5.8", layout="wide", page_icon="💎")
+st.title("🏆 LDY Pro Trader v5.8")
 st.caption("Subscription Service: AI Quant Analysis & Asset Management")
 
 # 3. 전역 상수 설정
@@ -36,8 +36,13 @@ MIN_TURN_KOSPI = 200.0
 MIN_TURN_KOSDAQ = 100.0
 MIN_TURN_DEFAULT = 100.0
 W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
-P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
-P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
+P_OVERHEAT_5D = 6.0
+P_OVERHEAT_10D = 6.0
+P_RSI_OUT = 4.0
+P_MACD_NEG = 4.0
+P_NEAR_FAR = 4.0
+P_LIQ_LOW = 4.0
+P_VOL_SPIKE = 2.0
 
 # 4. 데이터 로딩 함수
 @st.cache_data(ttl=600)
@@ -96,8 +101,8 @@ def get_last_business_date(d=datetime.now()):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    kp_stat, kp_diff = "대기중", 0.0
-    kq_stat, kq_diff = "대기중", 0.0
+    kp_stat, kp_diff = "Unknown", 0.0
+    kq_stat, kq_diff = "Unknown", 0.0
     if not FDR_OK: return kp_stat, kp_diff, kq_stat, kq_diff
     def _check(ticker):
         try:
@@ -115,6 +120,7 @@ def get_market_status():
     kq_stat, kq_diff = _check('KQ11')
     return kp_stat, kp_diff, kq_stat, kq_diff
 
+# 공포/탐욕 지수
 @st.cache_data(ttl=3600)
 def get_fear_greed_index():
     if not FDR_OK: return 50, "Neutral"
@@ -164,8 +170,7 @@ def plot_sector_treemap(df):
     df_map = df.copy()
     df_map['업종'] = df_map['업종'].fillna('기타')
     df_map = df_map[df_map['업종'] != '기타']
-    # [Fix] LDY Score 반올림 처리 (소수점 1자리)
-    if 'LDY_SCORE' in df_map.columns: df_map['LDY_SCORE'] = df_map['LDY_SCORE'].astype(float).round(1)
+    if 'LDY_SCORE' in df_map.columns: df_map['LDY_SCORE'] = df_map['LDY_SCORE'].round(1)
     if df_map.empty: return None
     fig = px.treemap(
         df_map, path=['업종', '종목명'], values='거래대금(억원)', color='LDY_SCORE',
@@ -270,21 +275,6 @@ def liquidity_gate(x_turn, market):
     min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
     return nz_num(x_turn) >= market.map(min_map).fillna(MIN_TURN_DEFAULT)
 
-# [Fix] ROUTE 계산 함수 추가 (대시보드용)
-def route_tag(row):
-    r5 = row.get("ret_5d_%", 0)
-    slope = row.get("MACD_Slope", 0)
-    rsi = row.get("RSI14", 50)
-    kairi = row.get("이격도", 0)
-    mfi = row.get("MFI14", 0)
-    
-    if r5 >= 3 and slope > 0: return "🔼 BRK (돌파)"
-    if 40 <= rsi <= 60: return "↩️ PULL (눌림)"
-    if rsi <= 40: return "🔁 MR (반전)"
-    if mfi >= 60: return "🐳 WHALE (수급)"
-    if slope > 0: return "📈 TREND (추세)"
-    return "—"
-
 def build_global_score(lat):
     x = lat.copy()
     req = ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","RSI14","MACD_Slope","거래강도","이격도","ret_5d_%","ret_10d_%","EBS","MACD_Hist","MFI14"]
@@ -338,16 +328,19 @@ def build_global_score(lat):
     
     score = np.clip(base_score - pen, 0, 100)
     x["RR1"] = rr1; x["Now%"] = now_gap
-    x["LDY_SCORE"] = score.round(1) # [Fix] 점수 반올림
+    x["LDY_SCORE"] = score.round(1)
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
     x["LDY_RANK"] = range(1, len(x)+1)
     
-    if "AI_COMMENT" in x.columns:
-        x["WHY"] = x["AI_COMMENT"]
-    else:
-        x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
+    if "AI_COMMENT" in x.columns: x["WHY"] = x["AI_COMMENT"]
     return x
+
+def route_tag(row):
+    r5 = row.get("ret_5d_%", 0)
+    slope = row.get("MACD_Slope", 0)
+    if r5 >= 3 and slope > 0: return "🔼 BRK (돌파)"
+    return "↩️ PULL (눌림)"
 
 # 6. 메인 실행
 try: df_raw = load_csv_url(RAW_URL); log_src(df_raw, "Remote")
@@ -358,8 +351,6 @@ except:
 df = normalize_cols(df_raw)
 latest = df.copy()
 scored = build_global_score(latest)
-# [Fix] ROUTE 함수 적용 및 빈 칸 채우기
-scored["ROUTE"] = scored.apply(route_tag, axis=1).fillna("—")
 base = scored[(scored["EBS"] >= PASS_EBS) & (scored["_GATE_OK"])].copy()
 if len(base) < 20: base = scored.head(20)
 top10 = base.head(20).copy()
@@ -386,33 +377,17 @@ with st.sidebar:
     kakao_url = "https://open.kakao.com/o/g6enIm4h"
     st.link_button("👉 구독 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
 
-    # [Fix] 버튼 변수 초기화 (NameError 방지)
-    send_btn = False
-    tg_token, tg_chat_id = "", ""
-    pf_input = ""
-
     if auth_status in ["pro", "prime", "admin"]:
         st.divider(); st.subheader("💼 내 자산 관리")
         saved_pf = load_portfolio_file()
-        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=100)
+        pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=120)
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
     
     if auth_status in ["prime", "admin"]:
-        with st.expander("🔔 텔레그램 봇"):
+        with st.expander("🔔 텔레그램"):
             tg_token = st.text_input("Token", type="password")
             tg_chat_id = st.text_input("ChatID")
-            send_btn = st.button("🚀 전송")
-
-# [텔레그램 전송 로직]
-if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v5.7] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
-    for i in range(min(5, len(top10))):
-        row = top10.iloc[i]
-        msg += f"{i+1}. {row['종목명']} ({row['ROUTE']})\n"
-        msg += f"   매수: {row['추천매수가']:,} / 손절: {row['손절가']:,}\n\n"
-    ok, res = send_telegram_msg(tg_token, tg_chat_id, msg)
-    if ok: st.toast("전송 완료!", icon="✅")
-    else: st.error(f"전송 실패: {res}")
+            if st.button("🚀 전송"): send_telegram_msg(tg_token, tg_chat_id, "Test")
 
 # [메인 화면]
 tab1, tab2, tab3 = st.tabs(["📊 시장 (Market)", "🔭 종목 분석", "💼 내 자산"])
@@ -437,12 +412,11 @@ with tab1:
         else: st.info("섹터 정보 없음")
 
 with tab2:
-    # [권한별 데이터 제한]
     if auth_status == "free":
         view_df = top10.head(3)
         st.info("🔒 Free 버전: Top 3 종목만 공개됩니다.")
     else:
-        view_df = top10 # Pro 이상 전체 공개
+        view_df = top10
         st.success(f"🥇 {auth_status.upper()} 회원: Top 20 전체 열람 중")
 
     opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']})", axis=1).tolist()
@@ -463,20 +437,31 @@ with tab2:
                 st.info(f"💬 **AI:** {ai_cmt}")
                 st.plotly_chart(plot_risk_reward_bar(row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
             else:
-                st.warning("🔒 상세 분석은 Pro 등급부터 확인 가능합니다.")
+                st.warning("🔒 상세 AI 분석은 Pro 등급부터 확인 가능합니다.")
             c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop", delta_color="inverse")
 
     st.divider()
     st.subheader("📋 Daily Top List", anchor=False)
     safe_view = view_df.copy().reset_index(drop=True)
     safe_view.set_index("종목명", inplace=True)
+    
     price_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)"]
     for c in price_cols: 
         if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+    if "LDY_SCORE" in safe_view.columns: safe_view["LDY_SCORE"] = pd.to_numeric(safe_view["LDY_SCORE"], errors='coerce').fillna(0)
 
     cols = ["ROUTE","업종","종목코드","LDY_SCORE","종가","추천매수가","손절가","추천매도가1"]
     cols = [c for c in cols if c in safe_view.columns]
-    st.dataframe(safe_view[cols], use_container_width=True)
+    
+    # [Fix] 컬럼 설정 (점수 반올림 등)
+    cfg = {
+        "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
+        "종가": st.column_config.TextColumn("현재가"),
+        "추천매수가": st.column_config.TextColumn("진입가"),
+        "손절가": st.column_config.TextColumn("손절가"),
+        "추천매도가1": st.column_config.TextColumn("목표가"),
+    }
+    st.dataframe(safe_view[cols], use_container_width=True, column_config=cfg)
     
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
