@@ -460,11 +460,17 @@ with tab1:
         else: st.info("섹터 정보 없음")
 
 with tab2:
+    # 권한에 따른 데이터 제한
     if auth_status == "free":
-        view_df = top10.head(3)
+        view_df = latest.head(3)  # 무료: 상위 3개
         st.info("🔒 Free 버전: Top 3 종목만 공개됩니다.")
     else:
-        view_df = top10
+        # Pro/Prime/Admin: 전체 데이터(Top 20 이상) 공개
+        view_df = latest.head(20) # 20개까지 보여줌
+        if auth_status == "pro":
+            st.success("🥇 Pro 회원: Top 20 전체 열람 중")
+        elif auth_status == "prime":
+            st.success("👑 Prime 회원: 풀 패키지 적용 중")
 
     opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']})", axis=1).tolist()
     sel = st.selectbox("종목 선택", opts)
