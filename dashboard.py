@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.6 (Open Beta Ultimate)
-- New: Excel-like Portfolio Editor, Smart Filters, Risk-Reward Bar
-- Free: No Password Required
+LDY Pro Trader v5.7 (Open Beta Ultimate)
+- Features: All unlocked (No Password), Tab Layout, Sparkline, AI Narrative
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -15,10 +14,10 @@ except: FDR_OK = False
 try: from pykrx import stock; PYKRX_OK = True
 except: PYKRX_OK = False
 
-# 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v5.6", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v5.6 (Open Beta)")
-st.caption("Free for Everyone: Smart Filters & Visual Risk Analysis")
+# 2. 페이지 설정 (와이드 모드)
+st.set_page_config(page_title="LDY Pro Trader v5.7", layout="wide", page_icon="💎")
+st.title("🏆 LDY Pro Trader v5.7 (Open Beta)")
+st.caption("Free for Everyone: AI Quant Analysis & Portfolio Manager")
 
 # 3. 상수 및 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
@@ -28,10 +27,8 @@ PORTFOLIO_FILE = "my_portfolio.json"
 PASS_EBS = 4
 MIN_TURN_KOSPI, MIN_TURN_KOSDAQ, MIN_TURN_DEFAULT = 200.0, 100.0, 100.0
 W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
-P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
-P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
 
-# 4. 데이터 로딩
+# 4. 데이터 로딩 함수
 @st.cache_data(ttl=600)
 def load_csv_url(url):
     r = requests.get(url, timeout=30); r.raise_for_status()
@@ -42,27 +39,29 @@ def load_csv_path(path): return pd.read_csv(path, encoding="utf-8")
 
 def log_src(df, src): st.toast(f"Data Loaded: {src} ({len(df)} rows)", icon="✅")
 
-# 포트폴리오 로드/저장 (JSON)
-def load_portfolio():
+def load_portfolio_file():
     if os.path.exists(PORTFOLIO_FILE):
         try:
             with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return pd.DataFrame(data)
+                return json.load(f).get("data", "")
         except: pass
-    # 기본 예시 데이터 (처음 쓰는 사람용)
-    return pd.DataFrame([
-        {"종목명": "삼성전자", "평단가": 70000, "수량": 10},
-        {"종목명": "NAVER", "평단가": 200000, "수량": 5}
-    ])
+    return ""
 
-def save_portfolio(df):
+def save_portfolio_file(text_data):
     try:
-        data = df.to_dict(orient="records")
         with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+            json.dump({"data": text_data}, f, ensure_ascii=False)
         return True
     except: return False
+
+def send_telegram_msg(token, chat_id, message):
+    if not token or not chat_id: return False, "토큰/ID 누락"
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+        requests.post(url, data=data)
+        return True, "전송 완료"
+    except Exception as e: return False, str(e)
 
 # 종목코드 맵핑
 @st.cache_data(ttl=3600)
@@ -104,6 +103,7 @@ def get_market_status():
     kq_stat, kq_diff = _check('KQ11')
     return kp_stat, kp_diff, kq_stat, kq_diff
 
+# 공포/탐욕 지수
 @st.cache_data(ttl=3600)
 def get_fear_greed_index():
     if not FDR_OK: return 50, "Neutral"
@@ -134,7 +134,7 @@ def plot_fear_greed_gauge(score):
     fig = go.Figure(go.Indicator(
         mode = "gauge+number+delta", value = score,
         domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': "Market Fear & Greed Index", 'font': {'size': 24}},
+        title = {'text': "Market Fear & Greed", 'font': {'size': 20}},
         delta = {'reference': 50, 'increasing': {'color': "red"}, 'decreasing': {'color': "blue"}},
         gauge = {
             'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "white"},
@@ -148,7 +148,7 @@ def plot_fear_greed_gauge(score):
             'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': score}
         }
     ))
-    fig.update_layout(height=250, margin=dict(l=20,r=20,t=40,b=20), paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"})
+    fig.update_layout(height=200, margin=dict(l=20,r=20,t=40,b=20), paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"})
     return fig
 
 def plot_sector_treemap(df):
@@ -159,9 +159,9 @@ def plot_sector_treemap(df):
     if df_map.empty: return None
     fig = px.treemap(
         df_map, path=['업종', '종목명'], values='거래대금(억원)', color='LDY_SCORE',
-        color_continuous_scale='RdYlGn', title="<b>🔥 시장 주도 섹터 지도 (Size:거래대금 / Color:점수)</b>"
+        color_continuous_scale='RdYlGn', title="<b>🔥 시장 주도 섹터 지도</b>"
     )
-    fig.update_layout(margin=dict(t=50, l=10, r=10, b=10), height=400)
+    fig.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=350)
     return fig
 
 def calculate_supertrend(df, period=10, multiplier=3):
@@ -216,7 +216,7 @@ def plot_radar_chart(row):
     categories = list(stats.keys())
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name=row['종목명'], line_color='#00CC96', fillcolor='rgba(0, 204, 150, 0.3)'))
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100], color="gray"), bgcolor='rgba(0,0,0,0)'), showlegend=False, margin=dict(l=20, r=20, t=20, b=20), height=300, template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)')
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100], color="gray"), bgcolor='rgba(0,0,0,0)'), showlegend=False, margin=dict(l=20, r=20, t=20, b=20), height=250, template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)')
     return fig
 
 def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
@@ -238,13 +238,12 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     fig.update_layout(title=dict(text=f"<b>{name}</b> ({code})", font=dict(size=20)), yaxis_title="주가", yaxis_tickformat=',', xaxis_tickformat='%Y-%m-%d', xaxis_rangeslider_visible=False, template="plotly_dark", height=500, margin=dict(l=20,r=20,t=40,b=20), legend=dict(orientation="h",y=1.02,x=1), hovermode="x unified")
     return fig
 
-# [v5.6 NEW] 손익비 바
 def plot_risk_reward_bar(buy, stop, target1, target2):
     fig = go.Figure()
     fig.add_trace(go.Bar(y=["Price"], x=[buy - stop], orientation='h', name='Risk', marker=dict(color='red'), text=f"Risk -{int(((buy-stop)/buy)*100)}%", textposition='auto'))
     fig.add_trace(go.Bar(y=["Price"], x=[target1 - buy], orientation='h', name='Reward 1', marker=dict(color='lightgreen'), text=f"T1 +{int(((target1-buy)/buy)*100)}%", textposition='auto'))
     fig.add_trace(go.Bar(y=["Price"], x=[target2 - target1], orientation='h', name='Reward 2', marker=dict(color='green'), text=f"T2 +{int(((target2-buy)/buy)*100)}%", textposition='auto'))
-    fig.update_layout(barmode='stack', showlegend=False, height=100, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(visible=False), yaxis=dict(visible=False))
+    fig.update_layout(barmode='stack', showlegend=False, height=80, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(visible=False), yaxis=dict(visible=False))
     return fig
 
 # 5. 유틸 및 로직
@@ -332,15 +331,18 @@ def build_global_score(lat):
     pen += P_OVERHEAT_5D * np.clip((r5 - 10)/10, 0, 1)
     pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
-    
     score = np.clip(base_score - pen, 0, 100)
-    x["RR1"] = rr1; x["Now%"] = now_gap
-    x["LDY_SCORE"] = score.round(1)
+    x["RR1"] = rr1; x["Now%"] = now_gap; x["LDY_SCORE"] = score.round(1)
     x["ROUTE"] = (x.apply(route_tag, axis=1) if len(x) else "—")
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
     x["LDY_RANK"] = range(1, len(x)+1)
-    x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
+    
+    # [Fix] AI Comment가 있으면 WHY 대신 사용, 없으면 WHY 사용
+    if "AI_COMMENT" in x.columns:
+        x["WHY"] = x["AI_COMMENT"]
+    else:
+        x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
 # 6. 메인 실행 및 UI
@@ -357,123 +359,73 @@ if len(base) < 10: base = scored.head(20)
 top10 = base.head(10).copy()
 top10["P_hit"] = (top10["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
-# [사이드바 - 엑셀형 포트폴리오]
+# [사이드바]
 with st.sidebar:
-    st.header("💼 내 자산 (Excel Editor)")
-    loaded_df = load_portfolio()
-    edited_df = st.data_editor(loaded_df, num_rows="dynamic", key="pf_editor", use_container_width=True)
-    
-    if st.button("💾 포트폴리오 저장"):
-        save_portfolio(edited_df)
-        st.success("저장 완료!")
-        st.rerun()
-
-# [메인 화면]
-kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
-st.plotly_chart(plot_fear_greed_gauge(get_fear_greed_index()[0]), use_container_width=True)
-
-c1, c2 = st.columns(2)
-c1.metric("KOSPI", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if kp_stat=="Bull" else "inverse")
-c2.metric("KOSDAQ", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if kq_stat=="Bull" else "inverse")
-
-st.divider()
-st.subheader("🔥 오늘의 주도 테마", anchor=False)
-if "업종" in base.columns:
-    sector_counts = base["업종"].fillna("미분류").value_counts()
-    if "기타" in sector_counts.index and len(sector_counts) > 1: sector_counts = sector_counts.drop("기타")
-    top_sectors = sector_counts.head(5)
-    if not top_sectors.empty:
-        cols = st.columns(5)
-        for i, (sec_name, count) in enumerate(top_sectors.items()):
-            if i < 5: cols[i].metric(f"{i+1}위", sec_name, f"{count}종목", delta_color="inverse" if i==0 else "off")
-    else: st.info("데이터 부족")
-else: st.info("섹터 정보 없음")
-
-st.divider()
-
-# [v5.6] 포트폴리오 진단 (에디터 기반)
-if not edited_df.empty:
-    st.subheader("🧐 내 포트폴리오 진단", anchor=False)
-    try:
-        code_map = get_code_map() if 'get_code_map' in globals() else {}
-        if not code_map and FDR_OK: 
-             try: 
-                 df_krx = fdr.StockListing('KRX')
-                 code_map = dict(zip(df_krx['Name'], df_krx['Code'].astype(str).str.zfill(6)))
-             except: pass
-        
-        pf_list = []
-        total_buy = 0; total_eval = 0
-        
-        for idx, row in edited_df.iterrows():
-            name_input = str(row["종목명"])
-            avg = float(row["평단가"])
-            qty = int(row["수량"])
-            
-            code = name_input.strip()
-            if not code.isdigit(): code = code_map.get(code, code)
-            code = str(code).zfill(6)
-            
-            try:
-                if not FDR_OK: raise Exception
-                df_rt = fdr.DataReader(code)
-                cur_price = int(df_rt.iloc[-1]['Close'])
-                real_name = stock.get_market_ticker_name(code) if PYKRX_OK else name_input
-                profit_rate = (cur_price - avg) / avg * 100
-                
-                if profit_rate > 0: signal = "🟢 수익"
-                elif profit_rate > -3: signal = "🟡 보합"
-                else: signal = "🔴 손실"
-            except: cur_price = 0; real_name = name_input; signal = "❓"; profit_rate = 0
-
-            buy_amt = avg * qty
-            eval_amt = cur_price * qty
-            pf_list.append({
-                "종목명": real_name, "상태": signal, "현재가": f"{cur_price:,}", "평단가": f"{int(avg):,}",
-                "수익률": f"{profit_rate:.2f}%", "평가손익": f"{int(eval_amt-buy_amt):,}원"
-            })
-            total_buy += buy_amt; total_eval += eval_amt
-            
-        c1, c2, c3 = st.columns(3)
-        tot_rate = (total_eval - total_buy) / total_buy * 100 if total_buy > 0 else 0
-        c1.metric("총 매수", f"{int(total_buy):,}원")
-        c2.metric("총 평가", f"{int(total_eval):,}원")
-        c3.metric("총 수익", f"{tot_rate:.2f}%", f"{int(total_eval-total_buy):,}원", delta_color="normal")
-        st.dataframe(pd.DataFrame(pf_list), hide_index=True, use_container_width=True)
-    except Exception as e: st.error(f"분석 실패: {e}")
-
-st.divider()
-
-# [v5.6] 스마트 조건 검색
-st.subheader("🔭 종목 상세 분석 (Smart Filter)", anchor=False)
-if not top10.empty:
-    all_routes = ["전체"] + list(top10['ROUTE'].unique())
-    all_sectors = ["전체"] + list(top10['업종'].unique()) if '업종' in top10.columns else ["전체"]
-    
+    st.header("💼 내 자산 & 알림")
+    saved_pf = load_portfolio_file()
+    pf_input = st.text_area("종목명 또는 코드:평단가:수량", value=saved_pf, placeholder="NAVER:261000:10", height=120)
     c1, c2 = st.columns(2)
-    filter_route = c1.selectbox("전략 필터", all_routes)
-    filter_sector = c2.selectbox("업종 필터", all_sectors)
+    run_pf = c1.button("💾 저장/분석", type="primary")
+    with st.expander("🔔 텔레그램 봇 설정"):
+        tg_token = st.text_input("Bot Token", type="password")
+        tg_chat_id = st.text_input("Chat ID")
+        send_btn = st.button("🚀 Top 5 전송")
+
+if run_pf: save_portfolio_file(pf_input)
+if send_btn and tg_token and tg_chat_id:
+    msg = f"🔥 [LDY v5.7] 오늘의 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
+    for i in range(min(5, len(top10))):
+        row = top10.iloc[i]
+        msg += f"{i+1}. {row['종목명']} ({row['ROUTE']})\n"
+        msg += f"   매수: {row['추천매수가']:,} / 손절: {row['손절가']:,}\n\n"
+    ok, res = send_telegram_msg(tg_token, tg_chat_id, msg)
+    if ok: st.toast("전송 완료!", icon="✅")
+    else: st.error(f"전송 실패: {res}")
+
+# ==============================================================================
+# [Tab 1] 📊 시장 (Market)
+# ==============================================================================
+tab1, tab2, tab3 = st.tabs(["📊 시장 (Market)", "🔭 종목 분석", "💼 내 자산"])
+
+with tab1:
+    kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
+    c1, c2 = st.columns(2)
+    c1.metric("KOSPI", f"{kp_stat}", f"{kp_diff:.2f}%", delta_color="off" if kp_stat=="Bull" else "inverse")
+    c2.metric("KOSDAQ", f"{kq_stat}", f"{kq_diff:.2f}%", delta_color="off" if kq_stat=="Bull" else "inverse")
     
-    filtered_df = top10.copy()
-    if filter_route != "전체": filtered_df = filtered_df[filtered_df['ROUTE'] == filter_route]
-    if filter_sector != "전체": filtered_df = filtered_df[filtered_df['업종'] == filter_sector]
+    st.divider()
+    c_gauge, c_map = st.columns([1, 1.5])
     
-    if filtered_df.empty:
-        st.warning("조건에 맞는 종목이 없습니다.")
+    with c_gauge:
+        st.plotly_chart(plot_fear_greed_gauge(get_fear_greed_index()[0]), use_container_width=True)
+        st.caption("시장 공포/탐욕 지수 (RSI + 이격도 기반)")
+        
+    with c_map:
+        st.markdown("##### 🔥 오늘의 주도 섹터")
+        if "업종" in base.columns:
+            fig = plot_sector_treemap(base)
+            if fig: st.plotly_chart(fig, use_container_width=True)
+            else: st.info("섹터 데이터 부족")
+        else: st.info("섹터 정보 없음")
+
+# ==============================================================================
+# [Tab 2] 🔭 종목 분석 (Analysis)
+# ==============================================================================
+with tab2:
+    if top10.empty:
+        st.warning("데이터가 충분하지 않습니다.")
         view_df = pd.DataFrame()
     else:
-        view_df = filtered_df
-else:
-    view_df = pd.DataFrame()
+        view_df = top10
 
-if not view_df.empty:
     opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']}) - {r['ROUTE']}", axis=1).tolist()
-    sel = st.selectbox("종목 선택", opts, index=0)
+    sel = st.selectbox("종목 선택", opts, index=0 if opts else None)
 
     if sel:
         sel_idx = opts.index(sel)
         row = view_df.iloc[sel_idx]
         code = row['종목코드']
+        
         c1, c2 = st.columns([2, 1])
         with c1:
             chart_df = get_stock_chart_data(code)
@@ -482,42 +434,104 @@ if not view_df.empty:
             else: st.info("차트 로딩 실패")
         with c2:
             st.markdown(f"### {row['종목명']}"); st.plotly_chart(plot_radar_chart(row), use_container_width=True)
-            st.info(f"**전략:** `{row['ROUTE']}` / **업종:** {row.get('업종','-')}")
+            
+            # AI 코멘트 표시
+            ai_cmt = row.get("AI_COMMENT", row.get("WHY", "분석 정보 없음"))
+            st.info(f"💬 **AI 분석:** {ai_cmt}")
+            
             st.plotly_chart(plot_risk_reward_bar(row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
             c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop")
 
-st.subheader("📋 Daily Top 10 List", anchor=False)
-with st.expander("❓ 용어 설명", expanded=False):
-    st.markdown("- **Score:** 종합점수 / **MFI:** 수급 / **SuperTrend:** 차트 위 초록/빨강 점선 (초록=상승)")
+    st.divider()
+    st.subheader("📋 Daily Top 10 List", anchor=False)
+    
+    safe_view = view_df.copy().reset_index(drop=True)
+    safe_view["LDY_RANK"] = safe_view.index + 1
+    price_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)"]
+    for c in price_cols: 
+        if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+    for c in ["MFI14", "LDY_SCORE", "P_hit"]:
+        if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0)
 
-# 리스트 필터링 적용
-list_view = filtered_df if not filtered_df.empty else top10
-list_view = list_view.reset_index(drop=True)
+    cols = ["LDY_RANK","통과","ROUTE","업종","종목명","종목코드","LDY_SCORE","P_hit","종가","추천매수가","손절가","추천매도가1","MFI14","WHY"]
+    cols = [c for c in cols if c in safe_view.columns]
+    cfg = {
+        "LDY_RANK": st.column_config.NumberColumn("순위"),
+        "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
+        "P_hit": st.column_config.NumberColumn("확률", format="%.1f"),
+        "종가": st.column_config.TextColumn("현재가"),
+        "추천매수가": st.column_config.TextColumn("진입가"),
+        "손절가": st.column_config.TextColumn("손절가"),
+        "추천매도가1": st.column_config.TextColumn("목표1"),
+        "MFI14": st.column_config.NumberColumn("MFI", format="%.1f"),
+        "WHY": st.column_config.TextColumn("AI 분석 / 근거", width="large"), 
+        "업종": st.column_config.TextColumn("업종")
+    }
+    st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
+    csv = scored.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("📥 전체 다운로드", csv, "ldy_rank.csv", "text/csv")
 
-safe_view = list_view.copy()
-safe_view["LDY_RANK"] = safe_view.index + 1
-price_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)"]
-for c in price_cols: 
-    if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
-for c in ["MFI14", "LDY_SCORE", "P_hit"]:
-    if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0)
+# ==============================================================================
+# [Tab 3] 💼 내 자산 (Portfolio)
+# ==============================================================================
+with tab3:
+    if pf_input:
+        try:
+            code_map = get_code_map() if 'get_code_map' in globals() else {}
+            if not code_map and FDR_OK: 
+                 try: 
+                     df_krx = fdr.StockListing('KRX')
+                     code_map = dict(zip(df_krx['Name'], df_krx['Code'].astype(str).str.zfill(6)))
+                 except: pass
+            
+            pf_list = []
+            total_buy = 0; total_eval = 0
+            lines = pf_input.strip().split('\n')
+            
+            cols = st.columns(3)
+            idx = 0
+            
+            for line in lines:
+                if ":" not in line: continue
+                name_input, avg, qty = line.split(':')
+                code = name_input.strip()
+                if not code.isdigit(): code = code_map.get(code, code)
+                code = str(code).zfill(6)
+                avg = float(avg.replace(',', '')); qty = int(qty.replace(',', ''))
+                
+                try:
+                    if not FDR_OK: raise Exception
+                    df_rt = fdr.DataReader(code)
+                    cur_price = int(df_rt.iloc[-1]['Close'])
+                    real_name = stock.get_market_ticker_name(code) if PYKRX_OK else name_input
+                    profit_rate = (cur_price - avg) / avg * 100
+                    
+                    if profit_rate > 0: signal = "🟢 수익"
+                    elif profit_rate > -3: signal = "🟡 보합"
+                    else: signal = "🔴 손실"
+                except: cur_price = 0; real_name = name_input; signal = "❓"; profit_rate = 0
 
-cols = ["LDY_RANK","통과","ROUTE","업종","종목명","종목코드","LDY_SCORE","P_hit","종가","추천매수가","손절가","추천매도가1","추천매도가2","MFI14","WHY"]
-cols = [c for c in cols if c in safe_view.columns]
-cfg = {
-    "LDY_RANK": st.column_config.NumberColumn("순위"),
-    "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
-    "P_hit": st.column_config.NumberColumn("확률", format="%.1f"),
-    "종가": st.column_config.TextColumn("현재가"),
-    "추천매수가": st.column_config.TextColumn("진입가"),
-    "손절가": st.column_config.TextColumn("손절가"),
-    "추천매도가1": st.column_config.TextColumn("목표1"),
-    "추천매도가2": st.column_config.TextColumn("목표2"),
-    "MFI14": st.column_config.NumberColumn("MFI", format="%.1f"),
-    "WHY": st.column_config.TextColumn("분석", width="medium"),
-    "업종": st.column_config.TextColumn("업종")
-}
-st.dataframe(safe_view[cols], hide_index=True, use_container_width=True, column_config=cfg)
+                buy_amt = avg * qty
+                eval_amt = cur_price * qty
+                
+                with cols[idx % 3]:
+                    st.metric(
+                        label=f"{real_name} ({signal})",
+                        value=f"{cur_price:,}원",
+                        delta=f"{profit_rate:+.2f}% ({int(eval_amt-buy_amt):,}원)",
+                        delta_color="normal" if profit_rate >= 0 else "inverse"
+                    )
+                idx += 1
+                
+                total_buy += buy_amt; total_eval += eval_amt
+                
+            st.divider()
+            c1, c2, c3 = st.columns(3)
+            tot_rate = (total_eval - total_buy) / total_buy * 100 if total_buy > 0 else 0
+            c1.metric("총 매수", f"{int(total_buy):,}원")
+            c2.metric("총 평가", f"{int(total_eval):,}원")
+            c3.metric("총 수익", f"{tot_rate:+.2f}%", f"{int(total_eval-total_buy):,}원")
 
-csv = scored.to_csv(index=False).encode('utf-8-sig')
-st.download_button("📥 전체 다운로드", csv, "ldy_rank.csv", "text/csv")
+        except Exception as e: st.error(f"분석 실패: {e}")
+    else:
+        st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
