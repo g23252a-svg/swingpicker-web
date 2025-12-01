@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.0 (Advanced Sector Mapping)
-- 업종 자동맵핑 강화:
-  1) KRX KIND 상장법인 엑셀(KOSPI/KOSDAQ)에서 '업종' 컬럼 직접 수집
-  2) FDR StockListing('KRX')의 Sector/업종/Wics로 보완
-  3) ETF/ETN/스팩/리츠는 종목명 기반으로 자동 분류
-- 기존 v5.7 스코어링/AI 코멘트는 유지
+LDY Pro Trader Collector v6.0 (Sector Auto-Mapping Edition)
+- 업종 자동 매핑 강화
+    · FDR의 Sector/업종 컬럼 활용 (NaN을 억지로 '기타'로 채우지 않음)
+    · 종목명 기반 간단 카테고리 추론 (ETF/ETN/리츠/스팩/우선주 등)
+    · 끝까지 못 찾은 종목만 최종적으로 '기타' 부여
+- AI Narrative / Scoring / Telegram 그대로 유지
 """
 
 import os
@@ -25,12 +25,12 @@ TG_ID = os.environ.get("TG_ID")
 
 # ------------------------------- 설정 -------------------------------
 KST = timezone(timedelta(hours=9))
-LOOKBACK_DAYS = 250
-TOP_N = 600
-MIN_TURNOVER_EOK = 50
-MIN_MCAP_EOK = 1000
-RSI_LOW, RSI_HIGH = 45, 65
-PASS_EBS = 4
+LOOKBACK_DAYS = 250          # 과거 데이터 조회 일수
+TOP_N = 600                  # 거래대금 상위 N개 종목
+MIN_TURNOVER_EOK = 50        # 최소 거래대금 (억원)
+MIN_MCAP_EOK = 1000          # 최소 시총 (억원)
+RSI_LOW, RSI_HIGH = 45, 65   # RSI 적정 구간
+PASS_EBS = 4                 # EBS (룰 기반 스코어) 통과 기준
 SLEEP_SEC = 0.05
 OUT_DIR = "data"
 UTF8 = "utf-8-sig"
@@ -63,7 +63,12 @@ def calc_rsi(close, period=14):
     return 100 - 100 / (1 + rs)
 
 def calc_atr(high, low, close, period=14):
-    tr = pd.concat([(high - low), (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
+    tr = pd.concat(
+        [(high - low),
+         (high - close.shift(1)).abs(),
+         (low - close.shift(1)).abs()],
+        axis=1
+    ).max(axis=1)
     return tr.rolling(period).mean()
 
 def calc_mfi(high, low, close, vol, period=14):
@@ -71,27 +76,21 @@ def calc_mfi(high, low, close, vol, period=14):
     rmf = tp * vol
     pos = np.where(tp.diff() > 0, rmf, 0)
     neg = np.where(tp.diff() < 0, rmf, 0)
-    return 100 - (100 / (1 + pd.Series(pos).rolling(period).sum() /
-                        pd.Series(neg).rolling(period).sum().replace(0, 1)))
+    pos_s = pd.Series(pos).rolling(period).sum()
+    neg_s = pd.Series(neg).rolling(period).sum().replace(0, 1)
+    return 100 - (100 / (1 + (pos_s / neg_s)))
 
 def round_to_tick(price):
-    if price < 2000:
-        t = 1
-    elif price < 5000:
-        t = 5
-    elif price < 20000:
-        t = 10
-    elif price < 50000:
-        t = 50
-    elif price < 200000:
-        t = 100
-    elif price < 500000:
-        t = 500
-    else:
-        t = 1000
+    if price < 2000: t = 1
+    elif price < 5000: t = 5
+    elif price < 20000: t = 10
+    elif price < 50000: t = 50
+    elif price < 200000: t = 100
+    elif price < 500000: t = 500
+    else: t = 1000
     return int(round(price / t) * t)
 
-# ------------------------------- 데이터 수집 로직 -------------------------------
+# ------------------------------- 거래일/시총 -------------------------------
 def _has_ohlcv_and_mcap(ymd):
     for m in ["KOSPI", "KOSDAQ"]:
         try:
@@ -103,7 +102,11 @@ def _has_ohlcv_and_mcap(ymd):
     return False
 
 def resolve_trade_date():
+    """
+    장 종료 이후 기준일 찾기 (최대 10일 뒤로)
+    """
     d = datetime.now(KST).date()
+    # 18시 이전이면 전일 기준
     if datetime.now(KST).hour < 18:
         d -= timedelta(days=1)
     for _ in range(10):
@@ -135,9 +138,11 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# ------------------------------- 업종 맵핑 관련 -------------------------------
+# ------------------------------- 업종 맵핑 -------------------------------
 def get_fallback_sector_map():
-    # 대형주 위주의 기본 맵
+    """
+    최소한의 대형주 하드 맵핑 (문제 생길 때 백업용)
+    """
     return {
         "005930": "전기전자", "000660": "전기전자", "373220": "전기전자", "207940": "의약품",
         "005380": "운수장비", "005935": "전기전자", "068270": "의약품", "000270": "운수장비",
@@ -156,71 +161,36 @@ def get_fallback_sector_map():
         "098460": "기계", "277810": "기계", "352820": "서비스업", "253450": "서비스업"
     }
 
-def fetch_krx_kind_sector():
-    """
-    KRX KIND 상장법인 목록에서 업종 정보 수집
-    - KOSPI: searchType=13
-    - KOSDAQ: searchType=05
-    """
-    urls = [
-        "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13",  # KOSPI
-        "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=05",  # KOSDAQ
-    ]
-    sector_map = {}
-    for url in urls:
-        try:
-            r = requests.get(url, timeout=15)
-            r.raise_for_status()
-            # KIND 엑셀 구조: 회사명 / 종목코드 / 업종 / ...
-            df_list = pd.read_html(r.content)
-            if not df_list:
-                continue
-            df = df_list[0]
-            if "종목코드" not in df.columns:
-                continue
-            code_col = "종목코드"
-            # 업종 컬럼 이름이 '업종' 혹은 다른 이름일 수 있으니 후보 검색
-            cand_cols = ["업종", "업종명", "Industry", "업종명칭"]
-            sector_col = None
-            for c in cand_cols:
-                if c in df.columns:
-                    sector_col = c
-                    break
-            if sector_col is None:
-                continue
-
-            df[code_col] = df[code_col].astype(str).str.zfill(6)
-            df[sector_col] = df[sector_col].fillna("기타")
-            tmp = dict(zip(df[code_col], df[sector_col]))
-            sector_map.update(tmp)
-        except Exception as e:
-            log(f"[WARN] KIND 업종 수집 실패: {e}")
-    return sector_map
-
 def fetch_fdr_sector():
     """
-    FDR StockListing('KRX')에서 Sector/Wics/업종 컬럼을 최대한 활용하여 코드→업종 맵 생성
+    FDR StockListing('KRX')에서 Sector/업종/Wics 등을 최대한 활용하여
+    코드→업종 맵 생성 (NaN을 '기타'로 채우지 않음)
     """
     sector_map = {}
     try:
         df = fdr.StockListing('KRX')
-        # 코드 컬럼 후보: Symbol / Code
+        # 코드 컬럼 찾기
         code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
         df[code_col] = df[code_col].astype(str).str.zfill(6)
 
-        # 업종 후보 컬럼들
-        cand_cols = ['업종', 'Sector', 'Industry', 'Wics']
+        # 업종 후보 컬럼
+        cand_cols = ['업종', 'Sector', 'Industry', 'Wics', 'WICS']
         sector_col = None
         for c in cand_cols:
             if c in df.columns:
                 sector_col = c
                 break
         if sector_col is None:
+            log("[WARN] FDR: 업종/섹터 컬럼을 찾지 못함")
             return sector_map
 
-        tmp = df[[code_col, sector_col]].dropna()
-        tmp[sector_col] = tmp[sector_col].replace("", np.nan).fillna("기타")
+        tmp = df[[code_col, sector_col]].copy()
+        tmp[sector_col] = tmp[sector_col].astype(str).str.strip()
+        # 공백은 NaN 처리 후, 실제 값 있는 것만 사용
+        tmp = tmp.replace({"": np.nan}).dropna(subset=[sector_col])
+
         sector_map.update(dict(zip(tmp[code_col], tmp[sector_col])))
+        log(f"[INFO] FDR 업종 매핑 {len(sector_map)}건 로드")
     except Exception as e:
         log(f"[WARN] FDR 업종 수집 실패: {e}")
     return sector_map
@@ -228,10 +198,10 @@ def fetch_fdr_sector():
 def classify_by_name(code, name):
     """
     KIND/FDR 모두에서 업종을 못 찾은 종목에 대해
-    종목명 기반으로 대략적인 카테고리 부여
+    종목명 기반으로 대략적인 카테고리 부여 (없으면 None)
     """
     if not isinstance(name, str):
-        return "기타"
+        return None
 
     u = name.upper()
     if "ETF" in u:
@@ -242,63 +212,65 @@ def classify_by_name(code, name):
         return "SPAC"
     if "리츠" in name or "REIT" in u:
         return "리츠/부동산"
-    if "우선주" in name or "/우" in name:
+    if "우선주" in name or "/우" in name or "우B" in name or "우C" in name:
         return "우선주"
-    return "기타"
+    # 나머지는 일반 주식으로 보고 None (마지막 단계에서만 '기타')
+    return None
 
 def get_sector_map_full(name_map):
     """
-    업종 맵핑 최종 버전:
-    1) fallback 대형주 수동 맵
-    2) KIND(KOSPI/KOSDAQ) 업종
-    3) FDR StockListing 업종/섹터
-    4) 이름 기반 분류(ETF/ETN/스팩/리츠 등)
+    최종 업종 맵 생성:
+    1) fallback 하드맵
+    2) FDR StockListing 업종/섹터
+    3) 이름 기반 보완 (ETF/ETN/리츠/스팩/우선주 등)
+    4) 그래도 없으면 '기타'
     """
+    # 1) 하드코딩한 기본 맵
     sector_map = get_fallback_sector_map()
 
-    # 1) KIND 업종
-    log("📥 KIND 업종 맵 수집 중...")
-    kind_map = fetch_krx_kind_sector()
-    sector_map.update(kind_map)
-    log(f"   KIND 업종맵: {len(kind_map)}개")
-
-    # 2) FDR 업종
+    # 2) FDR에서 업종 정보 보강
     log("📥 FDR 업종 맵 수집 중...")
     fdr_map = fetch_fdr_sector()
-    # KIND 정보가 비어있을 수 있으니, KIND에 없는 코드만 FDR로 보완
     for code, sec in fdr_map.items():
-        if code not in sector_map or sector_map[code] in ["", "기타", None]:
+        # 이미 하드맵에 있으면 그대로 두고, 없거나 빈 값일 때만 덮어쓰기
+        if code not in sector_map or sector_map[code] in ["", None]:
             sector_map[code] = sec
-    log(f"   FDR 업종맵: {len(fdr_map)}개 (보완 후 총 {len(sector_map)}개)")
 
-    # 3) 이름 기반 분류 (ETF/ETN/스팩/리츠 등)
-    log("📥 이름기반 업종 보완 중...")
+    # 3) 이름 기반으로 ETF/ETN/리츠/스팩/우선주 등 보완
+    log("📥 이름 기반 업종 보완 중...")
     for code, name in name_map.items():
         code6 = str(code).zfill(6)
-        if code6 not in sector_map or sector_map[code6] in ["", "기타", None]:
-            sector_map[code6] = classify_by_name(code6, name)
+        cur = sector_map.get(code6, None)
+        if cur in ["", None]:
+            guess = classify_by_name(code6, name)
+            if guess is not None:
+                sector_map[code6] = guess
+
+    # 4) 마지막으로도 여전히 없는 애들만 '기타'
+    for code in name_map.keys():
+        code6 = str(code).zfill(6)
+        if code6 not in sector_map or sector_map[code6] in ["", None]:
+            sector_map[code6] = "기타"
 
     return sector_map
 
-# ------------------------------- 기타 맵/선택 로직 -------------------------------
+# ------------------------------- 기타 수집 로직 -------------------------------
 def pick_top_by_trading_value(date_yyyymmdd, top_n):
     frames = []
     for m in ["KOSPI", "KOSDAQ"]:
         try:
             df = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market=m).reset_index()
-            df.columns = ['종목코드' if '티커' in c else c for c in df.columns]
+            # pykrx 버전에 따라 컬럼명이 약간 다를 수 있어 보정
+            df.columns = ['종목코드' if '티커' in str(c) or '코드' in str(c) else c for c in df.columns]
             df.columns = ['거래대금(원)' if c == '거래대금' else c for c in df.columns]
-            frames.append(df[['티커', '거래대금(원)']] if '티커' in df.columns else df[['종목코드', '거래대금(원)']])
+            frames.append(df[['종목코드', '거래대금(원)']])
         except:
             pass
     if not frames:
-        raise RuntimeError("No Data")
-    df_all = pd.concat(frames)
-    # 컬럼명 정리
-    if '티커' in df_all.columns:
-        df_all.rename(columns={'티커': '종목코드'}, inplace=True)
-    df_all['종목코드'] = df_all['종목코드'].astype(str).str.zfill(6)
-    return df_all.sort_values('거래대금(원)', ascending=False).head(top_n)
+        raise RuntimeError("No Data from KRX (거래대금)")
+    df = pd.concat(frames)
+    df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
+    return df.sort_values('거래대금(원)', ascending=False).head(top_n)
 
 def get_market_sets(d):
     try:
@@ -307,6 +279,9 @@ def get_market_sets(d):
         return set(), set()
 
 def get_name_map_cached(d):
+    """
+    종목코드 → 종목명 맵 (캐시 파일 사용)
+    """
     ensure_dir(OUT_DIR)
     path = os.path.join(OUT_DIR, "krx_codes.csv")
     if os.path.exists(path):
@@ -319,8 +294,12 @@ def get_name_map_cached(d):
     rows = []
     for m in ["KOSPI", "KOSDAQ"]:
         try:
-            for t in stock.get_market_ticker_list(d, market=m):
-                rows.append({'종목코드': t, '종목명': stock.get_market_ticker_name(t)})
+            tickers = stock.get_market_ticker_list(d, market=m)
+            for t in tickers:
+                rows.append({
+                    '종목코드': str(t).zfill(6),
+                    '종목명': stock.get_market_ticker_name(t)
+                })
                 time.sleep(0.001)
         except:
             pass
@@ -330,9 +309,10 @@ def get_name_map_cached(d):
         return dict(zip(df['종목코드'], df['종목명']))
     return {}
 
-# ------------------------------- v5.7 AI 코멘트/스코어 -------------------------------
+# ------------------------------- AI 코멘트 / 스코어 -------------------------------
 def generate_ai_comment(mfi, rsi, slope, disp, score):
     comment = ""
+
     # 1. 수급 분석
     if mfi >= 70:
         comment += "💰 외국인/기관의 강력한 수급이 집중되고 있습니다. "
@@ -361,6 +341,7 @@ def generate_ai_comment(mfi, rsi, slope, disp, score):
 
     return comment if comment else "특이사항 없음. 기술적 지표를 참고하세요."
 
+# --- Scoring Logic ---
 def cap_q(s, q=90, floor=1.0):
     c = np.nanpercentile(nz_num(s), q)
     return float(max(c, floor)) if np.isfinite(c) else floor
@@ -405,13 +386,13 @@ def build_global_score(lat):
     tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1).fillna(0)
 
     base_score = (
-        100 * W_RR * rr_norm +
-        100 * W_T1 * t1_norm +
-        100 * W_SL * sl_norm +
-        100 * W_NEAR * near_norm +
-        100 * W_MOM * mom_norm +
-        100 * W_LIQ * liq_norm +
-        100 * W_TEC * tec_norm
+        100 * W_RR * rr_norm
+        + 100 * W_T1 * t1_norm
+        + 100 * W_SL * sl_norm
+        + 100 * W_NEAR * near_norm
+        + 100 * W_MOM * mom_norm
+        + 100 * W_LIQ * liq_norm
+        + 100 * W_TEC * tec_norm
     )
 
     pen = pd.Series(0.0, index=x.index)
@@ -424,6 +405,7 @@ def build_global_score(lat):
     x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
 
+    # ROUTE (전략 태그)
     conditions = [
         (r5 >= 3) & (slope > 0),
         (rsi >= 40) & (rsi <= 60),
@@ -432,23 +414,22 @@ def build_global_score(lat):
     choices = ["🔼 BRK (돌파)", "↩️ PULL (눌림)", "🔁 MR (반전)"]
     x["ROUTE"] = np.select(conditions, choices, default="—")
 
-    x["AI_COMMENT"] = x.apply(
-        lambda row: generate_ai_comment(
-            row.get("MFI14", 50),
-            row.get("RSI14", 50),
-            row.get("MACD_Slope", 0),
-            row.get("이격도", 0),
-            row.get("LDY_SCORE", 0)
-        ),
-        axis=1
-    )
+    # AI 코멘트
+    x["AI_COMMENT"] = x.apply(lambda row: generate_ai_comment(
+        row.get("MFI14", 50),
+        row.get("RSI14", 50),
+        row.get("MACD_Slope", 0),
+        row.get("이격도", 0),
+        row.get("LDY_SCORE", 0)
+    ), axis=1)
 
     return x
 
-# ------------------------------- 텔레그램 전송 -------------------------------
+# ------------------------------- 텔레그램 -------------------------------
 def send_telegram_auto(df):
     log("📨 텔레그램 발송 시작...")
     if not TG_TOKEN or not TG_ID:
+        log("⚠️ TG_TOKEN / TG_ID 미설정, 발송 생략")
         return
 
     try:
@@ -475,24 +456,24 @@ def send_telegram_auto(df):
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
             data={"chat_id": TG_ID, "text": msg}
         )
-        log("🚀 전송 완료")
+        log("🚀 텔레그램 전송 완료")
     except Exception as e:
-        log(f"⚠️ 전송 실패: {e}")
+        log(f"⚠️ 텔레그램 전송 실패: {e}")
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
     log("🚀 LDY Collector v6.0 시작...")
-    ensure_dir(OUT_DIR)
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd} (mcap ref: {mcap_ymd})")
 
+    # 1) 거래대금 상위 N개
     top_df = pick_top_by_trading_value(trade_ymd, TOP_N)
     tickers = top_df["종목코드"].tolist()
+
+    # 2) 시장/종목명/업종 정보 준비
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-
-    # 👉 업종 맵핑 고도화: 이름맵 기반으로 풀맵 생성
     sector_map = get_sector_map_full(name_map)
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
@@ -521,15 +502,15 @@ def main():
             vol_z = (v / v.rolling(20).mean()).iloc[-1]
             disp = ((c / ma20 - 1.0) * 100).iloc[-1]
 
-            std20 = c.rolling(20).std()
-            bb_w = ((ma20 + std20 * 2) - (ma20 - std20 * 2)) / ma20  # 사용은 안 하지만 참고용
-
             last_c = c.iloc[-1]
 
             tv_eok = float(top_df.loc[top_df["종목코드"] == t, "거래대금(원)"].values[0]) / 1e8
             mcap = get_mcap_eok_from_map(mcap_map, t)
 
-            if tv_eok < MIN_TURNOVER_EOK or (mcap > 0 and mcap < MIN_MCAP_EOK):
+            # 유동성 / 시총 필터
+            if tv_eok < MIN_TURNOVER_EOK:
+                continue
+            if mcap > 0 and mcap < MIN_MCAP_EOK:
                 continue
 
             score = 0
@@ -560,8 +541,13 @@ def main():
             if np.isnan(atr) or atr <= 0:
                 atr = last_c * 0.03
 
-            buy = min(last_c, ma20.iloc[-1] * 1.03) if ma20.iloc[-1] > 0 and last_c > ma20.iloc[-1] else last_c
+            # 매수가
+            if ma20.iloc[-1] > 0 and last_c > ma20.iloc[-1]:
+                buy = min(last_c, ma20.iloc[-1] * 1.03)
+            else:
+                buy = last_c
 
+            # 손절가
             stop = buy - (2.0 * atr)
             if stop < buy * 0.93:
                 stop = buy * 0.93
@@ -584,8 +570,8 @@ def main():
             t2 = round_to_tick(t2)
 
             code6 = str(t).zfill(6)
+            sector = sector_map.get(code6, "기타")
             name = name_map.get(code6, code6)
-            sector = sector_map.get(code6, classify_by_name(code6, name))
 
             rows.append({
                 "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
@@ -611,20 +597,24 @@ def main():
                 "추천매도가1": t1,
                 "추천매도가2": t2
             })
-        except Exception as e:
-            # 개별 티커 실패는 무시하고 계속
+        except Exception:
+            # 개별 종목 에러는 무시하고 다음으로 진행
             continue
 
     if not rows:
-        raise RuntimeError("No Result")
+        raise RuntimeError("No Result (필터를 모두 통과한 종목 없음)")
 
     df_raw = pd.DataFrame(rows)
-    df_out = build_global_score(df_raw).sort_values(["LDY_SCORE", "거래대금(억원)"], ascending=[False, False])
+    df_out = build_global_score(df_raw).sort_values(
+        ["LDY_SCORE", "거래대금(억원)"],
+        ascending=[False, False]
+    )
 
     ensure_dir(OUT_DIR)
     out_path = os.path.join(OUT_DIR, "recommend_latest.csv")
     df_out.to_csv(out_path, index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건) → {out_path}")
+
     send_telegram_auto(df_out)
 
 if __name__ == "__main__":
