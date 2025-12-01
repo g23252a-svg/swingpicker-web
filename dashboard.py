@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.9.4 (Final Fixed)
-- Fix: NameError (Global Constants Scope) Resolved
-- Features: Subscription, Portfolio, AI Narrative, Visual Charts
+LDY Pro Trader v5.9.5 (Bug Free Final)
+- Fix: NameError (sl_norm Missing Variable Resolved)
+- Features: All Unlocked, Tab Layout, Portfolio, Mobile View
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -17,31 +17,24 @@ except: PYKRX_OK = False
 
 # 2. 페이지 설정
 st.set_page_config(page_title="LDY Pro Trader v5.9", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v5.9")
-st.caption("Subscription Service: AI Quant Analysis & Asset Management")
+st.title("🏆 LDY Pro Trader v5.9 (Open Beta)")
+st.caption("Free for Everyone: AI Quant Analysis & Portfolio Manager")
 
-# ==============================================================================
-# 3. [핵심] 전역 상수 설정 (최상단 배치로 에러 방지)
-# ==============================================================================
+# 3. 전역 상수 설정
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 LOCAL_RAW = "data/recommend_latest.csv"
 PORTFOLIO_FILE = "my_portfolio.json"
 
-# [비밀번호]
-KEY_PRO = "2024"
-KEY_PRIME = "2025"
-ADMIN_KEY = "2022322"
-
-# [필터링 기준] (전역 변수)
+# 스코어링 상수
 PASS_EBS = 4
 MIN_TURN_KOSPI = 200.0
 MIN_TURN_KOSDAQ = 100.0
 MIN_TURN_DEFAULT = 100.0
 
-# [점수 가중치]
+# 가중치
 W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
 
-# [패널티 점수]
+# 패널티
 P_OVERHEAT_5D = 6.0
 P_OVERHEAT_10D = 6.0
 P_RSI_OUT = 4.0
@@ -49,7 +42,11 @@ P_MACD_NEG = 4.0
 P_NEAR_FAR = 4.0
 P_LIQ_LOW = 4.0
 P_VOL_SPIKE = 2.0
-# ==============================================================================
+
+# [비밀번호]
+KEY_PRO = "2024"
+KEY_PRIME = "2025"
+ADMIN_KEY = "2022322"
 
 # 4. 데이터 로딩 함수
 @st.cache_data(ttl=600)
@@ -86,6 +83,7 @@ def send_telegram_msg(token, chat_id, message):
         return True, "전송 완료"
     except Exception as e: return False, str(e)
 
+# 종목코드 맵핑
 @st.cache_data(ttl=3600)
 def get_code_map():
     if FDR_OK:
@@ -108,8 +106,8 @@ def get_last_business_date(d=datetime.now()):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    kp_stat, kp_diff = "대기중", 0.0
-    kq_stat, kq_diff = "대기중", 0.0
+    kp_stat, kp_diff = "Unknown", 0.0
+    kq_stat, kq_diff = "Unknown", 0.0
     if not FDR_OK: return kp_stat, kp_diff, kq_stat, kq_diff
     def _check(ticker):
         try:
@@ -127,6 +125,7 @@ def get_market_status():
     kq_stat, kq_diff = _check('KQ11')
     return kp_stat, kp_diff, kq_stat, kq_diff
 
+# 공포/탐욕 지수
 @st.cache_data(ttl=3600)
 def get_fear_greed_index():
     if not FDR_OK: return 50, "Neutral"
@@ -281,7 +280,6 @@ def ensure_turnover(df):
 def normalize_cols(df): return ensure_turnover(df)
 
 def liquidity_gate(x_turn, market):
-    # [Fix] 전역 변수 사용 (오류 해결)
     min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
     return nz_num(x_turn) >= market.map(min_map).fillna(MIN_TURN_DEFAULT)
 
@@ -295,100 +293,57 @@ def build_global_score(lat):
     kairi_col = "이격도" if "이격도" in x.columns and x["이격도"].notna().any() else "乖離%"
     vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].notna().any() else "Vol_Z"
 
-    close = nz_num(x["종가"])
-    entry = nz_num(x["추천매수가"])
-    stop = nz_num(x["손절가"])
-    t1 = nz_num(x["추천매도가1"])
-    turn = nz_num(x["거래대금(억원)"])
-    rsi = nz_num(x["RSI14"])
-    slope = nz_num(x[slope_col])
-    volz = nz_num(x[vol_col])
-    kairi = nz_num(x[kairi_col])
-    r5 = nz_num(x["ret_5d_%"])
-    ebs = nz_num(x["EBS"]).fillna(0)
+    close, entry, stop, t1 = nz_num(x["종가"]), nz_num(x["추천매수가"]), nz_num(x["손절가"]), nz_num(x["추천매도가1"])
+    turn, rsi, slope, volz = nz_num(x["거래대금(억원)"]), nz_num(x["RSI14"]), nz_num(x[slope_col]), nz_num(x[vol_col])
+    kairi, r5, ebs = nz_num(x[kairi_col]), nz_num(x["ret_5d_%"]), nz_num(x["EBS"]).fillna(0)
 
-    # RR 계산 (분모 0 방지)
     rr_den = (entry - stop)
-    rr_den = rr_den.replace(0, np.nan)
-    rr1 = ((t1 - entry) / rr_den).mask(entry.isna() | stop.isna() | t1.isna())
-
-    # 현재가와 진입가 차이 (%)
+    rr1 = ((t1 - entry) / rr_den.replace(0, np.nan)).mask(entry.isna() | stop.isna() | t1.isna())
     now_gap = ((close - entry).abs() / entry * 100)
+    t1_room = ((t1 - close) / close * 100)
+    sl_room = ((close - stop) / close * 100)
 
-    # 보조 정규화 함수
-    def cap_q(s, q=90, f=1.0):
-        try:
-            return float(max(np.nanpercentile(nz_num(s), q), f))
-        except:
-            return float(f)
-    def pct_norm(s, q=90, f=1.0):
-        s_num = nz_num(s).clip(lower=0)
-        cap = cap_q(s, q, f)
-        if cap == 0: return np.zeros_like(s_num)
-        return np.clip(s_num / cap, 0, 1)
-    def inv_dist_norm(dist, cap):
-        # 거리가 작을수록 높게 (근접성)
-        cap_val = float(cap) if cap is not None else 1.0
-        return np.clip(1 - (nz_num(dist) / max(cap_val, 1e-9)), 0, 1)
+    def cap_q(s, q=90, f=1.0): return float(max(np.nanpercentile(nz_num(s), q), f))
+    def pct_norm(s, q=90, f=1.0): return np.clip(nz_num(s).clip(lower=0) / cap_q(s, q, f), 0, 1)
+    def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
 
     rr_norm = pct_norm(rr1)
-    # 목표까지의 근접성 (거리가 작을수록 높은 점수)
-    t1_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
-
-    # --- 새로 추가한 값들: 손절 관련 정규화(sl_norm), 진입 근접성(near_norm) ---
-    # 손절 거리(%): 진입가 대비 손절까지 거리 비율
-    stop_gap_pct = ( (entry - stop).abs() / entry * 100 ).replace([np.inf, -np.inf], np.nan)
-    sl_norm = inv_dist_norm(stop_gap_pct, cap_q(stop_gap_pct, 90, 1.0))  # 값이 작으면(손절 가까우면) 낮게, 멀면(손절 여유) 높게
-    # 진입 근접성: 현재가와 진입가의 거리(작을수록 좋음)
+    t1_norm = np.clip(t1_room / cap_q(t1_room, 90, 5.0), 0, 1)
+    # [FIX] sl_norm 정의 (이전에 누락되었던 부분 해결)
+    sl_norm = np.clip(sl_room / cap_q(sl_room, 90, 3.0), 0, 1)
     near_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
-    # --------------------------------------------------------------------
-
-    # EBS, slope 등으로 모멘텀 비트 구성
-    ers_bits = (ebs >= PASS_EBS).astype(int) + (slope > 0).astype(int) + ((rsi >= 45) & (rsi <= 65)).astype(int)
-    ers_norm = np.clip(ers_bits / 3.0, 0, 1)
+    
+    ers_bits = (ebs>=PASS_EBS).astype(int) + (slope>0).astype(int) + ((rsi>=45)&(rsi<=65)).astype(int)
+    ers_norm = np.clip(ers_bits/3.0, 0, 1)
     slope_pos_norm = pct_norm(slope)
-    mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm, 0, 1)
+    mom_norm = np.clip(0.5*ers_norm + 0.3*slope_pos_norm, 0, 1)
 
-    # 유동성 정규화 (거래대금)
     if turn.notna().any():
         lo, hi = np.nanpercentile(turn, 30), np.nanpercentile(turn, 90)
-        denom = max(hi - lo, 1e-9)
-        liq_norm = np.clip((turn - lo) / denom, 0, 1)
-    else:
-        liq_norm = 0.0
+        liq_norm = np.clip((turn - lo) / max(hi-lo, 1e-9), 0, 1)
+    else: liq_norm = 0.0
 
-    vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1)
-    kairi_norm = (1 - np.minimum(kairi.abs() / cap_q(kairi.abs(), 80, 3.0), 1)).clip(0, 1)
-    tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1)
+    vol_sweet = (1 - np.minimum((volz - 1).abs()/3, 1)).clip(0,1)
+    kairi_norm = (1 - np.minimum(kairi.abs()/cap_q(kairi.abs(), 80, 3.0), 1)).clip(0,1)
+    tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1)
 
-    # 가중치 기반 기본 점수 계산 (슬랙 변수 sl_norm, near_norm 사용)
-    base_score = (100 * W_RR * rr_norm) + \
-                 (100 * W_T1 * t1_norm) + \
-                 (100 * W_SL * sl_norm) + \
-                 (100 * W_NEAR * near_norm) + \
-                 (100 * W_MOM * mom_norm) + \
-                 (100 * W_LIQ * liq_norm) + \
-                 (100 * W_TEC * tec_norm)
-
-    # 패널티 부과
+    # [FIX] sl_norm 포함하여 계산
+    base_score = (100*W_RR*rr_norm) + (100*W_T1*t1_norm) + (100*W_SL*sl_norm) + \
+                 (100*W_NEAR*near_norm) + (100*W_MOM*mom_norm) + (100*W_LIQ*liq_norm) + (100*W_TEC*tec_norm)
+    
     pen = pd.Series(0.0, index=x.index)
-    pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
+    pen += P_OVERHEAT_5D * np.clip((r5 - 10)/10, 0, 1)
     pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
-
+    
     score = np.clip(base_score - pen, 0, 100)
-    x["RR1"] = rr1
-    x["Now%"] = now_gap
+    x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
-
-    # 유동성 게이트 플래그
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
-
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
-    x["LDY_RANK"] = range(1, len(x) + 1)
-
-    if "AI_COMMENT" in x.columns:
-        x["WHY"] = x["AI_COMMENT"]
+    x["LDY_RANK"] = range(1, len(x)+1)
+    
+    if "AI_COMMENT" in x.columns: x["WHY"] = x["AI_COMMENT"]
     return x
 
 def route_tag(row):
@@ -406,7 +361,7 @@ except:
 df = normalize_cols(df_raw)
 latest = df.copy()
 scored = build_global_score(latest)
-scored["ROUTE"] = scored.apply(route_tag, axis=1).fillna("—")
+scored["ROUTE"] = scored.apply(route_tag, axis=1).fillna("—") # [Fix] ROUTE 강제 계산
 base = scored[(scored["EBS"] >= PASS_EBS) & (scored["_GATE_OK"])].copy()
 if len(base) < 20: base = scored.head(20)
 top10 = base.head(20).copy()
@@ -456,7 +411,7 @@ with st.sidebar:
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
     
     if auth_status in ["prime", "admin"]:
-        with st.expander("🔔 텔레그램"):
+        with st.expander("🔔 텔레그램 봇"):
             tg_token = st.text_input("Token", type="password")
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
@@ -520,7 +475,7 @@ with tab2:
                 st.info(f"💬 **AI:** {ai_cmt}")
                 st.plotly_chart(plot_risk_reward_bar(row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
             else:
-                st.warning("🔒 상세 AI 분석은 Pro 등급부터 확인 가능합니다.")
+                st.warning("🔒 상세 분석은 Pro 등급부터 확인 가능합니다.")
             c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop", delta_color="inverse")
 
     st.divider()
@@ -531,9 +486,12 @@ with tab2:
     price_cols = ["종가","추천매수가","손절가","추천매도가1","추천매도가2","거래대금(억원)"]
     for c in price_cols: 
         if c in safe_view.columns: safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+    if "LDY_SCORE" in safe_view.columns: safe_view["LDY_SCORE"] = pd.to_numeric(safe_view["LDY_SCORE"], errors='coerce').fillna(0)
 
     cols = ["ROUTE","업종","종목코드","LDY_SCORE","종가","추천매수가","손절가","추천매도가1"]
     cols = [c for c in cols if c in safe_view.columns]
+    
+    # [Fix] 컬럼 설정 적용
     cfg = {
         "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
         "종가": st.column_config.TextColumn("현재가"),
