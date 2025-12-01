@@ -346,11 +346,59 @@ def build_global_score(lat):
     if "AI_COMMENT" in x.columns: x["WHY"] = x["AI_COMMENT"]
     return x
 
+# --- Replace existing route_tag with this improved version ---
 def route_tag(row):
-    r5 = row.get("ret_5d_%", 0)
-    slope = row.get("MACD_Slope", 0)
-    if r5 >= 3 and slope > 0: return "🔼 BRK (돌파)"
+    """
+    다중 지표 기반 라우팅:
+    - Strong Break (강력 돌파): 최근 모멘텀, MACD 기울기 양수, EBS 충분, 현재가가 진입가보다 크게 앞선 경우
+    - Weak Break / Watch: 모멘텀이 + 이거나 EBS가 높고 근접성(진입과의 갭)이 작을 때
+    - Pull (눌림): 위 조건을 만족하지 않는 경우
+    """
+    try:
+        r5 = float(row.get("ret_5d_%", 0) or 0)
+    except: r5 = 0.0
+    try:
+        slope = float(row.get("MACD_Slope", row.get("MACD_slope", 0)) or 0)
+    except: slope = 0.0
+    try:
+        ebs = float(row.get("EBS", 0) or 0)
+    except: ebs = 0.0
+    try:
+        now_pct = float(row.get("Now%", 999) or 999)  # 진입 대비 현재가 갭(%)
+    except: now_pct = 999
+    try:
+        rr1 = float(row.get("RR1", 0) or 0)
+    except: rr1 = 0.0
+    # optional: MA20 갭이 있으면 추가 평가
+    try:
+        ma20_gap = float(row.get("MA20_GAP", row.get("MA20_diff_pct", 0)) or 0)
+    except: ma20_gap = 0.0
+
+    # 규칙 우선순위 (강력 돌파 기준)
+    strong_break = (slope > 0) and (r5 >= 1.5) and (ebs >= PASS_EBS) and (now_pct <= 10)
+    # rr1이 너무 작아 리스크/리워드가 나쁘면 약화
+    if strong_break and rr1 is not None and not np.isnan(rr1) and rr1 < 0.6:
+        strong_break = False
+
+    # 준비된 돌파(관찰): 모멘텀 양수 또는 EBS 높음, 진입과 현재가 차이 작음
+    watch = ((slope > 0) and (r5 > 0)) or ((ebs >= PASS_EBS) and (now_pct <= 8))
+
+    # MA20 상회 조건이 있으면 가산(데이터가 있으면 더 확신)
+    if ma20_gap and ma20_gap > 1:
+        # MA20 위에 있고 모멘텀도 양호하면 강력 돌파 우선
+        if slope > 0 and r5 > 0.5 and ebs >= PASS_EBS:
+            return "🔼 BRK (강력 돌파)"
+
+    if strong_break:
+        return "🔼 BRK (돌파)"
+    if watch:
+        # r5가 충분히 높으면 '돌파 후보'로 표시
+        if r5 >= 1.5 and slope > 0:
+            return "🔺 Watch→BRK (관찰·돌파예상)"
+        return "🔺 Watch (상승 준비)"
+    # 기본: 눌림
     return "↩️ PULL (눌림)"
+# --- end route_tag ---
 
 # 6. 메인 실행
 try: df_raw = load_csv_url(RAW_URL); log_src(df_raw, "Remote")
