@@ -133,10 +133,10 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
-# ------------------------------- 업종 맵핑 -------------------------------
+# [Sector Map] 하드코딩 + 자동 맵핑 (pykrx + FDR)
 def get_fallback_sector_map():
     return {
-        "005930": "전기전자", "000660": "전기전자", "373220": "전기전자", "207940": "의약품",
+        "005930": "전기전자", "000660": "전기전자", "373220": "전기전자", "207940": "의약품", 
         "005380": "운수장비", "005935": "전기전자", "068270": "의약품", "000270": "운수장비",
         "105560": "금융업", "005490": "철강금속", "035420": "서비스업", "035720": "서비스업",
         "006400": "전기전자", "051910": "화학", "012330": "화학", "028260": "유통업",
@@ -153,61 +153,57 @@ def get_fallback_sector_map():
         "098460": "기계", "277810": "기계", "352820": "서비스업", "253450": "서비스업"
     }
 
-def classify_by_name(name: str):
-    """종목명에 따라 ETF/ETN/리츠/우선주/스팩 정도만 보정"""
-    if not isinstance(name, str):
-        return None
-    u = name.upper()
-    if "ETF" in u:
-        return "ETF"
-    if "ETN" in u:
-        return "ETN"
-    if "SPAC" in u or "스팩" in name:
-        return "SPAC"
-    if "리츠" in name or "REIT" in u:
-        return "리츠/부동산"
-    if "우선주" in name or "/우" in name or "우B" in name or "우C" in name:
-        return "우선주"
-    return None
+def get_sector_map(trade_ymd: str):
+    """
+    1순위: pykrx get_market_cap_by_ticker의 '업종'
+    2순위: FDR StockListing('KRX')의 Sector/Industry/Wics/업종
+    3순위: 수동 fallback map
+    """
+    sector_map = {}
 
-def get_sector_map():
-    """
-    v5.x에서 쓰던 방식 최대한 유지:
-    - FDR StockListing('KRX')에서 업종/섹터 컬럼 하나 골라 code->업종 매핑
-    - 못 찾으면 fallback 맵 사용
-    - 이름 기반으로 ETF/ETN/리츠/스팩 등만 살짝 보정
-    """
-    sector_map = get_fallback_sector_map()
+    # --- 1) pykrx 업종 맵 (가장 신뢰도 높음) ---
+    for m in ["KOSPI", "KOSDAQ", "KONEX"]:
+        try:
+            df_cap = stock.get_market_cap_by_ticker(trade_ymd, market=m)
+            if df_cap is None or df_cap.empty or "업종" not in df_cap.columns:
+                continue
+            # index = 티커, 업종 = KRX 업종명 (한글)
+            codes = df_cap.index.astype(str).str.zfill(6)
+            upjongs = df_cap["업종"].astype(str)
+            sector_map.update(dict(zip(codes, upjongs)))
+        except Exception as e:
+            log(f"[WARN] get_sector_map pykrx {m} fail: {e}")
+            continue
+
+    # --- 2) FDR StockListing 보조 맵 ---
     try:
-        df = fdr.StockListing('KRX')
-        code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
-        df[code_col] = df[code_col].astype(str).str.zfill(6)
+        df_list = fdr.StockListing("KRX")
+        if not df_list.empty:
+            code_col = "Symbol" if "Symbol" in df_list.columns else "Code"
+            df_list[code_col] = df_list[code_col].astype(str).str.zfill(6)
 
-        target_cols = ['업종', 'Sector', 'Industry', 'Wics', 'WICS']
-        col = next((c for c in target_cols if c in df.columns), None)
-        if not col:
-            log("[WARN] FDR: 업종/섹터 컬럼을 찾지 못함, fallback만 사용")
-            return sector_map
+            # 우선순위: 업종(한글) > Sector > Industry > Wics
+            cand_cols = ["업종", "Sector", "Industry", "Wics", "WICS"]
+            use_col = None
+            for c in cand_cols:
+                if c in df_list.columns:
+                    use_col = c
+                    break
 
-        tmp = df[[code_col, col, 'Name']].copy()
-        tmp[col] = tmp[col].astype(str).str.strip()
-        tmp = tmp.replace({"": np.nan}).dropna(subset=[col])
-
-        # 1차: FDR 업종 그대로 사용
-        fdr_map = dict(zip(tmp[code_col], tmp[col]))
-        sector_map.update(fdr_map)
-        log(f"[INFO] FDR 업종 매핑 {len(fdr_map)}건 로드")
-
-        # 2차: 이름 기반 보정 (ETF/ETN/리츠/스팩/우선주 등)
-        for _, row in tmp.iterrows():
-            code6 = row[code_col]
-            name = str(row['Name'])
-            guessed = classify_by_name(name)
-            if guessed is not None:
-                sector_map[code6] = guessed
-
+            if use_col:
+                for code, sec in zip(df_list[code_col], df_list[use_col].fillna("")):
+                    if not sec:
+                        continue
+                    # 이미 pykrx에서 채운 것은 덮어쓰지 않음
+                    if code not in sector_map:
+                        sector_map[code] = str(sec)
     except Exception as e:
-        log(f"[WARN] get_sector_map() 실패: {e}")
+        log(f"[WARN] get_sector_map FDR fail: {e}")
+
+    # --- 3) fallback 수동 맵 (마지막 보정) ---
+    fb = get_fallback_sector_map()
+    for k, v in fb.items():
+        sector_map.setdefault(k, v)
 
     return sector_map
 
@@ -460,7 +456,7 @@ def main():
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-    sector_map = get_sector_map()
+    sector_map = get_sector_map(trade_ymd)
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
@@ -564,13 +560,13 @@ def main():
             t2 = round_to_tick(t2)
 
             code6 = str(t).zfill(6)
-            sector = sector_map.get(code6, "기타")
+            sector = sector_map.get(str(t).zfill(6), "기타")
             name = name_map.get(code6, code6)
 
             rows.append({
                 "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
-                "종목명": name,
-                "종목코드": code6,
+                "종목명": name_map.get(str(t).zfill(6), str(t)),
+                "종목코드": str(t).zfill(6),
                 "업종": sector,
                 "종가": int(last_c),
                 "거래대금(억원)": round(tv_eok, 2),
