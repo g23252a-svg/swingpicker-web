@@ -295,56 +295,100 @@ def build_global_score(lat):
     kairi_col = "이격도" if "이격도" in x.columns and x["이격도"].notna().any() else "乖離%"
     vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].notna().any() else "Vol_Z"
 
-    close, entry, stop, t1 = nz_num(x["종가"]), nz_num(x["추천매수가"]), nz_num(x["손절가"]), nz_num(x["추천매도가1"])
-    turn, rsi, slope, volz = nz_num(x["거래대금(억원)"]), nz_num(x["RSI14"]), nz_num(x[slope_col]), nz_num(x[vol_col])
-    kairi, r5, ebs = nz_num(x[kairi_col]), nz_num(x["ret_5d_%"]), nz_num(x["EBS"]).fillna(0)
+    close = nz_num(x["종가"])
+    entry = nz_num(x["추천매수가"])
+    stop = nz_num(x["손절가"])
+    t1 = nz_num(x["추천매도가1"])
+    turn = nz_num(x["거래대금(억원)"])
+    rsi = nz_num(x["RSI14"])
+    slope = nz_num(x[slope_col])
+    volz = nz_num(x[vol_col])
+    kairi = nz_num(x[kairi_col])
+    r5 = nz_num(x["ret_5d_%"])
+    ebs = nz_num(x["EBS"]).fillna(0)
 
+    # RR 계산 (분모 0 방지)
     rr_den = (entry - stop)
-    rr1 = ((t1 - entry) / rr_den.replace(0, np.nan)).mask(entry.isna() | stop.isna() | t1.isna())
+    rr_den = rr_den.replace(0, np.nan)
+    rr1 = ((t1 - entry) / rr_den).mask(entry.isna() | stop.isna() | t1.isna())
+
+    # 현재가와 진입가 차이 (%)
     now_gap = ((close - entry).abs() / entry * 100)
-    
-    def cap_q(s, q=90, f=1.0): return float(max(np.nanpercentile(nz_num(s), q), f))
-    def pct_norm(s, q=90, f=1.0): return np.clip(nz_num(s).clip(lower=0) / cap_q(s, q, f), 0, 1)
-    def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
+
+    # 보조 정규화 함수
+    def cap_q(s, q=90, f=1.0):
+        try:
+            return float(max(np.nanpercentile(nz_num(s), q), f))
+        except:
+            return float(f)
+    def pct_norm(s, q=90, f=1.0):
+        s_num = nz_num(s).clip(lower=0)
+        cap = cap_q(s, q, f)
+        if cap == 0: return np.zeros_like(s_num)
+        return np.clip(s_num / cap, 0, 1)
+    def inv_dist_norm(dist, cap):
+        # 거리가 작을수록 높게 (근접성)
+        cap_val = float(cap) if cap is not None else 1.0
+        return np.clip(1 - (nz_num(dist) / max(cap_val, 1e-9)), 0, 1)
 
     rr_norm = pct_norm(rr1)
+    # 목표까지의 근접성 (거리가 작을수록 높은 점수)
     t1_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
-    
-    # [Fix] 전역 변수 사용 (오류 해결)
-    ers_bits = (ebs>=PASS_EBS).astype(int) + (slope>0).astype(int) + ((rsi>=45)&(rsi<=65)).astype(int)
-    ers_norm = np.clip(ers_bits/3.0, 0, 1)
-    slope_pos_norm = pct_norm(slope)
-    mom_norm = np.clip(0.5*ers_norm + 0.3*slope_pos_norm, 0, 1)
 
+    # --- 새로 추가한 값들: 손절 관련 정규화(sl_norm), 진입 근접성(near_norm) ---
+    # 손절 거리(%): 진입가 대비 손절까지 거리 비율
+    stop_gap_pct = ( (entry - stop).abs() / entry * 100 ).replace([np.inf, -np.inf], np.nan)
+    sl_norm = inv_dist_norm(stop_gap_pct, cap_q(stop_gap_pct, 90, 1.0))  # 값이 작으면(손절 가까우면) 낮게, 멀면(손절 여유) 높게
+    # 진입 근접성: 현재가와 진입가의 거리(작을수록 좋음)
+    near_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
+    # --------------------------------------------------------------------
+
+    # EBS, slope 등으로 모멘텀 비트 구성
+    ers_bits = (ebs >= PASS_EBS).astype(int) + (slope > 0).astype(int) + ((rsi >= 45) & (rsi <= 65)).astype(int)
+    ers_norm = np.clip(ers_bits / 3.0, 0, 1)
+    slope_pos_norm = pct_norm(slope)
+    mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm, 0, 1)
+
+    # 유동성 정규화 (거래대금)
     if turn.notna().any():
         lo, hi = np.nanpercentile(turn, 30), np.nanpercentile(turn, 90)
-        liq_norm = np.clip((turn - lo) / max(hi-lo, 1e-9), 0, 1)
-    else: liq_norm = 0.0
+        denom = max(hi - lo, 1e-9)
+        liq_norm = np.clip((turn - lo) / denom, 0, 1)
+    else:
+        liq_norm = 0.0
 
-    vol_sweet = (1 - np.minimum((volz - 1).abs()/3, 1)).clip(0,1)
-    kairi_norm = (1 - np.minimum(kairi.abs()/cap_q(kairi.abs(), 80, 3.0), 1)).clip(0,1)
-    tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1)
+    vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1)
+    kairi_norm = (1 - np.minimum(kairi.abs() / cap_q(kairi.abs(), 80, 3.0), 1)).clip(0, 1)
+    tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1)
 
-    # [Fix] 전역 변수 사용
-    base_score = (100*W_RR*rr_norm) + (100*W_T1*t1_norm) + (100*W_SL*sl_norm) + \
-                 (100*W_NEAR*near_norm) + (100*W_MOM*mom_norm) + (100*W_LIQ*liq_norm) + (100*W_TEC*tec_norm)
-    
+    # 가중치 기반 기본 점수 계산 (슬랙 변수 sl_norm, near_norm 사용)
+    base_score = (100 * W_RR * rr_norm) + \
+                 (100 * W_T1 * t1_norm) + \
+                 (100 * W_SL * sl_norm) + \
+                 (100 * W_NEAR * near_norm) + \
+                 (100 * W_MOM * mom_norm) + \
+                 (100 * W_LIQ * liq_norm) + \
+                 (100 * W_TEC * tec_norm)
+
+    # 패널티 부과
     pen = pd.Series(0.0, index=x.index)
-    pen += P_OVERHEAT_5D * np.clip((r5 - 10)/10, 0, 1)
+    pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
     pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
-    
+
     score = np.clip(base_score - pen, 0, 100)
-    x["RR1"] = rr1; x["Now%"] = now_gap
+    x["RR1"] = rr1
+    x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
-    
-    # [Fix] 전역 변수 사용
+
+    # 유동성 게이트 플래그
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
-    
+
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
-    x["LDY_RANK"] = range(1, len(x)+1)
-    
-    if "AI_COMMENT" in x.columns: x["WHY"] = x["AI_COMMENT"]
+    x["LDY_RANK"] = range(1, len(x) + 1)
+
+    if "AI_COMMENT" in x.columns:
+        x["WHY"] = x["AI_COMMENT"]
     return x
 
 def route_tag(row):
