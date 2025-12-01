@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.1
-- 업종 자동 매핑 (FDR + 이름기반 + Fallback)
-- ROUTE 개선: 돌파 / 관찰 / 반전 / 눌림 다단계 분류
-- 5일/10일 수익률(ret_5d_%, ret_10d_%) 실제 계산
-- AI Narrative / Scoring / Telegram 유지
+LDY Pro Trader Collector v6.2
+- 업종 매핑: v5.x 방식으로 복구 (FDR StockListing + Fallback)
+- ROUTE: BRK / Watch / MR / PULL 다단계 분류 유지
+- 5일/10일 수익률 계산, AI Narrative, Telegram 유지
 """
 
 import os
@@ -154,34 +153,8 @@ def get_fallback_sector_map():
         "098460": "기계", "277810": "기계", "352820": "서비스업", "253450": "서비스업"
     }
 
-def fetch_fdr_sector():
-    sector_map = {}
-    try:
-        df = fdr.StockListing('KRX')
-        code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
-        df[code_col] = df[code_col].astype(str).str.zfill(6)
-
-        cand_cols = ['업종', 'Sector', 'Industry', 'Wics', 'WICS']
-        sector_col = None
-        for c in cand_cols:
-            if c in df.columns:
-                sector_col = c
-                break
-        if sector_col is None:
-            log("[WARN] FDR: 업종/섹터 컬럼을 찾지 못함")
-            return sector_map
-
-        tmp = df[[code_col, sector_col]].copy()
-        tmp[sector_col] = tmp[sector_col].astype(str).str.strip()
-        tmp = tmp.replace({"": np.nan}).dropna(subset=[sector_col])
-
-        sector_map.update(dict(zip(tmp[code_col], tmp[sector_col])))
-        log(f"[INFO] FDR 업종 매핑 {len(sector_map)}건 로드")
-    except Exception as e:
-        log(f"[WARN] FDR 업종 수집 실패: {e}")
-    return sector_map
-
-def classify_by_name(code, name):
+def classify_by_name(name: str):
+    """종목명에 따라 ETF/ETN/리츠/우선주/스팩 정도만 보정"""
     if not isinstance(name, str):
         return None
     u = name.upper()
@@ -197,28 +170,44 @@ def classify_by_name(code, name):
         return "우선주"
     return None
 
-def get_sector_map_full(name_map):
+def get_sector_map():
+    """
+    v5.x에서 쓰던 방식 최대한 유지:
+    - FDR StockListing('KRX')에서 업종/섹터 컬럼 하나 골라 code->업종 매핑
+    - 못 찾으면 fallback 맵 사용
+    - 이름 기반으로 ETF/ETN/리츠/스팩 등만 살짝 보정
+    """
     sector_map = get_fallback_sector_map()
+    try:
+        df = fdr.StockListing('KRX')
+        code_col = 'Symbol' if 'Symbol' in df.columns else 'Code'
+        df[code_col] = df[code_col].astype(str).str.zfill(6)
 
-    log("📥 FDR 업종 맵 수집 중...")
-    fdr_map = fetch_fdr_sector()
-    for code, sec in fdr_map.items():
-        if code not in sector_map or sector_map[code] in ["", None]:
-            sector_map[code] = sec
+        target_cols = ['업종', 'Sector', 'Industry', 'Wics', 'WICS']
+        col = next((c for c in target_cols if c in df.columns), None)
+        if not col:
+            log("[WARN] FDR: 업종/섹터 컬럼을 찾지 못함, fallback만 사용")
+            return sector_map
 
-    log("📥 이름 기반 업종 보완 중...")
-    for code, name in name_map.items():
-        code6 = str(code).zfill(6)
-        cur = sector_map.get(code6, None)
-        if cur in ["", None]:
-            guess = classify_by_name(code6, name)
-            if guess is not None:
-                sector_map[code6] = guess
+        tmp = df[[code_col, col, 'Name']].copy()
+        tmp[col] = tmp[col].astype(str).str.strip()
+        tmp = tmp.replace({"": np.nan}).dropna(subset=[col])
 
-    for code in name_map.keys():
-        code6 = str(code).zfill(6)
-        if code6 not in sector_map or sector_map[code6] in ["", None]:
-            sector_map[code6] = "기타"
+        # 1차: FDR 업종 그대로 사용
+        fdr_map = dict(zip(tmp[code_col], tmp[col]))
+        sector_map.update(fdr_map)
+        log(f"[INFO] FDR 업종 매핑 {len(fdr_map)}건 로드")
+
+        # 2차: 이름 기반 보정 (ETF/ETN/리츠/스팩/우선주 등)
+        for _, row in tmp.iterrows():
+            code6 = row[code_col]
+            name = str(row['Name'])
+            guessed = classify_by_name(name)
+            if guessed is not None:
+                sector_map[code6] = guessed
+
+    except Exception as e:
+        log(f"[WARN] get_sector_map() 실패: {e}")
 
     return sector_map
 
@@ -402,7 +391,6 @@ def build_global_score(lat):
         + 100 * W_TEC * tec_norm
     )
 
-    # 🔧 여기 오타 수정됨: index=x.index
     pen = pd.Series(0.0, index=x.index)
     pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
     pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
@@ -435,7 +423,7 @@ def send_telegram_auto(df):
     try:
         top5 = df.head(5).reset_index(drop=True)
         trade_date = datetime.now(KST).strftime('%Y-%m-%d')
-        msg = f"🔥 [LDY v6.1] 추천 Top 5 ({trade_date})\n"
+        msg = f"🔥 [LDY v6.2] 추천 Top 5 ({trade_date})\n"
         msg += "-" * 30 + "\n\n"
 
         for i, row in top5.iterrows():
@@ -462,7 +450,7 @@ def send_telegram_auto(df):
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
-    log("🚀 LDY Collector v6.1 시작...")
+    log("🚀 LDY Collector v6.2 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd} (mcap ref: {mcap_ymd})")
@@ -472,7 +460,7 @@ def main():
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-    sector_map = get_sector_map_full(name_map)
+    sector_map = get_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
