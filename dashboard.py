@@ -340,11 +340,35 @@ def build_global_score(lat):
         x["WHY"] = ("MOM+" + (100*W_MOM*mom_norm).round(0).fillna(0).astype(int).astype(str) + " LIQ+" + (100*W_LIQ*liq_norm).round(0).fillna(0).astype(int).astype(str) + " TEC+" + (100*W_TEC*tec_norm).round(0).fillna(0).astype(int).astype(str) + " PEN-" + pen.round(0).fillna(0).astype(int).astype(str))
     return x
 
+# [Fix] ROUTE 전략 판단 로직 수정 (우선순위 변경)
 def route_tag(row):
     r5 = row.get("ret_5d_%", 0)
     slope = row.get("MACD_Slope", 0)
-    if r5 >= 3 and slope > 0: return "🔼 BRK (돌파)"
-    return "↩️ PULL (눌림)"
+    rsi = row.get("RSI14", 50)
+    mfi = row.get("MFI14", 50)
+    kairi = row.get("이격도", 0)
+    
+    # 1. 돌파 (가장 강력한 신호) - 우선순위 1등
+    if r5 >= 3 and slope > 0: 
+        return "🔼 BRK (돌파)"
+    
+    # 2. 수급 (돈이 들어온 종목) - 우선순위 2등
+    if mfi >= 60: 
+        return "🐳 WHALE (수급)"
+        
+    # 3. 과매도 반전 (기술적 반등) - 우선순위 3등
+    if rsi <= 40: 
+        return "🔁 MR (반전)"
+        
+    # 4. 눌림목 (일반적인 매수 기회) - 기본값
+    if 40 <= rsi <= 60 and abs(kairi) < 5: 
+        return "↩️ PULL (눌림)"
+    
+    # 5. 그 외 (추세 지속 등)
+    if slope > 0:
+        return "📈 TREND (추세)"
+        
+    return "—"
 
 # 6. 메인 실행
 try: df_raw = load_csv_url(RAW_URL); log_src(df_raw, "Remote")
