@@ -153,11 +153,12 @@ def get_fallback_sector_map():
         "098460": "기계", "277810": "기계", "352820": "서비스업", "253450": "서비스업"
     }
 
-def get_sector_map():
+def get_sector_map(trade_ymd=None):
     """
     1) data/sector_map_krx.csv 캐시가 있으면 그걸 최우선 사용
     2) 없으면 FinanceDataReader.StockListing('KRX')로 풀리스트 받아서 캐시 만들기
     3) 실패하면 fallback_map 으로 최소 핵심 종목만 보강
+    trade_ymd는 지금은 안 쓰지만, 향후 일자별 캐시 분리할 때 쓸 수 있게 받아만 둠.
     """
     ensure_dir(OUT_DIR)
     cache_path = os.path.join(OUT_DIR, "sector_map_krx.csv")
