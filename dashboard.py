@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v5.9.4 (Bulletproof Final)
-- Fix: NameError completely resolved (Self-contained functions)
-- Features: Subscription (Free/Pro/Prime), Portfolio, AI Narrative, All Charts
+LDY Pro Trader v5.9.4 (Final Fixed)
+- Fix: NameError (Global Constants Scope) Resolved
+- Features: Subscription, Portfolio, AI Narrative, Visual Charts
 """
 import os, io, math, json, requests, numpy as np, pandas as pd, streamlit as st
 import plotly.graph_objects as go
@@ -20,7 +20,9 @@ st.set_page_config(page_title="LDY Pro Trader v5.9", layout="wide", page_icon="�
 st.title("🏆 LDY Pro Trader v5.9")
 st.caption("Subscription Service: AI Quant Analysis & Asset Management")
 
-# 3. 기본 설정
+# ==============================================================================
+# 3. [핵심] 전역 상수 설정 (최상단 배치로 에러 방지)
+# ==============================================================================
 RAW_URL   = "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 LOCAL_RAW = "data/recommend_latest.csv"
 PORTFOLIO_FILE = "my_portfolio.json"
@@ -29,6 +31,25 @@ PORTFOLIO_FILE = "my_portfolio.json"
 KEY_PRO = "2024"
 KEY_PRIME = "2025"
 ADMIN_KEY = "2022322"
+
+# [필터링 기준] (전역 변수)
+PASS_EBS = 4
+MIN_TURN_KOSPI = 200.0
+MIN_TURN_KOSDAQ = 100.0
+MIN_TURN_DEFAULT = 100.0
+
+# [점수 가중치]
+W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
+
+# [패널티 점수]
+P_OVERHEAT_5D = 6.0
+P_OVERHEAT_10D = 6.0
+P_RSI_OUT = 4.0
+P_MACD_NEG = 4.0
+P_NEAR_FAR = 4.0
+P_LIQ_LOW = 4.0
+P_VOL_SPIKE = 2.0
+# ==============================================================================
 
 # 4. 데이터 로딩 함수
 @st.cache_data(ttl=600)
@@ -259,21 +280,12 @@ def ensure_turnover(df):
     return df
 def normalize_cols(df): return ensure_turnover(df)
 
-# [중요] 유동성 게이트 (상수 포함)
 def liquidity_gate(x_turn, market):
-    MIN_TURN_KOSPI = 200.0
-    MIN_TURN_KOSDAQ = 100.0
-    MIN_TURN_DEFAULT = 100.0
+    # [Fix] 전역 변수 사용 (오류 해결)
     min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
     return nz_num(x_turn) >= market.map(min_map).fillna(MIN_TURN_DEFAULT)
 
-# [중요] 스코어링 함수 (상수 포함 - 완전 밀봉)
 def build_global_score(lat):
-    PASS_EBS = 4
-    W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
-    P_OVERHEAT_5D, P_OVERHEAT_10D = 6.0, 6.0
-    P_RSI_OUT, P_MACD_NEG = 4.0, 4.0
-    
     x = lat.copy()
     req = ["종가","추천매수가","손절가","추천매도가1","거래대금(억원)","RSI14","MACD_Slope","거래강도","이격도","ret_5d_%","ret_10d_%","EBS","MACD_Hist","MFI14"]
     for c in req:
@@ -296,16 +308,9 @@ def build_global_score(lat):
     def inv_dist_norm(dist, cap): return np.clip(1 - (nz_num(dist)/cap), 0, 1)
 
     rr_norm = pct_norm(rr1)
-    t1_norm = np.clip(t1_room / cap_q(t1_room, 90, 5.0) if 't1_room' in locals() else 1.0, 0, 1) 
+    t1_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
     
-    # [Fix] 변수 정의 보강
-    t1_room = ((t1 - close) / close * 100)
-    sl_room = ((close - stop) / close * 100)
-    
-    t1_norm = np.clip(t1_room / cap_q(t1_room, 90, 5.0), 0, 1)
-    sl_norm = np.clip(sl_room / cap_q(sl_room, 90, 3.0), 0, 1)
-    near_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
-    
+    # [Fix] 전역 변수 사용 (오류 해결)
     ers_bits = (ebs>=PASS_EBS).astype(int) + (slope>0).astype(int) + ((rsi>=45)&(rsi<=65)).astype(int)
     ers_norm = np.clip(ers_bits/3.0, 0, 1)
     slope_pos_norm = pct_norm(slope)
@@ -320,6 +325,7 @@ def build_global_score(lat):
     kairi_norm = (1 - np.minimum(kairi.abs()/cap_q(kairi.abs(), 80, 3.0), 1)).clip(0,1)
     tec_norm = np.clip(0.6*vol_sweet + 0.4*kairi_norm, 0, 1)
 
+    # [Fix] 전역 변수 사용
     base_score = (100*W_RR*rr_norm) + (100*W_T1*t1_norm) + (100*W_SL*sl_norm) + \
                  (100*W_NEAR*near_norm) + (100*W_MOM*mom_norm) + (100*W_LIQ*liq_norm) + (100*W_TEC*tec_norm)
     
@@ -331,7 +337,10 @@ def build_global_score(lat):
     score = np.clip(base_score - pen, 0, 100)
     x["RR1"] = rr1; x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
+    
+    # [Fix] 전역 변수 사용
     x["_GATE_OK"] = liquidity_gate(x["거래대금(억원)"], x["시장"]).fillna(False)
+    
     x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
     x["LDY_RANK"] = range(1, len(x)+1)
     
@@ -364,6 +373,11 @@ with st.sidebar:
     st.header("🔐 로그인")
     input_pw = st.text_input("비밀번호 입력", type="password", placeholder="비밀번호를 입력하세요")
     
+    # [Fix] 변수 초기화
+    send_btn = False
+    tg_token, tg_chat_id = "", ""
+    pf_input = ""
+
     auth_status = "free"
     if input_pw == ADMIN_KEY: auth_status = "admin"; st.success("✅ 관리자 로그인")
     elif input_pw == KEY_PRO: auth_status = "pro"; st.success("🥇 Pro 멤버십")
@@ -375,20 +389,22 @@ with st.sidebar:
     st.divider()
     st.subheader("💎 프리미엄 구독 안내")
     
-    # [Fix] 카드형 디자인 (깔끔하게)
+    # [Fix] 카드형 디자인 (세로형)
     with st.container(border=True):
-        st.markdown("### 🌱 **Free (무료)**\n`체험판` | Top 3 종목")
+        st.markdown("### 🌱 **Free (무료)**")
+        st.markdown("`체험판`\n- 📋 Top 3 종목\n- ❌ 알림/분석")
+        
     with st.container(border=True):
-        st.markdown("### 🚀 **Pro (2.9만)**\n`실전 투자` | Top 20 + 포트폴리오")
+        st.markdown("### 🚀 **Pro (2.9만)**")
+        st.markdown("`실전 투자자`\n- 🔓 Top 20 공개\n- 💼 내 포트폴리오 진단")
+        
     with st.container(border=True):
-        st.markdown("### 👑 **Prime (5.9만)**\n`전업 투자` | 풀패키지 + 알림")
+        st.markdown("### 👑 **Prime (5.9만)**")
+        st.markdown("`전업 투자자`\n- ✅ Pro 기능 포함\n- 🔔 텔레그램 알림")
     
     kakao_url = "https://open.kakao.com/o/g6enIm4h"
     st.link_button("👉 구독 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
     
-    # 변수 초기화
-    send_btn = False; tg_token = ""; tg_chat_id = ""; pf_input = ""
-
     if auth_status in ["pro", "prime", "admin"]:
         st.divider(); st.subheader("💼 내 자산 관리")
         saved_pf = load_portfolio_file()
@@ -396,7 +412,7 @@ with st.sidebar:
         if st.button("💾 저장/분석", key="pf_btn"): save_portfolio_file(pf_input)
     
     if auth_status in ["prime", "admin"]:
-        with st.expander("🔔 텔레그램 봇"):
+        with st.expander("🔔 텔레그램"):
             tg_token = st.text_input("Token", type="password")
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
@@ -460,7 +476,7 @@ with tab2:
                 st.info(f"💬 **AI:** {ai_cmt}")
                 st.plotly_chart(plot_risk_reward_bar(row['추천매수가'], row['손절가'], row['추천매도가1'], row['추천매도가2']), use_container_width=True)
             else:
-                st.warning("🔒 상세 분석은 Pro 등급부터 확인 가능합니다.")
+                st.warning("🔒 상세 AI 분석은 Pro 등급부터 확인 가능합니다.")
             c_a, c_b = st.columns(2); c_a.metric("진입가", f"{row['추천매수가']:,}"); c_b.metric("손절가", f"{row['손절가']:,}", delta="Stop", delta_color="inverse")
 
     st.divider()
@@ -474,8 +490,6 @@ with tab2:
 
     cols = ["ROUTE","업종","종목코드","LDY_SCORE","종가","추천매수가","손절가","추천매도가1"]
     cols = [c for c in cols if c in safe_view.columns]
-    
-    # [Fix] 컬럼 설정 적용
     cfg = {
         "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
         "종가": st.column_config.TextColumn("현재가"),
