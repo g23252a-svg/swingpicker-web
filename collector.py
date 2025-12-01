@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.2
-- 업종 매핑: v5.x 방식으로 복구 (FDR StockListing + Fallback)
+LDY Pro Trader Collector v6.3
+- 업종 매핑: KRX KIND + FDR + Fallback 하이브리드 (캐시 지원)
 - ROUTE: BRK / Watch / MR / PULL 다단계 분류 유지
 - 5일/10일 수익률 계산, AI Narrative, Telegram 유지
 """
 
 import os
+import io
 import time
 import math
 import numpy as np
@@ -133,6 +134,7 @@ def build_mcap_map():
 def get_mcap_eok_from_map(mcap_map, ticker):
     return float(mcap_map.get(str(ticker).zfill(6), 0))
 
+# ------------------------------- 업종 맵핑 -------------------------------
 def get_fallback_sector_map():
     # 기존에 쓰던 하드코딩 맵 그대로 유지
     return {
@@ -153,12 +155,13 @@ def get_fallback_sector_map():
         "098460": "기계", "277810": "기계", "352820": "서비스업", "253450": "서비스업"
     }
 
-def get_sector_map(trade_ymd=None):
+def get_sector_map_krx():
     """
-    1) data/sector_map_krx.csv 캐시가 있으면 그걸 최우선 사용
-    2) 없으면 FinanceDataReader.StockListing('KRX')로 풀리스트 받아서 캐시 만들기
-    3) 실패하면 fallback_map 으로 최소 핵심 종목만 보강
-    trade_ymd는 지금은 안 쓰지만, 향후 일자별 캐시 분리할 때 쓸 수 있게 받아만 둠.
+    업종 맵 생성 우선순위:
+    1) data/sector_map_krx.csv 캐시
+    2) KRX KIND (공식 업종 CSV)
+    3) 실패 시 FDR.StockListing('KRX')
+    4) 마지막으로 fallback 하드코딩 맵으로 보강
     """
     ensure_dir(OUT_DIR)
     cache_path = os.path.join(OUT_DIR, "sector_map_krx.csv")
@@ -166,65 +169,76 @@ def get_sector_map(trade_ymd=None):
     # 1) 캐시 우선
     if os.path.exists(cache_path):
         try:
-            df_cache = pd.read_csv(cache_path, dtype=str)
-            df_cache["종목코드"] = df_cache["종목코드"].astype(str).str.zfill(6)
-            df_cache["업종"] = df_cache["업종"].fillna("기타")
-            sector_map = dict(zip(df_cache["종목코드"], df_cache["업종"]))
-            log(f"✅ 업종 맵 캐시 로드: {len(sector_map)}개")
-            
-            # fallback 하드코딩으로 빈 구멍 보강
+            df = pd.read_csv(cache_path, dtype=str)
+            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+            df["업종"] = df["업종"].fillna("기타")
+            sector_map = dict(zip(df["종목코드"], df["업종"]))
+            log(f"📁 업종 캐시 로드 성공: {len(sector_map)} rows")
+
+            # fallback 보강
             fallback = get_fallback_sector_map()
             for code, sec in fallback.items():
                 sector_map.setdefault(code, sec)
             return sector_map
         except Exception as e:
-            log(f"⚠️ 업종 캐시 로드 실패, 재생성 시도: {e}")
+            log(f"⚠️ 업종 캐시 로드 실패. 재생성 시도: {e}")
 
-    # 2) 캐시가 없거나 로드 실패 → FDR에서 직접 생성
     sector_map = {}
+
+    # 2) KRX KIND 공식 업종 CSV 시도
+    url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download"
     try:
-        import FinanceDataReader as fdr
-        df = fdr.StockListing("KRX")
-        
-        # 코드 컬럼 잡기
-        code_col = "Symbol" if "Symbol" in df.columns else (
-            "Code" if "Code" in df.columns else None
-        )
-        if code_col is None:
-            raise RuntimeError(f"Code column not found in StockListing columns: {df.columns.tolist()}")
+        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+        r.raise_for_status()
+        df = pd.read_csv(io.BytesIO(r.content), encoding='euc-kr')
 
-        df[code_col] = df[code_col].astype(str).str.zfill(6)
+        df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+        df["업종"] = df["업종"].replace("", np.nan).fillna("기타")
 
-        # 업종 컬럼 후보
-        cand_cols = ["업종", "Sector", "Wics", "Industry"]
-        sector_col = None
-        for c in cand_cols:
-            if c in df.columns:
-                sector_col = c
-                break
-
-        if sector_col is None:
-            raise RuntimeError(f"No sector column found. columns={df.columns.tolist()}")
-
-        df_out = df[[code_col, sector_col]].rename(
-            columns={code_col: "종목코드", sector_col: "업종"}
-        )
-        df_out["업종"] = df_out["업종"].replace("", np.nan).fillna("기타")
-
+        df_out = df[["종목코드", "업종"]]
         sector_map = dict(zip(df_out["종목코드"], df_out["업종"]))
 
-        # 캐시에 저장
         df_out.to_csv(cache_path, index=False, encoding=UTF8)
-        log(f"✅ 업종 맵 생성 및 캐시 저장: {len(sector_map)}개")
+        log(f"✅ KRX 업종 다운로드 완료 및 캐시 저장 ({len(sector_map)} rows)")
 
     except Exception as e:
-        log(f"⚠️ FDR 업종 로딩 실패: {e}")
-        sector_map = {}
+        log(f"❌ KRX 업종 다운로드 실패: {e}")
+        # 3) KIND 실패 시 FDR로 대체 시도
+        try:
+            df = fdr.StockListing("KRX")
+            code_col = "Symbol" if "Symbol" in df.columns else (
+                "Code" if "Code" in df.columns else None
+            )
+            if code_col is None:
+                raise RuntimeError("Code column not found in FDR StockListing")
 
-    # 3) 마지막 보강: fallback 하드코딩 맵으로 최소한 채워 넣기
+            df[code_col] = df[code_col].astype(str).str.zfill(6)
+
+            cand_cols = ["업종", "Sector", "Wics", "Industry"]
+            sector_col = None
+            for c in cand_cols:
+                if c in df.columns:
+                    sector_col = c
+                    break
+            if sector_col is None:
+                raise RuntimeError("No sector column found in FDR StockListing")
+
+            df_out = df[[code_col, sector_col]].rename(
+                columns={code_col: "종목코드", sector_col: "업종"}
+            )
+            df_out["업종"] = df_out["업종"].replace("", np.nan).fillna("기타")
+            sector_map = dict(zip(df_out["종목코드"], df_out["업종"]))
+
+            df_out.to_csv(cache_path, index=False, encoding=UTF8)
+            log(f"✅ FDR 업종 로딩 및 캐시 저장 ({len(sector_map)} rows)")
+        except Exception as e2:
+            log(f"⚠️ FDR 업종 로딩도 실패: {e2}")
+            sector_map = {}
+
+    # 4) fallback 하드코딩으로 최종 보강
     fallback = get_fallback_sector_map()
     if not sector_map:
-        log("⚠️ FDR 실패로 fallback 업종 맵만 사용합니다.")
+        log("⚠️ 외부 소스 실패로 fallback 업종 맵만 사용합니다.")
         sector_map = dict(fallback)
     else:
         for code, sec in fallback.items():
@@ -312,7 +326,6 @@ def generate_ai_comment(mfi, rsi, slope, disp, score):
 
     return comment if comment else "특이사항 없음. 기술적 지표를 참고하세요."
 
-# --- Scoring Logic ---
 def cap_q(s, q=90, floor=1.0):
     c = np.nanpercentile(nz_num(s), q)
     return float(max(c, floor)) if np.isfinite(c) else floor
@@ -445,7 +458,7 @@ def send_telegram_auto(df):
     try:
         top5 = df.head(5).reset_index(drop=True)
         trade_date = datetime.now(KST).strftime('%Y-%m-%d')
-        msg = f"🔥 [LDY v6.2] 추천 Top 5 ({trade_date})\n"
+        msg = f"🔥 [LDY v6.3] 추천 Top 5 ({trade_date})\n"
         msg += "-" * 30 + "\n\n"
 
         for i, row in top5.iterrows():
@@ -472,7 +485,7 @@ def send_telegram_auto(df):
 
 # ------------------------------- 메인 실행 -------------------------------
 def main():
-    log("🚀 LDY Collector v6.2 시작...")
+    log("🚀 LDY Collector v6.3 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd} (mcap ref: {mcap_ymd})")
@@ -482,7 +495,7 @@ def main():
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-    sector_map = get_sector_map(trade_ymd)
+    sector_map = get_sector_map_krx()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
@@ -586,13 +599,13 @@ def main():
             t2 = round_to_tick(t2)
 
             code6 = str(t).zfill(6)
-            sector = sector_map.get(str(t).zfill(6), "기타")
+            sector = sector_map.get(code6, "기타")
             name = name_map.get(code6, code6)
 
             rows.append({
                 "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
-                "종목명": name_map.get(str(t).zfill(6), str(t)),
-                "종목코드": str(t).zfill(6),
+                "종목명": name,
+                "종목코드": code6,
                 "업종": sector,
                 "종가": int(last_c),
                 "거래대금(억원)": round(tv_eok, 2),
