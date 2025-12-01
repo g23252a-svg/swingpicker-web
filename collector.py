@@ -402,7 +402,8 @@ def build_global_score(lat):
         + 100 * W_TEC * tec_norm
     )
 
-    pen = pd.Series(0.0, index	x.index)
+    # 🔧 여기 오타 수정됨: index=x.index
+    pen = pd.Series(0.0, index=x.index)
     pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
     pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
@@ -412,10 +413,8 @@ def build_global_score(lat):
     x["Now%"] = now_gap
     x["LDY_SCORE"] = score.round(1)
 
-    # ROUTE: 행 단위로 고급 rule 평가
     x["ROUTE"] = x.apply(route_tag, axis=1)
 
-    # AI 코멘트
     x["AI_COMMENT"] = x.apply(lambda row: generate_ai_comment(
         row.get("MFI14", 50),
         row.get("RSI14", 50),
