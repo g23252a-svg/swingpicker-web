@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 LDY Pro Trader Collector v6.3
-- 업종 매핑: KRX KIND + FDR + Fallback 하이브리드 (캐시 지원)
+- 업종 매핑: KIND(KRX) + FDR + Fallback + Override(사용자 CSV) 병합
 - ROUTE: BRK / Watch / MR / PULL 다단계 분류 유지
 - 5일/10일 수익률 계산, AI Narrative, Telegram 유지
 """
@@ -136,7 +136,7 @@ def get_mcap_eok_from_map(mcap_map, ticker):
 
 # ------------------------------- 업종 맵핑 -------------------------------
 def get_fallback_sector_map():
-    # 기존에 쓰던 하드코딩 맵 그대로 유지
+    # 기존에 쓰던 하드코딩 맵 (메이저들 커버)
     return {
         "005930": "전기전자", "000660": "전기전자", "373220": "전기전자", "207940": "의약품", 
         "005380": "운수장비", "005935": "전기전자", "068270": "의약품", "000270": "운수장비",
@@ -157,11 +157,8 @@ def get_fallback_sector_map():
 
 def get_sector_map_krx():
     """
-    업종 맵 생성 우선순위:
-    1) data/sector_map_krx.csv 캐시
-    2) KRX KIND (공식 업종 CSV)
-    3) 실패 시 FDR.StockListing('KRX')
-    4) 마지막으로 fallback 하드코딩 맵으로 보강
+    KIND(KRX)에서 공식 업종 CSV를 받아오는 맵.
+    data/sector_map_krx.csv 로 캐시.
     """
     ensure_dir(OUT_DIR)
     cache_path = os.path.join(OUT_DIR, "sector_map_krx.csv")
@@ -172,79 +169,149 @@ def get_sector_map_krx():
             df = pd.read_csv(cache_path, dtype=str)
             df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
             df["업종"] = df["업종"].fillna("기타")
-            sector_map = dict(zip(df["종목코드"], df["업종"]))
-            log(f"📁 업종 캐시 로드 성공: {len(sector_map)} rows")
-
-            # fallback 보강
-            fallback = get_fallback_sector_map()
-            for code, sec in fallback.items():
-                sector_map.setdefault(code, sec)
-            return sector_map
+            log(f"📁 KIND 업종 캐시 로드 성공: {len(df)} rows")
+            return dict(zip(df["종목코드"], df["업종"]))
         except Exception as e:
-            log(f"⚠️ 업종 캐시 로드 실패. 재생성 시도: {e}")
+            log(f"⚠️ KIND 업종 캐시 로드 실패. 재다운로드 시도: {e}")
 
-    sector_map = {}
-
-    # 2) KRX KIND 공식 업종 CSV 시도
+    # 2) KRX 공식 업종 CSV 다운로드
     url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download"
     try:
         r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
         r.raise_for_status()
-        df = pd.read_csv(io.BytesIO(r.content), encoding='euc-kr')
+        df = pd.read_csv(io.BytesIO(r.content), encoding="euc-kr")
+
+        # KIND 형식 기준: 종목코드, 기업명, 업종, ...
+        if "종목코드" not in df.columns or "업종" not in df.columns:
+            log(f"⚠️ KIND CSV 컬럼 이상: {df.columns.tolist()}")
+            return {}
 
         df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
         df["업종"] = df["업종"].replace("", np.nan).fillna("기타")
 
         df_out = df[["종목코드", "업종"]]
-        sector_map = dict(zip(df_out["종목코드"], df_out["업종"]))
-
         df_out.to_csv(cache_path, index=False, encoding=UTF8)
-        log(f"✅ KRX 업종 다운로드 완료 및 캐시 저장 ({len(sector_map)} rows)")
+
+        log(f"✅ KIND 업종 다운로드 완료 ({len(df_out)} rows)")
+        return dict(zip(df_out["종목코드"], df_out["업종"]))
 
     except Exception as e:
-        log(f"❌ KRX 업종 다운로드 실패: {e}")
-        # 3) KIND 실패 시 FDR로 대체 시도
+        log(f"❌ KIND 업종 다운로드 실패: {e}")
+        return {}
+
+def get_sector_map_fdr():
+    """
+    FinanceDataReader.StockListing('KRX') 기반 섹터/업종 맵.
+    KIND에서 안 나오는 애들 보완용.
+    """
+    ensure_dir(OUT_DIR)
+    cache_path = os.path.join(OUT_DIR, "sector_map_fdr.csv")
+
+    # 1) 캐시 우선
+    if os.path.exists(cache_path):
         try:
-            df = fdr.StockListing("KRX")
-            code_col = "Symbol" if "Symbol" in df.columns else (
-                "Code" if "Code" in df.columns else None
-            )
-            if code_col is None:
-                raise RuntimeError("Code column not found in FDR StockListing")
+            df = pd.read_csv(cache_path, dtype=str)
+            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+            df["업종"] = df["업종"].fillna("기타")
+            log(f"📁 FDR 업종 캐시 로드 성공: {len(df)} rows")
+            return dict(zip(df["종목코드"], df["업종"]))
+        except Exception as e:
+            log(f"⚠️ FDR 업종 캐시 로드 실패. 재생성 시도: {e}")
 
-            df[code_col] = df[code_col].astype(str).str.zfill(6)
+    # 2) FDR에서 전체 KRX 리스트
+    try:
+        df = fdr.StockListing("KRX")
+        code_col = "Symbol" if "Symbol" in df.columns else (
+            "Code" if "Code" in df.columns else None
+        )
+        if code_col is None:
+            raise RuntimeError(f"Code column not found: {df.columns.tolist()}")
 
-            cand_cols = ["업종", "Sector", "Wics", "Industry"]
-            sector_col = None
-            for c in cand_cols:
-                if c in df.columns:
-                    sector_col = c
-                    break
-            if sector_col is None:
-                raise RuntimeError("No sector column found in FDR StockListing")
+        df[code_col] = df[code_col].astype(str).str.zfill(6)
 
-            df_out = df[[code_col, sector_col]].rename(
-                columns={code_col: "종목코드", sector_col: "업종"}
-            )
-            df_out["업종"] = df_out["업종"].replace("", np.nan).fillna("기타")
-            sector_map = dict(zip(df_out["종목코드"], df_out["업종"]))
+        # 섹터 후보 컬럼
+        cand_cols = ["업종", "Sector", "Wics", "Industry"]
+        sector_col = None
+        for c in cand_cols:
+            if c in df.columns:
+                sector_col = c
+                break
+        if sector_col is None:
+            raise RuntimeError(f"No sector column in FDR: {df.columns.tolist()}")
 
-            df_out.to_csv(cache_path, index=False, encoding=UTF8)
-            log(f"✅ FDR 업종 로딩 및 캐시 저장 ({len(sector_map)} rows)")
-        except Exception as e2:
-            log(f"⚠️ FDR 업종 로딩도 실패: {e2}")
-            sector_map = {}
+        df_out = df[[code_col, sector_col]].rename(
+            columns={code_col: "종목코드", sector_col: "업종"}
+        )
+        df_out["업종"] = df_out["업종"].replace("", np.nan).fillna("기타")
 
-    # 4) fallback 하드코딩으로 최종 보강
+        df_out.to_csv(cache_path, index=False, encoding=UTF8)
+        log(f"✅ FDR 업종 생성 및 캐시 저장: {len(df_out)} rows")
+        return dict(zip(df_out["종목코드"], df_out["업종"]))
+
+    except Exception as e:
+        log(f"❌ FDR 업종 생성 실패: {e}")
+        return {}
+
+def load_sector_override():
+    """
+    사용자가 직접 관리하는 오버라이드 테이블.
+    파일: data/sector_override.csv
+    컬럼: 종목코드, 업종
+    """
+    ensure_dir(OUT_DIR)
+    path = os.path.join(OUT_DIR, "sector_override.csv")
+    if not os.path.exists(path):
+        return {}
+
+    try:
+        df = pd.read_csv(path, dtype=str)
+        if "종목코드" not in df.columns or "업종" not in df.columns:
+            log(f"⚠️ sector_override.csv 컬럼 이상: {df.columns.tolist()}")
+            return {}
+        df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+        df["업종"] = df["업종"].fillna("기타")
+        log(f"📁 업종 Override 로드: {len(df)} rows")
+        return dict(zip(df["종목코드"], df["업종"]))
+    except Exception as e:
+        log(f"⚠️ 업종 Override 로드 실패: {e}")
+        return {}
+
+def build_sector_map():
+    """
+    최종 업종 맵:
+    1) FDR
+    2) KIND
+    3) fallback 하드맵
+    4) override (최우선)
+    """
+    # 1) FDR
+    fdr_map = get_sector_map_fdr()
+
+    # 2) KIND
+    kind_map = get_sector_map_krx()
+
+    # 3) fallback
     fallback = get_fallback_sector_map()
-    if not sector_map:
-        log("⚠️ 외부 소스 실패로 fallback 업종 맵만 사용합니다.")
-        sector_map = dict(fallback)
-    else:
-        for code, sec in fallback.items():
-            sector_map.setdefault(code, sec)
 
-    log(f"ℹ️ 최종 업종 맵 크기: {len(sector_map)}개")
+    # 4) override
+    override = load_sector_override()
+
+    sector_map = {}
+
+    # FDR 우선 세팅
+    sector_map.update(fdr_map)
+
+    # KIND로 덮어쓰기 (공식 업종이 더 직관적인 경우 많음)
+    sector_map.update(kind_map)
+
+    # fallback은 비어있는 코드만 채우기
+    for code, sec in fallback.items():
+        sector_map.setdefault(code, sec)
+
+    # override는 최종 우선순위
+    sector_map.update(override)
+
+    log(f"ℹ️ 최종 업종 맵 크기: {len(sector_map)}개 (FDR+KIND+fallback+override)")
     return sector_map
 
 # ------------------------------- 기타 수집 로직 -------------------------------
@@ -253,7 +320,10 @@ def pick_top_by_trading_value(date_yyyymmdd, top_n):
     for m in ["KOSPI", "KOSDAQ"]:
         try:
             df = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market=m).reset_index()
-            df.columns = ['종목코드' if '티커' in str(c) or '코드' in str(c) else c for c in df.columns]
+            df.columns = [
+                '종목코드' if ('티커' in str(c) or '코드' in str(c)) else c
+                for c in df.columns
+            ]
             df.columns = ['거래대금(원)' if c == '거래대금' else c for c in df.columns]
             frames.append(df[['종목코드', '거래대금(원)']])
         except:
@@ -326,6 +396,7 @@ def generate_ai_comment(mfi, rsi, slope, disp, score):
 
     return comment if comment else "특이사항 없음. 기술적 지표를 참고하세요."
 
+# --- Scoring Logic ---
 def cap_q(s, q=90, floor=1.0):
     c = np.nanpercentile(nz_num(s), q)
     return float(max(c, floor)) if np.isfinite(c) else floor
@@ -495,7 +566,7 @@ def main():
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
-    sector_map = get_sector_map_krx()
+    sector_map = build_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
