@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.1 (Integrated)
-- 개선: 점수/ROUTE 기반 필터 UI 추가 (최소 점수, 전략 유형 필터)
-- 개선: 섹터맵 데이터 소스 선택 (통과 종목만 / 전체 상위)
-- 기반: v6.0 스코어링/라우팅 로직 유지
+LDY Pro Trader v6.1 (Enhanced)
+- 개선: 포트폴리오 분석 병렬 처리 (속도 향상)
+- 개선: 차트에 거래량(Volume) 보조 지표 추가
+- 개선: 데이터 로딩 상태 시각화 (st.status)
+- 개선: 보안 설정 (st.secrets 우선 지원)
+- 기반: v6.1 오리지널 로직 유지
 """
 import os, io, math, json, requests, logging
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 
 # ---------------------------
 # 로깅 설정
@@ -37,27 +41,37 @@ except Exception as e:
 
 # 2. 페이지 설정
 st.set_page_config(page_title="LDY Pro Trader v6.1", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v6.1 (Beta)")
-st.caption("AI Quant Analysis & Portfolio Manager — Dynamic scoring, routing & filters")
+st.title("🏆 LDY Pro Trader v6.1 (Enhanced)")
+st.caption("AI Quant Analysis & Portfolio Manager — Speed & Viz Upgraded")
 
-# 3. 전역 설정 (환경변수 우선)
-RAW_URL = os.getenv(
+# 3. 설정 관리 (Secrets -> Env -> Default 순서)
+def get_conf(key, default_val):
+    # 1순위: Streamlit Secrets
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except FileNotFoundError:
+        pass
+    # 2순위: 환경변수
+    return os.getenv(key, default_val)
+
+RAW_URL = get_conf(
     "LDY_RAW_URL",
     "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 )
-LOCAL_RAW = os.getenv("LDY_LOCAL_RAW", "data/recommend_latest.csv")
-PORTFOLIO_FILE = os.getenv("LDY_PORTFOLIO_FILE", "my_portfolio.json")
+LOCAL_RAW = get_conf("LDY_LOCAL_RAW", "data/recommend_latest.csv")
+PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
 
-# 보안키는 환경변수로 관리 (기본값은 개발용)
-KEY_PRO = os.getenv("LDY_KEY_PRO", "2024")
-KEY_PRIME = os.getenv("LDY_KEY_PRIME", "2025")
-ADMIN_KEY = os.getenv("LDY_ADMIN_KEY", "2022322")
+# 보안키
+KEY_PRO = get_conf("LDY_KEY_PRO", "2024")
+KEY_PRIME = get_conf("LDY_KEY_PRIME", "2025")
+ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
 
 # 스코어링 상수
-PASS_EBS = float(os.getenv("LDY_PASS_EBS", 4))
-MIN_TURN_KOSPI = float(os.getenv("LDY_MIN_TURN_KOSPI", 200.0))
-MIN_TURN_KOSDAQ = float(os.getenv("LDY_MIN_TURN_KOSDAQ", 100.0))
-MIN_TURN_DEFAULT = float(os.getenv("LDY_MIN_TURN_DEFAULT", 100.0))
+PASS_EBS = float(get_conf("LDY_PASS_EBS", 4))
+MIN_TURN_KOSPI = float(get_conf("LDY_MIN_TURN_KOSPI", 200.0))
+MIN_TURN_KOSDAQ = float(get_conf("LDY_MIN_TURN_KOSDAQ", 100.0))
+MIN_TURN_DEFAULT = float(get_conf("LDY_MIN_TURN_DEFAULT", 100.0))
 
 # 가중치
 W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10)
@@ -121,14 +135,6 @@ def find_code_by_name(name_or_code, code_map):
     if name_or_code.isdigit():
         return name_or_code.zfill(6)
     return code_map.get(name_or_code, None)
-
-def get_last_business_date(d=datetime.now()):
-    d = d.date()
-    if d.weekday() == 5:
-        d -= timedelta(days=1)
-    elif d.weekday() == 6:
-        d -= timedelta(days=2)
-    return d.strftime("%Y%m%d")
 
 @st.cache_data(ttl=3600)
 def get_market_status():
@@ -346,47 +352,62 @@ def plot_radar_chart(row):
     )
     return fig
 
+# ---------------------------
+# [개선] 차트 시각화 (거래량 추가)
+# ---------------------------
 def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty:
         return go.Figure()
 
-    fig = go.Figure(
-        data=[go.Candlestick(
-            x=df.index,
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            name="주가",
-            increasing_line_color='#ef5350',
-            decreasing_line_color='#2979ff',
-            hovertemplate="<b>%{x|%y년 %m월 %d일}</b><br>종가: %{close:,}원<extra></extra>",
-        )]
+    # 2행 1열 서브플롯 생성 (주가 차트 / 거래량)
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.7, 0.3]
     )
 
+    # 1. 캔들스틱 (Row 1)
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="주가",
+        increasing_line_color='#ef5350',
+        decreasing_line_color='#2979ff',
+        hovertemplate="<b>%{x|%y/%m/%d}</b><br>종가: %{close:,}원<extra></extra>",
+        showlegend=False
+    ), row=1, col=1)
+
+    # 2. 이동평균선 (Row 1)
+    if 'MA20' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20일선'
+        ), row=1, col=1)
+    if 'MA60' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['MA60'], line=dict(color='purple', width=1.5), name='60일선'
+        ), row=1, col=1)
+
+    # 3. SuperTrend (Row 1)
     up = df[df['Trend'] == 1]
     down = df[df['Trend'] == -1]
     if not up.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=up.index,
-                y=up['SuperTrend'],
-                mode='markers',
-                marker=dict(color='green', size=2),
-                name='상승추세'
-            )
-        )
+        fig.add_trace(go.Scatter(
+            x=up.index, y=up['SuperTrend'], mode='markers', marker=dict(color='green', size=2), name='상승추세'
+        ), row=1, col=1)
     if not down.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=down.index,
-                y=down['SuperTrend'],
-                mode='markers',
-                marker=dict(color='red', size=2),
-                name='하락추세'
-            )
-        )
+        fig.add_trace(go.Scatter(
+            x=down.index, y=down['SuperTrend'], mode='markers', marker=dict(color='red', size=2), name='하락추세'
+        ), row=1, col=1)
 
+    # 4. 거래량 (Row 2)
+    # 한국 주식 스타일: 종가 > 시가(양봉)이면 빨강, 아니면 파랑
+    colors = ['#ef5350' if row['Close'] >= row['Open'] else '#2979ff' for idx, row in df.iterrows()]
+    fig.add_trace(go.Bar(
+        x=df.index, y=df['Volume'], marker_color=colors, name="거래량", showlegend=False
+    ), row=2, col=1)
+
+    # 진입/손절 라인 (Row 1에 추가)
     lines = [
         (entry, "🔵진입", "blue"),
         (stop, "🔴손절", "red"),
@@ -396,38 +417,16 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
         try:
             if pd.notna(val) and val > 0:
                 fig.add_hline(
-                    y=val,
-                    line_dash="dash",
-                    line_color=color,
-                    annotation_text=label
+                    y=val, line_dash="dash", line_color=color,
+                    annotation_text=label, row=1, col=1
                 )
         except Exception:
             pass
 
-    if 'MA20' in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['MA20'],
-                line=dict(color='orange'),
-                name='20일선'
-            )
-        )
-    if 'MA60' in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['MA60'],
-                line=dict(color='purple'),
-                name='60일선'
-            )
-        )
-
     fig.update_layout(
         title=f"{name} ({code})",
         xaxis_rangeslider_visible=False,
-        xaxis_tickformat='%m.%d',
-        height=500,
+        height=600, # 높이 증가
         margin=dict(l=20, r=20, t=40, b=20),
         hovermode="x unified",
     )
@@ -726,34 +725,37 @@ def route_tag_dynamic(row, th):
     return "↩️ PULL (눌림)"
 
 # ---------------------------
-# 메인 데이터 로드
+# [개선] 메인 데이터 로드 (Status UX)
 # ---------------------------
-try:
-    df_raw = load_csv_url(RAW_URL)
-    log_src(df_raw, "Remote")
-except Exception as e_remote:
-    logger.warning("Remote load failed: %s", e_remote)
-    if os.path.exists(LOCAL_RAW):
-        try:
-            df_raw = load_csv_path(LOCAL_RAW)
-            log_src(df_raw, "Local")
-        except Exception:
-            logger.exception("Local load failed")
-            st.error("❌ 데이터 없음 (로컬 로드 실패)")
-            st.stop()
-    else:
-        st.error("❌ 데이터 없음 (원격/로컬 모두 실패)")
+df_raw = None
+with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded=True) as status:
+    st.write("📥 데이터 다운로드 중...")
+    try:
+        df_raw = load_csv_url(RAW_URL)
+        log_src(df_raw, "Remote")
+    except Exception as e_remote:
+        logger.warning("Remote load failed: %s", e_remote)
+        if os.path.exists(LOCAL_RAW):
+            try:
+                df_raw = load_csv_path(LOCAL_RAW)
+                log_src(df_raw, "Local")
+            except Exception:
+                pass
+
+    if df_raw is None:
+        status.update(label="❌ 데이터 로드 실패", state="error")
         st.stop()
+    
+    st.write("🧮 알고리즘 스코어링 계산 중...")
+    df = normalize_cols(df_raw)
+    latest = df.copy()
+    scored = build_global_score(latest)
 
-df = normalize_cols(df_raw)
-latest = df.copy()
+    st.write("🌊 동적 유동성 필터 적용 중...")
+    TH = compute_dynamic_thresholds(scored)
+    scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
 
-# 스코어링
-scored = build_global_score(latest)
-
-# 동적 threshold 계산 및 route 적용
-TH = compute_dynamic_thresholds(scored)
-scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
+    status.update(label="✅ 분석 완료!", state="complete", expanded=False)
 
 # 베이스 필터
 base = scored[(scored["EBS"] >= PASS_EBS) & (scored["_GATE_OK"])].copy()
@@ -894,16 +896,12 @@ with tab1:
             st.info("섹터 정보 없음")
 
 with tab2:
-    # --------- v6.1 핵심: 점수/ROUTE 필터 UI ---------
     st.subheader("🎯 추천 종목 필터")
     col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
     with col_f1:
         min_score = st.slider(
             "최소 LDY 점수",
-            min_value=0,
-            max_value=100,
-            value=80,
-            step=1,
+            min_value=0, max_value=100, value=80, step=1,
             key="min_score",
         )
     with col_f2:
@@ -969,8 +967,7 @@ with tab2:
                 if chart_df is not None:
                     st.plotly_chart(
                         plot_interactive_chart(
-                            chart_df,
-                            code,
+                            chart_df, code,
                             row.get('종목명', '-'),
                             row.get('추천매수가', 0),
                             row.get('손절가', 0),
@@ -1016,33 +1013,20 @@ with tab2:
     if not safe_view.empty:
         safe_view.set_index("종목명", inplace=True)
         price_cols = [
-            "종가",
-            "추천매수가",
-            "손절가",
-            "추천매도가1",
-            "추천매도가2",
-            "거래대금(억원)",
+            "종가", "추천매수가", "손절가", "추천매도가1", "추천매도가2", "거래대금(억원)",
         ]
         for c in price_cols:
             if c in safe_view.columns:
                 safe_view[c] = pd.to_numeric(
-                    safe_view[c],
-                    errors='coerce'
+                    safe_view[c], errors='coerce'
                 ).fillna(0).apply(lambda x: f"{int(x):,}")
         if "LDY_SCORE" in safe_view.columns:
             safe_view["LDY_SCORE"] = pd.to_numeric(
-                safe_view["LDY_SCORE"],
-                errors='coerce'
+                safe_view["LDY_SCORE"], errors='coerce'
             ).fillna(0)
         cols = [
-            "ROUTE",
-            "업종",
-            "종목코드",
-            "LDY_SCORE",
-            "종가",
-            "추천매수가",
-            "손절가",
-            "추천매도가1",
+            "ROUTE", "업종", "종목코드", "LDY_SCORE",
+            "종가", "추천매수가", "손절가", "추천매도가1",
         ]
         cols = [c for c in cols if c in safe_view.columns]
         cfg = {
@@ -1071,6 +1055,19 @@ with tab2:
             "text/csv",
         )
 
+# ---------------------------
+# [개선] 내 자산 (병렬 처리)
+# ---------------------------
+def fetch_current_price(code, name):
+    try:
+        # 최근 데이터만 가볍게 조회
+        df = fdr.DataReader(str(code), (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"))
+        if df is None or df.empty:
+            return code, name, 0
+        return code, name, int(df.iloc[-1]['Close'])
+    except:
+        return code, name, 0
+
 with tab3:
     if auth_status == "free":
         st.info("🔒 내 자산 분석은 Pro 등급부터 가능합니다.")
@@ -1080,50 +1077,54 @@ with tab3:
             if not code_map and FDR_OK:
                 try:
                     df_krx = fdr.StockListing('KRX')
-                    code_map = dict(
-                        zip(
-                            df_krx['Name'],
-                            df_krx['Code'].astype(str).str.zfill(6)
-                        )
-                    )
+                    code_map = dict(zip(df_krx['Name'], df_krx['Code'].astype(str).str.zfill(6)))
                 except Exception:
-                    logger.exception("KRX listing failed")
-            pf_list = []
-            total_buy = 0
-            total_eval = 0
+                    pass
+            
+            # 파싱
+            targets = []
             lines = pf_input.strip().split('\n')
-            cols_layout = st.columns(3)
-            idx = 0
             for line in lines:
-                if ":" not in line:
-                    continue
+                if ":" not in line: continue
                 name_input, avg, qty = line.split(':')
-                code = name_input.strip()
+                code = str(name_input).strip()
                 if not code.isdigit():
                     code = code_map.get(code, code)
                 code = str(code).zfill(6)
-                avg = float(avg.replace(',', ''))
-                qty = int(qty.replace(',', ''))
-                try:
-                    if not FDR_OK:
-                        raise Exception("FDR missing")
-                    df_rt = fdr.DataReader(code)
-                    cur_price = int(df_rt.iloc[-1]['Close'])
-                    real_name = stock.get_market_ticker_name(code) if PYKRX_OK else name_input
+                targets.append((code, name_input, float(avg.replace(',', '')), int(qty.replace(',', ''))))
+
+            # 병렬 처리로 시세 조회
+            price_map = {}
+            with st.spinner('⚡ 실시간 시세를 조회 중입니다...'):
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = [executor.submit(fetch_current_price, t[0], t[1]) for t in targets]
+                    for future in futures:
+                        c, n, p = future.result()
+                        price_map[c] = p
+            
+            # 렌더링
+            cols_layout = st.columns(3)
+            total_buy = 0
+            total_eval = 0
+            
+            for idx, (code, name_input, avg, qty) in enumerate(targets):
+                cur_price = price_map.get(code, 0)
+                real_name = stock.get_market_ticker_name(code) if (PYKRX_OK and cur_price > 0) else name_input
+                
+                if cur_price > 0:
                     profit_rate = (cur_price - avg) / avg * 100
-                    if profit_rate > 0:
-                        signal = "🟢 수익"
-                    elif profit_rate > -3:
-                        signal = "🟡 보합"
-                    else:
-                        signal = "🔴 손실"
-                except Exception:
-                    cur_price = 0
-                    real_name = name_input
-                    signal = "❓"
+                    if profit_rate > 0: signal = "🟢 수익"
+                    elif profit_rate > -3: signal = "🟡 보합"
+                    else: signal = "🔴 손실"
+                else:
+                    signal = "❓ 확인불가"
                     profit_rate = 0
+                
                 buy_amt = avg * qty
                 eval_amt = cur_price * qty
+                total_buy += buy_amt
+                total_eval += eval_amt
+                
                 with cols_layout[idx % 3]:
                     st.metric(
                         label=f"{real_name} ({signal})",
@@ -1131,9 +1132,7 @@ with tab3:
                         delta=f"{profit_rate:+.2f}% ({int(eval_amt-buy_amt):,}원)",
                         delta_color="normal" if profit_rate >= 0 else "inverse",
                     )
-                idx += 1
-                total_buy += buy_amt
-                total_eval += eval_amt
+            
             st.divider()
             c1, c2, c3 = st.columns(3)
             tot_rate = (total_eval - total_buy) / total_buy * 100 if total_buy > 0 else 0
