@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.1 (Enhanced)
+LDY Pro Trader v6.2 (Enhanced Score)
+- 개선: 스코어링 로직을 Collector v6.4 수준으로 정교화
+  * 5일/10일 과열 패널티
+  * 진입 괴리, 유동성 저하, 거래량 스파이크 패널티
+  * RSI 적정 구간 상수화 (RSI_LOW / RSI_HIGH)
 - 개선: 포트폴리오 분석 병렬 처리 (속도 향상)
 - 개선: 차트에 거래량(Volume) 보조 지표 추가
 - 개선: 데이터 로딩 상태 시각화 (st.status)
 - 개선: 보안 설정 (st.secrets 우선 지원)
-- 기반: v6.1 오리지널 로직 유지
 """
+
 import os, io, math, json, requests, logging
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -40,9 +44,9 @@ except Exception as e:
     logger.info("pykrx not available: %s", e)
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v6.1", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v6.1 (Enhanced)")
-st.caption("AI Quant Analysis & Portfolio Manager — Speed & Viz Upgraded")
+st.set_page_config(page_title="LDY Pro Trader v6.2", layout="wide", page_icon="💎")
+st.title("🏆 LDY Pro Trader v6.2 (Enhanced Score)")
+st.caption("AI Quant Analysis & Portfolio Manager — Scoring & Speed Upgraded")
 
 # 3. 설정 관리 (Secrets -> Env -> Default 순서)
 def get_conf(key, default_val):
@@ -84,6 +88,9 @@ P_MACD_NEG = 4.0
 P_NEAR_FAR = 4.0
 P_LIQ_LOW = 4.0
 P_VOL_SPIKE = 2.0
+
+# RSI 적정 구간
+RSI_LOW, RSI_HIGH = 45, 65
 
 # ---------------------------
 # 유틸 함수
@@ -359,7 +366,6 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty:
         return go.Figure()
 
-    # 2행 1열 서브플롯 생성 (주가 차트 / 거래량)
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
@@ -367,7 +373,6 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
         row_heights=[0.7, 0.3]
     )
 
-    # 1. 캔들스틱 (Row 1)
     fig.add_trace(go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
@@ -378,7 +383,6 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
         showlegend=False
     ), row=1, col=1)
 
-    # 2. 이동평균선 (Row 1)
     if 'MA20' in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20일선'
@@ -388,7 +392,6 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
             x=df.index, y=df['MA60'], line=dict(color='purple', width=1.5), name='60일선'
         ), row=1, col=1)
 
-    # 3. SuperTrend (Row 1)
     up = df[df['Trend'] == 1]
     down = df[df['Trend'] == -1]
     if not up.empty:
@@ -400,14 +403,11 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
             x=down.index, y=down['SuperTrend'], mode='markers', marker=dict(color='red', size=2), name='하락추세'
         ), row=1, col=1)
 
-    # 4. 거래량 (Row 2)
-    # 한국 주식 스타일: 종가 > 시가(양봉)이면 빨강, 아니면 파랑
     colors = ['#ef5350' if row['Close'] >= row['Open'] else '#2979ff' for idx, row in df.iterrows()]
     fig.add_trace(go.Bar(
         x=df.index, y=df['Volume'], marker_color=colors, name="거래량", showlegend=False
     ), row=2, col=1)
 
-    # 진입/손절 라인 (Row 1에 추가)
     lines = [
         (entry, "🔵진입", "blue"),
         (stop, "🔴손절", "red"),
@@ -426,7 +426,7 @@ def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     fig.update_layout(
         title=f"{name} ({code})",
         xaxis_rangeslider_visible=False,
-        height=600, # 높이 증가
+        height=600,
         margin=dict(l=20, r=20, t=40, b=20),
         hovermode="x unified",
     )
@@ -528,7 +528,7 @@ def save_portfolio_file(text_data):
         return False
 
 # ---------------------------
-# 핵심: 스코어링 함수
+# 핵심: 스코어링 함수 (v6.4 스타일)
 # ---------------------------
 def liquidity_gate(x_turn, market):
     min_map = {
@@ -569,29 +569,31 @@ def build_global_score(lat):
     volz = nz_num(x.get(vol_col, pd.Series(np.nan, index=x.index)))
     kairi = nz_num(x.get(kairi_col, pd.Series(np.nan, index=x.index)))
     r5 = nz_num(x["ret_5d_%"])
+    r10 = nz_num(x["ret_10d_%"])
     ebs = nz_num(x["EBS"]).fillna(0)
 
-    rr_den = (entry - stop).replace([0, np.inf, -np.inf], np.nan)
-    rr1 = ((t1 - entry) / rr_den).where(rr_den.notna())
-    rr1 = rr1.mask(entry.isna() | stop.isna() | t1.isna())
-
-    now_gap = ((close - entry).abs() / entry * 100).replace([np.inf, -np.inf], np.nan)
-    t1_room = ((t1 - close) / close * 100).replace([np.inf, -np.inf], np.nan)
-    sl_room = ((close - stop) / close * 100).replace([np.inf, -np.inf], np.nan)
+    # RR, 진입 괴리, 손절/목표 여유
+    rr_den = (entry - stop)
+    rr_den = rr_den.where(rr_den > 0, np.nan)  # 0 이하 RR은 무의미 → NaN
+    rr1 = (t1 - entry) / rr_den
+    now_gap = ((close - entry).abs() / entry * 100)
+    t1_room = ((t1 - close) / close * 100)
+    sl_room = ((close - stop) / close * 100)
 
     def cap_q(s, q=90, f=1.0):
         arr = nz_num(s)
+        arr = arr.replace([np.inf, -np.inf], np.nan)
         if arr.dropna().size == 0:
             return float(f)
         try:
-            val = float(np.nanpercentile(arr, q))
+            val = float(np.nanpercentile(arr.dropna(), q))
             return max(val, float(f))
         except Exception:
             return float(f)
 
     def pct_norm(s, q=90, f=1.0):
         s_num = nz_num(s).clip(lower=0)
-        cap = cap_q(s, q, f)
+        cap = cap_q(s_num, q, f)
         if cap == 0:
             return np.zeros_like(s_num)
         return np.clip(s_num / cap, 0, 1)
@@ -600,32 +602,43 @@ def build_global_score(lat):
         cap_val = float(cap) if cap is not None and not np.isnan(cap) else 1.0
         return np.clip(1 - (nz_num(dist) / max(cap_val, 1e-9)), 0, 1)
 
-    rr_norm = pct_norm(rr1)
-    t1_norm = np.clip(t1_room / cap_q(t1_room, 90, 5.0), 0, 1)
-    sl_norm = np.clip(sl_room / cap_q(sl_room, 90, 3.0), 0, 1)
-    near_norm = inv_dist_norm(now_gap, cap_q(now_gap, 75, 1.0))
+    rr_norm = pct_norm(rr1, q=90, f=1.0).fillna(0)
+    t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, f=5.0), 0, 1).fillna(0)
+    sl_norm = np.clip(sl_room / cap_q(sl_room, q=90, f=3.0), 0, 1).fillna(0)
+    near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, f=1.0)).fillna(0)
 
-    ers_bits = (ebs >= PASS_EBS).astype(int) \
-        + (slope > 0).astype(int) \
-        + ((rsi >= 45) & (rsi <= 65)).astype(int)
-    ers_norm = np.clip(ers_bits / 3.0, 0, 1)
-    slope_pos_norm = pct_norm(slope)
-    mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm, 0, 1)
+    # 모멘텀/에너지 (collector v6.4 스타일)
+    ers_bits = (
+        (ebs >= PASS_EBS).astype(int)
+        + (slope > 0).astype(int)
+        + ((rsi >= RSI_LOW) & (rsi <= RSI_HIGH)).astype(int)
+    )
+    ers_norm = np.clip(ers_bits / 3.0, 0, 1).fillna(0)
+    slope_pos_norm = pct_norm(slope, q=90, f=1.0).fillna(0)
+    mom_mid_norm = pct_norm(r10.clip(lower=0), q=90, f=1.0).fillna(0)
+    mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm + 0.2 * mom_mid_norm, 0, 1).fillna(0)
 
+    # 유동성
     if turn.notna().any():
         try:
-            lo, hi = np.nanpercentile(turn, 30), np.nanpercentile(turn, 90)
+            lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.dropna(), 90)
             denom = max(hi - lo, 1e-9)
-            liq_norm = np.clip((turn - lo) / denom, 0, 1)
+            liq_norm = np.clip((turn - lo) / denom, 0, 1).fillna(0)
+            liq_low = (turn < lo).astype(float)
         except Exception:
-            liq_norm = 0.0
+            liq_norm = pd.Series(0.0, index=x.index)
+            liq_low = pd.Series(0.0, index=x.index)
     else:
-        liq_norm = 0.0
+        liq_norm = pd.Series(0.0, index=x.index)
+        liq_low = pd.Series(0.0, index=x.index)
 
-    vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1)
-    kairi_norm = (1 - np.minimum(kairi.abs() / cap_q(kairi.abs(), 80, 3.0), 1)).clip(0, 1)
-    tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1)
+    # 기술적 세부: 거래량 스윗 스팟, 이격도
+    vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1).fillna(0)
+    kairi_abs = kairi.abs()
+    kairi_norm = (1 - np.minimum(kairi_abs / cap_q(kairi_abs, q=80, f=3.0), 1)).clip(0, 1).fillna(0)
+    tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1).fillna(0)
 
+    # 기본 점수
     base_score = (
         100 * W_RR * rr_norm
         + 100 * W_T1 * t1_norm
@@ -636,10 +649,15 @@ def build_global_score(lat):
         + 100 * W_TEC * tec_norm
     )
 
+    # 패널티 (collector v6.4 스타일)
     pen = pd.Series(0.0, index=x.index)
-    pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
-    pen += P_RSI_OUT * ((rsi < 45) | (rsi > 65)).astype(float)
+    pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1).fillna(0)
+    pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fillna(0)
+    pen += P_RSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
+    pen += P_NEAR_FAR * np.clip((now_gap - 15) / 15, 0, 1).fillna(0)
+    pen += P_LIQ_LOW * liq_low
+    pen += P_VOL_SPIKE * (volz > 3).astype(float)
 
     score = np.clip(base_score - pen, 0, 100)
 
@@ -648,13 +666,16 @@ def build_global_score(lat):
     x["T1_ROOM%"] = t1_room
     x["SL_ROOM%"] = sl_room
     x["LDY_SCORE"] = score.round(1)
+
     x["_GATE_OK"] = liquidity_gate(
         x["거래대금(억원)"],
         x.get("시장", pd.Series(np.nan, index=x.index))
     ).fillna(False)
 
     if "MA20" in x.columns:
-        x["MA20_GAP"] = ((nz_num(x["종가"]) / nz_num(x["MA20"]) - 1.0) * 100).replace([np.inf, -np.inf], np.nan)
+        x["MA20_GAP"] = (
+            (nz_num(x["종가"]) / nz_num(x["MA20"]) - 1.0) * 100
+        ).replace([np.inf, -np.inf], np.nan)
     else:
         x["MA20_GAP"] = np.nan
 
@@ -663,6 +684,7 @@ def build_global_score(lat):
 
     if "AI_COMMENT" in x.columns:
         x["WHY"] = x["AI_COMMENT"]
+
     return x
 
 # ---------------------------
@@ -833,7 +855,7 @@ with st.sidebar:
 # Telegram send
 # ---------------------------
 if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v6.1] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
+    msg = f"🔥 [LDY v6.2] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
     for i in range(min(5, len(top20))):
         row = top20.iloc[i]
         msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
@@ -860,7 +882,7 @@ with tab1:
     )
     c2.metric(
         "KOSDAQ",
-        f"{kq_stat}",
+        f"{kq_stat}":"",
         f"{kq_diff:.2f}%",
         delta_color="off" if "상승" in kq_stat else "inverse",
     )
@@ -925,7 +947,6 @@ with tab2:
             key="only_gate",
         )
 
-    # 필터 적용
     if use_only_gate:
         base_view = top20.copy()
     else:
@@ -1059,13 +1080,14 @@ with tab2:
 # [개선] 내 자산 (병렬 처리)
 # ---------------------------
 def fetch_current_price(code, name):
+    if not FDR_OK:
+        return code, name, 0
     try:
-        # 최근 데이터만 가볍게 조회
         df = fdr.DataReader(str(code), (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"))
         if df is None or df.empty:
             return code, name, 0
         return code, name, int(df.iloc[-1]['Close'])
-    except:
+    except Exception:
         return code, name, 0
 
 with tab3:
@@ -1081,11 +1103,11 @@ with tab3:
                 except Exception:
                     pass
             
-            # 파싱
             targets = []
             lines = pf_input.strip().split('\n')
             for line in lines:
-                if ":" not in line: continue
+                if ":" not in line:
+                    continue
                 name_input, avg, qty = line.split(':')
                 code = str(name_input).strip()
                 if not code.isdigit():
@@ -1093,7 +1115,6 @@ with tab3:
                 code = str(code).zfill(6)
                 targets.append((code, name_input, float(avg.replace(',', '')), int(qty.replace(',', ''))))
 
-            # 병렬 처리로 시세 조회
             price_map = {}
             with st.spinner('⚡ 실시간 시세를 조회 중입니다...'):
                 with ThreadPoolExecutor(max_workers=10) as executor:
@@ -1102,7 +1123,6 @@ with tab3:
                         c, n, p = future.result()
                         price_map[c] = p
             
-            # 렌더링
             cols_layout = st.columns(3)
             total_buy = 0
             total_eval = 0
@@ -1113,9 +1133,12 @@ with tab3:
                 
                 if cur_price > 0:
                     profit_rate = (cur_price - avg) / avg * 100
-                    if profit_rate > 0: signal = "🟢 수익"
-                    elif profit_rate > -3: signal = "🟡 보합"
-                    else: signal = "🔴 손실"
+                    if profit_rate > 0:
+                        signal = "🟢 수익"
+                    elif profit_rate > -3:
+                        signal = "🟡 보합"
+                    else:
+                        signal = "🔴 손실"
                 else:
                     signal = "❓ 확인불가"
                     profit_rate = 0
