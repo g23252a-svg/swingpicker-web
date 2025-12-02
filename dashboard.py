@@ -882,7 +882,7 @@ with tab1:
     )
     c2.metric(
         "KOSDAQ",
-        f"{kq_stat}":"",
+        f"{kq_stat}",
         f"{kq_diff:.2f}%",
         delta_color="off" if "상승" in kq_stat else "inverse",
     )
