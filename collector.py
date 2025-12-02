@@ -547,7 +547,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1)
 
     # RSI 범위 밖, MACD 기울기 음수
-    pen += P_PSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
+    pen += P_RSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
 
     # 진입 괴리 과도
