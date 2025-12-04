@@ -22,12 +22,23 @@ from pykrx import stock
 from tqdm import tqdm
 import FinanceDataReader as fdr
 
+# 👇 추가
+from time_utils import now_kst, now_utc, KST
+
+def create_user(uid: str, email: str) -> dict:
+    return {
+        "user_id": uid,
+        "email": email,
+        "created_at": now_utc(),      # DB/CSV에는 UTC로 저장
+        "last_login_at": now_utc(),
+    }
+
 # [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 
 # ------------------------------- 설정 -------------------------------
-KST = timezone(timedelta(hours=9))
+
 LOOKBACK_DAYS = 250          # 과거 데이터 조회 일수
 BENCH_LOOKBACK_DAYS = 60     # 벤치마크 상대강도 기준 일수
 TOP_N = 600                  # 거래대금 상위 N개 종목
@@ -44,8 +55,9 @@ P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
 
 # ------------------------------- 유틸 -------------------------------
+# ✅ 새 log 함수
 def log(msg: str) -> None:
-    print(f"[{datetime.now(KST)}] {msg}")
+    print(f"[{now_kst().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -652,13 +664,25 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str) -> None:
             buy = row['추천매수가']
             score = row.get('LDY_SCORE', 0)
             comment = row.get('AI_COMMENT', '')
-            rel60 = row.get('rel_60d_%', np.nan)
+
+            # 6.5: 60일 지수/상대강도 상세 표시용
+            rel60 = row.get('rel_60d_%', np.nan)   # 종목 - 지수 (α)
+            ret60 = row.get('ret_60d_%', np.nan)   # 종목 60일 수익률
+            idx60 = row.get('idx_60d_%', np.nan)   # 지수 60일 수익률
 
             msg += f"{rank}. {name} ({code})\n"
             msg += f"   🌡점수: {score:.1f}점\n"
             msg += f"   🎯전략: {route}\n"
+
+            # 👉 60일 상대강도/수익률 구조적으로 표시
             if not pd.isna(rel60):
-                msg += f"   📊60일 α: {rel60:+.2f}%\n"
+                msg += f"   📊60일 상대강도(α): {rel60:+.2f}%\n"
+                if not pd.isna(ret60) and not pd.isna(idx60):
+                    msg += (
+                        f"      · 종목: {ret60:+.2f}%  /  "
+                        f"지수: {idx60:+.2f}%\n"
+                    )
+
             msg += f"   💬AI: {comment}\n"
             msg += f"   🔵매수: {buy:,}\n"
             msg += f"   🔴손절: {row['손절가']:,} / 🟢목표: {row['추천매도가1']:,}\n\n"
@@ -923,6 +947,14 @@ def main() -> None:
     df_out["시총기준일"] = mcap_ymd
     df_out["벤치_60d_KOSPI_%"] = bench_ret_60.get("KOSPI", np.nan)
     df_out["벤치_60d_KOSDAQ_%"] = bench_ret_60.get("KOSDAQ", np.nan)
+
+    # 6.5: 60일 수익률/상대강도 한국어 컬럼 alias
+    if "ret_60d_%" in df_out.columns:
+        df_out["60일_종목수익률_%"] = df_out["ret_60d_%"]
+    if "idx_60d_%" in df_out.columns:
+        df_out["60일_지수수익률_%"] = df_out["idx_60d_%"]
+    if "rel_60d_%" in df_out.columns:
+        df_out["60일_초과수익(α)_%"] = df_out["rel_60d_%"]    
 
     ensure_dir(OUT_DIR)
     date_tag = datetime.now(KST).strftime("%Y%m%d")
