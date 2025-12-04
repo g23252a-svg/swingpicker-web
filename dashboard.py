@@ -122,7 +122,7 @@ BETA_PRIME_USERS = {
     "coolguyhaeng@naver.com",
     "kiljung87@nate.com",
     "coiil@naver.com",
-    "user4@example.com",
+    "quartzk123@gmail.com",
     "user5@example.com",
 }
 
