@@ -851,22 +851,6 @@ with st.sidebar:
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
 
-# ---------------------------
-# Telegram send
-# ---------------------------
-if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v6.2] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
-    for i in range(min(5, len(top20))):
-        row = top20.iloc[i]
-        msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
-        msg += f"   매수: {int(row.get('추천매수가',0)):,} / 손절: {int(row.get('손절가',0)):,}\n\n"
-    ok, res = send_telegram_msg(tg_token, tg_chat_id, msg)
-    if ok:
-        st.toast("전송 완료!", icon="✅")
-    else:
-        st.error(f"전송 실패: {res}")
-
-
     # 5) 관리자 전용: 회원 권한 관리
     if auth_status == "admin":
         st.divider()
@@ -876,8 +860,6 @@ if send_btn and tg_token and tg_chat_id:
         if not users:
             st.info("등록된 회원이 없습니다.")
         else:
-            # 간단 테이블로 보여주기
-            import pandas as pd
             df_users = pd.DataFrame(
                 [
                     {
@@ -912,7 +894,23 @@ if send_btn and tg_token and tg_chat_id:
                     st.error("권한 변경에 실패했습니다.")
 
 
+# ---------------------------
+# Telegram send
+# ---------------------------
+if send_btn and tg_token and tg_chat_id:
+    msg = f"🔥 [LDY v6.2] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
+    for i in range(min(5, len(top20))):
+        row = top20.iloc[i]
+        msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
+        msg += f"   매수: {int(row.get('추천매수가',0)):,} / 손절: {int(row.get('손절가',0)):,}\n\n"
+    ok, res = send_telegram_msg(tg_token, tg_chat_id, msg)
+    if ok:
+        st.toast("전송 완료!", icon="✅")
+    else:
+        st.error(f"전송 실패: {res}")
 
+
+  
 # ---------------------------
 # 메인 UI
 # ---------------------------
