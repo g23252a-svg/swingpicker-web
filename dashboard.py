@@ -922,10 +922,7 @@ top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 # ---------------------------
 from auth_user import render_auth_box, list_users, update_user_role
 
-# ---------------------------
-# Sidebar (Auth / Portfolio)
-# ---------------------------
-from auth_user import render_auth_box, list_users, update_user_role
+
 
 # ---------------------------
 # Sidebar (Auth / Portfolio / Subscription)
@@ -992,6 +989,9 @@ with st.sidebar:
         "- 관리자가 입금 확인 후 **1개월 단위로 권한을 부여/연장**합니다."
     )
 
+        BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-00-0000000")
+        BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
+    
     # (선택) 이미 로그인한 유저에게는 내 만료일 다시 한 번 보여주기
     if user and expire_str:
         st.info(f"현재 구독 만료 예정일: **{expire_str}**")
@@ -1094,54 +1094,12 @@ with st.sidebar:
                 else:
                     st.error("권한 변경에 실패했습니다.")
 
-    # 5) 관리자 전용: 회원 권한 관리
-    if auth_status == "admin":
-        st.divider()
-        st.subheader("👑 회원 권한 관리 (Admin)")
-
-        users = list_users()
-        if not users:
-            st.info("등록된 회원이 없습니다.")
-        else:
-            df_users = pd.DataFrame(
-                [
-                    {
-                        "이메일": u.get("login_id"),
-                        "닉네임": u.get("nickname"),
-                        "권한": u.get("role"),
-                        "가입일": u.get("created_at"),
-                        "마지막 로그인": u.get("last_login", ""),
-                    }
-                    for u in users
-                ]
-            )
-            st.dataframe(df_users, use_container_width=True, height=200)
-
-            target_email = st.selectbox(
-                "권한을 변경할 회원 선택",
-                options=[u["login_id"] for u in users],
-                key="admin_target_user",
-            )
-            new_role = st.selectbox(
-                "새 권한",
-                options=["free", "pro", "prime", "admin"],
-                index=1,
-                key="admin_new_role",
-            )
-
-            if st.button("권한 변경 적용", key="btn_update_role"):
-                ok = update_user_role(target_email, new_role)
-                if ok:
-                    st.success(f"{target_email} → {new_role} 으로 변경되었습니다. (새로고침 후 반영)")
-                else:
-                    st.error("권한 변경에 실패했습니다.")
-
-
+   
 # ---------------------------
 # Telegram send
 # ---------------------------
 if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v6.2] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
+    msg = f"🔥 [LDY v6.3] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
     for i in range(min(5, len(top20))):
         row = top20.iloc[i]
         msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
