@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.2 (Enhanced Score)
+LDY Pro Trader v6.3 (Enhanced Score)
 - 개선: 스코어링 로직을 Collector v6.4 수준으로 정교화
   * 5일/10일 과열 패널티
   * 진입 괴리, 유동성 저하, 거래량 스파이크 패널티
