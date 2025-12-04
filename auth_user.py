@@ -235,7 +235,7 @@ def render_auth_box():
             if reg_pw1 != reg_pw2:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
             else:
-                ok, msg, new_user = (
+                ok, msg, new_user = register_user(
                     reg_email, reg_pw1, reg_nick, reg_code
                 )
                 if ok:
