@@ -535,21 +535,25 @@ def now_kst() -> datetime:
 
 def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
     """
-    DB/auth_user 등에 UTC로 저장된 created_at / last_login 같은 값을
-    KST 문자열로 변환해서 화면에 표시하기 위한 함수.
-    - value: str, datetime, pandas.Timestamp 모두 허용
+    DB/auth_user 등에 저장된 시간을 KST 문자열로 변환
+    - 타임존 없는 값: 기존에 KST로 저장되었다고 가정 → KST로 localize만 함 (시간 안 바뀜)
+    - 타임존 있는 값: 해당 타임존에서 KST로 convert
     """
     if value is None or value == "" or value == "NaT":
         return ""
     ts = pd.to_datetime(value, errors="coerce")
     if pd.isna(ts):
         return ""
-    # tz 정보가 없으면 → UTC로 가정
+
     if ts.tzinfo is None:
-        ts = ts.tz_localize("UTC")
+        # 🔹 과거 users_db.json에 저장된 "2025-12-04 18:23:11" 같은 값은
+        # 이미 KST 기준이라고 보고, 그대로 KST로만 붙여서 사용
+        ts = ts.tz_localize(KST)
     else:
-        ts = ts.tz_convert("UTC")
-    return ts.tz_convert(KST).strftime(fmt)
+        # 🔹 새로운 ISO(UTC 포함) 값은 지정된 tz → KST로 변환
+        ts = ts.tz_convert(KST)
+
+    return ts.strftime(fmt)
 
 # ---------------------------
 # [개선] 차트 시각화 (거래량 추가)
