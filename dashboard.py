@@ -866,6 +866,53 @@ if send_btn and tg_token and tg_chat_id:
     else:
         st.error(f"전송 실패: {res}")
 
+
+    # 5) 관리자 전용: 회원 권한 관리
+    if auth_status == "admin":
+        st.divider()
+        st.subheader("👑 회원 권한 관리 (Admin)")
+
+        users = list_users()
+        if not users:
+            st.info("등록된 회원이 없습니다.")
+        else:
+            # 간단 테이블로 보여주기
+            import pandas as pd
+            df_users = pd.DataFrame(
+                [
+                    {
+                        "이메일": u.get("login_id"),
+                        "닉네임": u.get("nickname"),
+                        "권한": u.get("role"),
+                        "가입일": u.get("created_at"),
+                        "마지막 로그인": u.get("last_login", ""),
+                    }
+                    for u in users
+                ]
+            )
+            st.dataframe(df_users, use_container_width=True, height=200)
+
+            target_email = st.selectbox(
+                "권한을 변경할 회원 선택",
+                options=[u["login_id"] for u in users],
+                key="admin_target_user",
+            )
+            new_role = st.selectbox(
+                "새 권한",
+                options=["free", "pro", "prime", "admin"],
+                index=1,
+                key="admin_new_role",
+            )
+
+            if st.button("권한 변경 적용", key="btn_update_role"):
+                ok = update_user_role(target_email, new_role)
+                if ok:
+                    st.success(f"{target_email} → {new_role} 으로 변경되었습니다. (새로고침 후 반영)")
+                else:
+                    st.error("권한 변경에 실패했습니다.")
+
+
+
 # ---------------------------
 # 메인 UI
 # ---------------------------
