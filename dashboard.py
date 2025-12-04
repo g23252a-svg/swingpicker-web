@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.3 (Enhanced Score)
+LDY Pro Trader v6.3 (Subscription Ready)
 - 개선: 스코어링 로직을 Collector v6.4 수준으로 정교화
-  * 5일/10일 과열 패널티
-  * 진입 괴리, 유동성 저하, 거래량 스파이크 패널티
-  * RSI 적정 구간 상수화 (RSI_LOW / RSI_HIGH)
 - 개선: 포트폴리오 분석 병렬 처리 (속도 향상)
 - 개선: 차트에 거래량(Volume) 보조 지표 추가
 - 개선: 데이터 로딩 상태 시각화 (st.status)
 - 개선: 보안 설정 (st.secrets 우선 지원)
+- 추가: Pro / Prime 유료 구독 + 1개월 만료일 관리
 """
 
 import os, io, math, json, requests, logging
@@ -53,7 +51,103 @@ def save_inquiry_db(db):
     with open(INQUIRY_DB_PATH, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
 
+# ---------------------------
+# 구독/권한(만료일) 관리
+# ---------------------------
+SUBS_DB_PATH = os.path.join("data", "subscriptions_db.json")
 
+def load_subs_db():
+    """구독 DB 로드"""
+    os.makedirs("data", exist_ok=True)
+    if not os.path.exists(SUBS_DB_PATH):
+        return {"subs": {}}
+    try:
+        with open(SUBS_DB_PATH, "r", encoding="utf-8") as f:
+            db = json.load(f)
+        if "subs" not in db:
+            db["subs"] = {}
+        return db
+    except Exception:
+        return {"subs": {}}
+
+def save_subs_db(db):
+    """구독 DB 저장"""
+    os.makedirs("data", exist_ok=True)
+    with open(SUBS_DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(db, f, ensure_ascii=False, indent=2)
+
+def set_subscription(email, role):
+    """
+    관리자가 권한 변경할 때 1개월 만료일 저장
+    - pro / prime : 오늘 기준 +30일
+    - free / admin : 구독 만료 처리
+    """
+    email = (email or "").strip()
+    if not email:
+        return
+
+    db = load_subs_db()
+    subs = db.get("subs", {})
+    today = datetime.now().date()
+
+    if role in ["pro", "prime"]:
+        expire = today + timedelta(days=30)
+        subs[email] = {
+            "role": role,
+            "paid_at": today.strftime("%Y-%m-%d"),
+            "expire_at": expire.strftime("%Y-%m-%d"),
+        }
+    else:
+        # free / admin 등으로 바뀌면 구독 종료로 간주
+        if email in subs:
+            subs[email]["role"] = role
+            subs[email]["expire_at"] = today.strftime("%Y-%m-%d")
+
+    db["subs"] = subs
+    save_subs_db(db)
+
+def get_subscription(email):
+    """이메일 기준 구독 정보 조회"""
+    email = (email or "").strip()
+    if not email:
+        return None
+    db = load_subs_db()
+    return db.get("subs", {}).get(email)
+
+def sync_user_role_with_subscription(user):
+    """
+    로그인 시마다 호출해서
+    - 만료일 지난 Pro/Prime → free 자동 다운그레이드
+    - 유효한 구독이면 subs.role 기준으로 auth_status 리턴
+    """
+    if not user:
+        return "free", None
+
+    email = user.get("login_id", "")
+    base_role = user.get("role", "free")
+    sub = get_subscription(email)
+    if not sub:
+        # 구독 DB에 기록이 없는 경우, 기존 auth_user 역할 그대로 사용
+        return base_role, None
+
+    exp_str = sub.get("expire_at")
+    try:
+        exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+    except Exception:
+        return base_role, exp_str
+
+    today = datetime.now().date()
+    # 만료일 지나면 free로 내려버림
+    if today > exp_date and base_role in ["pro", "prime"]:
+        try:
+            update_user_role(email, "free")
+        except Exception:
+            logger.exception("auto downgrade failed")
+        set_subscription(email, "free")
+        return "free", exp_str
+
+    # 아직 유효하면 구독에 저장된 role 기준으로 권한 사용
+    return sub.get("role", base_role), exp_str
 
 # 1. 라이브러리 로드 (외부 라이브러리 실패에 대비)
 try:
@@ -71,9 +165,9 @@ except Exception as e:
     logger.info("pykrx not available: %s", e)
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v6.2", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v6.2 (Enhanced Score)")
-st.caption("AI Quant Analysis & Portfolio Manager — Scoring & Speed Upgraded")
+st.set_page_config(page_title="LDY Pro Trader v6.3", layout="wide", page_icon="💎")
+st.title("🏆 LDY Pro Trader v6.3 (Enhanced Score + Subscription)")
+st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
 
 # 🔻 요기부터 추가
 st.warning(
@@ -831,25 +925,34 @@ from auth_user import render_auth_box, list_users, update_user_role
 # ---------------------------
 # Sidebar (Auth / Portfolio)
 # ---------------------------
+from auth_user import render_auth_box, list_users, update_user_role
+
+# ---------------------------
+# Sidebar (Auth / Portfolio / Subscription)
+# ---------------------------
 with st.sidebar:
     # 1) 계정 기반 로그인 / 회원가입
     user = render_auth_box()
 
-    # 2) 유저 등급에 따라 auth_status 계산
+    # 2) 구독 만료일 기반으로 auth_status 동기화
     if user is None:
         auth_status = "free"
+        expire_str = None
         st.caption("현재 상태: 🔒 Free (비로그인)")
     else:
-        auth_status = user.get("role", "free")
-        st.caption(f"현재 상태: **{auth_status.upper()}**")
+        auth_status, expire_str = sync_user_role_with_subscription(user)
+        if expire_str:
+            st.caption(f"현재 상태: **{auth_status.upper()}** (만료일: {expire_str})")
+        else:
+            st.caption(f"현재 상태: **{auth_status.upper()}**")
 
     st.divider()
     st.subheader("💎 프리미엄 구독 안내")
 
-    # 👉 요금제 상수 (6.3에서 재사용할 거라면 위쪽 전역에 빼도 됨)
     PRICE_PRO = 19000
     PRICE_PRIME = 39000
 
+    # 2-1) 요금제 설명
     with st.container():
         st.markdown("### 🌱 **Free (무료)**")
         st.markdown(
@@ -880,13 +983,26 @@ with st.sidebar:
             "- ✅ 향후 고급 리포트 / 기능 우선 적용"
         )
 
+    # 2-2) 결제(입금) 안내 — 카카오뱅크 계좌 노출
+    st.markdown("#### 💳 결제(입금) 안내")
+    st.markdown(
+        f"- 입금계좌: **{BANK_ACCOUNT}**  \n"
+        f"- 예금주: **{BANK_HOLDER}**  \n"
+        "- 입금 후 카카오톡 채널 또는 문의 게시판에 **입금자명 / 이메일 / 희망 요금제(Pro/Prime)**를 남겨 주세요.  \n"
+        "- 관리자가 입금 확인 후 **1개월 단위로 권한을 부여/연장**합니다."
+    )
+
+    # (선택) 이미 로그인한 유저에게는 내 만료일 다시 한 번 보여주기
+    if user and expire_str:
+        st.info(f"현재 구독 만료 예정일: **{expire_str}**")
+
     kakao_url = "https://open.kakao.com/o/soKqY04h"
     try:
-        st.link_button("👉 구독 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
+        st.link_button("👉 구독/입금 확인 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
     except Exception:
-        st.markdown(f"[👉 구독 문의 (카톡)]({kakao_url})")
+        st.markdown(f"[👉 구독/입금 확인 문의 (카톡)]({kakao_url})")
 
-    # 3) Pro 이상만 포트폴리오 기능 노출 (기존 로직 그대로)
+    # 3) Pro 이상만 포트폴리오 기능 노출
     if auth_status in ["pro", "prime", "admin"]:
         st.divider()
         st.subheader("💼 내 자산 관리")
@@ -903,7 +1019,7 @@ with st.sidebar:
     else:
         pf_input = ""  # 밑에서 참조하니까 빈값으로 정의
 
-    # 4) Prime 이상 텔레그램 (기존 로직 유지)
+    # 4) Prime 이상 텔레그램
     send_btn = False
     tg_token, tg_chat_id = "", ""
     if auth_status in ["prime", "admin"]:
@@ -911,6 +1027,72 @@ with st.sidebar:
             tg_token = st.text_input("Token", type="password")
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
+
+    # 5) 관리자 전용: 회원 권한 + 구독 만료일 관리
+    if auth_status == "admin":
+        st.divider()
+        st.subheader("👑 회원 권한 / 구독 관리 (Admin)")
+
+        users = list_users()
+        if not users:
+            st.info("등록된 회원이 없습니다.")
+        else:
+            # 구독 DB 로드해서 만료일 / 잔여일수 같이 보여주기
+            subs_db = load_subs_db()
+            subs = subs_db.get("subs", {})
+
+            rows = []
+            today = datetime.now().date()
+            for u in users:
+                email = u.get("login_id")
+                sub = subs.get(email, {})
+                exp_str = sub.get("expire_at", "")
+                days_left = ""
+                if exp_str:
+                    try:
+                        d_exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                        days_left = (d_exp - today).days
+                    except Exception:
+                        days_left = ""
+                rows.append({
+                    "이메일": email,
+                    "닉네임": u.get("nickname"),
+                    "권한(auth_user)": u.get("role"),
+                    "구독 역할(sub)": sub.get("role", ""),
+                    "만료일": exp_str,
+                    "잔여일수": days_left,
+                    "가입일": u.get("created_at"),
+                    "마지막 로그인": u.get("last_login", ""),
+                })
+
+            df_users = pd.DataFrame(rows)
+            st.dataframe(df_users, use_container_width=True, height=230)
+
+            target_email = st.selectbox(
+                "권한을 변경할 회원 선택",
+                options=[u["이메일"] for u in rows],
+                key="admin_target_user",
+            )
+            new_role = st.selectbox(
+                "새 권한",
+                options=["free", "pro", "prime", "admin"],
+                index=1,
+                key="admin_new_role",
+            )
+
+            if st.button("권한 변경 적용", key="btn_update_role"):
+                ok = update_user_role(target_email, new_role)
+                if ok:
+                    # 👉 여기서 1개월 만료일 세팅
+                    set_subscription(target_email, new_role)
+                    msg = f"{target_email} → {new_role} 으로 변경되었습니다."
+                    if new_role in ["pro", "prime"]:
+                        sub_info = get_subscription(target_email)
+                        if sub_info:
+                            msg += f" (만료일: {sub_info.get('expire_at')})"
+                    st.success(msg + " (새로고침 후 반영)")
+                else:
+                    st.error("권한 변경에 실패했습니다.")
 
     # 5) 관리자 전용: 회원 권한 관리
     if auth_status == "admin":
