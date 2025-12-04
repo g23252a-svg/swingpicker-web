@@ -120,7 +120,7 @@ def get_subscription(email):
 # 여기 이메일 5개 넣으면, 이 계정은 만료일/구독DB와 무관하게 항상 PRIME 취급됩니다.
 BETA_PRIME_USERS = {
     "coolguyhaeng@naver.com",
-    "user2@example.com",
+    "kiljung87@nate.com",
     "user3@example.com",
     "user4@example.com",
     "user5@example.com",
