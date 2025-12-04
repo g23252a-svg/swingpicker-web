@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.4
+LDY Pro Trader Collector v6.5
 - 업종 매핑: KIND(KRX) + FDR + Fallback + Override(사용자 CSV) 병합
 - ROUTE: BRK / Watch / MR / PULL 다단계 분류 유지
-- 5일/10일 수익률 계산, AI Narrative, Telegram 유지
+- 5일/10일 수익률 + 60일 지수/상대강도 계산
+- AI Narrative, Telegram 유지
 - 안정성/성능, 스코어링, 구조, 출력 메타데이터 개선
 """
 
@@ -28,6 +29,7 @@ TG_ID = os.environ.get("TG_ID")
 # ------------------------------- 설정 -------------------------------
 KST = timezone(timedelta(hours=9))
 LOOKBACK_DAYS = 250          # 과거 데이터 조회 일수
+BENCH_LOOKBACK_DAYS = 60     # 벤치마크 상대강도 기준 일수
 TOP_N = 600                  # 거래대금 상위 N개 종목
 MIN_TURNOVER_EOK = 50        # 최소 거래대금 (억원)
 MIN_MCAP_EOK = 1000          # 최소 시총 (억원)
@@ -332,6 +334,46 @@ def build_sector_map() -> Dict[str, str]:
     log(f"ℹ️ 최종 업종 맵 크기: {len(sector_map)}개 (FDR+KIND+fallback+override)")
     return sector_map
 
+# ------------------------------- 벤치마크 (지수 60일 수익률) -------------------------------
+def get_index_60d_returns(trade_ymd: str, lookback: int = BENCH_LOOKBACK_DAYS) -> Dict[str, float]:
+    """
+    KOSPI(KS11), KOSDAQ(KQ11) 60일 수익률 계산.
+    - trade_ymd 기준으로 lookback+여유일 만큼 과거부터 가져와서
+      마지막 종가 / (lookback+1 번째 종가) - 1 로 계산.
+    """
+    try:
+        end = datetime.strptime(trade_ymd, "%Y%m%d").date()
+    except Exception:
+        return {}
+
+    start = end - timedelta(days=lookback * 2)  # 비영업일 감안 여유
+
+    res: Dict[str, float] = {}
+    index_map = {
+        "KOSPI": "KS11",
+        "KOSDAQ": "KQ11",
+    }
+
+    for market, symbol in index_map.items():
+        try:
+            df = fdr.DataReader(symbol, start, end)
+            if df is None or df.empty or "Close" not in df.columns:
+                continue
+            close = df["Close"].dropna()
+            if len(close) <= lookback:
+                continue
+            last = float(close.iloc[-1])
+            base = float(close.iloc[-(lookback + 1)])
+            if base <= 0:
+                continue
+            ret = (last / base - 1.0) * 100
+            res[market] = round(ret, 2)
+        except Exception as e:
+            log(f"⚠️ 벤치마크({market}, {symbol}) 60일 수익률 계산 실패: {e}")
+            continue
+
+    return res
+
 # ------------------------------- 기타 수집 로직 -------------------------------
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
@@ -487,6 +529,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     r5 = nz_num(x["ret_5d_%"])
     r10 = nz_num(x["ret_10d_%"])
     ebs = nz_num(x["EBS"]).fillna(0)
+    rel60 = nz_num(x.get("rel_60d_%", 0.0))  # 6.5: 지수 대비 60일 상대강도
 
     # RR, 진입 괴리, 손절/목표 여유
     rr_den = (entry - stop)
@@ -510,7 +553,18 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     ers_norm = np.clip(ers_bits / 3.0, 0, 1).fillna(0)
     slope_pos_norm = pct_norm_pos(slope, q=90, floor=1.0).fillna(0)
     mom_mid_norm = pct_norm_pos(r10.clip(lower=0), q=90, floor=1.0).fillna(0)
-    mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm + 0.2 * mom_mid_norm, 0, 1).fillna(0)
+
+    # 6.5: 지수 대비 60일 상대강도(양수만 반영)
+    rel60_pos_norm = pct_norm_pos(rel60.clip(lower=0), q=90, floor=1.0).fillna(0)
+
+    mom_norm = np.clip(
+        0.45 * ers_norm
+        + 0.25 * slope_pos_norm
+        + 0.20 * mom_mid_norm
+        + 0.10 * rel60_pos_norm,
+        0,
+        1
+    ).fillna(0)
 
     # 유동성
     if turn.notna().any():
@@ -587,7 +641,7 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str) -> None:
     try:
         top5 = df.head(5).reset_index(drop=True)
         trade_date = datetime.strptime(trade_ymd, "%Y%m%d").strftime('%Y-%m-%d')
-        msg = f"🔥 [LDY v6.4] 추천 Top 5 ({trade_date})\n"
+        msg = f"🔥 [LDY v6.5] 추천 Top 5 ({trade_date})\n"
         msg += "-" * 30 + "\n\n"
 
         for i, row in top5.iterrows():
@@ -598,10 +652,13 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str) -> None:
             buy = row['추천매수가']
             score = row.get('LDY_SCORE', 0)
             comment = row.get('AI_COMMENT', '')
+            rel60 = row.get('rel_60d_%', np.nan)
 
             msg += f"{rank}. {name} ({code})\n"
             msg += f"   🌡점수: {score:.1f}점\n"
             msg += f"   🎯전략: {route}\n"
+            if not pd.isna(rel60):
+                msg += f"   📊60일 α: {rel60:+.2f}%\n"
             msg += f"   💬AI: {comment}\n"
             msg += f"   🔵매수: {buy:,}\n"
             msg += f"   🔴손절: {row['손절가']:,} / 🟢목표: {row['추천매도가1']:,}\n\n"
@@ -625,6 +682,7 @@ def analyze_ticker(
     kosdaq_set: set,
     name_map: Dict[str, str],
     sector_map: Dict[str, str],
+    bench_ret_60: Dict[str, float],
 ) -> Optional[Dict[str, Any]]:
     """
     단일 티커에 대한 지표 계산 및 추천 라인 생성
@@ -676,6 +734,12 @@ def analyze_ticker(
         ret_10 = (last_c / c.iloc[-11] - 1.0) * 100
     else:
         ret_10 = 0.0
+
+    # 60일 수익률 (개별 종목)
+    if len(c) >= BENCH_LOOKBACK_DAYS + 1:
+        ret_60 = (last_c / c.iloc[-(BENCH_LOOKBACK_DAYS + 1)] - 1.0) * 100
+    else:
+        ret_60 = 0.0
 
     tv_row = top_df.loc[top_df["종목코드"] == code6, "거래대금(원)"]
     if tv_row.empty:
@@ -750,8 +814,13 @@ def analyze_ticker(
     sector = sector_map.get(code6, "기타")
     name = name_map.get(code6, code6)
 
+    # 시장 구분 및 지수 60일 수익률 매핑
+    market = "KOSPI" if t in kospi_set else "KOSDAQ"
+    idx_60 = float(bench_ret_60.get(market, 0.0))
+    rel_60 = ret_60 - idx_60
+
     row: Dict[str, Any] = {
-        "시장": "KOSPI" if t in kospi_set else "KOSDAQ",
+        "시장": market,
         "종목명": name,
         "종목코드": code6,
         "업종": sector,
@@ -766,6 +835,9 @@ def analyze_ticker(
         "거래강도": round(float(vol_z), 2),
         "ret_5d_%": round(float(ret_5), 2),
         "ret_10d_%": round(float(ret_10), 2),
+        "ret_60d_%": round(float(ret_60), 2),
+        "idx_60d_%": round(float(idx_60), 2),
+        "rel_60d_%": round(float(rel_60), 2),
         "EBS": int(score),
         "통과": "★" if score >= PASS_EBS else "",
         "근거": ", ".join(reason),
@@ -779,10 +851,21 @@ def analyze_ticker(
 
 # ------------------------------- 메인 실행 -------------------------------
 def main() -> None:
-    log("🚀 LDY Collector v6.4 시작...")
+    log("🚀 LDY Collector v6.5 시작...")
     mcap_map, mcap_ymd = build_mcap_map()
     trade_ymd = resolve_trade_date()
     log(f"📅 거래 기준일: {trade_ymd} (mcap ref: {mcap_ymd})")
+
+    # 지수 60일 수익률 계산
+    bench_ret_60 = get_index_60d_returns(trade_ymd, BENCH_LOOKBACK_DAYS)
+    def _fmt(v: Optional[float]) -> str:
+        return f"{v:.2f}%" if isinstance(v, (int, float)) else "N/A"
+
+    log(
+        "📈 60일 기준 지수 수익률 - "
+        f"KOSPI: {_fmt(bench_ret_60.get('KOSPI'))}, "
+        f"KOSDAQ: {_fmt(bench_ret_60.get('KOSDAQ'))}"
+    )
 
     top_df = pick_top_by_trading_value(trade_ymd, TOP_N)
 
@@ -813,7 +896,8 @@ def main() -> None:
         try:
             row = analyze_ticker(
                 t, start_s, end_s, top_df, mcap_map,
-                kospi_set, kosdaq_set, name_map, sector_map
+                kospi_set, kosdaq_set, name_map, sector_map,
+                bench_ret_60
             )
             if row is not None:
                 rows.append(row)
@@ -837,6 +921,8 @@ def main() -> None:
     # 메타데이터 컬럼 추가
     df_out["기준일"] = trade_ymd
     df_out["시총기준일"] = mcap_ymd
+    df_out["벤치_60d_KOSPI_%"] = bench_ret_60.get("KOSPI", np.nan)
+    df_out["벤치_60d_KOSDAQ_%"] = bench_ret_60.get("KOSDAQ", np.nan)
 
     ensure_dir(OUT_DIR)
     date_tag = datetime.now(KST).strftime("%Y%m%d")
