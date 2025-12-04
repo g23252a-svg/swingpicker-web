@@ -1127,7 +1127,7 @@ with st.sidebar:
                     "만료일": exp_str,
                     "잔여일수": days_left,
                     "가입일": u.get("created_at"),
-                    "마지막 로그인": u.get("last_login", ""),
+                    "마지막 로그인": to_kst_str(u.get("last_login")),
                 })
 
             df_users = pd.DataFrame(rows)
