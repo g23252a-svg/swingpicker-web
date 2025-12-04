@@ -989,8 +989,8 @@ with st.sidebar:
         "- 관리자가 입금 확인 후 **1개월 단위로 권한을 부여/연장**합니다."
     )
 
-        BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-00-0000000")
-        BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
+BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-00-0000000")
+BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
     
     # (선택) 이미 로그인한 유저에게는 내 만료일 다시 한 번 보여주기
     if user and expire_str:
