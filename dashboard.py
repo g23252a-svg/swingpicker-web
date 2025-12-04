@@ -28,6 +28,33 @@ from plotly.subplots import make_subplots
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("ldy")
 
+# ---------------------------
+# 문의게시판 저장소 설정
+# ---------------------------
+INQUIRY_DB_PATH = os.path.join("data", "inquiries_db.json")
+
+def load_inquiry_db():
+    """문의글 DB 로드"""
+    os.makedirs("data", exist_ok=True)
+    if not os.path.exists(INQUIRY_DB_PATH):
+        return {"inquiries": []}
+    try:
+        with open(INQUIRY_DB_PATH, "r", encoding="utf-8") as f:
+            db = json.load(f)
+        if "inquiries" not in db:
+            db["inquiries"] = []
+        return db
+    except Exception:
+        return {"inquiries": []}
+
+def save_inquiry_db(db):
+    """문의글 DB 저장"""
+    os.makedirs("data", exist_ok=True)
+    with open(INQUIRY_DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(db, f, ensure_ascii=False, indent=2)
+
+
+
 # 1. 라이브러리 로드 (외부 라이브러리 실패에 대비)
 try:
     import FinanceDataReader as fdr
@@ -47,6 +74,15 @@ except Exception as e:
 st.set_page_config(page_title="LDY Pro Trader v6.2", layout="wide", page_icon="💎")
 st.title("🏆 LDY Pro Trader v6.2 (Enhanced Score)")
 st.caption("AI Quant Analysis & Portfolio Manager — Scoring & Speed Upgraded")
+
+# 🔻 요기부터 추가
+st.warning(
+    "⚠️ 투자 책임 안내\n\n"
+    "본 서비스는 교육 및 참고용 정보를 제공하기 위한 도구일 뿐입니다.\n"
+    "실제 매수·매도 등 **최종 투자 판단과 그에 따른 손익은 전적으로 이용자 본인의 책임**입니다.\n\n"
+    "한 줄 요약: **투자는 전적으로 니 책임이다.**"
+)
+# 🔺 여기까지
 
 # 3. 설정 관리 (Secrets -> Env -> Default 순서)
 def get_conf(key, default_val):
@@ -914,7 +950,9 @@ if send_btn and tg_token and tg_chat_id:
 # ---------------------------
 # 메인 UI
 # ---------------------------
-tab1, tab2, tab3 = st.tabs(["📊 시장 (Market)", "🔭 종목 분석", "💼 내 자산"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["📊 시장 (Market)", "🔭 종목 분석", "💼 내 자산", "📮 문의 게시판"]
+)
 
 with tab1:
     kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
@@ -1217,3 +1255,72 @@ with tab3:
             st.error(f"분석 실패: {e}")
     else:
         st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
+
+
+with tab4:
+    st.subheader("📮 문의 게시판")
+
+    # 현재 로그인 유저 정보 (없을 수도 있음)
+    current_user = None
+    try:
+        current_user = user  # sidebar에서 render_auth_box() 결과
+    except NameError:
+        current_user = None
+
+    default_email = ""
+    default_nick = ""
+    if current_user:
+        default_email = current_user.get("login_id", "")
+        default_nick = current_user.get("nickname", "")
+
+    st.markdown("#### ✏️ 문의 작성")
+
+    with st.form("inquiry_form"):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            nickname = st.text_input("닉네임", value=default_nick, placeholder="닉네임 또는 이름")
+        with col_b:
+            email = st.text_input("이메일 (선택)", value=default_email, placeholder="답변 받을 이메일 (선택)")
+
+        title = st.text_input("제목", placeholder="문의 제목을 입력해 주세요.")
+        content = st.text_area("내용", placeholder="사이트 사용 관련 문의를 자유롭게 남겨 주세요.", height=150)
+
+        submitted = st.form_submit_button("💌 문의 등록")
+
+    if submitted:
+        if not title.strip() or not content.strip():
+            st.error("제목과 내용을 모두 입력해 주세요.")
+        else:
+            db = load_inquiry_db()
+            inq_list = db.get("inquiries", [])
+
+            inq_list.append({
+                "title": title.strip(),
+                "content": content.strip(),
+                "nickname": nickname.strip() or "익명",
+                "email": email.strip(),
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            db["inquiries"] = inq_list
+            save_inquiry_db(db)
+            st.success("문의가 등록되었습니다. 가능한 한 빠르게 확인하겠습니다. 🙌")
+
+    st.markdown("---")
+    st.markdown("#### 📂 최근 문의 내역")
+
+    db = load_inquiry_db()
+    inquiries = db.get("inquiries", [])
+
+    if not inquiries:
+        st.info("아직 등록된 문의가 없습니다.")
+    else:
+        # 최근 글이 위로 오도록 역순 정렬
+        for item in reversed(inquiries[-50:]):  # 최근 50개까지만 표시
+            box = st.container(border=True)
+            with box:
+                st.markdown(f"**제목:** {item.get('title', '-')}")
+                meta = f"작성자: {item.get('nickname','익명')} · 작성일: {item.get('created_at','-')}"
+                if item.get("email"):
+                    meta += f" · 이메일: {item.get('email')}"
+                st.caption(meta)
+                st.markdown(item.get("content", "").replace("\n", "  \n"))
