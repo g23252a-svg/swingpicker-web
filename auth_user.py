@@ -94,7 +94,7 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
 
     salt = _create_salt(email)
     pw_hash = _hash_password(password, salt)
-    now_str = _now_utc_str()  # 🔹 가입/최초 로그인 시각을 UTC로 저장
+    now_utc = datetime.now(timezone.utc).isoformat()
 
     users[email] = {
         "login_id": email,
@@ -102,8 +102,8 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
         "role": role,
         "salt": salt,
         "password_hash": pw_hash,
-        "created_at": now_str,   # UTC ISO 문자열
-        "last_login": now_str,   # 가입 시점 = 첫 로그인 시점
+        "created_at": now_utc,
+        "last_login": now_utc,   # 가입 시점 = 첫 로그인 시점
     }
 
     db["users"] = users
@@ -235,7 +235,7 @@ def render_auth_box():
             if reg_pw1 != reg_pw2:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
             else:
-                ok, msg, new_user = register_user(
+                ok, msg, new_user = (
                     reg_email, reg_pw1, reg_nick, reg_code
                 )
                 if ok:
