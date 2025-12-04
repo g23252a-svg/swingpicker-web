@@ -848,15 +848,39 @@ with st.sidebar:
     st.divider()
     st.subheader("💎 프리미엄 구독 안내")
 
+    # 👉 요금제 상수 (6.3에서 재사용할 거라면 위쪽 전역에 빼도 됨)
+    PRICE_PRO = 19000
+    PRICE_PRIME = 39000
+
     with st.container():
         st.markdown("### 🌱 **Free (무료)**")
-        st.markdown("`체험판`\n- 📋 Top 3 종목\n- ❌ 알림/분석")
+        st.markdown(
+            "- ✅ 상위 **3개 종목** 조회\n"
+            "- ✅ 시장 지표/섹터맵 열람\n"
+            "- ❌ 내 포트폴리오 분석\n"
+            "- ❌ CSV 다운로드 / 알림"
+        )
+
     with st.container():
-        st.markdown("### 🚀 **Pro (2.9만)**")
-        st.markdown("`실전 투자자`\n- 🔓 Top 20 공개\n- 💼 내 포트폴리오 진단")
+        st.markdown(f"### 🚀 **Pro (월 {PRICE_PRO:,}원)**")
+        st.markdown(
+            "`실전 투자자용`\n"
+            "- 🔓 필터 적용 **Top 20 종목** 열람\n"
+            "- 💼 **내 자산(포트폴리오)** 수익률 분석\n"
+            "- 📊 개별 종목 레이더·리스크/리워드 차트\n"
+            "- ❌ CSV 다운로드\n"
+            "- ❌ 텔레그램 알림"
+        )
+
     with st.container():
-        st.markdown("### 👑 **Prime (5.9만)**")
-        st.markdown("`전업 투자자`\n- ✅ Pro 기능 포함\n- 🔔 텔레그램 알림")
+        st.markdown(f"### 👑 **Prime (월 {PRICE_PRIME:,}원)**")
+        st.markdown(
+            "`전업 / 하이엔드 투자자`\n"
+            "- ✅ **전체 스코어링 종목** 열람\n"
+            "- ✅ CSV 다운로드\n"
+            "- ✅ 텔레그램 요약 알림 (Top 종목 브리핑)\n"
+            "- ✅ 향후 고급 리포트 / 기능 우선 적용"
+        )
 
     kakao_url = "https://open.kakao.com/o/g6enIm4h"
     try:
@@ -864,7 +888,7 @@ with st.sidebar:
     except Exception:
         st.markdown(f"[👉 구독 문의 (카톡)]({kakao_url})")
 
-    # 3) Pro 이상만 포트폴리오 기능 노출
+    # 3) Pro 이상만 포트폴리오 기능 노출 (기존 로직 그대로)
     if auth_status in ["pro", "prime", "admin"]:
         st.divider()
         st.subheader("💼 내 자산 관리")
@@ -881,7 +905,7 @@ with st.sidebar:
     else:
         pf_input = ""  # 밑에서 참조하니까 빈값으로 정의
 
-    # 4) Prime 이상 텔레그램
+    # 4) Prime 이상 텔레그램 (기존 로직 유지)
     send_btn = False
     tg_token, tg_chat_id = "", ""
     if auth_status in ["prime", "admin"]:
