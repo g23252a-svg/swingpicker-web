@@ -10,7 +10,7 @@ LDY Pro Trader v6.3 (Subscription Ready)
 """
 
 import os, io, math, json, requests, logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -88,7 +88,7 @@ def set_subscription(email, role):
 
     db = load_subs_db()
     subs = db.get("subs", {})
-    today = datetime.now().date()
+    today = now_kst().date()
 
     if role in ["pro", "prime"]:
         expire = today + timedelta(days=30)
@@ -126,7 +126,6 @@ BETA_PRIME_USERS = {
     "user5@example.com",
 }
 
-
 def sync_user_role_with_subscription(user):
     """
     로그인 시마다 호출해서
@@ -163,7 +162,7 @@ def sync_user_role_with_subscription(user):
     except Exception:
         return base_role, exp_str
 
-    today = datetime.now().date()
+    today = now_kst().date()
     # 만료일 지나면 free로 내려버림
     if today > exp_date and base_role in ["pro", "prime"]:
         try:
@@ -181,7 +180,7 @@ try:
     import FinanceDataReader as fdr
     FDR_OK = True
 except Exception as e:
-    FDR_OK = False
+    FDR_OK = False    # FinanceDataReader 사용 불가 시 플래그
     logger.warning("FinanceDataReader not available: %s", e)
 
 try:
@@ -520,6 +519,37 @@ def plot_radar_chart(row):
         margin=dict(l=30, r=30, t=20, b=20),
     )
     return fig
+
+# ---------------------------
+# 시간 / 타임존 유틸 (UTC 저장 + KST 표기)
+# ---------------------------
+KST = timezone(timedelta(hours=9))
+
+def now_utc() -> datetime:
+    """DB/파일 저장용: 항상 UTC 기준 aware datetime"""
+    return datetime.now(timezone.utc)
+
+def now_kst() -> datetime:
+    """화면/로그 표시용: 한국 시간(KST) 기준 aware datetime"""
+    return datetime.now(KST)
+
+def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """
+    DB/auth_user 등에 UTC로 저장된 created_at / last_login 같은 값을
+    KST 문자열로 변환해서 화면에 표시하기 위한 함수.
+    - value: str, datetime, pandas.Timestamp 모두 허용
+    """
+    if value is None or value == "" or value == "NaT":
+        return ""
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+    # tz 정보가 없으면 → UTC로 가정
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts.tz_convert(KST).strftime(fmt)
 
 # ---------------------------
 # [개선] 차트 시각화 (거래량 추가)
@@ -962,8 +992,6 @@ top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 # ---------------------------
 from auth_user import render_auth_box, list_users, update_user_role
 
-
-
 # ---------------------------
 # Sidebar (Auth / Portfolio / Subscription)
 # ---------------------------
@@ -1029,8 +1057,6 @@ with st.sidebar:
         "- 관리자가 입금 확인 후 **1개월 단위로 권한을 부여/연장**합니다."
     )
 
-
-    
     # (선택) 이미 로그인한 유저에게는 내 만료일 다시 한 번 보여주기
     if user and expire_str:
         st.info(f"현재 구독 만료 예정일: **{expire_str}**")
@@ -1133,7 +1159,6 @@ with st.sidebar:
                 else:
                     st.error("권한 변경에 실패했습니다.")
 
-   
 # ---------------------------
 # Telegram send
 # ---------------------------
@@ -1149,8 +1174,6 @@ if send_btn and tg_token and tg_chat_id:
     else:
         st.error(f"전송 실패: {res}")
 
-
-  
 # ---------------------------
 # 메인 UI
 # ---------------------------
@@ -1460,7 +1483,6 @@ with tab3:
     else:
         st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
 
-
 with tab4:
     st.subheader("📮 문의 게시판")
 
@@ -1528,7 +1550,6 @@ with tab4:
                     meta += f" · 이메일: {item.get('email')}"
                 st.caption(meta)
                 st.markdown(item.get("content", "").replace("\n", "  \n"))
-
 
 with tab5:
     st.subheader("⚖️ 이용 약관 / 투자 유의사항")
