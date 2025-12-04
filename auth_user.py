@@ -1,213 +1,186 @@
 # auth_user.py
-# -*- coding: utf-8 -*-
-"""
-간단 회원관리 / 로그인 모듈 (LDY Pro Trader 전용)
-
-- users.json 에 계정 저장
-- 비밀번호는 salt + sha256 으로 해시 (간단 버전)
-- Streamlit UI: render_auth_box(container=None) 로 렌더링
-  * return 값: 로그인된 user dict or None
-"""
+# 간단한 파일 기반 회원 관리 + Streamlit UI
 
 import os
 import json
 import hashlib
 import secrets
+import threading
 from datetime import datetime
 
 import streamlit as st
 
-# 유저 데이터 파일 경로 (환경변수로도 바꿀 수 있게)
-USERS_FILE = os.getenv("LDY_USERS_FILE", "users.json")
+# ---------------------------
+# 설정
+# ---------------------------
+USER_DB_PATH = os.getenv("LDY_USER_DB", "user_db.json")
 
+# Pro / Prime / Admin 코드 (환경변수나 .streamlit/secrets.toml 로 관리 추천)
+KEY_PRO = os.getenv("LDY_KEY_PRO", "PRO-2024")
+KEY_PRIME = os.getenv("LDY_KEY_PRIME", "PRIME-2025")
+ADMIN_KEY = os.getenv("LDY_ADMIN_KEY", "ADMIN-2022322")
+
+_lock = threading.Lock()
+
+if "current_user" not in st.session_state:
+    st.session_state["current_user"] = None
 
 # ---------------------------
 # 내부 유틸
 # ---------------------------
-def _hash_password(password: str, salt: str) -> str:
-    """salt + password 를 sha256 으로 해시"""
-    base = (salt + password).encode("utf-8")
-    return hashlib.sha256(base).hexdigest()
+def _now_str():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-
-def _load_db() -> dict:
-    """users.json 로드 (없으면 기본 구조 리턴)"""
-    if not os.path.exists(USERS_FILE):
+def _load_user_db():
+    """user_db.json 로드 (없으면 기본 구조 반환)"""
+    if not os.path.exists(USER_DB_PATH):
         return {"users": {}}
     try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if "users" not in data:
-                data["users"] = {}
-            return data
+        with open(USER_DB_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
-        # 깨진 파일 보호용
         return {"users": {}}
 
-
-def _save_db(data: dict) -> None:
-    os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True) if os.path.dirname(USERS_FILE) else None
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
+def _save_user_db(data):
+    """user_db.json 저장"""
+    os.makedirs(os.path.dirname(USER_DB_PATH) or ".", exist_ok=True)
+    with open(USER_DB_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-
-def _normalize_login_id(login_id: str) -> str:
-    """로그인 ID는 소문자 이메일/아이디 기준으로 통일"""
-    return login_id.strip().lower()
-
-
-# ---------------------------
-# 공개 API: 회원가입 / 로그인
-# ---------------------------
-def register_user(login_id: str, password: str, nickname: str = ""):
-    """
-    회원 가입 처리
-    - login_id: 이메일 또는 아이디 (유일)
-    - password: 비밀번호 평문 (입력값)
-    - nickname: 닉네임 (선택)
-    return: (ok: bool, msg: str)
-    """
-    login_id = _normalize_login_id(login_id)
-    nickname = nickname.strip() or login_id
-
-    if not login_id or not password:
-        return False, "아이디와 비밀번호를 모두 입력해 주세요."
-
-    db = _load_db()
-    users = db.get("users", {})
-
-    if login_id in users:
-        return False, "이미 가입된 아이디입니다."
-
-    # salt 생성 + 해시
-    salt = secrets.token_hex(16)
-    pw_hash = _hash_password(password, salt)
-
-    user_obj = {
-        "login_id": login_id,
-        "nickname": nickname,
-        "role": "free",  # 기본 등급은 free, 나중에 관리자 화면/직접 수정으로 pro/prime 부여
-        "salt": salt,
-        "password_hash": pw_hash,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "last_login": None,
-        # 향후 확장용: 이메일, 전화번호, 메모 등
-    }
-
-    users[login_id] = user_obj
-    db["users"] = users
-    _save_db(db)
-
-    return True, "회원가입이 완료되었습니다. 이제 로그인해 주세요."
-
-
-def authenticate_user(login_id: str, password: str):
-    """
-    로그인 인증
-    return: user dict (성공 시) / None (실패 시)
-    """
-    login_id = _normalize_login_id(login_id)
-    db = _load_db()
-    user = db.get("users", {}).get(login_id)
-
-    if not user:
-        return None
-
-    salt = user.get("salt", "")
-    pw_hash = user.get("password_hash", "")
-
-    if _hash_password(password, salt) != pw_hash:
-        return None
-
-    # last_login 업데이트
-    user["last_login"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    db["users"][login_id] = user
-    _save_db(db)
-
-    return user
-
-
-def get_user(role_required=None):
-    """
-    세션에서 현재 로그인 유저 가져오기
-    role_required: "pro", "prime", "admin" 등 필요시 사용
-    """
-    user = st.session_state.get("user")
-    if not user:
-        return None
-    if role_required is None:
-        return user
-    # 등급 체크 (대충: admin >= prime >= pro >= free 가정)
-    role_order = ["free", "pro", "prime", "admin"]
-    try:
-        cur = role_order.index(user.get("role", "free"))
-        need = role_order.index(role_required)
-        if cur >= need:
-            return user
-        return None
-    except ValueError:
-        return None
-
+def _hash_password(password: str, salt: str | None = None):
+    """salt + SHA256 해시"""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    base = (salt + password).encode("utf-8")
+    h = hashlib.sha256(base).hexdigest()
+    return salt, h
 
 # ---------------------------
-# Streamlit UI: 로그인/회원가입 박스
+# 외부에서 쓰는 함수
+# ---------------------------
+def get_user(login_id: str):
+    db = _load_user_db()
+    return db.get("users", {}).get(login_id)
+
+def verify_login(login_id: str, password: str):
+    """로그인 검증 → (True, user_dict) or (False, message)"""
+    with _lock:
+        db = _load_user_db()
+        user = db.get("users", {}).get(login_id)
+        if not user:
+            return False, "존재하지 않는 계정입니다."
+        salt = user.get("salt", "")
+        _, h = _hash_password(password, salt)
+        if h != user.get("password_hash"):
+            return False, "비밀번호가 올바르지 않습니다."
+        # last_login 업데이트
+        user["last_login"] = _now_str()
+        db["users"][login_id] = user
+        _save_user_db(db)
+        return True, user
+
+def register_user(login_id: str, password: str, nickname: str, invite_code: str | None = None):
+    """회원가입 → (True, msg) or (False, msg)"""
+    login_id = login_id.strip().lower()
+    if not login_id or "@" not in login_id:
+        return False, "이메일 형식의 로그인 ID를 입력해 주세요."
+    if len(password) < 6:
+        return False, "비밀번호는 6자리 이상으로 설정해 주세요."
+    if not nickname:
+        return False, "닉네임을 입력해 주세요."
+
+    with _lock:
+        db = _load_user_db()
+        users = db.setdefault("users", {})
+        if login_id in users:
+            return False, "이미 가입된 이메일입니다."
+
+        # 기본은 free
+        role = "free"
+        invite_code = (invite_code or "").strip()
+        if invite_code == KEY_PRO:
+            role = "pro"
+        elif invite_code == KEY_PRIME:
+            role = "prime"
+        elif invite_code == ADMIN_KEY:
+            role = "admin"
+
+        salt, pw_hash = _hash_password(password)
+        users[login_id] = {
+            "login_id": login_id,
+            "nickname": nickname,
+            "role": role,
+            "salt": salt,
+            "password_hash": pw_hash,
+            "created_at": _now_str(),
+            "last_login": "",
+        }
+        _save_user_db(db)
+        return True, f"회원가입 완료! 현재 권한: {role}"
+
+def list_users():
+    """전체 유저 리스트 반환 (list[dict])"""
+    db = _load_user_db()
+    return list(db.get("users", {}).values())
+
+def update_user_role(login_id: str, new_role: str):
+    """관리자가 유저 role 변경"""
+    with _lock:
+        db = _load_user_db()
+        users = db.setdefault("users", {})
+        if login_id not in users:
+            return False
+        users[login_id]["role"] = new_role
+        _save_user_db(db)
+        return True
+
+# ---------------------------
+# Streamlit용 인증 박스
 # ---------------------------
 def render_auth_box():
-    """
-    사이드바나 원하는 위치에서 호출:
-        with st.sidebar:
-            user = render_auth_box()
-    return: 로그인된 user dict or None
-    """
-    if "user" not in st.session_state:
-        st.session_state["user"] = None
+    """사이드바에서 호출: 로그인/회원가입 UI + 세션 관리"""
+    st.markdown("### 🔐 계정 로그인 / 회원가입")
 
-    user = st.session_state["user"]
+    cur_user = st.session_state.get("current_user")
 
-    # 이미 로그인 상태면 간단 정보 + 로그아웃 버튼
-    if user:
-        st.markdown(f"### 👋 {user.get('nickname', user.get('login_id'))} 님")
-        st.caption(f"역할(role): **{user.get('role', 'free')}**")
+    # 이미 로그인된 경우 간단 표시 + 로그아웃 버튼
+    if cur_user:
+        st.success(f"{cur_user.get('nickname','')}님 환영합니다! ({cur_user.get('role','free')})")
         if st.button("로그아웃"):
-            st.session_state["user"] = None
-            st.success("로그아웃 되었습니다.")
-            st.experimental_rerun()
-        return user
+            st.session_state["current_user"] = None
+        return st.session_state.get("current_user")
 
-    st.subheader("🔐 로그인 / 회원가입")
+    tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
 
-    mode = st.radio(
-        "모드 선택",
-        options=["로그인", "회원가입"],
-        horizontal=True,
-        key="auth_mode_radio",
-    )
-
-    if mode == "로그인":
-        login_id = st.text_input("아이디 (이메일 등)", key="login_id_login")
-        password = st.text_input("비밀번호", type="password", key="pw_login")
-        if st.button("로그인", type="primary", use_container_width=True):
-            user = authenticate_user(login_id, password)
-            if user:
-                st.session_state["user"] = user
-                st.success("로그인 성공!")
-                st.experimental_rerun()
+    # --- 로그인 탭 ---
+    with tab_login:
+        login_id = st.text_input("이메일 (로그인 ID)", key="login_email")
+        password = st.text_input("비밀번호", type="password", key="login_pw")
+        if st.button("로그인", key="btn_login"):
+            ok, res = verify_login(login_id, password)
+            if ok:
+                st.session_state["current_user"] = res
+                st.success(f"{res.get('nickname','')}님 로그인 되었습니다.")
             else:
-                st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
-    else:  # 회원가입
-        login_id = st.text_input("아이디 (이메일 등)", key="login_id_sign")
-        nickname = st.text_input("닉네임 (선택)", key="nickname_sign")
-        pw1 = st.text_input("비밀번호", type="password", key="pw1_sign")
-        pw2 = st.text_input("비밀번호 확인", type="password", key="pw2_sign")
+                st.error(res)
 
-        if st.button("회원가입", type="primary", use_container_width=True):
+    # --- 회원가입 탭 ---
+    with tab_signup:
+        new_email = st.text_input("이메일", key="signup_email")
+        nickname = st.text_input("닉네임", key="signup_nick")
+        pw1 = st.text_input("비밀번호", type="password", key="signup_pw1")
+        pw2 = st.text_input("비밀번호 확인", type="password", key="signup_pw2")
+        invite = st.text_input("초대/구독 코드 (선택)", key="signup_invite", placeholder="Pro/Prime 코드가 있다면 입력")
+
+        if st.button("회원가입", key="btn_signup"):
             if pw1 != pw2:
-                st.error("비밀번호가 서로 다릅니다.")
+                st.error("비밀번호가 서로 일치하지 않습니다.")
             else:
-                ok, msg = register_user(login_id, pw1, nickname)
+                ok, msg = register_user(new_email, pw1, nickname, invite_code=invite)
                 if ok:
                     st.success(msg)
+                    st.info("이제 로그인 탭에서 로그인해 주세요.")
                 else:
                     st.error(msg)
 
-    return st.session_state.get("user")
+    return st.session_state.get("current_user")
