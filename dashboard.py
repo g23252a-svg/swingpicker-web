@@ -121,7 +121,7 @@ def get_subscription(email):
 BETA_PRIME_USERS = {
     "coolguyhaeng@naver.com",
     "kiljung87@nate.com",
-    "user3@example.com",
+    "coiil@naver.com",
     "user4@example.com",
     "user5@example.com",
 }
