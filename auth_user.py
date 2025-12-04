@@ -4,7 +4,7 @@
 import os
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone  # 🔹 timezone 추가
 
 import streamlit as st
 
@@ -25,6 +25,16 @@ KEY_PRIME = _get_conf("LDY_KEY_PRIME", "2025")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
 CURRENT_USER_KEY = "ldy_current_user"
+
+
+# ----------------- 공통 시간 유틸 (UTC 문자열) -----------------
+def _now_utc_str() -> str:
+    """
+    DB에 저장용 공통 시간 포맷
+    - 항상 UTC 기준, ISO8601 문자열로 저장
+    - 예: 2025-12-04T10:22:11.123456+00:00
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ----------------- 기본 DB 유틸 -----------------
@@ -84,7 +94,7 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
 
     salt = _create_salt(email)
     pw_hash = _hash_password(password, salt)
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = _now_utc_str()  # 🔹 가입/최초 로그인 시각을 UTC로 저장
 
     users[email] = {
         "login_id": email,
@@ -92,8 +102,8 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
         "role": role,
         "salt": salt,
         "password_hash": pw_hash,
-        "created_at": now_str,
-        "last_login": now_str,
+        "created_at": now_str,   # UTC ISO 문자열
+        "last_login": now_str,   # 가입 시점 = 첫 로그인 시점
     }
 
     db["users"] = users
@@ -116,7 +126,9 @@ def authenticate_user(email: str, password: str):
     if _hash_password(password, salt) != pw_hash:
         return None, "비밀번호가 일치하지 않습니다."
 
-    user["last_login"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 🔹 로그인 성공 시점에 last_login을 UTC 기준으로 갱신
+    now_str = _now_utc_str()
+    user["last_login"] = now_str
     users[email] = user
     db["users"] = users
     save_user_db(db)
