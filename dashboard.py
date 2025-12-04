@@ -114,6 +114,19 @@ def get_subscription(email):
     db = load_subs_db()
     return db.get("subs", {}).get(email)
 
+# ---------------------------
+# 오픈베타 영구 PRIME 사용자
+# ---------------------------
+# 여기 이메일 5개 넣으면, 이 계정은 만료일/구독DB와 무관하게 항상 PRIME 취급됩니다.
+BETA_PRIME_USERS = {
+    "user1@example.com",
+    "user2@example.com",
+    "user3@example.com",
+    "user4@example.com",
+    "user5@example.com",
+}
+
+
 def sync_user_role_with_subscription(user):
     """
     로그인 시마다 호출해서
@@ -125,6 +138,20 @@ def sync_user_role_with_subscription(user):
 
     email = user.get("login_id", "")
     base_role = user.get("role", "free")
+
+    # 🔹 (1) 오픈베타 참여자: 무조건 영구 PRIME
+    if email in BETA_PRIME_USERS:
+        # auth_user DB에 role이 prime이 아니면 맞춰준다 (한 번만 실행됨)
+        try:
+            if base_role != "prime":
+                update_user_role(email, "prime")
+        except Exception:
+            logger.exception("beta prime sync failed")
+
+        # 만료일은 '∞' 로 표시 (사이드바에서 그대로 노출됨)
+        return "prime", "∞"
+
+    # 🔹 (2) 일반 구독자 로직 (기존 코드 그대로)
     sub = get_subscription(email)
     if not sub:
         # 구독 DB에 기록이 없는 경우, 기존 auth_user 역할 그대로 사용
