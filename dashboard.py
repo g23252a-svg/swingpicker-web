@@ -789,8 +789,11 @@ top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 # ---------------------------
 # Sidebar (Auth / Portfolio)
 # ---------------------------
-from auth_user import render_auth_box, get_user  # 파일명에 맞게 수정
+from auth_user import render_auth_box, list_users, update_user_role
 
+# ---------------------------
+# Sidebar (Auth / Portfolio)
+# ---------------------------
 with st.sidebar:
     # 1) 계정 기반 로그인 / 회원가입
     user = render_auth_box()
@@ -798,23 +801,10 @@ with st.sidebar:
     # 2) 유저 등급에 따라 auth_status 계산
     if user is None:
         auth_status = "free"
+        st.caption("현재 상태: 🔒 Free (비로그인)")
     else:
         auth_status = user.get("role", "free")
-
-    st.divider()
-    st.subheader("💎 프리미엄 구독 안내")
- 
-        st.success("✅ 관리자 로그인")
-    elif input_pw == KEY_PRO:
-        auth_status = "pro"
-        st.success("🥇 Pro 멤버십")
-    elif input_pw == KEY_PRIME:
-        auth_status = "prime"
-        st.success("👑 Prime 멤버십")
-    else:
-        if input_pw:
-            st.error("❌ 불일치")
-        st.caption("🔒 Free 모드")
+        st.caption(f"현재 상태: **{auth_status.upper()}**")
 
     st.divider()
     st.subheader("💎 프리미엄 구독 안내")
@@ -835,6 +825,7 @@ with st.sidebar:
     except Exception:
         st.markdown(f"[👉 구독 문의 (카톡)]({kakao_url})")
 
+    # 3) Pro 이상만 포트폴리오 기능 노출
     if auth_status in ["pro", "prime", "admin"]:
         st.divider()
         st.subheader("💼 내 자산 관리")
@@ -848,7 +839,12 @@ with st.sidebar:
         if st.button("💾 저장/분석", key="pf_btn"):
             save_portfolio_file(pf_input)
             st.success("저장되었습니다")
+    else:
+        pf_input = ""  # 밑에서 참조하니까 빈값으로 정의
 
+    # 4) Prime 이상 텔레그램
+    send_btn = False
+    tg_token, tg_chat_id = "", ""
     if auth_status in ["prime", "admin"]:
         with st.expander("🔔 텔레그램 봇"):
             tg_token = st.text_input("Token", type="password")
