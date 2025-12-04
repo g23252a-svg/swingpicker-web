@@ -202,6 +202,10 @@ KEY_PRO = get_conf("LDY_KEY_PRO", "2024")
 KEY_PRIME = get_conf("LDY_KEY_PRIME", "2025")
 ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
 
+# 결제 계좌 정보 (전역 설정)
+BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-00-0000000")
+BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
+
 # 스코어링 상수
 PASS_EBS = float(get_conf("LDY_PASS_EBS", 4))
 MIN_TURN_KOSPI = float(get_conf("LDY_MIN_TURN_KOSPI", 200.0))
@@ -823,10 +827,19 @@ def build_global_score(lat):
 # ---------------------------
 def compute_dynamic_thresholds(df):
     thr = {}
+    # 5일 수익률
     thr['r5_q75'] = float(np.nanpercentile(df['ret_5d_%'].fillna(0), 75)) if 'ret_5d_%' in df.columns else 1.0
-    thr['slope_q60'] = float(np.nanpercentile(df['MACD_Slope'].fillna(0), 60)) if 'MACD_Slope' in df.columns else 0.0
+    
+    # MACD 기울기 컬럼 유연하게 탐색
+    slope_col = "MACD_Slope" if "MACD_Slope" in df.columns else ("MACD_slope" if "MACD_slope" in df.columns else None)
+    if slope_col:
+        thr['slope_q60'] = float(np.nanpercentile(df[slope_col].fillna(0), 60))
+    else:
+        thr['slope_q60'] = 0.0
+
     thr['ebs_q60'] = float(np.nanpercentile(df['EBS'].fillna(0), 60)) if 'EBS' in df.columns else PASS_EBS
     thr['now_gap_q25'] = float(np.nanpercentile(df['Now%'].fillna(999), 25)) if 'Now%' in df.columns else 10.0
+
     for k, v in thr.items():
         if np.isnan(v):
             thr[k] = 0.0
@@ -989,8 +1002,7 @@ with st.sidebar:
         "- 관리자가 입금 확인 후 **1개월 단위로 권한을 부여/연장**합니다."
     )
 
-BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-00-0000000")
-BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
+
     
     # (선택) 이미 로그인한 유저에게는 내 만료일 다시 한 번 보여주기
     if user and expire_str:
