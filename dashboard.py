@@ -1010,6 +1010,11 @@ with st.sidebar:
         st.caption("현재 상태: 🔒 Free (비로그인)")
     else:
         auth_status, expire_str = sync_user_role_with_subscription(user)
+        # 🔹 세션에 저장된 user.role 과 auth_status를 동기화
+        if auth_status != user.get("role"):
+            user["role"] = auth_status
+            st.session_state["ldy_current_user"] = user
+
         if expire_str:
             st.caption(f"현재 상태: **{auth_status.upper()}** (만료일: {expire_str})")
         else:
@@ -1529,7 +1534,7 @@ with tab4:
                 "content": content.strip(),
                 "nickname": nickname.strip() or "익명",
                 "email": email.strip(),
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "created_at": now_kst().strftime("%Y-%m-%d %H:%M:%S"),
             })
             db["inquiries"] = inq_list
             save_inquiry_db(db)
