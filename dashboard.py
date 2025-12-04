@@ -880,7 +880,7 @@ with st.sidebar:
             "- ✅ 향후 고급 리포트 / 기능 우선 적용"
         )
 
-    kakao_url = "https://open.kakao.com/o/g6enIm4h"
+    kakao_url = "https://open.kakao.com/o/soKqY04h"
     try:
         st.link_button("👉 구독 문의 (카톡)", kakao_url, type="primary", use_container_width=True)
     except Exception:
