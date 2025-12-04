@@ -1130,7 +1130,7 @@ with st.sidebar:
                     "구독 역할(sub)": sub.get("role", ""),
                     "만료일": exp_str,
                     "잔여일수": days_left,
-                    "가입일": u.get("created_at"),
+                    "가입일": to_kst_str(u.get("created_at")),
                     "마지막 로그인": to_kst_str(u.get("last_login")),
                 })
 
