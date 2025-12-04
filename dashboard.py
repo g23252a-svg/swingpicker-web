@@ -789,17 +789,21 @@ top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 # ---------------------------
 # Sidebar (Auth / Portfolio)
 # ---------------------------
+from auth_user import render_auth_box, get_user  # 파일명에 맞게 수정
+
 with st.sidebar:
-    st.header("🔐 로그인")
-    input_pw = st.text_input("비밀번호 입력", type="password", placeholder="비밀번호를 입력하세요")
+    # 1) 계정 기반 로그인 / 회원가입
+    user = render_auth_box()
 
-    send_btn = False
-    tg_token, tg_chat_id = "", ""
-    pf_input = ""
+    # 2) 유저 등급에 따라 auth_status 계산
+    if user is None:
+        auth_status = "free"
+    else:
+        auth_status = user.get("role", "free")
 
-    auth_status = "free"
-    if input_pw == ADMIN_KEY:
-        auth_status = "admin"
+    st.divider()
+    st.subheader("💎 프리미엄 구독 안내")
+ 
         st.success("✅ 관리자 로그인")
     elif input_pw == KEY_PRO:
         auth_status = "pro"
