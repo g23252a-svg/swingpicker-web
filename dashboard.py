@@ -1244,19 +1244,32 @@ with tab2:
     st.subheader("🎯 추천 종목 필터")
 
     # 🔹 첫 가입 직후 한 번만 보여주는 Top 5 프리뷰
+    just_registered = st.session_state.get("just_registered", False)
     if just_registered:
         st.success("🎉 첫 가입을 환영합니다! 오늘 기준 TOP 5 프리뷰를 먼저 보여드릴게요.")
-        preview = base.sort_values("LDY_SCORE", ascending=False).head(5).copy()
+        try:
+            preview = base.sort_values("LDY_SCORE", ascending=False).head(5).copy()
+        except Exception:
+            preview = scored.sort_values("LDY_SCORE", ascending=False).head(5).copy()
+
         if not preview.empty:
             cols = [
                 "종목명", "종목코드", "LDY_SCORE",
                 "추천매수가", "손절가", "추천매도가1"
             ]
             cols = [c for c in cols if c in preview.columns]
-            prev_view = preview[cols].set_index("종목명") if "종목명" in cols else preview[cols]
+            if "종목명" in cols:
+                prev_view = preview[cols].set_index("종목명")
+            else:
+                prev_view = preview[cols]
             st.dataframe(prev_view, use_container_width=True)
+        else:
+            st.info("프리뷰로 표시할 종목이 없습니다.")
+        # 🔻 한 번 보여준 뒤에는 플래그 끔
+        st.session_state["just_registered"] = False
         st.divider()
 
+    # ---------------- 필터 영역 ----------------
     col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
     with col_f1:
         min_score = st.slider(
@@ -1285,32 +1298,47 @@ with tab2:
             key="only_gate",
         )
 
+    # ---------------- 조회 대상 기본셋 ----------------
     if use_only_gate:
-        base_view = top20.copy()
+        base_view = top20.copy()   # EBS/유동성 통과 Top20
     else:
         base_view = scored.sort_values(
             ["LDY_SCORE", "거래대금(억원)"],
             ascending=[False, False]
-        ).head(50)
+        ).head(50)                 # 상위 50 중에서 필터
 
     filtered = base_view.copy()
     filtered = filtered[filtered["LDY_SCORE"] >= min_score]
     if sel_routes:
         filtered = filtered[filtered["ROUTE"].isin(sel_routes)]
 
-    # 🔸 권한별 노출 개수
-    if auth_status == "guest":
-        view_df = filtered.head(3)
-        st.info("🔐 비로그인(Guest) 상태입니다. 회원가입/로그인 시 상위 5개 종목까지 확인할 수 있습니다.")
-    elif auth_status == "free":
-        view_df = filtered.head(5)
-        st.info("✅ Free 회원: 필터가 적용된 상위 5개 종목 프리뷰를 보고 있습니다.")
-    else:
+    # ---------------- 권한별 노출 개수 ----------------
+    # user / auth_status 는 사이드바에서 이미 계산해둔 값 사용
+    # - 비로그인(게스트) : Top 3
+    # - 무료회원(free, 로그인됨) : Top 5
+    # - Pro/Prime/Admin : Top 20
+    if auth_status in ["pro", "prime", "admin"]:
         view_df = filtered.head(20)
         st.success(
             f"🥇 {auth_status.upper()} 회원: 필터 적용 Top {len(view_df)} 종목 열람 중"
         )
+    else:
+        if user is None:
+            # 게스트
+            view_df = filtered.head(3)
+            st.info(
+                "🔐 현재는 **비로그인(게스트)** 상태라, 필터 적용 상위 **3개 종목**만 확인할 수 있습니다.\n\n"
+                "✅ 지금 무료 회원가입하면 **상위 5개 종목**까지 바로 열람 가능합니다!"
+            )
+        else:
+            # 로그인한 free 회원
+            view_df = filtered.head(5)
+            st.info(
+                "✅ Free 회원: 필터 적용 상위 **5개 종목**까지 열람 중입니다.\n"
+                "📈 더 많은 종목과 CSV 다운로드, 알림 기능은 Pro / Prime 등급에서 제공됩니다."
+            )
 
+    # ---------------- 종목 선택 / 상세 패널 ----------------
     if view_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
@@ -1361,7 +1389,10 @@ with tab2:
                         use_container_width=True,
                     )
                 else:
-                    st.warning("🔒 상세 분석(레이더/리스크-리워드/AI 코멘트)은 Pro 등급부터 확인 가능합니다.")
+                    st.warning(
+                        "🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다."
+                    )
+
                 c_a, c_b = st.columns(2)
                 c_a.metric("진입가", f"{int(row.get('추천매수가', 0)):,}")
                 c_b.metric(
@@ -1371,11 +1402,13 @@ with tab2:
                     delta_color="inverse",
                 )
 
+    # ---------------- Daily Top List ----------------
     st.divider()
     st.subheader("📋 Daily Top List", anchor=False)
     safe_view = view_df.copy().reset_index(drop=True)
     if not safe_view.empty:
-        safe_view.set_index("종목명", inplace=True)
+        if "종목명" in safe_view.columns:
+            safe_view.set_index("종목명", inplace=True)
         price_cols = [
             "종가", "추천매수가", "손절가", "추천매도가1", "추천매도가2", "거래대금(억원)",
         ]
@@ -1410,6 +1443,7 @@ with tab2:
     else:
         st.info("표시할 종목 없음")
 
+    # Prime/Admin 전체 CSV 다운로드
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
