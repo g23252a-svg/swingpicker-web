@@ -1,39 +1,51 @@
 # auth_user.py
 # -*- coding: utf-8 -*-
 
-# -*- coding: utf-8 -*-
 import os
 import json
 import hashlib
+import logging
 from datetime import datetime, timezone
+
+import requests
 import streamlit as st
 
-print("DEBUG GIST_ID =", GIST_ID)
-print("DEBUG GIST_TOKEN set?", bool(GIST_TOKEN))
+# ----------------- 로깅 설정 -----------------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("auth_user")
 
 # 🔹 auth_user.py가 있는 폴더 기준으로 data 폴더 고정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 USER_DB_PATH = os.path.join(DATA_DIR, "users_db.json")
 
-
-
-
-# Secrets / Env 우선
+# ----------------- Secrets / Env 우선 -----------------
 def _get_conf(key, default_val):
+    """
+    Streamlit secrets > 환경변수 > 기본값 순으로 설정값을 가져온다.
+    """
     try:
         if key in st.secrets:
             return st.secrets[key]
     except FileNotFoundError:
+        # 로컬 환경에서 .streamlit/secrets.toml 이 없을 수도 있음
         pass
     return os.getenv(key, default_val)
 
+# 구독/관리용 키
 KEY_PRO   = _get_conf("LDY_KEY_PRO",   "2024")
 KEY_PRIME = _get_conf("LDY_KEY_PRIME", "2025")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
+# 🔹 Gist 관련 설정 (Streamlit secrets 또는 환경변수에서 읽음)
+GIST_ID    = _get_conf("LDY_GIST_ID", "")
+GIST_TOKEN = _get_conf("LDY_GIST_TOKEN", "")
+
 CURRENT_USER_KEY = "ldy_current_user"
 
+# 디버그 로그 (Streamlit Cloud 로그에서 확인용)
+print("[auth_user] DEBUG GIST_ID =", GIST_ID)
+print("[auth_user] DEBUG GIST_TOKEN set?", bool(GIST_TOKEN))
 
 # ----------------- 공통 시간 유틸 (UTC 문자열) -----------------
 def _now_utc_str() -> str:
@@ -44,13 +56,15 @@ def _now_utc_str() -> str:
     """
     return datetime.now(timezone.utc).isoformat()
 
-
-# ----------------- 기본 DB 유틸 -----------------
+# ----------------- 기본 로컬 DB 유틸 -----------------
 def _ensure_data_dir():
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR, exist_ok=True)
 
-def load_user_db():
+def _load_user_db_local():
+    """
+    로컬 파일(users_db.json)에서 DB 로드
+    """
     _ensure_data_dir()
     if not os.path.exists(USER_DB_PATH):
         return {"users": {}}
@@ -61,13 +75,121 @@ def load_user_db():
             db["users"] = {}
         return db
     except Exception:
+        logger.exception("[auth_user] local user DB load failed, return empty")
         return {"users": {}}
 
-def save_user_db(db):
+def _save_user_db_local(db):
+    """
+    로컬 파일(users_db.json)에 DB 저장
+    """
     _ensure_data_dir()
-    with open(USER_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
+    try:
+        with open(USER_DB_PATH, "w", encoding="utf-8") as f:
+            json.dump(db, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.exception("[auth_user] local user DB save failed")
 
+# ----------------- GitHub Gist 연동 유틸 -----------------
+GIST_FILE_NAME = "users_db.json"   # Gist 안에 만들 파일 이름 (원하면 바꿀 수 있음)
+
+def _load_user_db_from_gist():
+    """
+    GitHub Gist에서 users_db.json 내용을 읽어온다.
+    - GIST_ID / GIST_TOKEN 없으면 None 리턴 (로컬로 fallback)
+    """
+    if not GIST_ID or not GIST_TOKEN:
+        return None
+
+    try:
+        url = f"https://api.github.com/gists/{GIST_ID}"
+        headers = {
+            "Authorization": f"token {GIST_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        gist = resp.json()
+        files = gist.get("files", {})
+        file_obj = files.get(GIST_FILE_NAME)
+
+        if not file_obj:
+            logger.info("[auth_user] Gist에 '%s' 파일이 없어 빈 DB로 초기화합니다.", GIST_FILE_NAME)
+            return {"users": {}}
+
+        content = file_obj.get("content", "")
+        if not content.strip():
+            return {"users": {}}
+
+        db = json.loads(content)
+        if "users" not in db:
+            db["users"] = {}
+        logger.info("[auth_user] Gist에서 user DB 로드 완료 (users=%d)", len(db["users"]))
+        return db
+
+    except Exception as e:
+        logger.exception("[auth_user] Gist user DB load 실패: %s", e)
+        return None
+
+def _save_user_db_to_gist(db) -> bool:
+    """
+    GitHub Gist에 users_db.json 내용을 저장한다.
+    - 실패해도 예외 던지지 않고 False 리턴
+    """
+    if not GIST_ID or not GIST_TOKEN:
+        return False
+
+    try:
+        url = f"https://api.github.com/gists/{GIST_ID}"
+        headers = {
+            "Authorization": f"token {GIST_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        }
+        files = {
+            GIST_FILE_NAME: {
+                "content": json.dumps(db, ensure_ascii=False, indent=2)
+            }
+        }
+        payload = {"files": files}
+
+        resp = requests.patch(url, headers=headers, data=json.dumps(payload), timeout=10)
+        resp.raise_for_status()
+        logger.info("[auth_user] Gist에 user DB 저장 완료 (users=%d)", len(db.get("users", {})))
+        return True
+
+    except Exception as e:
+        logger.exception("[auth_user] Gist user DB save 실패: %s", e)
+        return False
+
+# ----------------- 통합 DB 유틸 (Gist 우선, 로컬 백업) -----------------
+def load_user_db():
+    """
+    1순위: Gist에서 로드
+    2순위: 로컬 파일에서 로드
+    """
+    # Gist 사용 가능하면 먼저 시도
+    db = _load_user_db_from_gist()
+    if db is not None:
+        # 로컬에도 백업 저장
+        _save_user_db_local(db)
+        return db
+
+    # Gist 실패 또는 미설정 → 로컬 파일 사용
+    logger.info("[auth_user] Gist 사용 불가, 로컬 user DB 사용")
+    return _load_user_db_local()
+
+def save_user_db(db):
+    """
+    - 항상 로컬에는 저장
+    - Gist 설정이 되어 있으면 Gist에도 저장
+    """
+    # 로컬 백업
+    _save_user_db_local(db)
+
+    # Gist 동기화
+    if GIST_ID and GIST_TOKEN:
+        ok = _save_user_db_to_gist(db)
+        if not ok:
+            logger.warning("[auth_user] Gist 저장 실패, 로컬 파일만 최신 상태입니다.")
 
 # ----------------- 비밀번호 해시 -----------------
 def _create_salt(email: str) -> str:
@@ -76,7 +198,6 @@ def _create_salt(email: str) -> str:
 
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-
 
 # ----------------- 회원 가입 / 로그인 -----------------
 def register_user(email: str, password: str, nickname: str, invite_code: str = ""):
@@ -90,6 +211,7 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
     if email in users:
         return False, "이미 존재하는 이메일입니다.", None
 
+    # 기본 권한
     role = "free"
     invite_code = (invite_code or "").strip()
 
@@ -102,7 +224,7 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
 
     salt = _create_salt(email)
     pw_hash = _hash_password(password, salt)
-    now_utc = datetime.now(timezone.utc).isoformat()
+    now_utc = _now_utc_str()
 
     users[email] = {
         "login_id": email,
@@ -116,8 +238,9 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
 
     db["users"] = users
     save_user_db(db)
-    return True, f"회원가입 완료! 현재 권한: {role}", users[email]
 
+    logger.info("[auth_user] 신규 회원가입: %s (role=%s)", email, role)
+    return True, f"회원가입 완료! 현재 권한: {role}", users[email]
 
 def authenticate_user(email: str, password: str):
     email = email.strip()
@@ -141,38 +264,45 @@ def authenticate_user(email: str, password: str):
     db["users"] = users
     save_user_db(db)
 
+    logger.info("[auth_user] 로그인 성공: %s", email)
     return user, "로그인 성공"
-
 
 def get_user():
     return st.session_state.get(CURRENT_USER_KEY)
 
-
 # ----------------- Admin용 헬퍼 (dashboard.py에서 사용) -----------------
 def list_users():
-    """전체 유저 목록 리스트 반환 (dashboard용)"""
+    """
+    전체 유저 목록 리스트 반환 (dashboard용)
+    """
     db = load_user_db()
     users = db.get("users", {})
     return list(users.values())
 
-
 def update_user_role(email: str, new_role: str) -> bool:
-    """관리자가 회원 권한 변경"""
+    """
+    관리자가 회원 권한 변경
+    """
     db = load_user_db()
     users = db.get("users", {})
     if email not in users:
         return False
+
     users[email]["role"] = new_role
     db["users"] = users
     save_user_db(db)
-    return True
 
+    logger.info("[auth_user] 권한 변경: %s → %s", email, new_role)
+    return True
 
 # ----------------- UI: 로그인 / 회원가입 박스 -----------------
 def _render_admin_panel(current_user):
-    """(선택) auth_user 내부에서도 간단 관리 패널 제공 가능"""
+    """
+    (선택) auth_user 내부에서도 간단 관리 패널 제공 가능
+    """
     db = load_user_db()
     users = db.get("users", {})
+
     st.markdown("---")
     st.subheader("🛠 회원 권한 관리 (Admin - auth_user)")
 
@@ -206,9 +336,10 @@ def _render_admin_panel(current_user):
         else:
             st.error("변경 실패")
 
-
 def render_auth_box():
-    """사이드바 로그인/회원가입 UI"""
+    """
+    사이드바 로그인/회원가입 UI
+    """
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
 
@@ -238,7 +369,6 @@ def render_auth_box():
             type="password",
             key="reg_code",
         )
-
         if st.button("회원가입", key="btn_register"):
             if reg_pw1 != reg_pw2:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
