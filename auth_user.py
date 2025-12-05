@@ -8,6 +8,9 @@ import hashlib
 from datetime import datetime, timezone
 import streamlit as st
 
+print("DEBUG GIST_ID =", GIST_ID)
+print("DEBUG GIST_TOKEN set?", bool(GIST_TOKEN))
+
 # 🔹 auth_user.py가 있는 폴더 기준으로 data 폴더 고정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
