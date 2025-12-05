@@ -42,6 +42,7 @@ GIST_ID    = _get_conf("LDY_GIST_ID", "")
 GIST_TOKEN = _get_conf("LDY_GIST_TOKEN", "")
 
 CURRENT_USER_KEY = "ldy_current_user"
+JUST_REGISTERED_KEY = "just_registered"
 
 # 디버그 로그 (Streamlit Cloud 로그에서 확인용)
 print("[auth_user] DEBUG GIST_ID =", GIST_ID)
@@ -340,8 +341,11 @@ def render_auth_box():
     """
     사이드바 로그인/회원가입 UI
     """
+    # 세션 키 초기화
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
+    if JUST_REGISTERED_KEY not in st.session_state:
+        st.session_state[JUST_REGISTERED_KEY] = False
 
     st.subheader("🔐 계정 로그인 / 회원가입")
     tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
@@ -356,6 +360,8 @@ def render_auth_box():
                 st.error(msg)
             else:
                 st.session_state[CURRENT_USER_KEY] = user
+                # 일반 로그인은 just_registered = False
+                st.session_state[JUST_REGISTERED_KEY] = False
                 st.success(f"{user['nickname']}님 환영합니다! ({user['role']})")
 
     # 회원가입 탭
@@ -379,8 +385,8 @@ def render_auth_box():
                 if ok:
                     st.success(msg)
                     st.session_state[CURRENT_USER_KEY] = new_user
-                     # 🔹 첫 가입 여부 플래그
-                    st.session_state["just_registered"] = True
+                    # 🔹 첫 가입 여부 플래그
+                    st.session_state[JUST_REGISTERED_KEY] = True
                 else:
                     st.error(msg)
 
@@ -392,6 +398,7 @@ def render_auth_box():
         with col2:
             if st.button("로그아웃", key="btn_logout"):
                 st.session_state[CURRENT_USER_KEY] = None
+                st.session_state[JUST_REGISTERED_KEY] = False
                 st.success("로그아웃 되었습니다.")
                 user = None
 
