@@ -379,6 +379,8 @@ def render_auth_box():
                 if ok:
                     st.success(msg)
                     st.session_state[CURRENT_USER_KEY] = new_user
+                     # 🔹 첫 가입 여부 플래그
+                    st.session_state["just_registered"] = True
                 else:
                     st.error(msg)
 
