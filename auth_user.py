@@ -366,6 +366,13 @@ def render_auth_box():
 
     # 회원가입 탭
     with tab_signup:
+        # 🔸 회원가입 혜택 안내 (가입 전 홍보용)
+        st.markdown("### 🎁 지금 무료 회원가입하면")
+        st.markdown(
+            "- 🔍 오늘의 추천 종목 **Top 5**까지 무료 열람\n"
+            "- 📊 시장 지표 / 섹터맵은 계속 무료\n"
+            "- 💬 문의 게시판에 직접 문의글 작성 가능\n"
+        )
         reg_email = st.text_input("이메일", key="reg_email")
         reg_nick = st.text_input("닉네임 (선택)", key="reg_nick")
         reg_pw1 = st.text_input("비밀번호", type="password", key="reg_pw1")
