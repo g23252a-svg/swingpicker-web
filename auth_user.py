@@ -1,15 +1,20 @@
 # auth_user.py
 # -*- coding: utf-8 -*-
 
+# -*- coding: utf-8 -*-
 import os
 import json
 import hashlib
-from datetime import datetime, timezone  # 🔹 timezone 추가
-
+from datetime import datetime, timezone
 import streamlit as st
 
-DATA_DIR = "data"
+# 🔹 이 파일(auth_user.py) 기준으로 data 폴더 고정
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 USER_DB_PATH = os.path.join(DATA_DIR, "users_db.json")
+
+
+
 
 # Secrets / Env 우선
 def _get_conf(key, default_val):
