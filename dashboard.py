@@ -224,8 +224,8 @@ LOCAL_RAW = get_conf("LDY_LOCAL_RAW", "data/recommend_latest.csv")
 PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
 
 # 보안키
-KEY_PRO = get_conf("LDY_KEY_PRO", "2024")
-KEY_PRIME = get_conf("LDY_KEY_PRIME", "2025")
+KEY_PRO = get_conf("LDY_KEY_PRO", "220577")
+KEY_PRIME = get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
 
 # 결제 계좌 정보 (전역 설정)
