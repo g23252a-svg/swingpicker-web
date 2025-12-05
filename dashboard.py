@@ -991,6 +991,9 @@ if len(base) < 20:
 top20 = base.head(20).copy()
 top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
+# 🔹 첫 가입 직후 표시용 플래그 (auth_user에서 세팅했다고 가정)
+just_registered = st.session_state.pop("just_registered", False)
+
 # ---------------------------
 # Sidebar (Auth / Portfolio)
 # ---------------------------
@@ -1005,9 +1008,10 @@ with st.sidebar:
 
     # 2) 구독 만료일 기반으로 auth_status 동기화
     if user is None:
-        auth_status = "free"
+        # 🔸 비로그인 사용자는 guest로 구분
+        auth_status = "guest"
         expire_str = None
-        st.caption("현재 상태: 🔒 Free (비로그인)")
+        st.caption("현재 상태: 🔒 Guest (비로그인)")
     else:
         auth_status, expire_str = sync_user_role_with_subscription(user)
         # 🔹 세션에 저장된 user.role 과 auth_status를 동기화
@@ -1030,7 +1034,7 @@ with st.sidebar:
     with st.container():
         st.markdown("### 🌱 **Free (무료)**")
         st.markdown(
-            "- ✅ 상위 **3개 종목** 조회\n"
+            "- ✅ **회원가입 후** 상위 **5개 종목** 조회 (Guest는 3개)\n"
             "- ✅ 시장 지표/섹터맵 열람\n"
             "- ❌ 내 포트폴리오 분석\n"
             "- ❌ CSV 다운로드 / 알림"
@@ -1238,6 +1242,21 @@ with tab1:
 
 with tab2:
     st.subheader("🎯 추천 종목 필터")
+
+    # 🔹 첫 가입 직후 한 번만 보여주는 Top 5 프리뷰
+    if just_registered:
+        st.success("🎉 첫 가입을 환영합니다! 오늘 기준 TOP 5 프리뷰를 먼저 보여드릴게요.")
+        preview = base.sort_values("LDY_SCORE", ascending=False).head(5).copy()
+        if not preview.empty:
+            cols = [
+                "종목명", "종목코드", "LDY_SCORE",
+                "추천매수가", "손절가", "추천매도가1"
+            ]
+            cols = [c for c in cols if c in preview.columns]
+            prev_view = preview[cols].set_index("종목명") if "종목명" in cols else preview[cols]
+            st.dataframe(prev_view, use_container_width=True)
+        st.divider()
+
     col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
     with col_f1:
         min_score = st.slider(
@@ -1279,9 +1298,13 @@ with tab2:
     if sel_routes:
         filtered = filtered[filtered["ROUTE"].isin(sel_routes)]
 
-    if auth_status == "free":
+    # 🔸 권한별 노출 개수
+    if auth_status == "guest":
         view_df = filtered.head(3)
-        st.info("🔒 Free 버전: 필터가 적용된 상위 3개 종목만 공개됩니다.")
+        st.info("🔐 비로그인(Guest) 상태입니다. 회원가입/로그인 시 상위 5개 종목까지 확인할 수 있습니다.")
+    elif auth_status == "free":
+        view_df = filtered.head(5)
+        st.info("✅ Free 회원: 필터가 적용된 상위 5개 종목 프리뷰를 보고 있습니다.")
     else:
         view_df = filtered.head(20)
         st.success(
@@ -1319,7 +1342,8 @@ with tab2:
                 else:
                     st.info("차트 데이터 없음")
             with c2:
-                if auth_status != "free":
+                # 🔸 상세 분석은 Pro 이상만
+                if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
                     st.plotly_chart(
                         plot_radar_chart(row),
@@ -1337,7 +1361,7 @@ with tab2:
                         use_container_width=True,
                     )
                 else:
-                    st.warning("🔒 상세 분석은 Pro 등급부터 확인 가능합니다.")
+                    st.warning("🔒 상세 분석(레이더/리스크-리워드/AI 코멘트)은 Pro 등급부터 확인 가능합니다.")
                 c_a, c_b = st.columns(2)
                 c_a.metric("진입가", f"{int(row.get('추천매수가', 0)):,}")
                 c_b.metric(
@@ -1410,7 +1434,7 @@ def fetch_current_price(code, name):
         return code, name, 0
 
 with tab3:
-    if auth_status == "free":
+    if auth_status in ["guest", "free"]:
         st.info("🔒 내 자산 분석은 Pro 등급부터 가능합니다.")
     elif pf_input:
         try:
@@ -1591,7 +1615,8 @@ with tab5:
 
     st.markdown("### 4. 구독 및 계정 정책 (요약)")
     st.markdown(
-        f"- **Free** : 상위 3개 종목 열람 (테스트/체험 용도).\n"
+        "- **Guest(비회원)** : 상위 3개 종목 맛보기.\n"
+        f"- **Free(회원)** : 상위 5개 종목 열람.\n"
         f"- **Pro (월 {PRICE_PRO:,}원)** : 상위 20 종목, 내 자산 분석 기능 제공.\n"
         f"- **Prime (월 {PRICE_PRIME:,}원)** : 전체 종목, CSV 다운로드, 텔레그램 알림 등 고급 기능 제공.\n"
         "- 구체적인 결제/환불/구독 해지 정책은 별도 안내(카카오 채널, 약관 페이지 등)를 따릅니다."
