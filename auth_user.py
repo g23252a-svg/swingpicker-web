@@ -33,8 +33,8 @@ def _get_conf(key, default_val):
     return os.getenv(key, default_val)
 
 # 구독/관리용 키
-KEY_PRO   = _get_conf("LDY_KEY_PRO",   "2024")
-KEY_PRIME = _get_conf("LDY_KEY_PRIME", "2025")
+KEY_PRO   = _get_conf("LDY_KEY_PRO",   "220577")
+KEY_PRIME = _get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
 # 🔹 Gist 관련 설정 (Streamlit secrets 또는 환경변수에서 읽음)
