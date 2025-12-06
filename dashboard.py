@@ -327,30 +327,52 @@ def find_code_by_name(name_or_code, code_map):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
-    kp_stat, kp_diff = "Unknown", 0.0
-    kq_stat, kq_diff = "Unknown", 0.0
+    """
+    KOSPI / KOSDAQ 상태 조회
+    - 정상: '📈 상승장', '📉 조정장' + MA20 대비 %
+    - 휴장(오늘이 거래일 아님): '... (전일 기준)'
+    - 데이터 부족/에러: '데이터 없음 / 데이터 오류' + NaN
+    """
     if not FDR_OK:
-        return kp_stat, kp_diff, kq_stat, kq_diff
+        # FinanceDataReader 자체를 못 쓰는 경우
+        return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
 
-    def _check(ticker):
+    def _check(ticker: str):
         try:
             df = fdr.DataReader(ticker)
             if df is None or df.empty:
-                return "Error", 0.0
+                return "데이터 없음", float("nan")
+
+            # 최근 60일 기준으로 MA20 계산
             df = df.tail(60)
-            ma20 = df['Close'].rolling(20).mean().iloc[-1]
-            curr = df['Close'].iloc[-1]
+            ma20 = df["Close"].rolling(20).mean().iloc[-1]
+            curr = df["Close"].iloc[-1]
+
             if pd.isna(ma20) or ma20 == 0:
-                return "Unknown", 0.0
+                return "데이터 부족", float("nan")
+
             diff = ((curr - ma20) / ma20) * 100
+
             status = "📈 상승장" if diff > 0 else "📉 조정장"
+
+            # 오늘이 휴장(= 마지막 거래일 < 오늘)이면 표시만 붙여줌
+            last_idx = df.index[-1]
+            try:
+                last_date = last_idx.date()
+            except Exception:
+                last_date = pd.to_datetime(last_idx).date()
+
+            today = datetime.now().date()
+            if last_date < today:
+                status += " (전일 기준)"
+
             return status, diff
         except Exception:
             logger.exception("market status check failed")
-            return "Error", 0.0
+            return "데이터 오류", float("nan")
 
-    kp_stat, kp_diff = _check('KS11')
-    kq_stat, kq_diff = _check('KQ11')
+    kp_stat, kp_diff = _check("KS11")
+    kq_stat, kq_diff = _check("KQ11")
     return kp_stat, kp_diff, kq_stat, kq_diff
 
 @st.cache_data(ttl=3600)
