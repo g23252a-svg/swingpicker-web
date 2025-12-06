@@ -202,7 +202,7 @@ def _hash_password(password: str, salt: str) -> str:
 
 # ----------------- 회원 가입 / 로그인 -----------------
 def register_user(email: str, password: str, nickname: str, invite_code: str = ""):
-    email = email.strip()
+    email = email.strip().lower()   # 👈 소문자 통일
     if not email or not password:
         return False, "이메일 / 비밀번호를 입력해 주세요.", None
 
