@@ -339,28 +339,26 @@ def _render_admin_panel(current_user):
 
 def render_auth_box():
     """
-    사이드바 로그인/회원가입 UI
+    사이드바 로그인 / 회원가입 UI
     """
     # 세션 키 초기화
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
 
-    # 🔍 관리자일 때만 디버그 표시
-    if user and user.get("role") == "admin":
+    if JUST_REGISTERED_KEY not in st.session_state:
+        st.session_state[JUST_REGISTERED_KEY] = False
+
+    # 🔍 DB 디버그용 (Gist 연동 확인용)
     try:
         _db = load_user_db()
         st.caption(f"DEBUG: GIST_ID={GIST_ID[:8]}..., users={len(_db.get('users', {}))}")
     except Exception as e:
         st.caption(f"DEBUG: load_user_db error = {e}")
-        _db = {"users": {}}
-        
-    if JUST_REGISTERED_KEY not in st.session_state:
-        st.session_state[JUST_REGISTERED_KEY] = False
 
     st.subheader("🔐 계정 로그인 / 회원가입")
     tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
 
-    # 로그인 탭
+    # ---------------- 로그인 탭 ----------------
     with tab_login:
         login_email = st.text_input("이메일", key="login_email")
         login_pw = st.text_input("비밀번호", type="password", key="login_pw")
@@ -370,19 +368,12 @@ def render_auth_box():
                 st.error(msg)
             else:
                 st.session_state[CURRENT_USER_KEY] = user
-                # 일반 로그인은 just_registered = False
-                st.session_state[JUST_REGISTERED_KEY] = False
                 st.success(f"{user['nickname']}님 환영합니다! ({user['role']})")
+                # 로그인 시에는 첫 가입 플래그 초기화
+                st.session_state[JUST_REGISTERED_KEY] = False
 
-    # 회원가입 탭
+    # ---------------- 회원가입 탭 ----------------
     with tab_signup:
-        # 🔸 회원가입 혜택 안내 (가입 전 홍보용)
-        st.markdown("### 🎁 지금 무료 회원가입하면")
-        st.markdown(
-            "- 🔍 오늘의 추천 종목 **Top 5**까지 무료 열람\n"
-            "- 📊 시장 지표 / 섹터맵은 계속 무료\n"
-            "- 💬 문의 게시판에 직접 문의글 작성 가능\n"
-        )
         reg_email = st.text_input("이메일", key="reg_email")
         reg_nick = st.text_input("닉네임 (선택)", key="reg_nick")
         reg_pw1 = st.text_input("비밀번호", type="password", key="reg_pw1")
@@ -392,6 +383,10 @@ def render_auth_box():
             type="password",
             key="reg_code",
         )
+
+        # 💡 회원가입 전 혜택 홍보 문구
+        st.info("✅ 지금 회원가입하면 **오늘 기준 상위 5개 추천 종목**까지 무료로 확인할 수 있습니다.")
+
         if st.button("회원가입", key="btn_register"):
             if reg_pw1 != reg_pw2:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
@@ -402,11 +397,12 @@ def render_auth_box():
                 if ok:
                     st.success(msg)
                     st.session_state[CURRENT_USER_KEY] = new_user
-                    # 🔹 첫 가입 여부 플래그
+                    # 🔹 첫 가입 여부 플래그 ON
                     st.session_state[JUST_REGISTERED_KEY] = True
                 else:
                     st.error(msg)
 
+    # ---------------- 공통 로그인 상태 표시 ----------------
     user = get_user()
     if user:
         col1, col2 = st.columns([3, 1])
@@ -418,9 +414,5 @@ def render_auth_box():
                 st.session_state[JUST_REGISTERED_KEY] = False
                 st.success("로그아웃 되었습니다.")
                 user = None
-
-    # 관리자면, 이 파일 안에서도 추가 패널 노출할 수 있음 (선택 사항)
-    # if user and user.get("role") == "admin":
-    #     _render_admin_panel(user)
 
     return user
