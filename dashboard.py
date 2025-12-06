@@ -968,42 +968,24 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
 # ---------------------------
 # [개선] 메인 데이터 로드 (Status UX)
 # ---------------------------
-df_raw = None
 with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded=True) as status:
-    st.write("📥 데이터 다운로드 중...")
+    status.write("📥 데이터 다운로드 및 스코어링 계산 중...")
+
     try:
-        df_raw = load_csv_url(RAW_URL)
-        log_src(df_raw, "Remote")
-    except Exception as e_remote:
-        logger.warning("Remote load failed: %s", e_remote)
-        if os.path.exists(LOCAL_RAW):
-            try:
-                df_raw = load_csv_path(LOCAL_RAW)
-                log_src(df_raw, "Local")
-            except Exception:
-                pass
-
-    if df_raw is None:
+        # ✅ 캐시된 통합 함수 호출
+        scored, base, top20, TH = prepare_scored_data(
+            RAW_URL,
+            LOCAL_RAW,
+            PASS_EBS,
+        )
+        status.write("🌊 동적 유동성 필터 적용 중...")
+        status.update(label="✅ 분석 완료!", state="complete", expanded=False)
+    except Exception as e:
         status.update(label="❌ 데이터 로드 실패", state="error")
+        st.error(f"데이터 로드/스코어링 중 오류: {e}")
         st.stop()
-    
-    st.write("🧮 알고리즘 스코어링 계산 중...")
-    df = normalize_cols(df_raw)
-    latest = df.copy()
-    scored = build_global_score(latest)
 
-    st.write("🌊 동적 유동성 필터 적용 중...")
-    TH = compute_dynamic_thresholds(scored)
-    scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
 
-    status.update(label="✅ 분석 완료!", state="complete", expanded=False)
-
-# 베이스 필터
-base = scored[(scored["EBS"] >= PASS_EBS) & (scored["_GATE_OK"])].copy()
-if len(base) < 20:
-    base = scored.head(20)
-top20 = base.head(20).copy()
-top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
 # 🔹 첫 가입 직후 표시용 플래그 (auth_user에서 세팅했다고 가정)
 just_registered = st.session_state.pop("just_registered", False)
