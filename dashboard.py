@@ -1263,18 +1263,36 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 with tab1:
     kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
     c1, c2 = st.columns(2)
-    c1.metric(
-        "KOSPI",
-        f"{kp_stat}",
-        f"{kp_diff:.2f}%",
-        delta_color="off" if "상승" in kp_stat else "inverse",
-    )
-    c2.metric(
-        "KOSDAQ",
-        f"{kq_stat}",
-        f"{kq_diff:.2f}%",
-        delta_color="off" if "상승" in kq_stat else "inverse",
-    )
+
+    def _fmt_metric(stat, diff):
+        """지수 상태/증감값을 안전하게 포맷"""
+        bad_stats = {
+            "데이터 없음",
+            "데이터 오류",
+            "데이터 소스 오류",
+            "데이터 부족",
+            "Unknown",
+            "Error",
+        }
+
+        # (1) 에러/데이터 부족이거나 diff가 NaN이면 퍼센트는 숨김 ("-")
+        if stat in bad_stats or (
+            isinstance(diff, float) and math.isnan(diff)
+        ):
+            return stat, "-", "off"
+
+        # (2) 정상일 때만 % 포맷
+        delta_txt = f"{diff:.2f}%"
+
+        # (3) 상승이면 중립 색, 하락이면 inverse
+        delta_color = "off" if ("상승" in stat or diff >= 0) else "inverse"
+        return stat, delta_txt, delta_color
+
+    kp_value, kp_delta, kp_color = _fmt_metric(kp_stat, kp_diff)
+    kq_value, kq_delta, kq_color = _fmt_metric(kq_stat, kq_diff)
+
+    c1.metric("KOSPI", kp_value, kp_delta, delta_color=kp_color)
+    c2.metric("KOSDAQ", kq_value, kq_delta, delta_color=kq_color)
 
     st.divider()
     c_gauge, c_map = st.columns([1, 1.5])
