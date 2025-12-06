@@ -335,16 +335,16 @@ def find_code_by_name(name_or_code, code_map):
 
 @st.cache_data(ttl=600)
 def get_market_status_local(scored_df: pd.DataFrame):
-    """
-    FDR / pykrx가 막혀도 동작하는 로컬 시장 상태 계산
-    - 기준: 각 시장별 5일 수익률(ret_5d_%) 평균
-    - 평균 > 0  → 상승장
-      평균 ≤ 0 → 조정장
-    """
     result = {}
 
+    has_market_col = "시장" in scored_df.columns
+
     for mkt in ["KOSPI", "KOSDAQ"]:
-        sub = scored_df[scored_df.get("시장", "") == mkt].copy()
+        if has_market_col:
+            sub = scored_df[scored_df["시장"] == mkt].copy()
+        else:
+            sub = scored_df.copy()  # 시장 구분 없으면 전체 대상으로
+
         if sub.empty:
             result[mkt] = ("데이터 없음", float("nan"))
             continue
@@ -369,7 +369,7 @@ def get_market_status_local(scored_df: pd.DataFrame):
     return kp_stat, kp_diff, kq_stat, kq_diff
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=600)
 def get_market_status():
     """
     KOSPI / KOSDAQ 상태 조회 (통합 래퍼)
