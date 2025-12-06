@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.3 (Subscription Ready)
+LDY Pro Trader v6.4 (Data Freshness + Market Snapshot)
 - 개선: 스코어링 로직을 Collector v6.4 수준으로 정교화
 - 개선: 포트폴리오 분석 병렬 처리 (속도 향상)
 - 개선: 차트에 거래량(Volume) 보조 지표 추가
 - 개선: 데이터 로딩 상태 시각화 (st.status)
 - 개선: 보안 설정 (st.secrets 우선 지원)
+- 개선: 시장/공포탐욕 지표의 데이터 출처 상태 표시
+- 추가: 추천 데이터 기준 시점(업데이트 시간) 표시
 - 추가: Pro / Prime 유료 구독 + 1개월 만료일 관리
 """
 
@@ -217,8 +219,8 @@ except Exception as e:
     logger.info("pykrx not available: %s", e)
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v6.3", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v6.3 (Enhanced Score + Subscription)")
+st.set_page_config(page_title="LDY Pro Trader v6.4", layout="wide", page_icon="💎")
+st.title("🏆 LDY Pro Trader v6.4 (Data Freshness + Market Snapshot)")
 st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
 
 st.warning(
@@ -1144,6 +1146,36 @@ def route_tag_dynamic(row, th):
 
     return "↩️ PULL (눌림)"
 
+# 👉 여기부터 추가
+def infer_data_timestamp(df_raw: pd.DataFrame):
+    """
+    recommend_latest.csv 안에서 '기준일', '날짜', 'Date' 같은 컬럼을 찾아
+    가장 최신 날짜를 기준 시각으로 추출.
+    없으면 None 리턴.
+    """
+    if df_raw is None or df_raw.empty:
+        return None
+
+    candidates = []
+
+    # 한글/영문 날짜 컬럼 후보들
+    date_cols = ["기준일자", "기준일", "날짜", "DATE", "Date", "date"]
+    for col in date_cols:
+        if col in df_raw.columns:
+            s = pd.to_datetime(df_raw[col], errors="coerce")
+            s = s.dropna()
+            if not s.empty:
+                candidates.append(s.max())
+
+    if candidates:
+        # 여러 컬럼이 있으면 가장 나중 날짜 사용
+        return max(candidates)
+
+    return None
+# 👈 여기까지 추가
+
+
+
 @st.cache_data(ttl=600)
 def prepare_scored_data(raw_url, local_raw, pass_ebs):
     """
@@ -1152,9 +1184,12 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     - build_global_score
     - 동적 threshold + ROUTE
     - base / top20 / P_hit 계산
+    - 📅 recommend_latest.csv 기준 시점(data_ts) 추출
     """
+    
     df_raw = None
-
+    
+    # 1) CSV 로드
     try:
         df_raw = load_csv_url(raw_url)
         log_src(df_raw, "Remote")
@@ -1169,7 +1204,11 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
 
     if df_raw is None:
         raise RuntimeError("CSV를 원격/로컬 어디서도 불러오지 못했습니다.")
+        
+    # 2) 기준 시점 추출 (원본 df_raw 기준)
+    data_ts = infer_data_timestamp(df_raw)
 
+    # 3) 스코어링 파이프라인
     df = normalize_cols(df_raw)
     latest = df.copy()
     scored = build_global_score(latest)
@@ -1187,15 +1226,20 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     top20 = base.head(20).copy()
     top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
-    return scored, base, top20, TH
+    return scored, base, top20, TH, data_ts
 
 # ---------------------------
 # 메인 데이터 로드 (Status UX)
 # ---------------------------
+
+# 전역에서 쓸 수 있게 기준 시점 변수 하나 선언만 해두자
+DATA_TS = None
+
 with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded=True) as status:
     status.write("📥 데이터 다운로드 및 스코어링 계산 중...")
     try:
-        scored, base, top20, TH = prepare_scored_data(
+        # 🔥 data_ts까지 같이 받기
+        scored, base, top20, TH, DATA_TS = prepare_scored_data(
             RAW_URL,
             LOCAL_RAW,
             PASS_EBS,
@@ -1380,7 +1424,7 @@ with st.sidebar:
 # Telegram send
 # ---------------------------
 if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v6.3] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
+    msg = f"🔥 [LDY v6.4] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
     for i in range(min(5, len(top20))):
         row = top20.iloc[i]
         msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
@@ -1403,7 +1447,6 @@ with tab1:
     c1, c2 = st.columns(2)
 
     def _fmt_metric(stat, diff):
-        """지수 상태/증감값을 안전하게 포맷"""
         bad_stats = {
             "데이터 없음",
             "데이터 오류",
@@ -1412,13 +1455,10 @@ with tab1:
             "Unknown",
             "Error",
         }
-
-        # 에러/데이터 부족이면 예쁜 문구로 통일
         if stat in bad_stats or pd.isna(diff):
             friendly = "📡 지수 데이터 지연/점검 중"
             return friendly, "-", "off"
 
-        # 정상일 때만 % 표시
         delta_txt = f"{diff:.2f}%"
         delta_color = "off" if ("상승" in stat or diff >= 0) else "inverse"
         return stat, delta_txt, delta_color
@@ -1429,10 +1469,46 @@ with tab1:
     c1.metric("KOSPI", kp_value, kp_delta, delta_color=kp_color)
     c2.metric("KOSDAQ", kq_value, kq_delta, delta_color=kq_color)
 
+    # 🔥 여기부터 새로 정리
+    # ---- (NEW) 데이터 기준 시각 + 지표 모드 태그 ----
+    fg_score, fg_status = get_fear_greed_index()  # 한 번만 계산해서 아래에서 같이 사용
+
+    info_lines = []
+    
+    # 1) 추천 데이터 기준 시각
+    if DATA_TS is not None:
+        try:
+            ts_str = to_kst_str(DATA_TS)
+        except Exception:
+            ts_str = str(DATA_TS)
+        info_lines.append(f"📅 추천 데이터 기준 시각: **{ts_str} (KST)**")
+
+    # 2) 지수/스코어 기준 여부 요약
+    mode_bits = []
+
+    # 시장 상태: KOSPI/KOSDAQ
+    if "스코어 기반" in str(kp_stat) or "스코어 기반" in str(kq_stat):
+        mode_bits.append("시장 상태: 🔄 **로컬 스코어 기반 추정**")
+    else:
+        mode_bits.append("시장 상태: 📡 **지수(FDR/pykrx) 기준**")
+
+    # 공포/탐욕: 지수/스코어
+    if "스코어 기준" in fg_status:
+        mode_bits.append("공포/탐욕: 📊 **스코어 기준**")
+    elif "지수 기준" in fg_status:
+        mode_bits.append("공포/탐욕: 📈 **지수 기준**")
+
+    if mode_bits:
+        info_lines.append(" · ".join(mode_bits))
+
+    if info_lines:
+        st.caption("  \n".join(info_lines))
+
     st.divider()
+
+    # 공포/탐욕 게이지 + 섹터맵
     c_gauge, c_map = st.columns([1, 1.5])
     with c_gauge:
-        fg_score, fg_status = get_fear_greed_index()
         st.plotly_chart(
             plot_fear_greed_gauge(fg_score),
             use_container_width=True,
@@ -1747,6 +1823,42 @@ with tab3:
                 f"{int(total_eval-total_buy):,}원",
                 delta_color="normal" if tot_rate >= 0 else "inverse",
             )
+
+            # ---- (NEW) 종목별 평가금액 비중 파이차트 ----
+            try:
+                if total_eval > 0:
+                    pie_data = []
+                    for code, name_input, avg, qty in targets:
+                        cur_price = price_map.get(code, 0)
+                        eval_amt = cur_price * qty
+                        if eval_amt <= 0:
+                            continue
+                        label = (
+                            stock.get_market_ticker_name(code)
+                            if (PYKRX_OK and cur_price > 0)
+                            else name_input
+                        )
+                        pie_data.append((label, eval_amt))
+
+                    if pie_data:
+                        labels = [p[0] for p in pie_data]
+                        values = [p[1] for p in pie_data]
+                        fig_pie = go.Figure(
+                            data=[go.Pie(labels=labels, values=values, hole=0.4)]
+                        )
+                        fig_pie.update_layout(
+                            title="📊 종목별 평가 금액 비중",
+                            height=300,
+                            margin=dict(l=10, r=10, t=40, b=10),
+                            showlegend=True,
+                        )
+                        st.plotly_chart(fig_pie, use_container_width=True)
+            except Exception:
+                logger.exception("portfolio pie chart failed")
+
+
+
+        
         except Exception as e:
             logger.exception("pf analysis failed")
             st.error(f"분석 실패: {e}")
