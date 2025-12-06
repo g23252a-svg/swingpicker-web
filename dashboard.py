@@ -325,10 +325,14 @@ def find_code_by_name(name_or_code, code_map):
         return name_or_code.zfill(6)
     return code_map.get(name_or_code, None)
 
+# ---------------------------
+# 시장 상태 계산 (지수 + 로컬 fallback)
+# ---------------------------
+
 @st.cache_data(ttl=600)
 def get_market_status_local(scored_df: pd.DataFrame):
     """
-    FDR/pykrx가 막혀도 동작하는 로컬 시장 상태 계산
+    FDR / pykrx가 막혀도 동작하는 로컬 시장 상태 계산
     - 기준: 각 시장별 5일 수익률(ret_5d_%) 평균
     - 평균 > 0  → 상승장
       평균 ≤ 0 → 조정장
@@ -361,16 +365,15 @@ def get_market_status_local(scored_df: pd.DataFrame):
     return kp_stat, kp_diff, kq_stat, kq_diff
 
 
+@st.cache_data(ttl=3600)
+def get_market_status():
     """
     KOSPI / KOSDAQ 상태 조회 (통합 래퍼)
     1) FDR / pykrx 인덱스 데이터로 계산 시도
     2) 실패하거나 데이터 오류면 scored DF 기반 로컬 계산으로 fallback
     """
-    # -----------------------------
-    # 1) 인덱스 데이터 기반 계산
-    # -----------------------------
+    # 1) FDR / pykrx 둘 다 안 되면 바로 로컬
     if not FDR_OK and not PYKRX_OK:
-        # 바로 로컬로
         if "scored" in globals():
             try:
                 return get_market_status_local(globals()["scored"])
@@ -378,6 +381,9 @@ def get_market_status_local(scored_df: pd.DataFrame):
                 logger.exception("get_market_status_local fallback failed (no FDR/PYKRX)")
         return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
 
+    # -----------------------------
+    # 1) 인덱스 데이터 기반 계산
+    # -----------------------------
     def _via_fdr(ticker: str):
         """FinanceDataReader 경로"""
         if not FDR_OK:
@@ -451,11 +457,11 @@ def get_market_status_local(scored_df: pd.DataFrame):
 
         return status, diff
 
+    # 인덱스 기준 먼저 시도
     try:
         kp_stat, kp_diff = _status_for("KS11")
         kq_stat, kq_diff = _status_for("KQ11")
 
-        # 인덱스 데이터가 정상이면 그대로 사용
         bad_stats = {
             "데이터 없음",
             "데이터 오류",
@@ -464,6 +470,8 @@ def get_market_status_local(scored_df: pd.DataFrame):
             "Unknown",
             "Error",
         }
+
+        # 둘 중 하나라도 정상값이면 그냥 이거 쓴다
         if kp_stat not in bad_stats or kq_stat not in bad_stats:
             return kp_stat, kp_diff, kq_stat, kq_diff
     except Exception:
@@ -478,6 +486,7 @@ def get_market_status_local(scored_df: pd.DataFrame):
         except Exception:
             logger.exception("get_market_status_local fallback failed")
 
+    # 그래도 안 되면 완전 실패
     return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
 
 @st.cache_data(ttl=3600)
