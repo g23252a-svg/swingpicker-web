@@ -115,6 +115,38 @@ def get_subscription(email):
     return db.get("subs", {}).get(email)
 
 # ---------------------------
+# 시간 / 타임존 유틸 (UTC 저장 + KST 표기)
+# ---------------------------
+KST = timezone(timedelta(hours=9))
+
+def now_utc() -> datetime:
+    """DB/파일 저장용: 항상 UTC 기준 aware datetime"""
+    return datetime.now(timezone.utc)
+
+def now_kst() -> datetime:
+    """화면/로그 표시용: 한국 시간(KST) 기준 aware datetime"""
+    return datetime.now(KST)
+
+def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """
+    DB/auth_user 등에 저장된 시간을 KST 문자열로 변환
+    - 타임존 없는 값: 기존에 KST로 저장되었다고 가정 → KST로 localize만 함 (시간 안 바뀜)
+    - 타임존 있는 값: 해당 타임존에서 KST로 convert
+    """
+    if value is None or value == "" or value == "NaT":
+        return ""
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+
+    if ts.tzinfo is None:
+        ts = ts.tz_localize(KST)
+    else:
+        ts = ts.tz_convert(KST)
+
+    return ts.strftime(fmt)
+
+# ---------------------------
 # 오픈베타 영구 PRIME 사용자
 # ---------------------------
 BETA_PRIME_USERS = {
@@ -137,7 +169,7 @@ def sync_user_role_with_subscription(user):
     email = user.get("login_id", "")
     base_role = user.get("role", "free")
 
-    # 🔹 (1) 오픈베타 참여자: 무조건 영구 PRIME
+    # (1) 베타 PRIME 유저: 무조건 PRIME 취급
     if email in BETA_PRIME_USERS:
         try:
             if base_role != "prime":
@@ -146,7 +178,7 @@ def sync_user_role_with_subscription(user):
             logger.exception("beta prime sync failed")
         return "prime", "∞"
 
-    # 🔹 (2) 일반 구독자 로직
+    # (2) 일반 구독자
     sub = get_subscription(email)
     if not sub:
         return base_role, None
@@ -158,6 +190,7 @@ def sync_user_role_with_subscription(user):
         return base_role, exp_str
 
     today = now_kst().date()
+    # 만료일 지났으면 free로
     if today > exp_date and base_role in ["pro", "prime"]:
         try:
             update_user_role(email, "free")
@@ -168,7 +201,7 @@ def sync_user_role_with_subscription(user):
 
     return sub.get("role", base_role), exp_str
 
-# 1. 라이브러리 로드
+# 1. 라이브러리 로드 (외부 라이브러리 실패에 대비)
 try:
     import FinanceDataReader as fdr
     FDR_OK = True
@@ -196,7 +229,7 @@ st.warning(
     "본 서비스 및 개발자는 어떠한 법적 책임도 부담하지 않습니다."
 )
 
-# 3. 설정 관리
+# 3. 설정 관리 (Secrets -> Env -> Default 순서)
 def get_conf(key, default_val):
     try:
         if key in st.secrets:
@@ -217,7 +250,7 @@ KEY_PRO = get_conf("LDY_KEY_PRO", "220577")
 KEY_PRIME = get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
 
-# 결제 계좌 정보
+# 결제 계좌 정보 (전역 설정)
 BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-22-2658701")
 BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
 
@@ -239,6 +272,7 @@ P_NEAR_FAR = 4.0
 P_LIQ_LOW = 4.0
 P_VOL_SPIKE = 2.0
 
+# RSI 적정 구간
 RSI_LOW, RSI_HIGH = 45, 65
 
 # ---------------------------
@@ -508,32 +542,7 @@ def plot_radar_chart(row):
     return fig
 
 # ---------------------------
-# 시간 / 타임존 유틸
-# ---------------------------
-KST = timezone(timedelta(hours=9))
-
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-def now_kst() -> datetime:
-    return datetime.now(KST)
-
-def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
-    if value is None or value == "" or value == "NaT":
-        return ""
-    ts = pd.to_datetime(value, errors="coerce")
-    if pd.isna(ts):
-        return ""
-
-    if ts.tzinfo is None:
-        ts = ts.tz_localize(KST)
-    else:
-        ts = ts.tz_convert(KST)
-
-    return ts.strftime(fmt)
-
-# ---------------------------
-# 차트 시각화
+# 차트 시각화 (거래량 추가)
 # ---------------------------
 def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty:
@@ -676,9 +685,6 @@ def load_csv_path(path):
     return pd.read_csv(path, encoding="utf-8")
 
 def log_src(df, src):
-    """
-    데이터 로드 로그만 남김 (Streamlit UI 요소 사용 금지)
-    """
     logger.info("Data Loaded: %s rows=%s", src, len(df) if df is not None else 0)
 
 def load_portfolio_file():
@@ -700,7 +706,7 @@ def save_portfolio_file(text_data):
         return False
 
 # ---------------------------
-# 핵심: 스코어링 함수
+# 스코어링 함수 (v6.4 스타일)
 # ---------------------------
 def liquidity_gate(x_turn, market):
     min_map = {
@@ -854,7 +860,7 @@ def build_global_score(lat):
     return x
 
 # ---------------------------
-# 동적 라우트(분포기반 임계값)
+# 동적 라우트(분포기반 임계값) 적용
 # ---------------------------
 def compute_dynamic_thresholds(df):
     thr = {}
@@ -940,14 +946,14 @@ def route_tag_dynamic(row, th):
 
     return "↩️ PULL (눌림)"
 
-# 🔴 여기서 @st.cache_data 제거
+@st.cache_data(ttl=600)
 def prepare_scored_data(raw_url, local_raw, pass_ebs):
     """
     - CSV 로드 (원격 → 실패 시 로컬)
     - normalize_cols
     - build_global_score
     - 동적 threshold + ROUTE
-    - base / top20 / P_hit 까지 한 번에 계산
+    - base / top20 / P_hit 계산
     """
     df_raw = None
 
@@ -990,7 +996,6 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
 # ---------------------------
 with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded=True) as status:
     status.write("📥 데이터 다운로드 및 스코어링 계산 중...")
-
     try:
         scored, base, top20, TH = prepare_scored_data(
             RAW_URL,
@@ -1004,11 +1009,11 @@ with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded
         st.error(f"데이터 로드/스코어링 중 오류: {e}")
         st.stop()
 
-# 🔹 첫 가입 직후 표시용 플래그
+# 첫 가입 직후 표시용 플래그
 just_registered = st.session_state.pop("just_registered", False)
 
 # ---------------------------
-# Sidebar (Auth / Portfolio)
+# Sidebar (Auth / Portfolio / Subscription)
 # ---------------------------
 from auth_user import render_auth_box, list_users, update_user_role
 
@@ -1083,6 +1088,7 @@ with st.sidebar:
     except Exception:
         st.markdown(f"[👉 구독/입금 확인 문의 (카톡)]({kakao_url})")
 
+    # Pro 이상 포트폴리오
     if auth_status in ["pro", "prime", "admin"]:
         st.divider()
         st.subheader("💼 내 자산 관리")
@@ -1099,6 +1105,7 @@ with st.sidebar:
     else:
         pf_input = ""
 
+    # Prime 이상 텔레그램
     send_btn = False
     tg_token, tg_chat_id = "", ""
     if auth_status in ["prime", "admin"]:
@@ -1107,6 +1114,7 @@ with st.sidebar:
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
 
+    # 관리자 전용: 회원 권한 + 구독 만료일 관리
     if auth_status == "admin":
         st.divider()
         st.subheader("👑 회원 권한 / 구독 관리 (Admin)")
@@ -1123,11 +1131,11 @@ with st.sidebar:
             for u in users:
                 email = u.get("login_id")
                 sub = subs.get(email, {})
-                exp_str2 = sub.get("expire_at", "")
+                exp_str = sub.get("expire_at", "")
                 days_left = ""
-                if exp_str2:
+                if exp_str:
                     try:
-                        d_exp = datetime.strptime(exp_str2, "%Y-%m-%d").date()
+                        d_exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
                         days_left = (d_exp - today).days
                     except Exception:
                         days_left = ""
@@ -1136,7 +1144,7 @@ with st.sidebar:
                     "닉네임": u.get("nickname"),
                     "권한(auth_user)": u.get("role"),
                     "구독 역할(sub)": sub.get("role", ""),
-                    "만료일": exp_str2,
+                    "만료일": exp_str,
                     "잔여일수": days_left,
                     "가입일": to_kst_str(u.get("created_at")),
                     "마지막 로그인": to_kst_str(u.get("last_login")),
@@ -1241,7 +1249,6 @@ with tab1:
 with tab2:
     st.subheader("🎯 추천 종목 필터")
 
-    just_registered = st.session_state.get("just_registered", False)
     if just_registered:
         st.success("🎉 첫 가입을 환영합니다! 오늘 기준 TOP 5 프리뷰를 먼저 보여드릴게요.")
         try:
@@ -1462,7 +1469,7 @@ with tab3:
                     code_map = dict(zip(df_krx['Name'], df_krx['Code'].astype(str).str.zfill(6)))
                 except Exception:
                     pass
-            
+
             targets = []
             lines = pf_input.strip().split('\n')
             for line in lines:
@@ -1482,15 +1489,15 @@ with tab3:
                     for future in futures:
                         c, n, p = future.result()
                         price_map[c] = p
-            
+
             cols_layout = st.columns(3)
             total_buy = 0
             total_eval = 0
-            
+
             for idx, (code, name_input, avg, qty) in enumerate(targets):
                 cur_price = price_map.get(code, 0)
                 real_name = stock.get_market_ticker_name(code) if (PYKRX_OK and cur_price > 0) else name_input
-                
+
                 if cur_price > 0:
                     profit_rate = (cur_price - avg) / avg * 100
                     if profit_rate > 0:
@@ -1502,12 +1509,12 @@ with tab3:
                 else:
                     signal = "❓ 확인불가"
                     profit_rate = 0
-                
+
                 buy_amt = avg * qty
                 eval_amt = cur_price * qty
                 total_buy += buy_amt
                 total_eval += eval_amt
-                
+
                 with cols_layout[idx % 3]:
                     st.metric(
                         label=f"{real_name} ({signal})",
@@ -1515,7 +1522,7 @@ with tab3:
                         delta=f"{profit_rate:+.2f}% ({int(eval_amt-buy_amt):,}원)",
                         delta_color="normal" if profit_rate >= 0 else "inverse",
                     )
-            
+
             st.divider()
             c1, c2, c3 = st.columns(3)
             tot_rate = (total_eval - total_buy) / total_buy * 100 if total_buy > 0 else 0
@@ -1536,11 +1543,7 @@ with tab3:
 with tab4:
     st.subheader("📮 문의 게시판")
 
-    current_user = None
-    try:
-        current_user = user
-    except NameError:
-        current_user = None
+    current_user = user if 'user' in globals() else None
 
     default_email = ""
     default_nick = ""
@@ -1580,7 +1583,6 @@ with tab4:
             save_inquiry_db(db)
             st.success("문의가 등록되었습니다. 가능한 한 빠르게 확인하겠습니다. 🙌")
 
-    st.markdown("---")
     st.markdown("#### 📂 최근 문의 내역")
 
     db = load_inquiry_db()
@@ -1639,9 +1641,3 @@ with tab5:
 
     st.markdown("### 5. 한 줄 요약")
     st.info("👉 **데이터와 퀀트는 도구일 뿐, 최종 책임은 언제나 본인에게 있다.**")
-
----
-
-이 버전으로 저장하고 돌리면, `prepare_scored_data()` 관련 캐시/레이아웃 충돌 에러는 안 나와야 해.  
-만약 이 상태에서도 똑같은 에러가 또 뜨면, 그때는 **Streamlit 버전**이랑 **정확한 에러 전체 트레이스백** 한 번만 붙여줘.
-::contentReference[oaicite:0]{index=0}
