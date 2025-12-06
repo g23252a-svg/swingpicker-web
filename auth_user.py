@@ -344,6 +344,14 @@ def render_auth_box():
     # 세션 키 초기화
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
+
+    # 🔍 DB 디버그용
+    try:
+        _db = load_user_db()
+        st.caption(f"DEBUG: GIST_ID={GIST_ID[:8]}..., users={len(_db.get('users', {}))}")
+    except Exception as e:
+        st.caption(f"DEBUG: load_user_db error = {e}")
+        
     if JUST_REGISTERED_KEY not in st.session_state:
         st.session_state[JUST_REGISTERED_KEY] = False
 
