@@ -244,7 +244,7 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
     return True, f"회원가입 완료! 현재 권한: {role}", users[email]
 
 def authenticate_user(email: str, password: str):
-    email = email.strip()
+    email = email.strip().lower()   # 👈 여기서도 동일하게
     db = load_user_db()
     users = db.get("users", {})
     user = users.get(email)
