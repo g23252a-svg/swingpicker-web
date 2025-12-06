@@ -5,6 +5,8 @@ import os
 import json
 import hashlib
 import logging
+import re
+from typing import Tuple
 from datetime import datetime, timezone
 
 import requests
@@ -91,7 +93,7 @@ def _save_user_db_local(db):
         logger.exception("[auth_user] local user DB save failed")
 
 # ----------------- GitHub Gist 연동 유틸 -----------------
-GIST_FILE_NAME = "users_db.json"   # Gist 안에 만들 파일 이름 (원하면 바꿀 수 있음)
+GIST_FILE_NAME = "users_db.json"   # Gist 안에 만들 파일 이름
 
 def _load_user_db_from_gist():
     """
@@ -162,27 +164,52 @@ def _save_user_db_to_gist(db) -> bool:
         return False
 
 # ----------------- 통합 DB 유틸 (Gist 우선, 로컬 백업) -----------------
+# 👉 Gist API 호출 최적화를 위한 간단 캐시 (TTL)
+_USER_DB_CACHE = None
+_USER_DB_CACHE_TS = None
+_USER_DB_CACHE_TTL = 30  # 초 단위 (예: 30초)
+
 def load_user_db():
     """
-    1순위: Gist에서 로드
+    1순위: Gist에서 로드 (캐시 + TTL)
     2순위: 로컬 파일에서 로드
     """
-    # Gist 사용 가능하면 먼저 시도
+    global _USER_DB_CACHE, _USER_DB_CACHE_TS
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    # 캐시가 있고, TTL 이내면 그대로 사용
+    if _USER_DB_CACHE is not None and _USER_DB_CACHE_TS is not None:
+        if now_ts - _USER_DB_CACHE_TS < _USER_DB_CACHE_TTL:
+            return _USER_DB_CACHE
+
+    # Gist 우선 시도
     db = _load_user_db_from_gist()
     if db is not None:
-        # 로컬에도 백업 저장
         _save_user_db_local(db)
+        _USER_DB_CACHE = db
+        _USER_DB_CACHE_TS = now_ts
         return db
 
-    # Gist 실패 또는 미설정 → 로컬 파일 사용
+    # Gist 실패 → 로컬
     logger.info("[auth_user] Gist 사용 불가, 로컬 user DB 사용")
-    return _load_user_db_local()
+    db = _load_user_db_local()
+    _USER_DB_CACHE = db
+    _USER_DB_CACHE_TS = now_ts
+    return db
 
 def save_user_db(db):
     """
     - 항상 로컬에는 저장
     - Gist 설정이 되어 있으면 Gist에도 저장
+    - 모듈 캐시도 항상 최신으로 갱신
     """
+    global _USER_DB_CACHE, _USER_DB_CACHE_TS
+
+    # 캐시 갱신
+    _USER_DB_CACHE = db
+    _USER_DB_CACHE_TS = datetime.now(timezone.utc).timestamp()
+
     # 로컬 백업
     _save_user_db_local(db)
 
@@ -198,13 +225,34 @@ def _create_salt(email: str) -> str:
     return hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
 
 def _hash_password(password: str, salt: str) -> str:
+    # 필요 시 sha256 반복 횟수를 늘려 강도 강화도 가능
     return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+
+# ----------------- 입력 검증 유틸 -----------------
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+def _validate_email(email: str) -> bool:
+    if not email:
+        return False
+    return bool(EMAIL_REGEX.match(email))
+
+def _validate_password(pw: str) -> Tuple[bool, str]:
+    if len(pw) < 6:
+        return False, "비밀번호는 최소 6자 이상이어야 합니다."
+    return True, ""
 
 # ----------------- 회원 가입 / 로그인 -----------------
 def register_user(email: str, password: str, nickname: str, invite_code: str = ""):
-    email = email.strip().lower()   # 👈 소문자 통일
+    email = email.strip().lower()
     if not email or not password:
         return False, "이메일 / 비밀번호를 입력해 주세요.", None
+
+    if not _validate_email(email):
+        return False, "이메일 형식이 올바르지 않습니다.", None
+
+    ok_pw, pw_msg = _validate_password(password)
+    if not ok_pw:
+        return False, pw_msg, None
 
     db = load_user_db()
     users = db.get("users", {})
@@ -244,21 +292,22 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
     return True, f"회원가입 완료! 현재 권한: {role}", users[email]
 
 def authenticate_user(email: str, password: str):
-    email = email.strip().lower()   # 👈 여기서도 동일하게
+    email = email.strip().lower()
     db = load_user_db()
     users = db.get("users", {})
     user = users.get(email)
 
+    # 보안 관점에서 이메일/비번 에러 메시지 통합
     if not user:
-        return None, "존재하지 않는 계정입니다."
+        return None, "이메일 또는 비밀번호가 일치하지 않습니다."
 
     salt = user.get("salt", "")
     pw_hash = user.get("password_hash", "")
 
     if _hash_password(password, salt) != pw_hash:
-        return None, "비밀번호가 일치하지 않습니다."
+        return None, "이메일 또는 비밀번호가 일치하지 않습니다."
 
-    # 🔹 로그인 성공 시점에 last_login을 UTC 기준으로 갱신
+    # 로그인 성공 시점에 last_login을 UTC 기준으로 갱신
     now_str = _now_utc_str()
     user["last_login"] = now_str
     users[email] = user
@@ -284,6 +333,7 @@ def update_user_role(email: str, new_role: str) -> bool:
     """
     관리자가 회원 권한 변경
     """
+    email = email.strip().lower()
     db = load_user_db()
     users = db.get("users", {})
     if email not in users:
@@ -337,9 +387,11 @@ def _render_admin_panel(current_user):
         else:
             st.error("변경 실패")
 
-def render_auth_box():
+def render_auth_box(show_debug: bool = False):
     """
     사이드바 로그인 / 회원가입 UI
+    - show_debug=True 로 호출하면 Gist 연동 디버그 캡션을 표시
+      (예: 개발 시에만 사용)
     """
     # 세션 키 초기화
     if CURRENT_USER_KEY not in st.session_state:
@@ -348,12 +400,13 @@ def render_auth_box():
     if JUST_REGISTERED_KEY not in st.session_state:
         st.session_state[JUST_REGISTERED_KEY] = False
 
-    # 🔍 DB 디버그용 (Gist 연동 확인용)
-    try:
-        _db = load_user_db()
-        st.caption(f"DEBUG: GIST_ID={GIST_ID[:8]}..., users={len(_db.get('users', {}))}")
-    except Exception as e:
-        st.caption(f"DEBUG: load_user_db error = {e}")
+    # 🔍 DB 디버그용 (Gist 연동 확인용) - 옵션
+    if show_debug:
+        try:
+            _db = load_user_db()
+            st.caption(f"DEBUG: GIST_ID={GIST_ID[:8]}..., users={len(_db.get('users', {}))}")
+        except Exception as e:
+            st.caption(f"DEBUG: load_user_db error = {e}")
 
     st.subheader("🔐 계정 로그인 / 회원가입")
     tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
@@ -416,4 +469,3 @@ def render_auth_box():
                 user = None
 
     return user
-
