@@ -1497,16 +1497,12 @@ with tab1:
 
     info_lines = []
     
-    # 1) 추천 데이터 기준 시각
+    # 1) 추천 데이터 기준 일자
     if DATA_TS is not None:
-        try:
-            ts_str = to_kst_str(DATA_TS, fmt="%Y-%m-%d")
-            st.caption(f"📅 추천 데이터 기준 일자: **{ts_str} (KST)**")
-        except Exception:
-            ts_str = ""
+        ts_date = to_kst_str(DATA_TS, fmt="%Y-%m-%d")
+        if ts_date:
+            info_lines.append(f"📅 추천 데이터 기준 일자: **{ts_date} (KST)**")
 
-        if ts_str:  # 🔹 유효한 문자열일 때만 표시            
-            info_lines.append(f"📅 추천 데이터 기준 시각: **{ts_str} (KST)**")
 
     # 2) 지수/스코어 기준 여부 요약
     mode_bits = []
@@ -1529,6 +1525,9 @@ with tab1:
     if info_lines:
         st.caption("  \n".join(info_lines))
 
+    # 퍼센트 설명은 따로 한 줄
+    st.caption("※ 퍼센트 값은 최근 5영업일 평균 수익률 기반 (스코어 fallback 시)")
+    
     st.divider()
 
     # 공포/탐욕 게이지 + 섹터맵
