@@ -345,7 +345,8 @@ def render_auth_box():
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
 
-    # 🔍 DB 디버그용
+    # 🔍 관리자일 때만 디버그 표시
+    if user and user.get("role") == "admin":
     try:
         _db = load_user_db()
         st.caption(f"DEBUG: GIST_ID={GIST_ID[:8]}..., users={len(_db.get('users', {}))}")
