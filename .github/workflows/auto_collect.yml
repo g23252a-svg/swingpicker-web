@@ -18,6 +18,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # 👉 여기서 한 번에 환경변수 세팅 (모든 step 공통)
+    env:
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Seoul
+      TG_TOKEN: ${{ secrets.TG_TOKEN }}
+      TG_ID: ${{ secrets.TG_ID }}
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -38,12 +45,10 @@ jobs:
           python -c "import pykrx, pandas; print('pykrx', pykrx.__version__); print('pandas', pandas.__version__)"
 
       - name: Run Collector
-        env:
-          PYTHONUNBUFFERED: "1"
-          # 👇 [핵심 수정] 깃허브 Secrets에서 토큰을 가져와서 환경변수로 넣어줌
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_ID: ${{ secrets.TG_ID }}
-        run: python collector.py
+        run: |
+          echo ">>> TG_TOKEN set? $([[ -n \"$TG_TOKEN\" ]] && echo yes || echo no)"
+          echo ">>> TG_ID    = $TG_ID"
+          python collector.py
 
       - name: Show outputs
         run: |
@@ -51,8 +56,6 @@ jobs:
           head -n 5 data/recommend_latest.csv || true
 
       - name: Commit & Push CSV
-        env:
-          TZ: Asia/Seoul
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
