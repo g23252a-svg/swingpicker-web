@@ -331,48 +331,86 @@ def get_market_status():
     KOSPI / KOSDAQ 상태 조회
     - 정상: '📈 상승장', '📉 조정장' + MA20 대비 %
     - 휴장(오늘이 거래일 아님): '... (전일 기준)'
-    - 데이터 부족/에러: '데이터 없음 / 데이터 오류' + NaN
+    - 데이터 부족/에러: '데이터 오류' + NaN
     """
-    if not FDR_OK:
-        # FinanceDataReader 자체를 못 쓰는 경우
+    # FDR, PYKRX 둘 다 없으면 그냥 포기
+    if not FDR_OK and not PYKRX_OK:
         return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
 
-    def _check(ticker: str):
+    def _via_fdr(ticker: str):
+        """FinanceDataReader 경로"""
+        if not FDR_OK:
+            return None
         try:
             df = fdr.DataReader(ticker)
             if df is None or df.empty:
-                return "데이터 없음", float("nan")
-
-            # 최근 60일 기준으로 MA20 계산
-            df = df.tail(60)
-            ma20 = df["Close"].rolling(20).mean().iloc[-1]
-            curr = df["Close"].iloc[-1]
-
-            if pd.isna(ma20) or ma20 == 0:
-                return "데이터 부족", float("nan")
-
-            diff = ((curr - ma20) / ma20) * 100
-
-            status = "📈 상승장" if diff > 0 else "📉 조정장"
-
-            # 오늘이 휴장(= 마지막 거래일 < 오늘)이면 표시만 붙여줌
-            last_idx = df.index[-1]
-            try:
-                last_date = last_idx.date()
-            except Exception:
-                last_date = pd.to_datetime(last_idx).date()
-
-            today = datetime.now().date()
-            if last_date < today:
-                status += " (전일 기준)"
-
-            return status, diff
+                return None
+            return df
         except Exception:
-            logger.exception("market status check failed")
+            logger.exception("FDR DataReader failed for %s", ticker)
+            return None
+
+    def _via_pykrx_index(ticker: str):
+        """pykrx 인덱스 경로 (KS11/KQ11 대응)"""
+        if not PYKRX_OK:
+            return None
+        try:
+            today = datetime.now().strftime("%Y%m%d")
+            start = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+
+            # KS11(코스피 지수) → 1001, KQ11(코스닥 지수) → 2001
+            code = "1001" if ticker == "KS11" else "2001"
+            df = stock.get_index_ohlcv_by_date(start, today, code)
+            if df is None or df.empty:
+                return None
+
+            # pykrx: '종가' 컬럼을 Close로 맞춰줌
+            if "종가" in df.columns and "Close" not in df.columns:
+                df = df.rename(columns={"종가": "Close"})
+            return df
+        except Exception:
+            logger.exception("pykrx index fetch failed for %s", ticker)
+            return None
+
+    def _status_for(ticker: str):
+        """단일 지수(KOSPI/KOSDAQ) 상태 계산"""
+        df = _via_fdr(ticker)
+        if df is None:
+            df = _via_pykrx_index(ticker)
+
+        if df is None or df.empty:
             return "데이터 오류", float("nan")
 
-    kp_stat, kp_diff = _check("KS11")
-    kq_stat, kq_diff = _check("KQ11")
+        df = df.tail(60)
+
+        if "Close" not in df.columns:
+            return "데이터 부족", float("nan")
+
+        close = df["Close"]
+        ma20 = close.rolling(20).mean().iloc[-1]
+        curr = close.iloc[-1]
+
+        if pd.isna(ma20) or ma20 == 0:
+            return "데이터 부족", float("nan")
+
+        diff = ((curr - ma20) / ma20) * 100
+        status = "📈 상승장" if diff > 0 else "📉 조정장"
+
+        # 마지막 데이터 날짜 기준이 오늘보다 이전이면 "(전일 기준)" 붙이기
+        last_idx = df.index[-1]
+        try:
+            last_date = last_idx.date()
+        except Exception:
+            last_date = pd.to_datetime(last_idx).date()
+
+        today = datetime.now().date()
+        if last_date < today:
+            status += " (전일 기준)"
+
+        return status, diff
+
+    kp_stat, kp_diff = _status_for("KS11")
+    kq_stat, kq_diff = _status_for("KQ11")
     return kp_stat, kp_diff, kq_stat, kq_diff
 
 @st.cache_data(ttl=3600)
