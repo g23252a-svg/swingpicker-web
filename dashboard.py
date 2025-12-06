@@ -21,7 +21,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from version_info import PRIME_TG_JOIN_URL
+from version_info import PRIME_TG_JOIN_URL, APP_VERSION, CHANGELOG
 
 
 # ---------------------------
@@ -234,6 +234,20 @@ st.warning(
     "실제 투자에 대한 최종 판단과 그에 따른 결과(수익·손실 포함)는 **전적으로 이용자 본인에게 귀속**되며,\n"
     "본 서비스 및 개발자는 어떠한 법적 책임도 부담하지 않습니다."
 )
+
+# 🔔 상단 업데이트 공지 (항상 최신 CHANGELOG[0] 사용)
+latest_log = CHANGELOG[0] if CHANGELOG else None
+if latest_log:
+    # 상단에는 핵심 2~3줄만 요약해서 노출
+    top_items = latest_log["items"][:3]
+    bullets = "\n".join(f"- {item}" for item in top_items)
+
+    st.info(
+        f"✅ LDY Pro Trader v{APP_VERSION} 업데이트 ({latest_log['date']})\n\n"
+        f"**{latest_log['title']}**\n\n"
+        f"{bullets}\n\n"
+        "자세한 변경사항은 **🧩 LDY Pro Trader 업데이트 노트** 탭에서 확인할 수 있습니다."
+    )
 
 # 3. 설정 관리 (Secrets -> Env -> Default 순서)
 def get_conf(key, default_val):
@@ -1482,8 +1496,15 @@ if send_btn and tg_token and tg_chat_id:
 # ---------------------------
 # 메인 UI
 # ---------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["📊 시장 (Market)", "🔭 종목 분석", "💼 내 자산", "📮 문의 게시판", "⚖️ 이용 약관 / 투자 유의사항"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    [
+        "📊 시장 (Market)",
+        "🔭 종목 분석",
+        "💼 내 자산",
+        "📮 문의 게시판",
+        "⚖️ 이용 약관 / 투자 유의사항",
+        "🧩 LDY Pro Trader 업데이트 노트",
+    ]
 )
 
 with tab1:
@@ -2025,3 +2046,31 @@ with tab5:
 
     st.markdown("### 5. 한 줄 요약")
     st.info("👉 **데이터와 퀀트는 도구일 뿐, 최종 책임은 언제나 본인에게 있다.**")
+
+with tab6:
+    st.subheader("🧩 LDY Pro Trader 업데이트 노트")
+
+    if not CHANGELOG:
+        st.info("아직 등록된 업데이트 기록이 없습니다.")
+    else:
+        latest = CHANGELOG[0]
+
+        # 🔹 상단에 현재 버전 / 최근 업데이트 요약
+        st.success(
+            f"현재 버전: **v{APP_VERSION}**  \n"
+            f"최근 업데이트: **{latest['date']} · {latest['title']}**"
+        )
+
+        st.markdown("---")
+
+        # 🔹 버전별 상세 내역 (최신 버전은 기본 펼침)
+        for idx, log in enumerate(CHANGELOG):
+            header = f"v{log['version']} · {log['date']} — {log['title']}"
+            is_latest = (idx == 0)
+
+            with st.expander(
+                f"⭐ {header}" if is_latest else header,
+                expanded=is_latest,   # 최신 버전만 기본 펼침
+            ):
+                for item in log.get("items", []):
+                    st.markdown(f"- {item}")
