@@ -117,7 +117,6 @@ def get_subscription(email):
 # ---------------------------
 # 오픈베타 영구 PRIME 사용자
 # ---------------------------
-# 여기 이메일 5개 넣으면, 이 계정은 만료일/구독DB와 무관하게 항상 PRIME 취급됩니다.
 BETA_PRIME_USERS = {
     "coolguyhaeng@naver.com",
     "kiljung87@nate.com",
@@ -140,20 +139,16 @@ def sync_user_role_with_subscription(user):
 
     # 🔹 (1) 오픈베타 참여자: 무조건 영구 PRIME
     if email in BETA_PRIME_USERS:
-        # auth_user DB에 role이 prime이 아니면 맞춰준다 (한 번만 실행됨)
         try:
             if base_role != "prime":
                 update_user_role(email, "prime")
         except Exception:
             logger.exception("beta prime sync failed")
-
-        # 만료일은 '∞' 로 표시 (사이드바에서 그대로 노출됨)
         return "prime", "∞"
 
-    # 🔹 (2) 일반 구독자 로직 (기존 코드 그대로)
+    # 🔹 (2) 일반 구독자 로직
     sub = get_subscription(email)
     if not sub:
-        # 구독 DB에 기록이 없는 경우, 기존 auth_user 역할 그대로 사용
         return base_role, None
 
     exp_str = sub.get("expire_at")
@@ -163,7 +158,6 @@ def sync_user_role_with_subscription(user):
         return base_role, exp_str
 
     today = now_kst().date()
-    # 만료일 지나면 free로 내려버림
     if today > exp_date and base_role in ["pro", "prime"]:
         try:
             update_user_role(email, "free")
@@ -172,15 +166,14 @@ def sync_user_role_with_subscription(user):
         set_subscription(email, "free")
         return "free", exp_str
 
-    # 아직 유효하면 구독에 저장된 role 기준으로 권한 사용
     return sub.get("role", base_role), exp_str
 
-# 1. 라이브러리 로드 (외부 라이브러리 실패에 대비)
+# 1. 라이브러리 로드
 try:
     import FinanceDataReader as fdr
     FDR_OK = True
 except Exception as e:
-    FDR_OK = False    # FinanceDataReader 사용 불가 시 플래그
+    FDR_OK = False
     logger.warning("FinanceDataReader not available: %s", e)
 
 try:
@@ -195,7 +188,6 @@ st.set_page_config(page_title="LDY Pro Trader v6.3", layout="wide", page_icon="�
 st.title("🏆 LDY Pro Trader v6.3 (Enhanced Score + Subscription)")
 st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
 
-# 🔻 요기부터 추가
 st.warning(
     "⚠️ 투자 관련 유의사항\n\n"
     "LDY Pro Trader는 주식 투자 의사결정을 돕기 위한 **데이터·알고리즘 기반 분석 도구**입니다.\n"
@@ -203,17 +195,14 @@ st.warning(
     "실제 투자에 대한 최종 판단과 그에 따른 결과(수익·손실 포함)는 **전적으로 이용자 본인에게 귀속**되며,\n"
     "본 서비스 및 개발자는 어떠한 법적 책임도 부담하지 않습니다."
 )
-# 🔺 여기까지
 
-# 3. 설정 관리 (Secrets -> Env -> Default 순서)
+# 3. 설정 관리
 def get_conf(key, default_val):
-    # 1순위: Streamlit Secrets
     try:
         if key in st.secrets:
             return st.secrets[key]
     except FileNotFoundError:
         pass
-    # 2순위: 환경변수
     return os.getenv(key, default_val)
 
 RAW_URL = get_conf(
@@ -228,7 +217,7 @@ KEY_PRO = get_conf("LDY_KEY_PRO", "220577")
 KEY_PRIME = get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
 
-# 결제 계좌 정보 (전역 설정)
+# 결제 계좌 정보
 BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-22-2658701")
 BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
 
@@ -250,7 +239,6 @@ P_NEAR_FAR = 4.0
 P_LIQ_LOW = 4.0
 P_VOL_SPIKE = 2.0
 
-# RSI 적정 구간
 RSI_LOW, RSI_HIGH = 45, 65
 
 # ---------------------------
@@ -287,7 +275,6 @@ def send_telegram_msg(token, chat_id, message):
         logger.exception("Telegram send failed")
         return False, str(e)
 
-# 종목코드 맵핑
 @st.cache_data(ttl=3600)
 def get_code_map():
     if FDR_OK:
@@ -521,24 +508,17 @@ def plot_radar_chart(row):
     return fig
 
 # ---------------------------
-# 시간 / 타임존 유틸 (UTC 저장 + KST 표기)
+# 시간 / 타임존 유틸
 # ---------------------------
 KST = timezone(timedelta(hours=9))
 
 def now_utc() -> datetime:
-    """DB/파일 저장용: 항상 UTC 기준 aware datetime"""
     return datetime.now(timezone.utc)
 
 def now_kst() -> datetime:
-    """화면/로그 표시용: 한국 시간(KST) 기준 aware datetime"""
     return datetime.now(KST)
 
 def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
-    """
-    DB/auth_user 등에 저장된 시간을 KST 문자열로 변환
-    - 타임존 없는 값: 기존에 KST로 저장되었다고 가정 → KST로 localize만 함 (시간 안 바뀜)
-    - 타임존 있는 값: 해당 타임존에서 KST로 convert
-    """
     if value is None or value == "" or value == "NaT":
         return ""
     ts = pd.to_datetime(value, errors="coerce")
@@ -546,17 +526,14 @@ def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
         return ""
 
     if ts.tzinfo is None:
-        # 🔹 과거 users_db.json에 저장된 "2025-12-04 18:23:11" 같은 값은
-        # 이미 KST 기준이라고 보고, 그대로 KST로만 붙여서 사용
         ts = ts.tz_localize(KST)
     else:
-        # 🔹 새로운 ISO(UTC 포함) 값은 지정된 tz → KST로 변환
         ts = ts.tz_convert(KST)
 
     return ts.strftime(fmt)
 
 # ---------------------------
-# [개선] 차트 시각화 (거래량 추가)
+# 차트 시각화
 # ---------------------------
 def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
     if df is None or df.empty:
@@ -723,7 +700,7 @@ def save_portfolio_file(text_data):
         return False
 
 # ---------------------------
-# 핵심: 스코어링 함수 (v6.4 스타일)
+# 핵심: 스코어링 함수
 # ---------------------------
 def liquidity_gate(x_turn, market):
     min_map = {
@@ -767,9 +744,8 @@ def build_global_score(lat):
     r10 = nz_num(x["ret_10d_%"])
     ebs = nz_num(x["EBS"]).fillna(0)
 
-    # RR, 진입 괴리, 손절/목표 여유
     rr_den = (entry - stop)
-    rr_den = rr_den.where(rr_den > 0, np.nan)  # 0 이하 RR은 무의미 → NaN
+    rr_den = rr_den.where(rr_den > 0, np.nan)
     rr1 = (t1 - entry) / rr_den
     now_gap = ((close - entry).abs() / entry * 100)
     t1_room = ((t1 - close) / close * 100)
@@ -802,7 +778,6 @@ def build_global_score(lat):
     sl_norm = np.clip(sl_room / cap_q(sl_room, q=90, f=3.0), 0, 1).fillna(0)
     near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, f=1.0)).fillna(0)
 
-    # 모멘텀/에너지 (collector v6.4 스타일)
     ers_bits = (
         (ebs >= PASS_EBS).astype(int)
         + (slope > 0).astype(int)
@@ -813,7 +788,6 @@ def build_global_score(lat):
     mom_mid_norm = pct_norm(r10.clip(lower=0), q=90, f=1.0).fillna(0)
     mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm + 0.2 * mom_mid_norm, 0, 1).fillna(0)
 
-    # 유동성
     if turn.notna().any():
         try:
             lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.dropna(), 90)
@@ -827,13 +801,11 @@ def build_global_score(lat):
         liq_norm = pd.Series(0.0, index=x.index)
         liq_low = pd.Series(0.0, index=x.index)
 
-    # 기술적 세부: 거래량 스윗 스팟, 이격도
     vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1).fillna(0)
     kairi_abs = kairi.abs()
     kairi_norm = (1 - np.minimum(kairi_abs / cap_q(kairi_abs, q=80, f=3.0), 1)).clip(0, 1).fillna(0)
     tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1).fillna(0)
 
-    # 기본 점수
     base_score = (
         100 * W_RR * rr_norm
         + 100 * W_T1 * t1_norm
@@ -844,7 +816,6 @@ def build_global_score(lat):
         + 100 * W_TEC * tec_norm
     )
 
-    # 패널티 (collector v6.4 스타일)
     pen = pd.Series(0.0, index=x.index)
     pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1).fillna(0)
     pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fillna(0)
@@ -883,22 +854,17 @@ def build_global_score(lat):
     return x
 
 # ---------------------------
-# 동적 라우트(분포기반 임계값) 적용
+# 동적 라우트(분포기반 임계값)
 # ---------------------------
 def compute_dynamic_thresholds(df):
-    """
-    동적 임계값 계산 (항상 매개변수 df만 사용, 전역 scored 절대 참조 X)
-    """
     thr = {}
 
-    # 1) 5일 수익률 기준
     if 'ret_5d_%' in df.columns:
         s = pd.to_numeric(df['ret_5d_%'], errors='coerce')
         thr['r5_q75'] = float(np.nanpercentile(s.dropna(), 75)) if s.dropna().size > 0 else 1.0
     else:
         thr['r5_q75'] = 1.0
 
-    # 2) MACD 슬로프
     slope_col = None
     if "MACD_Slope" in df.columns:
         slope_col = "MACD_Slope"
@@ -911,21 +877,18 @@ def compute_dynamic_thresholds(df):
     else:
         thr['slope_q60'] = 0.0
 
-    # 3) EBS
     if 'EBS' in df.columns:
         s = pd.to_numeric(df['EBS'], errors='coerce')
         thr['ebs_q60'] = float(np.nanpercentile(s.dropna(), 60)) if s.dropna().size > 0 else PASS_EBS
     else:
         thr['ebs_q60'] = PASS_EBS
 
-    # 4) 현재가-진입가 괴리 (Now%)
     if 'Now%' in df.columns:
         s = pd.to_numeric(df['Now%'], errors='coerce')
         thr['now_gap_q25'] = float(np.nanpercentile(s.dropna(), 25)) if s.dropna().size > 0 else 10.0
     else:
         thr['now_gap_q25'] = 10.0
 
-    # NaN 방지
     for k, v in list(thr.items()):
         if v is None or (isinstance(v, float) and math.isnan(v)):
             thr[k] = 0.0
@@ -977,7 +940,7 @@ def route_tag_dynamic(row, th):
 
     return "↩️ PULL (눌림)"
 
-@st.cache_data(ttl=600)
+# 🔴 여기서 @st.cache_data 제거
 def prepare_scored_data(raw_url, local_raw, pass_ebs):
     """
     - CSV 로드 (원격 → 실패 시 로컬)
@@ -988,7 +951,6 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     """
     df_raw = None
 
-    # 1) CSV 로드 (원격 → 실패 시 로컬)
     try:
         df_raw = load_csv_url(raw_url)
         log_src(df_raw, "Remote")
@@ -1002,22 +964,18 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
                 logger.exception("prepare_scored_data: Local load failed: %s", e_local)
 
     if df_raw is None:
-        # cache 함수 안이지만, 호출하는 쪽에서 try/except로 처리함
         raise RuntimeError("CSV를 원격/로컬 어디서도 불러오지 못했습니다.")
 
-    # 2) 정규화 + 스코어링
     df = normalize_cols(df_raw)
     latest = df.copy()
     scored = build_global_score(latest)
 
-    # 3) 동적 임계값 + ROUTE 태깅
     TH = compute_dynamic_thresholds(scored)
     scored["ROUTE"] = scored.apply(
         lambda r: route_tag_dynamic(r, TH),
         axis=1
     ).fillna("—")
 
-    # 4) 베이스 필터 + Top20 + P_hit
     base = scored[(scored["EBS"] >= pass_ebs) & (scored["_GATE_OK"])].copy()
     if len(base) < 20:
         base = scored.head(20)
@@ -1027,15 +985,13 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
 
     return scored, base, top20, TH
 
-
 # ---------------------------
-# [개선] 메인 데이터 로드 (Status UX)
+# 메인 데이터 로드 (Status UX)
 # ---------------------------
 with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded=True) as status:
     status.write("📥 데이터 다운로드 및 스코어링 계산 중...")
 
     try:
-        # ✅ 캐시된 통합 함수 호출
         scored, base, top20, TH = prepare_scored_data(
             RAW_URL,
             LOCAL_RAW,
@@ -1048,9 +1004,7 @@ with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded
         st.error(f"데이터 로드/스코어링 중 오류: {e}")
         st.stop()
 
-
-
-# 🔹 첫 가입 직후 표시용 플래그 (auth_user에서 세팅했다고 가정)
+# 🔹 첫 가입 직후 표시용 플래그
 just_registered = st.session_state.pop("just_registered", False)
 
 # ---------------------------
@@ -1058,22 +1012,15 @@ just_registered = st.session_state.pop("just_registered", False)
 # ---------------------------
 from auth_user import render_auth_box, list_users, update_user_role
 
-# ---------------------------
-# Sidebar (Auth / Portfolio / Subscription)
-# ---------------------------
 with st.sidebar:
-    # 1) 계정 기반 로그인 / 회원가입
     user = render_auth_box()
 
-    # 2) 구독 만료일 기반으로 auth_status 동기화
     if user is None:
-        # 🔸 비로그인 사용자는 guest로 구분
         auth_status = "guest"
         expire_str = None
         st.caption("현재 상태: 🔒 Guest (비로그인)")
     else:
         auth_status, expire_str = sync_user_role_with_subscription(user)
-        # 🔹 세션에 저장된 user.role 과 auth_status를 동기화
         if auth_status != user.get("role"):
             user["role"] = auth_status
             st.session_state["ldy_current_user"] = user
@@ -1089,7 +1036,6 @@ with st.sidebar:
     PRICE_PRO = 19000
     PRICE_PRIME = 39000
 
-    # 2-1) 요금제 설명
     with st.container():
         st.markdown("### 🌱 **Free (무료)**")
         st.markdown(
@@ -1120,7 +1066,6 @@ with st.sidebar:
             "- ✅ 향후 고급 리포트 / 기능 우선 적용"
         )
 
-    # 2-2) 결제(입금) 안내 — 카카오뱅크 계좌 노출
     st.markdown("#### 💳 결제(입금) 안내")
     st.markdown(
         f"- 입금계좌: **{BANK_ACCOUNT}**  \n"
@@ -1129,7 +1074,6 @@ with st.sidebar:
         "- 관리자가 입금 확인 후 **1개월 단위로 권한을 부여/연장**합니다."
     )
 
-    # (선택) 이미 로그인한 유저에게는 내 만료일 다시 한 번 보여주기
     if user and expire_str:
         st.info(f"현재 구독 만료 예정일: **{expire_str}**")
 
@@ -1139,7 +1083,6 @@ with st.sidebar:
     except Exception:
         st.markdown(f"[👉 구독/입금 확인 문의 (카톡)]({kakao_url})")
 
-    # 3) Pro 이상만 포트폴리오 기능 노출
     if auth_status in ["pro", "prime", "admin"]:
         st.divider()
         st.subheader("💼 내 자산 관리")
@@ -1154,9 +1097,8 @@ with st.sidebar:
             save_portfolio_file(pf_input)
             st.success("저장되었습니다")
     else:
-        pf_input = ""  # 밑에서 참조하니까 빈값으로 정의
+        pf_input = ""
 
-    # 4) Prime 이상 텔레그램
     send_btn = False
     tg_token, tg_chat_id = "", ""
     if auth_status in ["prime", "admin"]:
@@ -1165,7 +1107,6 @@ with st.sidebar:
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
 
-    # 5) 관리자 전용: 회원 권한 + 구독 만료일 관리
     if auth_status == "admin":
         st.divider()
         st.subheader("👑 회원 권한 / 구독 관리 (Admin)")
@@ -1174,7 +1115,6 @@ with st.sidebar:
         if not users:
             st.info("등록된 회원이 없습니다.")
         else:
-            # 구독 DB 로드해서 만료일 / 잔여일수 같이 보여주기
             subs_db = load_subs_db()
             subs = subs_db.get("subs", {})
 
@@ -1183,11 +1123,11 @@ with st.sidebar:
             for u in users:
                 email = u.get("login_id")
                 sub = subs.get(email, {})
-                exp_str = sub.get("expire_at", "")
+                exp_str2 = sub.get("expire_at", "")
                 days_left = ""
-                if exp_str:
+                if exp_str2:
                     try:
-                        d_exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                        d_exp = datetime.strptime(exp_str2, "%Y-%m-%d").date()
                         days_left = (d_exp - today).days
                     except Exception:
                         days_left = ""
@@ -1196,7 +1136,7 @@ with st.sidebar:
                     "닉네임": u.get("nickname"),
                     "권한(auth_user)": u.get("role"),
                     "구독 역할(sub)": sub.get("role", ""),
-                    "만료일": exp_str,
+                    "만료일": exp_str2,
                     "잔여일수": days_left,
                     "가입일": to_kst_str(u.get("created_at")),
                     "마지막 로그인": to_kst_str(u.get("last_login")),
@@ -1220,7 +1160,6 @@ with st.sidebar:
             if st.button("권한 변경 적용", key="btn_update_role"):
                 ok = update_user_role(target_email, new_role)
                 if ok:
-                    # 👉 여기서 1개월 만료일 세팅
                     set_subscription(target_email, new_role)
                     msg = f"{target_email} → {new_role} 으로 변경되었습니다."
                     if new_role in ["pro", "prime"]:
@@ -1302,7 +1241,6 @@ with tab1:
 with tab2:
     st.subheader("🎯 추천 종목 필터")
 
-    # 🔹 첫 가입 직후 한 번만 보여주는 Top 5 프리뷰
     just_registered = st.session_state.get("just_registered", False)
     if just_registered:
         st.success("🎉 첫 가입을 환영합니다! 오늘 기준 TOP 5 프리뷰를 먼저 보여드릴게요.")
@@ -1324,11 +1262,9 @@ with tab2:
             st.dataframe(prev_view, use_container_width=True)
         else:
             st.info("프리뷰로 표시할 종목이 없습니다.")
-        # 🔻 한 번 보여준 뒤에는 플래그 끔
         st.session_state["just_registered"] = False
         st.divider()
 
-    # ---------------- 필터 영역 ----------------
     col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
     with col_f1:
         min_score = st.slider(
@@ -1357,25 +1293,19 @@ with tab2:
             key="only_gate",
         )
 
-    # ---------------- 조회 대상 기본셋 ----------------
     if use_only_gate:
-        base_view = top20.copy()   # EBS/유동성 통과 Top20
+        base_view = top20.copy()
     else:
         base_view = scored.sort_values(
             ["LDY_SCORE", "거래대금(억원)"],
             ascending=[False, False]
-        ).head(50)                 # 상위 50 중에서 필터
+        ).head(50)
 
     filtered = base_view.copy()
     filtered = filtered[filtered["LDY_SCORE"] >= min_score]
     if sel_routes:
         filtered = filtered[filtered["ROUTE"].isin(sel_routes)]
 
-    # ---------------- 권한별 노출 개수 ----------------
-    # user / auth_status 는 사이드바에서 이미 계산해둔 값 사용
-    # - 비로그인(게스트) : Top 3
-    # - 무료회원(free, 로그인됨) : Top 5
-    # - Pro/Prime/Admin : Top 20
     if auth_status in ["pro", "prime", "admin"]:
         view_df = filtered.head(20)
         st.success(
@@ -1383,21 +1313,18 @@ with tab2:
         )
     else:
         if user is None:
-            # 게스트
             view_df = filtered.head(3)
             st.info(
                 "🔐 현재는 **비로그인(게스트)** 상태라, 필터 적용 상위 **3개 종목**만 확인할 수 있습니다.\n\n"
                 "✅ 지금 무료 회원가입하면 **상위 5개 종목**까지 바로 열람 가능합니다!"
             )
         else:
-            # 로그인한 free 회원
             view_df = filtered.head(5)
             st.info(
                 "✅ Free 회원: 필터 적용 상위 **5개 종목**까지 열람 중입니다.\n"
                 "📈 더 많은 종목과 CSV 다운로드, 알림 기능은 Pro / Prime 등급에서 제공됩니다."
             )
 
-    # ---------------- 종목 선택 / 상세 패널 ----------------
     if view_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
@@ -1429,7 +1356,6 @@ with tab2:
                 else:
                     st.info("차트 데이터 없음")
             with c2:
-                # 🔸 상세 분석은 Pro 이상만
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
                     st.plotly_chart(
@@ -1461,7 +1387,6 @@ with tab2:
                     delta_color="inverse",
                 )
 
-    # ---------------- Daily Top List ----------------
     st.divider()
     st.subheader("📋 Daily Top List", anchor=False)
     safe_view = view_df.copy().reset_index(drop=True)
@@ -1502,7 +1427,6 @@ with tab2:
     else:
         st.info("표시할 종목 없음")
 
-    # Prime/Admin 전체 CSV 다운로드
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
@@ -1513,7 +1437,7 @@ with tab2:
         )
 
 # ---------------------------
-# [개선] 내 자산 (병렬 처리)
+# 내 자산 (병렬 처리)
 # ---------------------------
 def fetch_current_price(code, name):
     if not FDR_OK:
@@ -1612,10 +1536,9 @@ with tab3:
 with tab4:
     st.subheader("📮 문의 게시판")
 
-    # 현재 로그인 유저 정보 (없을 수도 있음)
     current_user = None
     try:
-        current_user = user  # sidebar에서 render_auth_box() 결과
+        current_user = user
     except NameError:
         current_user = None
 
@@ -1666,8 +1589,7 @@ with tab4:
     if not inquiries:
         st.info("아직 등록된 문의가 없습니다.")
     else:
-        # 최근 글이 위로 오도록 역순 정렬
-        for item in reversed(inquiries[-50:]):  # 최근 50개까지만 표시
+        for item in reversed(inquiries[-50:]):
             box = st.container(border=True)
             with box:
                 st.markdown(f"**제목:** {item.get('title', '-')}")
@@ -1717,3 +1639,9 @@ with tab5:
 
     st.markdown("### 5. 한 줄 요약")
     st.info("👉 **데이터와 퀀트는 도구일 뿐, 최종 책임은 언제나 본인에게 있다.**")
+
+---
+
+이 버전으로 저장하고 돌리면, `prepare_scored_data()` 관련 캐시/레이아웃 충돌 에러는 안 나와야 해.  
+만약 이 상태에서도 똑같은 에러가 또 뜨면, 그때는 **Streamlit 버전**이랑 **정확한 에러 전체 트레이스백** 한 번만 붙여줘.
+::contentReference[oaicite:0]{index=0}
