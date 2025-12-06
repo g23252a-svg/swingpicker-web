@@ -951,7 +951,7 @@ def build_global_score(lat):
 
     pen = pd.Series(0.0, index=x.index)
     pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1).fillna(0)
-    pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fill나(0)
+    pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fillna(0)
     pen += P_RSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
     pen += P_NEAR_FAR * np.clip((now_gap - 15) / 15, 0, 1).fillna(0)
@@ -1553,7 +1553,7 @@ with tab2:
         if "LDY_SCORE" in safe_view.columns:
             safe_view["LDY_SCORE"] = pd.to_numeric(
                 safe_view["LDY_SCORE"], errors='coerce'
-            ).fill나(0)
+            ).fillna(0)
         cols = [
             "ROUTE", "업종", "종목코드", "LDY_SCORE",
             "종가", "추천매수가", "손절가", "추천매도가1",
