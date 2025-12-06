@@ -491,30 +491,52 @@ def get_market_status():
 
 @st.cache_data(ttl=3600)
 def get_fear_greed_index():
+    """
+    KS11 지수 기반 공포/탐욕 지수
+    - FDR 에러/컬럼 오류/네트워크 불가 시: 50, '중립 (데이터 오류/부족)' 리턴
+    """
+    # 1) 데이터 소스 자체가 없으면 바로 중립
     if not FDR_OK:
-        return 50, "Neutral"
+        return 50, "중립 (데이터 없음)"
+
     try:
-        df = fdr.DataReader('KS11')
-        if df.empty:
-            return 50, "Neutral"
-        delta = df['Close'].diff()
-        up, down = delta.copy(), delta.copy()
-        up[up < 0] = 0
-        down[down > 0] = 0
-        rs = up.rolling(14).mean() / down.abs().rolling(14).mean()
+        # 2) KS11 지수 로드
+        df = fdr.DataReader("KS11")
+        if df is None or df.empty:
+            return 50, "중립 (데이터 부족)"
+
+        # 3) 종가 컬럼 찾기 (Close 또는 종가)
+        if "Close" in df.columns:
+            close = df["Close"]
+        elif "종가" in df.columns:
+            close = df["종가"]
+        else:
+            logger.warning("fear_greed: Close/종가 컬럼 없음")
+            return 50, "중립 (데이터 형식 오류)"
+
+        # 4) RSI 계산
+        delta = close.diff()
+        up = delta.clip(lower=0)
+        down = (-delta).clip(lower=0)
+
+        rs = up.rolling(14).mean() / down.rolling(14).mean()
         rsi = 100 - (100 / (1 + rs))
-        current_rsi = rsi.iloc[-1]
+        current_rsi = float(rsi.iloc[-1])
 
-        ma20 = df['Close'].rolling(20).mean()
-        disparity = (df['Close'] / ma20 * 100).iloc[-1]
+        # 5) 20일 이격도 계산
+        ma20 = close.rolling(20).mean()
+        disparity = float((close / ma20 * 100).iloc[-1])
 
+        # 6) 공포/탐욕 점수 만들기
         score = current_rsi
         if disparity > 105:
             score += 10
         elif disparity < 95:
             score -= 10
+
         score = max(0, min(100, score))
 
+        # 7) 상태 문구 매핑
         if score >= 75:
             status = "매도 권장 (탐욕)"
         elif score >= 60:
@@ -525,10 +547,13 @@ def get_fear_greed_index():
             status = "침체 구간"
         else:
             status = "중립 (관망)"
-        return score, status
-    except Exception:
-        logger.exception("fear_greed failed")
-        return 50, "Error"
+
+        return float(score), status
+
+    except Exception as e:
+        # 여기서 에러가 나더라도, UI에는 'Error' 대신 중립 메시지 표기
+        logger.exception("fear_greed failed: %s", e)
+        return 50, "중립 (내부 오류)"
 
 def plot_fear_greed_gauge(score):
     fig = go.Figure(go.Indicator(
