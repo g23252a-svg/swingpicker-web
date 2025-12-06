@@ -4,6 +4,7 @@
 import os
 import streamlit as st
 
+
 def _get_conf(key, default_val):
     """
     Streamlit secrets > 환경변수 > 기본값
@@ -13,20 +14,23 @@ def _get_conf(key, default_val):
         if key in st.secrets:
             return st.secrets[key]
     except FileNotFoundError:
-        # 로컬에서 secrets.toml 없을 때
+        # 로컬에서 .streamlit/secrets.toml 없을 때
         pass
     return os.getenv(key, default_val)
 
+
+# 앱 버전
+APP_VERSION = "6.5.0"
+
 # 🔹 PRIME 전용 텔레그램 채널 초대 링크
-# 1순위: secrets["LDY_PRIME_JOIN_URL"]
-# 2순위: 환경변수 LDY_PRIME_JOIN_URL
-# 3순위: 기본값(아래 URL)
+# 1순위: st.secrets["LDY_PRIME_JOIN_URL"]
+# 2순위: os.environ["LDY_PRIME_JOIN_URL"]
+# 3순위: 기본값(하드코딩 URL)
 PRIME_TG_JOIN_URL = _get_conf(
-    "LDY_PRIME_JOIN_URL",
-    "https://t.me/+DovDEluWnEJhOTY1",
+    "LDY_PRIME_JOIN_URL",                   # 👉 키 이름 (환경변수/시크릿에서 찾을 이름)
+    "https://t.me/+DovDEluWnEJhOTY1",       # 👉 기본값 (아무것도 없으면 이 URL 사용)
 )
 
-APP_VERSION = "6.5.0"
 
 CHANGELOG = [
     {
@@ -49,4 +53,5 @@ CHANGELOG = [
             "ROUTE 태그: BRK / Watch / MR / PULL 기준 재정의",
         ],
     },
+    # 필요하면 과거 버전 계속 추가
 ]
