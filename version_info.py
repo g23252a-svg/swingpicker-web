@@ -1,10 +1,32 @@
 # version_info.py
 # -*- coding: utf-8 -*-
 
-APP_VERSION = "6.5.0"
+import os
+import streamlit as st
+
+def _get_conf(key, default_val):
+    """
+    Streamlit secrets > 환경변수 > 기본값
+    순서로 읽는 공통 헬퍼
+    """
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except FileNotFoundError:
+        # 로컬에서 secrets.toml 없을 때
+        pass
+    return os.getenv(key, default_val)
 
 # 🔹 PRIME 전용 텔레그램 채널 초대 링크
-PRIME_TG_JOIN_URL = _get_conf("https://t.me/+DovDEluWnEJhOTY1", "")
+# 1순위: secrets["LDY_PRIME_JOIN_URL"]
+# 2순위: 환경변수 LDY_PRIME_JOIN_URL
+# 3순위: 기본값(아래 URL)
+PRIME_TG_JOIN_URL = _get_conf(
+    "LDY_PRIME_JOIN_URL",
+    "https://t.me/+DovDEluWnEJhOTY1",
+)
+
+APP_VERSION = "6.5.0"
 
 CHANGELOG = [
     {
@@ -27,5 +49,4 @@ CHANGELOG = [
             "ROUTE 태그: BRK / Watch / MR / PULL 기준 재정의",
         ],
     },
-    # 필요하면 과거 버전 계속 추가
 ]
