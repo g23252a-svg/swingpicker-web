@@ -492,52 +492,89 @@ def get_market_status():
 @st.cache_data(ttl=600)
 def get_fear_greed_index():
     """
-    🔹 외부 지수(FDR KS11) 대신, 이미 로딩된 scored DF를 이용해
-       '시장 공포/탐욕 지수'를 내부적으로 계산하는 로컬 버전
-
-    - 기준: 전체 종목의 RSI14 중앙값 + MA20_GAP 평균
-    - FDR/네트워크에 의존하지 않으므로 Render 환경에서도 안정적으로 동작
+    1순위: FDR KS11 지수 기반 공포/탐욕 지수
+    2순위: FDR/네트워크가 막히면 -> scored DF 기반 로컬 계산으로 Fallback
     """
+
+    # -----------------------------
+    # 1) FDR KS11 기반 (네트워크 우선)
+    # -----------------------------
+    if FDR_OK:
+        try:
+            df = fdr.DataReader("KS11")
+            if df is not None and not df.empty:
+                # 14일 RSI 계산
+                delta = df["Close"].diff()
+                up = delta.clip(lower=0)
+                down = (-delta.clip(upper=0))
+
+                rs = up.rolling(14).mean() / down.rolling(14).mean()
+                rsi = 100 - (100 / (1 + rs))
+                current_rsi = float(rsi.iloc[-1])
+
+                # MA20 대비 괴리율
+                ma20 = df["Close"].rolling(20).mean()
+                disparity = float(df["Close"].iloc[-1] / ma20.iloc[-1] * 100)
+
+                score = current_rsi
+
+                # 너무 과열/침체 시 가중치
+                if disparity > 105:
+                    score += 10
+                elif disparity < 95:
+                    score -= 10
+
+                score = max(0.0, min(100.0, score))
+
+                if score >= 75:
+                    status = "매도 권장 (탐욕)"
+                elif score >= 60:
+                    status = "과열 구간"
+                elif score <= 25:
+                    status = "적극 매수 (공포)"
+                elif score <= 40:
+                    status = "침체 구간"
+                else:
+                    status = "중립 (관망)"
+
+                return float(score), status + " (지수 기준)"
+        except Exception as e:
+            logger.exception("fear_greed FDR path failed: %s", e)
+
+    # -----------------------------
+    # 2) 로컬 scored DF 기반 Fallback
+    # -----------------------------
     try:
-        # 1) scored 전역 확인
         if "scored" not in globals():
-            return 50, "중립 (데이터 없음)"
+            return 50.0, "중립 (데이터 없음)"
 
         df = globals()["scored"]
         if df is None or df.empty:
-            return 50, "중립 (데이터 없음)"
+            return 50.0, "중립 (데이터 없음)"
 
-        # 2) RSI14 기준값 (중앙값 사용 → 극단치 영향 완화)
         if "RSI14" not in df.columns:
-            return 50, "중립 (데이터 부족)"
+            return 50.0, "중립 (데이터 부족)"
 
-        rsi = pd.to_numeric(df["RSI14"], errors="coerce")
-        rsi = rsi.dropna()
+        rsi = pd.to_numeric(df["RSI14"], errors="coerce").dropna()
         if rsi.empty:
-            return 50, "중립 (데이터 부족)"
+            return 50.0, "중립 (데이터 부족)"
 
-        rsi_mid = float(rsi.median())  # 0~100 근처 값
-
-        # 3) MA20 대비 이격도 (우리가 build_global_score에서 만든 컬럼)
+        rsi_mid = float(rsi.median())
         gap_mean = 0.0
+
         if "MA20_GAP" in df.columns:
             gap = pd.to_numeric(df["MA20_GAP"], errors="coerce").dropna()
             if not gap.empty:
-                gap_mean = float(gap.mean())  # 0 기준, +면 과열, -면 침체 쪽
+                gap_mean = float(gap.mean())
 
-        # 4) 점수 만들기
         score = rsi_mid
-
-        # 이격도가 너무 플러스면 약간 가산, 너무 마이너스면 감점
         if gap_mean > 5:
             score += 10
         elif gap_mean < -5:
             score -= 10
 
-        # 0~100 클램프
         score = max(0.0, min(100.0, score))
 
-        # 5) 상태 문구 매핑
         if score >= 75:
             status = "매도 권장 (탐욕)"
         elif score >= 60:
@@ -549,12 +586,11 @@ def get_fear_greed_index():
         else:
             status = "중립 (관망)"
 
-        return float(score), status
+        return float(score), status + " (스코어 기준)"
 
     except Exception as e:
-        # 혹시 여기서도 터지면, 로그만 남기고 UI는 최대한 깔끔하게
-        logger.exception("fear_greed local failed: %s", e)
-        return 50, "중립 (지표 계산 오류)"
+        logger.exception("fear_greed local fallback failed: %s", e)
+        return 50.0, "중립 (지표 계산 오류)"
 
 def plot_fear_greed_gauge(score):
     fig = go.Figure(go.Indicator(
