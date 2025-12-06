@@ -951,6 +951,20 @@ def route_tag_dynamic(row, th):
 
     return "↩️ PULL (눌림)"
 
+@st.cache_data(ttl=600)
+def prepare_scored_data(raw_url, local_raw, pass_ebs):
+    """
+    - CSV 로드 (원격 → 실패 시 로컬)
+    - normalize_cols
+    - build_global_score
+    - 동적 threshold + ROUTE
+    - base / top20 / P_hit 까지 한 번에 계산
+    """
+    df_raw = None
+    ...
+    return scored, base, top20, TH
+
+
 # ---------------------------
 # [개선] 메인 데이터 로드 (Status UX)
 # ---------------------------
