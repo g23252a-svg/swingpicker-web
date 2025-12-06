@@ -923,7 +923,7 @@ def build_global_score(lat):
 
     if turn.notna().any():
         try:
-            lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.drop나(), 90)
+            lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.dropna(), 90)
             denom = max(hi - lo, 1e-9)
             liq_norm = np.clip((turn - lo) / denom, 0, 1).fillna(0)
             liq_low = (turn < lo).astype(float)
@@ -1012,7 +1012,7 @@ def compute_dynamic_thresholds(df):
 
     if 'EBS' in df.columns:
         s = pd.to_numeric(df['EBS'], errors='coerce')
-        thr['ebs_q60'] = float(np.nanpercentile(s.drop나(), 60)) if s.drop나().size > 0 else PASS_EBS
+        thr['ebs_q60'] = float(np.nanpercentile(s.dropna(), 60)) if s.dropna().size > 0 else PASS_EBS
     else:
         thr['ebs_q60'] = PASS_EBS
 
