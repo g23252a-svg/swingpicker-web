@@ -363,16 +363,128 @@ def get_market_status_local(scored_df: pd.DataFrame):
     kp_stat, kp_diff = result.get("KOSPI", ("데이터 없음", float("nan")))
     kq_stat, kq_diff = result.get("KOSDAQ", ("데이터 없음", float("nan")))
     return kp_stat, kp_diff, kq_stat, kq_diff
-    
+
+
+@st.cache_data(ttl=3600)
+def get_market_status():
     """
-    KOSPI / KOSDAQ 상태 조회
-    - 정상: '📈 상승장', '📉 조정장' + MA20 대비 %
-    - 휴장(오늘이 거래일 아님): '... (전일 기준)'
-    - 데이터 부족/에러: '데이터 오류' + NaN
+    KOSPI / KOSDAQ 상태 조회 (통합 래퍼)
+    1) FDR / pykrx 인덱스 데이터로 계산 시도
+    2) 실패하거나 데이터 오류면 scored DF 기반 로컬 계산으로 fallback
     """
-    # FDR, PYKRX 둘 다 없으면 그냥 포기
+    # -----------------------------
+    # 1) 인덱스 데이터 기반 계산
+    # -----------------------------
     if not FDR_OK and not PYKRX_OK:
+        # 바로 로컬로
+        if "scored" in globals():
+            try:
+                return get_market_status_local(globals()["scored"])
+            except Exception:
+                logger.exception("get_market_status_local fallback failed (no FDR/PYKRX)")
         return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
+
+    def _via_fdr(ticker: str):
+        """FinanceDataReader 경로"""
+        if not FDR_OK:
+            return None
+        try:
+            df = fdr.DataReader(ticker)
+            if df is None or df.empty:
+                return None
+            return df
+        except Exception:
+            logger.exception("FDR DataReader failed for %s", ticker)
+            return None
+
+    def _via_pykrx_index(ticker: str):
+        """pykrx 인덱스 경로 (KS11/KQ11 대응)"""
+        if not PYKRX_OK:
+            return None
+        try:
+            today = datetime.now().strftime("%Y%m%d")
+            start = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+
+            # KS11(코스피 지수) → 1001, KQ11(코스닥 지수) → 2001
+            code = "1001" if ticker == "KS11" else "2001"
+            df = stock.get_index_ohlcv_by_date(start, today, code)
+            if df is None or df.empty:
+                return None
+
+            # pykrx: '종가' 컬럼을 Close로 맞춰줌
+            if "종가" in df.columns and "Close" not in df.columns:
+                df = df.rename(columns={"종가": "Close"})
+            return df
+        except Exception:
+            logger.exception("pykrx index fetch failed for %s", ticker)
+            return None
+
+    def _status_for(ticker: str):
+        """단일 지수(KOSPI/KOSDAQ) 상태 계산"""
+        df = _via_fdr(ticker)
+        if df is None:
+            df = _via_pykrx_index(ticker)
+
+        if df is None or df.empty:
+            return "데이터 오류", float("nan")
+
+        # 최근 60개만 사용
+        df = df.tail(60)
+
+        if "Close" not in df.columns:
+            return "데이터 부족", float("nan")
+
+        close = df["Close"]
+        ma20 = close.rolling(20).mean().iloc[-1]
+        curr = close.iloc[-1]
+
+        if pd.isna(ma20) or ma20 == 0:
+            return "데이터 부족", float("nan")
+
+        diff = ((curr - ma20) / ma20) * 100
+        status = "📈 상승장" if diff > 0 else "📉 조정장"
+
+        # 마지막 데이터 날짜 기준이 오늘보다 이전이면 "(전일 기준)" 붙이기
+        last_idx = df.index[-1]
+        try:
+            last_date = last_idx.date()
+        except Exception:
+            last_date = pd.to_datetime(last_idx).date()
+
+        today = datetime.now().date()
+        if last_date < today:
+            status += " (전일 기준)"
+
+        return status, diff
+
+    try:
+        kp_stat, kp_diff = _status_for("KS11")
+        kq_stat, kq_diff = _status_for("KQ11")
+
+        # 인덱스 데이터가 정상이면 그대로 사용
+        bad_stats = {
+            "데이터 없음",
+            "데이터 오류",
+            "데이터 소스 오류",
+            "데이터 부족",
+            "Unknown",
+            "Error",
+        }
+        if kp_stat not in bad_stats or kq_stat not in bad_stats:
+            return kp_stat, kp_diff, kq_stat, kq_diff
+    except Exception:
+        logger.exception("get_market_status index path failed")
+
+    # -----------------------------
+    # 2) 로컬 scored DF 기반 fallback
+    # -----------------------------
+    if "scored" in globals():
+        try:
+            return get_market_status_local(globals()["scored"])
+        except Exception:
+            logger.exception("get_market_status_local fallback failed")
+
+    return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
 
     def _via_fdr(ticker: str):
         """FinanceDataReader 경로"""
