@@ -961,7 +961,44 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     - base / top20 / P_hit 까지 한 번에 계산
     """
     df_raw = None
-    ...
+
+    # 1) CSV 로드 (원격 → 실패 시 로컬)
+    try:
+        df_raw = load_csv_url(raw_url)
+        log_src(df_raw, "Remote")
+    except Exception as e_remote:
+        logger.warning("prepare_scored_data: Remote load failed: %s", e_remote)
+        if os.path.exists(local_raw):
+            try:
+                df_raw = load_csv_path(local_raw)
+                log_src(df_raw, "Local")
+            except Exception as e_local:
+                logger.exception("prepare_scored_data: Local load failed: %s", e_local)
+
+    if df_raw is None:
+        # cache 함수 안이지만, 호출하는 쪽에서 try/except로 처리함
+        raise RuntimeError("CSV를 원격/로컬 어디서도 불러오지 못했습니다.")
+
+    # 2) 정규화 + 스코어링
+    df = normalize_cols(df_raw)
+    latest = df.copy()
+    scored = build_global_score(latest)
+
+    # 3) 동적 임계값 + ROUTE 태깅
+    TH = compute_dynamic_thresholds(scored)
+    scored["ROUTE"] = scored.apply(
+        lambda r: route_tag_dynamic(r, TH),
+        axis=1
+    ).fillna("—")
+
+    # 4) 베이스 필터 + Top20 + P_hit
+    base = scored[(scored["EBS"] >= pass_ebs) & (scored["_GATE_OK"])].copy()
+    if len(base) < 20:
+        base = scored.head(20)
+
+    top20 = base.head(20).copy()
+    top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
+
     return scored, base, top20, TH
 
 
