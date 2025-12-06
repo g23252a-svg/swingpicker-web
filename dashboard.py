@@ -887,23 +887,50 @@ def build_global_score(lat):
 # 동적 라우트(분포기반 임계값) 적용
 # ---------------------------
 def compute_dynamic_thresholds(df):
+    """
+    동적 임계값 계산 (항상 매개변수 df만 사용, 전역 scored 절대 참조 X)
+    """
     thr = {}
-    # 5일 수익률
-    thr['r5_q75'] = float(np.nanpercentile(df['ret_5d_%'].fillna(0), 75)) if 'ret_5d_%' in df.columns else 1.0
-    
-    # MACD 기울기 컬럼 유연하게 탐색
-    slope_col = "MACD_Slope" if "MACD_Slope" in df.columns else ("MACD_slope" if "MACD_slope" in df.columns else None)
+
+    # 1) 5일 수익률 기준
+    if 'ret_5d_%' in df.columns:
+        s = pd.to_numeric(df['ret_5d_%'], errors='coerce')
+        thr['r5_q75'] = float(np.nanpercentile(s.dropna(), 75)) if s.dropna().size > 0 else 1.0
+    else:
+        thr['r5_q75'] = 1.0
+
+    # 2) MACD 슬로프
+    slope_col = None
+    if "MACD_Slope" in df.columns:
+        slope_col = "MACD_Slope"
+    elif "MACD_slope" in df.columns:
+        slope_col = "MACD_slope"
+
     if slope_col:
-        thr['slope_q60'] = float(np.nanpercentile(df[slope_col].fillna(0), 60))
+        s = pd.to_numeric(df[slope_col], errors='coerce')
+        thr['slope_q60'] = float(np.nanpercentile(s.dropna(), 60)) if s.dropna().size > 0 else 0.0
     else:
         thr['slope_q60'] = 0.0
 
-    thr['ebs_q60'] = float(np.nanpercentile(df['EBS'].fillna(0), 60)) if 'EBS' in df.columns else PASS_EBS
-    thr['now_gap_q25'] = float(np.nanpercentile(df['Now%'].fillna(999), 25)) if 'Now%' in df.columns else 10.0
+    # 3) EBS
+    if 'EBS' in df.columns:
+        s = pd.to_numeric(df['EBS'], errors='coerce')
+        thr['ebs_q60'] = float(np.nanpercentile(s.dropna(), 60)) if s.dropna().size > 0 else PASS_EBS
+    else:
+        thr['ebs_q60'] = PASS_EBS
 
-    for k, v in thr.items():
-        if np.isnan(v):
+    # 4) 현재가-진입가 괴리 (Now%)
+    if 'Now%' in df.columns:
+        s = pd.to_numeric(df['Now%'], errors='coerce')
+        thr['now_gap_q25'] = float(np.nanpercentile(s.dropna(), 25)) if s.dropna().size > 0 else 10.0
+    else:
+        thr['now_gap_q25'] = 10.0
+
+    # NaN 방지
+    for k, v in list(thr.items()):
+        if v is None or (isinstance(v, float) and math.isnan(v)):
             thr[k] = 0.0
+
     return thr
 
 def route_tag_dynamic(row, th):
