@@ -130,16 +130,18 @@ def now_kst() -> datetime:
     return datetime.now(KST)
 
 def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
-    """
-    DB/auth_user 등에 저장된 시간을 KST 문자열로 변환
-    - 타임존 없는 값: 기존에 KST로 저장되었다고 가정 → KST로 localize만 함 (시간 안 바뀜)
-    - 타임존 있는 값: 해당 타임존에서 KST로 convert
-    """
     if value is None or value == "" or value == "NaT":
         return ""
     ts = pd.to_datetime(value, errors="coerce")
     if pd.isna(ts):
         return ""
+
+    # 🔹 말도 안 되는 옛날 날짜(예: 1970년)는 버리기
+    try:
+        if ts.year < 2000:
+            return ""
+    except Exception:
+        pass
 
     if ts.tzinfo is None:
         ts = ts.tz_localize(KST)
@@ -1151,24 +1153,42 @@ def infer_data_timestamp(df_raw: pd.DataFrame):
     """
     recommend_latest.csv 안에서 '기준일', '날짜', 'Date' 같은 컬럼을 찾아
     가장 최신 날짜를 기준 시각으로 추출.
-    없으면 None 리턴.
+    - 2000년 이전, 오늘+1일 이후 값은 버림
+    - YYYYMMDD 형태도 별도 처리
     """
     if df_raw is None or df_raw.empty:
         return None
 
     candidates = []
+    now_utc_val = now_utc()
 
-    # 한글/영문 날짜 컬럼 후보들
-    date_cols = ["기준일자", "기준일", "날짜", "DATE", "Date", "date"]
+    # 1차: 일반 datetime 컬럼 후보
+    date_cols = ["기준일자", "기준일", "날짜", "DATE", "Date", "date", "update_time", "updated_at"]
     for col in date_cols:
         if col in df_raw.columns:
-            s = pd.to_datetime(df_raw[col], errors="coerce")
-            s = s.dropna()
+            s = pd.to_datetime(df_raw[col], errors="coerce", utc=True)
+            # 🔹 현실적인 범위만 허용
+            s = s[(s.notna()) &
+                  (s >= pd.Timestamp("2000-01-01", tz="UTC")) &
+                  (s <= now_utc_val + pd.Timedelta(days=1))]
             if not s.empty:
                 candidates.append(s.max())
 
+    # 2차: YYYYMMDD 숫자/문자 컬럼 처리
+    if not candidates:
+        ymd_cols = ["기준일자", "기준일", "날짜", "DATE", "Date"]
+        for col in ymd_cols:
+            if col in df_raw.columns:
+                raw = df_raw[col].astype(str).str.replace(r"[^0-9]", "", regex=True)
+                s = pd.to_datetime(raw, format="%Y%m%d", errors="coerce", utc=True)
+                s = s[(s.notna()) &
+                      (s >= pd.Timestamp("2000-01-01", tz="UTC")) &
+                      (s <= now_utc_val + pd.Timedelta(days=1))]
+                if not s.empty:
+                    candidates.append(s.max())
+
     if candidates:
-        # 여러 컬럼이 있으면 가장 나중 날짜 사용
+        # 여러 후보가 있다면 가장 최신값 반환 (UTC)
         return max(candidates)
 
     return None
@@ -1480,8 +1500,10 @@ with tab1:
         try:
             ts_str = to_kst_str(DATA_TS)
         except Exception:
-            ts_str = str(DATA_TS)
-        info_lines.append(f"📅 추천 데이터 기준 시각: **{ts_str} (KST)**")
+            ts_str = ""
+
+        if ts_str:  # 🔹 유효한 문자열일 때만 표시            
+            info_lines.append(f"📅 추천 데이터 기준 시각: **{ts_str} (KST)**")
 
     # 2) 지수/스코어 기준 여부 요약
     mode_bits = []
