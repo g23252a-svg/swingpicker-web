@@ -416,3 +416,4 @@ def render_auth_box():
                 user = None
 
     return user
+
