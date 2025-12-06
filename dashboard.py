@@ -360,8 +360,7 @@ def get_market_status_local(scored_df: pd.DataFrame):
     kq_stat, kq_diff = result.get("KOSDAQ", ("데이터 없음", float("nan")))
     return kp_stat, kp_diff, kq_stat, kq_diff
 
-@st.cache_data(ttl=3600)
-def get_market_status():
+
     """
     KOSPI / KOSDAQ 상태 조회 (통합 래퍼)
     1) FDR / pykrx 인덱스 데이터로 계산 시도
