@@ -861,7 +861,7 @@ def build_global_score(lat):
         else ("MACD_slope" if "MACD_slope" in x.columns else "MACD_Slope")
     kairi_col = "이격도" if "이격도" in x.columns and x["이격도"].notna().any() \
         else ("乖離%" if "乖離%" in x.columns else "이격도")
-    vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].not나().any() \
+    vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].notna().any() \
         else ("Vol_Z" if "Vol_Z" in x.columns else "거래강도")
 
     close = nz_num(x["종가"])
