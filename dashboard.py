@@ -489,54 +489,55 @@ def get_market_status():
     # 그래도 안 되면 완전 실패
     return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=600)
 def get_fear_greed_index():
     """
-    KS11 지수 기반 공포/탐욕 지수
-    - FDR 에러/컬럼 오류/네트워크 불가 시: 50, '중립 (데이터 오류/부족)' 리턴
-    """
-    # 1) 데이터 소스 자체가 없으면 바로 중립
-    if not FDR_OK:
-        return 50, "중립 (데이터 없음)"
+    🔹 외부 지수(FDR KS11) 대신, 이미 로딩된 scored DF를 이용해
+       '시장 공포/탐욕 지수'를 내부적으로 계산하는 로컬 버전
 
+    - 기준: 전체 종목의 RSI14 중앙값 + MA20_GAP 평균
+    - FDR/네트워크에 의존하지 않으므로 Render 환경에서도 안정적으로 동작
+    """
     try:
-        # 2) KS11 지수 로드
-        df = fdr.DataReader("KS11")
+        # 1) scored 전역 확인
+        if "scored" not in globals():
+            return 50, "중립 (데이터 없음)"
+
+        df = globals()["scored"]
         if df is None or df.empty:
+            return 50, "중립 (데이터 없음)"
+
+        # 2) RSI14 기준값 (중앙값 사용 → 극단치 영향 완화)
+        if "RSI14" not in df.columns:
             return 50, "중립 (데이터 부족)"
 
-        # 3) 종가 컬럼 찾기 (Close 또는 종가)
-        if "Close" in df.columns:
-            close = df["Close"]
-        elif "종가" in df.columns:
-            close = df["종가"]
-        else:
-            logger.warning("fear_greed: Close/종가 컬럼 없음")
-            return 50, "중립 (데이터 형식 오류)"
+        rsi = pd.to_numeric(df["RSI14"], errors="coerce")
+        rsi = rsi.dropna()
+        if rsi.empty:
+            return 50, "중립 (데이터 부족)"
 
-        # 4) RSI 계산
-        delta = close.diff()
-        up = delta.clip(lower=0)
-        down = (-delta).clip(lower=0)
+        rsi_mid = float(rsi.median())  # 0~100 근처 값
 
-        rs = up.rolling(14).mean() / down.rolling(14).mean()
-        rsi = 100 - (100 / (1 + rs))
-        current_rsi = float(rsi.iloc[-1])
+        # 3) MA20 대비 이격도 (우리가 build_global_score에서 만든 컬럼)
+        gap_mean = 0.0
+        if "MA20_GAP" in df.columns:
+            gap = pd.to_numeric(df["MA20_GAP"], errors="coerce").dropna()
+            if not gap.empty:
+                gap_mean = float(gap.mean())  # 0 기준, +면 과열, -면 침체 쪽
 
-        # 5) 20일 이격도 계산
-        ma20 = close.rolling(20).mean()
-        disparity = float((close / ma20 * 100).iloc[-1])
+        # 4) 점수 만들기
+        score = rsi_mid
 
-        # 6) 공포/탐욕 점수 만들기
-        score = current_rsi
-        if disparity > 105:
+        # 이격도가 너무 플러스면 약간 가산, 너무 마이너스면 감점
+        if gap_mean > 5:
             score += 10
-        elif disparity < 95:
+        elif gap_mean < -5:
             score -= 10
 
-        score = max(0, min(100, score))
+        # 0~100 클램프
+        score = max(0.0, min(100.0, score))
 
-        # 7) 상태 문구 매핑
+        # 5) 상태 문구 매핑
         if score >= 75:
             status = "매도 권장 (탐욕)"
         elif score >= 60:
@@ -551,9 +552,9 @@ def get_fear_greed_index():
         return float(score), status
 
     except Exception as e:
-        # 여기서 에러가 나더라도, UI에는 'Error' 대신 중립 메시지 표기
-        logger.exception("fear_greed failed: %s", e)
-        return 50, "중립 (내부 오류)"
+        # 혹시 여기서도 터지면, 로그만 남기고 UI는 최대한 깔끔하게
+        logger.exception("fear_greed local failed: %s", e)
+        return 50, "중립 (지표 계산 오류)"
 
 def plot_fear_greed_gauge(score):
     fig = go.Figure(go.Indicator(
