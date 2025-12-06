@@ -699,10 +699,9 @@ def load_csv_path(path):
     return pd.read_csv(path, encoding="utf-8")
 
 def log_src(df, src):
-    try:
-        st.toast(f"Data Loaded: {src} ({len(df)} rows)", icon="✅")
-    except Exception:
-        pass
+    """
+    데이터 로드 로그만 남김 (Streamlit UI 요소 사용 금지)
+    """
     logger.info("Data Loaded: %s rows=%s", src, len(df) if df is not None else 0)
 
 def load_portfolio_file():
