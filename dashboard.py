@@ -21,6 +21,8 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+from version_info import PRIME_TG_JOIN_URL
+
 
 # ---------------------------
 # 로깅 설정
@@ -406,8 +408,8 @@ def get_market_status():
         if not PYKRX_OK:
             return None
         try:
-            today = datetime.now().strftime("%Y%m%d")
-            start = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+            today = now_kst().strftime("%Y%m%d")
+            start = (now_kst() - timedelta(days=365)).strftime("%Y%m%d")
 
             # KS11(코스피 지수) → 1001, KQ11(코스닥 지수) → 2001
             code = "1001" if ticker == "KS11" else "2001"
@@ -455,7 +457,7 @@ def get_market_status():
         except Exception:
             last_date = pd.to_datetime(last_idx).date()
 
-        today = datetime.now().date()
+        today = now_kst().date()
         if last_date < today:
             status += " (전일 기준)"
 
@@ -595,6 +597,7 @@ def get_fear_greed_index():
     except Exception as e:
         logger.exception("fear_greed local fallback failed: %s", e)
         return 50.0, "중립 (지표 계산 오류)"
+        
 
 def plot_fear_greed_gauge(score):
     fig = go.Figure(go.Indicator(
@@ -633,6 +636,8 @@ def plot_sector_treemap(df):
     df_map = df.copy()
     df_map['업종'] = df_map['업종'].fillna('기타')
     df_map = df_map[df_map['업종'] != '기타']
+    df_map['거래대금(억원)'] = pd.to_numeric(df_map['거래대금(억원)'], errors='coerce').fillna(0)
+    df_map = df_map[df_map['거래대금(억원)'] > 0]
     if df_map.empty:
         return None
     if 'LDY_SCORE' in df_map.columns:
@@ -1333,6 +1338,25 @@ with st.sidebar:
             "- ✅ 향후 고급 리포트 / 기능 우선 적용"
         )
 
+    # 🔹 PRIME 전용 텔레그램 채널 안내 (로그인 + PRIME 이상 전용)
+    if auth_status in ["prime", "admin"]:
+        if PRIME_TG_JOIN_URL:
+            st.markdown("#### 🔔 PRIME 전용 텔레그램 채널")
+            try:
+                st.link_button(
+                    "👑 PRIME 채널 입장하기",
+                    PRIME_TG_JOIN_URL,
+                    use_container_width=True,
+                    type="primary",
+                )
+            except Exception:
+                st.markdown(f"[👑 PRIME 채널 입장하기]({PRIME_TG_JOIN_URL})")
+        else:
+            st.caption("※ PRIME 전용 텔레그램 채널 URL이 아직 설정되지 않았습니다. (LDY_PRIME_JOIN_URL 환경변수 확인 요망)")
+    else:
+        st.caption("※ PRIME 등급이 되면 텔레그램 **전용 채널 입장 링크**가 열립니다.")    
+
+    
     st.markdown("#### 💳 결제(입금) 안내")
     st.markdown(
         f"- 입금계좌: **{BANK_ACCOUNT}**  \n"
@@ -1389,7 +1413,7 @@ with st.sidebar:
             subs = subs_db.get("subs", {})
 
             rows = []
-            today = datetime.now().date()
+            today = now_kst().date()
             for u in users:
                 email = u.get("login_id")
                 sub = subs.get(email, {})
@@ -1444,7 +1468,7 @@ with st.sidebar:
 # Telegram send
 # ---------------------------
 if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v6.4] 추천 Top 5 ({datetime.now().strftime('%m/%d')})\n\n"
+    msg = f"🔥 [LDY v6.4] 추천 Top 5 ({now_kst().strftime('%m/%d')})\n\n"
     for i in range(min(5, len(top20))):
         row = top20.iloc[i]
         msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
@@ -1492,27 +1516,24 @@ with tab1:
     
     # 🔥 여기부터 새로 정리
     # ---- (NEW) 데이터 기준 시각 + 지표 모드 태그 ----
-    fg_score, fg_status = get_fear_greed_index()  # 한 번만 계산해서 아래에서 같이 사용
+    fg_score, fg_status = get_fear_greed_index()
 
     info_lines = []
-    
+
     # 1) 추천 데이터 기준 일자
     if DATA_TS is not None:
         ts_date = to_kst_str(DATA_TS, fmt="%Y-%m-%d")
         if ts_date:
             info_lines.append(f"📅 추천 데이터 기준 일자: **{ts_date} (KST)**")
 
-
     # 2) 지수/스코어 기준 여부 요약
     mode_bits = []
 
-    # 시장 상태: KOSPI/KOSDAQ
     if "스코어 기반" in str(kp_stat) or "스코어 기반" in str(kq_stat):
         mode_bits.append("시장 상태: 🔄 **로컬 스코어 기반 추정**")
     else:
         mode_bits.append("시장 상태: 📡 **지수(FDR/pykrx) 기준**")
 
-    # 공포/탐욕: 지수/스코어
     if "스코어 기준" in fg_status:
         mode_bits.append("공포/탐욕: 📊 **스코어 기준**")
     elif "지수 기준" in fg_status:
@@ -1521,9 +1542,18 @@ with tab1:
     if mode_bits:
         info_lines.append(" · ".join(mode_bits))
 
-    # 🔹 여기에서 한 번만 추가
-    info_lines.insert(0, "※ 퍼센트 값은 최근 5영업일 평균 수익률 기반 (스코어 fallback 시)")
-    
+    # 3) KOSPI/KOSDAQ 퍼센트 계산 방식 설명 추가
+    use_local_market = ("스코어 기반" in str(kp_stat)) or ("스코어 기반" in str(kq_stat))
+    if use_local_market:
+        info_lines.append(
+            "※ KOSPI/KOSDAQ 퍼센트 값은 지수 데이터 장애 시 "
+            "**최근 5영업일 평균 수익률**을 기반으로 한 로컬 추정치입니다."
+        )
+    else:
+        info_lines.append(
+            "※ KOSPI/KOSDAQ 퍼센트 값은 지수 종가와 **20일 이동평균선 괴리율(%)** 기준입니다."
+        )
+
     if info_lines:
         st.caption("  \n".join(info_lines))
 
@@ -1788,6 +1818,10 @@ with tab3:
             lines = pf_input.strip().split('\n')
             for line in lines:
                 if ":" not in line:
+                    continue
+                parts = [p.strip() for p in line.split(':')]
+                if len(parts) != 3:
+                    # 형식 이상하면 그냥 건너뜀
                     continue
                 name_input, avg, qty = line.split(':')
                 code = str(name_input).strip()
