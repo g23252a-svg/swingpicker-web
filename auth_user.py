@@ -351,6 +351,7 @@ def render_auth_box():
         st.caption(f"DEBUG: GIST_ID={GIST_ID[:8]}..., users={len(_db.get('users', {}))}")
     except Exception as e:
         st.caption(f"DEBUG: load_user_db error = {e}")
+        _db = {"users": {}}
         
     if JUST_REGISTERED_KEY not in st.session_state:
         st.session_state[JUST_REGISTERED_KEY] = False
