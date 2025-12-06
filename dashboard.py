@@ -1275,18 +1275,20 @@ with tab1:
             "Error",
         }
 
-        # (1) 에러/데이터 부족이거나 diff가 NaN이면 퍼센트는 숨김 ("-")
+        # 1) 에러/데이터 부족이면 예쁜 문구로 통일
         if stat in bad_stats or (
-            isinstance(diff, float) and math.isnan(diff)
+            isinstance(diff, float) and isinstance(diff, float) and math.isnan(diff)
         ):
-            return stat, "-", "off"
-
-        # (2) 정상일 때만 % 포맷
+            friendly = "📡 지수 데이터 지연/점검 중"
+            return friendly, "-", "off"
+            
+            # 2) 정상일 때만 % 표시
         delta_txt = f"{diff:.2f}%"
-
-        # (3) 상승이면 중립 색, 하락이면 inverse
         delta_color = "off" if ("상승" in stat or diff >= 0) else "inverse"
         return stat, delta_txt, delta_color
+
+
+
 
     kp_value, kp_delta, kp_color = _fmt_metric(kp_stat, kp_diff)
     kq_value, kq_delta, kq_color = _fmt_metric(kq_stat, kq_diff)
