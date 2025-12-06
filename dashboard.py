@@ -325,10 +325,6 @@ def find_code_by_name(name_or_code, code_map):
         return name_or_code.zfill(6)
     return code_map.get(name_or_code, None)
 
-@st.cache_data(ttl=3600)
-def get_market_status():
-
-
 @st.cache_data(ttl=600)
 def get_market_status_local(scored_df: pd.DataFrame):
     """
@@ -363,7 +359,6 @@ def get_market_status_local(scored_df: pd.DataFrame):
     kp_stat, kp_diff = result.get("KOSPI", ("데이터 없음", float("nan")))
     kq_stat, kq_diff = result.get("KOSDAQ", ("데이터 없음", float("nan")))
     return kp_stat, kp_diff, kq_stat, kq_diff
-
 
 @st.cache_data(ttl=3600)
 def get_market_status():
@@ -485,82 +480,6 @@ def get_market_status():
             logger.exception("get_market_status_local fallback failed")
 
     return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
-
-    def _via_fdr(ticker: str):
-        """FinanceDataReader 경로"""
-        if not FDR_OK:
-            return None
-        try:
-            df = fdr.DataReader(ticker)
-            if df is None or df.empty:
-                return None
-            return df
-        except Exception:
-            logger.exception("FDR DataReader failed for %s", ticker)
-            return None
-
-    def _via_pykrx_index(ticker: str):
-        """pykrx 인덱스 경로 (KS11/KQ11 대응)"""
-        if not PYKRX_OK:
-            return None
-        try:
-            today = datetime.now().strftime("%Y%m%d")
-            start = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-
-            # KS11(코스피 지수) → 1001, KQ11(코스닥 지수) → 2001
-            code = "1001" if ticker == "KS11" else "2001"
-            df = stock.get_index_ohlcv_by_date(start, today, code)
-            if df is None or df.empty:
-                return None
-
-            # pykrx: '종가' 컬럼을 Close로 맞춰줌
-            if "종가" in df.columns and "Close" not in df.columns:
-                df = df.rename(columns={"종가": "Close"})
-            return df
-        except Exception:
-            logger.exception("pykrx index fetch failed for %s", ticker)
-            return None
-
-    def _status_for(ticker: str):
-        """단일 지수(KOSPI/KOSDAQ) 상태 계산"""
-        df = _via_fdr(ticker)
-        if df is None:
-            df = _via_pykrx_index(ticker)
-
-        if df is None or df.empty:
-            return "데이터 오류", float("nan")
-
-        df = df.tail(60)
-
-        if "Close" not in df.columns:
-            return "데이터 부족", float("nan")
-
-        close = df["Close"]
-        ma20 = close.rolling(20).mean().iloc[-1]
-        curr = close.iloc[-1]
-
-        if pd.isna(ma20) or ma20 == 0:
-            return "데이터 부족", float("nan")
-
-        diff = ((curr - ma20) / ma20) * 100
-        status = "📈 상승장" if diff > 0 else "📉 조정장"
-
-        # 마지막 데이터 날짜 기준이 오늘보다 이전이면 "(전일 기준)" 붙이기
-        last_idx = df.index[-1]
-        try:
-            last_date = last_idx.date()
-        except Exception:
-            last_date = pd.to_datetime(last_idx).date()
-
-        today = datetime.now().date()
-        if last_date < today:
-            status += " (전일 기준)"
-
-        return status, diff
-
-    kp_stat, kp_diff = _status_for("KS11")
-    kq_stat, kq_diff = _status_for("KQ11")
-    return kp_stat, kp_diff, kq_stat, kq_diff
 
 @st.cache_data(ttl=3600)
 def get_fear_greed_index():
@@ -943,7 +862,7 @@ def build_global_score(lat):
         else ("MACD_slope" if "MACD_slope" in x.columns else "MACD_Slope")
     kairi_col = "이격도" if "이격도" in x.columns and x["이격도"].notna().any() \
         else ("乖離%" if "乖離%" in x.columns else "이격도")
-    vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].notna().any() \
+    vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].not나().any() \
         else ("Vol_Z" if "Vol_Z" in x.columns else "거래강도")
 
     close = nz_num(x["종가"])
@@ -1005,7 +924,7 @@ def build_global_score(lat):
 
     if turn.notna().any():
         try:
-            lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.dropna(), 90)
+            lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.drop나(), 90)
             denom = max(hi - lo, 1e-9)
             liq_norm = np.clip((turn - lo) / denom, 0, 1).fillna(0)
             liq_low = (turn < lo).astype(float)
@@ -1033,7 +952,7 @@ def build_global_score(lat):
 
     pen = pd.Series(0.0, index=x.index)
     pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1).fillna(0)
-    pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fillna(0)
+    pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fill나(0)
     pen += P_RSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
     pen += P_NEAR_FAR * np.clip((now_gap - 15) / 15, 0, 1).fillna(0)
@@ -1094,7 +1013,7 @@ def compute_dynamic_thresholds(df):
 
     if 'EBS' in df.columns:
         s = pd.to_numeric(df['EBS'], errors='coerce')
-        thr['ebs_q60'] = float(np.nanpercentile(s.dropna(), 60)) if s.dropna().size > 0 else PASS_EBS
+        thr['ebs_q60'] = float(np.nanpercentile(s.drop나(), 60)) if s.drop나().size > 0 else PASS_EBS
     else:
         thr['ebs_q60'] = PASS_EBS
 
@@ -1424,20 +1343,15 @@ with tab1:
             "Error",
         }
 
-        # 1) 에러/데이터 부족이면 예쁜 문구로 통일
-        if stat in bad_stats or (
-            isinstance(diff, (int, float)) and math.isnan(diff)
-        ):
+        # 에러/데이터 부족이면 예쁜 문구로 통일
+        if stat in bad_stats or pd.isna(diff):
             friendly = "📡 지수 데이터 지연/점검 중"
             return friendly, "-", "off"
-            
-            # 2) 정상일 때만 % 표시
+
+        # 정상일 때만 % 표시
         delta_txt = f"{diff:.2f}%"
         delta_color = "off" if ("상승" in stat or diff >= 0) else "inverse"
         return stat, delta_txt, delta_color
-
-
-
 
     kp_value, kp_delta, kp_color = _fmt_metric(kp_stat, kp_diff)
     kq_value, kq_delta, kq_color = _fmt_metric(kq_stat, kq_diff)
@@ -1640,7 +1554,7 @@ with tab2:
         if "LDY_SCORE" in safe_view.columns:
             safe_view["LDY_SCORE"] = pd.to_numeric(
                 safe_view["LDY_SCORE"], errors='coerce'
-            ).fillna(0)
+            ).fill나(0)
         cols = [
             "ROUTE", "업종", "종목코드", "LDY_SCORE",
             "종가", "추천매수가", "손절가", "추천매도가1",
