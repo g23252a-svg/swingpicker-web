@@ -1489,6 +1489,8 @@ with tab1:
     c1.metric("KOSPI", kp_value, kp_delta, delta_color=kp_color)
     c2.metric("KOSDAQ", kq_value, kq_delta, delta_color=kq_color)
 
+    st.caption("※ 퍼센트 값은 최근 5영업일 평균 수익률 기반 (스코어 fallback 시)")
+
     # 🔥 여기부터 새로 정리
     # ---- (NEW) 데이터 기준 시각 + 지표 모드 태그 ----
     fg_score, fg_status = get_fear_greed_index()  # 한 번만 계산해서 아래에서 같이 사용
@@ -1498,7 +1500,8 @@ with tab1:
     # 1) 추천 데이터 기준 시각
     if DATA_TS is not None:
         try:
-            ts_str = to_kst_str(DATA_TS)
+            ts_str = to_kst_str(DATA_TS, fmt="%Y-%m-%d")
+            st.caption(f"📅 추천 데이터 기준 일자: **{ts_str} (KST)**")
         except Exception:
             ts_str = ""
 
