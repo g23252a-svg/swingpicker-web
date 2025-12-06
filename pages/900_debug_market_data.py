@@ -1,8 +1,23 @@
+
+
+
+
 # pages/900_debug_market_data.py
 # -*- coding: utf-8 -*-
 
 import streamlit as st
-from datetime import datetime, timedelta
+from auth_user import render_auth_box
+
+st.set_page_config(page_title="Debug Market Data", layout="wide")
+
+with st.sidebar:
+    user = render_auth_box()
+
+if not user or user.get("role") != "admin":
+    st.error("🚫 이 페이지는 관리자 전용입니다.")
+    st.stop()
+
+st.title("📡 KOSPI / KOSDAQ 데이터 디버그 페이지")
 
 # 1) 라이브러리 import 상태 체크
 try:
