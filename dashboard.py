@@ -327,6 +327,43 @@ def find_code_by_name(name_or_code, code_map):
 
 @st.cache_data(ttl=3600)
 def get_market_status():
+
+
+@st.cache_data(ttl=600)
+def get_market_status_local(scored_df: pd.DataFrame):
+    """
+    FDR/pykrx가 막혀도 동작하는 로컬 시장 상태 계산
+    - 기준: 각 시장별 5일 수익률(ret_5d_%) 평균
+    - 평균 > 0  → 상승장
+      평균 ≤ 0 → 조정장
+    """
+    result = {}
+
+    for mkt in ["KOSPI", "KOSDAQ"]:
+        sub = scored_df[scored_df.get("시장", "") == mkt].copy()
+        if sub.empty:
+            result[mkt] = ("데이터 없음", float("nan"))
+            continue
+
+        if "ret_5d_%" not in sub.columns:
+            result[mkt] = ("데이터 부족", float("nan"))
+            continue
+
+        r5 = pd.to_numeric(sub["ret_5d_%"], errors="coerce").dropna()
+        if r5.empty:
+            result[mkt] = ("데이터 부족", float("nan"))
+            continue
+
+        avg_5d = float(r5.mean())
+        status = "📈 상승장" if avg_5d > 0 else "📉 조정장"
+        status_text = f"{status} (스코어 기반)"
+
+        result[mkt] = (status_text, avg_5d)
+
+    kp_stat, kp_diff = result.get("KOSPI", ("데이터 없음", float("nan")))
+    kq_stat, kq_diff = result.get("KOSDAQ", ("데이터 없음", float("nan")))
+    return kp_stat, kp_diff, kq_stat, kq_diff
+    
     """
     KOSPI / KOSDAQ 상태 조회
     - 정상: '📈 상승장', '📉 조정장' + MA20 대비 %
@@ -1277,7 +1314,7 @@ with tab1:
 
         # 1) 에러/데이터 부족이면 예쁜 문구로 통일
         if stat in bad_stats or (
-            isinstance(diff, float) and isinstance(diff, float) and math.isnan(diff)
+            isinstance(diff, (int, float)) and math.isnan(diff)
         ):
             friendly = "📡 지수 데이터 지연/점검 중"
             return friendly, "-", "off"
