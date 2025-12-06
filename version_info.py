@@ -3,6 +3,9 @@
 
 APP_VERSION = "6.5.0"
 
+# 🔹 PRIME 전용 텔레그램 채널 초대 링크
+PRIME_TG_JOIN_URL = _get_conf("https://t.me/+DovDEluWnEJhOTY1", "")
+
 CHANGELOG = [
     {
         "version": "6.5.0",
