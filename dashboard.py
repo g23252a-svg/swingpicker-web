@@ -1526,10 +1526,7 @@ if send_btn and tg_token and tg_chat_id:
     else:
         st.error(f"전송 실패: {res}")
 
-st.caption(f"RAW_URL = {RAW_URL}")
-st.caption(f"LOCAL_RAW = {LOCAL_RAW}")
-st.caption(f"DATA_SRC = {DATA_SRC}")
-st.caption(f"컬럼 예시: {', '.join(list(scored.columns[:15]))}")
+
 
 # ---------------------------
 # 메인 UI
