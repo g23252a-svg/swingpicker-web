@@ -22,7 +22,13 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from version_info import PRIME_TG_JOIN_URL, APP_VERSION, CHANGELOG
+from version_info import (
+    PRIME_TG_JOIN_URL,
+    APP_VERSION,
+    CHANGELOG,
+    get_version_label,
+    get_latest_log,
+)
 
 
 # ---------------------------
@@ -240,16 +246,19 @@ st.warning(
     "본 서비스 및 개발자는 어떠한 법적 책임도 부담하지 않습니다."
 )
 
-# 🔔 상단 업데이트 공지 (항상 최신 CHANGELOG[0] 사용)
-latest_log = CHANGELOG[0] if CHANGELOG else None
-if latest_log:
-    # 상단에는 핵심 2~3줄만 요약해서 노출
-    top_items = latest_log["items"][:3]
+# 🔔 상단 업데이트 공지 (version_info 헬퍼 함수 사용)
+log = get_latest_log()
+if log:
+    # 화면 상단 간단 버전 라벨
+    st.caption(f"LDY Pro Trader v{get_version_label(include_build=False)}")  # 예: v6.6
+
+    # 핵심 2~3줄만 요약
+    top_items = log["items"][:3]
     bullets = "\n".join(f"- {item}" for item in top_items)
 
     st.info(
-        f"✅ LDY Pro Trader v{APP_VERSION} 업데이트 ({latest_log['date']})\n\n"
-        f"**{latest_log['title']}**\n\n"
+        f"✅ v{log['version']} 업데이트 ({log['date']})\n\n"
+        f"**{log['title']}**\n\n"
         f"{bullets}\n\n"
         "자세한 변경사항은 **🧩 LDY Pro Trader 업데이트 노트** 탭에서 확인할 수 있습니다."
     )
