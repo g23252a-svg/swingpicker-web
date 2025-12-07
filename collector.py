@@ -412,6 +412,99 @@ def build_sector_map() -> Dict[str, str]:
 
     return sector_map
 
+# ------------------------------- 업종 대분류 (시각화용) -------------------------------
+
+def classify_big_sector(name: str, detailed: str) -> str:
+    """
+    KRX 세부업종(detailed) + 종목명(name)을 기반으로
+    대분류 업종을 만들어준다.
+    """
+    t = (detailed or "").strip()
+
+    # 2차전지
+    if any(k in t for k in ["2차전지", "이차전지", "이차 전지", "전지"]):
+        return "2차전지"
+    if any(k in name for k in ["에코프로", "엘앤에프", "퓨처엠", "에너지솔루션", "SDI", "에스디아이"]):
+        return "2차전지"
+
+    # 반도체
+    if "반도체" in t:
+        return "반도체"
+    if any(k in name for k in ["하이닉스", "DB하이텍", "한미반도체", "티씨케이", "덕산네오룩스"]):
+        return "반도체"
+
+    # 인터넷/플랫폼·게임 (먼저 체크)
+    if any(k in t for k in ["포털", "인터넷"]) or any(
+        k in name for k in ["네이버", "NAVER", "카카오", "크래프톤", "넷마블", "엔씨소프트"]
+    ):
+        return "인터넷/플랫폼·게임"
+
+    # IT/전기전자
+    if any(k in t for k in [
+        "전자부품", "전자 제품", "전기장비", "컴퓨터",
+        "통신 및 방송 장비", "자료처리", "소프트웨어", "정보 서비스"
+    ]):
+        return "IT/전기전자"
+
+    # 자동차·모빌리티
+    if any(k in t for k in ["자동차", "운수장비", "차량부품"]) or any(
+        k in name for k in ["현대차", "기아", "만도", "현대모비스", "HL클라테크", "롯데렌탈"]
+    ):
+        return "자동차·모빌리티"
+
+    # 조선·기계·설비
+    if any(k in t for k in ["조선", "기계", "선박", "보트 건조업", "산업용 장비", "펌프", "밸브", "터빈"]):
+        return "조선·기계·설비"
+
+    # 철강·금속
+    if any(k in t for k in ["철강", "1차 금속", "비철금속", "금속가공"]):
+        return "철강·금속"
+
+    # 화학·소재
+    if any(k in t for k in ["화학", "플라스틱 제품", "고무제품", "합성수지", "섬유제품"]):
+        return "화학·소재"
+
+    # 바이오·의약품
+    if any(k in t for k in ["의약품", "제약", "생명공학", "의료기기"]):
+        return "바이오·의약품"
+    if any(k in name for k in ["셀트리온", "삼성바이오로직스", "HLB"]):
+        return "바이오·의약품"
+
+    # 금융
+    if any(k in t for k in ["은행", "증권", "보험", "기타 금융업", "금융 지원 서비스"]):
+        return "금융"
+
+    # 건설·부동산
+    if any(k in t for k in ["건설", "주택", "부동산", "토목"]):
+        return "건설·부동산"
+
+    # 유통·소비재
+    if any(k in t for k in ["도소매", "소매업", "유통업", "전자상거래"]) or any(
+        k in t for k in ["음·식료품", "음료", "식품", "의복", "패션", "화장품"]
+    ):
+        return "유통·소비재"
+
+    # 운송·물류
+    if any(k in t for k in ["운수", "물류", "항공운송", "해상운송", "창고업", "택배"]):
+        return "운송·물류"
+
+    # 인프라·에너지 (전력/가스/전력장비 포함)
+    if any(k in t for k in ["전기가스", "수도", "발전", "송전", "에너지 공급"]):
+        return "인프라·에너지"
+    if "전동기, 발전기 및 전기 변환 · 공급 · 제어 장치 제조업" in t:
+        return "인프라·에너지"
+
+    # 미디어·콘텐츠
+    if any(k in t for k in ["방송업", "영화", "비디오물", "출판", "광고업"]):
+        return "미디어·콘텐츠"
+
+    # 서비스 기타
+    if any(k in t for k in ["서비스업", "사업 지원 서비스", "기타 개인 서비스"]):
+        return "서비스 기타"
+
+    return "기타"
+
+
 # ------------------------------- 벤치마크 (지수 60일 수익률) -------------------------------
 
 def get_index_60d_returns(trade_ymd: str, lookback: int = BENCH_LOOKBACK_DAYS) -> Dict[str, float]:
@@ -717,16 +810,22 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
 
     # ----- 섹터(업종) 강도 보정 -----
     sector_bonus = pd.Series(0.0, index=x.index)
-    if "업종" in x.columns:
+    # 🔹 업종_대분류가 있으면 그걸 우선 사용
+    sector_key = None
+    if "업종_대분류" in x.columns:
+        sector_key = "업종_대분류"
+    elif "업종" in x.columns:
+        sector_key = "업종"
+
+    if sector_key is not None:
         try:
-            # 업종별 평균 prelim_score
-            sector_mean = prelim_score.groupby(x["업종"]).transform("mean")
+            sector_mean = prelim_score.groupby(x[sector_key]).transform("mean")
             sector_norm = pct_norm_pos(sector_mean, q=85, floor=1.0).fillna(0)
             # 최대 +5점 수준 보너스
             sector_bonus = 100 * W_SECTOR * sector_norm
         except Exception:
             sector_bonus = 0.0
-
+            
     final_score = np.clip(prelim_score + sector_bonus, 0, 100)
 
     # ----- 결과 컬럼 세팅 -----
@@ -1090,6 +1189,18 @@ def main(
         raise RuntimeError("No Result (필터를 모두 통과한 종목 없음)")
 
     df_raw = pd.DataFrame(rows)
+    
+    # 🔹 업종 대분류 컬럼 생성 (세부 업종은 보존)
+    if "업종" in df_raw.columns:
+        df_raw["업종_상세"] = df_raw["업종"]
+        df_raw["업종_대분류"] = df_raw.apply(
+            lambda r: classify_big_sector(
+                str(r.get("종목명", "")),
+                str(r.get("업종", "")),
+            ),
+            axis=1,
+        )
+    
     df_out = build_global_score(df_raw).sort_values(
         ["LDY_SCORE", "거래대금(억원)"],
         ascending=[False, False]
