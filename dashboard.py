@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.4 (Data Freshness + Market Snapshot)
+LDY Pro Trader v6.5 (Data Source Tag + Freshness Warning)
 - 개선: 스코어링 로직을 Collector v6.4 수준으로 정교화
 - 개선: 포트폴리오 분석 병렬 처리 (속도 향상)
 - 개선: 차트에 거래량(Volume) 보조 지표 추가
@@ -9,6 +9,7 @@ LDY Pro Trader v6.4 (Data Freshness + Market Snapshot)
 - 개선: 시장/공포탐욕 지표의 데이터 출처 상태 표시
 - 추가: 추천 데이터 기준 시점(업데이트 시간) 표시
 - 추가: Pro / Prime 유료 구독 + 1개월 만료일 관리
+- v6.5: 데이터 출처(원격/로컬) 태그 + 기준일 오래됐을 때 경고 표시
 """
 
 import os, io, math, json, requests, logging
@@ -223,8 +224,8 @@ except Exception as e:
     logger.info("pykrx not available: %s", e)
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v6.4", layout="wide", page_icon="💎")
-st.title("🏆 LDY Pro Trader v6.4 (Data Freshness + Market Snapshot)")
+st.set_page_config(page_title="LDY Pro Trader v6.5", layout="wide", page_icon="💎")  # v6.5
+st.title("🏆 LDY Pro Trader v6.5 (Data Freshness + Market Snapshot)")  # v6.5
 st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
 
 st.warning(
@@ -1167,7 +1168,7 @@ def route_tag_dynamic(row, th):
 
     return "↩️ PULL (눌림)"
 
-# 👉 여기부터 추가
+# 👉 데이터 기준일 추론
 def infer_data_timestamp(df_raw: pd.DataFrame):
     """
     recommend_latest.csv 안에서 '기준일', '날짜', 'Date' 같은 컬럼을 찾아
@@ -1211,8 +1212,7 @@ def infer_data_timestamp(df_raw: pd.DataFrame):
         return max(candidates)
 
     return None
-# 👈 여기까지 추가
-
+# 👈 데이터 기준일 추론 끝
 
 
 @st.cache_data(ttl=600)
@@ -1224,20 +1224,24 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     - 동적 threshold + ROUTE
     - base / top20 / P_hit 계산
     - 📅 recommend_latest.csv 기준 시점(data_ts) 추출
+    - 🔖 v6.5: 실제 사용한 데이터 소스 타입(remote/local) 반환
     """
     
     df_raw = None
+    src_type = "unknown"  # v6.5: 데이터 출처 태그
     
     # 1) CSV 로드
     try:
         df_raw = load_csv_url(raw_url)
         log_src(df_raw, "Remote")
+        src_type = "remote"
     except Exception as e_remote:
         logger.warning("prepare_scored_data: Remote load failed: %s", e_remote)
         if os.path.exists(local_raw):
             try:
                 df_raw = load_csv_path(local_raw)
                 log_src(df_raw, "Local")
+                src_type = "local"
             except Exception as e_local:
                 logger.exception("prepare_scored_data: Local load failed: %s", e_local)
 
@@ -1265,20 +1269,22 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     top20 = base.head(20).copy()
     top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
-    return scored, base, top20, TH, data_ts
+    return scored, base, top20, TH, data_ts, src_type  # v6.5: src_type 추가
+
 
 # ---------------------------
 # 메인 데이터 로드 (Status UX)
 # ---------------------------
 
-# 전역에서 쓸 수 있게 기준 시점 변수 하나 선언만 해두자
+# 전역에서 쓸 수 있게 기준 시점 / 데이터 출처 변수 선언
 DATA_TS = None
+DATA_SRC = None  # v6.5
 
 with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded=True) as status:
     status.write("📥 데이터 다운로드 및 스코어링 계산 중...")
     try:
-        # 🔥 data_ts까지 같이 받기
-        scored, base, top20, TH, DATA_TS = prepare_scored_data(
+        # 🔥 data_ts + data_src까지 같이 받기
+        scored, base, top20, TH, DATA_TS, DATA_SRC = prepare_scored_data(
             RAW_URL,
             LOCAL_RAW,
             PASS_EBS,
@@ -1482,7 +1488,7 @@ with st.sidebar:
 # Telegram send
 # ---------------------------
 if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v6.4] 추천 Top 5 ({now_kst().strftime('%m/%d')})\n\n"
+    msg = f"🔥 [LDY v6.5] 추천 Top 5 ({now_kst().strftime('%m/%d')})\n\n"  # v6.5
     for i in range(min(5, len(top20))):
         row = top20.iloc[i]
         msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
@@ -1535,17 +1541,36 @@ with tab1:
     c2.metric("KOSDAQ", kq_value, kq_delta, delta_color=kq_color)
 
     
-    # 🔥 여기부터 새로 정리
-    # ---- (NEW) 데이터 기준 시각 + 지표 모드 태그 ----
+    # 🔥 v6.5: 데이터 기준 시각 + 지표 모드 + 소스 태그 + 신선도 경고
     fg_score, fg_status = get_fear_greed_index()
 
     info_lines = []
+
+    # 0) 데이터 소스 태그
+    if DATA_SRC == "remote":
+        info_lines.append("📡 데이터 출처: **GitHub 원격 CSV** (실시간 반영)")
+    elif DATA_SRC == "local":
+        info_lines.append("📁 데이터 출처: **로컬 캐시 파일** (네트워크 장애 시 대체 사용)")
+    else:
+        info_lines.append("📡 데이터 출처: **알 수 없음** (코드/환경 확인 필요)")
 
     # 1) 추천 데이터 기준 일자
     if DATA_TS is not None:
         ts_date = to_kst_str(DATA_TS, fmt="%Y-%m-%d")
         if ts_date:
             info_lines.append(f"📅 추천 데이터 기준 일자: **{ts_date} (KST)**")
+
+            # 신선도 경고 (기준일이 2일 이상 지났을 때)
+            try:
+                ts_kst = pd.to_datetime(DATA_TS).tz_convert(KST)
+                days_diff = (now_kst().date() - ts_kst.date()).days
+                if days_diff >= 2:
+                    info_lines.append(
+                        f"⚠️ 기준일이 **{days_diff}일** 지났습니다. "
+                        "GitHub의 `recommend_latest.csv` 업데이트 여부를 확인해 주세요."
+                    )
+            except Exception:
+                pass
 
     # 2) 지수/스코어 기준 여부 요약
     mode_bits = []
@@ -1577,7 +1602,6 @@ with tab1:
 
     if info_lines:
         st.caption("  \n".join(info_lines))
-
 
     
     st.divider()
@@ -1904,7 +1928,7 @@ with tab3:
                 delta_color="normal" if tot_rate >= 0 else "inverse",
             )
 
-            # ---- (NEW) 종목별 평가금액 비중 파이차트 ----
+            # ---- 종목별 평가금액 비중 파이차트 ----
             try:
                 if total_eval > 0:
                     pie_data = []
@@ -1935,8 +1959,6 @@ with tab3:
                         st.plotly_chart(fig_pie, use_container_width=True)
             except Exception:
                 logger.exception("portfolio pie chart failed")
-
-
 
         
         except Exception as e:
