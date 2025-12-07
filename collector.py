@@ -227,6 +227,7 @@ def get_sector_map_krx() -> Dict[str, str]:
     ensure_dir(OUT_DIR)
     cache_path = os.path.join(OUT_DIR, "sector_map_krx.csv")
 
+    # 1) 캐시 먼저 사용
     if os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, dtype=str)
@@ -239,9 +240,23 @@ def get_sector_map_krx() -> Dict[str, str]:
 
     url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download"
     try:
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
-        df = pd.read_csv(io.BytesIO(r.content), encoding="euc-kr")
+
+        # 1차: 기본 파서 시도
+        try:
+            df = pd.read_csv(io.BytesIO(r.content), encoding="euc-kr")
+        except Exception:
+            # 2차: 탭 구분 + python 엔진으로 재시도
+            df = pd.read_csv(
+                io.BytesIO(r.content),
+                encoding="euc-kr",
+                sep="\t",
+                engine="python",
+            )
+
+        # 컬럼 이름에 공백 있을 수 있으니 한번 정리
+        df.columns = [c.strip() for c in df.columns]
 
         if "종목코드" not in df.columns or "업종" not in df.columns:
             log(f"⚠️ KIND CSV 컬럼 이상: {df.columns.tolist()}")
@@ -257,13 +272,14 @@ def get_sector_map_krx() -> Dict[str, str]:
         return dict(zip(df_out["종목코드"], df_out["업종"]))
 
     except Exception as e:
-        log(f"❌ KIND 업종 다운로드 실패: {e}")
+        log(f"❌ KIND 업종 다운로드 실패(최종): {e}")
         return {}
 
 def get_sector_map_fdr() -> Dict[str, str]:
     ensure_dir(OUT_DIR)
     cache_path = os.path.join(OUT_DIR, "sector_map_fdr.csv")
 
+    # 1) 캐시 먼저 사용
     if os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, dtype=str)
@@ -274,24 +290,37 @@ def get_sector_map_fdr() -> Dict[str, str]:
         except Exception as e:
             log(f"⚠️ FDR 업종 캐시 로드 실패. 재생성 시도: {e}")
 
+    # 2) FDR에서 새로 생성
     try:
         df = fdr.StockListing("KRX")
-        code_col = "Symbol" if "Symbol" in df.columns else (
-            "Code" if "Code" in df.columns else None
-        )
+
+        # 코드 컬럼 찾기
+        code_col = None
+        for c in ("Symbol", "Code", "ISU_CD"):
+            if c in df.columns:
+                code_col = c
+                break
         if code_col is None:
-            raise RuntimeError(f"Code column not found: {df.columns.tolist()}")
+            log(f"⚠️ FDR 코드 컬럼을 찾을 수 없음: {df.columns.tolist()}")
+            return {}
 
         df[code_col] = df[code_col].astype(str).str.zfill(6)
 
-        cand_cols = ["업종", "Sector", "Wics", "Industry"]
+        # 🔥 업종 후보 컬럼: Dept까지 포함!
         sector_col = None
-        for c in cand_cols:
+        for c in ("업종", "Sector", "Wics", "Industry", "Dept"):
             if c in df.columns:
                 sector_col = c
                 break
+
+        # 그래도 없으면 마지막 fallback으로 Market 사용
         if sector_col is None:
-            raise RuntimeError(f"No sector column in FDR: {df.columns.tolist()}")
+            if "Market" in df.columns:
+                sector_col = "Market"
+                log("⚠️ 업종 컬럼은 없어 Market을 업종처럼 사용합니다.")
+            else:
+                log(f"⚠️ FDR 업종/섹터 컬럼 없음: {df.columns.tolist()}")
+                return {}
 
         df_out = df[[code_col, sector_col]].rename(
             columns={code_col: "종목코드", sector_col: "업종"}
@@ -303,7 +332,7 @@ def get_sector_map_fdr() -> Dict[str, str]:
         return dict(zip(df_out["종목코드"], df_out["업종"]))
 
     except Exception as e:
-        log(f"❌ FDR 업종 생성 실패: {e}")
+        log(f"❌ FDR 업종 생성 실패(최종): {e}")
         return {}
 
 def load_sector_override() -> Dict[str, str]:
