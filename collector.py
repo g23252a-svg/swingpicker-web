@@ -224,10 +224,15 @@ def get_fallback_sector_map() -> Dict[str, str]:
     }
 
 def get_sector_map_krx() -> Dict[str, str]:
+    """
+    KIND(상장법인 목록) 기준 업종 맵 생성
+    - corpList.do?method=download 는 사실상 HTML 테이블이므로 read_html 사용
+    - '종목코드', '업종' 기준으로 맵 구성
+    """
     ensure_dir(OUT_DIR)
     cache_path = os.path.join(OUT_DIR, "sector_map_krx.csv")
 
-    # 1) 캐시 먼저 사용
+    # 1) 캐시 먼저 시도
     if os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, dtype=str)
@@ -238,25 +243,28 @@ def get_sector_map_krx() -> Dict[str, str]:
         except Exception as e:
             log(f"⚠️ KIND 업종 캐시 로드 실패. 재다운로드 시도: {e}")
 
+    # 2) 웹에서 다시 다운로드
     url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download"
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        # KIND는 POST 로 파라미터 넣어 요청하는 게 가장 안정적
+        data = {
+            "method": "download",
+            "orderMode": "1",      # 정렬 기준
+            "orderStat": "D",      # 내림차순
+            "searchType": "13",    # 상장법인
+            "fiscalYearEnd": "all",
+            "location": "all",
+        }
+        r = requests.post(url, data=data, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
 
-        # 1차: 기본 파서 시도
-        try:
-            df = pd.read_csv(io.BytesIO(r.content), encoding="euc-kr")
-        except Exception:
-            # 2차: 탭 구분 + python 엔진으로 재시도
-            df = pd.read_csv(
-                io.BytesIO(r.content),
-                encoding="euc-kr",
-                sep="\t",
-                engine="python",
-            )
+        # 👉 포인트: read_html 로 테이블 통째로 읽기
+        dfs = pd.read_html(io.BytesIO(r.content), header=0)
+        if not dfs:
+            log("⚠️ KIND 테이블 파싱 실패: 테이블이 비어 있음")
+            return {}
 
-        # 컬럼 이름에 공백 있을 수 있으니 한번 정리
-        df.columns = [c.strip() for c in df.columns]
+        df = dfs[0]
 
         if "종목코드" not in df.columns or "업종" not in df.columns:
             log(f"⚠️ KIND CSV 컬럼 이상: {df.columns.tolist()}")
@@ -265,10 +273,11 @@ def get_sector_map_krx() -> Dict[str, str]:
         df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
         df["업종"] = df["업종"].replace("", np.nan).fillna("기타")
 
-        df_out = df[["종목코드", "업종"]]
+        # 필요 컬럼만 저장
+        df_out = df[["종목코드", "업종"]].copy()
         df_out.to_csv(cache_path, index=False, encoding=UTF8)
 
-        log(f"✅ KIND 업종 다운로드 완료 ({len(df_out)} rows)")
+        log(f"✅ KIND 업종 다운로드/파싱 완료 ({len(df_out)} rows)")
         return dict(zip(df_out["종목코드"], df_out["업종"]))
 
     except Exception as e:
