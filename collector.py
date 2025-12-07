@@ -161,27 +161,40 @@ def resolve_trade_date(force_ymd: Optional[str] = None) -> str:
 
     return find_latest_valid_date(_has_ohlcv_and_mcap, max_back_days=10)
 
-def build_mcap_map() -> Tuple[Dict[str, float], str]:
+def build_mcap_map(ref_ymd: Optional[str] = None) -> Tuple[Dict[str, float], str]:
     def _check_mcap(ymd: str) -> bool:
         try:
             df = pd.concat([
                 stock.get_market_cap_by_ticker(ymd, market='KOSPI'),
                 stock.get_market_cap_by_ticker(ymd, market='KOSDAQ')
             ])
+            # 완전히 빈 데이터만 아니면 OK
             return not df.empty
         except Exception:
             return False
 
-    use = find_latest_valid_date(_check_mcap, max_back_days=10)
+    use: Optional[str] = None
+
+    # 1순위: ref_ymd(= trade_ymd) 그대로 시도
+    if ref_ymd:
+        if _check_mcap(ref_ymd):
+            use = ref_ymd
+
+    # 2순위: 자동 탐색
+    if use is None:
+        use = find_latest_valid_date(_check_mcap, max_back_days=10)
+
     try:
         df = pd.concat([
             stock.get_market_cap_by_ticker(use, market='KOSPI'),
             stock.get_market_cap_by_ticker(use, market='KOSDAQ')
         ])
         if df.empty:
+            log(f"⚠️ 시가총액 맵이 비어 있음(use={use}), 빈 맵 반환")
             return {}, use
         df['Code'] = df.index
-        return dict(zip(df['Code'].astype(str), df['시가총액'] / 1e8)), use
+        mcap_map = dict(zip(df['Code'].astype(str), df['시가총액'] / 1e8))
+        return mcap_map, use
     except Exception as e:
         log(f"⚠️ 시가총액 맵 생성 실패({use}): {e}")
         return {}, use
@@ -795,8 +808,9 @@ def analyze_ticker(
 
     if tv_eok < MIN_TURNOVER_EOK:
         return None
-    if mcap > 0 and mcap < MIN_MCAP_EOK:
+    if mcap <= 0:
         return None
+
 
     score = 0
     reason: List[str] = []
@@ -900,10 +914,15 @@ def main(
 ) -> None:
     log("🚀 LDY Collector v6.6 시작...")
 
-    mcap_map, mcap_ymd = build_mcap_map()
+    # 1) 먼저 거래 기준일 결정
     trade_ymd = resolve_trade_date(trade_date)
+
+    # 2) 그 날짜를 기준으로 시총 맵 생성 시도
+    mcap_map, mcap_ymd = build_mcap_map(trade_ymd)
+
     log(f"📅 거래 기준일: {trade_ymd} (mcap ref: {mcap_ymd})")
 
+    # 3) 60일 지수 수익률
     bench_ret_60 = get_index_60d_returns(trade_ymd, BENCH_LOOKBACK_DAYS)
 
     def _fmt(v: Optional[float]) -> str:
@@ -918,29 +937,68 @@ def main(
     use_top_n = top_n or TOP_N
     log(f"📊 거래대금 상위 N: {use_top_n}")
 
+    # 4) 거래대금 상위 종목 리스트
     top_df = pick_top_by_trading_value(trade_ymd, use_top_n)
 
+    # 5) 시총 프리필터
     if mcap_map:
-        top_df["시가총액(억원)"] = top_df["종목코드"].map(lambda c: get_mcap_eok_from_map(mcap_map, c))
+        top_df["시가총액(억원)"] = top_df["종목코드"].map(
+            lambda c: get_mcap_eok_from_map(mcap_map, c)
+        )
+
         before_cnt = len(top_df)
-        top_df = top_df[top_df["시가총액(억원)"] >= MIN_MCAP_EOK].copy()
-        after_cnt = len(top_df)
-        log(f"📊 시총 필터 적용: {before_cnt} → {after_cnt}개 (MIN_MCAP_EOK={MIN_MCAP_EOK})")
+        s_mcap = pd.to_numeric(top_df["시가총액(억원)"], errors="coerce").fillna(0)
+
+        # 🔍 시총 분포 로그 (디버깅용)
+        try:
+            log(
+                "📊 시총 분포(억원) - min={:.1f}, median={:.1f}, max={:.1f}".format(
+                    float(s_mcap.min()),
+                    float(s_mcap.median()),
+                    float(s_mcap.max()),
+                )
+            )
+        except Exception:
+            pass
+
+        # 1차 필터
+        top_df_f = top_df[s_mcap >= MIN_MCAP_EOK].copy()
+        after_cnt = len(top_df_f)
+        log(
+            f"📊 시총 필터 적용: {before_cnt} → {after_cnt}개 "
+            f"(MIN_MCAP_EOK={MIN_MCAP_EOK})"
+        )
+
+        # 💥 모두 0개면 → 기준 완화해서 한 번 더 시도
+        if after_cnt == 0 and before_cnt > 0:
+            relaxed = MIN_MCAP_EOK / 10
+            log(
+                f"⚠️ 시총 필터 결과 0개 → 임시 기준 완화 재시도 "
+                f"(기준 {MIN_MCAP_EOK} → {relaxed})"
+            )
+            top_df_f = top_df[s_mcap >= relaxed].copy()
+            log(f"📊 완화 후 시총 필터: {before_cnt} → {len(top_df_f)}개")
+
+        top_df = top_df_f
     else:
         log("⚠️ mcap_map 비어 있음 → 시총 사전 필터 생략")
         top_df["시가총액(억원)"] = 0.0
 
+    # 6) 여기부터는 공통 분석 파이프라인
     tickers = top_df["종목코드"].tolist()
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
     sector_map = build_sector_map()
 
-    start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(days=LOOKBACK_DAYS * 2 + 60)
+    start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(
+        days=LOOKBACK_DAYS * 2 + 60
+    )
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
 
     rows: List[Dict[str, Any]] = []
     err_cnt = 0
+
     for t in tqdm(tickers, desc="Analyzing"):
         code6 = str(t).zfill(6)
         try:
