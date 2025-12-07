@@ -335,6 +335,9 @@ def get_sector_map_fdr() -> Dict[str, str]:
             columns={code_col: "종목코드", sector_col: "업종"}
         )
         df_out["업종"] = df_out["업종"].replace("", np.nan).fillna("기타")
+        # 🔹 업종이 아니라 시장 구분(우량기업부, 중견기업부, 중소기업부 등)은 전부 '기타'로 통일
+        bad_labels = ["우량기업부", "중견기업부", "중소기업부"]
+        df_out.loc[df_out["업종"].isin(bad_labels), "업종"] = "기타"
 
         df_out.to_csv(cache_path, index=False, encoding=UTF8)
         log(f"✅ FDR 업종 생성 및 캐시 저장: {len(df_out)} rows")
@@ -379,6 +382,10 @@ def build_sector_map() -> Dict[str, str]:
     sector_map.update(override)
 
     log(f"ℹ️ 최종 업종 맵 크기: {len(sector_map)}개 (FDR+KIND+fallback+override)")
+    # 🔍 디버그: 대형주 몇 개 찍어보기 (삼전/하닉/네이버 등)
+    for test_code in ["005930", "000660", "035420", "005490"]:
+        if test_code in sector_map:
+            log(f"   - {test_code} 업종 = {sector_map[test_code]}")
     return sector_map
 
 # ------------------------------- 벤치마크 (지수 60일 수익률) -------------------------------
