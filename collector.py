@@ -47,6 +47,10 @@ W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.
 P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
 
+# 🔹 v6.7 추가: 업종 보너스 + 과도 손절 패널티
+W_SECTOR = 0.05          # 섹터 강도 보정 (최대 +5점 수준)
+P_BIG_SL = 3.0           # 손절 폭이 너무 큰 종목 패널티
+
 # ------------------------------- 유틸 -------------------------------
 
 def log(msg: str) -> None:
@@ -458,6 +462,13 @@ def inv_dist_norm(dist: pd.Series, cap: float) -> pd.Series:
     return np.clip(1 - (nz_num(dist) / cap), 0, 1)
 
 def route_tag(row: pd.Series) -> str:
+    """
+    v6.7 ROUTE 분류
+    - BRK: 강한 돌파
+    - Watch: 상승 준비 / 관찰
+    - REV: 역추세 반등 (지수·섹터 대비 바닥권에서 턴)
+    - PULL: 눌림/중립
+    """
     def _fv(key: str, default: float = 0.0) -> float:
         try:
             return float(row.get(key, default) or default)
@@ -471,30 +482,55 @@ def route_tag(row: pd.Series) -> str:
     now_pct = _fv("Now%", 999.0)
     rr1 = _fv("RR1", 0.0)
     mfi = _fv("MFI14", 50.0)
+    rel60 = _fv("rel_60d_%", 0.0)  # 60일 상대강도(α)
 
+    # 1) 강한 돌파 BRK
     strong_break = (
         (r5 >= 3) and (r10 >= 5) and (slope > 0) and (ebs >= PASS_EBS)
         and (now_pct <= 10) and (mfi >= 55)
     )
+    # RR1이 너무 나쁘면 BRK에서 제외
     if strong_break and rr1 and not np.isnan(rr1) and rr1 < 0.6:
         strong_break = False
 
     if strong_break:
         return "🔼 BRK (돌파)"
 
+    # 2) 역추세 반등 REV
+    #    - 60일 상대강도는 약하지만, 단기 r5>0 + slope>0 + 과도한 갭 아님
+    rev = (
+        (rel60 <= -5.0) and   # 지수 대비 꽤 처졌던 종목
+        (r5 >= 1.0) and       # 최근 5일은 플러스
+        (slope > 0) and
+        (now_pct <= 10)       # 엔트리에서 너무 멀지 않음
+    )
+    if rev:
+        return "🔻 REV (역추세 반등)"
+
+    # 3) Watch 영역
     watch = ((slope > 0) and (r5 > 0)) or ((ebs >= PASS_EBS) and (now_pct <= 8))
     if watch:
         if r5 >= 1.5 and slope > 0:
             return "🔺 Watch (관찰·돌파예상)"
         return "🔺 Watch (상승 준비)"
 
+    # 4) 그 외는 기본적으로 PULL
     if r5 <= -2 and slope < 0:
         return "🔁 MR (반전)"
 
     return "↩️ PULL (눌림)"
 
 def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
+    """
+    v6.7 점수 로직
+    - RR / T1 / SL / Now% / MOM / LIQ / TEC 기본 구조 유지
+    - 상대강도(rel_60d_%) 비중 소폭 상향
+    - 손절 폭 과도(big SL) 패널티 추가
+    - 업종(섹터) 강도 보너스 W_SECTOR 반영
+    """
     x = lat.copy()
+
+    # ----- 기본 수치 추출 -----
     close = nz_num(x["종가"])
     entry = nz_num(x["추천매수가"])
     stop = nz_num(x["손절가"])
@@ -507,39 +543,45 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     r5 = nz_num(x["ret_5d_%"])
     r10 = nz_num(x["ret_10d_%"])
     ebs = nz_num(x["EBS"]).fillna(0)
-    rel60 = nz_num(x.get("rel_60d_%", 0.0))
+    rel60 = nz_num(x.get("rel_60d_%", 0.0))  # 60일 상대강도(α)
 
+    # ----- RR / T1 / SL / Now -----
     rr_den = (entry - stop)
     rr_den = rr_den.where(rr_den > 0, np.nan)
     rr1 = (t1 - entry) / rr_den
-    now_gap = ((close - entry).abs() / entry * 100)
-    t1_room = ((t1 - close) / close * 100)
-    sl_room = ((close - stop) / close * 100)
+
+    now_gap = ((close - entry).abs() / entry * 100)          # 추천가 대비 현재 위치
+    t1_room = ((t1 - close) / close * 100)                   # 현재가→목표1 여유
+    sl_room = ((close - stop) / close * 100)                 # 현재가→손절 여유(손절 폭)
 
     rr_norm = pct_norm_pos(rr1, q=90, floor=1.0).fillna(0)
     t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1).fillna(0)
     sl_norm = np.clip(sl_room / cap_q(sl_room, q=90, floor=3.0), 0, 1).fillna(0)
     near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0)).fillna(0)
 
+    # ----- MOM (모멘텀 + 상대강도) -----
     ers_bits = (
         (ebs >= PASS_EBS).astype(int)
         + (slope > 0).astype(int)
         + ((rsi >= RSI_LOW) & (rsi <= RSI_HIGH)).astype(int)
     )
     ers_norm = np.clip(ers_bits / 3.0, 0, 1).fillna(0)
+
     slope_pos_norm = pct_norm_pos(slope, q=90, floor=1.0).fillna(0)
     mom_mid_norm = pct_norm_pos(r10.clip(lower=0), q=90, floor=1.0).fillna(0)
     rel60_pos_norm = pct_norm_pos(rel60.clip(lower=0), q=90, floor=1.0).fillna(0)
 
+    # 🔹 v6.7: 상대강도 비중 소폭 상향
     mom_norm = np.clip(
-        0.45 * ers_norm
+        0.40 * ers_norm
         + 0.25 * slope_pos_norm
-        + 0.20 * mom_mid_norm
-        + 0.10 * rel60_pos_norm,
+        + 0.15 * mom_mid_norm
+        + 0.20 * rel60_pos_norm,
         0,
         1
     ).fillna(0)
 
+    # ----- LIQ (유동성) -----
     if turn.notna().any():
         lo, hi = np.nanpercentile(turn, 30), np.nanpercentile(turn, 90)
         denom = max(hi - lo, 1e-9)
@@ -549,11 +591,13 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
         liq_norm = 0.0
         liq_low = 0.0
 
+    # ----- 기술적 요소(거래강도/이격도) -----
     vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1).fillna(0)
     kairi_abs = kairi.abs()
     kairi_norm = (1 - np.minimum(kairi_abs / cap_q(kairi_abs, q=80, floor=3.0), 1)).clip(0, 1).fillna(0)
     tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1).fillna(0)
 
+    # ----- 기본 점수(패널티 적용 전) -----
     base_score = (
         100 * W_RR * rr_norm
         + 100 * W_T1 * t1_norm
@@ -564,22 +608,54 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
         + 100 * W_TEC * tec_norm
     )
 
+    # ----- 패널티 -----
     pen = pd.Series(0.0, index=x.index)
+
+    # 단기/중기 과열
     pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
     pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1)
+
+    # RSI 구간 이탈, MACD 하락
     pen += P_RSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
+
+    # 현재가가 엔트리에서 너무 멀어짐
     pen += P_NEAR_FAR * np.clip((now_gap - 15) / 15, 0, 1)
+
+    # 유동성 부족, 거래량 스파이크 과열
     pen += P_LIQ_LOW * liq_low
     pen += P_VOL_SPIKE * (volz > 3).astype(float)
 
-    score = np.clip(base_score - pen, 0, 100)
+    # 🔹 v6.7: 손절 폭 과도(big SL) 추가 패널티
+    big_sl = (sl_room > 12).astype(float)  # 손절 폭 12% 초과 종목
+    pen += P_BIG_SL * big_sl
+
+    # 1차 점수 (섹터 보정 전)
+    prelim_score = np.clip(base_score - pen, 0, 100)
+
+    # ----- 섹터(업종) 강도 보정 -----
+    sector_bonus = pd.Series(0.0, index=x.index)
+    if "업종" in x.columns:
+        try:
+            # 업종별 평균 prelim_score
+            sector_mean = prelim_score.groupby(x["업종"]).transform("mean")
+            sector_norm = pct_norm_pos(sector_mean, q=85, floor=1.0).fillna(0)
+            # 최대 +5점 수준 보너스
+            sector_bonus = 100 * W_SECTOR * sector_norm
+        except Exception:
+            sector_bonus = 0.0
+
+    final_score = np.clip(prelim_score + sector_bonus, 0, 100)
+
+    # ----- 결과 컬럼 세팅 -----
     x["RR1"] = rr1
     x["Now%"] = now_gap
-    x["LDY_SCORE"] = score.round(1)
+    x["LDY_SCORE"] = final_score.round(1)
 
+    # ROUTE 재계산 (v6.7 로직)
     x["ROUTE"] = x.apply(route_tag, axis=1)
 
+    # AI 코멘트
     x["AI_COMMENT"] = x.apply(
         lambda row: generate_ai_comment(
             row.get("MFI14", 50),
