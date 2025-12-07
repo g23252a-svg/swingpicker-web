@@ -224,8 +224,12 @@ except Exception as e:
     logger.info("pykrx not available: %s", e)
 
 # 2. 페이지 설정
-st.set_page_config(page_title="LDY Pro Trader v6.5", layout="wide", page_icon="💎")  # v6.5
-st.title("🏆 LDY Pro Trader v6.5 (Data Freshness + Market Snapshot)")  # v6.5
+st.set_page_config(
+    page_title=f"LDY Pro Trader v{APP_VERSION}",
+    layout="wide",
+    page_icon="💎",
+)
+st.title(f"🏆 LDY Pro Trader v{APP_VERSION} (Data Freshness + Market Snapshot)")
 st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
 
 st.warning(
