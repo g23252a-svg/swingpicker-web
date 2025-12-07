@@ -33,7 +33,7 @@ def _get_conf(key, default_val):
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 #    - 예: "6.5.0", "6.5.1-beta", "6.6.0+staging"
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.5.0")
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.6.0")
 APP_VERSION = _RAW_APP_VERSION  # 기존 코드 호환용 (대시보드에서 import 하는 값)
 
 
@@ -70,6 +70,18 @@ PRIME_TG_JOIN_URL = _get_conf(
 #    - 맨 앞 요소가 항상 최신 버전이라고 가정
 # --------------------------------------------------------------------
 CHANGELOG = [
+    {
+        "version": "6.6.0",
+        "date": "2025-12-07",
+        "title": "Collector v6.6 / 섹터맵 & 지수 상성 패치",
+        "items": [
+            "Collector v6.6: FDR + KIND + fallback + override를 통합한 업종 맵(build_sector_map) 도입",
+            "KIND 상장법인 목록을 HTML 테이블(read_html)로 파싱하여 CSV 파싱 오류(C parser 오류) 제거",
+            "업종_대분류 컬럼을 추가하고, 섹터 보정과 섹터 트리맵이 대분류 기준으로 동작하도록 구조 개편",
+            "60일 지수 수익률 및 상대강도(α)를 스코어링·ROUTE 태그·텔레그램 메시지에 반영",
+            "섹터맵(treemap)을 대분류 기준으로 시각화하여, 반도체/2차전지/플랫폼 등 시장 주도 섹터를 한눈에 확인 가능",
+        ],
+    },
     {
         "version": "6.5.0",
         "date": "2025-12-06",
