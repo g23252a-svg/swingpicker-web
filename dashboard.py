@@ -649,30 +649,32 @@ def plot_fear_greed_gauge(score):
     fig.update_layout(height=200, margin=dict(l=20, r=20, t=40, b=20))
     return fig
 
-def plot_sector_treemap(df):
-    if '업종' not in df.columns:
-        return None
-    df_map = df.copy()
-    df_map['업종'] = df_map['업종'].fillna('기타')
-    df_map = df_map[df_map['업종'] != '기타']
-    df_map['거래대금(억원)'] = pd.to_numeric(df_map['거래대금(억원)'], errors='coerce').fillna(0)
-    df_map = df_map[df_map['거래대금(억원)'] > 0]
-    if df_map.empty:
-        return None
-    if 'LDY_SCORE' in df_map.columns:
-        df_map['LDY_SCORE'] = pd.to_numeric(df_map['LDY_SCORE'], errors='coerce').fillna(0).round(1)
+def make_sector_treemap(df_map):
+    # 1) 섹터 키 선택 (대분류 우선)
+    sector_key = "업종_대분류" if "업종_대분류" in df_map.columns else "업종"
+
+    # 2) 트리맵 생성
     fig = px.treemap(
         df_map,
-        path=['업종', '종목명'],
+        path=[sector_key, '종목명'],   # ✅ 최상단을 대분류로
         values='거래대금(억원)',
         color='LDY_SCORE',
         color_continuous_scale='RdYlGn',
         title="<b>🔥 시장 주도 섹터 지도</b>",
-        custom_data=['LDY_SCORE']
+        custom_data=['LDY_SCORE', sector_key]  # hover에 대분류도 같이 넣자
     )
+
+    # 3) hover 텍스트 커스터마이즈
     fig.update_traces(
-        hovertemplate='<b>%{label}</b><br>점수: %{customdata[0]:.1f}<br>대금: %{value}억<extra></extra>'
+        hovertemplate=(
+            '<b>%{label}</b>'  # 종목명
+            '<br>섹터: %{customdata[1]}'  # 업종_대분류
+            '<br>점수: %{customdata[0]:.1f}'
+            '<br>대금: %{value}억'
+            '<extra></extra>'
+        )
     )
+
     fig.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=350)
     return fig
 
