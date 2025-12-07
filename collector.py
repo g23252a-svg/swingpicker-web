@@ -285,19 +285,26 @@ def get_sector_map_krx() -> Dict[str, str]:
         return {}
 
 def get_sector_map_fdr() -> Dict[str, str]:
+    """
+    FDR 기반 업종 맵
+    - FDR에 'Sector' / 'Wics' / 'Industry' 같은 컬럼이 있을 때만 사용
+    - 'Dept'(우량기업부, 기술성장 기업부 등)는 업종으로 취급하지 않음
+    - KIND가 메인이고, FDR는 진짜로 '보조용'이라서 과하게 안 씀
+    """
     ensure_dir(OUT_DIR)
-    cache_path = os.path.join(OUT_DIR, "sector_map_fdr.csv")
+    # 🔥 예전 sector_map_fdr.csv 대신 v2 캐시를 새로 쓴다
+    cache_path = os.path.join(OUT_DIR, "sector_map_fdr_v2.csv")
 
-    # 1) 캐시 먼저 사용
+    # 1) 캐시 먼저 시도
     if os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, dtype=str)
             df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
             df["업종"] = df["업종"].fillna("기타")
-            log(f"📁 FDR 업종 캐시 로드 성공: {len(df)} rows")
+            log(f"📁 FDR 업종 캐시(v2) 로드 성공: {len(df)} rows")
             return dict(zip(df["종목코드"], df["업종"]))
         except Exception as e:
-            log(f"⚠️ FDR 업종 캐시 로드 실패. 재생성 시도: {e}")
+            log(f"⚠️ FDR 업종 캐시(v2) 로드 실패. 재생성 시도: {e}")
 
     # 2) FDR에서 새로 생성
     try:
@@ -315,32 +322,33 @@ def get_sector_map_fdr() -> Dict[str, str]:
 
         df[code_col] = df[code_col].astype(str).str.zfill(6)
 
-        # 🔥 업종 후보 컬럼: Dept까지 포함!
+        # ✅ 업종 후보 컬럼 (Dept는 일부러 제외!)
         sector_col = None
-        for c in ("업종", "Sector", "Wics", "Industry", "Dept"):
+        for c in ("업종", "Sector", "Wics", "Industry"):
             if c in df.columns:
                 sector_col = c
                 break
 
-        # 그래도 없으면 마지막 fallback으로 Market 사용
+        # 그런 컬럼이 하나도 없으면, FDR 업종 맵은 아예 안 쓴다
         if sector_col is None:
-            if "Market" in df.columns:
-                sector_col = "Market"
-                log("⚠️ 업종 컬럼은 없어 Market을 업종처럼 사용합니다.")
-            else:
-                log(f"⚠️ FDR 업종/섹터 컬럼 없음: {df.columns.tolist()}")
-                return {}
+            log(f"⚠️ FDR에 업종/섹터 컬럼 없음 → FDR 업종 맵 사용 안 함: {df.columns.tolist()}")
+            return {}
 
         df_out = df[[code_col, sector_col]].rename(
             columns={code_col: "종목코드", sector_col: "업종"}
         )
-        df_out["업종"] = df_out["업종"].replace("", np.nan).fillna("기타")
-        # 🔹 업종이 아니라 시장 구분(우량기업부, 중견기업부, 중소기업부 등)은 전부 '기타'로 통일
-        bad_labels = ["우량기업부", "중견기업부", "중소기업부"]
-        df_out.loc[df_out["업종"].isin(bad_labels), "업종"] = "기타"
+
+        # FDR에서 내려오는 이상한 값(기업부 계열)은 전부 '기타'로 처리
+        bad_vals = {"기술성장 기업부", "우량기업부", "중견기업부", "기타 기업부"}
+        df_out["업종"] = (
+            df_out["업종"]
+            .replace("", np.nan)
+            .fillna("기타")
+            .apply(lambda x: "기타" if str(x).strip() in bad_vals else x)
+        )
 
         df_out.to_csv(cache_path, index=False, encoding=UTF8)
-        log(f"✅ FDR 업종 생성 및 캐시 저장: {len(df_out)} rows")
+        log(f"✅ FDR 업종(v2) 생성 및 캐시 저장: {len(df_out)} rows")
         return dict(zip(df_out["종목코드"], df_out["업종"]))
 
     except Exception as e:
@@ -367,25 +375,41 @@ def load_sector_override() -> Dict[str, str]:
         return {}
 
 def build_sector_map() -> Dict[str, str]:
-    fdr_map = get_sector_map_fdr()
+    # 1) 메인: KIND 업종
     kind_map = get_sector_map_krx()
+
+    # 2) 서브: FDR 업종 (v2)
+    fdr_map = get_sector_map_fdr()
+
+    # 3) 하드코딩 fallback + 사용자 override
     fallback = get_fallback_sector_map()
     override = load_sector_override()
 
     sector_map: Dict[str, str] = {}
-    sector_map.update(fdr_map)
+
+    # 🔹 1순위: KIND 그대로 넣기
     sector_map.update(kind_map)
 
+    # 🔹 2순위: FDR – KIND가 없거나 '기타'일 때만 보충
+    for code, sec in fdr_map.items():
+        cur = sector_map.get(code)
+        if (cur is None) or (str(cur).strip() == "") or (str(cur).strip() == "기타"):
+            sector_map[code] = sec
+
+    # 🔹 3순위: fallback – 여전히 비어 있는 코드만 채우기
     for code, sec in fallback.items():
         sector_map.setdefault(code, sec)
 
+    # 🔹 4순위: 최종 수동 Override가 최상위
     sector_map.update(override)
 
-    log(f"ℹ️ 최종 업종 맵 크기: {len(sector_map)}개 (FDR+KIND+fallback+override)")
-    # 🔍 디버그: 대형주 몇 개 찍어보기 (삼전/하닉/네이버 등)
-    for test_code in ["005930", "000660", "035420", "005490"]:
-        if test_code in sector_map:
-            log(f"   - {test_code} 업종 = {sector_map[test_code]}")
+    log(f"ℹ️ 최종 업종 맵 크기: {len(sector_map)}개 (KIND 우선 + FDR 보조 + fallback + override)")
+
+    # 디버그용 샘플 몇 개 찍어보면 확인하기 좋음
+    for test in ["005930", "000660", "035420", "005490"]:
+        if test in sector_map:
+            log(f"   - {test} 업종 = {sector_map[test]}")
+
     return sector_map
 
 # ------------------------------- 벤치마크 (지수 60일 수익률) -------------------------------
