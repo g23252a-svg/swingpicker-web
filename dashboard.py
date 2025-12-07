@@ -286,7 +286,7 @@ ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
 
 # 결제 계좌 정보 (전역 설정)
 BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-22-2658701")
-BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이두영")
+BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이OO")
 
 # 스코어링 상수
 PASS_EBS = float(get_conf("LDY_PASS_EBS", 4))
