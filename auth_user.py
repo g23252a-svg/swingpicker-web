@@ -8,9 +8,11 @@ import logging
 import re
 from typing import Tuple
 from datetime import datetime, timezone
+from typing import Optional  # 상단 import
 
 import requests
 import streamlit as st
+import secrets  # 상단 import 추가
 
 # ----------------- 로깅 설정 -----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -221,8 +223,11 @@ def save_user_db(db):
 
 # ----------------- 비밀번호 해시 -----------------
 def _create_salt(email: str) -> str:
-    base = f"{email}-{datetime.now().timestamp()}"
-    return hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
+    """
+    비밀번호 해시에 사용할 솔트 생성
+    - email은 굳이 섞지 않아도 되고, 독립 랜덤 값이면 충분
+    """
+    return secrets.token_hex(16)  # 32자리 hex 문자열 (128bit)
 
 def _hash_password(password: str, salt: str) -> str:
     # 필요 시 sha256 반복 횟수를 늘려 강도 강화도 가능
@@ -329,15 +334,27 @@ def list_users():
     users = db.get("users", {})
     return list(users.values())
 
-def update_user_role(email: str, new_role: str) -> bool:
+def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str] = None) -> bool:
     """
     관리자가 회원 권한 변경
+    - acting_admin_email: 실제 권한 변경을 수행하는 관리자 이메일
+      (자기 자신을 free/prime 등으로 떨어뜨리는 실수 방지용)
     """
     email = email.strip().lower()
+    if acting_admin_email:
+        acting_admin_email = acting_admin_email.strip().lower()
+
     db = load_user_db()
     users = db.get("users", {})
     if email not in users:
         return False
+
+    # ⛔ 자기 자신(admin)이 자기 권한을 admin이 아닌 걸로 바꾸는 것을 막기
+    if acting_admin_email == email:
+        current_role = users[email].get("role", "free")
+        if current_role == "admin" and new_role != "admin":
+            logger.warning("[auth_user] admin self-downgrade 차단: %s -> %s", email, new_role)
+            return False
 
     users[email]["role"] = new_role
     db["users"] = users
@@ -381,11 +398,12 @@ def _render_admin_panel(current_user):
     )
 
     if st.button("권한 변경 적용", key=f"admin_apply_{target_email}"):
-        ok = update_user_role(target_email, new_role)
+        current_admin = current_user.get("login_id") if current_user else None
+        ok = update_user_role(target_email, new_role, acting_admin_email=current_admin)
         if ok:
             st.success(f"{target_email} 권한이 `{new_role}` 로 변경되었습니다.")
         else:
-            st.error("변경 실패")
+            st.error("변경 실패 (자기 자신 admin 권한을 낮출 수는 없습니다.)")
 
 def render_auth_box(show_debug: bool = False):
     """
