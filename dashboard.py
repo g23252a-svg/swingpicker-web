@@ -1800,10 +1800,16 @@ with tab2:
         filtered = filtered[filtered["REGIME"].isin(sel_regimes)]
         
     if auth_status in ["pro", "prime", "admin"]:
-        view_df = filtered.head(20)
-        st.success(
-            f"🥇 {auth_status.upper()} 회원: 필터 적용 Top {len(view_df)} 종목 열람 중"
-        )
+        if auth_status == "pro":
+            # Pro: 기존처럼 Top 20
+            view_df = filtered.head(20)
+            desc = "Pro 회원: 필터 적용 Top 20 종목 열람 중"
+        else:
+            # Prime 이상(Prime, Admin): Top 100
+            view_df = filtered.head(100)
+            desc = f"{auth_status.upper()} 회원: 필터 적용 Top 100 종목 열람 중"
+
+        st.success(f"🥇 {desc}")
     else:
         if user is None:
             view_df = filtered.head(3)
@@ -1817,7 +1823,6 @@ with tab2:
                 "✅ Free 회원: 필터 적용 상위 **5개 종목**까지 열람 중입니다.\n"
                 "📈 더 많은 종목과 CSV 다운로드, 알림 기능은 Pro / Prime 등급에서 제공됩니다."
             )
-
     if view_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
