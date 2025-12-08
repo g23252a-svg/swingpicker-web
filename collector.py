@@ -636,6 +636,42 @@ def pct_norm_pos(s: pd.Series, q: int = 90, floor: float = 1.0) -> pd.Series:
 def inv_dist_norm(dist: pd.Series, cap: float) -> pd.Series:
     return np.clip(1 - (nz_num(dist) / cap), 0, 1)
 
+def detect_regime_row(row: pd.Series) -> str:
+    """
+    추세 단계(REGIME)를 텍스트로 분류
+    - rel_60d_% : 60일 초과수익(α)
+    - MACD_Slope : 단기 모멘텀 기울기
+    - RSI14 : 과매수/과매도 판단
+    """
+    def _fv(key: str, default: float = 0.0) -> float:
+        try:
+            return float(row.get(key, default) or default)
+        except Exception:
+            return default
+
+    rel60 = _fv("rel_60d_%", 0.0)
+    slope = _fv("MACD_Slope", 0.0)
+    rsi = _fv("RSI14", 50.0)
+
+    # ① 강한 상승 추세
+    if rel60 > 10 and slope > 0 and 50 <= rsi <= 70:
+        return "① 강한 상승 추세"
+
+    # ② 상승 후 조정 구간 (상대강도는 높은데 모멘텀 둔화)
+    if rel60 > 5 and slope <= 0:
+        return "② 상승 후 조정"
+
+    # ③ 박스 / 중립
+    if -5 <= rel60 <= 5:
+        return "③ 박스 / 중립"
+
+    # ④ 바닥 반등 시도 (상대강도는 약하지만 모멘텀 플러스 전환)
+    if rel60 <= -5 and slope > 0:
+        return "④ 바닥 반등 시도"
+
+    # ⑤ 하락 / 약세
+    return "⑤ 하락 / 약세"
+
 def route_tag(row: pd.Series) -> str:
     """
     v6.7 ROUTE 분류
@@ -697,11 +733,12 @@ def route_tag(row: pd.Series) -> str:
 
 def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     """
-    v6.7 점수 로직
+    v6.7 점수 로직 + REGIME / ENTRY_SCORE
     - RR / T1 / SL / Now% / MOM / LIQ / TEC 기본 구조 유지
     - 상대강도(rel_60d_%) 비중 소폭 상향
     - 손절 폭 과도(big SL) 패널티 추가
     - 업종(섹터) 강도 보너스 W_SECTOR 반영
+    - ENTRY_SCORE: '지금 들어가면 좋은가?'에 대한 별도 점수 (0~100)
     """
     x = lat.copy()
 
@@ -746,7 +783,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     mom_mid_norm = pct_norm_pos(r10.clip(lower=0), q=90, floor=1.0).fillna(0)
     rel60_pos_norm = pct_norm_pos(rel60.clip(lower=0), q=90, floor=1.0).fillna(0)
 
-    # 🔹 v6.7: 상대강도 비중 소폭 상향
+    # 상대강도 비중 소폭 상향
     mom_norm = np.clip(
         0.40 * ers_norm
         + 0.25 * slope_pos_norm
@@ -801,7 +838,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     pen += P_LIQ_LOW * liq_low
     pen += P_VOL_SPIKE * (volz > 3).astype(float)
 
-    # 🔹 v6.7: 손절 폭 과도(big SL) 추가 패널티
+    # 손절 폭 과도(big SL) 추가 패널티
     big_sl = (sl_room > 12).astype(float)  # 손절 폭 12% 초과 종목
     pen += P_BIG_SL * big_sl
 
@@ -810,7 +847,6 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
 
     # ----- 섹터(업종) 강도 보정 -----
     sector_bonus = pd.Series(0.0, index=x.index)
-    # 🔹 업종_대분류가 있으면 그걸 우선 사용
     sector_key = None
     if "업종_대분류" in x.columns:
         sector_key = "업종_대분류"
@@ -825,16 +861,37 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
             sector_bonus = 100 * W_SECTOR * sector_norm
         except Exception:
             sector_bonus = 0.0
-            
+
     final_score = np.clip(prelim_score + sector_bonus, 0, 100)
+
+    # ----- ENTRY SCORE: 진입 타점 점수 (0~100) -----
+    # - near_norm : 엔트리와의 거리
+    # - rr_norm   : 보상 대비 리스크
+    # - t1_norm   : 목표1까지 여유
+    # - sl_norm   : 손절폭(너무 좁지도/넓지도 않은지)
+    # - mom_norm  : 추세/모멘텀
+    # - (1 - liq_low): 유동성 좋은 종목 가중
+    raw_entry = (
+        0.30 * near_norm
+        + 0.18 * rr_norm
+        + 0.12 * t1_norm
+        + 0.10 * sl_norm
+        + 0.20 * mom_norm
+        + 0.10 * (1 - liq_low)
+    )
+    entry_score = np.clip(100 * raw_entry, 0, 100)
 
     # ----- 결과 컬럼 세팅 -----
     x["RR1"] = rr1
     x["Now%"] = now_gap
     x["LDY_SCORE"] = final_score.round(1)
+    x["ENTRY_SCORE"] = entry_score.round(1)
 
     # ROUTE 재계산 (v6.7 로직)
     x["ROUTE"] = x.apply(route_tag, axis=1)
+
+    # REGIME (추세 단계)
+    x["REGIME"] = x.apply(detect_regime_row, axis=1)
 
     # AI 코멘트
     x["AI_COMMENT"] = x.apply(
