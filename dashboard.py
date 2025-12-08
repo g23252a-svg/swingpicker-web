@@ -1393,11 +1393,11 @@ with st.sidebar:
             st.caption(f"현재 상태: **{auth_status.upper()}**")
 
     st.divider()
-    st.subheader("💎 프리미엄 구독 안내")
-
+    st.subheader("💎 프리미엄 이용권 안내")
+    
     PRICE_PRO = 19000
     PRICE_PRIME = 39000
-
+    
     with st.container():
         st.markdown("### 🌱 **Free (무료)**")
         st.markdown(
@@ -1406,9 +1406,9 @@ with st.sidebar:
             "- ❌ 내 포트폴리오 분석\n"
             "- ❌ CSV 다운로드 / 알림"
         )
-
+    
     with st.container():
-        st.markdown(f"### 🚀 **Pro (월 {PRICE_PRO:,}원)**")
+        st.markdown(f"### 🚀 **Pro 1개월 이용권 ({PRICE_PRO:,}원)**")
         st.markdown(
             "`실전 투자자용`\n"
             "- 🔓 필터 적용 **Top 20 종목** 열람\n"
@@ -1417,9 +1417,9 @@ with st.sidebar:
             "- ❌ CSV 다운로드\n"
             "- ❌ 텔레그램 알림"
         )
-
+    
     with st.container():
-        st.markdown(f"### 👑 **Prime (월 {PRICE_PRIME:,}원)**")
+        st.markdown(f"### 👑 **Prime 1개월 이용권 ({PRICE_PRIME:,}원)**")
         st.markdown(
             "`전업 / 하이엔드 투자자`\n"
             "- ✅ **전체 스코어링 종목** 열람\n"
@@ -1427,6 +1427,7 @@ with st.sidebar:
             "- ✅ 텔레그램 요약 알림 (Top 종목 브리핑)\n"
             "- ✅ 향후 고급 리포트 / 기능 우선 적용"
         )
+
 
     # 🔹 PRIME 전용 텔레그램 채널 안내 (로그인 + PRIME 이상 전용)
     if auth_status in ["prime", "admin"]:
@@ -1449,14 +1450,18 @@ with st.sidebar:
     
     st.markdown("#### 💳 결제(입금) 안내")
     st.markdown(
+        "- 이 서비스는 **자동 결제 없는 1개월 이용권(30일 패스)** 방식입니다.  \n"
         f"- 입금계좌: **{BANK_ACCOUNT}**  \n"
         f"- 예금주: **{BANK_HOLDER}**  \n"
-        "- 입금 후 카카오톡 채널 또는 문의 게시판에 **입금자명 / 이메일 / 희망 요금제(Pro/Prime)**를 남겨 주세요.  \n"
-        "- 관리자가 입금 확인 후 **1개월 단위로 권한을 부여/연장**합니다."
+        "- 입금 후 카카오톡 채널 또는 문의 게시판에 "
+        "**입금자명 / 이메일 / 희망 이용권(Pro 또는 Prime)**을 남겨 주세요.  \n"
+        "- 관리자가 입금 확인 후 해당 계정에 Pro / Prime 권한을 부여하며, "
+        "**부여일로부터 30일간** 프리미엄 기능이 활성화됩니다.  \n"
+        "- 이용 기간이 끝난 뒤 계속 사용을 원하시면, 동일한 방식으로 다시 1개월 이용권을 결제해 주세요."
     )
 
     if user and expire_str:
-        st.info(f"현재 구독 만료 예정일: **{expire_str}**")
+        st.info(f"현재 이용권 만료 예정일: **{expire_str}**")
 
     kakao_url = "https://open.kakao.com/o/soKqY04h"
     try:
@@ -2166,13 +2171,14 @@ with tab5:
         "이 과정에서 **종전 결과와 다른 스코어**가 나올 수 있습니다."
     )
 
-    st.markdown("### 4. 구독 및 계정 정책 (요약)")
+    st.markdown("### 4. 이용권 및 계정 정책 (요약)")
     st.markdown(
         "- **Guest(비회원)** : 상위 3개 종목 맛보기.\n"
-        f"- **Free(회원)** : 상위 5개 종목 열람.\n"
-        f"- **Pro (월 {PRICE_PRO:,}원)** : 상위 20 종목, 내 자산 분석 기능 제공.\n"
-        f"- **Prime (월 {PRICE_PRIME:,}원)** : 전체 종목, CSV 다운로드, 텔레그램 알림 등 고급 기능 제공.\n"
-        "- 구체적인 결제/환불/구독 해지 정책은 별도 안내(카카오 채널, 약관 페이지 등)를 따릅니다."
+        "- **Free(회원)** : 상위 5개 종목 열람.\n"
+        f"- **Pro 1개월 이용권 ({PRICE_PRO:,}원)** : 상위 20 종목, 내 자산 분석 기능 제공.\n"
+        f"- **Prime 1개월 이용권 ({PRICE_PRIME:,}원)** : 전체 종목, CSV 다운로드, 텔레그램 알림 등 고급 기능 제공.\n"
+        "- 자동 결제는 지원하지 않으며, 1개월 단위 선불 결제·연장 방식입니다.\n"
+        "- 구체적인 결제/환불/이용 기간 정책은 별도 안내(카카오 채널, 약관 페이지 등)를 따릅니다."
     )
 
     st.markdown("### 5. 한 줄 요약")
