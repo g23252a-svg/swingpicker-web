@@ -69,10 +69,23 @@ def nz_num(s: Any) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 def calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    표준 RSI 구현 (down=0인 날 때문에 전 구간이 NaN 되는 문제 수정)
+    """
     delta = close.diff()
-    up, down = delta.clip(lower=0), -delta.clip(upper=0)
-    rs = up.rolling(period).mean() / down.replace(0, np.nan).rolling(period).mean()
-    return 100 - 100 / (1 + rs)
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+
+    # 1) 먼저 rolling 평균을 구하고
+    roll_up = up.rolling(period).mean()
+    roll_down = down.rolling(period).mean()
+
+    # 2) 그 다음에 0인 down을 NaN 처리 (0으로 나누기 방지용)
+    roll_down = roll_down.replace(0, np.nan)
+
+    rs = roll_up / roll_down
+    rsi = 100 - 100 / (1 + rs)
+    return rsi
 
 def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     tr = pd.concat(
@@ -748,7 +761,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     stop = nz_num(x["손절가"])
     t1 = nz_num(x["추천매도가1"])
     turn = nz_num(x["거래대금(억원)"])
-    rsi = nz_num(x["RSI14"])
+    rsi = nz_num(x["RSI14"]).fillna(50)
     slope = nz_num(x["MACD_Slope"])
     volz = nz_num(x["거래강도"])
     kairi = nz_num(x["이격도"])
