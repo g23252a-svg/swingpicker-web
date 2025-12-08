@@ -33,7 +33,7 @@ def _get_conf(key, default_val):
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 #    - 예: "6.5.0", "6.5.1-beta", "6.6.0+staging"
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.6.0")
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.7.0")
 APP_VERSION = _RAW_APP_VERSION  # 기존 코드 호환용 (대시보드에서 import 하는 값)
 
 
@@ -71,15 +71,25 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG = [
     {
+        "version": "6.7.0",
+        "date": "2025-12-08",
+        "title": "Prime Top 100 + Role-based Daily Top",
+        "items": [
+            "게스트/Free/Pro/Prime/Admin 등급별 Daily Top 노출 개수를 분리 (Guest 3개, Free 5개, Pro 20개, Prime/Admin 100개).",
+            "Prime/Admin 등급에서 EBS·유동성 통과 종목 풀을 넓혀, 더 많은 후보군 중에서 상위 100개를 열람할 수 있도록 개선.",
+            "Daily Top List, 종목 선택 드롭다운, 개별 차트/레이더/리스크-리워드 분석이 동일한 필터 조건(LDY 점수, ROUTE, REGIME)에 따라 일관되게 동작하도록 구조 정리.",
+            "필터가 과도하게 좁거나 데이터가 부족한 상황에서도 에러 없이 빈 상태 안내/경고만 출력되도록 방어 코드 보강.",
+        ],
+    },
+    {
         "version": "6.6.0",
         "date": "2025-12-07",
-        "title": "Collector v6.6 / 섹터맵 & 지수 상성 패치",
+        "title": "Data Freshness + Market Snapshot",
         "items": [
-            "Collector v6.6: FDR + KIND + fallback + override를 통합한 업종 맵(build_sector_map) 도입",
-            "KIND 상장법인 목록을 HTML 테이블(read_html)로 파싱하여 CSV 파싱 오류(C parser 오류) 제거",
-            "업종_대분류 컬럼을 추가하고, 섹터 보정과 섹터 트리맵이 대분류 기준으로 동작하도록 구조 개편",
-            "60일 지수 수익률 및 상대강도(α)를 스코어링·ROUTE 태그·텔레그램 메시지에 반영",
-            "섹터맵(treemap)을 대분류 기준으로 시각화하여, 반도체/2차전지/플랫폼 등 시장 주도 섹터를 한눈에 확인 가능",
+            "GitHub 원격 CSV / 로컬 캐시 데이터 출처 태그(remote/local) 표시.",
+            "추천 데이터 기준일(기준일자/날짜/Date 컬럼 자동 인식) 추론 및 2일 이상 경과 시 신선도 경고 출력.",
+            "FDR/pykrx 지수 기반 KOSPI/KOSDAQ Market Snapshot + 데이터 장애 시 로컬 스코어 기반으로 자동 Fallback.",
+            "KS11 지수 기반 공포/탐욕 지수 + scored DF 기반 Fallback을 통합한 공포/탐욕 인덱스 구현.",
         ],
     },
     {
