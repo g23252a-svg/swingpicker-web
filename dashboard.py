@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.5 (Data Source Tag + Freshness Warning)
-- 개선: 스코어링 로직을 Collector v6.4 수준으로 정교화
-- 개선: 포트폴리오 분석 병렬 처리 (속도 향상)
-- 개선: 차트에 거래량(Volume) 보조 지표 추가
-- 개선: 데이터 로딩 상태 시각화 (st.status)
-- 개선: 보안 설정 (st.secrets 우선 지원)
-- 개선: 시장/공포탐욕 지표의 데이터 출처 상태 표시
-- 추가: 추천 데이터 기준 시점(업데이트 시간) 표시
-- 추가: Pro / Prime 유료 구독 + 1개월 만료일 관리
-- v6.5: 데이터 출처(원격/로컬) 태그 + 기준일 오래됐을 때 경고 표시 df = normalize_cols(df_raw)
+LDY Pro Trader v6.7.0 (Prime Top 100 + Role-based Daily Top)
+- 개선: 권한별 Daily Top 노출 개수 분리
+    · Guest: 3개 · Free: 5개 · Pro: 20개 · Prime/Admin: 100개
+- 개선: Prime/Admin에서 EBS·유동성 통과 종목/전체 스코어링 풀을 넓게 사용하도록 모수(base_view) 확장
+- 개선: Daily Top 필터(LDY 점수 / ROUTE / REGIME)와 개별 종목 차트/레이더/리스크-리워드 연동 구조 정리
+- 개선: 엣지 케이스(데이터 부족, 필터 과도 등)에서도 에러 없이 graceful하게 동작하도록 방어 코드 보강
+- 이전(v6.6.0): Data Freshness + Market Snapshot (데이터 기준일·소스 태그, 지수/스코어 기반 시장 스냅샷)
 """
 
 import os, io, math, json, requests, logging
@@ -235,7 +232,7 @@ st.set_page_config(
     layout="wide",
     page_icon="💎",
 )
-st.title(f"🏆 LDY Pro Trader v{APP_VERSION} (Data Freshness + Market Snapshot)")
+st.title(f"🏆 LDY Pro Trader v{APP_VERSION} (Prime Top 100 + Role-based Daily Top)")
 st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
 
 st.warning(
