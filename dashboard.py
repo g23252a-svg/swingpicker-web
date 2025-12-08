@@ -9,7 +9,7 @@ LDY Pro Trader v6.5 (Data Source Tag + Freshness Warning)
 - 개선: 시장/공포탐욕 지표의 데이터 출처 상태 표시
 - 추가: 추천 데이터 기준 시점(업데이트 시간) 표시
 - 추가: Pro / Prime 유료 구독 + 1개월 만료일 관리
-- v6.5: 데이터 출처(원격/로컬) 태그 + 기준일 오래됐을 때 경고 표시
+- v6.5: 데이터 출처(원격/로컬) 태그 + 기준일 오래됐을 때 경고 표시 df = normalize_cols(df_raw)
 """
 
 import os, io, math, json, requests, logging
@@ -1283,16 +1283,62 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     latest = df.copy()
     scored = build_global_score(latest)
 
+    # 🔥 REGIME(추세) + 점수 기반 정렬 우선순위 설정
+    if "REGIME" in scored.columns:
+        def _regime_rank(val: str) -> int:
+            s = str(val)
+            if s.startswith("①"):  # ① 강한 상승 추세
+                return 1
+            if s.startswith("②"):  # ② 상승 추세
+                return 2
+            if s.startswith("③"):  # ③ 조정 중인 상승 추세
+                return 3
+            if s.startswith("④"):  # ④ 박스권
+                return 4
+            if s.startswith("⑤"):  # ⑤ 하락 추세
+                return 5
+            if s.startswith("⑥"):  # ⑥ 추세 붕괴
+                return 6
+            return 999  # 분류 안 된 것들
+
+        scored["REGIME_RANK"] = (
+            scored["REGIME"]
+            .map(_regime_rank)
+            .fillna(999)
+            .astype(int)
+        )
+    else:
+        # REGIME 컬럼이 없는 경우에도 코드가 깨지지 않도록
+        scored["REGIME_RANK"] = 999
+
+    # 📌 REGIME → LDY_SCORE → ENTRY_SCORE → 거래대금(억원) 순으로 정렬
+    sort_cols = ["REGIME_RANK", "LDY_SCORE"]
+    asc = [True, False]
+
+    if "ENTRY_SCORE" in scored.columns:
+        sort_cols.append("ENTRY_SCORE")
+        asc.append(False)
+
+    if "거래대금(억원)" in scored.columns:
+        sort_cols.append("거래대금(억원)")
+        asc.append(False)
+
+    scored = scored.sort_values(sort_cols, ascending=asc)
+    scored["LDY_RANK"] = range(1, len(scored) + 1)
+
+    # 👉 정렬된 scored를 기준으로 동적 임계값 및 ROUTE 계산
     TH = compute_dynamic_thresholds(scored)
     scored["ROUTE"] = scored.apply(
         lambda r: route_tag_dynamic(r, TH),
         axis=1
     ).fillna("—")
 
+    # EBS + 유동성 필터 통과 종목만 base로
     base = scored[(scored["EBS"] >= pass_ebs) & (scored["_GATE_OK"])].copy()
     if len(base) < 20:
-        base = scored.head(20)
+        base = scored.head(20).copy()
 
+    # Top20도 동일한 우선순위(정렬된 base의 앞 20개)
     top20 = base.head(20).copy()
     top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
@@ -1697,6 +1743,8 @@ with tab2:
             min_value=0, max_value=100, value=80, step=1,
             key="min_score",
         )
+
+    # ROUTE 필터 (기존 유지)
     with col_f2:
         all_routes = sorted(
             scored["ROUTE"].dropna().unique().tolist()
@@ -1711,26 +1759,46 @@ with tab2:
             )
         else:
             sel_routes = []
+
+    # 🔥 REGIME(추세) 필터 추가
     with col_f3:
-        use_only_gate = st.checkbox(
-            "EBS/유동성 통과만 사용",
-            value=True,
-            key="only_gate",
-        )
+        if "REGIME" in scored.columns:
+            all_regimes = sorted(scored["REGIME"].dropna().unique().tolist())
+            # 기본값: 전체 선택 (필요하면 ①~③만 기본 선택으로 바꿀 수도 있음)
+            sel_regimes = st.multiselect(
+                "추세 구분 (REGIME)",
+                options=all_regimes,
+                default=all_regimes,
+                key="regime_filter",
+            )
+        else:
+            sel_regimes = []
+
+    # EBS / 유동성 통과여부 체크박스는 한 줄 아래로 분리
+    use_only_gate = st.checkbox(
+        "EBS/유동성 통과만 사용",
+        value=True,
+        key="only_gate",
+    )
+
 
     if use_only_gate:
+        # 👉 EBS/유동성 필터 통과 Top20 (prepare_scored_data에서 이미 정렬됨)
         base_view = top20.copy()
     else:
-        base_view = scored.sort_values(
-            ["LDY_SCORE", "거래대금(억원)"],
-            ascending=[False, False]
-        ).head(50)
+        # 👉 전체 스코어링 중 상위 50개 (REGIME + 점수 기준 정렬 상태)
+        base_view = scored.head(50).copy()
 
     filtered = base_view.copy()
     filtered = filtered[filtered["LDY_SCORE"] >= min_score]
+
     if sel_routes:
         filtered = filtered[filtered["ROUTE"].isin(sel_routes)]
 
+    # 🔥 REGIME 필터 반영
+    if sel_regimes and "REGIME" in filtered.columns:
+        filtered = filtered[filtered["REGIME"].isin(sel_regimes)]
+        
     if auth_status in ["pro", "prime", "admin"]:
         view_df = filtered.head(20)
         st.success(
@@ -1754,7 +1822,7 @@ with tab2:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
         opts = view_df.apply(
-            lambda r: f"{r.get('종목명','-')} ({r.get('종목코드','-')})",
+            lambda r: f"{r.get('종목명','-')} ({r.get('종목코드','-')}) / {r.get('REGIME','-')}",
             axis=1
         ).tolist()
         sel = st.selectbox("종목 선택", opts)
@@ -1831,7 +1899,7 @@ with tab2:
                 safe_view["LDY_SCORE"], errors='coerce'
             ).fillna(0)
         cols = [
-            "ROUTE", "업종", "종목코드", "LDY_SCORE",
+            "REGIME", "ROUTE", "업종", "종목코드", "LDY_SCORE",
             "종가", "추천매수가", "손절가", "추천매도가1",
         ]
         cols = [c for c in cols if c in safe_view.columns]
