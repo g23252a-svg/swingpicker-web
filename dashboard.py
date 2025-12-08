@@ -1774,20 +1774,30 @@ with tab2:
         else:
             sel_regimes = []
 
-    # EBS / 유동성 통과여부 체크박스는 한 줄 아래로 분리
+    # EBS / 유동성 통과여부 체크박스
     use_only_gate = st.checkbox(
         "EBS/유동성 통과만 사용",
         value=True,
         key="only_gate",
     )
 
-
+    # 🔥 권한별로 Daily Top 모수 설정
     if use_only_gate:
-        # 👉 EBS/유동성 필터 통과 Top20 (prepare_scored_data에서 이미 정렬됨)
-        base_view = top20.copy()
+        # ✅ EBS / 유동성 통과 종목만 보는 모드
+        if auth_status in ["prime", "admin"]:
+            # PRIME 이상: 통과 종목을 넉넉히 가져와서 그 중에서 Top 100 뽑기
+            base_view = base.head(300).copy()   # 필요하면 .head(300) → base.copy()로 바꿔도 됨
+        else:
+            # guest / free / pro: 기존처럼 Top20만 모수
+            base_view = top20.copy()
     else:
-        # 👉 전체 스코어링 중 상위 50개 (REGIME + 점수 기준 정렬 상태)
-        base_view = scored.head(50).copy()
+        # ✅ 전체 스코어링 종목에서 보는 모드
+        if auth_status in ["prime", "admin"]:
+            # PRIME 이상: 전체 스코어링 대상
+            base_view = scored.copy()
+        else:
+            # guest / free / pro: 상위 50개까지만 모수
+            base_view = scored.head(50).copy()
 
     filtered = base_view.copy()
     filtered = filtered[filtered["LDY_SCORE"] >= min_score]
