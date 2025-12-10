@@ -33,7 +33,7 @@ def _get_conf(key: str, default_val: str) -> str:
     try:
         if key in st.secrets:
             return st.secrets[key]
-    except FileNotFoundError:
+    except Exception:
         # 로컬 환경에서 .streamlit/secrets.toml 이 없을 수도 있음
         pass
     return os.getenv(key, default_val)
