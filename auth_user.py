@@ -243,6 +243,146 @@ def _save_user_db_to_gist(db: dict) -> bool:
         logger.exception("[auth_user] Gist user DB save 실패: %s", e)
         return False
 
+# ----------------- (공용) Gist JSON 유틸 -----------------
+def load_json_from_gist_file(file_name: str, default):
+    """
+    Gist 안의 file_name을 JSON으로 읽어온다.
+    - 파일이 없거나 오류가 나면 default를 반환한다.
+    - subscriptions_db.json / inquiries_db.json 같이 다른 DB도 이 함수로 공통 처리.
+    """
+    if not GIST_ID or not GIST_TOKEN:
+        logger.warning("[auth_user] Gist 설정 없음 → %s default 반환", file_name)
+        return default
+
+    try:
+        url = f"https://api.github.com/gists/{GIST_ID}"
+        headers = {
+            "Authorization": f"token {GIST_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+
+        if resp.status_code != 200:
+            logger.error(
+                "[auth_user] Gist GET 실패 (%s): status=%s, body=%s",
+                file_name, resp.status_code, resp.text
+            )
+            return default
+
+        gist = resp.json()
+        files = gist.get("files", {})
+        file_obj = files.get(file_name)
+
+        if not file_obj:
+            logger.info(
+                "[auth_user] Gist에 '%s' 파일 없음 → default 사용", file_name
+            )
+            return default
+
+        content = file_obj.get("content", "") or ""
+        if not content.strip():
+            return default
+
+        json_text = _extract_json_from_text(content)
+        return json.loads(json_text)
+
+    except Exception as e:
+        logger.exception("[auth_user] Gist에서 %s 로드 실패: %s", file_name, e)
+        return default
+
+
+def save_json_to_gist_file(file_name: str, payload) -> bool:
+    """
+    Gist 안의 file_name에 payload(JSON 직렬화 가능 객체)를 저장한다.
+    - 실패 시 False, 성공 시 True 반환.
+    """
+    if not GIST_ID or not GIST_TOKEN:
+        logger.error("[auth_user] Gist 설정 없음 → %s 저장 불가", file_name)
+        return False
+
+    try:
+        url = f"https://api.github.com/gists/{GIST_ID}"
+        headers = {
+            "Authorization": f"token {GIST_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        }
+        body = {
+            "files": {
+                file_name: {
+                    "content": json.dumps(payload, ensure_ascii=False, indent=2)
+                }
+            }
+        }
+
+        resp = requests.patch(
+            url, headers=headers, data=json.dumps(body), timeout=10
+        )
+        if resp.status_code not in (200, 201):
+            logger.error(
+                "[auth_user] Gist PATCH 실패 (%s): status=%s, body=%s",
+                file_name, resp.status_code, resp.text
+            )
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.exception("[auth_user] Gist에 %s 저장 실패: %s", file_name, e)
+        return False
+
+
+# ----------------- 구독 DB / 문의 DB (Gist 저장용) -----------------
+SUBSCRIPTIONS_GIST_FILE = "subscriptions_db.json"
+INQUIRIES_GIST_FILE     = "inquiries_db.json"
+
+
+def load_subscriptions_db() -> dict:
+    """
+    구독 정보 DB 로드
+    - Gist의 subscriptions_db.json에서 읽어오고,
+      없거나 오류면 {} 반환
+    """
+    data = load_json_from_gist_file(SUBSCRIPTIONS_GIST_FILE, default={})
+    if not isinstance(data, dict):
+        logger.warning("[auth_user] subscriptions_db 타입이 dict가 아님 → 강제 초기화")
+        return {}
+    return data
+
+
+def save_subscriptions_db(db: dict) -> bool:
+    """
+    구독 정보 DB 저장
+    - Gist subscriptions_db.json에 저장
+    """
+    if not isinstance(db, dict):
+        logger.warning("[auth_user] save_subscriptions_db 인자가 dict가 아님 → dict() 변환")
+        db = dict(db)
+    return save_json_to_gist_file(SUBSCRIPTIONS_GIST_FILE, db)
+
+
+def load_inquiries_db() -> list:
+    """
+    문의글 DB 로드
+    - Gist inquiries_db.json에서 읽어오고,
+      없거나 오류면 [] 반환
+    """
+    data = load_json_from_gist_file(INQUIRIES_GIST_FILE, default=[])
+    if not isinstance(data, list):
+        logger.warning("[auth_user] inquiries_db 타입이 list가 아님 → 강제 초기화")
+        return []
+    return data
+
+
+def save_inquiries_db(items: list) -> bool:
+    """
+    문의글 DB 저장
+    - Gist inquiries_db.json에 저장
+    """
+    if not isinstance(items, list):
+        logger.warning("[auth_user] save_inquiries_db 인자가 list가 아님 → list() 변환")
+        items = list(items)
+    return save_json_to_gist_file(INQUIRIES_GIST_FILE, items)
+
 # ----------------- 통합 DB 유틸 (Gist 우선, 로컬 백업) -----------------
 # 👉 Gist API 호출 최적화를 위한 간단 캐시 (TTL)
 _USER_DB_CACHE: Optional[dict] = None
