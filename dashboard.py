@@ -2265,7 +2265,6 @@ with tab3:
                     pass
 
             # 3) 포트폴리오 파싱
-            #    형식: NAVER:261000:10
             targets = []     # 종목 리스트
             cash_amt = 0.0   # 현금(예수금) 총액
 
@@ -2276,7 +2275,6 @@ with tab3:
 
                 parts = [p.strip() for p in line.split(':')]
                 if len(parts) != 3:
-                    # 형식이 다르면 스킵
                     continue
 
                 name_input, avg_str, qty_str = parts
@@ -2512,10 +2510,12 @@ with tab3:
                     st.caption("※ 스코어 데이터에 섹터 정보(업종, 업종_대분류)가 없어 건강검진을 생략했습니다.")
             except Exception:
                 logger.exception("portfolio health check failed")
-                st.caption("※ 포트폴리오 건강검진 중 오류가 발생했습니다. (로그를 확인해 주세요)")
+                st.caption("※ 포트폴리오 건강검진 중 오류가 발생했습니다.")
+        except Exception as e:
+            st.error(f"포트폴리오 분석 중 오류 발생: {e}")
+
     else:
         st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
-
 
 with tab4:
     st.subheader("📮 문의 게시판")
