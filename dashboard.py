@@ -278,7 +278,7 @@ def get_conf(key, default_val):
         pass
     return os.getenv(key, default_val)
 
-# 🔧 경로 / 파일 설정
+# ----------------- 설정값 로딩 -----------------
 RAW_SRC        = get_conf("LDY_RAW_URL",        "data/recommend_latest.csv")
 LOCAL_RAW      = get_conf("LDY_LOCAL_RAW",      "data/recommend_latest.csv")
 PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
@@ -327,57 +327,10 @@ def normalize_cols(df):
 
 
 
-
-RAW_SRC = get_conf("LDY_RAW_URL", "data/recommend_latest.csv")   # 이름만 RAW_SRC로 통일
-LOCAL_RAW = get_conf("LDY_LOCAL_RAW", "data/recommend_latest.csv")
-PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
-
-# 보안키
-KEY_PRO = get_conf("LDY_KEY_PRO", "220577")
-KEY_PRIME = get_conf("LDY_KEY_PRIME", "577220")
-ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
-
-# 결제 계좌 정보 (전역 설정)
-BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-22-2658701")
-BANK_HOLDER  = get_conf("LDY_BANK_HOLDER", "이OO")
-
-# 스코어링 상수
-PASS_EBS = float(get_conf("LDY_PASS_EBS", 4))
-MIN_TURN_KOSPI = float(get_conf("LDY_MIN_TURN_KOSPI", 200.0))
-MIN_TURN_KOSDAQ = float(get_conf("LDY_MIN_TURN_KOSDAQ", 100.0))
-MIN_TURN_DEFAULT = float(get_conf("LDY_MIN_TURN_DEFAULT", 100.0))
-
-# 가중치
-W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10)
-
-# 패널티
-P_OVERHEAT_5D = 6.0
-P_OVERHEAT_10D = 6.0
-P_RSI_OUT = 4.0
-P_MACD_NEG = 4.0
-P_NEAR_FAR = 4.0
-P_LIQ_LOW = 4.0
-P_VOL_SPIKE = 2.0
-
-# RSI 적정 구간
-RSI_LOW, RSI_HIGH = 45, 65
-
 # ---------------------------
 # 유틸 함수
 # ---------------------------
-def z6(x):
-    return str(x).zfill(6) if str(x).isdigit() else str(x)
 
-def nz_num(s):
-    return pd.to_numeric(s, errors="coerce")
-
-def ensure_turnover(df):
-    if "거래대금(억원)" not in df.columns and "거래대금(원)" in df.columns:
-        df["거래대금(억원)"] = (nz_num(df["거래대금(원)"]) / 1e8).round(2)
-    return df
-
-def normalize_cols(df):
-    return ensure_turnover(df)
 
 def send_telegram_msg(token, chat_id, message):
     if not token or not chat_id:
