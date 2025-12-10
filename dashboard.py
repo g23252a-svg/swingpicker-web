@@ -2512,7 +2512,7 @@ with tab3:
                     st.caption("※ 스코어 데이터에 섹터 정보(업종, 업종_대분류)가 없어 건강검진을 생략했습니다.")
             except Exception:
                 logger.exception("portfolio health check failed")
-                st.caption("※ 포트폴리오 건강검진 중 오류가 발생했습니다.")
+                st.caption("※ 포트폴리오 건강검진 중 오류가 발생했습니다. (로그를 확인해 주세요)")
     else:
         st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
 
