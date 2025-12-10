@@ -33,7 +33,7 @@ def _get_conf(key, default_val):
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 #    - 예: "6.5.0", "6.5.1-beta", "6.6.0+staging"
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.7.0")
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.8.0")
 APP_VERSION = _RAW_APP_VERSION  # 기존 코드 호환용 (대시보드에서 import 하는 값)
 
 
@@ -71,6 +71,18 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG = [
     {
+        "version": "6.8.0",
+        "date": "2025-12-10",
+        "title": "Reality Check & Deep Tech",
+        "items": [
+            "✅ **Reality Check System:** 과거 추천(기준일) 종목의 현재 수익률 성과를 메인 화면에서 자동 검증.",
+            "📊 **Advanced Charting:** 볼린저 밴드 / RSI 보조지표를 On/Off 할 수 있는 전문가용 인터랙티브 차트 도입.",
+            "🏥 **Portfolio Health Check:** 내 자산의 섹터 편중도와 현금 비중(%)을 분석하여 리스크 관리 조언 제공.",
+            "🚀 **Sector Momentum:** 섹터별 최근 수익률/점수 Top 10 바 차트 추가.",
+            "🔧 **System Stabilization:** Gist 파일 분리(회원DB/포트폴리오)로 데이터 보존성 강화 및 텔레그램-대시보드 정렬 로직 통일.",
+        ],
+    },
+    {
         "version": "6.7.0",
         "date": "2025-12-08",
         "title": "Prime Top 100 + Role-based Daily Top",
@@ -101,15 +113,6 @@ CHANGELOG = [
             "KOSPI/KOSDAQ 지수 fallback 로직 개선 (직전 영업일 자동 탐색)",
             "회원 DB를 GitHub Gist + 로컬 캐시 구조로 안정화",
             "로그인/회원가입 시 이메일 소문자 통일 + 형식 검증 추가",
-        ],
-    },
-    {
-        "version": "6.4.0",
-        "date": "2025-11-30",
-        "title": "점수 로직 / 라우팅 개선",
-        "items": [
-            "LDY_SCORE 스코어링 안정화 및 페널티 구조 조정",
-            "ROUTE 태그: BRK / Watch / MR / PULL 기준 재정의",
         ],
     },
     # 필요하면 과거 버전 계속 추가
