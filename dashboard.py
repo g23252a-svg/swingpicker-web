@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.7.0 (Prime Top 100 + Role-based Daily Top)
-- 개선: 권한별 Daily Top 노출 개수 분리
-    · Guest: 3개 · Free: 5개 · Pro: 20개 · Prime/Admin: 100개
-- 개선: Prime/Admin에서 EBS·유동성 통과 종목/전체 스코어링 풀을 넓게 사용하도록 모수(base_view) 확장
-- 개선: Daily Top 필터(LDY 점수 / ROUTE / REGIME)와 개별 종목 차트/레이더/리스크-리워드 연동 구조 정리
-- 개선: 엣지 케이스(데이터 부족, 필터 과도 등)에서도 에러 없이 graceful하게 동작하도록 방어 코드 보강
-- 이전(v6.6.0): Data Freshness + Market Snapshot (데이터 기준일·소스 태그, 지수/스코어 기반 시장 스냅샷)
+LDY Pro Trader v6.8.0 (Reality Check & Deep Tech)
+- 신규: Reality Check System — 지난 추천(기준일) 대비 현재 성과 자동 검증
+- 신규: Advanced Charting — 볼린저 밴드 / RSI On·Off 가능한 전문가용 차트
+- 신규: Portfolio Health Check — 섹터 편중·현금 비중 진단
+- 신규: Sector Momentum Ranking — 섹터 상대강도 Top 10 바 차트
+- 기반: v6.7.0 Prime Top 100 + Role-based Daily Top 구조 유지
 """
 
 import os, io, math, json, requests, logging
@@ -697,6 +697,56 @@ def plot_sector_treemap(df_map):
     fig.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=350)
     return fig
 
+def plot_sector_momentum_bar(scored_df: pd.DataFrame):
+    """
+    섹터별 최근 모멘텀 (ret_5d_% or LDY_SCORE 평균) Top 10 바 차트
+    """
+    if scored_df is None or scored_df.empty:
+        return go.Figure()
+
+    # 섹터 컬럼
+    if "업종_대분류" in scored_df.columns:
+        sector_col = "업종_대분류"
+    elif "업종" in scored_df.columns:
+        sector_col = "업종"
+    else:
+        return go.Figure()
+
+    metric = "ret_5d_%" if "ret_5d_%" in scored_df.columns else "LDY_SCORE"
+
+    grp = (
+        scored_df
+        .dropna(subset=[sector_col, metric])
+        .groupby(sector_col)[metric]
+        .mean()
+        .sort_values(ascending=False)
+        .head(10)
+    )
+    if grp.empty:
+        return go.Figure()
+
+    values = grp.values
+    labels = grp.index
+
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=values,
+                y=labels,
+                orientation="h",
+                text=[f"{v:.2f}" + ("%p" if metric == "ret_5d_%" else "") for v in values],
+                textposition="auto",
+            )
+        ]
+    )
+    title_metric = "5일 평균 수익률" if metric == "ret_5d_%" else "LDY 평균 점수"
+    fig.update_layout(
+        title=f"🚀 섹터 모멘텀 Top 10 ({title_metric})",
+        height=320,
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
 def calculate_supertrend(df, period=10, multiplier=3):
     high = df['High']
     low = df['Low']
@@ -757,6 +807,22 @@ def get_stock_chart_data(code):
             return None
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
+
+        # 🔹 Bollinger Bands (20, 2σ)
+        std20 = df['Close'].rolling(window=20).std()
+        df['BB_MID'] = df['MA20']
+        df['BB_UPPER'] = df['MA20'] + 2 * std20
+        df['BB_LOWER'] = df['MA20'] - 2 * std20
+
+        # 🔹 RSI(14)
+        delta = df['Close'].diff()
+        up = delta.clip(lower=0)
+        down = -delta.clip(upper=0)
+        roll_up = up.rolling(14).mean()
+        roll_down = down.rolling(14).mean()
+        rs = roll_up / roll_down
+        df['RSI14_CHART'] = 100 - (100 / (1 + rs))
+
         df = calculate_supertrend(df)
         return df.tail(80)
     except Exception:
@@ -791,17 +857,55 @@ def plot_radar_chart(row):
 # ---------------------------
 # 차트 시각화 (거래량 추가)
 # ---------------------------
-def plot_interactive_chart(df, code, name, entry, stop, target1, target2):
+def plot_interactive_chart(
+    df,
+    code,
+    name,
+    entry,
+    stop,
+    target1,
+    target2,
+    show_bb: bool = True,
+    show_rsi: bool = False,
+):
     if df is None or df.empty:
         return go.Figure()
 
     fig = make_subplots(
-        rows=2, cols=1,
+        rows=3 if show_rsi else 2,
+        cols=1,
         shared_xaxes=True,
         vertical_spacing=0.03,
-        row_heights=[0.7, 0.3]
+        row_heights=[0.6, 0.2, 0.2] if show_rsi else [0.7, 0.3],
     )
 
+    # 🔹 Bollinger Bands
+    if show_bb and 'BB_MID' in df.columns:
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['BB_MID'], name="BB Mid", line=dict(color='gray', width=1)),
+            row=1, col=1
+        )
+    if show_bb and 'BB_UPPER' in df.columns:
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['BB_UPPER'], name="BB Upper", line=dict(color='lightgray', width=1, dash='dot')),
+            row=1, col=1
+        )
+    if show_bb and 'BB_LOWER' in df.columns:
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['BB_LOWER'], name="BB Lower", line=dict(color='lightgray', width=1, dash='dot')),
+            row=1, col=1
+        )
+
+    # 🔹 RSI Sub-chart
+    if show_rsi and 'RSI14_CHART' in df.columns:
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['RSI14_CHART'], name="RSI(14)", line=dict(color='orange', width=1)),
+            row=3, col=1
+        )
+        # 기준선 30 / 70
+        fig.add_hline(y=30, line_dash="dot", line_color="blue", row=3, col=1)
+        fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
+    
     fig.add_trace(go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
@@ -1239,6 +1343,65 @@ def infer_data_timestamp(df_raw: pd.DataFrame):
     return None
 # 👈 데이터 기준일 추론 끝
 
+@st.cache_data(ttl=300)
+def reality_check_top(df_top: pd.DataFrame, data_ts, n: int = 5):
+    """
+    recommend_latest.csv 기준 상위 n개 추천 종목에 대해
+    - 기준일 종가 vs 현재가 수익률
+    - 평균 수익률 / 적중 개수
+    를 계산해서 대시보드 상단에 보여줄 요약값을 리턴.
+    """
+    if df_top is None or df_top.empty or not FDR_OK:
+        return None
+
+    df = df_top.head(n).copy()
+    results = []
+    hit = 0
+    cnt = 0
+
+    for _, row in df.iterrows():
+        code = str(row.get("종목코드", "")).zfill(6)
+        name = row.get("종목명", code)
+        base_price = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
+        if pd.isna(base_price) or base_price <= 0:
+            base_price = pd.to_numeric(row.get("종가", np.nan), errors="coerce")
+
+        try:
+            # 최근 7일 사이 데이터에서 마지막 종가 사용
+            start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            df_price = fdr.DataReader(code, start)
+            if df_price is None or df_price.empty:
+                continue
+            cur_price = float(df_price["Close"].iloc[-1])
+        except Exception:
+            continue
+
+        if cur_price <= 0:
+            continue
+
+        cnt += 1
+        ret_pct = (cur_price - base_price) / base_price * 100
+        if ret_pct > 0:
+            hit += 1
+        results.append(ret_pct)
+
+    if cnt == 0:
+        return None
+
+    avg_ret = float(np.mean(results))
+
+    # 기준일 문자열
+    if data_ts is not None:
+        base_str = to_kst_str(data_ts, fmt="%m/%d")
+    else:
+        base_str = "기준일 미상"
+
+    return {
+        "base_str": base_str,
+        "avg_ret": avg_ret,
+        "hit": hit,
+        "count": cnt,
+    }
 
 @st.cache_data(ttl=600)
 def prepare_scored_data(raw_url, local_raw, pass_ebs):
@@ -1569,7 +1732,7 @@ with st.sidebar:
 # Telegram send
 # ---------------------------
 if send_btn and tg_token and tg_chat_id:
-    msg = f"🔥 [LDY v6.5] 추천 Top 5 ({now_kst().strftime('%m/%d')})\n\n"  # v6.5
+    msg = f"🔥 [LDY v{APP_VERSION}] 추천 Top 5 ({now_kst().strftime('%m/%d')})\n\n"
     for i in range(min(5, len(top20))):
         row = top20.iloc[i]
         msg += f"{i+1}. {row.get('종목명','-')} ({row.get('ROUTE','-')})\n"
@@ -1597,6 +1760,18 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
 )
 
 with tab1:
+    # 🔥 v6.8 Reality Check: 지난 추천 성과 요약
+    rc = reality_check_top(top20, DATA_TS, n=5)
+    if rc is not None:
+        msg = (
+            f"📅 {rc['base_str']} 추천 Top {rc['count']} 기준, "
+            f"현재 평균 수익률 **{rc['avg_ret']:+.2f}%** "
+            f"(적중 {rc['hit']}/{rc['count']})"
+        )
+        st.success(msg)
+    else:
+        st.caption("※ FDR 데이터 또는 추천 데이터가 부족해 성과 검증을 표시할 수 없습니다.")
+
     kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
     c1, c2 = st.columns(2)
 
@@ -1717,6 +1892,14 @@ with tab1:
                 st.info("섹터 데이터 부족")
         else:
             st.info("섹터 정보 없음")
+
+    st.divider()
+    st.markdown("##### 🚀 섹터 모멘텀 Top 10")
+    mom_fig = plot_sector_momentum_bar(scored)
+    if mom_fig and len(mom_fig.data) > 0:
+        st.plotly_chart(mom_fig, use_container_width=True)
+    else:
+        st.caption("※ 섹터 모멘텀을 계산할 수 있는 데이터가 부족합니다.")
 
 with tab2:
     st.subheader("🎯 추천 종목 필터")
@@ -1856,19 +2039,32 @@ with tab2:
 
             c1, c2 = st.columns([2, 1])
             with c1:
+                # 🔧 고급 차트 옵션
+                show_bb = st.checkbox(
+                    "볼린저 밴드 표시",
+                    value=True,
+                    key=f"opt_bb_{code}",      # 종목별로 키 다르게
+                )
+                show_rsi = st.checkbox(
+                    "RSI 서브차트 표시",
+                    value=False,
+                    key=f"opt_rsi_{code}",     # 종목별로 키 다르게
+                )
+            
                 chart_df = get_stock_chart_data(code)
                 if chart_df is not None:
-                    st.plotly_chart(
-                        plot_interactive_chart(
-                            chart_df, code,
-                            row.get('종목명', '-'),
-                            row.get('추천매수가', 0),
-                            row.get('손절가', 0),
-                            row.get('추천매도가1', 0),
-                            row.get('추천매도가2', 0),
-                        ),
-                        use_container_width=True,
+                    fig = plot_interactive_chart(
+                        chart_df,
+                        code,
+                        row.get('종목명', '-'),
+                        row.get('추천매수가', 0),
+                        row.get('손절가', 0),
+                        row.get('추천매도가1', 0),
+                        row.get('추천매도가2', 0),
+                        show_bb=show_bb,
+                        show_rsi=show_rsi,
                     )
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("차트 데이터 없음")
             with c2:
@@ -1967,52 +2163,111 @@ def fetch_current_price(code, name):
         return code, name, 0
 
 with tab3:
+    # 1) 권한 체크
     if auth_status in ["guest", "free"]:
         st.info("🔒 내 자산 분석은 Pro 등급부터 가능합니다.")
     elif pf_input:
         try:
+            # 2) 종목 코드 매핑 준비
             code_map = get_code_map() if 'get_code_map' in globals() else {}
             if not code_map and FDR_OK:
                 try:
                     df_krx = fdr.StockListing('KRX')
-                    code_map = dict(zip(df_krx['Name'], df_krx['Code'].astype(str).str.zfill(6)))
+                    code_map = dict(
+                        zip(df_krx['Name'], df_krx['Code'].astype(str).str.zfill(6))
+                    )
                 except Exception:
                     pass
 
-            targets = []
+            # 3) 포트폴리오 파싱
+            #    형식: NAVER:261000:10
+            targets = []     # 종목 리스트
+            cash_amt = 0.0   # 현금(예수금) 총액
+
             lines = pf_input.strip().split('\n')
             for line in lines:
                 if ":" not in line:
                     continue
+
                 parts = [p.strip() for p in line.split(':')]
                 if len(parts) != 3:
-                    # 형식 이상하면 그냥 건너뜀
+                    # 형식이 다르면 스킵
                     continue
-                name_input, avg, qty = line.split(':')
+
+                name_input, avg_str, qty_str = parts
+
+                # ✅ CASH / 현금 라인 분리 처리
+                if name_input.strip().upper().startswith("CASH") or "현금" in name_input:
+                    try:
+                        cash_amt += float(avg_str.replace(',', '')) * int(qty_str.replace(',', ''))
+                    except Exception:
+                        pass
+                    continue
+
+                # ✅ 일반 종목 라인
                 code = str(name_input).strip()
                 if not code.isdigit():
-                    code = code_map.get(code, code)
+                    code = code_map.get(code, code)  # 종목명 → 코드 매핑
                 code = str(code).zfill(6)
-                targets.append((code, name_input, float(avg.replace(',', '')), int(qty.replace(',', ''))))
 
+                try:
+                    avg = float(avg_str.replace(',', ''))
+                    qty = int(qty_str.replace(',', ''))
+                except Exception:
+                    continue
+
+                targets.append((code, name_input, avg, qty))
+
+            if not targets and cash_amt <= 0:
+                st.warning("포트폴리오 입력 형식이 올바른지 확인해 주세요. 예시: `NAVER:261000:10` 또는 `CASH:1000000:1`")
+                st.stop()
+
+            # 4) 현재가 조회 (병렬 처리)
             price_map = {}
             with st.spinner('⚡ 실시간 시세를 조회 중입니다...'):
                 with ThreadPoolExecutor(max_workers=10) as executor:
-                    futures = [executor.submit(fetch_current_price, t[0], t[1]) for t in targets]
+                    futures = [
+                        executor.submit(fetch_current_price, t[0], t[1])
+                        for t in targets
+                    ]
                     for future in futures:
                         c, n, p = future.result()
                         price_map[c] = p
 
+            # 5) 기본 지표 계산 (종목별/전체)
             cols_layout = st.columns(3)
-            total_buy = 0
-            total_eval = 0
+            total_buy = 0.0
+            total_eval = 0.0
+
+            rows_pf = []  # 섹터/파이차트용
 
             for idx, (code, name_input, avg, qty) in enumerate(targets):
                 cur_price = price_map.get(code, 0)
-                real_name = stock.get_market_ticker_name(code) if (PYKRX_OK and cur_price > 0) else name_input
+                real_name = (
+                    stock.get_market_ticker_name(code)
+                    if (PYKRX_OK and cur_price > 0)
+                    else name_input
+                )
 
+                buy_amt = avg * qty
+                eval_amt = cur_price * qty
+                total_buy += buy_amt
+                total_eval += eval_amt
+
+                rows_pf.append(
+                    {
+                        "code": code,
+                        "name": real_name,
+                        "avg": avg,
+                        "qty": qty,
+                        "eval": eval_amt,
+                    }
+                )
+
+                # 수익률/평가손익
                 if cur_price > 0:
                     profit_rate = (cur_price - avg) / avg * 100
+                    pnl = eval_amt - buy_amt
                     if profit_rate > 0:
                         signal = "🟢 수익"
                     elif profit_rate > -3:
@@ -2022,53 +2277,59 @@ with tab3:
                 else:
                     signal = "❓ 확인불가"
                     profit_rate = 0
-
-                buy_amt = avg * qty
-                eval_amt = cur_price * qty
-                total_buy += buy_amt
-                total_eval += eval_amt
+                    pnl = 0
 
                 with cols_layout[idx % 3]:
                     st.metric(
                         label=f"{real_name} ({signal})",
-                        value=f"{cur_price:,}원",
-                        delta=f"{profit_rate:+.2f}% ({int(eval_amt-buy_amt):,}원)",
+                        value=f"{cur_price:,}원" if cur_price > 0 else "시세 없음",
+                        delta=f"{profit_rate:+.2f}% ({int(pnl):,}원)",
                         delta_color="normal" if profit_rate >= 0 else "inverse",
                     )
 
             st.divider()
+
+            # 6) 전체 포트폴리오 요약
             c1, c2, c3 = st.columns(3)
-            tot_rate = (total_eval - total_buy) / total_buy * 100 if total_buy > 0 else 0
+            tot_rate = (
+                (total_eval - total_buy) / total_buy * 100
+                if total_buy > 0
+                else 0
+            )
+
             c1.metric("총 매수", f"{int(total_buy):,}원")
             c2.metric("총 평가", f"{int(total_eval):,}원")
             c3.metric(
-                "총 수익",
+                "총 수익률",
                 f"{tot_rate:+.2f}%",
-                f"{int(total_eval-total_buy):,}원",
+                f"{int(total_eval - total_buy):,}원",
                 delta_color="normal" if tot_rate >= 0 else "inverse",
             )
 
-            # ---- 종목별 평가금액 비중 파이차트 ----
+            # 7) 현금 비중 계산
+            total_asset = total_eval + cash_amt
+            if cash_amt > 0 and total_asset > 0:
+                cash_ratio = cash_amt / total_asset * 100
+                st.info(
+                    f"💰 현재 현금(예수금) 비중은 **{cash_ratio:.1f}%** 입니다.\n"
+                    "시장 변동성에 따라 보통 **10~30%** 사이에서 조절하는 전략이 많이 사용됩니다."
+                )
+
+            # 8) 종목별 평가금액 비중 파이차트
             try:
                 if total_eval > 0:
-                    pie_data = []
-                    for code, name_input, avg, qty in targets:
-                        cur_price = price_map.get(code, 0)
-                        eval_amt = cur_price * qty
-                        if eval_amt <= 0:
-                            continue
-                        label = (
-                            stock.get_market_ticker_name(code)
-                            if (PYKRX_OK and cur_price > 0)
-                            else name_input
-                        )
-                        pie_data.append((label, eval_amt))
+                    df_pf = pd.DataFrame(rows_pf)
+                    df_pf = df_pf[df_pf["eval"] > 0]
 
-                    if pie_data:
-                        labels = [p[0] for p in pie_data]
-                        values = [p[1] for p in pie_data]
+                    if not df_pf.empty:
                         fig_pie = go.Figure(
-                            data=[go.Pie(labels=labels, values=values, hole=0.4)]
+                            data=[
+                                go.Pie(
+                                    labels=df_pf["name"],
+                                    values=df_pf["eval"],
+                                    hole=0.4,
+                                )
+                            ]
                         )
                         fig_pie.update_layout(
                             title="📊 종목별 평가 금액 비중",
@@ -2080,12 +2341,84 @@ with tab3:
             except Exception:
                 logger.exception("portfolio pie chart failed")
 
-        
+            # 9) 포트폴리오 Health Check (섹터 편중 + 현금 비중)
+            try:
+                st.subheader("🏥 포트폴리오 건강검진", anchor=False)
+
+                df_pf = pd.DataFrame(rows_pf)
+                df_pf = df_pf[df_pf["eval"] > 0]
+
+                # 섹터 컬럼 선택
+                sector_col = None
+                if "업종_대분류" in scored.columns:
+                    sector_col = "업종_대분류"
+                elif "업종" in scored.columns:
+                    sector_col = "업종"
+
+                if sector_col:
+                    # 종목코드 → 섹터 매핑
+                    sector_map = (
+                        scored
+                        .dropna(subset=[sector_col, "종목코드"])
+                        .drop_duplicates("종목코드")
+                        .set_index("종목코드")[sector_col]
+                        .to_dict()
+                    )
+                    df_pf["섹터"] = df_pf["code"].map(sector_map).fillna("기타")
+
+                    sector_grp = (
+                        df_pf.groupby("섹터")["eval"]
+                        .sum()
+                        .sort_values(ascending=False)
+                    )
+                    total_eval_safe = sector_grp.sum()
+
+                    if total_eval_safe > 0:
+                        sector_ratio = (sector_grp / total_eval_safe * 100).round(1)
+
+                        fig_sec = go.Figure(
+                            data=[
+                                go.Bar(
+                                    x=sector_ratio.values,
+                                    y=sector_ratio.index,
+                                    orientation="h",
+                                    text=[f"{v:.1f}%" for v in sector_ratio.values],
+                                    textposition="auto",
+                                )
+                            ]
+                        )
+                        fig_sec.update_layout(
+                            title="섹터별 비중 (평가금액 기준)",
+                            height=300,
+                            margin=dict(l=10, r=10, t=40, b=10),
+                        )
+                        st.plotly_chart(fig_sec, use_container_width=True)
+
+                        top_sector = sector_ratio.index[0]
+                        top_ratio = sector_ratio.iloc[0]
+
+                        if top_ratio >= 70:
+                            st.warning(
+                                f"⚠️ '{top_sector}' 섹터 비중이 **{top_ratio:.1f}%**입니다. "
+                                "단일 섹터 편중이 매우 강합니다. 분산 투자를 적극 검토해 보세요."
+                            )
+                        elif top_ratio >= 50:
+                            st.info(
+                                f"ℹ️ '{top_sector}' 섹터 비중이 **{top_ratio:.1f}%**입니다. "
+                                "섹터 다변화를 통해 리스크를 줄이는 것도 고려해 보세요."
+                            )
+                else:
+                    st.caption("※ 현재 스코어 데이터에 섹터 정보가 없어 섹터 비중 분석은 생략됩니다.")
+
+            except Exception:
+                logger.exception("portfolio health check failed")
+
         except Exception as e:
             logger.exception("pf analysis failed")
             st.error(f"분석 실패: {e}")
     else:
         st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
+
 
 with tab4:
     st.subheader("📮 문의 게시판")
