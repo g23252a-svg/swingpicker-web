@@ -609,6 +609,58 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
         return dict(zip(df['종목코드'], df['종목명']))
     return {}
 
+def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
+    """
+    trade_ymd 기준으로 KOSPI/KOSDAQ 전 종목 '종가' 스냅샷을 저장한다.
+    - data/price_snapshot_YYYYMMDD.csv
+    - data/price_snapshot_latest.csv
+    """
+    ensure_dir(OUT_DIR)
+    frames: List[pd.DataFrame] = []
+
+    for m in ["KOSPI", "KOSDAQ"]:
+        try:
+            df = stock.get_market_ohlcv_by_ticker(trade_ymd, market=m)
+            if df is None or df.empty:
+                continue
+
+            df = df.reset_index()
+
+            # 코드 컬럼 찾기
+            code_col = None
+            for c in df.columns:
+                if "티커" in str(c) or "코드" in str(c) or "종목코드" in str(c):
+                    code_col = c
+                    break
+
+            if code_col is None or "종가" not in df.columns:
+                log(f"⚠️ 가격 스냅샷({m}) 컬럼 이상: {df.columns.tolist()}")
+                continue
+
+            df["종목코드"] = df[code_col].astype(str).str.zfill(6)
+            df["시장"] = m
+            df["종목명"] = df["종목코드"].map(name_map).fillna("")
+
+            frames.append(df[["종목코드", "종목명", "시장", "종가"]])
+        except Exception as e:
+            log(f"⚠️ 가격 스냅샷({m}) 수집 실패: {e}")
+            continue
+
+    if not frames:
+        log(f"❌ 가격 스냅샷 생성 실패: 데이터 없음({trade_ymd})")
+        return
+
+    snap = pd.concat(frames, ignore_index=True)
+
+    dated = os.path.join(OUT_DIR, f"price_snapshot_{trade_ymd}.csv")
+    latest = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
+
+    snap.to_csv(dated, index=False, encoding=UTF8)
+    snap.to_csv(latest, index=False, encoding=UTF8)
+
+    log(f"💾 가격 스냅샷 저장 완료 → {dated}")
+
+
 # ------------------------------- AI 코멘트 / 스코어 -------------------------------
 
 def generate_ai_comment(mfi: float, rsi: float, slope: float, disp: float, score: float) -> str:
@@ -1227,6 +1279,8 @@ def main(
 
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map_cached(trade_ymd)
+    # 🔹 전체 종목 가격 스냅샷 저장
+    save_price_snapshot(trade_ymd, name_map)
     sector_map = build_sector_map()
 
     start_dt = datetime.strptime(trade_ymd, "%Y%m%d") - timedelta(
