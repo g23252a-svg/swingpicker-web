@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+from auth_user import render_auth_box, get_user, list_users, update_user_role
 from plotly.subplots import make_subplots
 from version_info import (
     PRIME_TG_JOIN_URL,
@@ -1372,10 +1373,10 @@ just_registered = st.session_state.pop("just_registered", False)
 # ---------------------------
 # Sidebar (Auth / Portfolio / Subscription)
 # ---------------------------
-from auth_user import render_auth_box, list_users, update_user_role
+
 
 with st.sidebar:
-    user = render_auth_box()
+    user = render_auth_box(show_debug=True)
 
     if user is None:
         auth_status = "guest"
