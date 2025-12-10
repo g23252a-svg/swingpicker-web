@@ -9,6 +9,9 @@ LDY Pro Trader v6.8.0 (Reality Check & Deep Tech)
 - 기반: v6.7.0 Prime Top 100 + Role-based Daily Top 구조 유지
 """
 
+# ---------------------------
+# import
+# ---------------------------
 import os, io, math, json, requests, logging
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +21,11 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+import re
+
+# ❌ 이건 삭제 (밑에서 try/except로 처리할 거라서)
+# from pykrx import stock
+
 from auth_user import render_auth_box, get_user, list_users, update_user_role
 from plotly.subplots import make_subplots
 from version_info import (
@@ -270,10 +278,57 @@ def get_conf(key, default_val):
         pass
     return os.getenv(key, default_val)
 
-RAW_URL = get_conf(
-    "LDY_RAW_URL",
-    "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
-)
+# 🔧 경로 / 파일 설정
+RAW_SRC        = get_conf("LDY_RAW_URL",        "data/recommend_latest.csv")
+LOCAL_RAW      = get_conf("LDY_LOCAL_RAW",      "data/recommend_latest.csv")
+PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
+
+# 🔐 보안키
+KEY_PRO   = get_conf("LDY_KEY_PRO",   "220577")
+KEY_PRIME = get_conf("LDY_KEY_PRIME", "577220")
+ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
+
+# 💳 결제 계좌 정보
+BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-22-2658701")
+BANK_HOLDER  = get_conf("LDY_BANK_HOLDER",  "이OO")
+
+# 📊 스코어링 상수
+PASS_EBS          = float(get_conf("LDY_PASS_EBS",          4))
+MIN_TURN_KOSPI    = float(get_conf("LDY_MIN_TURN_KOSPI",    200.0))
+MIN_TURN_KOSDAQ   = float(get_conf("LDY_MIN_TURN_KOSDAQ",   100.0))
+MIN_TURN_DEFAULT  = float(get_conf("LDY_MIN_TURN_DEFAULT",  100.0))
+
+W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10)
+P_OVERHEAT_5D  = 6.0
+P_OVERHEAT_10D = 6.0
+P_RSI_OUT      = 4.0
+P_MACD_NEG     = 4.0
+P_NEAR_FAR     = 4.0
+P_LIQ_LOW      = 4.0
+P_VOL_SPIKE    = 2.0
+RSI_LOW, RSI_HIGH = 45, 65
+
+# ---------------------------
+# 유틸 함수
+# ---------------------------
+def z6(x):
+    return str(x).zfill(6) if str(x).isdigit() else str(x)
+
+def nz_num(s):
+    return pd.to_numeric(s, errors="coerce")
+
+def ensure_turnover(df):
+    if "거래대금(억원)" not in df.columns and "거래대금(원)" in df.columns:
+        df["거래대금(억원)"] = (nz_num(df["거래대금(원)"]) / 1e8).round(2)
+    return df
+
+def normalize_cols(df):
+    return ensure_turnover(df)
+
+
+
+
+RAW_SRC = get_conf("LDY_RAW_URL", "data/recommend_latest.csv")   # 이름만 RAW_SRC로 통일
 LOCAL_RAW = get_conf("LDY_LOCAL_RAW", "data/recommend_latest.csv")
 PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
 
@@ -343,19 +398,92 @@ def send_telegram_msg(token, chat_id, message):
 
 @st.cache_data(ttl=3600)
 def get_code_map():
+    """
+    종목명 → 6자리 코드 매핑
+    1순위: pykrx (KRX 공식 종목명)
+    2순위: FinanceDataReader(KRX) 보조
+    - 공백 제거 / 두 가지 key(원문, 공백제거문) 모두 저장
+    """
+    mapping = {}
+
+    # 1) pykrx 우선 (이게 KRX 종목명 그대로라서 제일 믿을 만함)
+    if PYKRX_OK:
+        try:
+            today = now_kst().strftime("%Y%m%d")
+            for mkt in ["KOSPI", "KOSDAQ"]:
+                tickers = stock.get_market_ticker_list(today, market=mkt)
+                for t in tickers:
+                    code = str(t).zfill(6)
+                    name = stock.get_market_ticker_name(t)  # 예: '삼성SDI'
+                    if not isinstance(name, str):
+                        continue
+                    name = name.strip()
+                    if not name:
+                        continue
+
+                    # 그대로
+                    mapping.setdefault(name, code)
+                    # 공백 제거 버전도 추가 (예: 'HD현대일렉트릭', 'HD 현대일렉트릭')
+                    mapping.setdefault(name.replace(" ", ""), code)
+        except Exception as e:
+            logger.exception("get_code_map via pykrx failed: %s", e)
+
+    # 2) FDR 보조 (pykrx가 안 되거나 빠진 종목 채우기용)
     if FDR_OK:
         try:
-            df = fdr.StockListing('KRX')
-            return dict(zip(df['Name'], df['Code'].astype(str).str.zfill(6)))
+            df = fdr.StockListing("KRX")
+            df["Code"] = df["Code"].astype(str).str.zfill(6)
+            for _, row in df.iterrows():
+                name = str(row.get("Name", "")).strip()
+                code = row["Code"]
+                if not name:
+                    continue
+
+                # 기존에 없을 때만 채움 (pykrx 우선 유지)
+                mapping.setdefault(name, code)
+                mapping.setdefault(name.replace(" ", ""), code)
         except Exception as e:
-            logger.exception("get_code_map failed")
-    return {}
+            logger.exception("get_code_map via FDR failed: %s", e)
+
+    return mapping
+
 
 def find_code_by_name(name_or_code, code_map):
-    name_or_code = str(name_or_code).strip()
-    if name_or_code.isdigit():
-        return name_or_code.zfill(6)
-    return code_map.get(name_or_code, None)
+    """
+    - 6자리 숫자 → 그대로 코드로 사용
+    - '005930.KS', '005930.KQ' 같은 형식도 처리
+    - '삼성SDI', '삼성 SDI', '삼성SDI(006400)' 같은 케이스까지 최대한 커버
+    """
+    x = str(name_or_code).strip()
+    if not x:
+        return None
+
+    # 1) 6자리 숫자만 들어온 경우
+    if x.isdigit():
+        return x.zfill(6)
+
+    # 2) '005930.KS' 같은 형식
+    if "." in x:
+        left = x.split(".")[0]
+        if left.isdigit():
+            return left.zfill(6)
+
+    # 3) 괄호 안에 코드가 들어 있는 경우: '삼성SDI(006400)'
+    m = re.search(r"(\d{6})", x)
+    if m:
+        return m.group(1)
+
+    # 4) 이름 기반 매핑 (원문 → 공백 제거 순으로 시도)
+    cand = code_map.get(x)
+    if cand:
+        return cand
+
+    cand = code_map.get(x.replace(" ", ""))
+    if cand:
+        return cand
+
+    return None
+
 
 # ---------------------------
 # 시장 상태 계산 (지수 + 로컬 fallback)
@@ -1512,17 +1640,21 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
 
 # 전역에서 쓸 수 있게 기준 시점 / 데이터 출처 변수 선언
 DATA_TS = None
-DATA_SRC = None  # v6.5
+DATA_SRC = None   # remote/local 태그용
 
 with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded=True) as status:
     status.write("📥 데이터 다운로드 및 스코어링 계산 중...")
     try:
-        # 🔥 data_ts + data_src까지 같이 받기
+        # 🔧 RAW_URL → RAW_SRC 로 수정
         scored, base, top20, TH, DATA_TS, DATA_SRC = prepare_scored_data(
-            RAW_URL,
+            RAW_SRC,
             LOCAL_RAW,
             PASS_EBS,
         )
+
+        # get_market_status / get_fear_greed_index fallback용
+        globals()["scored"] = scored
+
         status.write("🌊 동적 유동성 필터 적용 중...")
         status.update(label="✅ 분석 완료!", state="complete", expanded=False)
     except Exception as e:
@@ -2364,6 +2496,7 @@ with tab3:
                         .set_index("종목코드")[sector_col]
                         .to_dict()
                     )
+
                     df_pf["섹터"] = df_pf["code"].map(sector_map).fillna("기타")
 
                     sector_grp = (
@@ -2374,9 +2507,10 @@ with tab3:
                     total_eval_safe = sector_grp.sum()
 
                     if total_eval_safe > 0:
+                        # 섹터 비중 (%)
                         sector_ratio = (sector_grp / total_eval_safe * 100).round(1)
 
-                        fig_sec = go.Figure(
+                        fig_sector = go.Figure(
                             data=[
                                 go.Bar(
                                     x=sector_ratio.values,
@@ -2387,35 +2521,45 @@ with tab3:
                                 )
                             ]
                         )
-                        fig_sec.update_layout(
+                        fig_sector.update_layout(
                             title="섹터별 비중 (평가금액 기준)",
-                            height=300,
+                            height=320,
                             margin=dict(l=10, r=10, t=40, b=10),
                         )
-                        st.plotly_chart(fig_sec, use_container_width=True)
+                        st.plotly_chart(fig_sector, use_container_width=True)
 
+                        # 편중 진단 코멘트
                         top_sector = sector_ratio.index[0]
-                        top_ratio = sector_ratio.iloc[0]
+                        top_ratio = float(sector_ratio.iloc[0])
 
-                        if top_ratio >= 70:
-                            st.warning(
-                                f"⚠️ '{top_sector}' 섹터 비중이 **{top_ratio:.1f}%**입니다. "
-                                "단일 섹터 편중이 매우 강합니다. 분산 투자를 적극 검토해 보세요."
-                            )
-                        elif top_ratio >= 50:
-                            st.info(
-                                f"ℹ️ '{top_sector}' 섹터 비중이 **{top_ratio:.1f}%**입니다. "
-                                "섹터 다변화를 통해 리스크를 줄이는 것도 고려해 보세요."
-                            )
+                        comment = f"현재 가장 큰 비중은 **{top_sector} ({top_ratio:.1f}%)** 입니다.  \n"
+
+                        if top_ratio >= 60:
+                            comment += "➡ 단일 섹터 비중이 60%를 넘어 **위험도가 상당히 높은 편**입니다. 분산을 강하게 추천합니다."
+                        elif top_ratio >= 40:
+                            comment += "➡ 특정 섹터 비중이 40% 이상으로 **다소 편중된 상태**입니다. 다른 섹터 편입을 고민해 볼 만합니다."
+                        else:
+                            comment += "➡ 섹터 비중이 비교적 고르게 분산되어 있습니다."
+
+                        # 현금 비중까지 함께 코멘트
+                        total_asset = total_eval + cash_amt
+                        if cash_amt > 0 and total_asset > 0:
+                            cash_ratio = cash_amt / total_asset * 100
+                            comment += f"\n\n또한 현금(예수금) 비중은 약 **{cash_ratio:.1f}%** 입니다."
+
+                            if cash_ratio < 5:
+                                comment += " 변동성이 큰 장세에서는 다소 낮은 편입니다. 방어력을 조금 보강하는 것도 고려해 보세요."
+                            elif cash_ratio > 40:
+                                comment += " 상당히 보수적인 비중으로, 기회 포착 속도는 느려질 수 있지만 하락 방어에는 유리한 편입니다."
+
+                        st.info(comment)
+                    else:
+                        st.caption("※ 섹터별 평가금액이 거의 없어 건강검진을 생략했습니다.")
                 else:
-                    st.caption("※ 현재 스코어 데이터에 섹터 정보가 없어 섹터 비중 분석은 생략됩니다.")
-
+                    st.caption("※ 스코어 데이터에 섹터 정보(업종, 업종_대분류)가 없어 건강검진을 생략했습니다.")
             except Exception:
                 logger.exception("portfolio health check failed")
-
-        except Exception as e:
-            logger.exception("pf analysis failed")
-            st.error(f"분석 실패: {e}")
+                st.caption("※ 포트폴리오 건강검진 중 오류가 발생했습니다.")
     else:
         st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
 
