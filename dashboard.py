@@ -1119,23 +1119,76 @@ def load_csv_path(path):
 def log_src(df, src):
     logger.info("Data Loaded: %s rows=%s", src, len(df) if df is not None else 0)
 
+# ---------------------------
+# 포트폴리오 저장소 설정 (Gist 연동)
+# ---------------------------
+# secrets.toml 또는 환경변수에 설정 필요
+GIST_TOKEN = get_conf("GIST_TOKEN", "")  # GitHub Personal Access Token
+GIST_ID    = get_conf("GIST_ID", "")     # 생성해둔 Gist의 ID (주소 뒷부분)
+GIST_FILENAME = "ldy_portfolio.json"     # Gist 내에 저장될 파일명
+
 def load_portfolio_file():
+    """1순위: Gist, 2순위: 로컬 파일"""
+    # 1. Gist 로드 시도
+    if GIST_TOKEN and GIST_ID:
+        try:
+            headers = {"Authorization": f"token {GIST_TOKEN}"}
+            r = requests.get(f"https://api.github.com/gists/{GIST_ID}", headers=headers, timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                # Gist 안에 해당 파일이 있는지 확인
+                if GIST_FILENAME in data["files"]:
+                    content = data["files"][GIST_FILENAME]["content"]
+                    # {"data": "..."} 형태이므로 파싱 후 내부 데이터 반환
+                    return json.loads(content).get("data", "")
+        except Exception as e:
+            logger.error(f"Gist Load Failed: {e}")
+
+    # 2. 로컬 파일 로드 (Fallback)
     if os.path.exists(PORTFOLIO_FILE):
         try:
             with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
                 return json.load(f).get("data", "")
         except Exception:
-            logger.exception("load_portfolio_file failed")
+            logger.exception("load_portfolio_file local failed")
+    
     return ""
 
 def save_portfolio_file(text_data):
+    """Gist와 로컬 파일 모두에 저장"""
+    success = False
+    json_content = json.dumps({"data": text_data}, ensure_ascii=False)
+
+    # 1. Gist 저장 시도
+    if GIST_TOKEN and GIST_ID:
+        try:
+            headers = {"Authorization": f"token {GIST_TOKEN}"}
+            payload = {
+                "files": {
+                    GIST_FILENAME: {
+                        "content": json_content
+                    }
+                }
+            }
+            # PATCH 요청으로 Gist 업데이트
+            r = requests.patch(f"https://api.github.com/gists/{GIST_ID}", json=payload, headers=headers, timeout=5)
+            if r.status_code == 200:
+                success = True
+                logger.info("Saved to Gist successfully")
+            else:
+                logger.error(f"Gist Save Error: {r.status_code} {r.text}")
+        except Exception as e:
+            logger.exception(f"Gist Save Failed: {e}")
+
+    # 2. 로컬 파일 저장 (백업용)
     try:
         with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
-            json.dump({"data": text_data}, f, ensure_ascii=False)
-        return True
+            f.write(json_content)
+        success = True # 로컬이라도 저장되면 성공으로 간주
     except Exception:
-        logger.exception("save_portfolio_file failed")
-        return False
+        logger.exception("save_portfolio_file local failed")
+        
+    return success
 
 # ---------------------------
 # 스코어링 함수 (v6.4 스타일)
