@@ -2237,16 +2237,48 @@ with tab2:
 # 내 자산 (병렬 처리)
 # ---------------------------
 def fetch_current_price(code, name):
-    if not FDR_OK:
-        return code, name, 0
-    try:
-        df = fdr.DataReader(str(code), (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"))
-        if df is None or df.empty:
-            return code, name, 0
-        return code, name, int(df.iloc[-1]['Close'])
-    except Exception:
-        return code, name, 0
+    """
+    현재가 조회 함수 (FDR 우선 시도 -> 실패 시 pykrx 시도)
+    """
+    price = 0
+    
+    # 1차 시도: FinanceDataReader (속도가 빠름)
+    if FDR_OK:
+        try:
+            # 최근 7일 데이터 조회 (휴장일 고려)
+            start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            df = fdr.DataReader(str(code).zfill(6), start_date)
+            
+            if df is not None and not df.empty:
+                price = int(df.iloc[-1]['Close'])
+        except Exception:
+            pass # FDR 실패 시 그냥 넘어감
 
+    # 2차 시도: pykrx (FDR 실패 시 백업, collector.py와 동일 로직)
+    # price가 0이고 pykrx 라이브러리가 로드되어 있다면 시도
+    if price == 0 and PYKRX_OK:
+        try:
+            # pykrx는 YYYYMMDD 형식을 씀
+            end_dt = datetime.now()
+            start_dt = end_dt - timedelta(days=7)
+            
+            # 오늘 날짜까지 조회
+            df_k = stock.get_market_ohlcv_by_date(
+                start_dt.strftime("%Y%m%d"), 
+                end_dt.strftime("%Y%m%d"), 
+                str(code).zfill(6)
+            )
+            
+            if df_k is not None and not df_k.empty:
+                # '종가' 컬럼이 있는지 확인 (pykrx 버전에 따라 컬럼명이 다를 수 있음)
+                if '종가' in df_k.columns:
+                    price = int(df_k.iloc[-1]['종가'])
+                elif 'Close' in df_k.columns:
+                    price = int(df_k.iloc[-1]['Close'])
+        except Exception:
+            pass
+
+    return code, name, price
 with tab3:
     # 1) 권한 체크
     if auth_status in ["guest", "free"]:
