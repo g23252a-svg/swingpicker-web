@@ -1125,7 +1125,7 @@ def log_src(df, src):
 # secrets.toml 또는 환경변수에 설정 필요
 GIST_TOKEN = get_conf("GIST_TOKEN", "")  # GitHub Personal Access Token
 GIST_ID    = get_conf("GIST_ID", "")     # 생성해둔 Gist의 ID (주소 뒷부분)
-GIST_FILENAME = "users_db.json"     # Gist 내에 저장될 파일명
+GIST_FILENAME = "my_portfolio.json"
 
 def load_portfolio_file():
     """1순위: Gist, 2순위: 로컬 파일"""
