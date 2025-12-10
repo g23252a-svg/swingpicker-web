@@ -828,6 +828,47 @@ def plot_sector_momentum_bar(scored_df: pd.DataFrame):
     )
     return fig
 
+def plot_regime_summary(scored_df: pd.DataFrame):
+    """
+    Regime 별 평균 성과(점수, 수익률) 분석 테이블 표시
+    """
+    if scored_df is None or scored_df.empty or "REGIME" not in scored_df.columns:
+        return
+
+    # 필요한 컬럼 확인
+    cols = ["LDY_SCORE"]
+    if "ret_5d_%" in scored_df.columns:
+        cols.append("ret_5d_%")
+
+    # 그룹화 및 평균 계산 (내림차순 정렬)
+    try:
+        grp = scored_df.groupby("REGIME")[cols].mean().sort_values("LDY_SCORE", ascending=False)
+    except Exception:
+        return
+
+    # 컬럼명 변경 (화면 표시용)
+    rename_map = {"LDY_SCORE": "평균 점수"}
+    if "ret_5d_%" in cols:
+        rename_map["ret_5d_%"] = "5일 수익률(%)"
+    
+    grp = grp.rename(columns=rename_map)
+
+    st.markdown("##### 🧐 Regime 별 성과 분석 (평균)")
+    
+    # 스타일링: 점수는 파란색, 수익률은 빨강-초록 그라데이션
+    st_style = grp.style.format("{:.2f}").background_gradient(cmap="Blues", subset=["평균 점수"])
+    
+    if "5일 수익률(%)" in grp.columns:
+        st_style = st_style.background_gradient(cmap="RdYlGn", subset=["5일 수익률(%)"])
+
+    st.dataframe(st_style, use_container_width=True)
+
+    # 1위 코멘트
+    if not grp.empty:
+        top_name = grp.index[0]
+        top_val = grp.iloc[0]["평균 점수"]
+        st.caption(f"💡 현재 **'{top_name}'** 구간의 종목들이 평균 **{top_val:.1f}점**으로 가장 우수한 평가를 받고 있습니다.")
+
 def calculate_supertrend(df, period=10, multiplier=3):
     high = df['High']
     low = df['Low']
@@ -2038,6 +2079,10 @@ with tab1:
         st.plotly_chart(mom_fig, use_container_width=True)
     else:
         st.caption("※ 섹터 모멘텀을 계산할 수 있는 데이터가 부족합니다.")
+
+    # 👇 [여기 추가!] 이 두 줄을 tab1 맨 마지막에 넣으세요
+    st.divider()
+    plot_regime_summary(scored)
 
 with tab2:
     st.subheader("🎯 추천 종목 필터")
