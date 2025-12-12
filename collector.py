@@ -1325,19 +1325,10 @@ def main(
             axis=1,
         )
 
-    df_out = build_global_score(df_raw).sort_values(
-        ["LDY_SCORE", "거래대금(억원)"],
-        ascending=[False, False]
-# [수정 전 코드 위치]
-    # df_out = build_global_score(df_raw).sort_values(
-    #     ["LDY_SCORE", "거래대금(억원)"],
-    #     ascending=[False, False]
-    # )
 
-    # [✅ 수정 후 코드] - 대시보드와 정렬 로직 통일 (REGIME 우선)
+    # df_raw 생성 완료 이후 (main() 내부)
     df_out = build_global_score(df_raw)
 
-    # 1. REGIME_RANK 계산 (대시보드와 동일 로직)
     def _regime_rank(val: str) -> int:
         s = str(val)
         if s.startswith("①"): return 1
@@ -1346,11 +1337,10 @@ def main(
         if s.startswith("④"): return 4
         if s.startswith("⑤"): return 5
         if s.startswith("⑥"): return 6
-        return 999 
+        return 999
 
     df_out["REGIME_RANK"] = df_out["REGIME"].map(_regime_rank).fillna(999).astype(int)
 
-    # 2. 정렬: 추세(오름차순) -> 점수(내림차순) -> 진입점수(내림차순) -> 대금(내림차순)
     df_out = df_out.sort_values(
         ["REGIME_RANK", "LDY_SCORE", "ENTRY_SCORE", "거래대금(억원)"],
         ascending=[True, False, False, False]
