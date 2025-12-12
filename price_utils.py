@@ -1,3 +1,8 @@
+
+# price_utils.py
+import math
+import numpy as np
+
 # -*- coding: utf-8 -*-
 """price_utils.py
 
@@ -31,23 +36,13 @@ def is_nan(x) -> bool:
         return True
 
 
-def krx_tick_size(price: Optional[Number]) -> int:
-    """일반 주식(KRX) 가격대별 호가가격단위(틱) 반환."""
-    if is_nan(price):
-        return 1
-    p = float(price)
-    if p < 2000:
-        return 1
-    if p < 5000:
-        return 5
-    if p < 20000:
-        return 10
-    if p < 50000:
-        return 50
-    if p < 200000:
-        return 100
-    if p < 500000:
-        return 500
+def krx_tick_size(price: float) -> int:
+    if price < 2000: return 1
+    if price < 5000: return 5
+    if price < 20000: return 10
+    if price < 50000: return 50
+    if price < 200000: return 100
+    if price < 500000: return 500
     return 1000
 
 
@@ -56,38 +51,33 @@ def _round_half_up(x: float) -> int:
     return int(math.floor(x + 0.5))
 
 
-def round_to_tick(price: Optional[Number], method: str = "nearest") -> Optional[int]:
-    """호가단위에 맞춰 가격을 라운딩.
-
-    method:
-      - 'nearest': 가장 가까운 호가단위
-      - 'down'   : 아래로(내림)
-      - 'up'     : 위로(올림)
-    """
-    if is_nan(price):
-        return None
-    p = float(price)
-    tick = krx_tick_size(p)
-    if tick <= 0:
-        return int(p)
-
-    q = p / tick
-    if method == "down":
-        return int(math.floor(q) * tick)
-    if method == "up":
-        return int(math.ceil(q) * tick)
-    return int(_round_half_up(q) * tick)
-
-
-def format_krw(value: Optional[Number], suffix: str = "원") -> str:
-    """KRW 표시용(천 단위 콤마 + suffix)."""
-    if is_nan(value):
-        return "-"
+def round_to_tick(price, method="nearest"):
     try:
-        iv = int(round(float(value)))
+        if price is None: return None
+        if isinstance(price, float) and (math.isnan(price) or np.isinf(price)): return None
+        p = float(price)
+        t = krx_tick_size(p)
+        if t <= 0: return int(p)
+
+        q = p / t
+        if method == "down":
+            return int(math.floor(q) * t)
+        if method == "up":
+            return int(math.ceil(q) * t)
+        # nearest
+        return int(round(q) * t)
     except Exception:
-        return str(value)
-    return f"{iv:,}{suffix}"
+        return None
+
+
+def format_krw(x):
+    try:
+        if x is None: return "-"
+        v = float(x)
+        if math.isnan(v) or np.isinf(v): return "-"
+        return f"{int(v):,}원"
+    except:
+        return "-"
 
 
 def format_signed_krw(value: Optional[Number], suffix: str = "원") -> str:
