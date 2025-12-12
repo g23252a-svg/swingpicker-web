@@ -43,14 +43,19 @@ from version_info import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("ldy")
 
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.getenv("LDY_DATA_DIR", os.path.join(BASE_DIR, "data"))
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # ---------------------------
 # 문의게시판 저장소 설정
 # ---------------------------
-INQUIRY_DB_PATH = os.path.join("data", "inquiries_db.json")
+INQUIRY_DB_PATH = os.path.join(DATA_DIR, "inquiries_db.json")
 
 def load_inquiry_db():
     """문의글 DB 로드"""
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(INQUIRY_DB_PATH):
         return {"inquiries": []}
     try:
@@ -64,18 +69,18 @@ def load_inquiry_db():
 
 def save_inquiry_db(db):
     """문의글 DB 저장"""
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(INQUIRY_DB_PATH, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
 
 # ---------------------------
 # 구독/권한(만료일) 관리
 # ---------------------------
-SUBS_DB_PATH = os.path.join("data", "subscriptions_db.json")
+SUBS_DB_PATH    = os.path.join(DATA_DIR, "subscriptions_db.json")
 
 def load_subs_db():
     """구독 DB 로드"""
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(SUBS_DB_PATH):
         return {"subs": {}}
     try:
@@ -89,37 +94,42 @@ def load_subs_db():
 
 def save_subs_db(db):
     """구독 DB 저장"""
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(SUBS_DB_PATH, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
 
-def set_subscription(email, role):
-    """
-    관리자가 권한 변경할 때 1개월 만료일 저장
-    - pro / prime : 오늘 기준 +30일
-    - free / admin : 구독 만료 처리
-    """
+def set_subscription(email: str, role: str, days: int = 30):
     email = (email or "").strip()
     if not email:
         return
 
     db = load_subs_db()
     subs = db.get("subs", {})
+
+    role = (role or "").lower().strip()
+
+    # ✅ free/guest/빈값이면 아예 삭제
+    if role in ("free", "guest", ""):
+        subs.pop(email, None)
+        db["subs"] = subs
+        save_subs_db(db)
+        return
+
+    # ✅ admin은 만료 없음
+    if role == "admin":
+        subs[email] = {"role": "admin", "expire_at": "", "paid_at": ""}
+        db["subs"] = subs
+        save_subs_db(db)
+        return
+
+    # ✅ pro/prime만 만료일 유지
     today = now_kst().date()
-
-    if role in ["pro", "prime"]:
-        expire = today + timedelta(days=30)
-        subs[email] = {
-            "role": role,
-            "paid_at": today.strftime("%Y-%m-%d"),
-            "expire_at": expire.strftime("%Y-%m-%d"),
-        }
-    else:
-        # free / admin 등으로 바뀌면 구독 종료로 간주
-        if email in subs:
-            subs[email]["role"] = role
-            subs[email]["expire_at"] = today.strftime("%Y-%m-%d")
-
+    expire = today + timedelta(days=days)
+    subs[email] = {
+        "role": role,
+        "paid_at": today.strftime("%Y-%m-%d"),
+        "expire_at": expire.strftime("%Y-%m-%d"),
+    }
     db["subs"] = subs
     save_subs_db(db)
 
@@ -279,8 +289,11 @@ def get_conf(key, default_val):
     return os.getenv(key, default_val)
 
 # ----------------- 설정값 로딩 -----------------
-RAW_SRC        = get_conf("LDY_RAW_URL",        "data/recommend_latest.csv")
-LOCAL_RAW      = get_conf("LDY_LOCAL_RAW",      "data/recommend_latest.csv")
+RAW_SRC = get_conf(
+    "LDY_RAW_URL",
+    "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
+)
+LOCAL_RAW = get_conf("LDY_LOCAL_RAW", "data/recommend_latest.csv")
 PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
 
 # 🔐 보안키
@@ -362,7 +375,22 @@ def get_code_map():
     # 1) pykrx 우선 (이게 KRX 종목명 그대로라서 제일 믿을 만함)
     if PYKRX_OK:
         try:
-            today = now_kst().strftime("%Y%m%d")
+            today_dt = now_kst().date()
+            
+            # ✅ 최근 10일 안에서 "티커가 실제로 나오는 날짜"를 찾는다 (주말/휴장일 대응)
+            today = None
+            for i in range(10):
+                ymd = (today_dt - timedelta(days=i)).strftime("%Y%m%d")
+                try:
+                    chk = stock.get_market_ticker_list(ymd, market="KOSPI")
+                    if chk:  # 빈 리스트 아니면 그 날짜가 거래일
+                        today = ymd
+                        break
+                except Exception:
+                    pass
+            
+            if today is None:
+                today = now_kst().strftime("%Y%m%d")
             for mkt in ["KOSPI", "KOSDAQ"]:
                 tickers = stock.get_market_ticker_list(today, market=mkt)
                 for t in tickers:
@@ -479,52 +507,40 @@ def get_market_status_local(scored_df: pd.DataFrame):
 
 
 @st.cache_data(ttl=600)
-def get_market_status():
+def get_market_status(scored_df: pd.DataFrame):
     """
-    KOSPI / KOSDAQ 상태 조회 (통합 래퍼)
+    KOSPI / KOSDAQ 상태 조회
     1) FDR / pykrx 인덱스 데이터로 계산 시도
-    2) 실패하거나 데이터 오류면 scored DF 기반 로컬 계산으로 fallback
+    2) 실패/오류면 scored_df 기반 로컬 계산으로 fallback
     """
+    # scored_df가 없으면 바로 실패 처리
+    if scored_df is None or scored_df.empty:
+        return "데이터 없음", float("nan"), "데이터 없음", float("nan")
+
     # 1) FDR / pykrx 둘 다 안 되면 바로 로컬
     if not FDR_OK and not PYKRX_OK:
-        if "scored" in globals():
-            try:
-                return get_market_status_local(globals()["scored"])
-            except Exception:
-                logger.exception("get_market_status_local fallback failed (no FDR/PYKRX)")
-        return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
+        return get_market_status_local(scored_df)
 
-    # -----------------------------
-    # 1) 인덱스 데이터 기반 계산
-    # -----------------------------
     def _via_fdr(ticker: str):
-        """FinanceDataReader 경로"""
         if not FDR_OK:
             return None
         try:
             df = fdr.DataReader(ticker)
-            if df is None or df.empty:
-                return None
-            return df
+            return df if df is not None and not df.empty else None
         except Exception:
             logger.exception("FDR DataReader failed for %s", ticker)
             return None
 
     def _via_pykrx_index(ticker: str):
-        """pykrx 인덱스 경로 (KS11/KQ11 대응)"""
         if not PYKRX_OK:
             return None
         try:
             today = now_kst().strftime("%Y%m%d")
             start = (now_kst() - timedelta(days=365)).strftime("%Y%m%d")
-
-            # KS11(코스피 지수) → 1001, KQ11(코스닥 지수) → 2001
             code = "1001" if ticker == "KS11" else "2001"
             df = stock.get_index_ohlcv_by_date(start, today, code)
             if df is None or df.empty:
                 return None
-
-            # pykrx: '종가' 컬럼을 Close로 맞춰줌
             if "종가" in df.columns and "Close" not in df.columns:
                 df = df.rename(columns={"종가": "Close"})
             return df
@@ -533,105 +549,68 @@ def get_market_status():
             return None
 
     def _status_for(ticker: str):
-        """단일 지수(KOSPI/KOSDAQ) 상태 계산"""
-        df = _via_fdr(ticker)
-        if df is None:
-            df = _via_pykrx_index(ticker)
-
+        df = _via_fdr(ticker) or _via_pykrx_index(ticker)
         if df is None or df.empty:
-            return "데이터 오류", float("nan")
+            return None
 
-        # 최근 60개만 사용
         df = df.tail(60)
-
         if "Close" not in df.columns:
-            return "데이터 부족", float("nan")
+            return None
 
         close = df["Close"]
         ma20 = close.rolling(20).mean().iloc[-1]
         curr = close.iloc[-1]
-
         if pd.isna(ma20) or ma20 == 0:
-            return "데이터 부족", float("nan")
+            return None
 
         diff = ((curr - ma20) / ma20) * 100
         status = "📈 상승장" if diff > 0 else "📉 조정장"
 
-        # 마지막 데이터 날짜 기준이 오늘보다 이전이면 "(전일 기준)" 붙이기
-        last_idx = df.index[-1]
+        # 전일 기준 표기
         try:
-            last_date = last_idx.date()
+            last_date = df.index[-1].date()
         except Exception:
-            last_date = pd.to_datetime(last_idx).date()
+            last_date = pd.to_datetime(df.index[-1]).date()
 
-        today = now_kst().date()
-        if last_date < today:
+        if last_date < now_kst().date():
             status += " (전일 기준)"
 
         return status, diff
 
-    # 인덱스 기준 먼저 시도
     try:
-        kp_stat, kp_diff = _status_for("KS11")
-        kq_stat, kq_diff = _status_for("KQ11")
-
-        bad_stats = {
-            "데이터 없음",
-            "데이터 오류",
-            "데이터 소스 오류",
-            "데이터 부족",
-            "Unknown",
-            "Error",
-        }
-
-        # 둘 중 하나라도 정상값이면 그냥 이거 쓴다
-        if kp_stat not in bad_stats or kq_stat not in bad_stats:
-            return kp_stat, kp_diff, kq_stat, kq_diff
+        kp = _status_for("KS11")
+        kq = _status_for("KQ11")
+        if kp and kq:
+            return kp[0], kp[1], kq[0], kq[1]
     except Exception:
         logger.exception("get_market_status index path failed")
 
-    # -----------------------------
-    # 2) 로컬 scored DF 기반 fallback
-    # -----------------------------
-    if "scored" in globals():
-        try:
-            return get_market_status_local(globals()["scored"])
-        except Exception:
-            logger.exception("get_market_status_local fallback failed")
-
-    # 그래도 안 되면 완전 실패
-    return "데이터 소스 오류", float("nan"), "데이터 소스 오류", float("nan")
+    # 2) 실패 시 로컬 fallback (globals() 금지)
+    return get_market_status_local(scored_df)
 
 @st.cache_data(ttl=600)
-def get_fear_greed_index():
+def get_fear_greed_index(scored_df: pd.DataFrame):
     """
-    1순위: FDR KS11 지수 기반 공포/탐욕 지수
-    2순위: FDR/네트워크가 막히면 -> scored DF 기반 로컬 계산으로 Fallback
+    1순위: FDR KS11 지수 기반 공포/탐욕
+    2순위: 실패 시 scored_df 기반 fallback
     """
 
-    # -----------------------------
-    # 1) FDR KS11 기반 (네트워크 우선)
-    # -----------------------------
-    if FDR_OK:
-        try:
+    # -------- 1) 지수(FDR) 경로 --------
+    try:
+        if FDR_OK:
             df = fdr.DataReader("KS11")
             if df is not None and not df.empty:
-                # 14일 RSI 계산
                 delta = df["Close"].diff()
                 up = delta.clip(lower=0)
                 down = (-delta.clip(upper=0))
-
                 rs = up.rolling(14).mean() / down.rolling(14).mean()
                 rsi = 100 - (100 / (1 + rs))
                 current_rsi = float(rsi.iloc[-1])
 
-                # MA20 대비 괴리율
                 ma20 = df["Close"].rolling(20).mean()
                 disparity = float(df["Close"].iloc[-1] / ma20.iloc[-1] * 100)
 
                 score = current_rsi
-
-                # 너무 과열/침체 시 가중치
                 if disparity > 105:
                     score += 10
                 elif disparity < 95:
@@ -651,32 +630,26 @@ def get_fear_greed_index():
                     status = "중립 (관망)"
 
                 return float(score), status + " (지수 기준)"
-        except Exception as e:
-            logger.exception("fear_greed FDR path failed: %s", e)
+    except Exception as e:
+        logger.exception("fear_greed FDR path failed: %s", e)
 
-    # -----------------------------
-    # 2) 로컬 scored DF 기반 Fallback
-    # -----------------------------
+    # -------- 2) scored_df fallback 경로 --------
     try:
-        if "scored" not in globals():
+        if scored_df is None or scored_df.empty:
             return 50.0, "중립 (데이터 없음)"
 
-        df = globals()["scored"]
-        if df is None or df.empty:
-            return 50.0, "중립 (데이터 없음)"
-
-        if "RSI14" not in df.columns:
+        if "RSI14" not in scored_df.columns:
             return 50.0, "중립 (데이터 부족)"
 
-        rsi = pd.to_numeric(df["RSI14"], errors="coerce").dropna()
+        rsi = pd.to_numeric(scored_df["RSI14"], errors="coerce").dropna()
         if rsi.empty:
             return 50.0, "중립 (데이터 부족)"
 
         rsi_mid = float(rsi.median())
-        gap_mean = 0.0
 
-        if "MA20_GAP" in df.columns:
-            gap = pd.to_numeric(df["MA20_GAP"], errors="coerce").dropna()
+        gap_mean = 0.0
+        if "MA20_GAP" in scored_df.columns:
+            gap = pd.to_numeric(scored_df["MA20_GAP"], errors="coerce").dropna()
             if not gap.empty:
                 gap_mean = float(gap.mean())
 
@@ -700,7 +673,6 @@ def get_fear_greed_index():
             status = "중립 (관망)"
 
         return float(score), status + " (스코어 기준)"
-
     except Exception as e:
         logger.exception("fear_greed local fallback failed: %s", e)
         return 50.0, "중립 (지표 계산 오류)"
@@ -815,7 +787,7 @@ def plot_sector_momentum_bar(scored_df: pd.DataFrame):
                 x=values,
                 y=labels,
                 orientation="h",
-                text=[f"{v:.2f}" + ("%p" if metric == "ret_5d_%" else "") for v in values],
+                text=[f"{v:.2f}%" if metric == "ret_5d_%" else f"{v:.2f}" for v in values],
                 textposition="auto",
             )
         ]
@@ -1147,15 +1119,28 @@ def plot_risk_reward_bar(buy, stop, target1, target2):
 # ---------------------------
 # 데이터 로딩
 # ---------------------------
-@st.cache_data(ttl=600)
-def load_csv_url(url):
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
-    return pd.read_csv(io.BytesIO(r.content))
+def normalize_github_raw(url: str) -> str:
+    if not isinstance(url, str):
+        return url
+    if "github.com/" in url and "/blob/" in url:
+        url = url.replace("https://github.com/", "https://raw.githubusercontent.com/")
+        url = url.replace("/blob/", "/")
+    return url
 
 @st.cache_data(ttl=600)
-def load_csv_path(path):
-    return pd.read_csv(path, encoding="utf-8")
+def load_csv_url(url: str) -> pd.DataFrame:
+    url = normalize_github_raw(url)
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    return pd.read_csv(io.BytesIO(r.content), encoding="utf-8-sig")
+
+@st.cache_data(ttl=600)
+def load_csv_path(path: str, enc: str = "utf-8-sig") -> pd.DataFrame:
+    try:
+        return pd.read_csv(path, encoding=enc)
+    except UnicodeDecodeError:
+        # utf-8-sig 실패 시 utf-8 재시도
+        return pd.read_csv(path, encoding="utf-8")
 
 def log_src(df, src):
     logger.info("Data Loaded: %s rows=%s", src, len(df) if df is not None else 0)
@@ -1700,7 +1685,7 @@ with st.status("🚀 시장 데이터를 분석하고 있습니다...", expanded
         )
 
         # get_market_status / get_fear_greed_index fallback용
-        globals()["scored"] = scored
+        
 
         status.write("🌊 동적 유동성 필터 적용 중...")
         status.update(label="✅ 분석 완료!", state="complete", expanded=False)
@@ -1718,7 +1703,7 @@ just_registered = st.session_state.pop("just_registered", False)
 
 
 with st.sidebar:
-    user = render_auth_box(show_debug=True)
+    user = render_auth_box(show_debug=False)
 
     if user is None:
         auth_status = "guest"
@@ -1951,7 +1936,7 @@ with tab1:
     else:
         st.caption("※ FDR 데이터 또는 추천 데이터가 부족해 성과 검증을 표시할 수 없습니다.")
 
-    kp_stat, kp_diff, kq_stat, kq_diff = get_market_status()
+    kp_stat, kp_diff, kq_stat, kq_diff = get_market_status(scored)
     c1, c2 = st.columns(2)
 
     def _fmt_metric(stat, diff):
@@ -1979,7 +1964,7 @@ with tab1:
 
 
     # 🔥 v6.5: 데이터 기준 시각 + 지표 모드 + 소스 태그 + 신선도 경고
-    fg_score, fg_status = get_fear_greed_index()
+    fg_score, fg_status = get_fear_greed_index(scored)
 
     info_lines = []
 
