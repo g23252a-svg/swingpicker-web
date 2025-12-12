@@ -22,9 +22,11 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import re
+import FinanceDataReader as fdr
+from typing import Optional, Dict, Any, Tuple
 
-# ❌ 이건 삭제 (밑에서 try/except로 처리할 거라서)
-# from pykrx import stock
+
+
 
 from auth_user import render_auth_box, get_user, list_users, update_user_role
 from plotly.subplots import make_subplots
@@ -46,7 +48,15 @@ logger = logging.getLogger("ldy")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.getenv("LDY_DATA_DIR", os.path.join(BASE_DIR, "data"))
+RECOMMEND_LATEST_PATH = os.path.join(DATA_DIR, "recommend_latest.csv")
+REALITY_LATEST_PATH   = os.path.join(DATA_DIR, "reality_check_latest.csv")
+RANKVAL_SUMM_LATEST   = os.path.join(DATA_DIR, "rank_validation_summary_latest.csv")
+RANKVAL_DETAIL_LATEST = os.path.join(DATA_DIR, "rank_validation_latest.csv")
+PRICE_SNAP_LATEST     = os.path.join(DATA_DIR, "price_snapshot_latest.csv")
+SECTOR_KRX_CACHE      = os.path.join(DATA_DIR, "sector_map_krx.csv")
+SECTOR_FDR_CACHE      = os.path.join(DATA_DIR, "sector_map_fdr_v2.csv")
 os.makedirs(DATA_DIR, exist_ok=True)
+REMOTE_RECOMMEND_URL = os.getenv("LDY_REMOTE_RECOMMEND_URL", "")
 
 # ---------------------------
 # 문의게시판 저장소 설정
@@ -175,6 +185,171 @@ def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
 
     return ts.strftime(fmt)
 
+# =========================
+# ✅ Loader / Cache Utils (Local 우선 → Remote fallback)
+# - 붙여넣기 위치: def to_kst_str(...) 함수 "끝난 직후"
+# =========================
+
+def _mtime(path: str) -> int:
+    try:
+        return int(os.path.getmtime(path))
+    except Exception:
+        return 0
+
+def _normalize_github_raw(url: str) -> str:
+    if not isinstance(url, str):
+        return ""
+    u = url.strip()
+    if not u:
+        return ""
+    if "github.com/" in u and "/blob/" in u:
+        u = u.replace("https://github.com/", "https://raw.githubusercontent.com/")
+        u = u.replace("/blob/", "/")
+    return u
+
+def _download_bytes(url: str, timeout: int = 30) -> bytes:
+    u = _normalize_github_raw(url)
+    if not u:
+        raise ValueError("REMOTE url is empty")
+    r = requests.get(
+        u,
+        timeout=timeout,
+        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+    )
+    r.raise_for_status()
+    return r.content
+
+def _read_csv_bytes(b: bytes, enc: str = "utf-8-sig") -> pd.DataFrame:
+    try:
+        return pd.read_csv(io.BytesIO(b), encoding=enc)
+    except UnicodeDecodeError:
+        return pd.read_csv(io.BytesIO(b), encoding="utf-8")
+
+def _read_csv_file(path: str, enc: str = "utf-8-sig") -> pd.DataFrame:
+    try:
+        return pd.read_csv(path, encoding=enc)
+    except UnicodeDecodeError:
+        return pd.read_csv(path, encoding="utf-8")
+
+def _atomic_write_bytes(path: str, b: bytes) -> None:
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(b)
+    os.replace(tmp, path)
+
+def _safe_read_csv(path: str, enc: str = "utf-8-sig", remote_url: str = "") -> pd.DataFrame:
+    """
+    ✅ 로컬 우선 → 원격 fallback
+    - 로컬 파일이 있으면 그걸 먼저 읽는다
+    - 로컬이 없거나/읽기 실패 시 remote_url(또는 REMOTE_RECOMMEND_URL)에서 다운로드
+    - 원격 성공 시 로컬(path)에 저장해서 mtime 갱신 → cache 무효화 자동 유도
+    """
+    last_err = None
+
+    # 1) Local first
+    if path and os.path.exists(path):
+        try:
+            return _read_csv_file(path, enc=enc)
+        except Exception as e:
+            last_err = e
+
+    # 2) Remote fallback
+    url = (remote_url or "").strip()
+    if not url:
+        url = (REMOTE_RECOMMEND_URL or "").strip()
+
+    if url:
+        try:
+            b = _download_bytes(url, timeout=30)
+            df = _read_csv_bytes(b, enc=enc)
+            if path:
+                try:
+                    _atomic_write_bytes(path, b)
+                except Exception:
+                    logger.exception("remote csv downloaded but local save failed: %s", path)
+            return df
+        except Exception as e:
+            last_err = e
+
+    # 3) Fail
+    if last_err is not None:
+        raise RuntimeError(f"_safe_read_csv failed (path={path}, url={url}): {last_err}") from last_err
+    raise RuntimeError(f"_safe_read_csv failed (path={path}, url={url})")
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_csv_cached(path: str, enc: str, remote_url: str, mtime_sig: int) -> pd.DataFrame:
+    # mtime_sig는 "캐시 키" 역할. 파일이 바뀌면 자동으로 캐시 무효화됨.
+    return _safe_read_csv(path=path, enc=enc, remote_url=remote_url)
+
+def load_recommend_latest(local_path: str = None, remote_url: str = "") -> pd.DataFrame:
+    """
+    recommend_latest.csv 로드
+    - local_path 기본값: RECOMMEND_LATEST_PATH
+    - remote_url 비어있으면 REMOTE_RECOMMEND_URL 사용
+    """
+    p = local_path or RECOMMEND_LATEST_PATH
+    sig = _mtime(p)
+    return _load_csv_cached(path=p, enc="utf-8-sig", remote_url=remote_url, mtime_sig=sig)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_price_ohlcv(code: str, start: Optional[str] = None) -> pd.DataFrame:
+    """
+    가격 OHLCV 로드 (FDR 우선)
+    return: index=Date, columns=[Open,High,Low,Close,Volume]
+    """
+    if not FDR_OK or fdr is None:
+        return pd.DataFrame()
+
+    code6 = str(code).split(".")[0].strip()
+    if code6.isdigit():
+        code6 = code6.zfill(6)
+
+    if start is None:
+        start = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+
+    try:
+        df = fdr.DataReader(code6, start)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        # FDR은 보통 이 컬럼들로 옴
+        need = ["Open", "High", "Low", "Close", "Volume"]
+        for c in need:
+            if c not in df.columns:
+                return pd.DataFrame()
+        return df[need].copy()
+    except Exception:
+        logger.exception("load_price_ohlcv(FDR) failed: %s", code6)
+        return pd.DataFrame()
+
+def calc_bollinger(close: pd.Series, window: int = 20, n_std: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    볼린저 밴드
+    return: (mid, upper, lower)
+    """
+    s = pd.to_numeric(close, errors="coerce")
+    mid = s.rolling(window).mean()
+    std = s.rolling(window).std()
+    upper = mid + n_std * std
+    lower = mid - n_std * std
+    return mid, upper, lower
+
+def calc_rsi_series(close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    RSI(14) 시리즈
+    """
+    s = pd.to_numeric(close, errors="coerce")
+    delta = s.diff()
+    up = delta.clip(lower=0)
+    down = (-delta.clip(upper=0))
+    roll_up = up.rolling(period).mean()
+    roll_down = down.rolling(period).mean()
+    rs = roll_up / roll_down
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
 # ---------------------------
 # 오픈베타 영구 PRIME 사용자
 # ---------------------------
@@ -235,13 +410,15 @@ try:
     import FinanceDataReader as fdr
     FDR_OK = True
 except Exception as e:
+    fdr = None
     FDR_OK = False
     logger.warning("FinanceDataReader not available: %s", e)
 
 try:
-    from pykrx import stock
+    from pykrx import stock  # optional
     PYKRX_OK = True
 except Exception as e:
+    stock = None
     PYKRX_OK = False
     logger.info("pykrx not available: %s", e)
 
@@ -1913,11 +2090,10 @@ if send_btn and tg_token and tg_chat_id:
     else:
         st.error(f"전송 실패: {res}")
 
+df_latest = load_recommend_latest(local_path=RECOMMEND_LATEST_PATH, remote_url=RAW_SRC)
+user = get_user()
+user_role = (user or {}).get("role", "guest")
 
-
-# ---------------------------
-# 메인 UI
-# ---------------------------
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "📊 시장 (Market)",
