@@ -22,7 +22,12 @@ import requests
 from datetime import datetime, timedelta, timezone
 import re
 from glob import glob
-from pykrx import stock
+try:
+    from pykrx import stock  # optional
+    PYKRX_OK = True
+except Exception:
+    stock = None
+    PYKRX_OK = False
 from tqdm import tqdm
 import FinanceDataReader as fdr
 
@@ -235,6 +240,64 @@ def run_reality_check(out_dir: str, trade_ymd: str) -> None:
         log(f"🧪 Reality Check 저장 완료 → {out1}")
     except Exception as e:
         log(f"⚠️ Reality Check 실패: {e}")
+
+
+def _ymd8_to_dash(s: str) -> str:
+    s = str(s)
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return s
+
+def _pykrx_df(fn, *args, **kwargs):
+    """PYKRX 호출을 안전하게 감싸고 실패 시 None"""
+    if (not PYKRX_OK) or (stock is None):
+        return None
+    try:
+        return fn(*args, **kwargs)
+    except Exception:
+        return None
+
+def safe_ohlcv_by_date(start_ymd: str, end_ymd: str, code: str) -> Optional[pd.DataFrame]:
+    """
+    ✅ 네가 말한 B 패턴을 그대로 구현한 '대표 케이스'
+    - 1순위: pykrx stock.get_market_ohlcv_by_date
+    - 실패/empty면: FDR DataReader로 대체
+    """
+    df = _pykrx_df(stock.get_market_ohlcv_by_date, start_ymd, end_ymd, code)
+
+    if df is None or getattr(df, "empty", True):
+        try:
+            df = fdr.DataReader(str(code).zfill(6), _ymd8_to_dash(start_ymd), _ymd8_to_dash(end_ymd))
+        except Exception:
+            df = None
+
+        if df is not None and not getattr(df, "empty", True):
+            # analyze_ticker가 쓰는 컬럼명으로 정규화
+            df = df.rename(columns={
+                "Open": "시가", "High": "고가", "Low": "저가", "Close": "종가", "Volume": "거래량"
+            })
+
+    return df
+
+def safe_ohlcv_by_ticker(ymd: str, market: str) -> Optional[pd.DataFrame]:
+    """market 단위(전종목) ohlcv는 FDR로 1:1 대체가 어려워서 pykrx만 안전 호출"""
+    return _pykrx_df(stock.get_market_ohlcv_by_ticker, ymd, market=market)
+
+def safe_market_cap_by_ticker(ymd: str, market: str) -> Optional[pd.DataFrame]:
+    return _pykrx_df(stock.get_market_cap_by_ticker, ymd, market=market)
+
+def safe_ticker_list(ymd: str, market: str) -> List[str]:
+    out = _pykrx_df(stock.get_market_ticker_list, ymd, market=market)
+    return list(out) if out is not None else []
+
+def safe_ticker_name(ticker: str) -> Optional[str]:
+    if (not PYKRX_OK) or (stock is None):
+        return None
+    try:
+        return stock.get_market_ticker_name(ticker)
+    except Exception:
+        return None
+
 
 # ------------------------------- Rank Validation (RANK_SCORE 검증) -------------------------------
 
@@ -467,7 +530,7 @@ def make_rank_validation_report(
 def _has_ohlcv_and_mcap(ymd: str) -> bool:
     for m in ["KOSPI", "KOSDAQ"]:
         try:
-            o = stock.get_market_ohlcv_by_ticker(ymd, market=m)
+            o = safe_ohlcv_by_ticker(ymd, market=m)
             if o is not None and not o.empty and "거래대금" in o.columns and _safe_sum(o["거래대금"]) > 0:
                 return True
         except Exception:
@@ -518,39 +581,44 @@ def resolve_trade_date(force_ymd: Optional[str] = None) -> str:
     return find_latest_valid_date(_has_ohlcv_and_mcap, max_back_days=10)
 
 def build_mcap_map(ref_ymd: Optional[str] = None) -> Tuple[Dict[str, float], str]:
+    # ✅ (1) 함수 첫 줄 방어코드: PYKRX 자체가 없으면 "빈 맵"으로 안전 종료
+    if (not PYKRX_OK) or (stock is None):
+        use = ref_ymd or now_kst().strftime("%Y%m%d")
+        log("⚠️ PYKRX 사용 불가 → 시총 맵 비활성(빈 맵 반환)")
+        return {}, use
+
+    # ✅ (2) _check_mcap을 safe wrapper 기반으로 교체
     def _check_mcap(ymd: str) -> bool:
-        try:
-            df = pd.concat([
-                stock.get_market_cap_by_ticker(ymd, market='KOSPI'),
-                stock.get_market_cap_by_ticker(ymd, market='KOSDAQ')
-            ])
-            # 완전히 빈 데이터만 아니면 OK
-            return not df.empty
-        except Exception:
-            return False
+        a = safe_market_cap_by_ticker(ymd, market="KOSPI")
+        b = safe_market_cap_by_ticker(ymd, market="KOSDAQ")
+        return (a is not None and not a.empty) or (b is not None and not b.empty)
 
     use: Optional[str] = None
 
-    # 1순위: ref_ymd(= trade_ymd) 그대로 시도
-    if ref_ymd:
-        if _check_mcap(ref_ymd):
-            use = ref_ymd
+    # 1순위: ref_ymd 그대로 시도
+    if ref_ymd and _check_mcap(ref_ymd):
+        use = ref_ymd
 
     # 2순위: 자동 탐색
     if use is None:
         use = find_latest_valid_date(_check_mcap, max_back_days=10)
 
     try:
-        df = pd.concat([
-            stock.get_market_cap_by_ticker(use, market='KOSPI'),
-            stock.get_market_cap_by_ticker(use, market='KOSDAQ')
-        ])
+        parts = []
+        a = safe_market_cap_by_ticker(use, market="KOSPI")
+        b = safe_market_cap_by_ticker(use, market="KOSDAQ")
+        if a is not None and not a.empty: parts.append(a)
+        if b is not None and not b.empty: parts.append(b)
+
+        df = pd.concat(parts) if parts else pd.DataFrame()
         if df.empty:
             log(f"⚠️ 시가총액 맵이 비어 있음(use={use}), 빈 맵 반환")
             return {}, use
-        df['Code'] = df.index
-        mcap_map = dict(zip(df['Code'].astype(str), df['시가총액'] / 1e8))
+
+        df["Code"] = df.index.astype(str).str.zfill(6)
+        mcap_map = dict(zip(df["Code"], df["시가총액"] / 1e8))  # 억원
         return mcap_map, use
+
     except Exception as e:
         log(f"⚠️ 시가총액 맵 생성 실패({use}): {e}")
         return {}, use
@@ -930,7 +998,7 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
 
     for m in ["KOSPI", "KOSDAQ"]:
         try:
-            df = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market=m)
+            df = safe_ohlcv_by_ticker(date_yyyymmdd, market=m)
             if df is None or df.empty:
                 log(f"⚠️ {m} 거래대금 데이터 비어있음: {date_yyyymmdd}")
                 continue
@@ -978,7 +1046,9 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
 
 def get_market_sets(d: str) -> Tuple[set, set]:
     try:
-        return set(stock.get_market_ticker_list(d, market='KOSPI')), set(stock.get_market_ticker_list(d, market='KOSDAQ'))
+        kospi = set(safe_ticker_list(d, market="KOSPI"))
+        kosdaq = set(safe_ticker_list(d, market="KOSDAQ"))
+        return kospi, kosdaq
     except Exception:
         return set(), set()
 
@@ -988,26 +1058,28 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
     if os.path.exists(path):
         try:
             df = pd.read_csv(path, dtype=str)
-            return dict(zip(df['종목코드'], df['종목명']))
+            return dict(zip(df["종목코드"], df["종목명"]))
         except Exception:
             pass
 
     rows: List[Dict[str, str]] = []
     for m in ["KOSPI", "KOSDAQ"]:
         try:
-            tickers = stock.get_market_ticker_list(d, market=m)
+            tickers = safe_ticker_list(d, market=m)
             for t in tickers:
+                nm = safe_ticker_name(t) or str(t)
                 rows.append({
-                    '종목코드': str(t).zfill(6),
-                    '종목명': stock.get_market_ticker_name(t)
+                    "종목코드": str(t).zfill(6),
+                    "종목명": nm
                 })
                 time.sleep(0.001)
         except Exception:
             pass
+
     if rows:
         df = pd.DataFrame(rows)
         df.to_csv(path, index=False, encoding=UTF8)
-        return dict(zip(df['종목코드'], df['종목명']))
+        return dict(zip(df["종목코드"], df["종목명"]))
     return {}
 
 def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
@@ -1021,7 +1093,7 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
 
     for m in ["KOSPI", "KOSDAQ"]:
         try:
-            df = stock.get_market_ohlcv_by_ticker(trade_ymd, market=m)
+            df = safe_ohlcv_by_ticker(trade_ymd, market=m)
             if df is None or df.empty:
                 continue
 
@@ -1072,10 +1144,13 @@ def generate_ai_comment(mfi: float, rsi: float, slope: float, disp: float, score
     elif mfi >= 60:
         comment += "💸 자금 유입이 꾸준히 이어지고 있습니다. "
 
-    if slope > 100:
-        comment += "🚀 상승 에너지가 폭발적으로 증가하는 중입니다. "
+    # ✅ slope는 이제 'MACD_Slope_PCT(%)'로 들어온다고 가정
+    if slope > 0.02:
+        comment += "🚀 단기 모멘텀이 강하게 가속 중입니다. "
+    elif slope > 0.005:
+        comment += "📈 상승 모멘텀이 개선되고 있습니다. "
     elif slope > 0:
-        comment += "📈 상승 추세가 견고하게 유지되고 있습니다. "
+        comment += "↗️ 약한 플러스 모멘텀입니다. "
 
     if -2 <= disp <= 2:
         comment += "✅ 20일선 부근의 안전한 눌림목 구간입니다."
@@ -1116,7 +1191,9 @@ def detect_regime_row(row: pd.Series) -> str:
             return default
 
     rel60 = _fv("rel_60d_%", 0.0)
-    slope = _fv("MACD_Slope", 0.0)
+    slope = _fv("MACD_Slope_PCT", 0.0)
+    if slope == 0.0:
+        slope = _fv("MACD_Slope", 0.0)
     rsi = _fv("RSI14", 50.0)
 
     # ① 강한 상승 추세
@@ -1154,7 +1231,9 @@ def route_tag(row: pd.Series) -> str:
 
     r5 = _fv("ret_5d_%", 0.0)
     r10 = _fv("ret_10d_%", 0.0)
-    slope = _fv("MACD_Slope", 0.0)
+    slope = _fv("MACD_Slope_PCT", 0.0)
+    if slope == 0.0:
+        slope = _fv("MACD_Slope", 0.0)
     ebs = _fv("EBS", 0.0)
     now_pct = _fv("Now%", 999.0)
     rr1 = _fv("RR1", 0.0)
@@ -1224,7 +1303,13 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     t1 = nz_num(x["추천매도가1"])
     turn = nz_num(x["거래대금(억원)"])
     rsi = nz_num(x["RSI14"]).fillna(50)
-    slope = nz_num(x["MACD_Slope"])
+    # ✅ PCT 우선, 없으면 기존 MACD_Slope 사용(하위호환)
+    if "MACD_Slope_PCT" in x.columns:
+        slope = nz_num(x["MACD_Slope_PCT"])
+        slope_floor = 0.01  # (% 단위) 너무 눌림 방지용 바닥값
+    else:
+        slope = nz_num(x["MACD_Slope"])
+        slope_floor = 1.0
     volz = nz_num(x["거래강도"]).replace([np.inf, -np.inf], np.nan).fillna(0)
     kairi = nz_num(x["이격도"])
     r5 = nz_num(x["ret_5d_%"])
@@ -1264,7 +1349,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     )
     ers_norm = np.clip(ers_bits / 3.0, 0, 1).fillna(0)
 
-    slope_pos_norm = pct_norm_pos(slope, q=90, floor=1.0).fillna(0)
+    slope_pos_norm = pct_norm_pos(slope, q=90, floor=slope_floor).fillna(0)
     mom_mid_norm = pct_norm_pos(r10.clip(lower=0), q=90, floor=1.0).fillna(0)
     rel60_pos_norm = pct_norm_pos(rel60.clip(lower=0), q=90, floor=1.0).fillna(0)
 
@@ -1530,7 +1615,7 @@ def analyze_ticker(
 ) -> Optional[Dict[str, Any]]:
     code6 = str(t).zfill(6)
 
-    ohlcv = stock.get_market_ohlcv_by_date(start_s, end_s, t)
+    ohlcv = safe_ohlcv_by_date(start_s, end_s, t)
     if ohlcv is None or ohlcv.empty or len(ohlcv) < 120:
         return None
     ohlcv = ohlcv.tail(LOOKBACK_DAYS)
@@ -1566,12 +1651,12 @@ def analyze_ticker(
     macd = ema(c, 12) - ema(c, 26)
     sig = ema(macd, 9)
     hist = macd - sig
-    slope = hist.diff().iloc[-1]
+    slope_pct = (slope / last_c) * 100
 
     vol_z_series = v / v.rolling(20).mean().replace(0, np.nan)
     vol_z_series = vol_z_series.replace([np.inf, -np.inf], np.nan)
     vol_z = float(vol_z_series.iloc[-1]) if len(vol_z_series) else np.nan
-    vol_z = vol_z_series.iloc[-1]
+   
 
     disp_series = (c / ma20 - 1.0) * 100
     disp = disp_series.iloc[-1]
