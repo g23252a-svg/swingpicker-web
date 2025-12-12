@@ -614,14 +614,22 @@ def main(trade_date: Optional[str] = None, top_n: Optional[int] = None,
     hot_sector_str = ", ".join([f"{k}({v:.1f}%)" for k,v in top_sectors.items()])
     log(f"🔥 현재 주도 섹터 Top3: {hot_sector_str}")
     
+    # ------------------------------------------------------------------
     # 7. 정렬 및 저장 (점수순)
     df = df.sort_values(["LDY_SCORE", "ENTRY_SCORE"], ascending=[False, False])
     
+    # (1) 기록 보관용 파일 저장 (기존 코드)
     date_tag = now_kst().strftime("%Y%m%d")
     suffix = f"_{tag}" if tag else ""
     out_path = os.path.join(OUT_DIR, f"recommend_{ymd}{suffix}_v6.8.csv")
     df.to_csv(out_path, index=False, encoding=UTF8)
-    log(f"💾 저장 완료: {out_path}")
+    log(f"💾 [기록용] 저장 완료: {out_path}")
+
+    # (2) [추가됨] 시스템 연동용 고정 파일명 저장 (Github Action/Dashboard용)
+    latest_path = os.path.join(OUT_DIR, "recommend_latest.csv")
+    df.to_csv(latest_path, index=False, encoding=UTF8)
+    log(f"💾 [시스템용] 저장 완료: {latest_path}")
+    # ------------------------------------------------------------------
     
     # 8. 텔레그램
     if enable_telegram:
