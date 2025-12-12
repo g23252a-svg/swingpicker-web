@@ -444,6 +444,28 @@ with st.sidebar:
         selected_regimes = st.multiselect("추세(REGIME)", all_regimes, default=all_regimes)
         
     st.divider()
+
+with st.sidebar:
+    st.divider()
+    with st.expander("🔧 데이터 디버그", expanded=True):
+        st.write("data_src =", data_src)
+        st.write("data_ts  =", data_ts)
+        st.write("rows     =", len(df_scored))
+        st.write("min_score =", min_score)
+        st.write("only_squeeze =", only_squeeze)
+        st.write("columns =", [c for c in df_scored.columns])
+
+        if "LDY_SCORE" in df_scored.columns:
+            st.write("LDY_SCORE desc")
+            st.write(df_scored["LDY_SCORE"].describe())
+
+        # ROUTE/REGIME가 진짜 존재하는지 즉시 확인
+        show_cols = [c for c in ["종목명","종목코드","LDY_SCORE","ROUTE","REGIME","ENTRY_SCORE","거래대금(억원)"] if c in df_scored.columns]
+        if show_cols:
+            st.dataframe(df_scored[show_cols].head(20), use_container_width=True)
+
+
+
     
     # 내 자산 입력 (v6.8 복구)
     if auth_status in ["pro", "prime", "admin"]:
