@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.6
+LDY Pro Trader Collector v6.8
 - 업종 매핑: KIND(KRX) + FDR + Fallback + Override(사용자 CSV) 병합
 - ROUTE: BRK / Watch / MR / PULL 다단계 분류 유지
 - 5일/10일 수익률 + 60일 지수/상대강도 계산
@@ -25,6 +25,7 @@ from tqdm import tqdm
 import FinanceDataReader as fdr
 
 from time_utils import now_kst, now_utc, KST
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
@@ -39,8 +40,24 @@ MIN_TURNOVER_EOK = 50        # 최소 거래대금 (억원)
 MIN_MCAP_EOK = 1000          # 최소 시총 (억원)
 RSI_LOW, RSI_HIGH = 45, 65   # RSI 적정 구간
 PASS_EBS = 4                 # EBS (룰 기반 스코어) 통과 기준
-OUT_DIR = "data"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = os.path.join(BASE_DIR, "data")
 UTF8 = "utf-8-sig"
+
+# 병렬 처리 (너무 크게 잡으면 KRX 쿼리/네트워크에 부담)
+MAX_WORKERS = int(os.environ.get("LDY_WORKERS", "8"))
+
+# Bollinger Squeeze 감지
+BB_PERIOD = 20
+BB_STD = 2
+BB_SQUEEZE_BW = 10.0  # Bandwidth(%) < 10%면 스퀴즈로 간주
+
+# 스퀴즈 보너스(가벼운 가산점)
+BONUS_BB_SQUEEZE_SCORE = 2.0
+BONUS_BB_SQUEEZE_ENTRY = 3.0
+
+# 섹터 모멘텀 보정은 "업종 평균점수"보다 "업종 수익률"이 더 직관적이라 교체
+# (기존 W_SECTOR = 0.05 그대로 사용해도 OK)
 
 # [가중치]
 W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
@@ -114,6 +131,101 @@ def round_to_tick(price: float) -> int:
     elif price < 500000: t = 500
     else: t = 1000
     return int(round(price / t) * t)
+
+def add_sector_momentum(df: pd.DataFrame, group_col: str = "업종_대분류") -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    업종(대분류)별 5일 평균 수익률을 계산해서 컬럼으로 주입
+    """
+    if group_col not in df.columns or "ret_5d_%" not in df.columns:
+        df["SECTOR_RET_5D"] = np.nan
+        df["SECTOR_RANK"] = np.nan
+        return df, pd.Series(dtype=float)
+
+    g = df.groupby(group_col)["ret_5d_%"].mean().sort_values(ascending=False)
+    df["SECTOR_RET_5D"] = df[group_col].map(g)
+    df["SECTOR_RANK"] = df[group_col].map(g.rank(ascending=False, method="min"))
+    return df, g
+
+
+def compute_market_breadth(df: pd.DataFrame) -> Dict[str, float]:
+    """
+    20일선 상회 비율(%) = 시장 온도
+    analyze_ticker에서 Above_MA20을 넣는 전제
+    """
+    out = {}
+    if "Above_MA20" not in df.columns:
+        return {"ALL": np.nan, "KOSPI": np.nan, "KOSDAQ": np.nan}
+
+    for m in ["KOSPI", "KOSDAQ"]:
+        sub = df[df["시장"] == m]
+        out[m] = round(float(sub["Above_MA20"].mean() * 100), 1) if len(sub) else np.nan
+
+    out["ALL"] = round(float(df["Above_MA20"].mean() * 100), 1) if len(df) else np.nan
+    return out
+
+
+def label_market_temp(breadth_all: float) -> str:
+    if not np.isfinite(breadth_all):
+        return "🌫 N/A"
+    if breadth_all >= 65:
+        return "🔥 과열"
+    if breadth_all <= 35:
+        return "🧊 침체"
+    return "🌤 중립"
+
+
+def run_reality_check(out_dir: str, trade_ymd: str) -> None:
+    """
+    전일(가장 최근) recommend_YYYYMMDD*.csv의 상위 추천들이
+    오늘 종가 스냅샷 기준으로 얼마나 움직였는지 검증 CSV 생성
+    - data/reality_check_YYYYMMDD.csv
+    - data/reality_check_latest.csv
+    """
+    try:
+        # 오늘 종가 스냅샷
+        snap_path = os.path.join(out_dir, f"price_snapshot_{trade_ymd}.csv")
+        if not os.path.exists(snap_path):
+            return
+        snap = pd.read_csv(snap_path, dtype={"종목코드": str})
+        snap["종목코드"] = snap["종목코드"].astype(str).str.zfill(6)
+        close_map = dict(zip(snap["종목코드"], pd.to_numeric(snap["종가"], errors="coerce")))
+
+        # 과거 recommend 파일 중 가장 최근(오늘 제외)
+        files = [f for f in os.listdir(out_dir) if f.startswith("recommend_") and f.endswith(".csv")]
+        cand = []
+        for f in files:
+            # recommend_YYYYMMDD or recommend_YYYYMMDD_tag
+            core = f.replace("recommend_", "").replace(".csv", "")
+            ymd = core.split("_")[0]
+            if len(ymd) == 8 and ymd.isdigit() and ymd != trade_ymd:
+                cand.append((ymd, f))
+        if not cand:
+            return
+        cand.sort(reverse=True)
+        prev_ymd, prev_file = cand[0]
+
+        prev = pd.read_csv(os.path.join(out_dir, prev_file), dtype={"종목코드": str})
+        prev["종목코드"] = prev["종목코드"].astype(str).str.zfill(6)
+
+        # 상위 30개만 체크(너무 커지면 파일만 무거워짐)
+        prev = prev.head(30).copy()
+
+        prev["오늘종가"] = prev["종목코드"].map(close_map)
+        prev["전일추천매수가"] = pd.to_numeric(prev.get("추천매수가", np.nan), errors="coerce")
+        prev["전일→오늘_수익률%"] = (prev["오늘종가"] / prev["전일추천매수가"] - 1.0) * 100
+
+        prev["검증기준일"] = trade_ymd
+        prev["비교대상추천일"] = prev_ymd
+
+        out1 = os.path.join(out_dir, f"reality_check_{trade_ymd}.csv")
+        out2 = os.path.join(out_dir, "reality_check_latest.csv")
+        prev.to_csv(out1, index=False, encoding=UTF8)
+        prev.to_csv(out2, index=False, encoding=UTF8)
+        log(f"🧪 Reality Check 저장 완료 → {out1}")
+    except Exception as e:
+        log(f"⚠️ Reality Check 실패: {e}")
+
+
 
 # ------------------------------- 거래일/시총 -------------------------------
 
@@ -583,7 +695,7 @@ def get_market_sets(d: str) -> Tuple[set, set]:
 
 def get_name_map_cached(d: str) -> Dict[str, str]:
     ensure_dir(OUT_DIR)
-    path = os.path.join(OUT_DIR, "krx_codes.csv")
+    path = os.path.join(OUT_DIR, f"krx_codes_{d}.csv")
     if os.path.exists(path):
         try:
             df = pd.read_csv(path, dtype=str)
@@ -759,6 +871,7 @@ def route_tag(row: pd.Series) -> str:
     rr1 = _fv("RR1", 0.0)
     mfi = _fv("MFI14", 50.0)
     rel60 = _fv("rel_60d_%", 0.0)  # 60일 상대강도(α)
+    bb_sq = _fv("BB_SQUEEZE", 0.0)
 
     # 1) 강한 돌파 BRK
     strong_break = (
@@ -782,6 +895,10 @@ def route_tag(row: pd.Series) -> str:
     )
     if rev:
         return "🔻 REV (역추세 반등)"
+
+    # 2.5) 스퀴즈 + 모멘텀 플러스 = 돌파예상 Watch로 선반영
+    if (bb_sq >= 1) and (slope > 0) and (now_pct <= 10):
+        return "🔺 Watch (스퀴즈·돌파예상)"
 
     # 3) Watch 영역
     watch = ((slope > 0) and (r5 > 0)) or ((ebs >= PASS_EBS) and (now_pct <= 8))
@@ -919,24 +1036,22 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     # 1차 점수 (섹터 보정 전)
     prelim_score = np.clip(base_score - pen, 0, 100)
 
-    # ----- 섹터(업종) 강도 보정 -----
+    # ----- 섹터(업종) 강도 보정(v6.8): 업종 평균점수 대신 '업종 5일 모멘텀' 사용 -----
     sector_bonus = pd.Series(0.0, index=x.index)
-    sector_key = None
-    if "업종_대분류" in x.columns:
-        sector_key = "업종_대분류"
-    elif "업종" in x.columns:
-        sector_key = "업종"
 
-    if sector_key is not None:
+    if "SECTOR_RET_5D" in x.columns:
         try:
-            sector_mean = prelim_score.groupby(x[sector_key]).transform("mean")
-            sector_norm = pct_norm_pos(sector_mean, q=85, floor=1.0).fillna(0)
-            # 최대 +5점 수준 보너스
-            sector_bonus = 100 * W_SECTOR * sector_norm
+            sec5 = nz_num(x["SECTOR_RET_5D"]).clip(lower=0)
+            sec_norm = pct_norm_pos(sec5, q=85, floor=1.0).fillna(0)
+            sector_bonus = 100 * W_SECTOR * sec_norm  # 최대 +5점 수준
         except Exception:
             sector_bonus = 0.0
 
     final_score = np.clip(prelim_score + sector_bonus, 0, 100)
+
+    # ✅ Bollinger Squeeze 보너스 (LDY_SCORE)
+    bb_sq = col_or_zero(x, "BB_SQUEEZE").clip(0, 1)
+    final_score = np.clip(final_score + BONUS_BB_SQUEEZE_SCORE * bb_sq, 0, 100)
 
     # ----- ENTRY SCORE: 진입 타점 점수 (0~100) -----
     # - near_norm : 엔트리와의 거리
@@ -954,6 +1069,9 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
         + 0.10 * (1 - liq_low)
     )
     entry_score = np.clip(100 * raw_entry, 0, 100)
+    
+    # ✅ Bollinger Squeeze 보너스 (ENTRY_SCORE)
+    entry_score = np.clip(entry_score + BONUS_BB_SQUEEZE_ENTRY * bb_sq, 0, 100)
 
     # ----- 결과 컬럼 세팅 -----
     x["RR1"] = rr1
@@ -992,7 +1110,7 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str) -> None:
     try:
         top5 = df.head(5).reset_index(drop=True)
         trade_date = datetime.strptime(trade_ymd, "%Y%m%d").strftime('%Y-%m-%d')
-        msg = f"🔥 [LDY v6.6] 추천 Top 5 ({trade_date})\n"
+        msg = f"🔥 [LDY v6.8] 추천 Top 5 ({trade_date})\n"
         msg += "-" * 30 + "\n\n"
 
         for i, row in top5.iterrows():
@@ -1063,9 +1181,19 @@ def analyze_ticker(
     l = ohlcv["저가"]
     v = ohlcv["거래량"]
 
-    ma20 = c.rolling(20).mean()
+    ma20 = c.rolling(BB_PERIOD).mean()
     ma60 = c.rolling(60).mean()
     ma120 = c.rolling(120).mean()
+
+    # ✅ Bollinger Bandwidth / Squeeze (여기 삽입)
+    std20 = c.rolling(BB_PERIOD).std()
+    bb_upper = ma20 + (BB_STD * std20)
+    bb_lower = ma20 - (BB_STD * std20)
+    bb_bw_series = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
+    bb_bw = float(bb_bw_series.iloc[-1]) if len(bb_bw_series) else np.nan
+    bb_squeeze = 1 if (np.isfinite(bb_bw) and bb_bw < BB_SQUEEZE_BW) else 0
+
+    above_ma20 = 1 if (np.isfinite(ma20.iloc[-1]) and float(c.iloc[-1]) > float(ma20.iloc[-1])) else 0
 
     atr_series = calc_atr(h, l, c, 14)
     atr = atr_series.iloc[-1]
@@ -1109,13 +1237,13 @@ def analyze_ticker(
     tv_eok = float(tv_row.values[0]) / 1e8
 
     mcap = get_mcap_eok_from_map(mcap_map, code6)
+    # mcap_map이 있을 때만 시총 필터 강제
+    if mcap_map and mcap <= 0:
+        return None        
 
     if tv_eok < MIN_TURNOVER_EOK:
         return None
-    if mcap <= 0:
-        return None
-
-
+ 
     score = 0
     reason: List[str] = []
     if RSI_LOW <= rsi <= RSI_HIGH:
@@ -1185,13 +1313,19 @@ def analyze_ticker(
         "업종": sector,
         "종가": int(last_c),
         "거래대금(억원)": round(tv_eok, 2),
-        "시가총액(억원)": round(mcap, 1),
+        "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
         "RSI14": round(float(rsi), 1),
         "MFI14": round(float(mfi), 1),
         "이격도": round(float(disp), 2),
         "MACD_Hist": round(float(hist.iloc[-1]), 4),
         "MACD_Slope": round(float(slope), 5),
         "거래강도": round(float(vol_z), 2),
+
+        # ✅ v6.8 추가 (여기 삽입)
+        "BB_BW": round(float(bb_bw), 2) if np.isfinite(bb_bw) else np.nan,
+        "BB_SQUEEZE": int(bb_squeeze),
+        "Above_MA20": int(above_ma20),
+        
         "ret_5d_%": round(float(ret_5), 2),
         "ret_10d_%": round(float(ret_10), 2),
         "ret_60d_%": round(float(ret_60), 2),
@@ -1216,7 +1350,7 @@ def main(
     enable_telegram: bool = True,
     tag: Optional[str] = None,
 ) -> None:
-    log("🚀 LDY Collector v6.6 시작...")
+    log("🚀 LDY Collector v6.8 시작...")
 
     # 1) 먼저 거래 기준일 결정
     trade_ymd = resolve_trade_date(trade_date)
@@ -1302,23 +1436,46 @@ def main(
     )
     start_s, end_s = start_dt.strftime("%Y%m%d"), trade_ymd
 
+
     rows: List[Dict[str, Any]] = []
     err_cnt = 0
-
-    for t in tqdm(tickers, desc="Analyzing"):
-        code6 = str(t).zfill(6)
-        try:
-            row = analyze_ticker(
-                t, start_s, end_s, top_df, mcap_map,
-                kospi_set, kosdaq_set, name_map, sector_map,
-                bench_ret_60
-            )
-            if row is not None:
-                rows.append(row)
-        except Exception as e:
-            err_cnt += 1
-            log(f"⚠️ {code6} 처리 중 오류 발생: {e}")
-            continue
+    
+    if MAX_WORKERS <= 1:
+        # 기존 방식(단일)
+        for t in tqdm(tickers, desc="Analyzing"):
+            code6 = str(t).zfill(6)
+            try:
+                row = analyze_ticker(
+                    t, start_s, end_s, top_df, mcap_map,
+                    kospi_set, kosdaq_set, name_map, sector_map,
+                    bench_ret_60
+                )
+                if row is not None:
+                    rows.append(row)
+            except Exception as e:
+                err_cnt += 1
+                log(f"⚠️ {code6} 처리 중 오류 발생: {e}")
+                continue
+    else:
+        # 병렬 처리
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+            futs = []
+            for t in tickers:
+                futs.append(ex.submit(
+                    analyze_ticker,
+                    t, start_s, end_s, top_df, mcap_map,
+                    kospi_set, kosdaq_set, name_map, sector_map,
+                    bench_ret_60
+                ))
+    
+            for fut in tqdm(as_completed(futs), total=len(futs), desc="Analyzing"):
+                try:
+                    row = fut.result()
+                    if row is not None:
+                        rows.append(row)
+                except Exception as e:
+                    err_cnt += 1
+                    log(f"⚠️ 병렬 처리 중 오류: {e}")
 
     if err_cnt > 0:
         log(f"⚠️ 분석 중 오류 발생 종목 수: {err_cnt}건")
@@ -1339,10 +1496,28 @@ def main(
             axis=1,
         )
 
+    # ✅ v6.8 섹터 모멘텀(업종 5일 평균 수익률) + 시장 브레드스
+    df_raw, sector_rank = add_sector_momentum(df_raw, "업종_대분류")
+    breadth = compute_market_breadth(df_raw)
+    mkt_temp = label_market_temp(breadth.get("ALL", np.nan))
 
     # df_raw 생성 완료 이후 (main() 내부)
     df_out = build_global_score(df_raw)
 
+    df_out["MKT_BREADTH_ALL_%"] = breadth.get("ALL", np.nan)
+    df_out["MKT_BREADTH_KOSPI_%"] = breadth.get("KOSPI", np.nan)
+    df_out["MKT_BREADTH_KOSDAQ_%"] = breadth.get("KOSDAQ", np.nan)
+    df_out["MKT_TEMP"] = mkt_temp
+
+    # 섹터 랭킹 상위 5개 텍스트(텔레그램/대시보드용)
+    try:
+        top_secs = sector_rank.head(5)
+        df_out["TOP_SECTORS_5D"] = " / ".join(
+            [f"{i+1}.{k}({v:+.1f}%)" for i, (k, v) in enumerate(top_secs.items())]
+        )
+    except Exception:
+        df_out["TOP_SECTORS_5D"] = ""
+    
     def _regime_rank(val: str) -> int:
         s = str(val)
         if s.startswith("①"): return 1
@@ -1411,7 +1586,10 @@ def main(
 
     log(f"💾 저장 완료 ({len(df_out)}건) → {out_path_dated}")
     log(f"💾 최신 파일 업데이트 → {out_path_latest}")
-
+    
+    # ✅ Reality Check 생성
+    run_reality_check(OUT_DIR, trade_ymd)
+    
     if enable_telegram:
         send_telegram_auto(df_out, trade_ymd)
     else:
@@ -1420,7 +1598,7 @@ def main(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="LDY Pro Trader Collector v6.6")
+    parser = argparse.ArgumentParser(description="LDY Pro Trader Collector v6.8")
     parser.add_argument(
         "--date",
         type=str,
