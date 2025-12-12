@@ -468,10 +468,13 @@ with st.sidebar:
 # ---------------------------
 # 필터링 로직
 # ---------------------------
-filtered_df = df_scored[df_scored["LDY_SCORE"] >= min_score].copy()
 
-if only_squeeze and "BandWidth" in filtered_df.columns:
-    filtered_df = filtered_df[filtered_df["BandWidth"] < 15]
+# [수정됨] Squeeze 체크가 켜져 있으면 '점수 컷'을 무시하고 밴드폭으로만 검색
+if only_squeeze and "BandWidth" in df_scored.columns:
+    filtered_df = df_scored[df_scored["BandWidth"] < 15].copy()
+else:
+    # 체크가 꺼져 있으면 기존대로 점수(LDY_SCORE) 기준 필터링
+    filtered_df = df_scored[df_scored["LDY_SCORE"] >= min_score].copy()
 
 if selected_regimes and "REGIME" in filtered_df.columns:
     filtered_df = filtered_df[filtered_df["REGIME"].isin(selected_regimes)]
