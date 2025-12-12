@@ -78,11 +78,14 @@ def calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
     rs = roll_up / roll_down.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
+    
+    # down=0 && up>0 => 100, up=0 && down>0 => 0, 둘 다 0 => 50
+    both_zero = (roll_up == 0) & (roll_down == 0)
+    rsi = rsi.where(~both_zero, 50)
+    rsi = rsi.where(~((roll_down == 0) & (roll_up != 0)), 100)
+    rsi = rsi.where(~((roll_up == 0) & (roll_down != 0)), 0)
 
-    # ✅ 표준 보정: down=0이면 RSI=100, up=0이면 RSI=0
-    rsi = rsi.where(roll_down != 0, 100)
-    rsi = rsi.where(roll_up != 0, 0)
-    return rsi
+    return rsi  # ✅ 이거 반드시 필요
 
 def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     tr = pd.concat(
@@ -261,11 +264,15 @@ def get_sector_map_krx() -> Dict[str, str]:
             "fiscalYearEnd": "all",
             "location": "all",
         }
-        r = requests.post(url, data=data, headers={"User-Agent": "Mozilla/5.0"})
-        r.raise_for_status()
-
-        # 👉 포인트: read_html 로 테이블 통째로 읽기
-        dfs = pd.read_html(io.BytesIO(r.content), header=0)
+        resp = requests.post(
+            url,
+            data=data,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=20
+        )
+        resp.raise_for_status()
+        
+        dfs = pd.read_html(io.BytesIO(resp.content), header=0)
         if not dfs:
             log("⚠️ KIND 테이블 파싱 실패: 테이블이 비어 있음")
             return {}
@@ -784,7 +791,7 @@ def route_tag(row: pd.Series) -> str:
         return "🔺 Watch (상승 준비)"
 
     # 4) 그 외는 기본적으로 PULL
-    if r5 <= -2 and slope < 0:
+    if r5 <= -2 and slope > 0:
         return "🔁 MR (반전)"
 
     return "↩️ PULL (눌림)"
@@ -800,6 +807,11 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     """
     x = lat.copy()
 
+    # ✅ [추가/삽입] 컬럼 없으면 0으로 채운 Series 반환
+    def col_or_zero(df: pd.DataFrame, col: str) -> pd.Series:
+        return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
+
+    
     # ----- 기본 수치 추출 -----
     close = nz_num(x["종가"])
     entry = nz_num(x["추천매수가"])
@@ -813,7 +825,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     r5 = nz_num(x["ret_5d_%"])
     r10 = nz_num(x["ret_10d_%"])
     ebs = nz_num(x["EBS"]).fillna(0)
-    rel60 = nz_num(x.get("rel_60d_%", 0.0))  # 60일 상대강도(α)
+    rel60 = col_or_zero(x, "rel_60d_%")
 
     # ----- RR / T1 / SL / Now -----
     rr_den = (entry - stop)
@@ -822,11 +834,15 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
 
     now_gap = ((close - entry).abs() / entry * 100)          # 추천가 대비 현재 위치
     t1_room = ((t1 - close) / close * 100)                   # 현재가→목표1 여유
-    sl_room = ((close - stop) / close * 100)                 # 현재가→손절 여유(손절 폭)
+    # 손절 폭(%)은 엔트리 대비로 계산해야 함
+    sl_pct = ((entry - stop) / entry * 100)
+    # sl_room은 '현재가 기준'으로 쓰고 싶으면 이름을 바꾸고,
+    # big_sl 패널티는 sl_pct 기준으로!
+    sl_room = ((close - stop) / close * 100)   # (옵션) 현재가→손절 거리(참고용)
 
     rr_norm = pct_norm_pos(rr1, q=90, floor=1.0).fillna(0)
     t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1).fillna(0)
-    sl_norm = np.clip(sl_room / cap_q(sl_room, q=90, floor=3.0), 0, 1).fillna(0)
+    sl_norm = np.clip(sl_pct / cap_q(sl_pct, q=90, floor=3.0), 0, 1).fillna(0)
     near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0)).fillna(0)
 
     # ----- MOM (모멘텀 + 상대강도) -----
@@ -897,7 +913,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     pen += P_VOL_SPIKE * (volz > 3).astype(float)
 
     # 손절 폭 과도(big SL) 추가 패널티
-    big_sl = (sl_room > 12).astype(float)  # 손절 폭 12% 초과 종목
+    big_sl = (sl_pct > 12).astype(float)
     pen += P_BIG_SL * big_sl
 
     # 1차 점수 (섹터 보정 전)
@@ -1008,10 +1024,15 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str) -> None:
             msg += f"   🔵매수: {buy:,}\n"
             msg += f"   🔴손절: {row['손절가']:,} / 🟢목표: {row['추천매도가1']:,}\n\n"
 
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            data={"chat_id": TG_ID, "text": msg}
+            data={"chat_id": TG_ID, "text": msg},
+            timeout=15
         )
+        
+        # 원하면 켜(권장). 텔레그램 API가 에러 주면 바로 로그로 잡힘
+        resp.raise_for_status()
+        
         log("🚀 텔레그램 전송 완료")
     except Exception as e:
         log(f"⚠️ 텔레그램 전송 실패: {e}")
@@ -1153,7 +1174,7 @@ def analyze_ticker(
     sector = sector_map.get(code6, "기타")
     name = name_map.get(code6, code6)
 
-    market = "KOSPI" if t in kospi_set else "KOSDAQ"
+    market = "KOSPI" if code6 in kospi_set else "KOSDAQ"
     idx_60 = bench_ret_60.get(market, np.nan)
     rel_60 = ret_60 - idx_60 if np.isfinite(idx_60) else np.nan
 
@@ -1364,8 +1385,23 @@ def main(
     except Exception as e:
         log(f"⚠️ 메타 요약 계산 실패: {e}")
 
+    # ✅ [추가/삽입] 저장 직전 스키마 고정 (대시보드 컬럼 깨짐 방지)
+    must_cols = [
+        "종목코드","종목명","시장","업종","업종_상세","업종_대분류",
+        "종가","거래대금(억원)","시가총액(억원)",
+        "추천매수가","손절가","추천매도가1","추천매도가2",
+        "LDY_SCORE","ENTRY_SCORE","ROUTE","REGIME"
+    ]
+    for c in must_cols:
+        if c not in df_out.columns:
+            df_out[c] = np.nan
+    
+    df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]    
+
+
+    
     ensure_dir(OUT_DIR)
-    date_tag = now_kst().strftime("%Y%m%d")
+    date_tag = trade_ymd
     suffix = f"_{tag}" if tag else ""
     out_path_dated = os.path.join(OUT_DIR, f"recommend_{date_tag}{suffix}.csv")
     out_path_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
