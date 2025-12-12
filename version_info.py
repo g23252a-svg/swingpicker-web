@@ -8,7 +8,7 @@ import streamlit as st
 
 logger = logging.getLogger("version_info")
 if not logger.handlers:
-    # 기본 로깅 설정 (필요하면 최상위에서 다시 세팅해도 됨)
+    # 기본 로깅 설정
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
@@ -23,7 +23,6 @@ def _get_conf(key, default_val):
         if key in st.secrets:
             return st.secrets[key]
     except FileNotFoundError:
-        # 로컬에서 .streamlit/secrets.toml 없을 때
         pass
     return os.getenv(key, default_val)
 
@@ -31,21 +30,17 @@ def _get_conf(key, default_val):
 # --------------------------------------------------------------------
 # 1) 버전 정보
 #    - LDY_APP_VERSION 으로 오버라이드 가능
-#    - 예: "6.5.0", "6.5.1-beta", "6.6.0+staging"
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.8.0")
-APP_VERSION = _RAW_APP_VERSION  # 기존 코드 호환용 (대시보드에서 import 하는 값)
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.9.0")
+APP_VERSION = _RAW_APP_VERSION
 
 
 def _shorten_version(ver: str) -> str:
     """
-    "6.5.0" -> "6.5"
-    "6.5.1-beta" -> "6.5"
-    "7" -> "7"
+    "6.9.0" -> "6.9"
+    "6.9.1-beta" -> "6.9"
     """
-    if not ver:
-        return ""
-    # 빌드/프리릴리즈 태그 제거 (예: 6.5.0-beta+001)
+    if not ver: return ""
     core = ver.split("+", 1)[0].split("-", 1)[0]
     parts = core.split(".")
     if len(parts) >= 2:
@@ -53,15 +48,15 @@ def _shorten_version(ver: str) -> str:
     return core
 
 
-VERSION_SHORT = _shorten_version(APP_VERSION)  # UI에 간단히 표시하고 싶을 때 사용
+VERSION_SHORT = _shorten_version(APP_VERSION)
 
 
 # --------------------------------------------------------------------
 # 2) PRIME 텔레그램 채널 URL
 # --------------------------------------------------------------------
 PRIME_TG_JOIN_URL = _get_conf(
-    "LDY_PRIME_JOIN_URL",                   # 👉 키 이름 (환경변수/시크릿에서 찾을 이름)
-    "https://t.me/+DovDEluWnEJhOTY1",       # 👉 기본값 (아무것도 없으면 이 URL 사용)
+    "LDY_PRIME_JOIN_URL",
+    "https://t.me/+DovDEluWnEJhOTY1",  # 기본값
 )
 
 
@@ -71,6 +66,18 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG = [
     {
+        "version": "6.9.0",
+        "date": "2025-12-12",
+        "title": "Deep Insight & Squeeze Hunter",
+        "items": [
+            "🌡️ **Market Breadth Gauge:** 시장 전체 종목 중 20일 이동평균선 상회 비율(%)을 시각화하여 지수 왜곡 없는 진짜 시장 온도를 측정.",
+            "⚡ **Squeeze Hunter:** 볼린저 밴드폭(BandWidth)이 15% 미만으로 축소된 '변동성 폭발 임박' 종목을 원클릭 필터링.",
+            "📊 **Advanced Charting v2:** 차트에 BandWidth 보조지표를 추가하여 변동성 축소/확대 구간을 직관적으로 확인.",
+            "🔥 **Sector Heatmap Upgrade:** 단순 거래대금 크기가 아닌, 섹터별 평균 등락률(모멘텀)을 색상으로 입혀 주도 섹터 식별력 강화.",
+            "🔐 **Auth Core Update:** PBKDF2-HMAC-SHA256 해시 적용 및 로그인/로그아웃 시 자동 새로고침(UX 개선).",
+        ],
+    },
+    {
         "version": "6.8.0",
         "date": "2025-12-10",
         "title": "Reality Check & Deep Tech",
@@ -79,7 +86,7 @@ CHANGELOG = [
             "📊 **Advanced Charting:** 볼린저 밴드 / RSI 보조지표를 On/Off 할 수 있는 전문가용 인터랙티브 차트 도입.",
             "🏥 **Portfolio Health Check:** 내 자산의 섹터 편중도와 현금 비중(%)을 분석하여 리스크 관리 조언 제공.",
             "🚀 **Sector Momentum:** 섹터별 최근 수익률/점수 Top 10 바 차트 추가.",
-            "🔧 **System Stabilization:** Gist 파일 분리(회원DB/포트폴리오)로 데이터 보존성 강화 및 텔레그램-대시보드 정렬 로직 통일.",
+            "🔧 **System Stabilization:** Gist 파일 분리(회원DB/포트폴리오)로 데이터 보존성 강화.",
         ],
     },
     {
@@ -87,10 +94,9 @@ CHANGELOG = [
         "date": "2025-12-08",
         "title": "Prime Top 100 + Role-based Daily Top",
         "items": [
-            "게스트/Free/Pro/Prime/Admin 등급별 Daily Top 노출 개수를 분리 (Guest 3개, Free 5개, Pro 20개, Prime/Admin 100개).",
-            "Prime/Admin 등급에서 EBS·유동성 통과 종목 풀을 넓혀, 더 많은 후보군 중에서 상위 100개를 열람할 수 있도록 개선.",
-            "Daily Top List, 종목 선택 드롭다운, 개별 차트/레이더/리스크-리워드 분석이 동일한 필터 조건(LDY 점수, ROUTE, REGIME)에 따라 일관되게 동작하도록 구조 정리.",
-            "필터가 과도하게 좁거나 데이터가 부족한 상황에서도 에러 없이 빈 상태 안내/경고만 출력되도록 방어 코드 보강.",
+            "등급별 Daily Top 노출 개수 분리 (Guest 3개, Free 5개, Pro 20개, Prime/Admin 100개).",
+            "Prime/Admin 등급 전용 EBS·유동성 통과 종목 풀 확대 (최대 100개).",
+            "필터링 구조 통일 (Daily Top, 차트, 분석 도구 간 데이터 동기화).",
         ],
     },
     {
@@ -99,23 +105,10 @@ CHANGELOG = [
         "title": "Data Freshness + Market Snapshot",
         "items": [
             "GitHub 원격 CSV / 로컬 캐시 데이터 출처 태그(remote/local) 표시.",
-            "추천 데이터 기준일(기준일자/날짜/Date 컬럼 자동 인식) 추론 및 2일 이상 경과 시 신선도 경고 출력.",
-            "FDR/pykrx 지수 기반 KOSPI/KOSDAQ Market Snapshot + 데이터 장애 시 로컬 스코어 기반으로 자동 Fallback.",
-            "KS11 지수 기반 공포/탐욕 지수 + scored DF 기반 Fallback을 통합한 공포/탐욕 인덱스 구현.",
+            "추천 데이터 기준일 자동 추론 및 신선도 경고 시스템.",
+            "FDR/pykrx 지수 기반 Market Snapshot 및 공포/탐욕 지수 통합.",
         ],
     },
-    {
-        "version": "6.5.0",
-        "date": "2025-12-06",
-        "title": "Collector v6.5 / 계정 시스템 안정화",
-        "items": [
-            "Collector v6.5: 60일 지수 수익률·상대강도(α) 반영",
-            "KOSPI/KOSDAQ 지수 fallback 로직 개선 (직전 영업일 자동 탐색)",
-            "회원 DB를 GitHub Gist + 로컬 캐시 구조로 안정화",
-            "로그인/회원가입 시 이메일 소문자 통일 + 형식 검증 추가",
-        ],
-    },
-    # 필요하면 과거 버전 계속 추가
 ]
 
 
@@ -123,20 +116,11 @@ CHANGELOG = [
 # 4) Changelog / 버전 유틸
 # --------------------------------------------------------------------
 def get_latest_log():
-    """
-    최신(맨 위) CHANGELOG 항목 반환.
-    CHANGELOG가 비어 있으면 None.
-    """
     return CHANGELOG[0] if CHANGELOG else None
 
 
 def find_changelog(version: str):
-    """
-    특정 버전에 해당하는 changelog 항목을 찾아 반환.
-    없으면 None.
-    """
-    if not version:
-        return None
+    if not version: return None
     for log in CHANGELOG:
         if log.get("version") == version:
             return log
@@ -144,22 +128,15 @@ def find_changelog(version: str):
 
 
 def get_version_label(include_build: bool = True) -> str:
-    """
-    UI에 표시할 버전 문자열 포맷터.
-    - include_build=True  -> "6.5.0"
-    - include_build=False -> "6.5"
-    """
     return APP_VERSION if include_build else VERSION_SHORT
 
 
-# 모듈 import 시점에 changelog와 버전이 일치하는지 한 번 점검
+# 버전 정합성 체크
 _latest = get_latest_log()
 if _latest:
     latest_ver = _latest.get("version")
     if latest_ver and latest_ver != APP_VERSION:
         logger.warning(
-            "version_info: APP_VERSION(%s)와 CHANGELOG[0].version(%s)이 일치하지 않습니다. "
-            "버전 정합성을 확인해 주세요.",
-            APP_VERSION,
-            latest_ver,
+            "version_info: APP_VERSION(%s) != CHANGELOG[0](%s). Check consistency.",
+            APP_VERSION, latest_ver
         )
