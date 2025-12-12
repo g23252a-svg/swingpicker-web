@@ -927,7 +927,6 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     # ✅ [추가/삽입] 컬럼 없으면 0으로 채운 Series 반환
     def col_or_zero(df: pd.DataFrame, col: str) -> pd.Series:
         return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
-
     
     # ----- 기본 수치 추출 -----
     close = nz_num(x["종가"])
@@ -945,9 +944,9 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     rel60 = col_or_zero(x, "rel_60d_%")
 
     # ----- RR / T1 / SL / Now -----
-    rr_den = (entry - stop)
+    rr_den = (close - stop)
     rr_den = rr_den.where(rr_den > 0, np.nan)
-    rr1 = (t1 - entry) / rr_den
+    rr1 = (t1 - close) / rr_den   # ✅ 현재가 기준 RR
 
     now_gap = ((close - entry).abs() / entry * 100)          # 추천가 대비 현재 위치
     t1_room = ((t1 - close) / close * 100)                   # 현재가→목표1 여유
@@ -959,7 +958,11 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
 
     rr_norm = pct_norm_pos(rr1, q=90, floor=1.0).fillna(0)
     t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1).fillna(0)
-    sl_norm = np.clip(sl_pct / cap_q(sl_pct, q=90, floor=3.0), 0, 1).fillna(0)
+    # build_global_score() 안에서 sl_norm 교체
+    opt = 7.0     # 손절폭 최적(%) - 너 스타일이면 6~8% 권장
+    width = 3.0   # 허용 폭
+    sl_norm = np.exp(-((sl_pct - opt) / width) ** 2)   # 0~1, opt 근처가 최고
+    sl_norm = pd.Series(sl_norm, index=x.index).fillna(0)
     near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0)).fillna(0)
 
     # ----- MOM (모멘텀 + 상대강도) -----
@@ -1072,6 +1075,29 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     
     # ✅ Bollinger Squeeze 보너스 (ENTRY_SCORE)
     entry_score = np.clip(entry_score + BONUS_BB_SQUEEZE_ENTRY * bb_sq, 0, 100)
+
+    # ----- 확률랭킹 점수(RANK_SCORE) : 3~7영업일 상승확률용 -----
+    # above_ma20(방향성) / bb_sq(스퀴즈) / entry+final(품질) / overheat(과열감점)
+    above = col_or_zero(x, "Above_MA20").clip(0, 1)
+
+    # entry_score, final_score가 np.array 형태일 수 있어서 index 맞춰준다
+    entry_s = pd.Series(entry_score, index=x.index)
+    final_s = pd.Series(final_score, index=x.index)
+
+    overheat = (
+        0.6 * np.clip((r5 - 8) / 8, 0, 1) +
+        0.4 * np.clip((r10 - 18) / 18, 0, 1)
+    )
+
+    rank_score = (
+        0.55 * (entry_s / 100) +     # 지금 타점
+        0.30 * (final_s / 100) +     # 종합 퀄리티
+        0.10 * bb_sq +               # 스퀴즈
+        0.05 * above -               # 20일선 위
+        0.20 * overheat              # 과열 감점
+    )
+
+    x["RANK_SCORE"] = np.clip(rank_score * 100, 0, 100).round(1)
 
     # ----- 결과 컬럼 세팅 -----
     x["RR1"] = rr1
@@ -1531,8 +1557,8 @@ def main(
     df_out["REGIME_RANK"] = df_out["REGIME"].map(_regime_rank).fillna(999).astype(int)
 
     df_out = df_out.sort_values(
-        ["REGIME_RANK", "LDY_SCORE", "ENTRY_SCORE", "거래대금(억원)"],
-        ascending=[True, False, False, False]
+        ["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE", "거래대금(억원)"],
+        ascending=[False, False, False, False]
     )
 
     df_out["기준일"] = trade_ymd
@@ -1565,7 +1591,7 @@ def main(
         "종목코드","종목명","시장","업종","업종_상세","업종_대분류",
         "종가","거래대금(억원)","시가총액(억원)",
         "추천매수가","손절가","추천매도가1","추천매도가2",
-        "LDY_SCORE","ENTRY_SCORE","ROUTE","REGIME"
+        "LDY_SCORE","ENTRY_SCORE","RANK_SCORE","ROUTE","REGIME"
     ]
     for c in must_cols:
         if c not in df_out.columns:
