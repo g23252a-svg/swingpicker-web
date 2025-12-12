@@ -69,22 +69,19 @@ def nz_num(s: Any) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 def calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """
-    표준 RSI 구현 (down=0인 날 때문에 전 구간이 NaN 되는 문제 수정)
-    """
     delta = close.diff()
     up = delta.clip(lower=0)
     down = -delta.clip(upper=0)
 
-    # 1) 먼저 rolling 평균을 구하고
     roll_up = up.rolling(period).mean()
     roll_down = down.rolling(period).mean()
 
-    # 2) 그 다음에 0인 down을 NaN 처리 (0으로 나누기 방지용)
-    roll_down = roll_down.replace(0, np.nan)
+    rs = roll_up / roll_down.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
 
-    rs = roll_up / roll_down
-    rsi = 100 - 100 / (1 + rs)
+    # ✅ 표준 보정: down=0이면 RSI=100, up=0이면 RSI=0
+    rsi = rsi.where(roll_down != 0, 100)
+    rsi = rsi.where(roll_up != 0, 0)
     return rsi
 
 def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
@@ -127,25 +124,21 @@ def _has_ohlcv_and_mcap(ymd: str) -> bool:
             pass
     return False
 
-def find_latest_valid_date(check_fn: Callable[[str], bool], max_back_days: int = 10) -> str:
-    """
-    공통 날짜 탐색 유틸:
-    - 오늘 18시 이전이면 전일 기준
-    - check_fn(YYYYMMDD)가 True인 가장 최근 날짜 반환
-    """
+def find_latest_valid_date(check_fn, max_back_days: int = 10) -> str:
     now = now_kst()
     d = now.date()
     if now.hour < 18:
         d -= timedelta(days=1)
 
-    last_ymd = d.strftime("%Y%m%d")
+    last_checked = d.strftime("%Y%m%d")
     for _ in range(max_back_days):
         ymd = d.strftime("%Y%m%d")
+        last_checked = ymd
         if check_fn(ymd):
             return ymd
         d -= timedelta(days=1)
-        last_ymd = d.strftime("%Y%m%d")
-    return last_ymd
+
+    return last_checked
 
 def resolve_trade_date(force_ymd: Optional[str] = None) -> str:
     """
@@ -1161,8 +1154,8 @@ def analyze_ticker(
     name = name_map.get(code6, code6)
 
     market = "KOSPI" if t in kospi_set else "KOSDAQ"
-    idx_60 = float(bench_ret_60.get(market, 0.0))
-    rel_60 = ret_60 - idx_60
+    idx_60 = bench_ret_60.get(market, np.nan)
+    rel_60 = ret_60 - idx_60 if np.isfinite(idx_60) else np.nan
 
     row: Dict[str, Any] = {
         "시장": market,
