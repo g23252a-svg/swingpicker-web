@@ -2144,13 +2144,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    try:
-        main(
-            trade_date=args.date,
-            top_n=args.top,
-            enable_telegram=not args.no_telegram,
-            tag=args.tag,
-        )
+    main(
+        trade_date=args.date,
+        top_n=args.top,
+        enable_telegram=not args.no_telegram,
+        tag=args.tag,
+    )
     except Exception as e:
         log(f"❌ Collector 실행 중 치명적 오류: {e}")
         raise
