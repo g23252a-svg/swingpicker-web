@@ -386,60 +386,59 @@ def route_tag(row: pd.Series) -> str:
     return "↩️ PULL (눌림)"
 
 def build_global_score(df: pd.DataFrame) -> pd.DataFrame:
-    """ v6.8: 동적 섹터 모멘텀 반영 점수 산출 """
     x = df.copy()
 
-    # 1. Dynamic Sector Momentum
+    # 1) Sector momentum
     if "업종_대분류" in x.columns:
-        # 업종별 5일 평균 수익률 계산하여 매핑
-        sector_mom = x.groupby("업종_대분류")["ret_5d_%"].transform("mean")
-        x["Sector_Mom_5d"] = sector_mom.fillna(0)
+        x["Sector_Mom_5d"] = x.groupby("업종_대분류")["ret_5d_%"].transform("mean").fillna(0)
     else:
         x["Sector_Mom_5d"] = 0.0
 
-    # 2. 지표 정규화
-    def cap_q(s, q=90, f=1.0): return max(float(np.nanpercentile(nz_num(s), q)), f)
-    
     rr1 = nz_num(x["RR1"]).fillna(0)
-    rr_norm = np.clip(rr1 / 3.0, 0, 1) # RR 3.0 이상 만점
+    rr_norm = np.clip(rr1 / 3.0, 0, 1)
 
-    # 가격 위치 점수
     t1_room = nz_num((x["추천매도가1"] - x["종가"]) / x["종가"] * 100)
     sl_room = nz_num((x["종가"] - x["손절가"]) / x["종가"] * 100)
     now_gap = nz_num(x["Now%"])
-    
+
     t1_norm = np.clip(t1_room / 15.0, 0, 1)
-    sl_norm = np.clip(sl_room / 10.0, 0, 1) 
-    near_norm = np.clip(1 - (now_gap / 5.0), 0, 1) # 5% 이내여야 점수 높음
+    sl_norm = np.clip(sl_room / 10.0, 0, 1)
 
-    # 모멘텀 점수 (개별 + 섹터)
+    # 🔧 (핵심) 강추세 종목 near_norm 급사 완화 (5% -> 10%)
+    near_norm = np.clip(1 - (now_gap / 10.0), 0, 1)
+
+    # 모멘텀(개별/섹터)
     indiv_mom = np.clip(nz_num(x["ret_10d_%"]) / 20.0, 0, 1)
-    sector_mom_norm = np.clip(nz_num(x["Sector_Mom_5d"]) / 5.0, 0, 1) # 섹터 평균 5%면 만점
+    sector_mom_norm = np.clip(nz_num(x["Sector_Mom_5d"]) / 5.0, 0, 1)
 
-    # 유동성 점수
+    # 유동성
     liq_val = nz_num(x["거래대금(억원)"])
-    liq_norm = np.clip(liq_val / 500, 0, 1) # 500억 이상 만점
+    liq_norm = np.clip(liq_val / 500, 0, 1)
 
-    # 3. 종합 점수 (Base Score)
+    # ✅ (핵심) W_TEC 실제 반영: EBS 기반 기술점수
+    tec_norm = np.clip(nz_num(x["EBS"]) / PASS_EBS, 0, 1)
+
+    # ✅ (핵심) 가중치 합으로 정규화해서 0~100 스케일 유지
+    weights_sum = (W_RR + W_T1 + W_SL + W_NEAR + W_MOM + W_SECTOR_MOM + W_LIQ + W_TEC)
+
     base_score = (
-        100 * W_RR * rr_norm +
-        100 * W_T1 * t1_norm +
-        100 * W_SL * sl_norm +
-        100 * W_NEAR * near_norm +
-        100 * W_MOM * indiv_mom +
-        100 * W_SECTOR_MOM * sector_mom_norm + # v6.8 New
-        100 * W_LIQ * liq_norm
-    )
+        W_RR * rr_norm +
+        W_T1 * t1_norm +
+        W_SL * sl_norm +
+        W_NEAR * near_norm +
+        W_MOM * indiv_mom +
+        W_SECTOR_MOM * sector_mom_norm +
+        W_LIQ * liq_norm +
+        W_TEC * tec_norm
+    ) / max(weights_sum, 1e-9) * 100
 
-    # 4. 패널티
     pen = pd.Series(0.0, index=x.index)
     pen += P_OVERHEAT_5D * (x["ret_5d_%"] > 15).astype(int)
     pen += P_MACD_NEG * (x["MACD_Slope"] < 0).astype(int)
-    pen += P_BIG_SL * (sl_room > 15).astype(int) # 손절폭 너무 크면 감점
+    pen += P_BIG_SL * (sl_room > 15).astype(int)
 
     final_score = np.clip(base_score - pen, 0, 100)
-    
-    # 5. 진입 매력도 (Entry Score)
+
     entry_score = np.clip(
         40 * near_norm + 30 * rr_norm + 30 * sector_mom_norm, 0, 100
     )
@@ -448,7 +447,6 @@ def build_global_score(df: pd.DataFrame) -> pd.DataFrame:
     x["ENTRY_SCORE"] = entry_score.round(1)
     x["ROUTE"] = x.apply(route_tag, axis=1)
     x["REGIME"] = x.apply(detect_regime_row, axis=1)
-
     return x
 
 def analyze_ticker(
