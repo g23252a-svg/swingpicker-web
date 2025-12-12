@@ -13,6 +13,18 @@ import requests
 import streamlit as st
 import secrets
 
+AUTH_IMPORT_ERR = None
+
+try:
+    from auth_user import render_auth_box, update_user_role, list_users
+except Exception as e:
+    AUTH_IMPORT_ERR = f"{type(e).__name__}: {e}"
+
+    # fallback (기존처럼 앱은 뜨게)
+    def render_auth_box(show_debug=False): return None
+    def update_user_role(*args, **kwargs): return False
+    def list_users(*args, **kwargs): return {}
+
 # ----------------- 로깅 설정 -----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("auth_user")
