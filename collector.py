@@ -927,24 +927,54 @@ def get_index_60d_returns(trade_ymd: str, lookback: int = BENCH_LOOKBACK_DAYS) -
 
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
+
     for m in ["KOSPI", "KOSDAQ"]:
         try:
-            df = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market=m).reset_index()
-            df.columns = [
-                '종목코드' if ('티커' in str(c) or '코드' in str(c)) else c
-                for c in df.columns
-            ]
-            df.columns = ['거래대금(원)' if c == '거래대금' else c for c in df.columns]
+            df = stock.get_market_ohlcv_by_ticker(date_yyyymmdd, market=m)
+            if df is None or df.empty:
+                log(f"⚠️ {m} 거래대금 데이터 비어있음: {date_yyyymmdd}")
+                continue
 
+            df = df.reset_index()
 
-        except Exception:
-            pass
+            # 코드 컬럼명 통일
+            code_col = None
+            for c in df.columns:
+                if ("티커" in str(c)) or ("코드" in str(c)) or (str(c) == "종목코드"):
+                    code_col = c
+                    break
+            if code_col is None:
+                log(f"⚠️ {m} 코드 컬럼을 찾을 수 없음: {df.columns.tolist()}")
+                continue
+
+            df = df.rename(columns={code_col: "종목코드"})
+
+            # 거래대금 컬럼명 통일
+            if "거래대금" in df.columns and "거래대금(원)" not in df.columns:
+                df = df.rename(columns={"거래대금": "거래대금(원)"})
+
+            if "거래대금(원)" not in df.columns:
+                log(f"⚠️ {m} 거래대금 컬럼이 없음: {df.columns.tolist()}")
+                continue
+
+            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+            df["시장"] = m
+            df["거래대금(원)"] = pd.to_numeric(df["거래대금(원)"], errors="coerce")
+
+            # ✅ 여기서 frames에 넣어야 함 (이게 누락돼서 지금 에러 난 것)
+            frames.append(df[["종목코드", "시장", "거래대금(원)"]])
+
+        except Exception as e:
+            log(f"⚠️ {m} 거래대금 수집 실패({date_yyyymmdd}): {e}")
+            continue
 
     if not frames:
         raise RuntimeError("No Data from KRX (거래대금)")
-    df_all = pd.concat(frames, ignore_index=True)
-    df_all['종목코드'] = df_all['종목코드'].astype(str).str.zfill(6)
-    return df_all.sort_values('거래대금(원)', ascending=False).head(top_n)
+
+    df_all = pd.concat(frames, ignore_index=True).dropna(subset=["거래대금(원)"])
+    df_all["종목코드"] = df_all["종목코드"].astype(str).str.zfill(6)
+
+    return df_all.sort_values("거래대금(원)", ascending=False).head(top_n)
 
 def get_market_sets(d: str) -> Tuple[set, set]:
     try:
@@ -1660,8 +1690,7 @@ def analyze_ticker(
     sector = sector_map.get(code6, "기타")
     name = name_map.get(code6, code6)
 
-    df["시장"] = m
-    frames.append(df[['종목코드', '시장', '거래대금(원)']])
+
 
     
     m_row = top_df.loc[top_df["종목코드"] == code6, "시장"]
