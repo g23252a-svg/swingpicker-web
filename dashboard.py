@@ -19,6 +19,12 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import re
+# dashboard.py (상단 import들 바로 아래에 추가)
+import sys, os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 # 가격(호가단위/표시) 유틸
 from price_utils import format_krw, format_pct, format_signed_krw, round_to_tick
