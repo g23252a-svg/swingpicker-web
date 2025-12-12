@@ -372,18 +372,31 @@ def plot_sector_treemap_v69(df):
 # ---------------------------
 @st.cache_data(ttl=600)
 def load_and_process_data(raw_url, local_path):
-    # 1. Load
-    try:
-        r = requests.get(raw_url, timeout=30)
-        r.raise_for_status()
-        df = pd.read_csv(io.BytesIO(r.content))
-        src = "remote"
-    except:
+    df = None
+    src = None
+
+    raw_url = str(raw_url) if raw_url is not None else ""
+    is_http = raw_url.startswith(("http://", "https://"))
+
+    # 1) 원격 URL이면 먼저 원격 시도
+    if is_http:
+        try:
+            r = requests.get(raw_url, timeout=30)
+            r.raise_for_status()
+            df = pd.read_csv(io.BytesIO(r.content))
+            src = "remote"
+        except Exception:
+            df = None
+            src = None
+
+    # 2) 원격 실패 or 애초에 URL이 아니면 로컬 fallback
+    if df is None:
         if os.path.exists(local_path):
             df = pd.read_csv(local_path)
             src = "local"
         else:
-            return None, None, None, None, "fail"
+            # ★ 너는 4개 변수로 받으니까, 반환도 4개로 맞춰야 함
+            return None, None, None, "fail"
 
     # 2. Normalize
     if "거래대금(원)" in df.columns and "거래대금(억원)" not in df.columns:
