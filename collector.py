@@ -42,10 +42,10 @@ OUT_DIR = "data"
 UTF8 = "utf-8-sig"
 
 # [가중치 v6.8 조정]
-# 섹터 모멘텀(W_SECTOR_MOM) 추가 및 기타 비중 미세 조정
-W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.20, 0.15, 0.10, 0.10, 0.15, 0.10, 0.10
-W_SECTOR_MOM = 0.10 
-
+# 점수 스케일이 0~100으로 자연스럽게 퍼지도록 정규화/가중치 재조정
+# (기존: 일부 가중치가 합 1.0 미만 + near/liq/rr 정규화가 빡빡해서 상단 점수가 60대에 갇히는 현상)
+W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.18, 0.14, 0.10, 0.10, 0.14, 0.12, 0.12
+W_SECTOR_MOM = 0.10
 # [패널티]
 P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
@@ -386,42 +386,84 @@ def route_tag(row: pd.Series) -> str:
     return "↩️ PULL (눌림)"
 
 def build_global_score(df: pd.DataFrame) -> pd.DataFrame:
+    """v6.8 점수 스케일 교정 버전
+    - 증상: LDY_SCORE 상단이 60대에 갇혀 min_score=70 필터가 전부 비는 현상
+    - 원인:
+      1) 가중치 합이 1.0 미만(=최대점 자체가 낮아짐)
+      2) near_norm(진입거리), rr_norm, liq_norm 정규화 기준이 과하게 빡빡함
+      3) W_TEC 정의는 있는데 점수에 반영이 안 됨
+    - 해결:
+      - 가중치 합 1.0로 재정렬 + 기술(TEC) 점수 반영
+      - log 유동성 + near/rr/mom 정규화 완화
+    """
     x = df.copy()
 
-    # 1) Sector momentum
-    if "업종_대분류" in x.columns:
+    # 1) Sector momentum (5일 평균)
+    if "업종_대분류" in x.columns and "ret_5d_%" in x.columns:
         x["Sector_Mom_5d"] = x.groupby("업종_대분류")["ret_5d_%"].transform("mean").fillna(0)
     else:
         x["Sector_Mom_5d"] = 0.0
 
-    rr1 = nz_num(x["RR1"]).fillna(0)
-    rr_norm = np.clip(rr1 / 3.0, 0, 1)
+    # 안전한 숫자화
+    def _num(col, default=0.0):
+        if col not in x.columns:
+            return pd.Series(default, index=x.index, dtype=float)
+        return nz_num(x[col]).fillna(default)
 
-    t1_room = nz_num((x["추천매도가1"] - x["종가"]) / x["종가"] * 100)
-    sl_room = nz_num((x["종가"] - x["손절가"]) / x["종가"] * 100)
-    now_gap = nz_num(x["Now%"])
+    rr1 = _num("RR1", 0)
+    rsi = _num("RSI14", 50)
+    macd_slope = _num("MACD_Slope", 0)
+    bw = _num("BandWidth", 100)
+    ebs = _num("EBS", 0)
+    tv = _num("거래대금(억원)", 0)
+    ret5 = _num("ret_5d_%", 0)
+    ret10 = _num("ret_10d_%", 0)
+    now_gap = _num("Now%", 99)
 
-    t1_norm = np.clip(t1_room / 15.0, 0, 1)
-    sl_norm = np.clip(sl_room / 10.0, 0, 1)
+    # 2) 정규화 (0~1)
+    # RR: 실제 RR이 2.0이면 '충분히 좋다'로 보고 2.0 기준 만점
+    rr_norm = np.clip(rr1 / 2.0, 0, 1)
 
-    # 🔧 (핵심) 강추세 종목 near_norm 급사 완화 (5% -> 10%)
+    # 목표/손절 여유
+    t1_room = _num("추천매도가1", 0)
+    close = _num("종가", 0).replace(0, np.nan)
+    buy = _num("추천매수가", 0)
+
+    # t1_room(%): (T1-현재가)/현재가
+    t1_room_pct = nz_num((t1_room - close) / close * 100).fillna(0)
+    # sl_room(%): (현재가-손절)/현재가
+    sl = _num("손절가", 0)
+    sl_room_pct = nz_num((close - sl) / close * 100).fillna(0)
+
+    # 기존보다 완만하게 (상단 점수가 퍼지도록)
+    t1_norm = np.clip(t1_room_pct / 18.0, 0, 1)
+    sl_norm = np.clip(sl_room_pct / 12.0, 0, 1)
+
+    # 진입거리: 10% 이내면 점수 유지(기존 5%는 너무 빡빡)
     near_norm = np.clip(1 - (now_gap / 10.0), 0, 1)
 
-    # 모멘텀(개별/섹터)
-    indiv_mom = np.clip(nz_num(x["ret_10d_%"]) / 20.0, 0, 1)
-    sector_mom_norm = np.clip(nz_num(x["Sector_Mom_5d"]) / 5.0, 0, 1)
+    # 개별 모멘텀: 10~12%면 충분히 강함으로 평가
+    indiv_mom = np.clip(ret10 / 12.0, 0, 1)
 
-    # 유동성
-    liq_val = nz_num(x["거래대금(억원)"])
-    liq_norm = np.clip(liq_val / 500, 0, 1)
+    # 섹터 모멘텀: 3%면 만점(기존 5%는 빡빡)
+    sector_mom_norm = np.clip(_num("Sector_Mom_5d", 0) / 3.0, 0, 1)
 
-    # ✅ (핵심) W_TEC 실제 반영: EBS 기반 기술점수
-    tec_norm = np.clip(nz_num(x["EBS"]) / PASS_EBS, 0, 1)
+    # 유동성: log 스케일(500억 이하 구간에서 변별력 확보)
+    liq_norm = np.clip(np.log1p(tv) / np.log1p(800), 0, 1)
 
-    # ✅ (핵심) 가중치 합으로 정규화해서 0~100 스케일 유지
-    weights_sum = (W_RR + W_T1 + W_SL + W_NEAR + W_MOM + W_SECTOR_MOM + W_LIQ + W_TEC)
+    # 기술(TEC): EBS + RSI 적정 + MACD 양/음 + Squeeze 보너스
+    tech_ebs = np.clip(ebs / 5.0, 0, 1)
+    tech_rsi = np.clip(1 - (rsi - 55).abs() / 20.0, 0, 1)   # 55 근처 최고
+    tech_macd = (macd_slope > 0).astype(float)
+    tech_sq = np.clip((15 - bw) / 15.0, 0, 1)               # bw<=15면 보너스
 
-    base_score = (
+    tech_norm = np.clip(
+        0.4 * tech_ebs + 0.3 * tech_rsi + 0.2 * tech_macd + 0.1 * tech_sq,
+        0, 1
+    )
+
+    # 3) 종합 점수
+    base_score = 100 * (
         W_RR * rr_norm +
         W_T1 * t1_norm +
         W_SL * sl_norm +
@@ -429,16 +471,25 @@ def build_global_score(df: pd.DataFrame) -> pd.DataFrame:
         W_MOM * indiv_mom +
         W_SECTOR_MOM * sector_mom_norm +
         W_LIQ * liq_norm +
-        W_TEC * tec_norm
-    ) / max(weights_sum, 1e-9) * 100
+        W_TEC * tech_norm
+    )
 
+    # 4) 패널티
     pen = pd.Series(0.0, index=x.index)
-    pen += P_OVERHEAT_5D * (x["ret_5d_%"] > 15).astype(int)
-    pen += P_MACD_NEG * (x["MACD_Slope"] < 0).astype(int)
-    pen += P_BIG_SL * (sl_room > 15).astype(int)
+    if "P_OVERHEAT_5D" in globals():
+        pen += P_OVERHEAT_5D * (ret5 > 15).astype(int)
+    if "P_OVERHEAT_10D" in globals():
+        pen += P_OVERHEAT_10D * (ret10 > 25).astype(int)
+    if "P_MACD_NEG" in globals():
+        pen += P_MACD_NEG * (macd_slope < 0).astype(int)
+    if "P_RSI_OUT" in globals():
+        pen += P_RSI_OUT * ((rsi < 40) | (rsi > 75)).astype(int)
+    if "P_BIG_SL" in globals():
+        pen += P_BIG_SL * (sl_room_pct > 15).astype(int)
 
     final_score = np.clip(base_score - pen, 0, 100)
 
+    # 5) 진입 매력도
     entry_score = np.clip(
         40 * near_norm + 30 * rr_norm + 30 * sector_mom_norm, 0, 100
     )
@@ -514,6 +565,7 @@ def analyze_ticker(
     
     return {
         "종목코드": code6, "종목명": name_map.get(code6, code6),
+        "기준일": end_s,
         "업종": sector_map.get(code6, "기타"),
         "종가": int(last_c), "거래대금(억원)": round(tv_eok, 1),
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1),
