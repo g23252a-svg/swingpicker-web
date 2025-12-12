@@ -960,104 +960,100 @@ def plot_radar_chart(row):
 # ---------------------------
 # 차트 시각화 (거래량 추가)
 # ---------------------------
-def plot_interactive_chart(df, title, entry=None, target1=None, target2=None, stop=None):
+def plot_interactive_chart(
+    df: pd.DataFrame,
+    code: str,
+    name: str,
+    entry=None,
+    stop=None,
+    target1=None,
+    target2=None,
+    show_bb: bool = True,
+    show_rsi: bool = False,
+):
     if df is None or df.empty:
         return go.Figure()
 
+    rows = 3 if show_rsi else 2
+    row_heights = [0.6, 0.2, 0.2] if show_rsi else [0.7, 0.3]
+
     fig = make_subplots(
-        rows=3 if show_rsi else 2,
+        rows=rows,
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.03,
-        row_heights=[0.6, 0.2, 0.2] if show_rsi else [0.7, 0.3],
+        row_heights=row_heights,
     )
 
-    # 🔹 Bollinger Bands
-    if show_bb and 'BB_MID' in df.columns:
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['BB_MID'], name="BB Mid", line=dict(color='gray', width=1)),
-            row=1, col=1
-        )
-    if show_bb and 'BB_UPPER' in df.columns:
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['BB_UPPER'], name="BB Upper", line=dict(color='lightgray', width=1, dash='dot')),
-            row=1, col=1
-        )
-    if show_bb and 'BB_LOWER' in df.columns:
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['BB_LOWER'], name="BB Lower", line=dict(color='lightgray', width=1, dash='dot')),
-            row=1, col=1
-        )
-
-    # 🔹 RSI Sub-chart
-    if show_rsi and 'RSI14_CHART' in df.columns:
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['RSI14_CHART'], name="RSI(14)", line=dict(color='orange', width=1)),
-            row=3, col=1
-        )
-        # 기준선 30 / 70
-        fig.add_hline(y=30, line_dash="dot", line_color="blue", row=3, col=1)
-        fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
-
-    if target2 is not None and np.isfinite(target2):
-    fig.add_hline(
-        y=float(target2),
-        line_dash="dot",
-        annotation_text=f"목표2: {int(target2):,}원",
-        annotation_position="top left",
+    # 1) 캔들
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index,
+            open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+            name="주가",
+            hovertemplate="<b>%{x|%y/%m/%d}</b><br>종가: %{close:,.0f}원<extra></extra>",
+            showlegend=False,
+        ),
+        row=1, col=1
     )
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name="주가",
-        increasing_line_color='#ef5350',
-        decreasing_line_color='#2979ff',
-        hovertemplate="<b>%{x|%y/%m/%d}</b><br>종가: %{close:,.0f}원<extra></extra>",
-        showlegend=False
-    ), row=1, col=1)
 
-    if 'MA20' in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['MA20'], line=dict(color='orange', width=1.5), name='20일선'
-        ), row=1, col=1)
-    if 'MA60' in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['MA60'], line=dict(color='purple', width=1.5), name='60일선'
-        ), row=1, col=1)
+    # 2) MA
+    if "MA20" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="20일선"), row=1, col=1)
+    if "MA60" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["MA60"], name="60일선"), row=1, col=1)
 
-    up = df[df['Trend'] == 1]
-    down = df[df['Trend'] == -1]
-    if not up.empty:
-        fig.add_trace(go.Scatter(
-            x=up.index, y=up['SuperTrend'], mode='markers', marker=dict(color='green', size=2), name='상승추세'
-        ), row=1, col=1)
-    if not down.empty:
-        fig.add_trace(go.Scatter(
-            x=down.index, y=down['SuperTrend'], mode='markers', marker=dict(color='red', size=2), name='하락추세'
-        ), row=1, col=1)
+    # 3) 볼린저
+    if show_bb and "BB_MID" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_MID"], name="BB Mid"), row=1, col=1)
+    if show_bb and "BB_UPPER" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_UPPER"], name="BB Upper"), row=1, col=1)
+    if show_bb and "BB_LOWER" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_LOWER"], name="BB Lower"), row=1, col=1)
 
-    colors = ['#ef5350' if row['Close'] >= row['Open'] else '#2979ff' for idx, row in df.iterrows()]
-    fig.add_trace(go.Bar(
-        x=df.index, y=df['Volume'], marker_color=colors, name="거래량", showlegend=False
-    ), row=2, col=1)
+    # 4) 슈퍼트렌드(있으면)
+    if "Trend" in df.columns and "SuperTrend" in df.columns:
+        up = df[df["Trend"] == 1]
+        down = df[df["Trend"] == -1]
+        if not up.empty:
+            fig.add_trace(go.Scatter(x=up.index, y=up["SuperTrend"], mode="markers", name="상승추세"), row=1, col=1)
+        if not down.empty:
+            fig.add_trace(go.Scatter(x=down.index, y=down["SuperTrend"], mode="markers", name="하락추세"), row=1, col=1)
 
-    lines = [
-        (entry, "🔵진입", "blue"),
-        (stop, "🔴손절", "red"),
-        (target1, "🟢목표1", "green"),
-    ]
-    for val, label, color in lines:
+    # 5) 거래량
+    if "Volume" in df.columns:
+        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", showlegend=False), row=2, col=1)
+
+    # 6) RSI(선택)
+    if show_rsi and "RSI14_CHART" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI(14)"), row=3, col=1)
+        fig.add_hline(y=30, line_dash="dot", row=3, col=1)
+        fig.add_hline(y=70, line_dash="dot", row=3, col=1)
+
+    # 7) 가격 라인(진입/손절/목표)
+    def _safe_float(v):
         try:
-            if pd.notna(val) and val > 0:
-                fig.add_hline(
-                    y=val, line_dash="dash", line_color=color,
-                    annotation_text=label, row=1, col=1
-                )
+            vv = float(pd.to_numeric(v, errors="coerce"))
+            return vv if np.isfinite(vv) and vv > 0 else None
         except Exception:
-            pass
+            return None
+
+    entry_v = _safe_float(entry)
+    stop_v = _safe_float(stop)
+    t1_v = _safe_float(target1)
+    t2_v = _safe_float(target2)
+
+    if entry_v is not None:
+        fig.add_hline(y=entry_v, line_dash="dash", annotation_text=f"진입: {int(entry_v):,}", row=1, col=1)
+    if stop_v is not None:
+        fig.add_hline(y=stop_v, line_dash="dash", annotation_text=f"손절: {int(stop_v):,}", row=1, col=1)
+    if t1_v is not None:
+        fig.add_hline(y=t1_v, line_dash="dot", annotation_text=f"목표1: {int(t1_v):,}", row=1, col=1)
+    if t2_v is not None:
+        fig.add_hline(y=t2_v, line_dash="dot", annotation_text=f"목표2: {int(t2_v):,}", row=1, col=1)
 
     fig.update_layout(
-        title=f"{name} ({code})",
+        title=f"{name} ({str(code).zfill(6)})",
         xaxis_rangeslider_visible=False,
         height=600,
         margin=dict(l=20, r=20, t=40, b=20),
@@ -1137,10 +1133,10 @@ def normalize_github_raw(url: str) -> str:
 def load_csv_url(url: str) -> pd.DataFrame:
     url = normalize_github_raw(url)
     r = requests.get(
-    url,
-    timeout=30,
-    headers={"Cache-Control": "no-cache", "Pragma": "no-cache"}
-)
+        url,
+        timeout=30,
+        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+    )
     r.raise_for_status()
     return pd.read_csv(io.BytesIO(r.content), encoding="utf-8-sig")
 
@@ -2232,13 +2228,13 @@ with tab2:
                 chart_df = get_stock_chart_data(code)
                 if chart_df is not None:
                     fig = plot_interactive_chart(
-                        chart_df,
-                        code,
-                        row.get('종목명', '-'),
-                        row.get('추천매수가', 0),
-                        row.get('손절가', 0),
-                        row.get('추천매도가1', 0),
-                        row.get('추천매도가2', 0),
+                        df=chart_df,
+                        code=code,
+                        name=row.get("종목명", "-"),
+                        entry=row.get("추천매수가", 0),
+                        stop=row.get("손절가", 0),
+                        target1=row.get("추천매도가1", 0),
+                        target2=row.get("추천매도가2", 0),
                         show_bb=show_bb,
                         show_rsi=show_rsi,
                     )
