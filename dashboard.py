@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.9.0 (Deep Insight Update)
+LDY Pro Trader v6.9.1 (Data Polish Patch)
 - 신규: Market Breadth Gauge — 시장 전체의 20일선 상회 비율(시장 온도) 시각화
 - 신규: Squeeze Hunter — 볼린저 밴드폭(BandWidth) 축소 종목 필터링
 - 신규: Chart Upgrade — BandWidth 보조지표 추가 (변동성 시각화)
 - 개선: Sector Heatmap — 섹터 모멘텀(수익률) 기반 컬러링 적용
-- 기반: v6.8.0 (Reality Check, Portfolio 등 기존 기능 모두 포함)
+- 신규: 가격 표시(콤마/원) + 추천가 호가단위 정합성 강화
+- 개선: 사용자 화면에서 디버그 UI 제거
+- 기반: v6.9.0 (Deep Insight, Squeeze Hunter)
 """
 
 import os, io, math, json, requests, logging
@@ -17,6 +19,9 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import re
+
+# 가격(호가단위/표시) 유틸
+from price_utils import format_krw, format_pct, format_signed_krw, round_to_tick
 
 # Auth & Version Logic
 # (auth_user.py, version_info.py 파일이 같은 폴더에 있다고 가정)
@@ -402,9 +407,37 @@ def load_and_process_data(raw_url, local_path):
     if "거래대금(원)" in df.columns and "거래대금(억원)" not in df.columns:
         df["거래대금(억원)"] = (pd.to_numeric(df["거래대금(원)"], errors='coerce')/1e8).round(1)
         
-    num_cols = ["LDY_SCORE", "ret_5d_%", "BandWidth", "ma20_above", "RR1", "EBS", "RSI14"]
+    # 숫자 컬럼 정규화
+    num_cols = [
+        "LDY_SCORE", "ret_5d_%", "ret_10d_%", "ret_60d_%", "rel_60d_%",
+        "BandWidth", "ma20_above", "RR1", "EBS", "RSI14", "MFI14", "Now%",
+        "거래대금(억원)",
+        # 가격 관련
+        "종가", "추천매수가", "손절가", "추천매도가1",
+    ]
     for c in num_cols:
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
+
+    # 종목코드는 "000000" 형태 유지
+    if "종목코드" in df.columns:
+        df["종목코드"] = df["종목코드"].astype(str).str.replace(".0$", "", regex=True).str.zfill(6)
+
+    # (호환) 과거 CSV에 호가단위가 안 맞는 값이 섞여 있을 수 있어, 로딩 시점에 1차 정규화
+    if "추천매수가" in df.columns:
+        df["추천매수가"] = df["추천매수가"].apply(lambda x: round_to_tick(x, "nearest") or x)
+    if "손절가" in df.columns:
+        df["손절가"] = df["손절가"].apply(lambda x: round_to_tick(x, "down") or x)
+    if "추천매도가1" in df.columns:
+        df["추천매도가1"] = df["추천매도가1"].apply(lambda x: round_to_tick(x, "up") or x)
+
+    # 파생 지표 재계산(표시/정렬 안정화)
+    if "종가" in df.columns and "추천매수가" in df.columns:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            df["Now%"] = (df["종가"] - df["추천매수가"]).abs() / df["추천매수가"] * 100
+            df["Now%"] = df["Now%"].replace([np.inf, -np.inf], np.nan)
+    if all(c in df.columns for c in ["추천매수가", "손절가", "추천매도가1"]):
+        denom = (df["추천매수가"] - df["손절가"]).replace(0, np.nan)
+        df["RR1"] = (df["추천매도가1"] - df["추천매수가"]) / denom
 
     # 3. Market Breadth Calculation (v6.9)
     if "ma20_above" in df.columns:
@@ -459,32 +492,6 @@ with st.sidebar:
     st.divider()
 
 with st.sidebar:
-    st.divider()
-    with st.expander("🔧 데이터 디버그", expanded=True):
-        st.write("data_src =", data_src)
-        st.write("data_ts  =", data_ts)
-        st.write("rows     =", len(df_scored))
-        st.write("min_score =", min_score)
-        st.write("only_squeeze =", only_squeeze)
-        st.write("columns =", [c for c in df_scored.columns])
-
-        if "LDY_SCORE" in df_scored.columns:
-            st.write("LDY_SCORE desc")
-            st.write(df_scored["LDY_SCORE"].describe())
-
-        # ROUTE/REGIME가 진짜 존재하는지 즉시 확인
-        show_cols = [c for c in ["종목명","종목코드","LDY_SCORE","ROUTE","REGIME","ENTRY_SCORE","거래대금(억원)"] if c in df_scored.columns]
-        if show_cols:
-            st.dataframe(df_scored[show_cols].head(20), use_container_width=True)
-
-with st.sidebar:
-    with st.expander("🔧 데이터 디버그(추가)", expanded=True):
-        st.write("LDY_SCORE dtype =", df_scored["LDY_SCORE"].dtype)
-        st.write("LDY_SCORE max   =", float(pd.to_numeric(df_scored["LDY_SCORE"], errors="coerce").max()))
-        st.write("count >= 70     =", int((pd.to_numeric(df_scored["LDY_SCORE"], errors="coerce") >= 70).sum()))
-        st.write("top10 scores    =", list(pd.to_numeric(df_scored["LDY_SCORE"], errors="coerce").sort_values(ascending=False).head(10)))
-
-    
     # 내 자산 입력 (v6.8 복구)
     if auth_status in ["pro", "prime", "admin"]:
         st.subheader("💼 내 자산 입력")
@@ -594,21 +601,46 @@ with tab2:
             else:
                 st.error("차트 데이터를 불러올 수 없습니다.")
                 
-            st.dataframe(pd.DataFrame([row]).dropna(axis=1), use_container_width=True)
+            # --- 가격 표시(콤마/원) ---
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("종가", format_krw(row.get("종가")))
+            m2.metric("추천매수가", format_krw(row.get("추천매수가")))
+            m3.metric("손절가", format_krw(row.get("손절가")))
+            m4.metric("1차 목표가", format_krw(row.get("추천매도가1")))
+
+            # 디테일 테이블 (가격 관련 컬럼은 문자열로 보기 좋게 변환)
+            row_disp = row.copy()
+            for _c in ["종가", "추천매수가", "손절가", "추천매도가1"]:
+                if _c in row_disp.index:
+                    row_disp[_c] = format_krw(row_disp[_c])
+            st.dataframe(pd.DataFrame([row_disp]).dropna(axis=1), use_container_width=True)
 
     st.divider()
     st.subheader("📋 리스트 뷰")
     
-    disp_cols = ["종목명", "종목코드", "LDY_SCORE", "ROUTE", "BandWidth", "ret_5d_%", "추천매수가", "손절가", "REGIME"]
+    # 리스트에서 가격(콤마/원) + 종가까지 한 눈에 보이도록
+    disp_cols = [
+        "종목명", "종목코드", "LDY_SCORE", "ROUTE", "REGIME",
+        "종가", "추천매수가", "손절가", "추천매도가1",
+        "BandWidth", "ret_5d_%", "Now%", "거래대금(억원)",
+    ]
     valid_cols = [c for c in disp_cols if c in view_df.columns]
-    
+
+    # 표시용 DF (가격 컬럼은 문자열로 변환)
+    view_df_disp = view_df[valid_cols].copy()
+    for _c in ["종가", "추천매수가", "손절가", "추천매도가1"]:
+        if _c in view_df_disp.columns:
+            view_df_disp[_c] = view_df_disp[_c].apply(format_krw)
+
     st.dataframe(
-        view_df[valid_cols],
+        view_df_disp,
         use_container_width=True,
         column_config={
             "LDY_SCORE": st.column_config.ProgressColumn("점수", min_value=0, max_value=100, format="%.1f"),
             "BandWidth": st.column_config.NumberColumn("밴드폭(%)", format="%.1f%%"),
-            "ret_5d_%": st.column_config.NumberColumn("5일등락", format="%.1f%%")
+            "ret_5d_%": st.column_config.NumberColumn("5일등락", format="%.1f%%"),
+            "Now%": st.column_config.NumberColumn("현재가-매수가 괴리", format="%.2f%%"),
+            "거래대금(억원)": st.column_config.NumberColumn("거래대금(억원)", format="%.1f"),
         }
     )
 

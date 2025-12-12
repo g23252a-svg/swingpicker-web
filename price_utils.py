@@ -1,0 +1,112 @@
+# -*- coding: utf-8 -*-
+"""price_utils.py
+
+KRX(유가/코스닥/코넥스) 호가가격단위(틱) 기반 가격 라운딩/표시 유틸.
+
+참고: 호가가격단위(7단계)
+ - 2,000원 미만: 1원
+ - 2,000~5,000원 미만: 5원
+ - 5,000~20,000원 미만: 10원
+ - 20,000~50,000원 미만: 50원
+ - 50,000~200,000원 미만: 100원
+ - 200,000~500,000원 미만: 500원
+ - 500,000원 이상: 1,000원
+
+※ ETF/ETN/ELW 등은 별도 호가단위가 있을 수 있으므로(상품별 상이)
+  현재는 “일반 주식” 기준으로만 적용합니다.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Optional, Union
+
+Number = Union[int, float]
+
+
+def is_nan(x) -> bool:
+    try:
+        return x is None or (isinstance(x, float) and math.isnan(x))
+    except Exception:
+        return True
+
+
+def krx_tick_size(price: Optional[Number]) -> int:
+    """일반 주식(KRX) 가격대별 호가가격단위(틱) 반환."""
+    if is_nan(price):
+        return 1
+    p = float(price)
+    if p < 2000:
+        return 1
+    if p < 5000:
+        return 5
+    if p < 20000:
+        return 10
+    if p < 50000:
+        return 50
+    if p < 200000:
+        return 100
+    if p < 500000:
+        return 500
+    return 1000
+
+
+def _round_half_up(x: float) -> int:
+    """0.5 올림(은행가 반올림 방지)."""
+    return int(math.floor(x + 0.5))
+
+
+def round_to_tick(price: Optional[Number], method: str = "nearest") -> Optional[int]:
+    """호가단위에 맞춰 가격을 라운딩.
+
+    method:
+      - 'nearest': 가장 가까운 호가단위
+      - 'down'   : 아래로(내림)
+      - 'up'     : 위로(올림)
+    """
+    if is_nan(price):
+        return None
+    p = float(price)
+    tick = krx_tick_size(p)
+    if tick <= 0:
+        return int(p)
+
+    q = p / tick
+    if method == "down":
+        return int(math.floor(q) * tick)
+    if method == "up":
+        return int(math.ceil(q) * tick)
+    return int(_round_half_up(q) * tick)
+
+
+def format_krw(value: Optional[Number], suffix: str = "원") -> str:
+    """KRW 표시용(천 단위 콤마 + suffix)."""
+    if is_nan(value):
+        return "-"
+    try:
+        iv = int(round(float(value)))
+    except Exception:
+        return str(value)
+    return f"{iv:,}{suffix}"
+
+
+def format_signed_krw(value: Optional[Number], suffix: str = "원") -> str:
+    if is_nan(value):
+        return "-"
+    try:
+        iv = int(round(float(value)))
+    except Exception:
+        return str(value)
+    sign = "+" if iv > 0 else ""  # 음수는 -가 자동 포함
+    return f"{sign}{iv:,}{suffix}"
+
+
+def format_pct(value: Optional[Number], digits: int = 2) -> str:
+    if is_nan(value):
+        return "-"
+    try:
+        fv = float(value)
+    except Exception:
+        return str(value)
+    sign = "+" if fv > 0 else ""
+    return f"{sign}{fv:.{digits}f}%"

@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.8 (Integrated Full Version)
+LDY Pro Trader Collector v6.9.1 (Data Polish Patch)
 - Base: v6.6 (안정적 데이터 수집, 업종 분류, 유틸리티)
 - New Features:
   1. Dynamic Sector Momentum: 실시간 주도 섹터(5일 평균 등락률) 가산점
   2. Bollinger Bands Squeeze: 변동성 축소(Bandwidth < 10%) 감지 -> 폭발 임박 포착
   3. Market Breadth: 20일 이동평균선 상회 종목 비율로 시장 과열/침체 진단
   4. Telegram: 주도 섹터 및 시장 온도 정보 포함
+  5. Price Tick Normalization: 추천매수가/손절/목표가를 KRX 호가단위에 맞춰 자동 라운딩
 """
 
 import os
@@ -24,6 +25,9 @@ from tqdm import tqdm
 import FinanceDataReader as fdr
 
 from time_utils import now_kst, now_utc, KST
+
+# 가격(호가단위) 유틸
+from price_utils import round_to_tick, krx_tick_size
 
 # [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
@@ -554,14 +558,38 @@ def analyze_ticker(
     if last_bw < 10: reason.append("Squeeze") # 밴드폭 축소
     
     # Trading Plan
-    buy = ma20.iloc[-1] if last_c > ma20.iloc[-1] else last_c
-    if buy > last_c * 1.05: buy = last_c 
+    # - KRX 호가단위(틱)에 맞춰서 추천가/손절/목표가를 “유효한 호가”로 정규화
+    raw_buy = ma20.iloc[-1] if last_c > ma20.iloc[-1] else last_c
+    if raw_buy > last_c * 1.05:
+        raw_buy = last_c
 
-    stop = buy - (2.0 * atr)
-    if stop < buy * 0.90: stop = buy * 0.90 # 최대 손절 10% 제한
-    
+    raw_stop = raw_buy - (2.0 * atr)
+    if raw_stop < raw_buy * 0.90:
+        raw_stop = raw_buy * 0.90  # 최대 손절 10% 제한
+
     rr_ratio = 2.0 if score >= 4 else 1.5
-    t1 = buy + (buy - stop) * rr_ratio
+    raw_t1 = raw_buy + (raw_buy - raw_stop) * rr_ratio
+
+    # (정책) buy=가장 가까운 틱 / stop=아래로 / t1=위로
+    buy = round_to_tick(raw_buy, method="nearest")
+    stop = round_to_tick(raw_stop, method="down")
+    t1 = round_to_tick(raw_t1, method="up")
+
+    # 라운딩으로 이상해지는 케이스 방어
+    if buy is None:
+        buy = int(last_c)
+    if stop is None:
+        stop = round_to_tick(buy * 0.90, method="down")
+    if t1 is None:
+        t1 = round_to_tick(buy * 1.10, method="up")
+
+    # stop이 buy 이상으로 올라오는 케이스 방어
+    if stop >= buy:
+        stop = round_to_tick(buy * 0.95, method="down")
+
+    # 목표가가 buy 이하로 내려오는 케이스 방어
+    if t1 <= buy:
+        t1 = round_to_tick(buy * 1.05, method="up")
     
     return {
         "종목코드": code6, "종목명": name_map.get(code6, code6),
@@ -587,7 +615,7 @@ def send_telegram_v68(df: pd.DataFrame, ymd: str, market_heat: float, hot_sector
         return
 
     top5 = df.head(5).reset_index(drop=True)
-    msg = f"🚀 [LDY v6.8] Smart Pick ({ymd})\n"
+    msg = f"🚀 [LDY v6.9.1] Smart Pick ({ymd})\n"
     msg += f"🌡 시장온도: {market_heat:.0f}% (20선 상회)\n"
     msg += f"🔥 주도섹터: {hot_sectors}\n"
     msg += "-" * 30 + "\n\n"
