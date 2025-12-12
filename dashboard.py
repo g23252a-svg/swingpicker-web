@@ -464,7 +464,12 @@ with st.sidebar:
         if show_cols:
             st.dataframe(df_scored[show_cols].head(20), use_container_width=True)
 
-
+with st.sidebar:
+    with st.expander("🔧 데이터 디버그(추가)", expanded=True):
+        st.write("LDY_SCORE dtype =", df_scored["LDY_SCORE"].dtype)
+        st.write("LDY_SCORE max   =", float(pd.to_numeric(df_scored["LDY_SCORE"], errors="coerce").max()))
+        st.write("count >= 70     =", int((pd.to_numeric(df_scored["LDY_SCORE"], errors="coerce") >= 70).sum()))
+        st.write("top10 scores    =", list(pd.to_numeric(df_scored["LDY_SCORE"], errors="coerce").sort_values(ascending=False).head(10)))
 
     
     # 내 자산 입력 (v6.8 복구)
