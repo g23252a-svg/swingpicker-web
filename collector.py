@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 import requests
 from datetime import datetime, timedelta, timezone
+import re
+from glob import glob
 from pykrx import stock
 from tqdm import tqdm
 import FinanceDataReader as fdr
@@ -132,6 +134,15 @@ def round_to_tick(price: float) -> int:
     else: t = 1000
     return int(round(price / t) * t)
 
+def tick_size(price: float) -> int:
+    if price < 2000: return 1
+    if price < 5000: return 5
+    if price < 20000: return 10
+    if price < 50000: return 50
+    if price < 200000: return 100
+    if price < 500000: return 500
+    return 1000
+
 def add_sector_momentum(df: pd.DataFrame, group_col: str = "업종_대분류") -> Tuple[pd.DataFrame, pd.Series]:
     """
     업종(대분류)별 5일 평균 수익률을 계산해서 컬럼으로 주입
@@ -225,7 +236,231 @@ def run_reality_check(out_dir: str, trade_ymd: str) -> None:
     except Exception as e:
         log(f"⚠️ Reality Check 실패: {e}")
 
+# ------------------------------- Rank Validation (RANK_SCORE 검증) -------------------------------
 
+def _list_snapshot_days(out_dir: str) -> List[str]:
+    paths = glob(os.path.join(out_dir, "price_snapshot_*.csv"))
+    days = []
+    for p in paths:
+        b = os.path.basename(p)
+        m = re.match(r"price_snapshot_(\d{8})\.csv$", b)
+        if m:
+            days.append(m.group(1))
+    return sorted(list(set(days)))
+
+def _load_close_map(out_dir: str, ymd: str) -> Dict[str, float]:
+    path = os.path.join(out_dir, f"price_snapshot_{ymd}.csv")
+    if not os.path.exists(path):
+        return {}
+    df = pd.read_csv(path, dtype={"종목코드": str})
+    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+    close = pd.to_numeric(df["종가"], errors="coerce")
+    return dict(zip(df["종목코드"], close))
+
+def _next_trade_day(trade_days: List[str], ymd: str, offset: int) -> Optional[str]:
+    try:
+        i = trade_days.index(ymd)
+    except ValueError:
+        return None
+    j = i + offset
+    if 0 <= j < len(trade_days):
+        return trade_days[j]
+    return None
+
+def _pick_recommend_file_per_day(out_dir: str) -> Dict[str, str]:
+    files = [os.path.basename(p) for p in glob(os.path.join(out_dir, "recommend_*.csv"))]
+    mp: Dict[str, List[str]] = {}
+    for f in files:
+        core = f.replace("recommend_", "").replace(".csv", "")
+        ymd = core.split("_")[0]
+        if len(ymd) == 8 and ymd.isdigit():
+            mp.setdefault(ymd, []).append(f)
+
+    pick: Dict[str, str] = {}
+    for ymd, flist in mp.items():
+        # 태그 없는 recommend_YYYYMMDD.csv 우선
+        plain = [f for f in flist if f == f"recommend_{ymd}.csv"]
+        pick[ymd] = plain[0] if plain else sorted(flist)[0]
+    return pick
+
+def make_rank_validation_report(
+    out_dir: str,
+    asof_ymd: str,
+    lookback_trading_days: int = 60,
+    horizons: List[int] = [1, 3, 5],
+    topks: List[int] = [1, 3, 5, 10],
+    methods: List[str] = ["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE"],
+) -> None:
+    """
+    과거 recommend + 이후 price_snapshot을 이용해
+    '상위 K개가 H영업일 후에 얼마나 올랐나'를 승률/수익률로 검증한다.
+
+    출력:
+    - data/rank_validation_{asof_ymd}.csv (상세)
+    - data/rank_validation_summary_{asof_ymd}.csv (요약)
+    - data/rank_validation_latest.csv
+    - data/rank_validation_summary_latest.csv
+    """
+    try:
+        ensure_dir(out_dir)
+
+        trade_days = _list_snapshot_days(out_dir)
+        if not trade_days:
+            log("⚠️ rank validation: price_snapshot이 없어 리포트 생략")
+            return
+
+        rec_map = _pick_recommend_file_per_day(out_dir)
+        if not rec_map:
+            log("⚠️ rank validation: recommend 파일이 없어 리포트 생략")
+            return
+
+        # 검증 대상 날짜: 스냅샷 캘린더 기준 최근 N 거래일
+        tail_days = trade_days[-lookback_trading_days:]
+        target_days = [d for d in tail_days if d in rec_map]
+
+        rows = []
+
+        for rec_ymd in target_days:
+            rec_path = os.path.join(out_dir, rec_map[rec_ymd])
+            try:
+                df = pd.read_csv(rec_path, dtype={"종목코드": str})
+            except Exception:
+                continue
+
+            if df is None or df.empty:
+                continue
+
+            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+
+            # 필수 숫자
+            df["추천매수가"] = pd.to_numeric(df.get("추천매수가", np.nan), errors="coerce")
+            df["종가"] = pd.to_numeric(df.get("종가", np.nan), errors="coerce")
+
+            # 추천매수가가 없으면 종가로 대체(최소한 검증은 되게)
+            entry_px = df["추천매수가"].where(df["추천매수가"].notna(), df["종가"])
+
+            for h in horizons:
+                future_ymd = _next_trade_day(trade_days, rec_ymd, h)
+                if not future_ymd:
+                    continue
+
+                close_map_future = _load_close_map(out_dir, future_ymd)
+                if not close_map_future:
+                    continue
+
+                # MDD 계산 위해 중간 스냅샷도 로드(TopK만이니 부담 적음)
+                mid_days = []
+                for k in range(1, h + 1):
+                    dd = _next_trade_day(trade_days, rec_ymd, k)
+                    if dd:
+                        mid_days.append(dd)
+
+                mid_close_maps = [(_d, _load_close_map(out_dir, _d)) for _d in mid_days]
+
+                for method in methods:
+                    if method not in df.columns:
+                        continue
+
+                    dfx = df.copy()
+                    dfx[method] = pd.to_numeric(dfx[method], errors="coerce").fillna(-1e9)
+                    dfx = dfx.sort_values(method, ascending=False)
+
+                    for topk in topks:
+                        pick = dfx.head(topk).copy()
+                        if pick.empty:
+                            continue
+
+                        codes = pick["종목코드"].tolist()
+                        
+                        # epx를 float로 안전하게
+                        epx = pd.to_numeric(entry_px.loc[pick.index], errors="coerce").values.astype(float)
+                        
+                        # H일 후 종가
+                        fut_close = np.array([close_map_future.get(c, np.nan) for c in codes], dtype=float)
+                        
+                        # ✅ ret safe-divide (inf 방지)
+                        ret = np.full_like(fut_close, np.nan, dtype=float)
+                        ok_ret = np.isfinite(fut_close) & np.isfinite(epx) & (epx > 0)
+                        ret[ok_ret] = (fut_close[ok_ret] / epx[ok_ret] - 1.0) * 100.0
+                        
+                        # MDD(최저 종가 기반, 추천매수가 대비)
+                        min_close = np.full_like(fut_close, np.nan)
+                        for _d, cmap in mid_close_maps:
+                            arr = np.array([cmap.get(c, np.nan) for c in codes], dtype=float)
+                            if np.isnan(min_close).all():
+                                min_close = arr
+                            else:
+                                min_close = np.nanmin(np.vstack([min_close, arr]), axis=0)
+                        
+                        # ✅ mdd safe-divide (inf 방지)
+                        mdd = np.full_like(fut_close, np.nan, dtype=float)
+                        ok_mdd = np.isfinite(min_close) & np.isfinite(epx) & (epx > 0)
+                        mdd[ok_mdd] = (min_close[ok_mdd] / epx[ok_mdd] - 1.0) * 100.0
+                        
+                        # ✅ (D-2) n 정의 + 샘플 0이면 skip
+                        valid = np.isfinite(ret) & np.isfinite(mdd)
+                        n = int(valid.sum())
+                        if n == 0:
+                            continue
+                        
+                        r = ret[valid]
+                        md = mdd[valid]
+                        
+                        rows.append({
+                            "추천일": rec_ymd,
+                            "비교종가일": future_ymd,
+                            "H(영업일)": h,
+                            "METHOD": method,
+                            "TOPK": topk,
+                            "N": n,
+                            "WIN_RATE_%": round(float((r > 0).mean() * 100), 1),
+                            "AVG_RET_%": round(float(np.nanmean(r)), 2),
+                            "MED_RET_%": round(float(np.nanmedian(r)), 2),
+                            "HIT_2%_%": round(float((r >= 2).mean() * 100), 1),
+                            "HIT_5%_%": round(float((r >= 5).mean() * 100), 1),
+                            "AVG_MDD_%": round(float(np.nanmean(md)), 2),
+                            "WORST_MDD_%": round(float(np.nanmin(md)), 2),
+                        })
+
+        if not rows:
+            log("⚠️ rank validation: 계산 가능한 샘플이 없어 리포트 생략")
+            return
+
+        detail = pd.DataFrame(rows)
+
+        # 요약(가중치: 샘플 수 N)
+        def _wavg(g, col):
+            w = g["N"].values
+            x = g[col].values
+            return float(np.nansum(x * w) / np.nansum(w))
+
+        grp = detail.groupby(["METHOD", "TOPK", "H(영업일)"], as_index=False)
+        summary = grp.apply(lambda g: pd.Series({
+            "TOTAL_N": int(g["N"].sum()),
+            "WIN_RATE_%": round(_wavg(g, "WIN_RATE_%"), 1),
+            "AVG_RET_%": round(_wavg(g, "AVG_RET_%"), 2),
+            "MED_RET_%": round(float(np.nanmedian(g["MED_RET_%"].values)), 2),
+            "HIT_2%_%": round(_wavg(g, "HIT_2%_%"), 1),
+            "HIT_5%_%": round(_wavg(g, "HIT_5%_%"), 1),
+            "AVG_MDD_%": round(_wavg(g, "AVG_MDD_%"), 2),
+            "WORST_MDD_%": round(float(np.nanmin(g["WORST_MDD_%"].values)), 2),
+        })).reset_index(drop=True)
+
+        detail_path = os.path.join(out_dir, f"rank_validation_{asof_ymd}.csv")
+        summ_path = os.path.join(out_dir, f"rank_validation_summary_{asof_ymd}.csv")
+        detail_latest = os.path.join(out_dir, "rank_validation_latest.csv")
+        summ_latest = os.path.join(out_dir, "rank_validation_summary_latest.csv")
+
+        detail.to_csv(detail_path, index=False, encoding=UTF8)
+        summary.to_csv(summ_path, index=False, encoding=UTF8)
+        detail.to_csv(detail_latest, index=False, encoding=UTF8)
+        summary.to_csv(summ_latest, index=False, encoding=UTF8)
+
+        log(f"📊 Rank Validation 저장 완료 → {detail_path}")
+        log(f"📊 Rank Validation Summary 저장 완료 → {summ_path}")
+
+    except Exception as e:
+        log(f"⚠️ rank validation 실패: {e}")
 
 # ------------------------------- 거래일/시총 -------------------------------
 
@@ -390,6 +625,7 @@ def get_sector_map_krx() -> Dict[str, str]:
             return {}
 
         df = dfs[0]
+        df.columns = [str(c).strip() for c in df.columns]  # ✅ 여기 추가
 
         if "종목코드" not in df.columns or "업종" not in df.columns:
             log(f"⚠️ KIND CSV 컬럼 이상: {df.columns.tolist()}")
@@ -546,6 +782,27 @@ def classify_big_sector(name: str, detailed: str) -> str:
     """
     t = (detailed or "").strip()
 
+
+    # KRX 구형 업종명(전기전자/운수장비 등) fallback 대응
+    if any(k in t for k in ["전기전자", "의약품", "운수장비", "철강금속", "화학", "금융업", "서비스업", "유통업", "통신업", "전기가스업", "운수창고"]):
+        mapping = {
+            "전기전자": "IT/전기전자",
+            "의약품": "바이오·의약품",
+            "운수장비": "자동차·모빌리티",
+            "철강금속": "철강·금속",
+            "화학": "화학·소재",
+            "금융업": "금융",
+            "서비스업": "서비스 기타",
+            "유통업": "유통·소비재",
+            "통신업": "IT/전기전자",
+            "전기가스업": "인프라·에너지",
+            "운수창고": "운송·물류",
+        }
+        for k, v in mapping.items():
+            if k in t:
+                return v
+
+    
     # 2차전지
     if any(k in t for k in ["2차전지", "이차전지", "이차 전지", "전지"]):
         return "2차전지"
@@ -678,12 +935,14 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
                 for c in df.columns
             ]
             df.columns = ['거래대금(원)' if c == '거래대금' else c for c in df.columns]
-            frames.append(df[['종목코드', '거래대금(원)']])
+
+
         except Exception:
             pass
+
     if not frames:
         raise RuntimeError("No Data from KRX (거래대금)")
-    df_all = pd.concat(frames)
+    df_all = pd.concat(frames, ignore_index=True)
     df_all['종목코드'] = df_all['종목코드'].astype(str).str.zfill(6)
     return df_all.sort_values('거래대금(원)', ascending=False).head(top_n)
 
@@ -879,7 +1138,7 @@ def route_tag(row: pd.Series) -> str:
         and (now_pct <= 10) and (mfi >= 55)
     )
     # RR1이 너무 나쁘면 BRK에서 제외
-    if strong_break and rr1 and not np.isnan(rr1) and rr1 < 0.6:
+    if strong_break and np.isfinite(rr1) and rr1 < 0.6:
         strong_break = False
 
     if strong_break:
@@ -927,16 +1186,16 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     # ✅ [추가/삽입] 컬럼 없으면 0으로 채운 Series 반환
     def col_or_zero(df: pd.DataFrame, col: str) -> pd.Series:
         return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
-    
-    # ----- 기본 수치 추출 -----
+
     close = nz_num(x["종가"])
-    entry = nz_num(x["추천매수가"])
+    entry = nz_num(x["추천매수가"]).replace(0, np.nan)
+    
     stop = nz_num(x["손절가"])
     t1 = nz_num(x["추천매도가1"])
     turn = nz_num(x["거래대금(억원)"])
     rsi = nz_num(x["RSI14"]).fillna(50)
     slope = nz_num(x["MACD_Slope"])
-    volz = nz_num(x["거래강도"])
+    volz = nz_num(x["거래강도"]).replace([np.inf, -np.inf], np.nan).fillna(0)
     kairi = nz_num(x["이격도"])
     r5 = nz_num(x["ret_5d_%"])
     r10 = nz_num(x["ret_10d_%"])
@@ -949,9 +1208,11 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
     rr1 = (t1 - close) / rr_den   # ✅ 현재가 기준 RR
 
     now_gap = ((close - entry).abs() / entry * 100)          # 추천가 대비 현재 위치
+    now_gap = now_gap.replace([np.inf, -np.inf], np.nan)
     t1_room = ((t1 - close) / close * 100)                   # 현재가→목표1 여유
     # 손절 폭(%)은 엔트리 대비로 계산해야 함
     sl_pct = ((entry - stop) / entry * 100)
+    sl_pct  = sl_pct.replace([np.inf, -np.inf], np.nan)
     # sl_room은 '현재가 기준'으로 쓰고 싶으면 이름을 바꾸고,
     # big_sl 패널티는 sl_pct 기준으로!
     sl_room = ((close - stop) / close * 100)   # (옵션) 현재가→손절 거리(참고용)
@@ -1016,6 +1277,15 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
 
     # ----- 패널티 -----
     pen = pd.Series(0.0, index=x.index)
+    
+    missing_entry = entry.isna() | ~np.isfinite(entry)
+    pen += 15.0 * missing_entry.astype(float)
+    
+    # ✅ 여기 추가
+    missing_stop = stop.isna() | ~np.isfinite(stop) | (stop <= 0)
+    missing_t1   = t1.isna()   | ~np.isfinite(t1)   | (t1 <= 0)
+    pen += 10.0 * missing_stop.astype(float)
+    pen += 10.0 * missing_t1.astype(float)
 
     # 단기/중기 과열
     pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
@@ -1097,13 +1367,14 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
         0.20 * overheat              # 과열 감점
     )
 
-    x["RANK_SCORE"] = np.clip(rank_score * 100, 0, 100).round(1)
+    
 
     # ----- 결과 컬럼 세팅 -----
     x["RR1"] = rr1
     x["Now%"] = now_gap
     x["LDY_SCORE"] = final_score.round(1)
     x["ENTRY_SCORE"] = entry_score.round(1)
+    x["RANK_SCORE"] = np.clip(rank_score * 100, 0, 100).round(1)
 
     # ROUTE 재계산 (v6.7 로직)
     x["ROUTE"] = x.apply(route_tag, axis=1)
@@ -1133,6 +1404,15 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str) -> None:
         log("⚠️ TG_TOKEN / TG_ID 미설정, 발송 생략")
         return
 
+    # ✅ 여기 추가 (텔레그램 출력 안전 포맷)
+    def _fmt_int(x):
+        try:
+            if pd.isna(x):
+                return "N/A"
+            return f"{int(float(x)):,}"
+        except Exception:
+            return "N/A"
+
     try:
         top5 = df.head(5).reset_index(drop=True)
         trade_date = datetime.strptime(trade_ymd, "%Y%m%d").strftime('%Y-%m-%d')
@@ -1144,44 +1424,67 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str) -> None:
             name = row['종목명']
             code = row['종목코드']
             route = row.get('ROUTE', '전략없음')
-            buy = row['추천매수가']
+            buy = row.get('추천매수가', np.nan)
             score = row.get('LDY_SCORE', 0)
             comment = row.get('AI_COMMENT', '')
-
-            rel60 = row.get('rel_60d_%', np.nan)
-            ret60 = row.get('ret_60d_%', np.nan)
-            idx60 = row.get('idx_60d_%', np.nan)
+            # ✅ 개별 코멘트 길이 제한(권장 120~180)
+            if len(comment) > 140:
+                comment = comment[:140] + "…"
 
             msg += f"{rank}. {name} ({code})\n"
-            msg += f"   🌡점수: {score:.1f}점\n"
+            msg += f"   🌡점수: {float(score):.1f}점\n"
             msg += f"   🎯전략: {route}\n"
-
-            if not pd.isna(rel60):
-                msg += f"   📊60일 상대강도(α): {rel60:+.2f}%\n"
-                if not pd.isna(ret60) and not pd.isna(idx60):
-                    msg += (
-                        f"      · 종목: {ret60:+.2f}%  /  "
-                        f"지수: {idx60:+.2f}%\n"
-                    )
-
             msg += f"   💬AI: {comment}\n"
-            msg += f"   🔵매수: {buy:,}\n"
-            msg += f"   🔴손절: {row['손절가']:,} / 🟢목표: {row['추천매도가1']:,}\n\n"
 
+            # ✅ 여기 변경
+            msg += f"   🔵매수: {_fmt_int(buy)}\n"
+            msg += (
+                f"   🔴손절: {_fmt_int(row.get('손절가'))} / "
+                f"🟢목표: {_fmt_int(row.get('추천매도가1'))}\n\n"
+            )
+
+        # ✅ 최종 msg 길이 제한(텔레그램 4096 대비 여유)
+        MAX_TG_LEN = 3800
+        if len(msg) > MAX_TG_LEN:
+            msg = msg[:MAX_TG_LEN] + "\n...\n(메시지 길이 제한으로 일부 생략)"
+        
         resp = requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
             data={"chat_id": TG_ID, "text": msg},
             timeout=15
         )
-        
-        # 원하면 켜(권장). 텔레그램 API가 에러 주면 바로 로그로 잡힘
         resp.raise_for_status()
-        
         log("🚀 텔레그램 전송 완료")
+
     except Exception as e:
         log(f"⚠️ 텔레그램 전송 실패: {e}")
 
 # ------------------------------- 티커 분석 -------------------------------
+
+# ---------------- util (analyze_ticker 위로 올리기) ----------------
+def floor_to_tick_by(price: float, tick: int) -> int:
+    if price is None or not np.isfinite(price) or tick <= 0:
+        return 0
+    return int(math.floor(float(price) / tick) * tick)
+
+def ceil_to_tick_by(price: float, tick: int) -> int:
+    if price is None or not np.isfinite(price) or tick <= 0:
+        return 0
+    return int(math.ceil(float(price) / tick) * tick)
+
+def floor_to_tick(price: float) -> int:
+    if price is None or not np.isfinite(price):
+        return 0
+    tk = tick_size(float(price))
+    return floor_to_tick_by(float(price), tk)
+
+def ceil_to_tick(price: float) -> int:
+    if price is None or not np.isfinite(price):
+        return 0
+    tk = tick_size(float(price))
+    return ceil_to_tick_by(float(price), tk)
+
+
 
 def analyze_ticker(
     t: str,
@@ -1235,7 +1538,9 @@ def analyze_ticker(
     hist = macd - sig
     slope = hist.diff().iloc[-1]
 
-    vol_z_series = v / v.rolling(20).mean()
+    vol_z_series = v / v.rolling(20).mean().replace(0, np.nan)
+    vol_z_series = vol_z_series.replace([np.inf, -np.inf], np.nan)
+    vol_z = float(vol_z_series.iloc[-1]) if len(vol_z_series) else np.nan
     vol_z = vol_z_series.iloc[-1]
 
     disp_series = (c / ma20 - 1.0) * 100
@@ -1321,14 +1626,49 @@ def analyze_ticker(
     t2 = buy + risk * rr2_val
 
     buy = round_to_tick(buy)
-    stop = round_to_tick(stop)
-    t1 = round_to_tick(t1)
-    t2 = round_to_tick(t2)
+    
+    # 손절/목표는 방향성 라운딩
+    stop = floor_to_tick(stop)
+    t1   = ceil_to_tick(t1)
+    t2   = ceil_to_tick(t2)
+    
+    tk = tick_size(buy)
 
+
+    
+    # 경계도 방향성 라운딩으로 “보장”
+    min_stop = ceil_to_tick(buy * 0.93)
+    max_stop = floor_to_tick(buy * 0.97)
+    max_stop = min(max_stop, buy - tk)  # 최소 1틱 아래
+    
+    stop = min(stop, max_stop)
+    stop = max(stop, min_stop)
+    
+    if stop >= buy:
+        stop = buy - tk
+    if stop < tk:
+        stop = tk
+    
+    risk = buy - stop
+    if risk <= 0:
+        stop = buy - tk
+        risk = buy - stop
+    
+    t1 = max(t1, buy + tk)
+    t2 = max(t2, t1 + tk)
+    
     sector = sector_map.get(code6, "기타")
     name = name_map.get(code6, code6)
 
-    market = "KOSPI" if code6 in kospi_set else "KOSDAQ"
+    df["시장"] = m
+    frames.append(df[['종목코드', '시장', '거래대금(원)']])
+
+    
+    m_row = top_df.loc[top_df["종목코드"] == code6, "시장"]
+    market = str(m_row.values[0]) if not m_row.empty else (
+        "KOSPI" if code6 in kospi_set else "KOSDAQ"
+    )
+    
     idx_60 = bench_ret_60.get(market, np.nan)
     rel_60 = ret_60 - idx_60 if np.isfinite(idx_60) else np.nan
 
@@ -1591,7 +1931,8 @@ def main(
         "종목코드","종목명","시장","업종","업종_상세","업종_대분류",
         "종가","거래대금(억원)","시가총액(억원)",
         "추천매수가","손절가","추천매도가1","추천매도가2",
-        "LDY_SCORE","ENTRY_SCORE","RANK_SCORE","ROUTE","REGIME"
+        "RANK_SCORE","LDY_SCORE","ENTRY_SCORE",
+        "ROUTE","REGIME"
     ]
     for c in must_cols:
         if c not in df_out.columns:
@@ -1615,11 +1956,19 @@ def main(
     
     # ✅ Reality Check 생성
     run_reality_check(OUT_DIR, trade_ymd)
+
+    # ✅ Rank Validation 생성 (RANK_SCORE/ENTRY_SCORE/LDY_SCORE 비교)
+    make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd)
     
     if enable_telegram:
         send_telegram_auto(df_out, trade_ymd)
     else:
         log("✉️ --no-telegram 옵션으로 인해 텔레그램 발송 생략")
+
+
+
+
+
 
 if __name__ == "__main__":
     import argparse
