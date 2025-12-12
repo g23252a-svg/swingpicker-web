@@ -169,7 +169,7 @@ def to_kst_str(value, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
         pass
 
     if ts.tzinfo is None:
-        ts = ts.tz_localize(KST)
+        ts = ts.tz_localize(timezone.utc).tz_convert(KST)
     else:
         ts = ts.tz_convert(KST)
 
@@ -251,6 +251,15 @@ st.set_page_config(
     layout="wide",
     page_icon="💎",
 )
+
+with st.sidebar:
+    if st.button("🔄 데이터/캐시 강제 새로고침"):
+        st.cache_data.clear()
+        if hasattr(st, "rerun"):
+            st.rerun()
+        else:
+            st.experimental_rerun()
+        
 st.title(f"🏆 LDY Pro Trader v{APP_VERSION} (Prime Top 100 + Role-based Daily Top)")
 st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
 
@@ -951,17 +960,7 @@ def plot_radar_chart(row):
 # ---------------------------
 # 차트 시각화 (거래량 추가)
 # ---------------------------
-def plot_interactive_chart(
-    df,
-    code,
-    name,
-    entry,
-    stop,
-    target1,
-    target2,
-    show_bb: bool = True,
-    show_rsi: bool = False,
-):
+def plot_interactive_chart(df, title, entry=None, target1=None, target2=None, stop=None):
     if df is None or df.empty:
         return go.Figure()
 
@@ -1000,13 +999,20 @@ def plot_interactive_chart(
         fig.add_hline(y=30, line_dash="dot", line_color="blue", row=3, col=1)
         fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
 
+    if target2 is not None and np.isfinite(target2):
+    fig.add_hline(
+        y=float(target2),
+        line_dash="dot",
+        annotation_text=f"목표2: {int(target2):,}원",
+        annotation_position="top left",
+    )
     fig.add_trace(go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         name="주가",
         increasing_line_color='#ef5350',
         decreasing_line_color='#2979ff',
-        hovertemplate="<b>%{x|%y/%m/%d}</b><br>종가: %{close:,}원<extra></extra>",
+        hovertemplate="<b>%{x|%y/%m/%d}</b><br>종가: %{close:,.0f}원<extra></extra>",
         showlegend=False
     ), row=1, col=1)
 
@@ -1130,7 +1136,11 @@ def normalize_github_raw(url: str) -> str:
 @st.cache_data(ttl=600)
 def load_csv_url(url: str) -> pd.DataFrame:
     url = normalize_github_raw(url)
-    r = requests.get(url, timeout=30)
+    r = requests.get(
+    url,
+    timeout=30,
+    headers={"Cache-Control": "no-cache", "Pragma": "no-cache"}
+)
     r.raise_for_status()
     return pd.read_csv(io.BytesIO(r.content), encoding="utf-8-sig")
 
