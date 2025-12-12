@@ -109,15 +109,7 @@ def calc_bollinger(close: pd.Series, period: int = 20, k: float = 2.0):
     bandwidth = ((upper - lower) / ma) * 100
     return upper, lower, bandwidth
 
-def round_to_tick(price: float) -> int:
-    if price < 2000: t = 1
-    elif price < 5000: t = 5
-    elif price < 20000: t = 10
-    elif price < 50000: t = 50
-    elif price < 200000: t = 100
-    elif price < 500000: t = 500
-    else: t = 1000
-    return int(round(price / t) * t)
+
 
 # ------------------------------- 데이터 수집 공통 -------------------------------
 
@@ -637,7 +629,7 @@ def send_telegram_v68(df: pd.DataFrame, ymd: str, market_heat: float, hot_sector
 
 def main(trade_date: Optional[str] = None, top_n: Optional[int] = None, 
          enable_telegram: bool = True, tag: Optional[str] = None) -> None:
-    log("🚀 LDY Collector v6.8 (Full Integrated) 시작...")
+    log("🚀 LDY Collector v6.9.1 시작...")
     
     # 1. 날짜 및 기초 데이터
     ymd = resolve_trade_date(trade_date)
@@ -699,7 +691,7 @@ def main(trade_date: Optional[str] = None, top_n: Optional[int] = None,
     # (1) 기록 보관용 파일 저장 (기존 코드)
     date_tag = now_kst().strftime("%Y%m%d")
     suffix = f"_{tag}" if tag else ""
-    out_path = os.path.join(OUT_DIR, f"recommend_{ymd}{suffix}_v6.8.csv")
+    out_path = os.path.join(OUT_DIR, f"recommend_{ymd}{suffix}_v6.9.1.csv")
     df.to_csv(out_path, index=False, encoding=UTF8)
     log(f"💾 [기록용] 저장 완료: {out_path}")
 
