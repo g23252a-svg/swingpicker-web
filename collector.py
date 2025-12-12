@@ -30,6 +30,7 @@ except Exception:
     PYKRX_OK = False
 from tqdm import tqdm
 import FinanceDataReader as fdr
+import random
 
 from time_utils import now_kst, now_utc, KST
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -52,7 +53,7 @@ OUT_DIR = os.path.join(BASE_DIR, "data")
 UTF8 = "utf-8-sig"
 
 # 병렬 처리 (너무 크게 잡으면 KRX 쿼리/네트워크에 부담)
-MAX_WORKERS = int(os.environ.get("LDY_WORKERS", "8"))
+MAX_WORKERS = int(os.environ.get("LDY_WORKERS", "4"))  # 8 -> 4
 
 # Bollinger Squeeze 감지
 BB_PERIOD = 20
@@ -189,6 +190,10 @@ def label_market_temp(breadth_all: float) -> str:
         return "🧊 침체"
     return "🌤 중립"
 
+def _backoff_sleep(i: int, base: float = 0.35, cap: float = 2.0) -> None:
+    # i=0,1 일 때만 의미 (총 2회 재시도)
+    jitter = random.uniform(0.85, 1.15)
+    time.sleep(min(cap, base * (2 ** i)) * jitter)
 
 def run_reality_check(out_dir: str, trade_ymd: str) -> None:
     """
@@ -249,30 +254,37 @@ def _ymd8_to_dash(s: str) -> str:
     return s
 
 def _pykrx_df(fn, *args, **kwargs):
-    """PYKRX 호출을 안전하게 감싸고 실패 시 None"""
+    """PYKRX 호출을 안전하게 감싸고 실패 시 None (+2회 재시도/backoff)"""
     if (not PYKRX_OK) or (stock is None):
         return None
-    try:
-        return fn(*args, **kwargs)
-    except Exception:
-        return None
+
+    last_err = None
+    for i in range(3):  # 총 3번 시도 = 최초 1 + 재시도 2
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            last_err = e
+            if i < 2:
+                _backoff_sleep(i)
+            else:
+                return None
 
 def safe_ohlcv_by_date(start_ymd: str, end_ymd: str, code: str) -> Optional[pd.DataFrame]:
-    """
-    ✅ 네가 말한 B 패턴을 그대로 구현한 '대표 케이스'
-    - 1순위: pykrx stock.get_market_ohlcv_by_date
-    - 실패/empty면: FDR DataReader로 대체
-    """
     df = _pykrx_df(stock.get_market_ohlcv_by_date, start_ymd, end_ymd, code)
 
     if df is None or getattr(df, "empty", True):
-        try:
-            df = fdr.DataReader(str(code).zfill(6), _ymd8_to_dash(start_ymd), _ymd8_to_dash(end_ymd))
-        except Exception:
-            df = None
+        df = None
+        for i in range(3):  # 1 + 2회 재시도
+            try:
+                df = fdr.DataReader(str(code).zfill(6), _ymd8_to_dash(start_ymd), _ymd8_to_dash(end_ymd))
+                break
+            except Exception:
+                if i < 2:
+                    _backoff_sleep(i)
+                else:
+                    df = None
 
         if df is not None and not getattr(df, "empty", True):
-            # analyze_ticker가 쓰는 컬럼명으로 정규화
             df = df.rename(columns={
                 "Open": "시가", "High": "고가", "Low": "저가", "Close": "종가", "Volume": "거래량"
             })
@@ -1844,6 +1856,11 @@ def main(
     tag: Optional[str] = None,
 ) -> None:
     log("🚀 LDY Collector v6.8 시작...")
+
+    # ✅ 여기에 넣기 (resolve_trade_date() 호출 전에!)
+    if not PYKRX_OK:
+        log("❌ pykrx 미사용 환경에서는 거래대금 TopN/스냅샷 생성이 불가합니다. requirements.txt에 pykrx 추가 후 재배포하세요.")
+        return
 
     # 1) 먼저 거래 기준일 결정
     trade_ymd = resolve_trade_date(trade_date)
