@@ -1502,7 +1502,7 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
         lambda row: generate_ai_comment(
             row.get("MFI14", 50),
             row.get("RSI14", 50),
-            row.get("MACD_Slope", 0),
+            row.get("MACD_Slope_PCT", row.get("MACD_Slope", 0)),
             row.get("이격도", 0),
             row.get("LDY_SCORE", 0),
         ),
@@ -1651,7 +1651,19 @@ def analyze_ticker(
     macd = ema(c, 12) - ema(c, 26)
     sig = ema(macd, 9)
     hist = macd - sig
-    slope_pct = (slope / last_c) * 100
+    last_c = c.iloc[-1]
+
+    # ✅ [PATCH] MACD 히스토그램 기울기(최근 5일 선형회귀 slope)
+    hist_tail = hist.dropna().tail(5)
+    if len(hist_tail) >= 2:
+        x_idx = np.arange(len(hist_tail), dtype=float)
+        slope = float(np.polyfit(x_idx, hist_tail.values.astype(float), 1)[0])
+    elif len(hist.dropna()) >= 2:
+        slope = float(hist.dropna().diff().iloc[-1])
+    else:
+        slope = 0.0
+    
+    slope_pct = (slope / last_c) * 100.0 if (np.isfinite(last_c) and last_c > 0) else 0.0
 
     vol_z_series = v / v.rolling(20).mean().replace(0, np.nan)
     vol_z_series = vol_z_series.replace([np.inf, -np.inf], np.nan)
@@ -1661,7 +1673,7 @@ def analyze_ticker(
     disp_series = (c / ma20 - 1.0) * 100
     disp = disp_series.iloc[-1]
 
-    last_c = c.iloc[-1]
+    
 
     if len(c) >= 6:
         ret_5 = (last_c / c.iloc[-6] - 1.0) * 100
@@ -1799,6 +1811,7 @@ def analyze_ticker(
         "이격도": round(float(disp), 2),
         "MACD_Hist": round(float(hist.iloc[-1]), 4),
         "MACD_Slope": round(float(slope), 5),
+        "MACD_Slope_PCT": round(float(slope_pct), 4),   # ✅ 여기 추가
         "거래강도": round(float(vol_z), 2),
 
         # ✅ v6.8 추가 (여기 삽입)
