@@ -48,11 +48,15 @@ KEY_PRIME = _get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
 # 🔹 Gist 관련 설정 (Streamlit secrets 또는 환경변수에서 읽음)
-GIST_ID    = _get_conf("LDY_GIST_ID", "")
+GIST_ID_USERS = _get_conf("LDY_GIST_ID", "")
 GIST_TOKEN = _get_conf("LDY_GIST_TOKEN", "")
+GIST_ID_SUBS = _get_conf("LDY_GIST_SUBS_ID", GIST_ID_USERS)
+GIST_ID_INQ  = _get_conf("LDY_GIST_INQ_ID",  GIST_ID_USERS)
 
 # 디버그 로그 (Streamlit Cloud / Render 로그에서 확인용)
-print("[auth_user] DEBUG GIST_ID =", GIST_ID)
+print("[auth_user] DEBUG GIST_ID_USERS =", GIST_ID_USERS)
+print("[auth_user] DEBUG GIST_ID_SUBS  =", GIST_ID_SUBS)
+print("[auth_user] DEBUG GIST_ID_INQ   =", GIST_ID_INQ)
 print("[auth_user] DEBUG GIST_TOKEN set?", bool(GIST_TOKEN))
 
 # ----------------- 공통 유틸 -----------------
@@ -165,29 +169,36 @@ GIST_FILE_NAME = "users_db.json"   # Gist 안에 만들 파일 이름
 
 def _extract_json_from_text(content: str) -> str:
     """
-    Gist 파일에 'LDY Pro Trader user DB' 같은 설명 텍스트가 앞에 붙어 있어도
-    실제 JSON 블록만 잘라내서 파싱할 수 있게 처리.
+    앞에 설명 텍스트가 붙어도 JSON({} 또는 [])만 추출
     """
     if not content:
         return "{}"
     s = content.strip()
-    start = s.find("{")
-    end = s.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        # JSON 형태가 아니면 빈 오브젝트로 처리
+
+    m = re.search(r"[\{\[]", s)
+    if not m:
         return "{}"
-    return s[start : end + 1]
+
+    start = m.start()
+    open_ch = s[start]
+    close_ch = "}" if open_ch == "{" else "]"
+
+    end = s.rfind(close_ch)
+    if end == -1 or end <= start:
+        return "{}" if open_ch == "{" else "[]"
+
+    return s[start:end + 1]
 
 def _load_user_db_from_gist() -> Optional[dict]:
     """
     GitHub Gist에서 users_db.json 내용을 읽어온다.
     - GIST_ID / GIST_TOKEN 없으면 None 리턴 (로컬로 fallback)
     """
-    if not GIST_ID or not GIST_TOKEN:
+    if not GIST_ID_USERS or not GIST_TOKEN:
         return None
 
     try:
-        url = f"https://api.github.com/gists/{GIST_ID}"
+        url = f"https://api.github.com/gists/{gist_id}"
         headers = {
             "Authorization": f"token {GIST_TOKEN}",
             "Accept": "application/vnd.github+json",
@@ -226,7 +237,7 @@ def _save_user_db_to_gist(db: dict) -> bool:
         return False
 
     try:
-        url = f"https://api.github.com/gists/{GIST_ID}"
+        url = f"https://api.github.com/gists/{gist_id}"
         headers = {
             "Authorization": f"token {GIST_TOKEN}",
             "Accept": "application/vnd.github+json",
@@ -247,19 +258,13 @@ def _save_user_db_to_gist(db: dict) -> bool:
         logger.exception("[auth_user] Gist user DB save 실패: %s", e)
         return False
 
-# ----------------- (공용) Gist JSON 유틸 -----------------
-def load_json_from_gist_file(file_name: str, default):
-    """
-    Gist 안의 file_name을 JSON으로 읽어온다.
-    - 파일이 없거나 오류가 나면 default를 반환한다.
-    - subscriptions_db.json / inquiries_db.json 같이 다른 DB도 이 함수로 공통 처리.
-    """
-    if not GIST_ID or not GIST_TOKEN:
+def load_json_from_gist_file(gist_id: str, file_name: str, default):
+    if not gist_id or not GIST_TOKEN:
         logger.warning("[auth_user] Gist 설정 없음 → %s default 반환", file_name)
         return default
 
     try:
-        url = f"https://api.github.com/gists/{GIST_ID}"
+        url = f"https://api.github.com/gists/{gist_id}"
         headers = {
             "Authorization": f"token {GIST_TOKEN}",
             "Accept": "application/vnd.github+json",
@@ -267,10 +272,8 @@ def load_json_from_gist_file(file_name: str, default):
         resp = requests.get(url, headers=headers, timeout=10)
 
         if resp.status_code != 200:
-            logger.error(
-                "[auth_user] Gist GET 실패 (%s): status=%s, body=%s",
-                file_name, resp.status_code, resp.text
-            )
+            logger.error("[auth_user] Gist GET 실패 (%s): status=%s, body=%s",
+                         file_name, resp.status_code, resp.text)
             return default
 
         gist = resp.json()
@@ -278,13 +281,11 @@ def load_json_from_gist_file(file_name: str, default):
         file_obj = files.get(file_name)
 
         if not file_obj:
-            logger.info(
-                "[auth_user] Gist에 '%s' 파일 없음 → default 사용", file_name
-            )
+            logger.info("[auth_user] Gist에 '%s' 파일 없음 → default 사용", file_name)
             return default
 
-        content = file_obj.get("content", "") or ""
-        if not content.strip():
+        content = (file_obj.get("content", "") or "").strip()
+        if not content:
             return default
 
         json_text = _extract_json_from_text(content)
@@ -295,17 +296,13 @@ def load_json_from_gist_file(file_name: str, default):
         return default
 
 
-def save_json_to_gist_file(file_name: str, payload) -> bool:
-    """
-    Gist 안의 file_name에 payload(JSON 직렬화 가능 객체)를 저장한다.
-    - 실패 시 False, 성공 시 True 반환.
-    """
-    if not GIST_ID or not GIST_TOKEN:
+def save_json_to_gist_file(gist_id: str, file_name: str, payload) -> bool:
+    if not gist_id or not GIST_TOKEN:
         logger.error("[auth_user] Gist 설정 없음 → %s 저장 불가", file_name)
         return False
 
     try:
-        url = f"https://api.github.com/gists/{GIST_ID}"
+        url = f"https://api.github.com/gists/{gist_id}"
         headers = {
             "Authorization": f"token {GIST_TOKEN}",
             "Accept": "application/vnd.github+json",
@@ -318,14 +315,10 @@ def save_json_to_gist_file(file_name: str, payload) -> bool:
             }
         }
 
-        resp = requests.patch(
-            url, headers=headers, data=json.dumps(body), timeout=10
-        )
+        resp = requests.patch(url, headers=headers, data=json.dumps(body), timeout=10)
         if resp.status_code not in (200, 201):
-            logger.error(
-                "[auth_user] Gist PATCH 실패 (%s): status=%s, body=%s",
-                file_name, resp.status_code, resp.text
-            )
+            logger.error("[auth_user] Gist PATCH 실패 (%s): status=%s, body=%s",
+                         file_name, resp.status_code, resp.text)
             return False
 
         return True
@@ -339,53 +332,57 @@ def save_json_to_gist_file(file_name: str, payload) -> bool:
 SUBSCRIPTIONS_GIST_FILE = "subscriptions_db.json"
 INQUIRIES_GIST_FILE     = "inquiries_db.json"
 
+DEFAULT_SUBSCRIPTIONS_DB = {"subs": {}, "updated_at": None}
+DEFAULT_INQUIRIES_DB     = {"inquiries": [], "updated_at": None}
+
 
 def load_subscriptions_db() -> dict:
-    """
-    구독 정보 DB 로드
-    - Gist의 subscriptions_db.json에서 읽어오고,
-      없거나 오류면 {} 반환
-    """
-    data = load_json_from_gist_file(SUBSCRIPTIONS_GIST_FILE, default={})
+    data = load_json_from_gist_file(GIST_ID_SUBS, SUBSCRIPTIONS_GIST_FILE, default=DEFAULT_SUBSCRIPTIONS_DB)
     if not isinstance(data, dict):
-        logger.warning("[auth_user] subscriptions_db 타입이 dict가 아님 → 강제 초기화")
-        return {}
+        return dict(DEFAULT_SUBSCRIPTIONS_DB)
+    if "subs" not in data or not isinstance(data.get("subs"), dict):
+        data["subs"] = {}
+    data.setdefault("updated_at", None)
     return data
 
 
 def save_subscriptions_db(db: dict) -> bool:
-    """
-    구독 정보 DB 저장
-    - Gist subscriptions_db.json에 저장
-    """
     if not isinstance(db, dict):
-        logger.warning("[auth_user] save_subscriptions_db 인자가 dict가 아님 → dict() 변환")
-        db = dict(db)
-    return save_json_to_gist_file(SUBSCRIPTIONS_GIST_FILE, db)
+        db = dict(DEFAULT_SUBSCRIPTIONS_DB)
+    if "subs" not in db or not isinstance(db.get("subs"), dict):
+        db["subs"] = {}
+    db["updated_at"] = _now_utc_str()
+    return save_json_to_gist_file(GIST_ID_SUBS, SUBSCRIPTIONS_GIST_FILE, db)
 
 
-def load_inquiries_db() -> list:
-    """
-    문의글 DB 로드
-    - Gist inquiries_db.json에서 읽어오고,
-      없거나 오류면 [] 반환
-    """
-    data = load_json_from_gist_file(INQUIRIES_GIST_FILE, default=[])
-    if not isinstance(data, list):
-        logger.warning("[auth_user] inquiries_db 타입이 list가 아님 → 강제 초기화")
-        return []
+def load_inquiries_db() -> dict:
+    data = load_json_from_gist_file(GIST_ID_INQ, INQUIRIES_GIST_FILE, default=DEFAULT_INQUIRIES_DB)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_INQUIRIES_DB)
+    if "inquiries" not in data or not isinstance(data.get("inquiries"), list):
+        data["inquiries"] = []
+    data.setdefault("updated_at", None)
     return data
 
 
-def save_inquiries_db(items: list) -> bool:
-    """
-    문의글 DB 저장
-    - Gist inquiries_db.json에 저장
-    """
-    if not isinstance(items, list):
-        logger.warning("[auth_user] save_inquiries_db 인자가 list가 아님 → list() 변환")
-        items = list(items)
-    return save_json_to_gist_file(INQUIRIES_GIST_FILE, items)
+def save_inquiries_db(db: dict) -> bool:
+    if not isinstance(db, dict):
+        db = dict(DEFAULT_INQUIRIES_DB)
+    if "inquiries" not in db or not isinstance(db.get("inquiries"), list):
+        db["inquiries"] = []
+    db["updated_at"] = _now_utc_str()
+    return save_json_to_gist_file(GIST_ID_INQ, INQUIRIES_GIST_FILE, db)
+
+
+# (호환용) 기존 dashboard가 list로 쓰고 있으면 이걸 쓰면 됨
+def load_inquiry_items() -> list:
+    return load_inquiries_db().get("inquiries", [])
+
+
+def save_inquiry_items(items: list) -> bool:
+    db = load_inquiries_db()
+    db["inquiries"] = list(items) if isinstance(items, list) else []
+    return save_inquiries_db(db)
 
 # ----------------- 통합 DB 유틸 (Gist 우선, 로컬 백업) -----------------
 # 👉 Gist API 호출 최적화를 위한 간단 캐시 (TTL)
@@ -652,7 +649,7 @@ def render_auth_box(show_debug: bool = False):
             st.caption(
                 f"DEBUG: GIST_ID={GIST_ID[:8]}..., "
                 f"users={len(_db.get('users', {}))}, "
-                f"from_gist={bool(GIST_ID and GIST_TOKEN)}"
+                f"from_gist={bool(GIST_ID_USERS and GIST_TOKEN)}"
             )
         except Exception as e:
             st.caption(f"DEBUG: load_user_db error = {e}")
