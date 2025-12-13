@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Collector v6.8
+LDY Pro Trader Collector v6.9 (TTM Squeeze)
 - 업종 매핑: KIND(KRX) + FDR + Fallback + Override(사용자 CSV) 병합
 - ROUTE: BRK / Watch / MR / PULL 다단계 분류 유지
 - 5일/10일 수익률 + 60일 지수/상대강도 계산
@@ -55,15 +55,22 @@ UTF8 = "utf-8-sig"
 # 병렬 처리 (너무 크게 잡으면 KRX 쿼리/네트워크에 부담)
 MAX_WORKERS = int(os.environ.get("LDY_WORKERS", "4"))  # 8 -> 4
 
-# Bollinger Squeeze 감지
+# 변동성 축소/스퀴즈 감지
 BB_PERIOD = 20
 BB_STD = 2
-BB_SQUEEZE_BW = 10.0  # Bandwidth(%) < 10%면 스퀴즈로 간주
 
-# 스퀴즈 보너스(가벼운 가산점)
-BONUS_BB_SQUEEZE_SCORE = 2.0
-BONUS_BB_SQUEEZE_ENTRY = 3.0
+# (1) 단순 Bandwidth(%) 기준 (정보용/보조)
+BB_SQUEEZE_BW = 10.0  # Bandwidth(%) < 10%면 '협의 스퀴즈'로 표시
 
+# (2) John Carter의 TTM Squeeze (진성 스퀴즈)
+#     - Bollinger Band(표준편차)가 Keltner Channel(ATR) 안으로 완전히 들어갈 때
+KC_PERIOD = 20
+KC_ATR_PERIOD = 20
+KC_MULT = 1.5
+
+# 스퀴즈 보너스(가산점) — v6.9부터는 'TTM Squeeze'를 주 신호로 사용
+BONUS_BB_SQUEEZE_SCORE = 3.0
+BONUS_BB_SQUEEZE_ENTRY = 4.0
 # 섹터 모멘텀 보정은 "업종 평균점수"보다 "업종 수익률"이 더 직관적이라 교체
 # (기존 W_SECTOR = 0.05 그대로 사용해도 OK)
 
@@ -1148,8 +1155,17 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
 
 # ------------------------------- AI 코멘트 / 스코어 -------------------------------
 
-def generate_ai_comment(mfi: float, rsi: float, slope: float, disp: float, score: float) -> str:
+def generate_ai_comment(mfi: float, rsi: float, slope: float, disp: float, score: float, ttm_squeeze: int = 0, bw_squeeze: int = 0, bb_bw: float = np.nan) -> str:
     comment = ""
+
+    # ✅ v6.9: TTM Squeeze 코멘트(존 카터)
+    if int(ttm_squeeze) >= 1:
+        comment += "🌪️ 폭풍전야! 에너지가 극한으로 응축되었습니다 (TTM Squeeze). "
+    elif int(bw_squeeze) >= 1:
+        if np.isfinite(bb_bw):
+            comment += f"🔇 변동성 축소 구간입니다 (BW {float(bb_bw):.1f}%). "
+        else:
+            comment += "🔇 변동성 축소 구간입니다 (BW<10%). "
 
     if mfi >= 70:
         comment += "💰 외국인/기관의 강력한 수급이 집중되고 있습니다. "
@@ -1231,6 +1247,7 @@ def route_tag(row: pd.Series) -> str:
     """
     v6.7 ROUTE 분류
     - BRK: 강한 돌파
+    - SQZ: 진성 스퀴즈(폭발대기)
     - Watch: 상승 준비 / 관찰
     - REV: 역추세 반등 (지수·섹터 대비 바닥권에서 턴)
     - PULL: 눌림/중립
@@ -1251,7 +1268,7 @@ def route_tag(row: pd.Series) -> str:
     rr1 = _fv("RR1", 0.0)
     mfi = _fv("MFI14", 50.0)
     rel60 = _fv("rel_60d_%", 0.0)  # 60일 상대강도(α)
-    bb_sq = _fv("BB_SQUEEZE", 0.0)
+    bb_sq = _fv("TTM_SQUEEZE", _fv("BB_SQUEEZE", 0.0))
 
     # 1) 강한 돌파 BRK
     strong_break = (
@@ -1276,9 +1293,9 @@ def route_tag(row: pd.Series) -> str:
     if rev:
         return "🔻 REV (역추세 반등)"
 
-    # 2.5) 스퀴즈 + 모멘텀 플러스 = 돌파예상 Watch로 선반영
+    # 2.5) 진성 스퀴즈(TTM) + 모멘텀 플러스 = 🔥 SQZ(폭발대기)
     if (bb_sq >= 1) and (slope > 0) and (now_pct <= 10):
-        return "🔺 Watch (스퀴즈·돌파예상)"
+        return "🔥 SQZ (폭발대기)"
 
     # 3) Watch 영역
     watch = ((slope > 0) and (r5 > 0)) or ((ebs >= PASS_EBS) and (now_pct <= 8))
@@ -1517,6 +1534,9 @@ def build_global_score(lat: pd.DataFrame) -> pd.DataFrame:
             row.get("MACD_Slope_PCT", row.get("MACD_Slope", 0)),
             row.get("이격도", 0),
             row.get("LDY_SCORE", 0),
+            row.get("TTM_SQUEEZE", row.get("BB_SQUEEZE", 0)),
+            row.get("BB_SQUEEZE_BW", 0),
+            row.get("BB_BW", np.nan),
         ),
         axis=1,
     )
@@ -1641,13 +1661,27 @@ def analyze_ticker(
     ma60 = c.rolling(60).mean()
     ma120 = c.rolling(120).mean()
 
-    # ✅ Bollinger Bandwidth / Squeeze (여기 삽입)
+    # ✅ Bollinger Bandwidth / Squeeze (v6.9: BW + TTM Squeeze)
     std20 = c.rolling(BB_PERIOD).std()
     bb_upper = ma20 + (BB_STD * std20)
     bb_lower = ma20 - (BB_STD * std20)
     bb_bw_series = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
     bb_bw = float(bb_bw_series.iloc[-1]) if len(bb_bw_series) else np.nan
-    bb_squeeze = 1 if (np.isfinite(bb_bw) and bb_bw < BB_SQUEEZE_BW) else 0
+
+    # (A) Bandwidth 기준 스퀴즈(정보용)
+    bw_squeeze = 1 if (np.isfinite(bb_bw) and bb_bw < BB_SQUEEZE_BW) else 0
+
+    # (B) John Carter TTM Squeeze(진성 스퀴즈): Bollinger Band가 Keltner Channel 안으로 완전히 들어감
+    atr_kc_series = calc_atr(h, l, c, KC_ATR_PERIOD)
+    kc_mid = ema(c, KC_PERIOD)
+    kc_upper = kc_mid + (KC_MULT * atr_kc_series)
+    kc_lower = kc_mid - (KC_MULT * atr_kc_series)
+    ttm_series = (bb_lower > kc_lower) & (bb_upper < kc_upper)
+    ttm_last = ttm_series.iloc[-1] if len(ttm_series) else False
+    ttm_squeeze = 1 if (bool(ttm_last) and not pd.isna(ttm_last)) else 0
+
+    # ✅ 호환성: BB_SQUEEZE는 이제 'TTM Squeeze' 의미로 사용 (기존 로직/대시보드 호환)
+    bb_squeeze = int(ttm_squeeze)
 
     above_ma20 = 1 if (np.isfinite(ma20.iloc[-1]) and float(c.iloc[-1]) > float(ma20.iloc[-1])) else 0
 
@@ -1826,9 +1860,11 @@ def analyze_ticker(
         "MACD_Slope_PCT": round(float(slope_pct), 4),   # ✅ 여기 추가
         "거래강도": round(float(vol_z), 2),
 
-        # ✅ v6.8 추가 (여기 삽입)
+        # ✅ v6.9 추가 (TTM Squeeze)
         "BB_BW": round(float(bb_bw), 2) if np.isfinite(bb_bw) else np.nan,
-        "BB_SQUEEZE": int(bb_squeeze),
+        "BB_SQUEEZE_BW": int(bw_squeeze),            # BW<10% (정보용)
+        "TTM_SQUEEZE": int(ttm_squeeze),             # John Carter TTM Squeeze (진성 스퀴즈)
+        "BB_SQUEEZE": int(bb_squeeze),               # (호환) = TTM_SQUEEZE
         "Above_MA20": int(above_ma20),
         
         "ret_5d_%": round(float(ret_5), 2),
