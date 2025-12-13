@@ -546,7 +546,25 @@ def ensure_turnover(df):
 def normalize_cols(df):
     return ensure_turnover(df)
 
+def make_preview(df, n=5):
+    if df is None or df.empty:
+        return df
 
+    # 1순위: collector가 박아준 최종 랭크
+    if "LDY_RANK" in df.columns:
+        return df.sort_values("LDY_RANK", ascending=True).head(n).copy()
+
+    # 2순위: CSV 원본 순서 랭크
+    if "_CSV_RANK" in df.columns:
+        return df.sort_values("_CSV_RANK", ascending=True).head(n).copy()
+
+    # 3순위: 점수 기반(오를만함을 RANK_SCORE로 본다면 이게 핵심)
+    keys = [c for c in ["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE", "거래대금(억원)"] if c in df.columns]
+    if keys:
+        return df.sort_values(keys, ascending=[False]*len(keys)).head(n).copy()
+
+    # fallback
+    return df.head(n).copy()
 
 # ---------------------------
 # 유틸 함수
@@ -2253,33 +2271,12 @@ with tab2:
     if just_registered:
         st.success("🎉 첫 가입을 환영합니다! 오늘 기준 TOP 5 프리뷰를 먼저 보여드릴게요.")
         try:
-            if "LDY_RANK" in base.columns:
-                preview = base.sort_values("LDY_RANK", ascending=True).head(5).copy()
-            elif "RANK_SCORE" in base.columns:
-                _keys = [c for c in ["RANK_SCORE","ENTRY_SCORE","LDY_SCORE","거래대금(억원)"] if c in base.columns]
-                if _keys:
-                    preview = base.sort_values(_keys, ascending=[False]*len(_keys)).head(5).copy()
-                else:
-                    preview = base.head(5).copy()
-            else:
-                preview = base.sort_values("LDY_SCORE", ascending=False).head(5).copy()
+            preview = make_preview(base, n=5)
         except Exception:
-            if "LDY_RANK" in scored.columns:
-                preview = scored.sort_values("LDY_RANK", ascending=True).head(5).copy()
-            elif "RANK_SCORE" in scored.columns:
-                _keys = [c for c in ["RANK_SCORE","ENTRY_SCORE","LDY_SCORE","거래대금(억원)"] if c in scored.columns]
-                if _keys:
-                    preview = scored.sort_values(_keys, ascending=[False]*len(_keys)).head(5).copy()
-                else:
-                    preview = scored.head(5).copy()
-            else:
-                preview = scored.sort_values("LDY_SCORE", ascending=False).head(5).copy()
+            preview = make_preview(scored, n=5)
 
         if not preview.empty:
-            cols = [
-                "종목명", "종목코드", "LDY_SCORE",
-                "추천매수가", "손절가", "추천매도가1"
-            ]
+            cols = ["종목명", "종목코드", "LDY_SCORE", "추천매수가", "손절가", "추천매도가1"]
             cols = [c for c in cols if c in preview.columns]
             if "종목명" in cols:
                 prev_view = preview[cols].set_index("종목명")
