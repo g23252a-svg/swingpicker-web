@@ -1160,12 +1160,10 @@ def get_stock_chart_data(code):
 
 def plot_radar_chart(row):
     """
-    v7.0: Collector에서 계산된 정규화 팩터(NORM_*)를 사용하여
-    점수가 왜 높은지/낮은지 정확한 근거를 시각화함.
+    v7.0: 팩터 기반 레이더 차트 (가시성 개선 버전)
     """
-    # 1) v7.4 NORM 컬럼이 있는지 확인
+    # 1) 팩터 데이터 확인
     if "NORM_MOM" in row.index:
-        # 데이터가 있으면 팩터 기반 (0~1.0 -> 0~100 변환)
         stats = {
             "모멘텀(MOM)": row.get("NORM_MOM", 0) * 100,
             "가성비(RR)": row.get("NORM_RR", 0) * 100,
@@ -1175,7 +1173,7 @@ def plot_radar_chart(row):
             "수급(LIQ)": row.get("NORM_LIQ", 0) * 100,
         }
     else:
-        # 2) 없으면(구버전 데이터) 기존 로직 유지 (Fallback)
+        # Fallback
         stats = {
             "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
             "수급(MFI)": row.get("MFI14", 50),
@@ -1197,7 +1195,9 @@ def plot_radar_chart(row):
             theta=keys,
             fill='toself',
             name=row.get('종목명', '종목'),
-            line_color='#00CC96'
+            # 🔥 색상 변경: 밝은 Cyan + 반투명 채우기
+            line=dict(color='#00E5FF', width=3),
+            fillcolor='rgba(0, 229, 255, 0.2)'
         )
     )
     fig.update_layout(
@@ -1205,8 +1205,14 @@ def plot_radar_chart(row):
             radialaxis=dict(
                 visible=True, 
                 range=[0, 100],
-                tickfont=dict(size=10),
-            )
+                tickfont=dict(size=10, color='gray'),
+                gridcolor='rgba(128,128,128,0.3)' # 그리드 색상
+            ),
+            angularaxis=dict(
+                tickfont=dict(size=12, weight='bold'),
+                gridcolor='rgba(128,128,128,0.3)'
+            ),
+            bgcolor='rgba(0,0,0,0)' # 투명 배경
         ),
         showlegend=False,
         height=280,
@@ -1227,7 +1233,7 @@ def plot_interactive_chart(
     target1=None,
     target2=None,
     show_bb: bool = True,
-    show_kc: bool = False,  # 🔥 [추가] 켈트너 채널 표시 여부
+    show_kc: bool = False,
     show_rsi: bool = False,
 ):
     if df is None or df.empty:
@@ -1240,72 +1246,132 @@ def plot_interactive_chart(
         rows=rows,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.03,
+        vertical_spacing=0.05,
         row_heights=row_heights,
     )
 
-    # 1) 캔들
+    # --- 🎨 색상 팔레트 정의 ---
+    COLOR_UP = '#FF3B30'      # 밝은 빨강 (상승)
+    COLOR_DOWN = '#007AFF'    # 밝은 파랑 (하락)
+    COLOR_MA20 = '#FFD700'    # 황금색 (20일선)
+    COLOR_BB = 'rgba(189, 195, 199, 0.5)'      # 은은한 회색 선 (BB)
+    COLOR_BB_FILL = 'rgba(189, 195, 199, 0.1)' # 아주 연한 회색 채우기 (BB)
+    COLOR_KC = '#E040FB'      # 형광 보라 (KC)
+    COLOR_ENTRY = '#FF9F0A'   # 형광 오렌지 (진입가)
+    COLOR_STOP = '#30D158'    # 형광 초록 (목표가 - 상승이라 초록 계열 사용)
+    COLOR_LOSS = '#00B0FF'    # 형광 하늘 (손절가 - 파랑 캔들과 구분되는 하늘색)
+
+    # 1) 캔들 차트
     fig.add_trace(
         go.Candlestick(
             x=df.index,
             open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
             name="주가",
-            increasing={'line': {'color': '#FF3333'}},  # 상승: 빨강
-            decreasing={'line': {'color': '#3333FF'}},  # 하락: 파랑
-            hovertemplate="<b>%{x|%y/%m/%d}</b><br>종가: %{close:,.0f}원<extra></extra>",
+            increasing={'line': {'color': COLOR_UP, 'width': 1.5}, 'fillcolor': COLOR_UP},
+            decreasing={'line': {'color': COLOR_DOWN, 'width': 1.5}, 'fillcolor': COLOR_DOWN},
+            hovertemplate="<b>%{x|%y/%m/%d}</b><br>시가: %{open:,.0f}<br>고가: %{high:,.0f}<br>저가: %{low:,.0f}<br>종가: %{close:,.0f}원<extra></extra>",
             showlegend=False,
         ),
         row=1, col=1
     )
 
-    # 2) MA
+    # 2) MA20 (황금색 실선)
     if "MA20" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="20일선", line=dict(width=1)), row=1, col=1)
-    # if "MA60" in df.columns:
-    #     fig.add_trace(go.Scatter(x=df.index, y=df["MA60"], name="60일선", line=dict(width=1)), row=1, col=1)
+        fig.add_trace(
+            go.Scatter(
+                x=df.index, y=df["MA20"], 
+                name="20일선", 
+                line=dict(color=COLOR_MA20, width=2)
+            ), 
+            row=1, col=1
+        )
 
-    # 3) 볼린저 밴드 (파란색 계열)
+    # 3) 볼린저 밴드 (은은한 회색 영역)
     if show_bb:
-        if "BB_UPPER" in df.columns:
-            fig.add_trace(go.Scatter(x=df.index, y=df["BB_UPPER"], name="BB 상단", line=dict(width=1, color='rgba(0,0,255,0.4)')), row=1, col=1)
-        if "BB_LOWER" in df.columns:
-            fig.add_trace(go.Scatter(x=df.index, y=df["BB_LOWER"], name="BB 하단", line=dict(width=1, color='rgba(0,0,255,0.4)'), fill='tonexty', fillcolor='rgba(0,0,255,0.05)'), row=1, col=1)
+        if "BB_UPPER" in df.columns and "BB_LOWER" in df.columns:
+            # 상단
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["BB_UPPER"], 
+                name="BB 상단", 
+                line=dict(width=1, color=COLOR_BB),
+                showlegend=False
+            ), row=1, col=1)
+            # 하단 (채우기 포함)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["BB_LOWER"], 
+                name="BB 밴드", 
+                line=dict(width=1, color=COLOR_BB), 
+                fill='tonexty', 
+                fillcolor=COLOR_BB_FILL,
+                showlegend=True
+            ), row=1, col=1)
 
-    # 4) 켈트너 채널 (주황색 점선) - 🔥 [추가된 부분]
+    # 4) 켈트너 채널 (보라색 점선) - 볼린저 밴드와 확연히 구분
     if show_kc:
         if "KC_UPPER" in df.columns:
-            fig.add_trace(go.Scatter(x=df.index, y=df["KC_UPPER"], name="KC 상단", line=dict(width=1, dash='dot', color='orange')), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["KC_UPPER"], 
+                name="KC 상단", 
+                line=dict(width=1.5, dash='dot', color=COLOR_KC)
+            ), row=1, col=1)
         if "KC_LOWER" in df.columns:
-            fig.add_trace(go.Scatter(x=df.index, y=df["KC_LOWER"], name="KC 하단", line=dict(width=1, dash='dot', color='orange')), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["KC_LOWER"], 
+                name="KC 하단", 
+                line=dict(width=1.5, dash='dot', color=COLOR_KC)
+            ), row=1, col=1)
 
-    # ... (슈퍼트렌드, 거래량, RSI, 가격 라인 등 기존 코드 유지) ...
-    # 5) 슈퍼트렌드(있으면)
+    # 5) 슈퍼트렌드 (추세 전환 포인트 강조)
     if "Trend" in df.columns and "SuperTrend" in df.columns:
+        # 상승 전환점 (밝은 민트색)
         up = df[df["Trend"] == 1]
-        down = df[df["Trend"] == -1]
         if not up.empty:
-            # 상승추세: 빨강
-            fig.add_trace(go.Scatter(x=up.index, y=up["SuperTrend"], mode="markers", marker=dict(size=4, color='red'), name="상승추세"), row=1, col=1)
-            # 하락추세: 파랑
+            fig.add_trace(go.Scatter(
+                x=up.index, y=up["SuperTrend"], 
+                mode="markers", 
+                marker=dict(size=4, color='#00E676', symbol='triangle-up'), 
+                name="상승추세"
+            ), row=1, col=1)
+        
+        # 하락 전환점 (진한 핑크색)
+        down = df[df["Trend"] == -1]
         if not down.empty:
-            fig.add_trace(go.Scatter(x=down.index, y=down["SuperTrend"], mode="markers", marker=dict(size=4, color='blue'), name="하락추세"), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=down.index, y=down["SuperTrend"], 
+                mode="markers", 
+                marker=dict(size=4, color='#FF4081', symbol='triangle-down'), 
+                name="하락추세"
+            ), row=1, col=1)
 
-    # 6) 거래량 (색상 구분)
+    # 6) 거래량 (캔들 색상과 일치시키되 투명도 조절)
     if "Volume" in df.columns:
-        # 거래량 봉 색상을 등락에 맞춤
         colors = [
-            '#FF3333' if c >= o else '#3333FF' 
+            COLOR_UP if c >= o else COLOR_DOWN 
             for c, o in zip(df["Close"], df["Open"])
         ]
-        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", marker_color=colors, showlegend=False), row=2, col=1)
+        fig.add_trace(go.Bar(
+            x=df.index, y=df["Volume"], 
+            name="거래량", 
+            marker_color=colors, 
+            opacity=0.8,
+            showlegend=False
+        ), row=2, col=1)
 
-    # 7) RSI
+    # 7) RSI (과매수/과매도 영역 강조)
     if show_rsi and "RSI14_CHART" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI(14)", line=dict(color='black')), row=3, col=1)
-        fig.add_hline(y=30, line_dash="dot", row=3, col=1)
-        fig.add_hline(y=70, line_dash="dot", row=3, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["RSI14_CHART"], 
+            name="RSI(14)", 
+            line=dict(color='#AB47BC', width=1.5)
+        ), row=3, col=1)
+        
+        # 기준선 30/70
+        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=70, y1=70,
+                      line=dict(color="red", width=1, dash="dot"), row=3, col=1)
+        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=30, y1=30,
+                      line=dict(color="blue", width=1, dash="dot"), row=3, col=1)
 
-    # 8) 가격 라인 (목표=빨강 계열, 손절=파랑 계열, 진입=검정/회색)
+    # 8) 가격 라인 (가시성 높은 형광색 사용)
     def _safe_float(v):
         try:
             vv = float(pd.to_numeric(v, errors="coerce"))
@@ -1316,27 +1382,35 @@ def plot_interactive_chart(
     entry_v = _safe_float(entry)
     stop_v = _safe_float(stop)
     t1_v = _safe_float(target1)
-    t2_v = _safe_float(target2)
 
     if entry_v is not None:
-        fig.add_hline(y=entry_v, line_dash="dash", line_color="gray", annotation_text=f"진입: {int(entry_v):,}", row=1, col=1)
+        fig.add_hline(y=entry_v, line_dash="dash", line_color=COLOR_ENTRY, line_width=1.5, 
+                      annotation_text=f"🚀진입: {int(entry_v):,}", annotation_font_color=COLOR_ENTRY, row=1, col=1)
     if stop_v is not None:
-        # 손절선: 파란색 (하락 방어)
-        fig.add_hline(y=stop_v, line_dash="dash", line_color="blue", annotation_text=f"손절: {int(stop_v):,}", row=1, col=1)
+        fig.add_hline(y=stop_v, line_dash="dot", line_color=COLOR_LOSS, line_width=1.5,
+                      annotation_text=f"🛡️손절: {int(stop_v):,}", annotation_font_color=COLOR_LOSS, row=1, col=1)
     if t1_v is not None:
-        # 목표가: 빨간색 (상승 수익)
-        fig.add_hline(y=t1_v, line_dash="dot", line_color="red", annotation_text=f"목표1: {int(t1_v):,}", row=1, col=1)
+        fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, line_width=1.5,
+                      annotation_text=f"💰목표: {int(t1_v):,}", annotation_font_color=COLOR_STOP, row=1, col=1)
 
+    # 레이아웃 설정
     fig.update_layout(
-        title=f"{name} ({str(code).zfill(6)})",
+        title=dict(text=f"{name} ({str(code).zfill(6)})", font=dict(size=18, color="white" if "dark" in str(st.config.get_option("theme.base")) else "black")),
         xaxis_rangeslider_visible=False,
-        height=600,
-        margin=dict(l=20, r=20, t=40, b=20),
+        height=650 if show_rsi else 500,
+        margin=dict(l=20, r=20, t=50, b=20),
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        # 차트 배경색을 약간 어둡게 처리하여 형광색이 잘 보이게 함 (선택사항)
+        # paper_bgcolor='rgba(0,0,0,0)',
+        # plot_bgcolor='rgba(0,0,0,0)'
     )
-    return fig
+    
+    # Y축 그리드 설정 (눈에 덜 띄게)
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
 
+    return fig
 def plot_risk_reward_bar(buy, stop, target1, target2):
     fig = go.Figure()
     try:
