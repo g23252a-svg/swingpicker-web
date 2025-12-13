@@ -31,7 +31,7 @@ def _get_conf(key, default_val):
 # 1) 버전 정보
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.9.1")
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.9.2")
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -40,7 +40,8 @@ def _shorten_version(ver: str) -> str:
     "6.9.0" -> "6.9"
     "6.9.1-beta" -> "6.9"
     """
-    if not ver: return ""
+    if not ver:
+        return ""
     core = ver.split("+", 1)[0].split("-", 1)[0]
     parts = core.split(".")
     if len(parts) >= 2:
@@ -65,6 +66,17 @@ PRIME_TG_JOIN_URL = _get_conf(
 #    - 맨 앞 요소가 항상 최신 버전이라고 가정
 # --------------------------------------------------------------------
 CHANGELOG = [
+    {
+        "version": "6.9.2",
+        "date": "2025-12-13",
+        "title": "Gist DB Split (Users / Subscriptions / Inquiries)",
+        "items": [
+            "🧩 **DB 분리:** 회원 DB(users)와 별개로 **구독 DB(subscriptions)**, **문의 DB(inquiries)** 를 각각 Secret Gist로 분리.",
+            "🔐 **Secrets 확장:** `LDY_GIST_SUBS_ID`, `LDY_GIST_INQ_ID` 지원(미설정 시 기존 `LDY_GIST_ID`로 자동 fallback).",
+            "🕒 **updated_at 표준화:** subscriptions/inquiries 저장 시 `updated_at`을 UTC ISO8601으로 자동 갱신.",
+            "🛡️ **호환성 유지:** 기존 dashboard 로직이 list 형태 문의를 쓰는 경우를 위한 helper(예: inquiry items)로 점진 전환 가능.",
+        ],
+    },
     {
         "version": "6.9.1",
         "date": "2025-12-12",
@@ -96,7 +108,7 @@ CHANGELOG = [
             "📊 **Advanced Charting:** 볼린저 밴드 / RSI 보조지표를 On/Off 할 수 있는 전문가용 인터랙티브 차트 도입.",
             "🏥 **Portfolio Health Check:** 내 자산의 섹터 편중도와 현금 비중(%)을 분석하여 리스크 관리 조언 제공.",
             "🚀 **Sector Momentum:** 섹터별 최근 수익률/점수 Top 10 바 차트 추가.",
-            "🔧 **System Stabilization:** Gist 파일 분리(회원DB/포트폴리오)로 데이터 보존성 강화.",
+            "🔧 **System Stabilization:** Gist 기반 데이터 보존성 강화(회원DB/포트폴리오 등).",
         ],
     },
     {
@@ -130,7 +142,8 @@ def get_latest_log():
 
 
 def find_changelog(version: str):
-    if not version: return None
+    if not version:
+        return None
     for log in CHANGELOG:
         if log.get("version") == version:
             return log
