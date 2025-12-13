@@ -2298,8 +2298,23 @@ with tab2:
 
     # ROUTE 필터 (기존 유지)
     with col_f2:
+        def _route_order(r: str):
+            s = str(r)
+            if "SQZ" in s:
+                return (0, s)
+            if "BRK" in s:
+                return (1, s)
+            if "Watch" in s or "관찰" in s or "상승" in s:
+                return (2, s)
+            if "MR" in s:
+                return (3, s)
+            if "PULL" in s:
+                return (4, s)
+            return (5, s)
+
         all_routes = sorted(
-            scored["ROUTE"].dropna().unique().tolist()
+            scored["ROUTE"].dropna().unique().tolist(),
+            key=_route_order
         ) if "ROUTE" in scored.columns else []
         if all_routes:
             default_routes = [r for r in all_routes if "PULL" not in r] or all_routes
