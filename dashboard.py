@@ -1746,20 +1746,19 @@ def reality_check_top(df_top: pd.DataFrame, data_ts, n: int = 5):
         "count": cnt,
     }
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def prepare_scored_data(raw_url, local_raw, pass_ebs):
     """
     - CSV 로드 (원격 → 실패 시 로컬)
     - normalize_cols
-    - build_global_score
-    - 동적 threshold + ROUTE
-    - base / top20 / P_hit 계산
-    - 📅 recommend_latest.csv 기준 시점(data_ts) 추출
-    - 🔖 v6.5: 실제 사용한 데이터 소스 타입(remote/local) 반환
+    - build_global_score(keep_order=True)로 계산은 하되 정렬은 여기서 통제
+    - CSV에 랭크 컬럼이 있으면 그걸 LDY_RANK로 고정
+    - ROUTE/TH 계산
+    - base/top20 생성
+    - data_ts / src_type 반환
     """
-
     df_raw = None
-    src_type = "unknown"  # v6.5: 데이터 출처 태그
+    src_type = "unknown"
 
     # 1) CSV 로드
     try:
@@ -1768,118 +1767,58 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
         src_type = "remote"
     except Exception as e_remote:
         logger.warning("prepare_scored_data: Remote load failed: %s", e_remote)
-        if os.path.exists(local_raw):
-            try:
-                df_raw = load_csv_path(local_raw)
-                log_src(df_raw, "Local")
-                src_type = "local"
-            except Exception as e_local:
-                logger.exception("prepare_scored_data: Local load failed: %s", e_local)
+        if local_raw and os.path.exists(local_raw):
+            df_raw = load_csv_path(local_raw)
+            log_src(df_raw, "Local")
+            src_type = "local"
 
-    if df_raw is None:
+    if df_raw is None or df_raw.empty:
         raise RuntimeError("CSV를 원격/로컬 어디서도 불러오지 못했습니다.")
 
-        df_raw = df_raw.copy()
-        df_raw = df_raw.reset_index(drop=True)  # (권장: 행 정렬 안정화)
-        
-        rank_col = None
-        for c in ["LDY_RANK", "RANK", "rank", "순위", "랭크"]:
-            if c in df_raw.columns:
-                rank_col = c
-                break
-        
-        if rank_col:
-            df_raw["_CSV_RANK"] = pd.to_numeric(df_raw[rank_col], errors="coerce")
-        else:
-            df_raw["_CSV_RANK"] = np.arange(1, len(df_raw) + 1)
-        
-        df_raw["_CSV_ROW"] = np.arange(len(df_raw))
-        # ✅✅✅ 여기까지 ✅✅✅
-    
-    # 2) 기준 시점 추출 (원본 df_raw 기준)
+    # ✅ 2) CSV 순서/랭크 안정화(여기가 반드시 raise 밖이어야 함)
+    df_raw = df_raw.copy().reset_index(drop=True)
+
+    rank_col = None
+    for c in ["LDY_RANK", "RANK", "rank", "순위", "랭크"]:
+        if c in df_raw.columns:
+            rank_col = c
+            break
+
+    if rank_col:
+        df_raw["_CSV_RANK"] = pd.to_numeric(df_raw[rank_col], errors="coerce")
+    else:
+        df_raw["_CSV_RANK"] = np.arange(1, len(df_raw) + 1)
+
+    df_raw["_CSV_ROW"] = np.arange(len(df_raw))
+
+    # 3) 기준 시점 추출
     data_ts = infer_data_timestamp(df_raw)
 
-    # 3) 스코어링 파이프라인
+    # 4) 스코어링 (정렬 금지)
     df = normalize_cols(df_raw)
-    latest = df.copy()
-    
-    # ✅ CSV 순서 유지: 계산만 하고 정렬 금지
-    scored = build_global_score(latest, keep_order=True)
-    scored = scored.reset_index(drop=True)  # (권장)
-    
-    # ✅ df_raw에서 만든 CSV 기준 랭크/행순서를 그대로 붙인다 (행 align 전제)
+    scored = build_global_score(df, keep_order=True).reset_index(drop=True)
+
+    # ✅ df_raw 기준 랭크/행순서 붙이기 (row align 전제)
     scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
     scored["_CSV_ROW"]  = df_raw["_CSV_ROW"].values
-    
-    # ROUTE/REGIME 등 추가 계산은 계속 진행
+
+    # 5) TH/ROUTE 계산 (1회만)
     TH = compute_dynamic_thresholds(scored)
     scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
-    
-    # ✅ 최종 표시 정렬은 CSV 랭크 우선
+
+    # ✅ 표시/기본 랭크는 CSV 기준 고정
     scored = scored.sort_values(["_CSV_RANK", "_CSV_ROW"], ascending=[True, True]).reset_index(drop=True)
-    
-    # ✅ 대시보드가 쓰는 LDY_RANK는 CSV 기준으로 고정
     scored["LDY_RANK"] = pd.to_numeric(scored["_CSV_RANK"], errors="coerce")
 
-    # 🔥 REGIME(추세) + 점수 기반 정렬 우선순위 설정
-    if "REGIME" in scored.columns:
-        def _regime_rank(val: str) -> int:
-            s = str(val)
-            if s.startswith("①"):  # ① 강한 상승 추세
-                return 1
-            if s.startswith("②"):  # ② 상승 추세
-                return 2
-            if s.startswith("③"):  # ③ 조정 중인 상승 추세
-                return 3
-            if s.startswith("④"):  # ④ 박스권
-                return 4
-            if s.startswith("⑤"):  # ⑤ 하락 추세
-                return 5
-            if s.startswith("⑥"):  # ⑥ 추세 붕괴
-                return 6
-            return 999  # 분류 안 된 것들
-
-        scored["REGIME_RANK"] = (
-            scored["REGIME"]
-            .map(_regime_rank)
-            .fillna(999)
-            .astype(int)
-        )
-    else:
-        # REGIME 컬럼이 없는 경우에도 코드가 깨지지 않도록
-        scored["REGIME_RANK"] = 999
-
-    # 📌 REGIME → LDY_SCORE → ENTRY_SCORE → 거래대금(억원) 순으로 정렬
-    sort_cols = ["REGIME_RANK", "LDY_SCORE"]
-    asc = [True, False]
-
-    if "ENTRY_SCORE" in scored.columns:
-        sort_cols.append("ENTRY_SCORE")
-        asc.append(False)
-
-    if "거래대금(억원)" in scored.columns:
-        sort_cols.append("거래대금(억원)")
-        asc.append(False)
-
-
-
-    # 👉 정렬된 scored를 기준으로 동적 임계값 및 ROUTE 계산
-    TH = compute_dynamic_thresholds(scored)
-    scored["ROUTE"] = scored.apply(
-        lambda r: route_tag_dynamic(r, TH),
-        axis=1
-    ).fillna("—")
-
-    # EBS + 유동성 필터 통과 종목만 base로
-    base = scored[(scored["EBS"] >= pass_ebs) & (scored["_GATE_OK"])].copy()
+    # 6) base/top20
+    base = scored[(pd.to_numeric(scored["EBS"], errors="coerce") >= pass_ebs) & (scored["_GATE_OK"])].copy()
     if len(base) < 20:
         base = scored.head(20).copy()
 
-    # Top20도 동일한 우선순위(정렬된 base의 앞 20개)
     top20 = base.head(20).copy()
     top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
 
-    return scored, base, top20, TH, data_ts, src_type  # v6.5: src_type 추가
+    return scored, base, top20, TH, data_ts, src_type
 
 
 # ---------------------------
@@ -2435,21 +2374,33 @@ with tab2:
                 )
 
                 chart_df = get_stock_chart_data(code)
-                if chart_df is not None:
+                
+                # None 이거나, 빈 DF면 차트 없음 처리
+                if chart_df is None or getattr(chart_df, "empty", True):
+                    st.info("차트 데이터 없음")
+                else:
+                    # 숫자형 안전 변환 (문자/None/NaN 대응)
+                    entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
+                    stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
+                    t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
+                    t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
+                
+                    # 추천매도가2가 없으면(=NaN) 표시용으로 2차 목표 자동 생성(선택)
+                    if pd.isna(t2) and pd.notna(t1):
+                        t2 = float(t1) * 1.07
+                
                     fig = plot_interactive_chart(
                         df=chart_df,
-                        code=code,
+                        code=str(code),
                         name=row.get("종목명", "-"),
-                        entry=row.get("추천매수가", 0),
-                        stop=row.get("손절가", 0),
-                        target1=row.get("추천매도가1", 0),
-                        target2=row.get("추천매도가2", 0),
+                        entry=entry,
+                        stop=stop,
+                        target1=t1,
+                        target2=t2,
                         show_bb=show_bb,
                         show_rsi=show_rsi,
                     )
                     st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("차트 데이터 없음")
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
