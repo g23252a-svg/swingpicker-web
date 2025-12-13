@@ -2096,8 +2096,11 @@ def main(
     df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
     df_out["기준일"] = trade_ymd
     df_out["시총기준일"] = mcap_ymd
-    df_out["벤치_60d_KOSPI_%"] = bench_ret_60.get("KOSPI", np.nan)
-    df_out["벤치_60d_KOSDAQ_%"] = bench_ret_60.get("KOSDAQ", np.nan)
+    
+    # 🚨 [수정 완료] bench_ret_60 -> bench_map 사용으로 변경
+    # bench_map 구조: {'KOSPI': {20: 1.1, 60: 2.2, ...}, ...}
+    df_out["벤치_60d_KOSPI_%"] = bench_map.get("KOSPI", {}).get(60, np.nan)
+    df_out["벤치_60d_KOSDAQ_%"] = bench_map.get("KOSDAQ", {}).get(60, np.nan)
 
     if "ret_60d_%" in df_out.columns:
         df_out["60일_종목수익률_%"] = df_out["ret_60d_%"]
