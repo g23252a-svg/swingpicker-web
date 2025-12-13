@@ -1411,7 +1411,7 @@ def liquidity_gate(x_turn, market):
     except Exception:
         return pd.Series(False, index=x_turn.index)
 
-def build_global_score(lat):
+def build_global_score(lat, keep_order: bool = False):
     x = lat.copy()
     req = [
         "종가", "추천매수가", "손절가", "추천매도가1",
@@ -1538,14 +1538,15 @@ def build_global_score(lat):
     ).fillna(False)
 
     if "MA20" in x.columns:
-        x["MA20_GAP"] = (
-            (nz_num(x["종가"]) / nz_num(x["MA20"]) - 1.0) * 100
-        ).replace([np.inf, -np.inf], np.nan)
+        x["MA20_GAP"] = ((nz_num(x["종가"]) / nz_num(x["MA20"]) - 1.0) * 100).replace([np.inf, -np.inf], np.nan)
     else:
         x["MA20_GAP"] = np.nan
 
-    x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
-    x["LDY_RANK"] = range(1, len(x) + 1)
+    # ✅ 여기부터가 핵심
+    if not keep_order:
+        x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
+        x["LDY_RANK"] = range(1, len(x) + 1)
+    # keep_order=True면 CSV 순서 유지 (LDY_RANK는 밖에서 결정)
 
     if "AI_COMMENT" in x.columns:
         x["WHY"] = x["AI_COMMENT"]
@@ -1778,13 +1779,47 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     if df_raw is None:
         raise RuntimeError("CSV를 원격/로컬 어디서도 불러오지 못했습니다.")
 
+        df_raw = df_raw.copy()
+        df_raw = df_raw.reset_index(drop=True)  # (권장: 행 정렬 안정화)
+        
+        rank_col = None
+        for c in ["LDY_RANK", "RANK", "rank", "순위", "랭크"]:
+            if c in df_raw.columns:
+                rank_col = c
+                break
+        
+        if rank_col:
+            df_raw["_CSV_RANK"] = pd.to_numeric(df_raw[rank_col], errors="coerce")
+        else:
+            df_raw["_CSV_RANK"] = np.arange(1, len(df_raw) + 1)
+        
+        df_raw["_CSV_ROW"] = np.arange(len(df_raw))
+        # ✅✅✅ 여기까지 ✅✅✅
+    
     # 2) 기준 시점 추출 (원본 df_raw 기준)
     data_ts = infer_data_timestamp(df_raw)
 
     # 3) 스코어링 파이프라인
     df = normalize_cols(df_raw)
     latest = df.copy()
-    scored = build_global_score(latest)
+    
+    # ✅ CSV 순서 유지: 계산만 하고 정렬 금지
+    scored = build_global_score(latest, keep_order=True)
+    scored = scored.reset_index(drop=True)  # (권장)
+    
+    # ✅ df_raw에서 만든 CSV 기준 랭크/행순서를 그대로 붙인다 (행 align 전제)
+    scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
+    scored["_CSV_ROW"]  = df_raw["_CSV_ROW"].values
+    
+    # ROUTE/REGIME 등 추가 계산은 계속 진행
+    TH = compute_dynamic_thresholds(scored)
+    scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
+    
+    # ✅ 최종 표시 정렬은 CSV 랭크 우선
+    scored = scored.sort_values(["_CSV_RANK", "_CSV_ROW"], ascending=[True, True]).reset_index(drop=True)
+    
+    # ✅ 대시보드가 쓰는 LDY_RANK는 CSV 기준으로 고정
+    scored["LDY_RANK"] = pd.to_numeric(scored["_CSV_RANK"], errors="coerce")
 
     # 🔥 REGIME(추세) + 점수 기반 정렬 우선순위 설정
     if "REGIME" in scored.columns:
@@ -1826,8 +1861,7 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
         sort_cols.append("거래대금(억원)")
         asc.append(False)
 
-    scored = scored.sort_values(sort_cols, ascending=asc)
-    scored["LDY_RANK"] = range(1, len(scored) + 1)
+
 
     # 👉 정렬된 scored를 기준으로 동적 임계값 및 ROUTE 계산
     TH = compute_dynamic_thresholds(scored)
