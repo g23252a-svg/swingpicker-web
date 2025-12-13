@@ -24,7 +24,18 @@ import plotly.express as px
 import re
 from typing import Optional, Dict, Any, Tuple
 
+def normalize_code(x) -> str:
+    if x is None or (isinstance(x, float) and pd.isna(x)) or pd.isna(x):
+        return ""
+    s = str(x).strip()
+    s = re.sub(r"\.0$", "", s)      # 660.0 같은 거 제거
+    s = re.sub(r"[^0-9]", "", s)    # 숫자만 남김
+    return s.zfill(6) if s else ""  # 6자리로
 
+def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
+    if "종목코드" in df.columns:
+        df["종목코드"] = df["종목코드"].apply(normalize_code)
+    return df
 
 
 from auth_user import render_auth_box, get_user, list_users, update_user_role
@@ -229,6 +240,18 @@ def _read_csv_file(path: str, enc: str = "utf-8-sig") -> pd.DataFrame:
         return pd.read_csv(path, encoding=enc)
     except UnicodeDecodeError:
         return pd.read_csv(path, encoding="utf-8")
+
+@st.cache_data(ttl=600)
+def load_csv_url(url: str) -> pd.DataFrame:
+    url = normalize_github_raw(url)
+    r = requests.get(
+        url,
+        timeout=30,
+        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+    )
+    r.raise_for_status()
+    return pd.read_csv(io.BytesIO(r.content), encoding="utf-8-sig")
+
 
 def _atomic_write_bytes(path: str, b: bytes) -> None:
     folder = os.path.dirname(path)
@@ -1305,16 +1328,7 @@ def normalize_github_raw(url: str) -> str:
         url = url.replace("/blob/", "/")
     return url
 
-@st.cache_data(ttl=600)
-def load_csv_url(url: str) -> pd.DataFrame:
-    url = normalize_github_raw(url)
-    r = requests.get(
-        url,
-        timeout=30,
-        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
-    )
-    r.raise_for_status()
-    return pd.read_csv(io.BytesIO(r.content), encoding="utf-8-sig")
+
 
 @st.cache_data(ttl=600)
 def load_csv_path(path: str, enc: str = "utf-8-sig") -> pd.DataFrame:
@@ -1763,6 +1777,7 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     # 1) CSV 로드
     try:
         df_raw = load_csv_url(raw_url)
+        df_raw = postprocess_codes(df_raw)   # ✅ 여기 한 줄 추가
         log_src(df_raw, "Remote")
         src_type = "remote"
     except Exception as e_remote:
