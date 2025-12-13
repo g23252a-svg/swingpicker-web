@@ -2005,7 +2005,7 @@ def main(
                 # log(f"⚠️ {code6} 처리 중 오류 발생: {e}")
                 continue
     else:
-        # 병렬 처리 (CPU 연산 분산)
+        # 🔥 [수정 대상] 병렬 처리 (CPU 연산 분산)
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
             futs = []
             for t in tickers:
@@ -2021,7 +2021,7 @@ def main(
                     t, df_t, # DataFrame 전달
                     top_df, mcap_map,
                     kospi_set, kosdaq_set, name_map, sector_map,
-                    bench_ret_60
+                    bench_map # ✅ [수정 완료] bench_ret_60 -> bench_map 으로 변경
                 ))
     
             for fut in tqdm(as_completed(futs), total=len(futs), desc="Analyzing"):
