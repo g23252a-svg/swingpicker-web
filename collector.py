@@ -1310,13 +1310,14 @@ def inv_dist_norm(dist: pd.Series, cap: float) -> pd.Series:
 def detect_regime_row(row: pd.Series) -> str:
     """
     추세 단계(REGIME)를 텍스트로 분류
-    - rel_60d_% : 60일 초과수익(α)
-    - MACD_Slope : 단기 모멘텀 기울기
-    - RSI14 : 과매수/과매도 판단
     """
+    # ✅ [수정됨] 0.0 값을 제대로 가져오도록 로직 변경
     def _fv(key: str, default: float = 0.0) -> float:
         try:
-            return float(row.get(key, default) or default)
+            val = row.get(key)
+            if val is None or pd.isna(val):
+                return default
+            return float(val)
         except Exception:
             return default
 
@@ -1348,15 +1349,14 @@ def detect_regime_row(row: pd.Series) -> str:
 def route_tag(row: pd.Series) -> str:
     """
     v6.7 ROUTE 분류
-    - BRK: 강한 돌파
-    - SQZ: 진성 스퀴즈(폭발대기)
-    - Watch: 상승 준비 / 관찰
-    - REV: 역추세 반등 (지수·섹터 대비 바닥권에서 턴)
-    - PULL: 눌림/중립
     """
+    # ✅ [수정됨] 0.0 값을 안전하게 처리
     def _fv(key: str, default: float = 0.0) -> float:
         try:
-            return float(row.get(key, default) or default)
+            val = row.get(key)
+            if val is None or pd.isna(val):
+                return default
+            return float(val)
         except Exception:
             return default
 
@@ -1366,10 +1366,10 @@ def route_tag(row: pd.Series) -> str:
     if slope == 0.0:
         slope = _fv("MACD_Slope", 0.0)
     ebs = _fv("EBS", 0.0)
-    now_pct = _fv("Now%", 999.0)
+    now_pct = _fv("Now%", 999.0) # 이제 0.0이 들어와도 999가 되지 않음!
     rr1 = _fv("RR1", 0.0)
     mfi = _fv("MFI14", 50.0)
-    rel60 = _fv("rel_60d_%", 0.0)  # 60일 상대강도(α)
+    rel60 = _fv("rel_60d_%", 0.0)
     bb_sq = _fv("TTM_SQUEEZE", _fv("BB_SQUEEZE", 0.0))
 
     # 1) 강한 돌파 BRK
@@ -1377,7 +1377,6 @@ def route_tag(row: pd.Series) -> str:
         (r5 >= 3) and (r10 >= 5) and (slope > 0) and (ebs >= PASS_EBS)
         and (now_pct <= 10) and (mfi >= 55)
     )
-    # RR1이 너무 나쁘면 BRK에서 제외
     if strong_break and np.isfinite(rr1) and rr1 < 0.6:
         strong_break = False
 
@@ -1385,17 +1384,16 @@ def route_tag(row: pd.Series) -> str:
         return "🔼 BRK (돌파)"
 
     # 2) 역추세 반등 REV
-    #    - 60일 상대강도는 약하지만, 단기 r5>0 + slope>0 + 과도한 갭 아님
     rev = (
-        (rel60 <= -5.0) and   # 지수 대비 꽤 처졌던 종목
-        (r5 >= 1.0) and       # 최근 5일은 플러스
+        (rel60 <= -5.0) and 
+        (r5 >= 1.0) and 
         (slope > 0) and
-        (now_pct <= 10)       # 엔트리에서 너무 멀지 않음
+        (now_pct <= 10)
     )
     if rev:
         return "🔻 REV (역추세 반등)"
 
-    # 2.5) 진성 스퀴즈(TTM) + 모멘텀 플러스 = 🔥 SQZ(폭발대기)
+    # 2.5) 진성 스퀴즈(TTM)
     if (bb_sq >= 1) and (slope > 0) and (now_pct <= 10):
         return "🔥 SQZ (폭발대기)"
 
