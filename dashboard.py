@@ -2431,52 +2431,57 @@ with tab2:
             axis=1
         ).tolist()
         sel = st.selectbox("종목 선택", opts)
+        # [dashboard.py] tab2 내부의 if sel: 블록 전체를 이것으로 교체하세요.
         if sel:
             sel_idx = opts.index(sel)
             row = view_df.iloc[sel_idx]
             code = str(row.get("종목코드", "")).zfill(6)
 
+            # --- 여기서부터 들여쓰기(Indent) 주의 ---
             c1, c2 = st.columns([2, 1])
-                        with c1:
-                            # 🔧 고급 차트 옵션 (3단 컬럼으로 변경)
-                            c_opt1, c_opt2, c_opt3 = st.columns(3)
-                            with c_opt1:
-                                show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                            with c_opt2:
-                                # 🔥 [추가] 켈트너 채널 체크박스 (기본값 True로 설정하여 스퀴즈 확인 용이하게)
-                                show_kc = st.checkbox("켈트너 채널 (Squeeze)", value=True, key=f"opt_kc_{code}")
-                            with c_opt3:
-                                show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
             
-                            chart_df = get_stock_chart_data(code)
-                            
-                            # None 이거나, 빈 DF면 차트 없음 처리
-                            if chart_df is None or getattr(chart_df, "empty", True):
-                                st.info("차트 데이터 없음")
-                            else:
-                                # 숫자형 안전 변환 (문자/None/NaN 대응)
-                                entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
-                                stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
-                                t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
-                                t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
-                            
-                                # 추천매도가2가 없으면(=NaN) 표시용으로 2차 목표 자동 생성(선택)
-                                if pd.isna(t2) and pd.notna(t1):
-                                    t2 = float(t1) * 1.07
-                            
-                                fig = plot_interactive_chart(
-                                    df=chart_df,
-                                    code=str(code),
-                                    name=row.get("종목명", "-"),
-                                    entry=entry,
-                                    stop=stop,
-                                    target1=t1,
-                                    target2=t2,
-                                    show_bb=show_bb,
-                                    show_kc=show_kc,  # 🔥 [추가] 파라미터 전달
-                                    show_rsi=show_rsi,
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
+            with c1:
+                # 🔧 고급 차트 옵션 (3단 컬럼)
+                c_opt1, c_opt2, c_opt3 = st.columns(3)
+                with c_opt1:
+                    show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
+                with c_opt2:
+                    # 🔥 [추가된 부분] 켈트너 채널 체크박스
+                    show_kc = st.checkbox("켈트너 채널 (Squeeze)", value=True, key=f"opt_kc_{code}")
+                with c_opt3:
+                    show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+
+                chart_df = get_stock_chart_data(code)
+                
+                # 차트 데이터 유효성 체크
+                if chart_df is None or getattr(chart_df, "empty", True):
+                    st.info("차트 데이터 없음")
+                else:
+                    # 숫자형 안전 변환
+                    entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
+                    stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
+                    t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
+                    t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
+                
+                    # 목표가2 없으면 자동 계산
+                    if pd.isna(t2) and pd.notna(t1):
+                        t2 = float(t1) * 1.07
+                
+                    # 차트 그리기 함수 호출 (파라미터 전달)
+                    fig = plot_interactive_chart(
+                        df=chart_df,
+                        code=str(code),
+                        name=row.get("종목명", "-"),
+                        entry=entry,
+                        stop=stop,
+                        target1=t1,
+                        target2=t2,
+                        show_bb=show_bb,
+                        show_kc=show_kc,  # 🔥 켈트너 채널 옵션 전달
+                        show_rsi=show_rsi,
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
@@ -2485,7 +2490,6 @@ with tab2:
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
                     st.info(f"💬 **AI:** {ai_cmt}")
             
-                    # ✅ 여기부터 숫자 안전 변환해서 넣기
                     rr_entry = _to_num(row.get("추천매수가", np.nan), np.nan)
                     rr_stop  = _to_num(row.get("손절가", np.nan), np.nan)
                     rr_t1    = _to_num(row.get("추천매도가1", np.nan), np.nan)
