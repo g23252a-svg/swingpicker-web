@@ -1125,6 +1125,8 @@ def get_stock_chart_data(code):
         df = fdr.DataReader(code_str, start_date)
         if df is None or df.empty:
             return None
+        
+        # 이동평균
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
 
@@ -1133,6 +1135,18 @@ def get_stock_chart_data(code):
         df['BB_MID'] = df['MA20']
         df['BB_UPPER'] = df['MA20'] + 2 * std20
         df['BB_LOWER'] = df['MA20'] - 2 * std20
+
+        # 🔹 Keltner Channels (20, 1.5 ATR) - 🔥 [추가된 부분]
+        # (중심선은 볼린저 밴드와 동일하게 MA20 사용, 폭은 ATR 사용)
+        tr = pd.concat([
+            df['High'] - df['Low'],
+            (df['High'] - df['Close'].shift(1)).abs(),
+            (df['Low'] - df['Close'].shift(1)).abs()
+        ], axis=1).max(axis=1)
+        atr20 = tr.rolling(window=20).mean()
+        
+        df['KC_UPPER'] = df['MA20'] + (1.5 * atr20)
+        df['KC_LOWER'] = df['MA20'] - (1.5 * atr20)
 
         # 🔹 RSI(14)
         delta = df['Close'].diff()
@@ -1186,6 +1200,7 @@ def plot_interactive_chart(
     target1=None,
     target2=None,
     show_bb: bool = True,
+    show_kc: bool = False,  # 🔥 [추가] 켈트너 채널 표시 여부
     show_rsi: bool = False,
 ):
     if df is None or df.empty:
@@ -1216,38 +1231,45 @@ def plot_interactive_chart(
 
     # 2) MA
     if "MA20" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="20일선"), row=1, col=1)
-    if "MA60" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["MA60"], name="60일선"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="20일선", line=dict(width=1)), row=1, col=1)
+    # if "MA60" in df.columns:
+    #     fig.add_trace(go.Scatter(x=df.index, y=df["MA60"], name="60일선", line=dict(width=1)), row=1, col=1)
 
-    # 3) 볼린저
-    if show_bb and "BB_MID" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["BB_MID"], name="BB Mid"), row=1, col=1)
-    if show_bb and "BB_UPPER" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["BB_UPPER"], name="BB Upper"), row=1, col=1)
-    if show_bb and "BB_LOWER" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["BB_LOWER"], name="BB Lower"), row=1, col=1)
+    # 3) 볼린저 밴드 (파란색 계열)
+    if show_bb:
+        if "BB_UPPER" in df.columns:
+            fig.add_trace(go.Scatter(x=df.index, y=df["BB_UPPER"], name="BB 상단", line=dict(width=1, color='rgba(0,0,255,0.4)')), row=1, col=1)
+        if "BB_LOWER" in df.columns:
+            fig.add_trace(go.Scatter(x=df.index, y=df["BB_LOWER"], name="BB 하단", line=dict(width=1, color='rgba(0,0,255,0.4)'), fill='tonexty', fillcolor='rgba(0,0,255,0.05)'), row=1, col=1)
 
-    # 4) 슈퍼트렌드(있으면)
+    # 4) 켈트너 채널 (주황색 점선) - 🔥 [추가된 부분]
+    if show_kc:
+        if "KC_UPPER" in df.columns:
+            fig.add_trace(go.Scatter(x=df.index, y=df["KC_UPPER"], name="KC 상단", line=dict(width=1, dash='dot', color='orange')), row=1, col=1)
+        if "KC_LOWER" in df.columns:
+            fig.add_trace(go.Scatter(x=df.index, y=df["KC_LOWER"], name="KC 하단", line=dict(width=1, dash='dot', color='orange')), row=1, col=1)
+
+    # ... (슈퍼트렌드, 거래량, RSI, 가격 라인 등 기존 코드 유지) ...
+    # 5) 슈퍼트렌드(있으면)
     if "Trend" in df.columns and "SuperTrend" in df.columns:
         up = df[df["Trend"] == 1]
         down = df[df["Trend"] == -1]
         if not up.empty:
-            fig.add_trace(go.Scatter(x=up.index, y=up["SuperTrend"], mode="markers", name="상승추세"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=up.index, y=up["SuperTrend"], mode="markers", marker=dict(size=4, color='green'), name="상승추세"), row=1, col=1)
         if not down.empty:
-            fig.add_trace(go.Scatter(x=down.index, y=down["SuperTrend"], mode="markers", name="하락추세"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=down.index, y=down["SuperTrend"], mode="markers", marker=dict(size=4, color='red'), name="하락추세"), row=1, col=1)
 
-    # 5) 거래량
+    # 6) 거래량
     if "Volume" in df.columns:
-        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", showlegend=False), row=2, col=1)
+        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", showlegend=False, marker_color='lightgray'), row=2, col=1)
 
-    # 6) RSI(선택)
+    # 7) RSI(선택)
     if show_rsi and "RSI14_CHART" in df.columns:
         fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI(14)"), row=3, col=1)
         fig.add_hline(y=30, line_dash="dot", row=3, col=1)
         fig.add_hline(y=70, line_dash="dot", row=3, col=1)
 
-    # 7) 가격 라인(진입/손절/목표)
+    # 8) 가격 라인(진입/손절/목표) - 기존 코드와 동일하게 유지
     def _safe_float(v):
         try:
             vv = float(pd.to_numeric(v, errors="coerce"))
@@ -1261,13 +1283,13 @@ def plot_interactive_chart(
     t2_v = _safe_float(target2)
 
     if entry_v is not None:
-        fig.add_hline(y=entry_v, line_dash="dash", annotation_text=f"진입: {int(entry_v):,}", row=1, col=1)
+        fig.add_hline(y=entry_v, line_dash="dash", line_color="blue", annotation_text=f"진입: {int(entry_v):,}", row=1, col=1)
     if stop_v is not None:
-        fig.add_hline(y=stop_v, line_dash="dash", annotation_text=f"손절: {int(stop_v):,}", row=1, col=1)
+        fig.add_hline(y=stop_v, line_dash="dash", line_color="red", annotation_text=f"손절: {int(stop_v):,}", row=1, col=1)
     if t1_v is not None:
-        fig.add_hline(y=t1_v, line_dash="dot", annotation_text=f"목표1: {int(t1_v):,}", row=1, col=1)
-    if t2_v is not None:
-        fig.add_hline(y=t2_v, line_dash="dot", annotation_text=f"목표2: {int(t2_v):,}", row=1, col=1)
+        fig.add_hline(y=t1_v, line_dash="dot", line_color="green", annotation_text=f"목표1: {int(t1_v):,}", row=1, col=1)
+    # if t2_v is not None:
+    #     fig.add_hline(y=t2_v, line_dash="dot", annotation_text=f"목표2: {int(t2_v):,}", row=1, col=1)
 
     fig.update_layout(
         title=f"{name} ({str(code).zfill(6)})",
@@ -1275,6 +1297,7 @@ def plot_interactive_chart(
         height=600,
         margin=dict(l=20, r=20, t=40, b=20),
         hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     return fig
 
@@ -2414,47 +2437,46 @@ with tab2:
             code = str(row.get("종목코드", "")).zfill(6)
 
             c1, c2 = st.columns([2, 1])
-            with c1:
-                # 🔧 고급 차트 옵션
-                show_bb = st.checkbox(
-                    "볼린저 밴드 표시",
-                    value=True,
-                    key=f"opt_bb_{code}",      # 종목별로 키 다르게
-                )
-                show_rsi = st.checkbox(
-                    "RSI 서브차트 표시",
-                    value=False,
-                    key=f"opt_rsi_{code}",     # 종목별로 키 다르게
-                )
-
-                chart_df = get_stock_chart_data(code)
-                
-                # None 이거나, 빈 DF면 차트 없음 처리
-                if chart_df is None or getattr(chart_df, "empty", True):
-                    st.info("차트 데이터 없음")
-                else:
-                    # 숫자형 안전 변환 (문자/None/NaN 대응)
-                    entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
-                    stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
-                    t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
-                    t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
-                
-                    # 추천매도가2가 없으면(=NaN) 표시용으로 2차 목표 자동 생성(선택)
-                    if pd.isna(t2) and pd.notna(t1):
-                        t2 = float(t1) * 1.07
-                
-                    fig = plot_interactive_chart(
-                        df=chart_df,
-                        code=str(code),
-                        name=row.get("종목명", "-"),
-                        entry=entry,
-                        stop=stop,
-                        target1=t1,
-                        target2=t2,
-                        show_bb=show_bb,
-                        show_rsi=show_rsi,
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                        with c1:
+                            # 🔧 고급 차트 옵션 (3단 컬럼으로 변경)
+                            c_opt1, c_opt2, c_opt3 = st.columns(3)
+                            with c_opt1:
+                                show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
+                            with c_opt2:
+                                # 🔥 [추가] 켈트너 채널 체크박스 (기본값 True로 설정하여 스퀴즈 확인 용이하게)
+                                show_kc = st.checkbox("켈트너 채널 (Squeeze)", value=True, key=f"opt_kc_{code}")
+                            with c_opt3:
+                                show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+            
+                            chart_df = get_stock_chart_data(code)
+                            
+                            # None 이거나, 빈 DF면 차트 없음 처리
+                            if chart_df is None or getattr(chart_df, "empty", True):
+                                st.info("차트 데이터 없음")
+                            else:
+                                # 숫자형 안전 변환 (문자/None/NaN 대응)
+                                entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
+                                stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
+                                t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
+                                t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
+                            
+                                # 추천매도가2가 없으면(=NaN) 표시용으로 2차 목표 자동 생성(선택)
+                                if pd.isna(t2) and pd.notna(t1):
+                                    t2 = float(t1) * 1.07
+                            
+                                fig = plot_interactive_chart(
+                                    df=chart_df,
+                                    code=str(code),
+                                    name=row.get("종목명", "-"),
+                                    entry=entry,
+                                    stop=stop,
+                                    target1=t1,
+                                    target2=t2,
+                                    show_bb=show_bb,
+                                    show_kc=show_kc,  # 🔥 [추가] 파라미터 전달
+                                    show_rsi=show_rsi,
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
