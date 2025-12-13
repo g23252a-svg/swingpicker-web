@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader v6.8.0 (Reality Check & Deep Tech)
-- 신규: Reality Check System — 지난 추천(기준일) 대비 현재 성과 자동 검증
-- 신규: Advanced Charting — 볼린저 밴드 / RSI On·Off 가능한 전문가용 차트
-- 신규: Portfolio Health Check — 섹터 편중·현금 비중 진단
-- 신규: Sector Momentum Ranking — 섹터 상대강도 Top 10 바 차트
-- 기반: v6.7.0 Prime Top 100 + Role-based Daily Top 구조 유지
+LDY Pro Trader Dashboard v7.0 (Deep Squeeze & Factor Analysis)
+- v7.0: 팩터 기반 레이더 차트, 스퀴즈 지속일(CNT) 표시, 켈트너 채널 차트
+...
 """
 
 # ---------------------------
