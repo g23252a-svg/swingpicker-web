@@ -1117,27 +1117,24 @@ def calculate_supertrend(df, period=10, multiplier=3):
 
 @st.cache_data(ttl=600)
 def get_stock_chart_data(code):
-    if not FDR_OK:
-        return None
+    if not FDR_OK: return None
     try:
         code_str = str(code).zfill(6)
-        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        # 넉넉히 1년치 가져오되, 차트엔 최근 100~150개만 표시하는 게 좋음
+        start_date = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d")
         df = fdr.DataReader(code_str, start_date)
-        if df is None or df.empty:
-            return None
+        if df is None or df.empty: return None
         
         # 이동평균
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
 
-        # 🔹 Bollinger Bands (20, 2σ)
+        # 🔹 Bollinger Bands (20, 2.0)
         std20 = df['Close'].rolling(window=20).std()
-        df['BB_MID'] = df['MA20']
-        df['BB_UPPER'] = df['MA20'] + 2 * std20
-        df['BB_LOWER'] = df['MA20'] - 2 * std20
+        df['BB_UPPER'] = df['MA20'] + 2.0 * std20
+        df['BB_LOWER'] = df['MA20'] - 2.0 * std20
 
-        # 🔹 Keltner Channels (20, 1.5 ATR) - 🔥 [추가된 부분]
-        # (중심선은 볼린저 밴드와 동일하게 MA20 사용, 폭은 ATR 사용)
+        # 🔹 Keltner Channels (20, 1.5 ATR) - Collector v7.x와 동기화
         tr = pd.concat([
             df['High'] - df['Low'],
             (df['High'] - df['Close'].shift(1)).abs(),
@@ -1152,39 +1149,72 @@ def get_stock_chart_data(code):
         delta = df['Close'].diff()
         up = delta.clip(lower=0)
         down = -delta.clip(upper=0)
-        roll_up = up.rolling(14).mean()
-        roll_down = down.rolling(14).mean()
-        rs = roll_up / roll_down
+        rs = up.rolling(14).mean() / down.rolling(14).mean()
         df['RSI14_CHART'] = 100 - (100 / (1 + rs))
 
+        # SuperTrend
         df = calculate_supertrend(df)
-        return df.tail(80)
+        
+        # 최근 120일 데이터 반환
+        return df.tail(120)
     except Exception:
         logger.exception("get_stock_chart_data failed")
         return None
 
 def plot_radar_chart(row):
-    stats = {
-        "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
-        "수급(MFI)": row.get("MFI14", 50),
-        "가성비(RR)": min(100, row.get("RR1", 1) * 50),
-        "안전성": 100 - (row.get("이격도", 0) * 2),
-        "종합점수": row.get("LDY_SCORE", 0),
-    }
+    """
+    v7.0: Collector에서 계산된 정규화 팩터(NORM_*)를 사용하여
+    점수가 왜 높은지/낮은지 정확한 근거를 시각화함.
+    """
+    # 1) v7.4 NORM 컬럼이 있는지 확인
+    if "NORM_MOM" in row.index:
+        # 데이터가 있으면 팩터 기반 (0~1.0 -> 0~100 변환)
+        stats = {
+            "모멘텀(MOM)": row.get("NORM_MOM", 0) * 100,
+            "가성비(RR)": row.get("NORM_RR", 0) * 100,
+            "수익여력(T1)": row.get("NORM_T1", 0) * 100,
+            "안전성(SL)": row.get("NORM_SL", 0) * 100,
+            "타점(NEAR)": row.get("NORM_NEAR", 0) * 100,
+            "수급(LIQ)": row.get("NORM_LIQ", 0) * 100,
+        }
+    else:
+        # 2) 없으면(구버전 데이터) 기존 로직 유지 (Fallback)
+        stats = {
+            "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
+            "수급(MFI)": row.get("MFI14", 50),
+            "가성비(RR)": min(100, row.get("RR1", 1) * 50),
+            "안전성": 100 - (row.get("이격도", 0) * 2),
+            "종합점수": row.get("LDY_SCORE", 0),
+        }
+
     values = [max(0, min(100, v)) for v in stats.values()]
+    keys = list(stats.keys())
+    
+    # 레이더 차트 닫기 위해 첫 번째 값 추가
+    values += values[:1]
+    keys += keys[:1]
+
     fig = go.Figure(
         go.Scatterpolar(
             r=values,
-            theta=list(stats.keys()),
+            theta=keys,
             fill='toself',
-            name=row.get('종목명', '종목')
+            name=row.get('종목명', '종목'),
+            line_color='#00CC96'
         )
     )
     fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        polar=dict(
+            radialaxis=dict(
+                visible=True, 
+                range=[0, 100],
+                tickfont=dict(size=10),
+            )
+        ),
         showlegend=False,
-        height=250,
-        margin=dict(l=30, r=30, t=20, b=20),
+        height=280,
+        margin=dict(l=40, r=40, t=30, b=30),
+        title=dict(text="📊 6-Factor Analysis", x=0.5, y=0.95, font=dict(size=14))
     )
     return fig
 
@@ -2399,6 +2429,16 @@ with tab2:
     if sel_regimes and "REGIME" in filtered.columns:
         filtered = filtered[filtered["REGIME"].isin(sel_regimes)]
 
+    # 👇👇👇 [여기] 아래 코드를 삽입하세요 👇👇👇
+
+    # 🔥 [v7.0] 스퀴즈 종목만 보기 필터
+    # (체크박스를 누르면 TTM_SQUEEZE == 1 인 종목만 남김)
+    show_only_squeeze = st.checkbox("🌪️ TTM Squeeze (폭발 대기) 종목만 보기", key="chk_sqz_only")
+    
+    if show_only_squeeze and "TTM_SQUEEZE" in filtered.columns:
+        filtered = filtered[filtered["TTM_SQUEEZE"] == 1]
+
+    
     if auth_status in ["pro", "prime", "admin"]:
         if auth_status == "pro":
             # Pro: 기존처럼 Top 20
@@ -2512,37 +2552,46 @@ with tab2:
                 )
 
     st.divider()
-    st.subheader("📋 Daily Top List", anchor=False)
+    st.subheader("📋 Daily Top List (Squeeze Analysis)", anchor=False)
     safe_view = view_df.copy().reset_index(drop=True)
+    
     if not safe_view.empty:
         if "종목명" in safe_view.columns:
             safe_view.set_index("종목명", inplace=True)
-        price_cols = [
-            "종가", "추천매수가", "손절가", "추천매도가1", "추천매도가2", "거래대금(억원)",
-        ]
+        
+        # 숫자 포맷팅
+        price_cols = ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]
         for c in price_cols:
             if c in safe_view.columns:
-                safe_view[c] = pd.to_numeric(
-                    safe_view[c], errors='coerce'
-                ).fillna(0).apply(lambda x: f"{int(x):,}")
+                safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+        
         if "LDY_SCORE" in safe_view.columns:
-            safe_view["LDY_SCORE"] = pd.to_numeric(
-                safe_view["LDY_SCORE"], errors='coerce'
-            ).fillna(0)
+            safe_view["LDY_SCORE"] = pd.to_numeric(safe_view["LDY_SCORE"], errors='coerce').fillna(0)
+
+        # ✅ 표시할 컬럼 정의 (SQUEEZE_CNT 추가)
         cols = [
-            "REGIME", "ROUTE", "업종", "종목코드", "LDY_SCORE",
+            "REGIME", "ROUTE", 
+            "TTM_SQUEEZE_CNT", # 🔥 [New] 스퀴즈 지속일
+            "업종", "종목코드", "LDY_SCORE",
             "종가", "추천매수가", "손절가", "추천매도가1",
         ]
+        # 실제 존재하는 컬럼만 필터링
         cols = [c for c in cols if c in safe_view.columns]
+
+        # 컬럼 설정 (Column Config)
         cfg = {
             "LDY_SCORE": st.column_config.ProgressColumn(
                 "점수", format="%.1f", min_value=0, max_value=100
+            ),
+            "TTM_SQUEEZE_CNT": st.column_config.NumberColumn(
+                "🌪️응축(일)", help="TTM Squeeze 연속 발생 일수. 5일 이상이면 폭발 임박(Hot Zone)"
             ),
             "종가": st.column_config.TextColumn("현재가"),
             "추천매수가": st.column_config.TextColumn("진입가"),
             "손절가": st.column_config.TextColumn("손절가"),
             "추천매도가1": st.column_config.TextColumn("목표가"),
         }
+        
         st.dataframe(
             safe_view[cols],
             use_container_width=True,
