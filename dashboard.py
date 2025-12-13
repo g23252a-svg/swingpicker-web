@@ -1821,9 +1821,20 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     TH = compute_dynamic_thresholds(scored)
     scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
 
-    # ✅ 표시/기본 랭크는 CSV 기준 고정
-    scored = scored.sort_values(["_CSV_RANK", "_CSV_ROW"], ascending=[True, True]).reset_index(drop=True)
-    scored["LDY_RANK"] = pd.to_numeric(scored["_CSV_RANK"], errors="coerce")
+    # ✅ 표시 랭크/정렬: "가장 오를 확률" 우선 (점수 기반)
+    # - CSV 순서(_CSV_RANK)는 보존하되, 화면/Top 리스트는 RANK_SCORE 중심으로 재정렬
+    score_sort_cols = [c for c in ["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE", "거래대금(억원)"] if c in scored.columns]
+    if score_sort_cols:
+        # 안전한 정렬을 위해 숫자 변환
+        for c in score_sort_cols:
+            scored[c] = pd.to_numeric(scored[c], errors="coerce")
+        scored = scored.sort_values(score_sort_cols, ascending=[False] * len(score_sort_cols)).reset_index(drop=True)
+        scored["LDY_RANK"] = np.arange(1, len(scored) + 1)
+        scored["_DISP_RANK"] = scored["LDY_RANK"]
+    else:
+        # (구버전 CSV 대응) 점수 컬럼이 없으면 CSV 순서 유지
+        scored = scored.sort_values(["_CSV_RANK", "_CSV_ROW"], ascending=[True, True]).reset_index(drop=True)
+        scored["LDY_RANK"] = pd.to_numeric(scored["_CSV_RANK"], errors="coerce")
 
     # 6) base/top20
     base = scored[(pd.to_numeric(scored["EBS"], errors="coerce") >= pass_ebs) & (scored["_GATE_OK"])].copy()
