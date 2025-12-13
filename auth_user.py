@@ -190,21 +190,18 @@ def _extract_json_from_text(content: str) -> str:
     return s[start:end + 1]
 
 def _load_user_db_from_gist() -> Optional[dict]:
-    """
-    GitHub Gist에서 users_db.json 내용을 읽어온다.
-    - GIST_ID / GIST_TOKEN 없으면 None 리턴 (로컬로 fallback)
-    """
     if not GIST_ID_USERS or not GIST_TOKEN:
         return None
 
     try:
-        url = f"https://api.github.com/gists/{gist_id}"
+        url = f"https://api.github.com/gists/{GIST_ID_USERS}"
         headers = {
             "Authorization": f"token {GIST_TOKEN}",
             "Accept": "application/vnd.github+json",
         }
         resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
+
         gist = resp.json()
         files = gist.get("files", {})
         file_obj = files.get(GIST_FILE_NAME)
@@ -213,8 +210,8 @@ def _load_user_db_from_gist() -> Optional[dict]:
             logger.info("[auth_user] Gist에 '%s' 파일이 없어 빈 DB로 초기화합니다.", GIST_FILE_NAME)
             return {"users": {}}
 
-        content = file_obj.get("content", "")
-        if not content or not content.strip():
+        content = (file_obj.get("content", "") or "").strip()
+        if not content:
             return {"users": {}}
 
         json_text = _extract_json_from_text(content)
@@ -296,35 +293,32 @@ def load_json_from_gist_file(gist_id: str, file_name: str, default):
         return default
 
 
-def save_json_to_gist_file(gist_id: str, file_name: str, payload) -> bool:
-    if not gist_id or not GIST_TOKEN:
-        logger.error("[auth_user] Gist 설정 없음 → %s 저장 불가", file_name)
+def _save_user_db_to_gist(db: dict) -> bool:
+    if not GIST_ID_USERS or not GIST_TOKEN:
         return False
 
     try:
-        url = f"https://api.github.com/gists/{gist_id}"
+        url = f"https://api.github.com/gists/{GIST_ID_USERS}"
         headers = {
             "Authorization": f"token {GIST_TOKEN}",
             "Accept": "application/vnd.github+json",
         }
-        body = {
+        payload = {
             "files": {
-                file_name: {
-                    "content": json.dumps(payload, ensure_ascii=False, indent=2)
+                GIST_FILE_NAME: {
+                    "content": json.dumps(db, ensure_ascii=False, indent=2)
                 }
             }
         }
 
-        resp = requests.patch(url, headers=headers, data=json.dumps(body), timeout=10)
-        if resp.status_code not in (200, 201):
-            logger.error("[auth_user] Gist PATCH 실패 (%s): status=%s, body=%s",
-                         file_name, resp.status_code, resp.text)
-            return False
+        resp = requests.patch(url, headers=headers, data=json.dumps(payload), timeout=10)
+        resp.raise_for_status()
 
+        logger.info("[auth_user] Gist에 user DB 저장 완료 (users=%d)", len(db.get("users", {})))
         return True
 
     except Exception as e:
-        logger.exception("[auth_user] Gist에 %s 저장 실패: %s", file_name, e)
+        logger.exception("[auth_user] Gist user DB save 실패: %s", e)
         return False
 
 
@@ -439,7 +433,7 @@ def save_user_db(db: dict) -> None:
     _save_user_db_local(db)
 
     # Gist 동기화
-    if GIST_ID and GIST_TOKEN:
+    if GIST_ID_USERS and GIST_TOKEN:
         ok = _save_user_db_to_gist(db)
         if not ok:
             logger.warning("[auth_user] Gist 저장 실패, 로컬 파일만 최신 상태입니다.")
@@ -647,7 +641,7 @@ def render_auth_box(show_debug: bool = False):
         try:
             _db = load_user_db()
             st.caption(
-                f"DEBUG: GIST_ID={GIST_ID[:8]}..., "
+                f"DEBUG: GIST_ID={GIST_ID_USERS[:8]}..., "
                 f"users={len(_db.get('users', {}))}, "
                 f"from_gist={bool(GIST_ID_USERS and GIST_TOKEN)}"
             )
