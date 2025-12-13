@@ -31,7 +31,7 @@ def _get_conf(key, default_val):
 # 1) 버전 정보
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.9.2")
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "6.9.3")
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -66,6 +66,17 @@ PRIME_TG_JOIN_URL = _get_conf(
 #    - 맨 앞 요소가 항상 최신 버전이라고 가정
 # --------------------------------------------------------------------
 CHANGELOG = [
+    {
+        "version": "6.9.3",
+        "date": "2025-12-13",
+        "title": "TTM Squeeze & Interactive Telegram",
+        "items": [
+            "🌪️ **TTM Squeeze Engine:** 존 카터의 TTM Squeeze 알고리즘 탑재 (Bollinger Bands가 Keltner Channel 안으로 수렴 시 '🔥 SQZ' 포착).",
+            "📉 **Keltner Channel Chart:** 대시보드 차트에 켈트너 채널(1.5 ATR) 표시 옵션을 추가하여 스퀴즈 상태를 시각적으로 확인 가능.",
+            "🚀 **Telegram On-Demand:** 대시보드에서 현재 필터링된 상위 5개 종목을 즉시 텔레그램으로 전송하는 버튼 추가.",
+            "🏷️ **Strategy Tag Upgrade:** '🔥 SQZ (폭발대기)' 전략 태그 추가로 변동성 폭발 임박 종목 우선 순위 노출.",
+        ],
+    },
     {
         "version": "6.9.2",
         "date": "2025-12-13",
