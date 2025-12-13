@@ -2223,6 +2223,15 @@ with tab1:
     st.divider()
     plot_regime_summary(scored)
 
+def _to_num(x, default=np.nan):
+    v = pd.to_numeric(x, errors="coerce")
+    return default if pd.isna(v) else float(v)
+
+def _to_int_str(x, default=0):
+    v = pd.to_numeric(x, errors="coerce")
+    return f"{int(v) if pd.notna(v) else default:,}"
+
+
 with tab2:
     st.subheader("🎯 추천 종목 필터")
 
@@ -2357,7 +2366,7 @@ with tab2:
         if sel:
             sel_idx = opts.index(sel)
             row = view_df.iloc[sel_idx]
-            code = row.get('종목코드', '')
+            code = str(row.get("종목코드", "")).zfill(6)
 
             c1, c2 = st.columns([2, 1])
             with c1:
@@ -2404,31 +2413,29 @@ with tab2:
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
-                    st.plotly_chart(
-                        plot_radar_chart(row),
-                        use_container_width=True,
-                    )
+                    st.plotly_chart(plot_radar_chart(row), use_container_width=True)
+            
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
                     st.info(f"💬 **AI:** {ai_cmt}")
+            
+                    # ✅ 여기부터 숫자 안전 변환해서 넣기
+                    rr_entry = _to_num(row.get("추천매수가", np.nan), np.nan)
+                    rr_stop  = _to_num(row.get("손절가", np.nan), np.nan)
+                    rr_t1    = _to_num(row.get("추천매도가1", np.nan), np.nan)
+                    rr_t2    = _to_num(row.get("추천매도가2", np.nan), np.nan)
+            
                     st.plotly_chart(
-                        plot_risk_reward_bar(
-                            row.get('추천매수가', 0),
-                            row.get('손절가', 0),
-                            row.get('추천매도가1', 0),
-                            row.get('추천매도가2', 0),
-                        ),
+                        plot_risk_reward_bar(rr_entry, rr_stop, rr_t1, rr_t2),
                         use_container_width=True,
                     )
                 else:
-                    st.warning(
-                        "🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다."
-                    )
-
+                    st.warning("🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다.")
+            
                 c_a, c_b = st.columns(2)
-                c_a.metric("진입가", f"{int(row.get('추천매수가', 0)):,}")
+                c_a.metric("진입가", _to_int_str(row.get("추천매수가", 0)))
                 c_b.metric(
                     "손절가",
-                    f"{int(row.get('손절가', 0)):,}",
+                    _to_int_str(row.get("손절가", 0)),
                     delta="Stop",
                     delta_color="inverse",
                 )
