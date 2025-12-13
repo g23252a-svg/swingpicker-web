@@ -1687,31 +1687,35 @@ def compute_dynamic_thresholds(df):
     return thr
 
 def route_tag_dynamic(row, th):
-    try:
-        r5 = float(row.get("ret_5d_%", 0) or 0)
-    except Exception:
-        r5 = 0.0
-    try:
-        slope = float(row.get("MACD_Slope", row.get("MACD_slope", 0)) or 0)
-    except Exception:
-        slope = 0.0
-    try:
-        ebs = float(row.get("EBS", 0) or 0)
-    except Exception:
-        ebs = 0.0
-    try:
-        now_pct = float(row.get("Now%", 999) or 999)
-    except Exception:
-        now_pct = 999
-    try:
-        rr1 = float(row.get("RR1", 0) or 0)
-    except Exception:
-        rr1 = 0.0
-    try:
-        ma20_gap = float(row.get("MA20_GAP", 0) or 0)
-    except Exception:
-        ma20_gap = 0.0
+    # ✅ [수정됨] 0 값을 안전하게 처리하는 헬퍼 함수
+    def _get_val(key, default):
+        val = row.get(key)
+        if val is None or pd.isna(val):
+            return default
+        try:
+            return float(val)
+        except:
+            return default
 
+    r5 = _get_val("ret_5d_%", 0.0)
+    
+    # 🚨 [핵심 수정] CSV에는 'MACD_Slope_PCT'에 값이 들어있습니다. 이걸 먼저 가져와야 합니다.
+    slope = _get_val("MACD_Slope_PCT", 0.0) 
+    if slope == 0.0:
+         slope = _get_val("MACD_Slope", 0.0) # Fallback
+
+    ebs = _get_val("EBS", 0.0)
+    now_pct = _get_val("Now%", 999.0) # 0이어도 999로 바뀌지 않음
+    rr1 = _get_val("RR1", 0.0)
+    ma20_gap = _get_val("MA20_GAP", 0.0)
+    
+    # 1) TTM Squeeze (폭발 대기)
+    # TTM_SQUEEZE 컬럼이 1이면 무조건 SQZ 태그 우선
+    is_sqz = _get_val("TTM_SQUEEZE", 0.0)
+    if is_sqz == 1.0:
+        return "🔥 SQZ (폭발대기)"
+
+    # 2) 강한 돌파 BRK
     strong = (
         (r5 >= th['r5_q75'])
         and (slope >= th['slope_q60'])
@@ -1721,11 +1725,13 @@ def route_tag_dynamic(row, th):
     if strong and rr1 >= 0.5:
         return "🔼 BRK (강력 돌파)"
 
+    # 3) Watch 영역
     if (slope > 0 and r5 > 0) or (ebs >= th['ebs_q60'] and now_pct <= th['now_gap_q25'] * 1.5):
         if r5 >= max(1.0, th['r5_q75'] * 0.6) and slope > 0:
             return "🔺 Watch→BRK (관찰·돌파예상)"
         return "🔺 Watch (상승 준비)"
 
+    # 4) 20일선 위 강세
     if ma20_gap > 1 and slope > 0 and ebs >= PASS_EBS:
         return "🔼 BRK (MA20상승)"
 
