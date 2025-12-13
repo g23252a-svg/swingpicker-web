@@ -22,7 +22,6 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import re
-import FinanceDataReader as fdr
 from typing import Optional, Dict, Any, Tuple
 
 
