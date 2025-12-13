@@ -1250,6 +1250,8 @@ def plot_interactive_chart(
             x=df.index,
             open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
             name="주가",
+            increasing={'line': {'color': '#FF3333'}},  # 상승: 빨강
+            decreasing={'line': {'color': '#3333FF'}},  # 하락: 파랑
             hovertemplate="<b>%{x|%y/%m/%d}</b><br>종가: %{close:,.0f}원<extra></extra>",
             showlegend=False,
         ),
@@ -1282,21 +1284,28 @@ def plot_interactive_chart(
         up = df[df["Trend"] == 1]
         down = df[df["Trend"] == -1]
         if not up.empty:
-            fig.add_trace(go.Scatter(x=up.index, y=up["SuperTrend"], mode="markers", marker=dict(size=4, color='green'), name="상승추세"), row=1, col=1)
+            # 상승추세: 빨강
+            fig.add_trace(go.Scatter(x=up.index, y=up["SuperTrend"], mode="markers", marker=dict(size=4, color='red'), name="상승추세"), row=1, col=1)
+            # 하락추세: 파랑
         if not down.empty:
-            fig.add_trace(go.Scatter(x=down.index, y=down["SuperTrend"], mode="markers", marker=dict(size=4, color='red'), name="하락추세"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=down.index, y=down["SuperTrend"], mode="markers", marker=dict(size=4, color='blue'), name="하락추세"), row=1, col=1)
 
-    # 6) 거래량
+    # 6) 거래량 (색상 구분)
     if "Volume" in df.columns:
-        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", showlegend=False, marker_color='lightgray'), row=2, col=1)
+        # 거래량 봉 색상을 등락에 맞춤
+        colors = [
+            '#FF3333' if c >= o else '#3333FF' 
+            for c, o in zip(df["Close"], df["Open"])
+        ]
+        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", marker_color=colors, showlegend=False), row=2, col=1)
 
-    # 7) RSI(선택)
+    # 7) RSI
     if show_rsi and "RSI14_CHART" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI(14)"), row=3, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI(14)", line=dict(color='black')), row=3, col=1)
         fig.add_hline(y=30, line_dash="dot", row=3, col=1)
         fig.add_hline(y=70, line_dash="dot", row=3, col=1)
 
-    # 8) 가격 라인(진입/손절/목표) - 기존 코드와 동일하게 유지
+    # 8) 가격 라인 (목표=빨강 계열, 손절=파랑 계열, 진입=검정/회색)
     def _safe_float(v):
         try:
             vv = float(pd.to_numeric(v, errors="coerce"))
@@ -1310,13 +1319,13 @@ def plot_interactive_chart(
     t2_v = _safe_float(target2)
 
     if entry_v is not None:
-        fig.add_hline(y=entry_v, line_dash="dash", line_color="blue", annotation_text=f"진입: {int(entry_v):,}", row=1, col=1)
+        fig.add_hline(y=entry_v, line_dash="dash", line_color="gray", annotation_text=f"진입: {int(entry_v):,}", row=1, col=1)
     if stop_v is not None:
-        fig.add_hline(y=stop_v, line_dash="dash", line_color="red", annotation_text=f"손절: {int(stop_v):,}", row=1, col=1)
+        # 손절선: 파란색 (하락 방어)
+        fig.add_hline(y=stop_v, line_dash="dash", line_color="blue", annotation_text=f"손절: {int(stop_v):,}", row=1, col=1)
     if t1_v is not None:
-        fig.add_hline(y=t1_v, line_dash="dot", line_color="green", annotation_text=f"목표1: {int(t1_v):,}", row=1, col=1)
-    # if t2_v is not None:
-    #     fig.add_hline(y=t2_v, line_dash="dot", annotation_text=f"목표2: {int(t2_v):,}", row=1, col=1)
+        # 목표가: 빨간색 (상승 수익)
+        fig.add_hline(y=t1_v, line_dash="dot", line_color="red", annotation_text=f"목표1: {int(t1_v):,}", row=1, col=1)
 
     fig.update_layout(
         title=f"{name} ({str(code).zfill(6)})",
