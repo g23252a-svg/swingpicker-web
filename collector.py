@@ -2045,6 +2045,9 @@ def main(
         ascending=[False, False, False, False]
     )
 
+    # ✅ 대시보드/외부 소비용 표시 랭크(1=최상단)
+    df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+
     df_out["기준일"] = trade_ymd
     df_out["시총기준일"] = mcap_ymd
     df_out["벤치_60d_KOSPI_%"] = bench_ret_60.get("KOSPI", np.nan)
