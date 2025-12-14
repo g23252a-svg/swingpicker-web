@@ -252,6 +252,8 @@ def _save_user_db_to_gist(db: dict) -> bool:
         logger.exception("[auth_user] Gist user DB save 실패: %s", e)
         return False
 
+
+
 def load_json_from_gist_file(gist_id: str, file_name: str, default):
     if not gist_id or not GIST_TOKEN:
         logger.warning("[auth_user] Gist 설정 없음 → %s default 반환", file_name)
@@ -318,6 +320,41 @@ def _save_user_db_to_gist(db: dict) -> bool:
         logger.exception("[auth_user] Gist user DB save 실패: %s", e)
         return False
 
+def save_json_to_gist_file(gist_id: str, file_name: str, data: dict) -> bool:
+    """
+    특정 Gist ID와 파일명을 지정하여 JSON 데이터를 저장하는 범용 함수
+    """
+    if not gist_id or not GIST_TOKEN:
+        logger.error("[auth_user] Gist ID 또는 Token이 없어 저장 실패 (%s)", file_name)
+        return False
+
+    try:
+        url = f"https://api.github.com/gists/{gist_id}"
+        headers = {
+            "Authorization": f"token {GIST_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        }
+        
+        # JSON 변환
+        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+        
+        payload = {
+            "files": {
+                file_name: {
+                    "content": json_str
+                }
+            }
+        }
+
+        resp = requests.patch(url, headers=headers, data=json.dumps(payload), timeout=10)
+        resp.raise_for_status()
+        
+        logger.info("[auth_user] Gist 저장 완료: %s (ID: ...%s)", file_name, gist_id[-5:])
+        return True
+
+    except Exception as e:
+        logger.exception("[auth_user] Gist 저장 실패 (%s): %s", file_name, e)
+        return False
 
 # ----------------- 구독 DB / 문의 DB (Gist 저장용) -----------------
 SUBSCRIPTIONS_GIST_FILE = "subscriptions_db.json"
