@@ -337,10 +337,6 @@ def load_sector_override() -> dict:
     return {}
 
 def build_sector_map() -> dict:
-    """
-    업종 맵 생성: Override 파일이 있으면 우선 사용하고,
-    없으면 빈 딕셔너리를 반환(이 경우 classify_big_sector가 종목명으로 자동 분류함)
-    """
     return load_sector_override()
 
 
@@ -513,12 +509,13 @@ def analyze_ticker(
         "종가": int(last_c), "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1),
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
         
-        # ✅ [수정] 누락된 컬럼 추가
-        "MACD_Slope": round(slope, 4),      # 추세 기울기 원본 값 추가
-        "MA20_GAP": round(disp, 2),         # 20일선 이격도 추가 (이격도 컬럼과 동일 값)
+        # ✅ 필수 컬럼 (TRD, Slope 등) 포함 보장
+        "MACD_Slope": round(slope, 4),
+        "MA20_GAP": round(disp, 2),
+        "ADX": round(adx, 1), 
+        "VWAP_Gap": round(vwap_gap, 2),
         
         "MACD_Slope_PCT": round(slope_pct, 4), "거래강도": round(vol_z, 2),
-        "ADX": round(adx, 1), "VWAP_Gap": round(vwap_gap, 2),
         "TTM_SQUEEZE": ttm_squeeze, "TTM_SQUEEZE_CNT": sqz_cnt,
         "Above_MA20": 1 if last_c > float(ma20.iloc[-1]) else 0,
         "ret_5d_%": round(ret_5, 2), "ret_10d_%": round(ret_10, 2),
@@ -749,15 +746,11 @@ def main(trade_date=None, top_n=None, enable_telegram=True, tag=None):
         return
 
     # 시총 필터
-    # [수정됨] 시총 필터 안전장치 추가
     if mcap_map:
-        # 매핑 전 원본 개수
         original_count = len(top_df)
-        
         top_df["시가총액"] = top_df["종목코드"].map(lambda c: mcap_map.get(c, 0))
         filtered_df = top_df[top_df["시가총액"] >= MIN_MCAP_EOK]
         
-        # 만약 필터링 후 0개가 되면 (데이터 매칭 실패 등), 필터를 해제하고 진행
         if filtered_df.empty:
             log(f"⚠️ 시총 필터 후 0개됨 (매칭 실패 가능성). 필터 해제하고 {original_count}개로 진행합니다.")
         else:
@@ -778,7 +771,7 @@ def main(trade_date=None, top_n=None, enable_telegram=True, tag=None):
     kospi_set, kosdaq_set = get_market_sets(trade_ymd)
     name_map = get_name_map(trade_ymd)
     save_price_snapshot(trade_ymd, name_map)
-    sector_map = build_sector_map() # 여기선 override만 로드하지만, 위 로직대로면 충분
+    sector_map = build_sector_map()
     
     rows = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
