@@ -1910,7 +1910,7 @@ def analyze_ticker(
         "ATR_MULT": atr_mult,
     }
 
-    return row
+  
 
 # ------------------------------- 메인 실행 -------------------------------
 
@@ -2012,7 +2012,7 @@ def main(
                     t, df_t, 
                     top_df, mcap_map,
                     kospi_set, kosdaq_set, name_map, sector_map,
-                    bench_ret_60
+                    bench_map     # ✅ 수정: bench_map으로 변경
                 )
                 if row is not None:
                     rows.append(row)
