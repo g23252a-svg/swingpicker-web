@@ -1164,12 +1164,13 @@ def get_stock_chart_data(code):
 
 def plot_radar_chart(row):
     """
-    v7.0: 팩터 기반 레이더 차트 (가시성 개선 버전)
+    v7.5: 팩터 기반 레이더 차트 (추세 TRD 추가)
     """
     # 1) 팩터 데이터 확인
     if "NORM_MOM" in row.index:
         stats = {
             "모멘텀(MOM)": row.get("NORM_MOM", 0) * 100,
+            "추세(TRD)": row.get("NORM_TRD", 0) * 100,  # v7.5 New
             "가성비(RR)": row.get("NORM_RR", 0) * 100,
             "수익여력(T1)": row.get("NORM_T1", 0) * 100,
             "안전성(SL)": row.get("NORM_SL", 0) * 100,
@@ -1221,7 +1222,7 @@ def plot_radar_chart(row):
         showlegend=False,
         height=280,
         margin=dict(l=40, r=40, t=30, b=30),
-        title=dict(text="📊 6-Factor Analysis", x=0.5, y=0.95, font=dict(size=14))
+        title=dict(text="📊 7-Factor Analysis (v7.5)", x=0.5, y=0.95, font=dict(size=14))
     )
     return fig
 
@@ -1236,6 +1237,7 @@ def plot_interactive_chart(
     stop=None,
     target1=None,
     target2=None,
+    vbo_price=None,     # 🔥 New Argument
     show_bb: bool = True,
     show_kc: bool = False,
     show_rsi: bool = False,
@@ -1255,15 +1257,16 @@ def plot_interactive_chart(
     )
 
     # --- 🎨 색상 팔레트 정의 ---
-    COLOR_UP = '#FF3B30'      # 밝은 빨강 (상승)
-    COLOR_DOWN = '#007AFF'    # 밝은 파랑 (하락)
-    COLOR_MA20 = '#FFD700'    # 황금색 (20일선)
-    COLOR_BB = 'rgba(189, 195, 199, 0.5)'      # 은은한 회색 선 (BB)
-    COLOR_BB_FILL = 'rgba(189, 195, 199, 0.1)' # 아주 연한 회색 채우기 (BB)
-    COLOR_KC = '#E040FB'      # 형광 보라 (KC)
-    COLOR_ENTRY = '#FF9F0A'   # 형광 오렌지 (진입가)
-    COLOR_STOP = '#30D158'    # 형광 초록 (목표가 - 상승이라 초록 계열 사용)
-    COLOR_LOSS = '#00B0FF'    # 형광 하늘 (손절가 - 파랑 캔들과 구분되는 하늘색)
+    COLOR_UP = '#FF3B30'      # 밝은 빨강
+    COLOR_DOWN = '#007AFF'    # 밝은 파랑
+    COLOR_MA20 = '#FFD700'    # 황금색
+    COLOR_BB = 'rgba(189, 195, 199, 0.5)'
+    COLOR_BB_FILL = 'rgba(189, 195, 199, 0.1)'
+    COLOR_KC = '#E040FB'      # 형광 보라
+    COLOR_ENTRY = '#FF9F0A'   # 형광 오렌지
+    COLOR_STOP = '#30D158'    # 형광 초록
+    COLOR_LOSS = '#00B0FF'    # 형광 하늘
+    COLOR_VBO  = '#FF00FF'    # 🔥 마젠타 (VBO)
 
     # 1) 캔들 차트
     fig.add_trace(
@@ -1279,152 +1282,80 @@ def plot_interactive_chart(
         row=1, col=1
     )
 
-    # 2) MA20 (황금색 실선)
+    # 2) MA20
     if "MA20" in df.columns:
         fig.add_trace(
-            go.Scatter(
-                x=df.index, y=df["MA20"], 
-                name="20일선", 
-                line=dict(color=COLOR_MA20, width=2)
-            ), 
+            go.Scatter(x=df.index, y=df["MA20"], name="20일선", line=dict(color=COLOR_MA20, width=2)), 
             row=1, col=1
         )
 
-    # 3) 볼린저 밴드 (은은한 회색 영역)
-    if show_bb:
-        if "BB_UPPER" in df.columns and "BB_LOWER" in df.columns:
-            # 상단
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["BB_UPPER"], 
-                name="BB 상단", 
-                line=dict(width=1, color=COLOR_BB),
-                showlegend=False
-            ), row=1, col=1)
-            # 하단 (채우기 포함)
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["BB_LOWER"], 
-                name="BB 밴드", 
-                line=dict(width=1, color=COLOR_BB), 
-                fill='tonexty', 
-                fillcolor=COLOR_BB_FILL,
-                showlegend=True
-            ), row=1, col=1)
+    # 3) 볼린저 밴드
+    if show_bb and "BB_UPPER" in df.columns and "BB_LOWER" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_UPPER"], name="BB 상단", line=dict(width=1, color=COLOR_BB), showlegend=False), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_LOWER"], name="BB 밴드", line=dict(width=1, color=COLOR_BB), fill='tonexty', fillcolor=COLOR_BB_FILL, showlegend=True), row=1, col=1)
 
-    # 4) 켈트너 채널 (보라색 점선) - 볼린저 밴드와 확연히 구분
+    # 4) 켈트너 채널
     if show_kc:
         if "KC_UPPER" in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["KC_UPPER"], 
-                name="KC 상단", 
-                line=dict(width=1.5, dash='dot', color=COLOR_KC)
-            ), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["KC_UPPER"], name="KC 상단", line=dict(width=1.5, dash='dot', color=COLOR_KC)), row=1, col=1)
         if "KC_LOWER" in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["KC_LOWER"], 
-                name="KC 하단", 
-                line=dict(width=1.5, dash='dot', color=COLOR_KC)
-            ), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["KC_LOWER"], name="KC 하단", line=dict(width=1.5, dash='dot', color=COLOR_KC)), row=1, col=1)
 
-    # 5) 슈퍼트렌드 (추세 전환 포인트 강조)
+    # 5) 슈퍼트렌드
     if "Trend" in df.columns and "SuperTrend" in df.columns:
-        # 상승 전환점 (밝은 민트색)
         up = df[df["Trend"] == 1]
         if not up.empty:
-            fig.add_trace(go.Scatter(
-                x=up.index, y=up["SuperTrend"], 
-                mode="markers", 
-                marker=dict(size=4, color='#00E676', symbol='triangle-up'), 
-                name="상승추세"
-            ), row=1, col=1)
-
-        # 하락 전환점 (진한 핑크색)
+            fig.add_trace(go.Scatter(x=up.index, y=up["SuperTrend"], mode="markers", marker=dict(size=4, color='#00E676', symbol='triangle-up'), name="상승추세"), row=1, col=1)
         down = df[df["Trend"] == -1]
         if not down.empty:
-            fig.add_trace(go.Scatter(
-                x=down.index, y=down["SuperTrend"], 
-                mode="markers", 
-                marker=dict(size=4, color='#FF4081', symbol='triangle-down'), 
-                name="하락추세"
-            ), row=1, col=1)
+            fig.add_trace(go.Scatter(x=down.index, y=down["SuperTrend"], mode="markers", marker=dict(size=4, color='#FF4081', symbol='triangle-down'), name="하락추세"), row=1, col=1)
 
-    # 6) 거래량 (캔들 색상과 일치시키되 투명도 조절)
+    # 6) 거래량
     if "Volume" in df.columns:
-        colors = [
-            COLOR_UP if c >= o else COLOR_DOWN 
-            for c, o in zip(df["Close"], df["Open"])
-        ]
-        fig.add_trace(go.Bar(
-            x=df.index, y=df["Volume"], 
-            name="거래량", 
-            marker_color=colors, 
-            opacity=0.8,
-            showlegend=False
-        ), row=2, col=1)
+        colors = [COLOR_UP if c >= o else COLOR_DOWN for c, o in zip(df["Close"], df["Open"])]
+        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", marker_color=colors, opacity=0.8, showlegend=False), row=2, col=1)
 
-    # 7) RSI (과매수/과매도 영역 강조)
+    # 7) RSI
     if show_rsi and "RSI14_CHART" in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["RSI14_CHART"], 
-            name="RSI(14)", 
-            line=dict(color='#AB47BC', width=1.5)
-        ), row=3, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI(14)", line=dict(color='#AB47BC', width=1.5)), row=3, col=1)
+        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=70, y1=70, line=dict(color="red", width=1, dash="dot"), row=3, col=1)
+        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=30, y1=30, line=dict(color="blue", width=1, dash="dot"), row=3, col=1)
 
-        # 기준선 30/70
-        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=70, y1=70,
-                      line=dict(color="red", width=1, dash="dot"), row=3, col=1)
-        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=30, y1=30,
-                      line=dict(color="blue", width=1, dash="dot"), row=3, col=1)
-
-    # 8) 가격 라인 (가시성 높은 형광색 사용)
+    # 8) 가격 라인 & VBO 라인
     def _safe_float(v):
         try:
             vv = float(pd.to_numeric(v, errors="coerce"))
             return vv if np.isfinite(vv) and vv > 0 else None
-        except Exception:
-            return None
+        except: return None
 
     entry_v = _safe_float(entry)
     stop_v = _safe_float(stop)
     t1_v = _safe_float(target1)
+    vbo_v = _safe_float(vbo_price)
 
-    if entry_v is not None:
-        fig.add_hline(y=entry_v, line_dash="dash", line_color=COLOR_ENTRY, line_width=1.5, 
-                      annotation_text=f"🚀진입: {int(entry_v):,}", annotation_font_color=COLOR_ENTRY, row=1, col=1)
-    if stop_v is not None:
-        fig.add_hline(y=stop_v, line_dash="dot", line_color=COLOR_LOSS, line_width=1.5,
-                      annotation_text=f"🛡️손절: {int(stop_v):,}", annotation_font_color=COLOR_LOSS, row=1, col=1)
-    if t1_v is not None:
-        fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, line_width=1.5,
-                      annotation_text=f"💰목표: {int(t1_v):,}", annotation_font_color=COLOR_STOP, row=1, col=1)
+    if entry_v:
+        fig.add_hline(y=entry_v, line_dash="dash", line_color=COLOR_ENTRY, annotation_text=f"🚀진입: {int(entry_v):,}", annotation_font_color=COLOR_ENTRY, row=1, col=1)
+    if stop_v:
+        fig.add_hline(y=stop_v, line_dash="dot", line_color=COLOR_LOSS, annotation_text=f"🛡️손절: {int(stop_v):,}", annotation_font_color=COLOR_LOSS, row=1, col=1)
+    if t1_v:
+        fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, annotation_text=f"💰목표: {int(t1_v):,}", annotation_font_color=COLOR_STOP, row=1, col=1)
+    
+    # 🔥 [v7.5] VBO Line 추가
+    if vbo_v:
+        fig.add_hline(y=vbo_v, line_dash="solid", line_color=COLOR_VBO, line_width=1.5, annotation_text=f"⚡VBO: {int(vbo_v):,}", annotation_font_color=COLOR_VBO, row=1, col=1)
 
-    # 레이아웃 설정 (모바일 최적화)
+    # 레이아웃
     fig.update_layout(
-        title=dict(
-            text=f"{name} ({str(code).zfill(6)})", 
-            font=dict(size=16), # 폰트 크기 약간 축소 (모바일 타이틀 잘림 방지)
-            x=0, # 왼쪽 정렬
-        ),
+        title=dict(text=f"{name} ({str(code).zfill(6)})", font=dict(size=16), x=0),
         xaxis_rangeslider_visible=False,
-        # 🚨 [핵심] 높이를 좀 더 늘림 (모바일에서 터치 스크롤 편의성)
         height=700 if show_rsi else 550, 
-        # 🚨 [핵심] 좌우 여백(margin)을 최소화하여 차트를 크게 보여줌
         margin=dict(l=10, r=10, t=50, b=10), 
         hovermode="x unified",
-        # 차트 배경색을 약간 어둡게 처리하여 형광색이 잘 보이게 함 (선택사항)
-        # paper_bgcolor='rgba(0,0,0,0)',
-        # plot_bgcolor='rgba(0,0,0,0)'
-        legend=dict(
-            orientation="h", 
-            yanchor="bottom", y=1.02, 
-            xanchor="left", x=0 # 범례 왼쪽 정렬
-        ),
-        dragmode="pan", # 모바일 터치 드래그 기본 활성화
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        dragmode="pan",
     )
-
-    # Y축 그리드 설정 (눈에 덜 띄게)
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-
     return fig
 def plot_risk_reward_bar(buy, stop, target1, target2):
     fig = go.Figure()
@@ -1788,23 +1719,36 @@ def route_tag_dynamic(row, th):
 
     r5 = _get_val("ret_5d_%", 0.0)
 
-    # 🚨 [핵심 수정] CSV에는 'MACD_Slope_PCT'에 값이 들어있습니다. 이걸 먼저 가져와야 합니다.
+    # MACD Slope 처리
     slope = _get_val("MACD_Slope_PCT", 0.0) 
     if slope == 0.0:
-         slope = _get_val("MACD_Slope", 0.0) # Fallback
+         slope = _get_val("MACD_Slope", 0.0) 
 
     ebs = _get_val("EBS", 0.0)
-    now_pct = _get_val("Now%", 999.0) # 0이어도 999로 바뀌지 않음
+    now_pct = _get_val("Now%", 999.0)
     rr1 = _get_val("RR1", 0.0)
     ma20_gap = _get_val("MA20_GAP", 0.0)
+    
+    # v7.5 신규 지표
+    adx = _get_val("ADX", 0.0)
+    vbo = _get_val("VBO_Price", 0.0)
+    close = _get_val("종가", 0.0)
 
     # 1) TTM Squeeze (폭발 대기)
-    # TTM_SQUEEZE 컬럼이 1이면 무조건 SQZ 태그 우선
     is_sqz = _get_val("TTM_SQUEEZE", 0.0)
     if is_sqz == 1.0:
         return "🔥 SQZ (폭발대기)"
 
-    # 2) 강한 돌파 BRK
+    # 2) VBO (변동성 돌파 임박) - v7.5 추가
+    # 현재가가 VBO 기준가 근처(1% 이내)이거나 돌파했을 때
+    if vbo > 0 and close > 0 and ((vbo - close) / close * 100) < 1.0:
+        return "⚡ VBO (돌파임박)"
+
+    # 3) 강한 돌파 BRK (ADX 조건 추가)
+    # ADX가 25 이상이고 기울기가 양수면 강력한 추세장
+    if adx >= 25 and slope > 0:
+        return "🔼 BRK (추세돌파)"
+    
     strong = (
         (r5 >= th['r5_q75'])
         and (slope >= th['slope_q60'])
@@ -1814,13 +1758,13 @@ def route_tag_dynamic(row, th):
     if strong and rr1 >= 0.5:
         return "🔼 BRK (강력 돌파)"
 
-    # 3) Watch 영역
+    # 4) Watch 영역
     if (slope > 0 and r5 > 0) or (ebs >= th['ebs_q60'] and now_pct <= th['now_gap_q25'] * 1.5):
         if r5 >= max(1.0, th['r5_q75'] * 0.6) and slope > 0:
             return "🔺 Watch→BRK (관찰·돌파예상)"
         return "🔺 Watch (상승 준비)"
 
-    # 4) 20일선 위 강세
+    # 5) 20일선 위 강세
     if ma20_gap > 1 and slope > 0 and ebs >= PASS_EBS:
         return "🔼 BRK (MA20상승)"
 
@@ -2587,47 +2531,30 @@ with tab2:
             row = view_df.iloc[sel_idx]
             code = str(row.get("종목코드", "")).zfill(6)
 
-            # --- 여기서부터 들여쓰기(Indent) 주의 ---
+            # --- Layout ---
             c1, c2 = st.columns([2, 1])
 
             with c1:
-                # 🔧 고급 차트 옵션 (3단 컬럼)
-                c_opt1, c_opt2, c_opt3 = st.columns(3)
-                with c_opt1:
-                    show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                with c_opt2:
-                    # 🔥 [추가된 부분] 켈트너 채널 체크박스
-                    show_kc = st.checkbox("켈트너 채널 (Squeeze)", value=True, key=f"opt_kc_{code}")
-                with c_opt3:
-                    show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
-            with c1:  # 👈 여기가 c1, c2 정의와 같은 레벨이거나 안쪽이어야 함
-                # 🔧 [수정됨] 모바일 최적화: Expander로 옵션 숨기기
+                # 🔧 차트 옵션 (Expander)
                 with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
                     c_opt1, c_opt2, c_opt3 = st.columns(3)
-                    with c_opt1:
-                        show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                    with c_opt2:
-                        show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
-                    with c_opt3:
-                        show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+                    with c_opt1: show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
+                    with c_opt2: show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
+                    with c_opt3: show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
 
                 chart_df = get_stock_chart_data(code)
 
-                # 차트 데이터 유효성 체크
                 if chart_df is None or getattr(chart_df, "empty", True):
                     st.info("차트 데이터 없음")
                 else:
-                    # 숫자형 안전 변환
                     entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
                     stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
                     t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
                     t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
+                    vbo   = pd.to_numeric(row.get("VBO_Price", np.nan), errors="coerce") # 🔥 v7.5
 
-                    # 목표가2 없으면 자동 계산
-                    if pd.isna(t2) and pd.notna(t1):
-                        t2 = float(t1) * 1.07
+                    if pd.isna(t2) and pd.notna(t1): t2 = float(t1) * 1.07
 
-                    # 차트 그리기 함수 호출 (파라미터 전달)
                     fig = plot_interactive_chart(
                         df=chart_df,
                         code=str(code),
@@ -2636,8 +2563,9 @@ with tab2:
                         stop=stop,
                         target1=t1,
                         target2=t2,
+                        vbo_price=vbo,  # 🔥 전달
                         show_bb=show_bb,
-                        show_kc=show_kc,  # 🔥 켈트너 채널 옵션 전달
+                        show_kc=show_kc,
                         show_rsi=show_rsi,
                     )
                     st.plotly_chart(fig, use_container_width=True)
@@ -2645,6 +2573,7 @@ with tab2:
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
+                    # 🔥 v7.5 Updated Radar Chart
                     st.plotly_chart(plot_radar_chart(row), use_container_width=True)
 
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
@@ -2655,91 +2584,70 @@ with tab2:
                     rr_t1    = _to_num(row.get("추천매도가1", np.nan), np.nan)
                     rr_t2    = _to_num(row.get("추천매도가2", np.nan), np.nan)
 
-                    st.plotly_chart(
-                        plot_risk_reward_bar(rr_entry, rr_stop, rr_t1, rr_t2),
-                        use_container_width=True,
-                    )
+                    st.plotly_chart(plot_risk_reward_bar(rr_entry, rr_stop, rr_t1, rr_t2), use_container_width=True)
                 else:
                     st.warning("🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다.")
 
                 c_a, c_b = st.columns(2)
                 c_a.metric("진입가", _to_int_str(row.get("추천매수가", 0)))
-                c_b.metric(
-                    "손절가",
-                    _to_int_str(row.get("손절가", 0)),
-                    delta="Stop",
-                    delta_color="inverse",
-                )
+                c_b.metric("손절가", _to_int_str(row.get("손절가", 0)), delta="Stop", delta_color="inverse")
+                
+                # 🔥 [New] ADX & VBO Info
+                c_c, c_d = st.columns(2)
+                adx_val = row.get("ADX", 0)
+                c_c.metric("추세강도(ADX)", f"{adx_val:.1f}", delta="강함" if adx_val>=25 else "보통", delta_color="normal" if adx_val>=25 else "off")
+                vbo_p = row.get("VBO_Price", 0)
+                c_d.metric("VBO 돌파가", _to_int_str(vbo_p), help="이 가격을 돌파하면 매수 신호")
 
     st.divider()
-    st.subheader("📋 Daily Top List (Squeeze Analysis)", anchor=False)
+    st.subheader("📋 Daily Top List (Trend & Squeeze)", anchor=False)
     safe_view = view_df.copy().reset_index(drop=True)
 
     if not safe_view.empty:
         if "종목명" in safe_view.columns:
             safe_view.set_index("종목명", inplace=True)
 
-        # 숫자 포맷팅
-        price_cols = ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]
+        price_cols = ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)", "VBO_Price"]
         for c in price_cols:
             if c in safe_view.columns:
                 safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
         if "LDY_SCORE" in safe_view.columns:
             safe_view["LDY_SCORE"] = pd.to_numeric(safe_view["LDY_SCORE"], errors='coerce').fillna(0)
-
-        # ✅ 표시할 컬럼 정의 (SQUEEZE_CNT 추가)
+        
+        # 🔥 [v7.5] ADX, VBO_Price 컬럼 추가
         cols = [
             "REGIME", "ROUTE", 
-            "TTM_SQUEEZE_CNT", # 🔥 [New] 스퀴즈 지속일
+            "ADX", "TTM_SQUEEZE_CNT", # ADX 추가
             "업종", "종목코드", "LDY_SCORE",
-            "종가", "추천매수가", "손절가", "추천매도가1",
-            "종목명", # 인덱스라면 생략 가능하지만 명시적 확인
-            "LDY_SCORE",
-            "ROUTE",  
-            "종가", 
-            "추천매수가", 
-            "손절가",
-            # "TTM_SQUEEZE_CNT" -> 공간 부족하면 툴팁이나 상세화면으로 유도
+            "종가", "VBO_Price", # VBO Price 추가
+            "추천매수가", "손절가", "추천매도가1",
         ]
-        # 실제 존재하는 컬럼만 필터링
         cols = [c for c in cols if c in safe_view.columns]
 
-        # 컬럼 설정 (Column Config)
-        # 🚨 Streamlit의 column_config를 활용해 "작은 화면"용 라벨 설정
         cfg = {
-            "LDY_SCORE": st.column_config.ProgressColumn(
-                "점수", format="%.1f", min_value=0, max_value=100
-            ),
-            "TTM_SQUEEZE_CNT": st.column_config.NumberColumn(
-                "🌪️응축(일)", help="TTM Squeeze 연속 발생 일수. 5일 이상이면 폭발 임박(Hot Zone)"
-                "점수", format="%.0f", min_value=0, max_value=100, width="small" 
-            ),
+            "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
+            "ADX": st.column_config.NumberColumn("ADX(추세)", format="%.1f", help="25 이상이면 강한 추세"),
+            "TTM_SQUEEZE_CNT": st.column_config.NumberColumn("🌪️응축(일)", width="small"),
+            "VBO_Price": st.column_config.TextColumn("⚡VBO기준", help="변동성 돌파 매수 기준가"),
             "종가": st.column_config.TextColumn("현재가"),
             "추천매수가": st.column_config.TextColumn("진입가"),
             "손절가": st.column_config.TextColumn("손절가"),
             "추천매도가1": st.column_config.TextColumn("목표가"),
             "ROUTE": st.column_config.TextColumn("전략", width="small"),
-            "종가": st.column_config.TextColumn("현재가", width="small"),
-            "추천매수가": st.column_config.TextColumn("매수", width="small"),
-            "손절가": st.column_config.TextColumn("손절", width="small"),
-            "TTM_SQUEEZE_CNT": st.column_config.NumberColumn("응축", width="small"),
         }
 
-        # 실제 존재하는 컬럼만 필터링 (인덱스인 종목명은 cols에서 제외)
+        # 실제 존재하는 컬럼만 필터링
         display_cols = [c for c in cols if c in safe_view.columns or c == "종목명"]
         if "종목명" in safe_view.index.names:
              display_cols = [c for c in display_cols if c != "종목명"]
 
-        # ▼▼▼ 여기부터 교체하세요 ▼▼▼
         st.dataframe(
-            safe_view[display_cols],    # 데이터
-            use_container_width=True,   # 가로 꽉 채우기
-            column_config=cfg,          # 컬럼 설정
-            height=500                  # 높이
-        )                               # ◀ 이 닫는 괄호 ')'가 꼭 있어야 합니다!
-        # ▲▲▲ 여기까지 교체하세요 ▲▲▲
-
+            safe_view[display_cols],
+            use_container_width=True,
+            column_config=cfg,
+            height=500
+        )
     else:
         st.info("표시할 종목 없음")
 
