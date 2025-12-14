@@ -1164,12 +1164,14 @@ def get_stock_chart_data(code):
 
 def plot_radar_chart(row):
     """
-    v7.0: 팩터 기반 레이더 차트 (가시성 개선 버전)
+    v7.5: 7-Factor Radar (Trend 추가)
     """
-    # 1) 팩터 데이터 확인
+    # 1) 팩터 데이터 확인 (v7.5 NORM_TRD 추가)
+    stats = {}
     if "NORM_MOM" in row.index:
         stats = {
             "모멘텀(MOM)": row.get("NORM_MOM", 0) * 100,
+            "추세(TRD)": row.get("NORM_TRD", 0) * 100,   # [v7.5] NEW
             "가성비(RR)": row.get("NORM_RR", 0) * 100,
             "수익여력(T1)": row.get("NORM_T1", 0) * 100,
             "안전성(SL)": row.get("NORM_SL", 0) * 100,
@@ -1177,7 +1179,7 @@ def plot_radar_chart(row):
             "수급(LIQ)": row.get("NORM_LIQ", 0) * 100,
         }
     else:
-        # Fallback
+        # Fallback (구버전 데이터 호환용)
         stats = {
             "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
             "수급(MFI)": row.get("MFI14", 50),
@@ -1189,7 +1191,7 @@ def plot_radar_chart(row):
     values = [max(0, min(100, v)) for v in stats.values()]
     keys = list(stats.keys())
     
-    # 레이더 차트 닫기 위해 첫 번째 값 추가
+    # 차트 닫기 (시작점 복사)
     values += values[:1]
     keys += keys[:1]
 
@@ -1199,231 +1201,100 @@ def plot_radar_chart(row):
             theta=keys,
             fill='toself',
             name=row.get('종목명', '종목'),
-            # 🔥 색상 변경: 밝은 Cyan + 반투명 채우기
             line=dict(color='#00E5FF', width=3),
             fillcolor='rgba(0, 229, 255, 0.2)'
         )
     )
     fig.update_layout(
         polar=dict(
-            radialaxis=dict(
-                visible=True, 
-                range=[0, 100],
-                tickfont=dict(size=10, color='gray'),
-                gridcolor='rgba(128,128,128,0.3)' # 그리드 색상
-            ),
-            angularaxis=dict(
-                tickfont=dict(size=12, weight='bold'),
-                gridcolor='rgba(128,128,128,0.3)'
-            ),
-            bgcolor='rgba(0,0,0,0)' # 투명 배경
+            radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(size=10, color='gray'), gridcolor='rgba(128,128,128,0.3)'),
+            angularaxis=dict(tickfont=dict(size=12, weight='bold'), gridcolor='rgba(128,128,128,0.3)'),
+            bgcolor='rgba(0,0,0,0)'
         ),
         showlegend=False,
         height=280,
         margin=dict(l=40, r=40, t=30, b=30),
-        title=dict(text="📊 6-Factor Analysis", x=0.5, y=0.95, font=dict(size=14))
+        title=dict(text="📊 7-Factor Analysis (v7.5)", x=0.5, y=0.95, font=dict(size=14))
     )
     return fig
 
 # ---------------------------
 # 차트 시각화 (거래량 추가)
 # ---------------------------
-def plot_interactive_chart(
-    df: pd.DataFrame,
-    code: str,
-    name: str,
-    entry=None,
-    stop=None,
-    target1=None,
-    target2=None,
-    show_bb: bool = True,
-    show_kc: bool = False,
-    show_rsi: bool = False,
-):
-    if df is None or df.empty:
-        return go.Figure()
+def plot_interactive_chart(df, code, name, entry=None, stop=None, target1=None, target2=None, vbo=None, show_bb=True, show_kc=False, show_rsi=False):
+    if df is None or df.empty: return go.Figure()
 
     rows = 3 if show_rsi else 2
     row_heights = [0.6, 0.2, 0.2] if show_rsi else [0.7, 0.3]
 
     fig = make_subplots(
-        rows=rows,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.05,
-        row_heights=row_heights,
+        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=row_heights
     )
 
-    # --- 🎨 색상 팔레트 정의 ---
-    COLOR_UP = '#FF3B30'      # 밝은 빨강 (상승)
-    COLOR_DOWN = '#007AFF'    # 밝은 파랑 (하락)
-    COLOR_MA20 = '#FFD700'    # 황금색 (20일선)
-    COLOR_BB = 'rgba(189, 195, 199, 0.5)'      # 은은한 회색 선 (BB)
-    COLOR_BB_FILL = 'rgba(189, 195, 199, 0.1)' # 아주 연한 회색 채우기 (BB)
-    COLOR_KC = '#E040FB'      # 형광 보라 (KC)
-    COLOR_ENTRY = '#FF9F0A'   # 형광 오렌지 (진입가)
-    COLOR_STOP = '#30D158'    # 형광 초록 (목표가 - 상승이라 초록 계열 사용)
-    COLOR_LOSS = '#00B0FF'    # 형광 하늘 (손절가 - 파랑 캔들과 구분되는 하늘색)
-
-    # 1) 캔들 차트
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,
-            open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-            name="주가",
-            increasing={'line': {'color': COLOR_UP, 'width': 1.5}, 'fillcolor': COLOR_UP},
-            decreasing={'line': {'color': COLOR_DOWN, 'width': 1.5}, 'fillcolor': COLOR_DOWN},
-            hovertemplate="<b>%{x|%y/%m/%d}</b><br>시가: %{open:,.0f}<br>고가: %{high:,.0f}<br>저가: %{low:,.0f}<br>종가: %{close:,.0f}원<extra></extra>",
-            showlegend=False,
-        ),
-        row=1, col=1
-    )
-
-    # 2) MA20 (황금색 실선)
-    if "MA20" in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df.index, y=df["MA20"], 
-                name="20일선", 
-                line=dict(color=COLOR_MA20, width=2)
-            ), 
-            row=1, col=1
-        )
-
-    # 3) 볼린저 밴드 (은은한 회색 영역)
-    if show_bb:
-        if "BB_UPPER" in df.columns and "BB_LOWER" in df.columns:
-            # 상단
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["BB_UPPER"], 
-                name="BB 상단", 
-                line=dict(width=1, color=COLOR_BB),
-                showlegend=False
-            ), row=1, col=1)
-            # 하단 (채우기 포함)
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["BB_LOWER"], 
-                name="BB 밴드", 
-                line=dict(width=1, color=COLOR_BB), 
-                fill='tonexty', 
-                fillcolor=COLOR_BB_FILL,
-                showlegend=True
-            ), row=1, col=1)
-
-    # 4) 켈트너 채널 (보라색 점선) - 볼린저 밴드와 확연히 구분
-    if show_kc:
-        if "KC_UPPER" in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["KC_UPPER"], 
-                name="KC 상단", 
-                line=dict(width=1.5, dash='dot', color=COLOR_KC)
-            ), row=1, col=1)
-        if "KC_LOWER" in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["KC_LOWER"], 
-                name="KC 하단", 
-                line=dict(width=1.5, dash='dot', color=COLOR_KC)
-            ), row=1, col=1)
-
-    # 5) 슈퍼트렌드 (추세 전환 포인트 강조)
-    if "Trend" in df.columns and "SuperTrend" in df.columns:
-        # 상승 전환점 (밝은 민트색)
-        up = df[df["Trend"] == 1]
-        if not up.empty:
-            fig.add_trace(go.Scatter(
-                x=up.index, y=up["SuperTrend"], 
-                mode="markers", 
-                marker=dict(size=4, color='#00E676', symbol='triangle-up'), 
-                name="상승추세"
-            ), row=1, col=1)
-        
-        # 하락 전환점 (진한 핑크색)
-        down = df[df["Trend"] == -1]
-        if not down.empty:
-            fig.add_trace(go.Scatter(
-                x=down.index, y=down["SuperTrend"], 
-                mode="markers", 
-                marker=dict(size=4, color='#FF4081', symbol='triangle-down'), 
-                name="하락추세"
-            ), row=1, col=1)
-
-    # 6) 거래량 (캔들 색상과 일치시키되 투명도 조절)
-    if "Volume" in df.columns:
-        colors = [
-            COLOR_UP if c >= o else COLOR_DOWN 
-            for c, o in zip(df["Close"], df["Open"])
-        ]
-        fig.add_trace(go.Bar(
-            x=df.index, y=df["Volume"], 
-            name="거래량", 
-            marker_color=colors, 
-            opacity=0.8,
-            showlegend=False
-        ), row=2, col=1)
-
-    # 7) RSI (과매수/과매도 영역 강조)
-    if show_rsi and "RSI14_CHART" in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["RSI14_CHART"], 
-            name="RSI(14)", 
-            line=dict(color='#AB47BC', width=1.5)
-        ), row=3, col=1)
-        
-        # 기준선 30/70
-        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=70, y1=70,
-                      line=dict(color="red", width=1, dash="dot"), row=3, col=1)
-        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=30, y1=30,
-                      line=dict(color="blue", width=1, dash="dot"), row=3, col=1)
-
-    # 8) 가격 라인 (가시성 높은 형광색 사용)
-    def _safe_float(v):
-        try:
-            vv = float(pd.to_numeric(v, errors="coerce"))
-            return vv if np.isfinite(vv) and vv > 0 else None
-        except Exception:
-            return None
-
-    entry_v = _safe_float(entry)
-    stop_v = _safe_float(stop)
-    t1_v = _safe_float(target1)
-
-    if entry_v is not None:
-        fig.add_hline(y=entry_v, line_dash="dash", line_color=COLOR_ENTRY, line_width=1.5, 
-                      annotation_text=f"🚀진입: {int(entry_v):,}", annotation_font_color=COLOR_ENTRY, row=1, col=1)
-    if stop_v is not None:
-        fig.add_hline(y=stop_v, line_dash="dot", line_color=COLOR_LOSS, line_width=1.5,
-                      annotation_text=f"🛡️손절: {int(stop_v):,}", annotation_font_color=COLOR_LOSS, row=1, col=1)
-    if t1_v is not None:
-        fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, line_width=1.5,
-                      annotation_text=f"💰목표: {int(t1_v):,}", annotation_font_color=COLOR_STOP, row=1, col=1)
-
-    # 🟢 [붙여넣을 새 코드]
-    # 레이아웃 설정 (모바일 최적화)
-    fig.update_layout(
-        title=dict(
-            text=f"{name} ({str(code).zfill(6)})", 
-            font=dict(size=16), # 폰트 크기 약간 축소 (모바일 타이틀 잘림 방지)
-            x=0, # 왼쪽 정렬
-        ),
-        xaxis_rangeslider_visible=False,
-        # 🚨 [핵심] 높이를 좀 더 늘림 (모바일에서 터치 스크롤 편의성)
-        height=700 if show_rsi else 550, 
-        # 🚨 [핵심] 좌우 여백(margin)을 최소화하여 차트를 크게 보여줌
-        margin=dict(l=10, r=10, t=50, b=10), 
-        hovermode="x unified",
-        legend=dict(
-            orientation="h", 
-            yanchor="bottom", y=1.02, 
-            xanchor="left", x=0 # 범례 왼쪽 정렬
-        ),
-        dragmode="pan", # 모바일 터치 드래그 기본 활성화
-    )
+    # 색상 정의
+    COLOR_UP, COLOR_DOWN = '#FF3B30', '#007AFF'
+    COLOR_MA20, COLOR_BB, COLOR_KC = '#FFD700', 'rgba(189, 195, 199, 0.5)', '#E040FB'
     
-    # Y축 그리드 설정 (눈에 덜 띄게)
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+    # 1. 캔들 차트
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+        name="주가", increasing={'line': {'color': COLOR_UP}}, decreasing={'line': {'color': COLOR_DOWN}}
+    ), row=1, col=1)
+
+    # 2. 이동평균선
+    if "MA20" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="20일선", line=dict(color=COLOR_MA20, width=1.5)), row=1, col=1)
+
+    # 3. 볼린저 밴드
+    if show_bb and "BB_UPPER" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_UPPER"], line=dict(width=1, color=COLOR_BB), showlegend=False), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_LOWER"], line=dict(width=1, color=COLOR_BB), fill='tonexty', fillcolor='rgba(189,195,199,0.1)', name="BB"), row=1, col=1)
+
+    # 4. 켈트너 채널
+    if show_kc and "KC_UPPER" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["KC_UPPER"], line=dict(width=1.5, dash='dot', color=COLOR_KC), name="KC"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["KC_LOWER"], line=dict(width=1.5, dash='dot', color=COLOR_KC), showlegend=False), row=1, col=1)
+
+    # 5. 거래량
+    colors = [COLOR_UP if c >= o else COLOR_DOWN for c, o in zip(df["Close"], df["Open"])]
+    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", marker_color=colors, opacity=0.8), row=2, col=1)
+
+    # 6. RSI
+    if show_rsi and "RSI14_CHART" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI", line=dict(color='#AB47BC')), row=3, col=1)
+        fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
+        fig.add_hline(y=30, line_dash="dot", line_color="blue", row=3, col=1)
+
+    # 가격 라인 그리기 함수
+    def _add_line(val, color, dash, txt):
+        if val and val > 0:
+            fig.add_hline(y=val, line_dash=dash, line_color=color, annotation_text=txt, annotation_font_color=color, row=1, col=1)
+
+    _add_line(entry, '#FF9F0A', "dash", f"🚀진입: {int(entry):,}")
+    _add_line(stop, '#00B0FF', "dot", f"🛡️손절: {int(stop):,}")
+    _add_line(target1, '#30D158', "dot", f"💰목표: {int(target1):,}")
+    
+    # [v7.5] VBO Line (노란색 점쇄선)
+    if vbo and vbo > 0:
+        fig.add_hline(y=vbo, line_dash="dashdot", line_color="#FFFF00", line_width=2, 
+                      annotation_text=f"⚡VBO: {int(vbo):,}", annotation_position="top left", row=1, col=1)
+
+    # 레이아웃 설정
+    fig.update_layout(
+        title=dict(text=f"{name} ({str(code).zfill(6)})", x=0, font=dict(size=16)),
+        height=700 if show_rsi else 550,
+        margin=dict(l=10, r=10, t=50, b=10),
+        xaxis_rangeslider_visible=False,
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        dragmode="pan"
+    )
+    # 십자선(Crosshair) 활성화
+    fig.update_xaxes(showspikes=True, spikemode="across", spikesnap="cursor", showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_yaxes(showspikes=True, spikemode="across", spikesnap="cursor", showgrid=True, gridcolor='rgba(128,128,128,0.2)')
 
     return fig
+    
 def plot_risk_reward_bar(buy, stop, target1, target2):
     fig = go.Figure()
     try:
@@ -2425,8 +2296,9 @@ def _to_int_str(x, default=0):
 
 
 with tab2:
-    st.subheader("🎯 추천 종목 필터")
-
+    # =========================================================
+    # 1. [기존 기능 유지] 첫 가입자 환영 메시지 & 프리뷰
+    # =========================================================
     if just_registered:
         st.success("🎉 첫 가입을 환영합니다! 오늘 기준 TOP 5 프리뷰를 먼저 보여드릴게요.")
         try:
@@ -2447,280 +2319,190 @@ with tab2:
         st.session_state["just_registered"] = False
         st.divider()
 
-    col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-    with col_f1:
-        min_score = st.slider(
-            "최소 LDY 점수",
-            min_value=0, max_value=100, value=80, step=1,
-            key="min_score",
-        )
+    # =========================================================
+    # 2. [v7.5 신규] 종목 발굴 필터 & 리스트
+    # =========================================================
+    st.subheader("🎯 종목 발굴 & 상세 분석 (v7.5)")
 
-    # ROUTE 필터 (기존 유지)
-    with col_f2:
-        def _route_order(r: str):
-            s = str(r)
-            if "SQZ" in s:
-                return (0, s)
-            if "BRK" in s:
-                return (1, s)
-            if "Watch" in s or "관찰" in s or "상승" in s:
-                return (2, s)
-            if "MR" in s:
-                return (3, s)
-            if "PULL" in s:
-                return (4, s)
-            return (5, s)
-
-        all_routes = sorted(
-            scored["ROUTE"].dropna().unique().tolist(),
-            key=_route_order
-        ) if "ROUTE" in scored.columns else []
-        if all_routes:
-            default_routes = [r for r in all_routes if "PULL" not in r] or all_routes
-            sel_routes = st.multiselect(
-                "전략 유형 (ROUTE)",
-                options=all_routes,
-                default=default_routes,
-                key="route_filter",
-            )
-        else:
-            sel_routes = []
-
-    # 🔥 REGIME(추세) 필터 추가
-    with col_f3:
-        if "REGIME" in scored.columns:
-            all_regimes = sorted(scored["REGIME"].dropna().unique().tolist())
-            # 기본값: 전체 선택 (필요하면 ①~③만 기본 선택으로 바꿀 수도 있음)
-            sel_regimes = st.multiselect(
-                "추세 구분 (REGIME)",
-                options=all_regimes,
-                default=all_regimes,
-                key="regime_filter",
-            )
-        else:
-            sel_regimes = []
-
-    # EBS / 유동성 통과여부 체크박스
-    use_only_gate = st.checkbox(
-        "EBS/유동성 통과만 사용",
-        value=True,
-        key="only_gate",
-    )
-
-    # 🔥 권한별로 Daily Top 모수 설정
-    if use_only_gate:
-        # ✅ EBS / 유동성 통과 종목만 보는 모드
-        if auth_status in ["prime", "admin"]:
-            # PRIME 이상: 통과 종목을 넉넉히 가져와서 그 중에서 Top 100 뽑기
-            base_view = base.head(300).copy()   # 필요하면 .head(300) → base.copy()로 바꿔도 됨
-        else:
-            # guest / free / pro: 기존처럼 Top20만 모수
-            base_view = top20.copy()
-    else:
-        # ✅ 전체 스코어링 종목에서 보는 모드
-        if auth_status in ["prime", "admin"]:
-            # PRIME 이상: 전체 스코어링 대상
-            base_view = scored.copy()
-        else:
-            # guest / free / pro: 상위 50개까지만 모수
-            base_view = scored.head(50).copy()
-
-    filtered = base_view.copy()
-    filtered = filtered[filtered["LDY_SCORE"] >= min_score]
-
-    if sel_routes:
-        filtered = filtered[filtered["ROUTE"].isin(sel_routes)]
-
-    # 🔥 REGIME 필터 반영
-    if sel_regimes and "REGIME" in filtered.columns:
-        filtered = filtered[filtered["REGIME"].isin(sel_regimes)]
-
-    # 👇👇👇 [여기] 아래 코드를 삽입하세요 👇👇👇
-
-    # 🔥 [v7.0] 스퀴즈 종목만 보기 필터
-    # (체크박스를 누르면 TTM_SQUEEZE == 1 인 종목만 남김)
-    show_only_squeeze = st.checkbox("🌪️ TTM Squeeze (폭발 대기) 종목만 보기", key="chk_sqz_only")
+    # --- 필터 UI ---
+    c_f1, c_f2, c_f3 = st.columns([1, 1, 1])
+    with c_f1:
+        min_score = st.slider("최소 LDY 점수", 0, 100, 70, step=5, key="v75_min_score")
     
-    if show_only_squeeze and "TTM_SQUEEZE" in filtered.columns:
-        filtered = filtered[filtered["TTM_SQUEEZE"] == 1]
+    with c_f2:
+        # [v7.5] ADX & Squeeze 필터
+        use_adx = st.checkbox("💪 강한 추세장 (ADX ≥ 25)", value=False, key="v75_use_adx")
+        use_sqz = st.checkbox("🌪️ TTM Squeeze (폭발대기)", value=False, key="v75_use_sqz")
 
-    
+    with c_f3:
+        search_txt = st.text_input("종목명/코드 검색", placeholder="예: 삼성전자", key="v75_search")
+
+    # --- 데이터 필터링 ---
+    view_df = scored.copy()
+
+    # 1) 점수 필터
+    view_df = view_df[pd.to_numeric(view_df["LDY_SCORE"], errors='coerce') >= min_score]
+
+    # 2) ADX 필터
+    if use_adx and "ADX" in view_df.columns:
+        view_df = view_df[pd.to_numeric(view_df["ADX"], errors='coerce') >= 25]
+
+    # 3) Squeeze 필터
+    if use_sqz and "TTM_SQUEEZE" in view_df.columns:
+        view_df = view_df[view_df["TTM_SQUEEZE"] == 1]
+
+    # 4) 검색 필터
+    if search_txt:
+        view_df = view_df[
+            view_df["종목명"].str.contains(search_txt) | 
+            view_df["종목코드"].str.contains(search_txt)
+        ]
+
+    # 5) 권한별 종목 노출 제한
     if auth_status in ["pro", "prime", "admin"]:
         if auth_status == "pro":
-            # Pro: 기존처럼 Top 20
-            view_df = filtered.head(20)
+            view_df = view_df.head(20)
             desc = "Pro 회원: 필터 적용 Top 20 종목 열람 중"
         else:
-            # Prime 이상(Prime, Admin): Top 100
-            view_df = filtered.head(100)
+            view_df = view_df.head(100)
             desc = f"{auth_status.upper()} 회원: 필터 적용 Top 100 종목 열람 중"
-
         st.success(f"🥇 {desc}")
     else:
-        if user is None:
-            view_df = filtered.head(3)
-            st.info(
-                "🔐 현재는 **비로그인(게스트)** 상태라, 필터 적용 상위 **3개 종목**만 확인할 수 있습니다.\n\n"
-                "✅ 지금 무료 회원가입하면 **상위 5개 종목**까지 바로 열람 가능합니다!"
-            )
-        else:
-            view_df = filtered.head(5)
-            st.info(
-                "✅ Free 회원: 필터 적용 상위 **5개 종목**까지 열람 중입니다.\n"
-                "📈 더 많은 종목과 CSV 다운로드, 알림 기능은 Pro / Prime 등급에서 제공됩니다."
-            )
+        # Guest / Free
+        limit = 5 if user else 3
+        view_df = view_df.head(limit)
+        user_type = "Free 회원" if user else "Guest (비로그인)"
+        st.info(f"✅ {user_type}: 상위 {limit}개 종목만 열람 가능합니다. (Pro 업그레이드 시 전체 열람)")
+
+    # --- 메인 리스트 출력 ---
+    st.markdown("##### 📋 Daily Opportunity List")
+    
     if view_df.empty:
-        st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
+        st.warning("🔍 조건에 맞는 종목이 없습니다. 필터를 조정해보세요.")
     else:
-        opts = view_df.apply(
-            lambda r: f"{r.get('종목명','-')} ({r.get('종목코드','-')}) / {r.get('REGIME','-')}",
-            axis=1
-        ).tolist()
-        sel = st.selectbox("종목 선택", opts)
-        # [dashboard.py] tab2 내부의 if sel: 블록 전체를 이것으로 교체하세요.
+        cols_candidate = [
+            "종목명", "LDY_SCORE", "ROUTE", "종가", 
+            "추천매수가", "손절가", "ADX", "VBO_Price", "거래대금(억원)"
+        ]
+        display_cols = [c for c in cols_candidate if c in view_df.columns]
+
+        cfg = {
+            "LDY_SCORE": st.column_config.ProgressColumn(
+                "점수", format="%.0f", min_value=0, max_value=100, width="small"
+            ),
+            "ADX": st.column_config.ProgressColumn(
+                "추세(ADX)", help="25 이상 강세", format="%.0f", min_value=0, max_value=60, width="small"
+            ),
+            "거래대금(억원)": st.column_config.BarChartColumn(
+                "대금(억)", y_min=0, y_max=view_df["거래대금(억원)"].max() if not view_df.empty else 1000, width="small"
+            ),
+            "종가": st.column_config.NumberColumn("현재가", format="%d원"),
+            "추천매수가": st.column_config.NumberColumn("매수", format="%d원"),
+            "손절가": st.column_config.NumberColumn("손절", format="%d원"),
+            "VBO_Price": st.column_config.NumberColumn("⚡VBO", help="변동성 돌파 기준가", format="%d원"),
+            "ROUTE": st.column_config.TextColumn("전략", width="medium"),
+        }
+
+        st.dataframe(
+            view_df[display_cols],
+            use_container_width=True,
+            column_config=cfg,
+            height=400,
+            hide_index=True
+        )
+
+    st.divider()
+
+    # =========================================================
+    # 3. [v7.5 신규] 종목 상세 분석 (Interactive)
+    # =========================================================
+    st.subheader("🔭 종목 상세 정밀 분석")
+
+    if not view_df.empty:
+        opts = view_df.apply(lambda r: f"{r['종목명']} ({r['종목코드']})", axis=1).tolist()
+        sel = st.selectbox("분석할 종목을 선택하세요", opts, key="v75_sel_stock")
+
         if sel:
             sel_idx = opts.index(sel)
             row = view_df.iloc[sel_idx]
             code = str(row.get("종목코드", "")).zfill(6)
+            name = row.get("종목명", "")
 
-            c1, c2 = st.columns([2, 1])
+            # --- 상단 핵심 지표 ---
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("현재가", f"{int(row.get('종가',0)):,}원")
             
-            with c1:  # 👈 여기가 c1, c2 정의와 같은 레벨이거나 안쪽이어야 함
-                # 🔧 [수정됨] 모바일 최적화: Expander로 옵션 숨기기
-                with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
-                    c_opt1, c_opt2, c_opt3 = st.columns(3)
-                    with c_opt1:
-                        show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                    with c_opt2:
-                        show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
-                    with c_opt3:
-                        show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+            score = row.get('LDY_SCORE', 0)
+            m2.metric("LDY Score", f"{score}점", delta="Good" if score >= 80 else None)
+
+            adx_val = row.get('ADX', 0)
+            m3.metric("ADX (추세강도)", f"{adx_val}", delta="Strong" if adx_val >= 25 else "Weak")
+
+            vbo_val = row.get('VBO_Price', 0)
+            m4.metric("⚡VBO 돌파가", f"{int(vbo_val):,}원" if vbo_val > 0 else "-")
+
+            st.divider()
+
+            # --- 차트 & 레이더 ---
+            col_chart, col_radar = st.columns([2, 1])
+
+            with col_chart:
+                with st.expander("⚙️ 차트 옵션 (터치하여 열기)", expanded=False):
+                    co1, co2, co3 = st.columns(3)
+                    show_bb = co1.checkbox("볼린저 밴드", True, key=f"bb_{code}")
+                    show_kc = co2.checkbox("켈트너 채널", False, key=f"kc_{code}")
+                    show_rsi = co3.checkbox("RSI 패널", False, key=f"rsi_{code}")
 
                 chart_df = get_stock_chart_data(code)
                 
-                # 차트 데이터 유효성 체크
-                if chart_df is None or getattr(chart_df, "empty", True):
-                    st.info("차트 데이터 없음")
-                else:
-                    # 숫자형 안전 변환
-                    entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
-                    stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
-                    t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
-                    t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
-                
-                    # 목표가2 없으면 자동 계산
-                    if pd.isna(t2) and pd.notna(t1):
-                        t2 = float(t1) * 1.07
-                
-                    # 차트 그리기 함수 호출 (파라미터 전달)
+                if chart_df is not None:
+                    # [v7.5] VBO 라인 전달
                     fig = plot_interactive_chart(
-                        df=chart_df,
-                        code=str(code),
-                        name=row.get("종목명", "-"),
-                        entry=entry,
-                        stop=stop,
-                        target1=t1,
-                        target2=t2,
-                        show_bb=show_bb,
-                        show_kc=show_kc,  # 🔥 켈트너 채널 옵션 전달
-                        show_rsi=show_rsi,
+                        chart_df, code, name,
+                        entry=pd.to_numeric(row.get('추천매수가'), errors='coerce'),
+                        stop=pd.to_numeric(row.get('손절가'), errors='coerce'),
+                        target1=pd.to_numeric(row.get('추천매도가1'), errors='coerce'),
+                        target2=pd.to_numeric(row.get('추천매도가2'), errors='coerce'),
+                        vbo=pd.to_numeric(row.get('VBO_Price'), errors='coerce'), 
+                        show_bb=show_bb, show_kc=show_kc, show_rsi=show_rsi
                     )
                     st.plotly_chart(fig, use_container_width=True)
-
-            with c2:
-                if auth_status in ["pro", "prime", "admin"]:
-                    st.markdown(f"### {row.get('종목명','-')}")
-                    st.plotly_chart(plot_radar_chart(row), use_container_width=True)
-            
-                    ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
-                    st.info(f"💬 **AI:** {ai_cmt}")
-            
-                    rr_entry = _to_num(row.get("추천매수가", np.nan), np.nan)
-                    rr_stop  = _to_num(row.get("손절가", np.nan), np.nan)
-                    rr_t1    = _to_num(row.get("추천매도가1", np.nan), np.nan)
-                    rr_t2    = _to_num(row.get("추천매도가2", np.nan), np.nan)
-            
-                    st.plotly_chart(
-                        plot_risk_reward_bar(rr_entry, rr_stop, rr_t1, rr_t2),
-                        use_container_width=True,
-                    )
                 else:
-                    st.warning("🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다.")
-            
-                c_a, c_b = st.columns(2)
-                c_a.metric("진입가", _to_int_str(row.get("추천매수가", 0)))
-                c_b.metric(
-                    "손절가",
-                    _to_int_str(row.get("손절가", 0)),
-                    delta="Stop",
-                    delta_color="inverse",
-                )
+                    st.warning("데이터 로드 실패 (FDR/네트워크 확인 필요)")
 
-    st.divider()
-    st.subheader("📋 Daily Top List (Squeeze Analysis)", anchor=False)
-    safe_view = view_df.copy().reset_index(drop=True)
-    
-    if not safe_view.empty:
-        if "종목명" in safe_view.columns:
-            safe_view.set_index("종목명", inplace=True)
-        
-        # 숫자 포맷팅
-        price_cols = ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]
-        for c in price_cols:
-            if c in safe_view.columns:
-                safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
-        
-        if "LDY_SCORE" in safe_view.columns:
-            safe_view["LDY_SCORE"] = pd.to_numeric(safe_view["LDY_SCORE"], errors='coerce').fillna(0)
+            with col_radar:
+                # [v7.5] 7-Factor Radar
+                try:
+                    st.plotly_chart(plot_radar_chart(row), use_container_width=True)
+                except Exception:
+                    st.caption("레이더 차트 생성 실패")
 
-        # ✅ 표시할 컬럼 정의 (SQUEEZE_CNT 추가)
-        cols = [
-            "종목명", # 인덱스라면 생략 가능하지만 명시적 확인
-            "LDY_SCORE",
-            "ROUTE",  
-            "종가", 
-            "추천매수가", 
-            "손절가",
-            # "TTM_SQUEEZE_CNT" -> 공간 부족하면 툴팁이나 상세화면으로 유도
-        ]
-        # 실제 존재하는 컬럼만 필터링
-        cols = [c for c in cols if c in safe_view.columns]
+                # AI Comment
+                cmt = row.get('AI_COMMENT', row.get('WHY', '-'))
+                st.info(f"💡 **AI 분석:** {cmt}")
 
-        # 🚨 Streamlit의 column_config를 활용해 "작은 화면"용 라벨 설정
-        cfg = {
-            "LDY_SCORE": st.column_config.ProgressColumn(
-                "점수", format="%.0f", min_value=0, max_value=100, width="small" 
-            ),
-            "ROUTE": st.column_config.TextColumn("전략", width="small"),
-            "종가": st.column_config.TextColumn("현재가", width="small"),
-            "추천매수가": st.column_config.TextColumn("매수", width="small"),
-            "손절가": st.column_config.TextColumn("손절", width="small"),
-            "TTM_SQUEEZE_CNT": st.column_config.NumberColumn("응축", width="small"),
-        }
+                # 세부 지표
+                with st.container(border=True):
+                    st.caption("세부 테크니컬")
+                    col_d1, col_d2 = st.columns(2)
+                    col_d1.write(f"**RSI:** {row.get('RSI14', '-')}")
+                    col_d1.write(f"**MFI:** {row.get('MFI14', '-')}")
+                    
+                    if "VWAP_Gap" in row:
+                        col_d2.write(f"**VWAP:** {row['VWAP_Gap']}%")
+                    col_d2.write(f"**강도:** {row.get('거래강도', '-')}")
 
-        # 실제 존재하는 컬럼만 필터링 (인덱스인 종목명은 cols에서 제외)
-        display_cols = [c for c in cols if c in safe_view.columns or c == "종목명"]
-        if "종목명" in safe_view.index.names:
-             display_cols = [c for c in display_cols if c != "종목명"]
-        
-        st.dataframe(
-            safe_view[display_cols],
-            use_container_width=True, # 화면 꽉 채우기
-            column_config=cfg,
-            height=500 # 목록을 길게 보여줌
-        )
-    else:
-        st.info("표시할 종목 없음")
-
+    # --- CSV 다운로드 (Prime/Admin 전용) ---
     if auth_status in ["prime", "admin"]:
+        st.divider()
         csv = scored.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            "📥 전체 다운로드",
+            "📥 전체 데이터 다운로드 (CSV)",
             csv,
-            "ldy_rank.csv",
+            "ldy_rank_v75.csv",
             "text/csv",
+            key="download_csv_v75"
         )
-
 # ---------------------------
 # 내 자산 (병렬 처리)
 # ---------------------------
