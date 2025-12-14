@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 import requests
 import streamlit as st
 import secrets
-import extra_streamlit_components as stx  # 👈 [추가됨] 쿠키 관리 라이브러리
+# import extra_streamlit_components as stx  # 👈 [임시 주석] 쿠키 라이브러리 비활성화
 
 AUTH_IMPORT_ERR = None
 
@@ -50,10 +50,11 @@ GIST_TOKEN    = _get_conf("LDY_GIST_TOKEN", "")
 GIST_ID_SUBS = _get_conf("LDY_GIST_SUBS_ID", GIST_ID_USERS)
 GIST_ID_INQ  = _get_conf("LDY_GIST_INQ_ID",  GIST_ID_USERS)
 
-# ----------------- [핵심 추가] 쿠키 매니저 설정 -----------------
+# ----------------- [핵심 수정] 쿠키 매니저 설정 비활성화 -----------------
 
 def get_cookie_manager():
-    return stx.CookieManager(key="cookie_manager_core")
+    # return stx.CookieManager(key="cookie_manager_core") # 👈 [임시 주석]
+    return None
 
 # ----------------- 공통 유틸 -----------------
 def _now_utc_str() -> str:
@@ -405,16 +406,20 @@ def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str
     save_user_db(db)
     return True
 
-# ----------------- UI: 로그인 / 회원가입 박스 (쿠키 적용됨) -----------------
+# ----------------- UI: 로그인 / 회원가입 박스 (쿠키 임시 비활성화됨) -----------------
 def render_auth_box(show_debug: bool = False):
     """
     브라우저 탭 전환 / 새로고침 시에도 로그인을 유지하기 위해 CookieManager 사용
+    (현재 화면 로딩 이슈로 비활성화: 필요시 주석 해제)
     """
-    # 1. 쿠키 매니저 로드
-    cookie_manager = get_cookie_manager()
+    # 1. 쿠키 매니저 로드 (임시 비활성)
+    cookie_manager = None 
+    # cookie_manager = get_cookie_manager()
     
-    # 2. 쿠키에서 저장된 이메일 가져오기 (비동기 처리 특성상 약간 지연될 수 있음)
-    cookie_user_email = cookie_manager.get(cookie="ldy_user_email")
+    # 2. 쿠키 값 읽기 (임시 비활성)
+    cookie_user_email = None
+    # if cookie_manager:
+    #     cookie_user_email = cookie_manager.get(cookie="ldy_user_email")
 
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
@@ -422,9 +427,8 @@ def render_auth_box(show_debug: bool = False):
     if JUST_REGISTERED_KEY not in st.session_state:
         st.session_state[JUST_REGISTERED_KEY] = False
 
-    # 3. [자동 로그인] 세션은 비었는데 쿠키에 정보가 있으면 -> DB 조회 후 세션 복구
+    # 3. [자동 로그인] 쿠키 기반 세션 복구 (비활성)
     if st.session_state[CURRENT_USER_KEY] is None and cookie_user_email:
-        # 혹시 모를 로딩 시간 고려 (필수 아님)
         # time.sleep(0.1)
         db = load_user_db()
         users = db.get("users", {})
@@ -434,7 +438,6 @@ def render_auth_box(show_debug: bool = False):
             st.session_state[CURRENT_USER_KEY] = saved_user
             if show_debug: 
                 print(f"[AutoLogin] Restored session for {cookie_user_email}")
-            # 여기서 st.rerun()을 하면 무한 루프 가능성이 있으므로, 자연스럽게 아래 흐름을 타게 함
 
     # 현재 세션 사용자 가져오기
     user = get_user()
@@ -450,11 +453,12 @@ def render_auth_box(show_debug: bool = False):
                 st.session_state[CURRENT_USER_KEY] = None
                 st.session_state[JUST_REGISTERED_KEY] = False
                 
-                # 쿠키 삭제 (브라우저 저장소 클리어)
-                cookie_manager.delete("ldy_user_email")
+                # 쿠키 삭제 (비활성)
+                # if cookie_manager:
+                #     cookie_manager.delete("ldy_user_email")
                 
                 st.toast("로그아웃 되었습니다.", icon="👋")
-                time.sleep(0.5) # 쿠키 삭제가 프론트엔드에 반영될 시간 확보
+                time.sleep(0.5) 
                 st.rerun()
         
         return user
@@ -468,8 +472,8 @@ def render_auth_box(show_debug: bool = False):
         with st.form(key="login_form"):
             login_email = st.text_input("이메일")
             login_pw = st.text_input("비밀번호", type="password")
-            # 자동 로그인 옵션 (기본 체크)
-            remember_me = st.checkbox("로그인 상태 유지 (쿠키)", value=True)
+            # 자동 로그인 옵션 (비활성 상태임을 표시)
+            remember_me = st.checkbox("로그인 상태 유지 (현재 점검중)", value=False, disabled=True)
             submit_login = st.form_submit_button("로그인")
         
         if submit_login:
@@ -480,13 +484,13 @@ def render_auth_box(show_debug: bool = False):
                 st.session_state[CURRENT_USER_KEY] = user_obj
                 st.session_state[JUST_REGISTERED_KEY] = False
                 
-                # [핵심] 로그인 성공 시 쿠키 굽기 (30일 유지)
-                if remember_me:
-                    expires = datetime.now() + timedelta(days=30)
-                    cookie_manager.set("ldy_user_email", user_obj['login_id'], expires_at=expires)
+                # 쿠키 저장 (비활성)
+                # if remember_me and cookie_manager:
+                #     expires = datetime.now() + timedelta(days=30)
+                #     cookie_manager.set("ldy_user_email", user_obj['login_id'], expires_at=expires)
                 
                 st.toast(f"{user_obj['nickname']}님 환영합니다!", icon="🎉")
-                time.sleep(0.5) # 쿠키 저장이 프론트엔드에 반영될 시간 확보
+                time.sleep(0.5) 
                 st.rerun()
 
     # 2) 회원가입 탭
@@ -510,9 +514,10 @@ def render_auth_box(show_debug: bool = False):
                     st.session_state[CURRENT_USER_KEY] = new_user
                     st.session_state[JUST_REGISTERED_KEY] = True
                     
-                    # 가입 성공 시에도 편의상 쿠키 저장
-                    expires = datetime.now() + timedelta(days=30)
-                    cookie_manager.set("ldy_user_email", new_user['login_id'], expires_at=expires)
+                    # 쿠키 저장 (비활성)
+                    # if cookie_manager:
+                    #     expires = datetime.now() + timedelta(days=30)
+                    #     cookie_manager.set("ldy_user_email", new_user['login_id'], expires_at=expires)
                     
                     st.success(msg)
                     time.sleep(0.5)
