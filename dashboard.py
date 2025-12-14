@@ -2737,13 +2737,15 @@ with tab2:
         if "종목명" in safe_view.index.names:
              display_cols = [c for c in display_cols if c != "종목명"]
 
+        # ▼▼▼ 여기부터 교체하세요 ▼▼▼
         st.dataframe(
-            st.dataframe(
-            safe_view[display_cols],    # 데이터 (위치 인자)
-            use_container_width=True,   # 가로 꽉 채우기 (키워드 인자)
-            column_config=cfg,          # 컬럼 설정 (키워드 인자)
-            height=500                  # 높이 (키워드 인자)
-        )
+            safe_view[display_cols],    # 데이터
+            use_container_width=True,   # 가로 꽉 채우기
+            column_config=cfg,          # 컬럼 설정
+            height=500                  # 높이
+        )                               # ◀ 이 닫는 괄호 ')'가 꼭 있어야 합니다!
+        # ▲▲▲ 여기까지 교체하세요 ▲▲▲
+
     else:
         st.info("표시할 종목 없음")
 
