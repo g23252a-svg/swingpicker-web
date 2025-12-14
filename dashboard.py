@@ -2677,18 +2677,13 @@ with tab2:
             safe_view["LDY_SCORE"] = pd.to_numeric(safe_view["LDY_SCORE"], errors='coerce').fillna(0)
 
         # ✅ 표시할 컬럼 정의 (SQUEEZE_CNT 추가)
+        # ✅ 표시할 컬럼 정의 (SQUEEZE_CNT 추가)
         cols = [
             "REGIME", "ROUTE", 
             "TTM_SQUEEZE_CNT", # 🔥 [New] 스퀴즈 지속일
             "업종", "종목코드", "LDY_SCORE",
             "종가", "추천매수가", "손절가", "추천매도가1",
-            "종목명", # 인덱스라면 생략 가능하지만 명시적 확인
-            "LDY_SCORE",
-            "ROUTE",  
-            "종가", 
-            "추천매수가", 
-            "손절가",
-            # "TTM_SQUEEZE_CNT" -> 공간 부족하면 툴팁이나 상세화면으로 유도
+            "종목명"
         ]
         # 실제 존재하는 컬럼만 필터링
         cols = [c for c in cols if c in safe_view.columns]
