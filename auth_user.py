@@ -51,9 +51,9 @@ GIST_ID_SUBS = _get_conf("LDY_GIST_SUBS_ID", GIST_ID_USERS)
 GIST_ID_INQ  = _get_conf("LDY_GIST_INQ_ID",  GIST_ID_USERS)
 
 # ----------------- [핵심 추가] 쿠키 매니저 설정 -----------------
-@st.cache_resource
+
 def get_cookie_manager():
-    return stx.CookieManager()
+    return stx.CookieManager(key="cookie_manager_core")
 
 # ----------------- 공통 유틸 -----------------
 def _now_utc_str() -> str:
