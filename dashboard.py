@@ -2535,26 +2535,32 @@ with tab2:
             c1, c2 = st.columns([2, 1])
 
             with c1:
-                # 🔧 차트 옵션 (Expander)
+                # 🔧 [수정] 중복 제거됨: Expander 내부의 옵션만 남김
                 with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
                     c_opt1, c_opt2, c_opt3 = st.columns(3)
-                    with c_opt1: show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                    with c_opt2: show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
-                    with c_opt3: show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+                    with c_opt1:
+                        show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
+                    with c_opt2:
+                        show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
+                    with c_opt3:
+                        show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
 
                 chart_df = get_stock_chart_data(code)
 
                 if chart_df is None or getattr(chart_df, "empty", True):
                     st.info("차트 데이터 없음")
                 else:
+                    # 데이터 매핑
                     entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
                     stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
                     t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
                     t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
-                    vbo   = pd.to_numeric(row.get("VBO_Price", np.nan), errors="coerce") # 🔥 v7.5
+                    vbo   = pd.to_numeric(row.get("VBO_Price", np.nan), errors="coerce")
 
-                    if pd.isna(t2) and pd.notna(t1): t2 = float(t1) * 1.07
+                    if pd.isna(t2) and pd.notna(t1):
+                        t2 = float(t1) * 1.07
 
+                    # 차트 그리기
                     fig = plot_interactive_chart(
                         df=chart_df,
                         code=str(code),
@@ -2563,7 +2569,7 @@ with tab2:
                         stop=stop,
                         target1=t1,
                         target2=t2,
-                        vbo_price=vbo,  # 🔥 전달
+                        vbo_price=vbo,
                         show_bb=show_bb,
                         show_kc=show_kc,
                         show_rsi=show_rsi,
@@ -2573,7 +2579,7 @@ with tab2:
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
-                    # 🔥 v7.5 Updated Radar Chart
+                    # 레이더 차트
                     st.plotly_chart(plot_radar_chart(row), use_container_width=True)
 
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
@@ -2584,20 +2590,41 @@ with tab2:
                     rr_t1    = _to_num(row.get("추천매도가1", np.nan), np.nan)
                     rr_t2    = _to_num(row.get("추천매도가2", np.nan), np.nan)
 
-                    st.plotly_chart(plot_risk_reward_bar(rr_entry, rr_stop, rr_t1, rr_t2), use_container_width=True)
+                    st.plotly_chart(
+                        plot_risk_reward_bar(rr_entry, rr_stop, rr_t1, rr_t2),
+                        use_container_width=True,
+                    )
                 else:
                     st.warning("🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다.")
 
                 c_a, c_b = st.columns(2)
                 c_a.metric("진입가", _to_int_str(row.get("추천매수가", 0)))
-                c_b.metric("손절가", _to_int_str(row.get("손절가", 0)), delta="Stop", delta_color="inverse")
+                c_b.metric(
+                    "손절가",
+                    _to_int_str(row.get("손절가", 0)),
+                    delta="Stop",
+                    delta_color="inverse",
+                )
                 
-                # 🔥 [New] ADX & VBO Info
+                # ADX & VBO 정보 표시
                 c_c, c_d = st.columns(2)
                 adx_val = row.get("ADX", 0)
-                c_c.metric("추세강도(ADX)", f"{adx_val:.1f}", delta="강함" if adx_val>=25 else "보통", delta_color="normal" if adx_val>=25 else "off")
+                # ADX 값이 있으면 표시
+                if pd.notna(adx_val) and adx_val > 0:
+                    c_c.metric(
+                        "추세강도(ADX)", 
+                        f"{adx_val:.1f}", 
+                        delta="강함" if adx_val >= 25 else "보통",
+                        delta_color="normal" if adx_val >= 25 else "off"
+                    )
+                
                 vbo_p = row.get("VBO_Price", 0)
-                c_d.metric("VBO 돌파가", _to_int_str(vbo_p), help="이 가격을 돌파하면 매수 신호")
+                if pd.notna(vbo_p) and vbo_p > 0:
+                    c_d.metric(
+                        "VBO 돌파가", 
+                        _to_int_str(vbo_p), 
+                        help="이 가격을 돌파하면 매수 신호"
+                    )
 
     st.divider()
     st.subheader("📋 Daily Top List (Trend & Squeeze)", anchor=False)
