@@ -1317,7 +1317,6 @@ def detect_regime_row(row: pd.Series) -> str:
     # ✅ [수정됨] 0.0 값을 제대로 가져오도록 로직 변경
     def _fv(key: str, default: float = 0.0) -> float:
         try:
-            return float(row.get(key, default) or default)
             val = row.get(key)
             if val is None or pd.isna(val):
                 return default
