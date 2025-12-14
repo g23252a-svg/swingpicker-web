@@ -2738,12 +2738,11 @@ with tab2:
              display_cols = [c for c in display_cols if c != "종목명"]
 
         st.dataframe(
-            safe_view[cols],
-            use_container_width=True,
-            safe_view[display_cols],
-            use_container_width=True, # 화면 꽉 채우기
-            column_config=cfg,
-            height=500 # 목록을 길게 보여줌
+            st.dataframe(
+            safe_view[display_cols],    # 데이터 (위치 인자)
+            use_container_width=True,   # 가로 꽉 채우기 (키워드 인자)
+            column_config=cfg,          # 컬럼 설정 (키워드 인자)
+            height=500                  # 높이 (키워드 인자)
         )
     else:
         st.info("표시할 종목 없음")
