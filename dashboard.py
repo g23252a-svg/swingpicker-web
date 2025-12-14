@@ -1397,17 +1397,26 @@ def plot_interactive_chart(
         fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, line_width=1.5,
                       annotation_text=f"💰목표: {int(t1_v):,}", annotation_font_color=COLOR_STOP, row=1, col=1)
 
-    # 레이아웃 설정
+    # 🟢 [붙여넣을 새 코드]
+    # 레이아웃 설정 (모바일 최적화)
     fig.update_layout(
-        title=dict(text=f"{name} ({str(code).zfill(6)})", font=dict(size=18, color="white" if "dark" in str(st.config.get_option("theme.base")) else "black")),
+        title=dict(
+            text=f"{name} ({str(code).zfill(6)})", 
+            font=dict(size=16), # 폰트 크기 약간 축소 (모바일 타이틀 잘림 방지)
+            x=0, # 왼쪽 정렬
+        ),
         xaxis_rangeslider_visible=False,
-        height=650 if show_rsi else 500,
-        margin=dict(l=20, r=20, t=50, b=20),
+        # 🚨 [핵심] 높이를 좀 더 늘림 (모바일에서 터치 스크롤 편의성)
+        height=700 if show_rsi else 550, 
+        # 🚨 [핵심] 좌우 여백(margin)을 최소화하여 차트를 크게 보여줌
+        margin=dict(l=10, r=10, t=50, b=10), 
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        # 차트 배경색을 약간 어둡게 처리하여 형광색이 잘 보이게 함 (선택사항)
-        # paper_bgcolor='rgba(0,0,0,0)',
-        # plot_bgcolor='rgba(0,0,0,0)'
+        legend=dict(
+            orientation="h", 
+            yanchor="bottom", y=1.02, 
+            xanchor="left", x=0 # 범례 왼쪽 정렬
+        ),
+        dragmode="pan", # 모바일 터치 드래그 기본 활성화
     )
     
     # Y축 그리드 설정 (눈에 덜 띄게)
@@ -2358,14 +2367,21 @@ with tab1:
 
     st.divider()
 
-    # 공포/탐욕 게이지 + 섹터맵
-    c_gauge, c_map = st.columns([1, 1.5])
+    # 🚨 [수정] 공포/탐욕 게이지와 섹터맵을 모바일에서 보기 좋게 변경
+    # PC에서는 옆으로, 모바일에서는 위아래로 자연스럽게 배치되도록
+    # Streamlit은 화면이 좁으면 자동으로 수직 배치하지만, 
+    # [1, 1.5] 비율 강제보다는 1:1이 모바일에서 찌그러짐을 방지함.
+    c_gauge, c_map = st.columns([1, 1]) 
+    
     with c_gauge:
         st.plotly_chart(
             plot_fear_greed_gauge(fg_score),
             use_container_width=True,
+            # 모바일에서 게이지가 너무 작아지지 않게 높이 약간 확보
+            config={'staticPlot': True} # 터치 오동작 방지
         )
         st.caption(f"시장 공포/탐욕 지수 — {fg_status}")
+    
     with c_map:
         st.markdown("##### 🔥 오늘의 주도 섹터")
         map_src = st.radio(
@@ -2567,19 +2583,18 @@ with tab2:
             row = view_df.iloc[sel_idx]
             code = str(row.get("종목코드", "")).zfill(6)
 
-            # --- 여기서부터 들여쓰기(Indent) 주의 ---
             c1, c2 = st.columns([2, 1])
             
-            with c1:
-                # 🔧 고급 차트 옵션 (3단 컬럼)
-                c_opt1, c_opt2, c_opt3 = st.columns(3)
-                with c_opt1:
-                    show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                with c_opt2:
-                    # 🔥 [추가된 부분] 켈트너 채널 체크박스
-                    show_kc = st.checkbox("켈트너 채널 (Squeeze)", value=True, key=f"opt_kc_{code}")
-                with c_opt3:
-                    show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+            with c1:  # 👈 여기가 c1, c2 정의와 같은 레벨이거나 안쪽이어야 함
+                # 🔧 [수정됨] 모바일 최적화: Expander로 옵션 숨기기
+                with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
+                    c_opt1, c_opt2, c_opt3 = st.columns(3)
+                    with c_opt1:
+                        show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
+                    with c_opt2:
+                        show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
+                    with c_opt3:
+                        show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
 
                 chart_df = get_stock_chart_data(code)
                 
@@ -2660,32 +2675,39 @@ with tab2:
 
         # ✅ 표시할 컬럼 정의 (SQUEEZE_CNT 추가)
         cols = [
-            "REGIME", "ROUTE", 
-            "TTM_SQUEEZE_CNT", # 🔥 [New] 스퀴즈 지속일
-            "업종", "종목코드", "LDY_SCORE",
-            "종가", "추천매수가", "손절가", "추천매도가1",
+            "종목명", # 인덱스라면 생략 가능하지만 명시적 확인
+            "LDY_SCORE",
+            "ROUTE",  
+            "종가", 
+            "추천매수가", 
+            "손절가",
+            # "TTM_SQUEEZE_CNT" -> 공간 부족하면 툴팁이나 상세화면으로 유도
         ]
         # 실제 존재하는 컬럼만 필터링
         cols = [c for c in cols if c in safe_view.columns]
 
-        # 컬럼 설정 (Column Config)
+        # 🚨 Streamlit의 column_config를 활용해 "작은 화면"용 라벨 설정
         cfg = {
             "LDY_SCORE": st.column_config.ProgressColumn(
-                "점수", format="%.1f", min_value=0, max_value=100
+                "점수", format="%.0f", min_value=0, max_value=100, width="small" 
             ),
-            "TTM_SQUEEZE_CNT": st.column_config.NumberColumn(
-                "🌪️응축(일)", help="TTM Squeeze 연속 발생 일수. 5일 이상이면 폭발 임박(Hot Zone)"
-            ),
-            "종가": st.column_config.TextColumn("현재가"),
-            "추천매수가": st.column_config.TextColumn("진입가"),
-            "손절가": st.column_config.TextColumn("손절가"),
-            "추천매도가1": st.column_config.TextColumn("목표가"),
+            "ROUTE": st.column_config.TextColumn("전략", width="small"),
+            "종가": st.column_config.TextColumn("현재가", width="small"),
+            "추천매수가": st.column_config.TextColumn("매수", width="small"),
+            "손절가": st.column_config.TextColumn("손절", width="small"),
+            "TTM_SQUEEZE_CNT": st.column_config.NumberColumn("응축", width="small"),
         }
+
+        # 실제 존재하는 컬럼만 필터링 (인덱스인 종목명은 cols에서 제외)
+        display_cols = [c for c in cols if c in safe_view.columns or c == "종목명"]
+        if "종목명" in safe_view.index.names:
+             display_cols = [c for c in display_cols if c != "종목명"]
         
         st.dataframe(
-            safe_view[cols],
-            use_container_width=True,
+            safe_view[display_cols],
+            use_container_width=True, # 화면 꽉 채우기
             column_config=cfg,
+            height=500 # 목록을 길게 보여줌
         )
     else:
         st.info("표시할 종목 없음")
@@ -2816,7 +2838,7 @@ with tab3:
                         price_map[c] = p
 
             # 5) 기본 지표 계산 (종목별/전체)
-            cols_layout = st.columns(3)
+            
             total_buy = 0.0
             total_eval = 0.0
 
@@ -2845,7 +2867,7 @@ with tab3:
                     }
                 )
 
-                # 수익률/평가손익
+                # 수익률/평가손익 계산
                 if cur_price > 0:
                     profit_rate = (cur_price - avg) / avg * 100
                     pnl = eval_amt - buy_amt
@@ -2860,13 +2882,25 @@ with tab3:
                     profit_rate = 0
                     pnl = 0
 
-                with cols_layout[idx % 3]:
-                    st.metric(
-                        label=f"{real_name} ({signal})",
-                        value=f"{cur_price:,}원" if cur_price > 0 else "시세 없음",
-                        delta=f"{profit_rate:+.2f}% ({int(pnl):,}원)",
-                        delta_color="normal" if profit_rate >= 0 else "inverse",
-                    )
+                # 🚨 [수정됨] 모바일 최적화: 카드형 UI (컨테이너 사용)
+                with st.container(border=True):
+                    c_main, c_pnl = st.columns([1.5, 1])
+                    with c_main:
+                        st.markdown(f"**{real_name}**")
+                        st.caption(f"평단: {int(avg):,} / 수량: {qty}")
+                        if cur_price > 0:
+                            st.markdown(f"현재: **{cur_price:,}원**")
+                        else:
+                            st.markdown("시세 확인 불가")
+                    
+                    with c_pnl:
+                        # 수익률 색상 강조
+                        color = "green" if profit_rate > 0 else "red"
+                        if profit_rate == 0: color = "gray"
+                        
+                        # 우측에 수익률 크게 표시
+                        st.markdown(f":{color}[**{profit_rate:+.2f}%**]")
+                        st.markdown(f":{color}[{int(pnl):,}원]")
 
             st.divider()
 
