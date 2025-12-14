@@ -31,9 +31,7 @@ JUST_REGISTERED_KEY = "just_registered"
 
 # ----------------- Secrets / Env 우선 -----------------
 def _get_conf(key: str, default_val: str) -> str:
-    """
-    Streamlit secrets > 환경변수 > 기본값 순으로 설정값을 가져온다.
-    """
+    """Streamlit secrets > 환경변수 > 기본값 순"""
     try:
         if key in st.secrets:
             return st.secrets[key]
@@ -53,11 +51,10 @@ GIST_TOKEN = _get_conf("LDY_GIST_TOKEN", "")
 GIST_ID_SUBS = _get_conf("LDY_GIST_SUBS_ID", GIST_ID_USERS)
 GIST_ID_INQ  = _get_conf("LDY_GIST_INQ_ID",  GIST_ID_USERS)
 
-# 디버그 로그 (Streamlit Cloud / Render 로그에서 확인용)
-print("[auth_user] DEBUG GIST_ID_USERS =", GIST_ID_USERS)
-print("[auth_user] DEBUG GIST_ID_SUBS  =", GIST_ID_SUBS)
-print("[auth_user] DEBUG GIST_ID_INQ   =", GIST_ID_INQ)
-print("[auth_user] DEBUG GIST_TOKEN set?", bool(GIST_TOKEN))
+# 디버그: ID가 잘 들어왔는지 확인 (보안을 위해 앞 4자리만 출력)
+logger.info(f"[Config] USERS_ID prefix: {GIST_ID_USERS[:4]}...")
+logger.info(f"[Config] SUBS_ID prefix : {GIST_ID_SUBS[:4]}...")
+logger.info(f"[Config] INQ_ID prefix  : {GIST_ID_INQ[:4]}...")
 
 # ----------------- 공통 유틸 -----------------
 def _now_utc_str() -> str:
