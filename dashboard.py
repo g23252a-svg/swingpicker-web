@@ -1401,30 +1401,21 @@ def plot_interactive_chart(
     # 🟢 [붙여넣을 새 코드]
     # 레이아웃 설정 (모바일 최적화)
     fig.update_layout(
-        title=dict(text=f"{name} ({str(code).zfill(6)})", font=dict(size=18, color="white" if "dark" in str(st.config.get_option("theme.base")) else "black")),
         title=dict(
-            text=f"{name} ({str(code).zfill(6)})", 
-            font=dict(size=16), # 폰트 크기 약간 축소 (모바일 타이틀 잘림 방지)
-            x=0, # 왼쪽 정렬
+            text=f"{name} ({str(code).zfill(6)})",
+            font=dict(size=16),
+            x=0,  # 왼쪽 정렬
         ),
         xaxis_rangeslider_visible=False,
-        height=650 if show_rsi else 500,
-        margin=dict(l=20, r=20, t=50, b=20),
-        # 🚨 [핵심] 높이를 좀 더 늘림 (모바일에서 터치 스크롤 편의성)
-        height=700 if show_rsi else 550, 
-        # 🚨 [핵심] 좌우 여백(margin)을 최소화하여 차트를 크게 보여줌
-        margin=dict(l=10, r=10, t=50, b=10), 
+        height=700 if show_rsi else 550,  # 모바일 편의성 높이 반영
+        margin=dict(l=10, r=10, t=50, b=10), # 여백 최소화
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        # 차트 배경색을 약간 어둡게 처리하여 형광색이 잘 보이게 함 (선택사항)
-        # paper_bgcolor='rgba(0,0,0,0)',
-        # plot_bgcolor='rgba(0,0,0,0)'
         legend=dict(
-            orientation="h", 
-            yanchor="bottom", y=1.02, 
-            xanchor="left", x=0 # 범례 왼쪽 정렬
+            orientation="h",
+            yanchor="bottom", y=1.02,
+            xanchor="left", x=0
         ),
-        dragmode="pan", # 모바일 터치 드래그 기본 활성화
+        dragmode="pan", # 모바일 터치 드래그
     )
 
     # Y축 그리드 설정 (눈에 덜 띄게)
