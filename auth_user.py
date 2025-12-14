@@ -15,8 +15,6 @@ import secrets
 
 AUTH_IMPORT_ERR = None
 
-
-
 # ----------------- 로깅 설정 -----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("auth_user")
@@ -46,10 +44,13 @@ KEY_PRIME = _get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
 # 🔹 Gist 관련 설정 (Streamlit secrets 또는 환경변수에서 읽음)
+# ✅ [수정됨] 하드코딩 제거 -> _get_conf 사용
 GIST_ID_USERS = _get_conf("LDY_GIST_ID", "")
-GIST_TOKEN = _get_conf("LDY_GIST_TOKEN", "")
-GIST_ID_SUBS  = "0fb7f1970af50a30519efa46dbe2ce01"
-GIST_ID_INQ   = "d778f9a10483d35982a5ba12af6b713a"      # 문의 DB
+GIST_TOKEN    = _get_conf("LDY_GIST_TOKEN", "")
+
+# Secrets에 LDY_GIST_SUBS_ID가 없으면 유저 DB ID를 대신 사용 (Fallback)
+GIST_ID_SUBS = _get_conf("LDY_GIST_SUBS_ID", GIST_ID_USERS)
+GIST_ID_INQ  = _get_conf("LDY_GIST_INQ_ID",  GIST_ID_USERS)
 
 # 디버그: ID가 잘 들어왔는지 확인 (보안을 위해 앞 4자리만 출력)
 logger.info(f"[Config] USERS_ID prefix: {GIST_ID_USERS[:4]}...")
@@ -227,21 +228,22 @@ def _save_user_db_to_gist(db: dict) -> bool:
     GitHub Gist에 users_db.json 내용을 저장한다.
     - 실패해도 예외 던지지 않고 False 리턴
     """
-    if not GIST_ID or not GIST_TOKEN:
+    if not GIST_ID_USERS or not GIST_TOKEN:
         return False
 
     try:
-        url = f"https://api.github.com/gists/{gist_id}"
+        url = f"https://api.github.com/gists/{GIST_ID_USERS}"
         headers = {
             "Authorization": f"token {GIST_TOKEN}",
             "Accept": "application/vnd.github+json",
         }
-        files = {
-            GIST_FILE_NAME: {
-                "content": json.dumps(db, ensure_ascii=False, indent=2)
+        payload = {
+            "files": {
+                GIST_FILE_NAME: {
+                    "content": json.dumps(db, ensure_ascii=False, indent=2)
+                }
             }
         }
-        payload = {"files": files}
 
         resp = requests.patch(url, headers=headers, data=json.dumps(payload), timeout=10)
         resp.raise_for_status()
@@ -251,8 +253,6 @@ def _save_user_db_to_gist(db: dict) -> bool:
     except Exception as e:
         logger.exception("[auth_user] Gist user DB save 실패: %s", e)
         return False
-
-
 
 def load_json_from_gist_file(gist_id: str, file_name: str, default):
     if not gist_id or not GIST_TOKEN:
@@ -291,34 +291,6 @@ def load_json_from_gist_file(gist_id: str, file_name: str, default):
         logger.exception("[auth_user] Gist에서 %s 로드 실패: %s", file_name, e)
         return default
 
-
-def _save_user_db_to_gist(db: dict) -> bool:
-    if not GIST_ID_USERS or not GIST_TOKEN:
-        return False
-
-    try:
-        url = f"https://api.github.com/gists/{GIST_ID_USERS}"
-        headers = {
-            "Authorization": f"token {GIST_TOKEN}",
-            "Accept": "application/vnd.github+json",
-        }
-        payload = {
-            "files": {
-                GIST_FILE_NAME: {
-                    "content": json.dumps(db, ensure_ascii=False, indent=2)
-                }
-            }
-        }
-
-        resp = requests.patch(url, headers=headers, data=json.dumps(payload), timeout=10)
-        resp.raise_for_status()
-
-        logger.info("[auth_user] Gist에 user DB 저장 완료 (users=%d)", len(db.get("users", {})))
-        return True
-
-    except Exception as e:
-        logger.exception("[auth_user] Gist user DB save 실패: %s", e)
-        return False
 
 def save_json_to_gist_file(gist_id: str, file_name: str, data: dict) -> bool:
     """
