@@ -207,8 +207,12 @@ def prepare_ohlcv_data(tickers, start_ymd, end_ymd, trade_ymd):
                 code = future_to_code[future]
                 try:
                     df = future.result()
-                    ohlcv_map[code] = df
-                except: ohlcv_map[code] = pd.DataFrame()
+                    if df is not None and not df.empty:
+                        ohlcv_map[code] = df
+                except: 
+                    pass  # 👈 실패하면 저장하지 않고 건너뜀 (다음에 다시 시도하게)
+        
+        # 유효한 데이터가 있을 때만 저장
         save_ohlcv_cache(trade_ymd, ohlcv_map)
     
     return ohlcv_map
