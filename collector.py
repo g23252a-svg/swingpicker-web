@@ -1400,11 +1400,8 @@ def route_tag(row: pd.Series) -> str:
     rev = (
         (rel60 <= -5.0) and   # 지수 대비 꽤 처졌던 종목
         (r5 >= 1.0) and       # 최근 5일은 플러스
-        (rel60 <= -5.0) and 
-        (r5 >= 1.0) and 
-        (slope > 0) and
-        (now_pct <= 10)       # 엔트리에서 너무 멀지 않음
-        (now_pct <= 10)
+        (slope > 0) and       # 상승 기울기
+        (now_pct <= 10)       # 진입가에서 너무 멀지 않음
     )
     if rev:
         return "🔻 REV (역추세 반등)"
