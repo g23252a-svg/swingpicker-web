@@ -35,7 +35,11 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-from auth_user import render_auth_box, get_user, list_users, update_user_role
+# load_inquiry_items, save_inquiry_items, _now_utc_str 를 추가했습니다.
+from auth_user import (
+    render_auth_box, get_user, list_users, update_user_role,
+    load_inquiry_items, save_inquiry_items, _now_utc_str
+)
 from plotly.subplots import make_subplots
 from version_info import (
     PRIME_TG_JOIN_URL,
@@ -3040,33 +3044,52 @@ with tab4:
         if not title.strip() or not content.strip():
             st.error("제목과 내용을 모두 입력해 주세요.")
         else:
-            db = load_inquiry_db()
-            inq_list = db.get("inquiries", [])
-
-            inq_list.append({
+            # ✅ [수정됨] Gist에서 기존 목록을 불러옵니다.
+            current_items = load_inquiry_items()
+            
+            # 새 문의 데이터 생성
+            new_item = {
                 "title": title.strip(),
                 "content": content.strip(),
                 "nickname": nickname.strip() or "익명",
                 "email": email.strip(),
-                "created_at": now_kst().strftime("%Y-%m-%d %H:%M:%S"),
-            })
-            db["inquiries"] = inq_list
-            save_inquiry_db(db)
-            st.success("문의가 등록되었습니다. 가능한 한 빠르게 확인하겠습니다. 🙌")
+                "created_at": _now_utc_str(), # auth_user의 시간 함수 사용
+            }
+            
+            # 리스트에 추가하고 Gist에 저장
+            current_items.append(new_item)
+            ok = save_inquiry_items(current_items)
+
+            if ok:
+                st.success("문의가 등록되었습니다. Gist에 저장 완료! 🙌")
+                # 화면 갱신을 위해 rerun (Streamlit 버전에 따라 다름)
+                try:
+                    st.rerun()
+                except:
+                    pass
+            else:
+                st.error("저장 실패! (Gist 연동 오류 - 로그 확인 필요)")
 
     st.markdown("#### 📂 최근 문의 내역")
 
-    db = load_inquiry_db()
-    inquiries = db.get("inquiries", [])
+    # ✅ [수정됨] Gist에서 데이터를 불러와서 보여줍니다.
+    inquiries = load_inquiry_items()
 
     if not inquiries:
         st.info("아직 등록된 문의가 없습니다.")
     else:
+        # 최신순 정렬 (리스트 뒤집기)
         for item in reversed(inquiries[-50:]):
             box = st.container(border=True)
             with box:
                 st.markdown(f"**제목:** {item.get('title', '-')}")
-                meta = f"작성자: {item.get('nickname','익명')} · 작성일: {item.get('created_at','-')}"
+                
+                # 날짜 포맷팅 (UTC -> KST 변환은 to_kst_str 함수가 있다면 사용, 없으면 그대로)
+                date_str = item.get('created_at','-')
+                if 'to_kst_str' in globals():
+                    date_str = to_kst_str(date_str)
+
+                meta = f"작성자: {item.get('nickname','익명')} · 작성일: {date_str}"
                 if item.get("email"):
                     meta += f" · 이메일: {item.get('email')}"
                 st.caption(meta)
