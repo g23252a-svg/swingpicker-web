@@ -48,8 +48,8 @@ ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 # 🔹 Gist 관련 설정 (Streamlit secrets 또는 환경변수에서 읽음)
 GIST_ID_USERS = _get_conf("LDY_GIST_ID", "")
 GIST_TOKEN = _get_conf("LDY_GIST_TOKEN", "")
-GIST_ID_SUBS = _get_conf("LDY_GIST_SUBS_ID", GIST_ID_USERS)
-GIST_ID_INQ  = _get_conf("LDY_GIST_INQ_ID",  GIST_ID_USERS)
+GIST_ID_SUBS  = "0fb7f1970af50a30519efa46dbe2ce01"
+GIST_ID_INQ   = "d778f9a10483d35982a5ba12af6b713a"      # 문의 DB
 
 # 디버그: ID가 잘 들어왔는지 확인 (보안을 위해 앞 4자리만 출력)
 logger.info(f"[Config] USERS_ID prefix: {GIST_ID_USERS[:4]}...")
