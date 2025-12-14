@@ -2644,10 +2644,10 @@ with tab2:
         
         # 🔥 [v7.5] ADX, VBO_Price 컬럼 추가
         cols = [
-            "REGIME", "ROUTE", 
-            "ADX", "TTM_SQUEEZE_CNT", # ADX 추가
+            "REGIME", "ROUTE",
+            "ADX", "MACD_Slope", "TTM_SQUEEZE_CNT",  # <-- "MACD_Slope" 추가됨
             "업종", "종목코드", "LDY_SCORE",
-            "종가", "VBO_Price", # VBO Price 추가
+            "종가", "VBO_Price",
             "추천매수가", "손절가", "추천매도가1",
         ]
         cols = [c for c in cols if c in safe_view.columns]
@@ -2655,6 +2655,12 @@ with tab2:
         cfg = {
             "LDY_SCORE": st.column_config.ProgressColumn("점수", format="%.1f", min_value=0, max_value=100),
             "ADX": st.column_config.NumberColumn("ADX(추세)", format="%.1f", help="25 이상이면 강한 추세"),
+            "MACD_Slope": st.column_config.NumberColumn(
+                "추세(Slope)",
+                format="%.2f",
+                help="MACD 히스토그램 기울기 (양수: 상승가속 / 음수: 하락가속)"
+            ),
+            
             "TTM_SQUEEZE_CNT": st.column_config.NumberColumn("🌪️응축(일)", width="small"),
             "VBO_Price": st.column_config.TextColumn("⚡VBO기준", help="변동성 돌파 매수 기준가"),
             "종가": st.column_config.TextColumn("현재가"),
