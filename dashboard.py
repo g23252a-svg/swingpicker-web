@@ -133,6 +133,13 @@ def load_csv_url(url: str) -> pd.DataFrame:
     r.raise_for_status()
     return pd.read_csv(io.BytesIO(r.content), encoding="utf-8-sig")
 
+@st.cache_data(ttl=600)
+def load_csv_path(path: str, enc: str = "utf-8-sig") -> pd.DataFrame:
+    try:
+        return pd.read_csv(path, encoding=enc)
+    except UnicodeDecodeError:
+        return pd.read_csv(path, encoding="utf-8")
+
 @st.cache_data(ttl=600, show_spinner=False)
 def _load_csv_cached(path: str, enc: str, remote_url: str, mtime_sig: int) -> pd.DataFrame:
     # Local First logic simplified for brevity
