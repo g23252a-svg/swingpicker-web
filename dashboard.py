@@ -2587,16 +2587,7 @@ with tab2:
             # --- 여기서부터 들여쓰기(Indent) 주의 ---
             c1, c2 = st.columns([2, 1])
 
-            with c1:
-                # 🔧 고급 차트 옵션 (3단 컬럼)
-                c_opt1, c_opt2, c_opt3 = st.columns(3)
-                with c_opt1:
-                    show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                with c_opt2:
-                    # 🔥 [추가된 부분] 켈트너 채널 체크박스
-                    show_kc = st.checkbox("켈트너 채널 (Squeeze)", value=True, key=f"opt_kc_{code}")
-                with c_opt3:
-                    show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+
             with c1:  # 👈 여기가 c1, c2 정의와 같은 레벨이거나 안쪽이어야 함
                 # 🔧 [수정됨] 모바일 최적화: Expander로 옵션 숨기기
                 with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
