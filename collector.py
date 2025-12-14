@@ -512,6 +512,11 @@ def analyze_ticker(
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector,
         "종가": int(last_c), "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1),
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
+        
+        # ✅ [수정] 누락된 컬럼 추가
+        "MACD_Slope": round(slope, 4),      # 추세 기울기 원본 값 추가
+        "MA20_GAP": round(disp, 2),         # 20일선 이격도 추가 (이격도 컬럼과 동일 값)
+        
         "MACD_Slope_PCT": round(slope_pct, 4), "거래강도": round(vol_z, 2),
         "ADX": round(adx, 1), "VWAP_Gap": round(vwap_gap, 2),
         "TTM_SQUEEZE": ttm_squeeze, "TTM_SQUEEZE_CNT": sqz_cnt,
