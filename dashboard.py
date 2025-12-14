@@ -520,7 +520,8 @@ MIN_TURN_KOSPI    = float(get_conf("LDY_MIN_TURN_KOSPI",    200.0))
 MIN_TURN_KOSDAQ   = float(get_conf("LDY_MIN_TURN_KOSDAQ",   100.0))
 MIN_TURN_DEFAULT  = float(get_conf("LDY_MIN_TURN_DEFAULT",  100.0))
 
-W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10)
+W_RR, W_T1, W_SL, W_NEAR = 0.20, 0.15, 0.10, 0.10
+W_MOM, W_TRD, W_LIQ, W_TEC = 0.10, 0.10, 0.15, 0.10
 P_OVERHEAT_5D  = 6.0
 P_OVERHEAT_10D = 6.0
 P_RSI_OUT      = 4.0
@@ -1523,12 +1524,36 @@ def liquidity_gate(x_turn, market):
         return pd.Series(False, index=x_turn.index)
 
 def build_global_score(lat, keep_order: bool = False):
+    if lat is None or lat.empty:
+        return lat
+
     x = lat.copy()
+    
+    # ---------------------------------------------------------
+    # 헬퍼 함수 (내부 정의)
+    # ---------------------------------------------------------
+    def nz_num(s):
+        return pd.to_numeric(s, errors="coerce")
+        
+    def cap_q(s, q=90, floor=1.0):
+        c = np.nanpercentile(nz_num(s), q)
+        return float(max(c, floor)) if np.isfinite(c) else floor
+
+    def pct_norm_pos(s, q=90, floor=1.0):
+        s = nz_num(s).clip(lower=0)
+        return np.clip(s / cap_q(s, q, floor), 0, 1)
+        
+    def inv_dist_norm(dist, cap):
+        cap_val = float(cap) if cap is not None and not np.isnan(cap) else 1.0
+        return np.clip(1 - (nz_num(dist) / max(cap_val, 1e-9)), 0, 1)
+
+    # 필수 컬럼 확보
     req = [
         "종가", "추천매수가", "손절가", "추천매도가1",
         "거래대금(억원)", "RSI14", "MACD_Slope", "거래강도",
         "이격도", "ret_5d_%", "ret_10d_%", "EBS",
         "MACD_Hist", "MFI14", "시장",
+        "ADX", "rel_60d_%", "VWAP_Gap", "VBO_Price" # ✅ v7.5 필수 컬럼 추가
     ]
     for c in req:
         if c not in x.columns:
@@ -1536,132 +1561,113 @@ def build_global_score(lat, keep_order: bool = False):
 
     slope_col = "MACD_Slope" if "MACD_Slope" in x.columns and x["MACD_Slope"].notna().any() \
         else ("MACD_slope" if "MACD_slope" in x.columns else "MACD_Slope")
-    kairi_col = "이격도" if "이격도" in x.columns and x["이격도"].notna().any() \
-        else ("乖離%" if "乖離%" in x.columns else "이격도")
-    vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].notna().any() \
-        else ("Vol_Z" if "Vol_Z" in x.columns else "거래강도")
-
+    
     close = nz_num(x["종가"])
     entry = nz_num(x["추천매수가"])
     stop = nz_num(x["손절가"])
     t1 = nz_num(x["추천매도가1"])
     turn = nz_num(x["거래대금(억원)"])
-    rsi = nz_num(x["RSI14"])
-    slope = nz_num(x.get(slope_col, pd.Series(np.nan, index=x.index)))
-    volz = nz_num(x.get(vol_col, pd.Series(np.nan, index=x.index)))
-    kairi = nz_num(x.get(kairi_col, pd.Series(np.nan, index=x.index)))
-    r5 = nz_num(x["ret_5d_%"])
-    r10 = nz_num(x["ret_10d_%"])
-    ebs = nz_num(x["EBS"]).fillna(0)
-
-    rr_den = (entry - stop)
-    rr_den = rr_den.where(rr_den > 0, np.nan)
-    rr1 = (t1 - entry) / rr_den
-    now_gap = ((close - entry).abs() / entry * 100)
+    
+    # 1. 자금 관리 (Money Mgmt)
+    rr_den = (close - stop).replace(0, np.nan)
+    rr1 = (t1 - close) / rr_den
+    rr_norm = pct_norm_pos(rr1, q=90, floor=1.0).fillna(0)
     t1_room = ((t1 - close) / close * 100)
-    sl_room = ((close - stop) / close * 100)
+    t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1).fillna(0)
+    sl_pct = ((entry - stop) / entry * 100)
+    sl_norm = pd.Series(np.exp(-((sl_pct - 7.0) / 3.0) ** 2), index=x.index).fillna(0)
+    
+    # 2. 타이밍 (Timing)
+    now_gap = ((close - entry).abs() / entry * 100).fillna(0)
+    near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0)).fillna(0)
 
-    def cap_q(s, q=90, f=1.0):
-        arr = nz_num(s)
-        arr = arr.replace([np.inf, -np.inf], np.nan)
-        if arr.dropna().size == 0:
-            return float(f)
-        try:
-            val = float(np.nanpercentile(arr.dropna(), q))
-            return max(val, float(f))
-        except Exception:
-            return float(f)
+    # 3. 모멘텀 (Momentum)
+    slope = nz_num(x.get("MACD_Slope_PCT", 0))
+    # 기울기 퍼센트가 없으면 원본 기울기로 대체 시도
+    if slope.sum() == 0 and x[slope_col].sum() != 0:
+         slope = nz_num(x[slope_col]) / close * 100
+         
+    r5 = nz_num(x["ret_5d_%"])
+    slope_norm = pct_norm_pos(slope, q=90, floor=0.01).fillna(0)
+    mom_mid_norm = pct_norm_pos(nz_num(x["ret_10d_%"]), q=90, floor=1.0).fillna(0)
+    mom_norm = np.clip(0.6*slope_norm + 0.4*mom_mid_norm, 0, 1)
 
-    def pct_norm(s, q=90, f=1.0):
-        s_num = nz_num(s).clip(lower=0)
-        cap = cap_q(s_num, q, f)
-        if cap == 0:
-            return np.zeros_like(s_num)
-        return np.clip(s_num / cap, 0, 1)
+    # 4. 추세 (Trend - v7.5 핵심 추가 부분) ✅
+    adx = nz_num(x.get("ADX", 0)).fillna(0)
+    rel60 = nz_num(x.get("rel_60d_%", 0)).fillna(0)
+    vwap_gap = nz_num(x.get("VWAP_Gap", 0)).fillna(0)
+    
+    adx_norm = np.clip((adx - 15) / 35, 0, 1)
+    rel60_norm = pct_norm_pos(rel60, q=90, floor=1.0).fillna(0)
+    vwap_norm = np.clip((vwap_gap + 2) / 7, 0, 1).fillna(0)
+    
+    trd_norm = np.clip(0.4*adx_norm + 0.3*rel60_norm + 0.3*vwap_norm, 0, 1)
 
-    def inv_dist_norm(dist, cap):
-        cap_val = float(cap) if cap is not None and not np.isnan(cap) else 1.0
-        return np.clip(1 - (nz_num(dist) / max(cap_val, 1e-9)), 0, 1)
-
-    rr_norm = pct_norm(rr1, q=90, f=1.0).fillna(0)
-    t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, f=5.0), 0, 1).fillna(0)
-    sl_norm = np.clip(sl_room / cap_q(sl_room, q=90, f=3.0), 0, 1).fillna(0)
-    near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, f=1.0)).fillna(0)
-
-    ers_bits = (
-        (ebs >= PASS_EBS).astype(int)
-        + (slope > 0).astype(int)
-        + ((rsi >= RSI_LOW) & (rsi <= RSI_HIGH)).astype(int)
-    )
-    ers_norm = np.clip(ers_bits / 3.0, 0, 1).fillna(0)
-    slope_pos_norm = pct_norm(slope, q=90, f=1.0).fillna(0)
-    mom_mid_norm = pct_norm(r10.clip(lower=0), q=90, f=1.0).fillna(0)
-    mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm + 0.2 * mom_mid_norm, 0, 1).fillna(0)
-
+    # 5. 유동성 (Liquidity)
     if turn.notna().any():
-        try:
-            lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.dropna(), 90)
-            denom = max(hi - lo, 1e-9)
-            liq_norm = np.clip((turn - lo) / denom, 0, 1).fillna(0)
-            liq_low = (turn < lo).astype(float)
-        except Exception:
-            liq_norm = pd.Series(0.0, index=x.index)
-            liq_low = pd.Series(0.0, index=x.index)
+        lo, hi = np.nanpercentile(turn, 30), np.nanpercentile(turn, 90)
+        denom = max(hi - lo, 1e-9)
+        liq_norm = np.clip((turn - lo) / denom, 0, 1).fillna(0)
+        liq_low = (turn < lo).astype(float)
     else:
-        liq_norm = pd.Series(0.0, index=x.index)
-        liq_low = pd.Series(0.0, index=x.index)
+        liq_norm = 0.0; liq_low = 0.0
 
+    # 6. 기술적 지표 (Technical)
+    volz = nz_num(x.get("거래강도", 0)).fillna(0)
+    kairi = nz_num(x.get("이격도", 0))
     vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1).fillna(0)
-    kairi_abs = kairi.abs()
-    kairi_norm = (1 - np.minimum(kairi_abs / cap_q(kairi_abs, q=80, f=3.0), 1)).clip(0, 1).fillna(0)
+    kairi_norm = (1 - np.minimum(kairi.abs() / cap_q(kairi.abs(), 80, 3.0), 1)).clip(0, 1).fillna(0)
     tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1).fillna(0)
 
+    # 기본 점수 합산 (W_TRD 추가됨)
     base_score = (
-        100 * W_RR * rr_norm
-        + 100 * W_T1 * t1_norm
-        + 100 * W_SL * sl_norm
-        + 100 * W_NEAR * near_norm
-        + 100 * W_MOM * mom_norm
-        + 100 * W_LIQ * liq_norm
-        + 100 * W_TEC * tec_norm
+        100 * W_RR * rr_norm + 100 * W_T1 * t1_norm + 100 * W_SL * sl_norm +
+        100 * W_NEAR * near_norm + 100 * W_MOM * mom_norm + 100 * W_TRD * trd_norm +
+        100 * W_LIQ * liq_norm + 100 * W_TEC * tec_norm
     )
 
+    # 페널티 적용
     pen = pd.Series(0.0, index=x.index)
-    pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1).fillna(0)
-    pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fillna(0)
-    pen += P_RSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
+    pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1)
+    
+    rsi_val = nz_num(x["RSI14"])
+    pen += P_RSI_OUT * ((rsi_val < RSI_LOW) | (rsi_val > RSI_HIGH)).astype(float)
     pen += P_MACD_NEG * (slope < 0).astype(float)
-    pen += P_NEAR_FAR * np.clip((now_gap - 15) / 15, 0, 1).fillna(0)
+    pen += P_NEAR_FAR * np.clip((now_gap - 15) / 15, 0, 1)
     pen += P_LIQ_LOW * liq_low
-    pen += P_VOL_SPIKE * (volz > 3).astype(float)
 
-    score = np.clip(base_score - pen, 0, 100)
+    prelim_score = np.clip(base_score - pen, 0, 100)
 
+    # 섹터 보너스
+    sector_bonus = 0.0
+    if "SECTOR_RET_5D" in x.columns:
+        sec_norm = pct_norm_pos(nz_num(x["SECTOR_RET_5D"]), q=85, floor=1.0).fillna(0)
+        sector_bonus = 100 * 0.05 * sec_norm 
+
+    final_score = np.clip(prelim_score + sector_bonus, 0, 100)
+    
+    # 팩터 저장 (NORM_TRD 저장)
+    x["NORM_RR"] = rr_norm.round(2)
+    x["NORM_T1"] = t1_norm.round(2)
+    x["NORM_SL"] = sl_norm.round(2)
+    x["NORM_NEAR"] = near_norm.round(2)
+    x["NORM_MOM"] = mom_norm.round(2)
+    x["NORM_TRD"] = trd_norm.round(2) # ✅ 추세 점수 저장
+    x["NORM_LIQ"] = liq_norm.round(2)
+    x["NORM_TEC"] = tec_norm.round(2)
+
+    x["LDY_SCORE"] = final_score.round(1)
+    
+    # 기타 정보 저장
     x["RR1"] = rr1
     x["Now%"] = now_gap
     x["T1_ROOM%"] = t1_room
-    x["SL_ROOM%"] = sl_room
-    x["LDY_SCORE"] = score.round(1)
+    x["SL_ROOM%"] = sl_pct # Use calculated sl_pct
 
-    x["_GATE_OK"] = liquidity_gate(
-        x["거래대금(억원)"],
-        x.get("시장", pd.Series(np.nan, index=x.index))
-    ).fillna(False)
-
-    if "MA20" in x.columns:
-        x["MA20_GAP"] = ((nz_num(x["종가"]) / nz_num(x["MA20"]) - 1.0) * 100).replace([np.inf, -np.inf], np.nan)
-    else:
-        x["MA20_GAP"] = np.nan
-
-    # ✅ 여기부터가 핵심
+    # 정렬
     if not keep_order:
-        x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
-        x["LDY_RANK"] = range(1, len(x) + 1)
-    # keep_order=True면 CSV 순서 유지 (LDY_RANK는 밖에서 결정)
-
-    if "AI_COMMENT" in x.columns:
-        x["WHY"] = x["AI_COMMENT"]
-
+        x = x.sort_values("LDY_SCORE", ascending=False)
+        
     return x
 
 # ---------------------------
