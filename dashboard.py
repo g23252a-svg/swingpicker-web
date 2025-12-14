@@ -2181,22 +2181,48 @@ with st.sidebar:
 
             rows = []
             today = now_kst().date()
+            
             for u in users:
                 email = u.get("login_id")
                 sub = subs.get(email, {})
+                
+                # 1. 실제 권한 확인 (구독정보 없으면 기본 유저 권한 사용)
+                current_role = sub.get("role") or u.get("role", "free")
+                
+                # 2. 만료일 문자열 가져오기
                 exp_str = sub.get("expire_at", "")
                 days_left = ""
-                if exp_str:
-                    try:
-                        d_exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
-                        days_left = (d_exp - today).days
-                    except Exception:
-                        days_left = ""
+
+                # 3. 권한별 표시 로직 분기
+                if current_role in ["free", "guest"]:
+                    exp_str = "-"
+                    days_left = "-"
+                elif current_role == "admin":
+                    exp_str = "무제한"
+                    days_left = "∞"
+                else:
+                    # Pro / Prime 인 경우
+                    if exp_str:
+                        try:
+                            d_exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                            remain = (d_exp - today).days
+                            days_left = f"{remain}일"
+                            
+                            # (선택) 만료된 경우 표시
+                            if remain < 0:
+                                days_left = f"만료 ({remain}일)"
+                        except Exception:
+                            days_left = "날짜오류"
+                    else:
+                        # 권한은 있는데 날짜가 없는 경우 (DB 불일치 등)
+                        exp_str = "미설정"
+                        days_left = "?"
+
                 rows.append({
                     "이메일": email,
                     "닉네임": u.get("nickname"),
                     "권한(auth_user)": u.get("role"),
-                    "구독 역할(sub)": sub.get("role", ""),
+                    "구독 역할(sub)": current_role,  # 수정됨
                     "만료일": exp_str,
                     "잔여일수": days_left,
                     "가입일": to_kst_str(u.get("created_at")),
