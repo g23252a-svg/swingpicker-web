@@ -327,6 +327,23 @@ def save_price_snapshot(ymd, name_map):
 
 # ------------------------------- 섹터 -------------------------------
 
+def load_sector_override() -> dict:
+    path = os.path.join(OUT_DIR, "sector_override.csv")
+    if os.path.exists(path):
+        try:
+            df = pd.read_csv(path, dtype=str)
+            return dict(zip(df["종목코드"], df["업종"]))
+        except: pass
+    return {}
+
+def build_sector_map() -> dict:
+    """
+    업종 맵 생성: Override 파일이 있으면 우선 사용하고,
+    없으면 빈 딕셔너리를 반환(이 경우 classify_big_sector가 종목명으로 자동 분류함)
+    """
+    return load_sector_override()
+
+
 def classify_big_sector(name, detail):
     t, n = str(detail), str(name)
     if any(x in n for x in ["삼성전자", "SK하이닉스", "DB하이텍"]): return "반도체"
@@ -727,11 +744,25 @@ def main(trade_date=None, top_n=None, enable_telegram=True, tag=None):
         return
 
     # 시총 필터
+    # [수정됨] 시총 필터 안전장치 추가
     if mcap_map:
+        # 매핑 전 원본 개수
+        original_count = len(top_df)
+        
         top_df["시가총액"] = top_df["종목코드"].map(lambda c: mcap_map.get(c, 0))
-        top_df = top_df[top_df["시가총액"] >= MIN_MCAP_EOK]
+        filtered_df = top_df[top_df["시가총액"] >= MIN_MCAP_EOK]
+        
+        # 만약 필터링 후 0개가 되면 (데이터 매칭 실패 등), 필터를 해제하고 진행
+        if filtered_df.empty:
+            log(f"⚠️ 시총 필터 후 0개됨 (매칭 실패 가능성). 필터 해제하고 {original_count}개로 진행합니다.")
+        else:
+            top_df = filtered_df
     
     tickers = top_df["종목코드"].tolist()
+    if not tickers:
+        log("❌ 분석 대상 종목이 없습니다.")
+        return
+
     log(f"📊 분석 대상: {len(tickers)}개")
     
     # 2. OHLCV
