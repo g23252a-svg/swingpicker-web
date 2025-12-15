@@ -39,7 +39,7 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
 from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
-    load_subscriptions_db, save_subscriptions_db  # 👈 추가됨
+    load_subscriptions_db, save_subscriptions_db  # 👈 이 2개가 꼭 있어야 합니다!
 )
 from plotly.subplots import make_subplots
 from version_info import (
@@ -96,31 +96,17 @@ def save_inquiry_db(db):
         json.dump(db, f, ensure_ascii=False, indent=2)
 
 # ---------------------------
-# 구독/권한(만료일) 관리 - Gist 연동으로 변경
+# [수정됨] 구독/권한(만료일) 관리 - Gist 연동
 # ---------------------------
+# (기존의 SUBS_DB_PATH 정의나 파일 open 코드는 모두 제거됨)
+
 def load_subs_db():
-    """auth_user.py의 Gist 로드 함수 사용"""
+    """auth_user.py의 Gist 로드 함수 사용 (로컬 파일 X)"""
     return load_subscriptions_db()
 
 def save_subs_db(db):
-    """auth_user.py의 Gist 저장 함수 사용"""
+    """auth_user.py의 Gist 저장 함수 사용 (로컬 파일 X)"""
     return save_subscriptions_db(db)
-    if not os.path.exists(SUBS_DB_PATH):
-        return {"subs": {}}
-    try:
-        with open(SUBS_DB_PATH, "r", encoding="utf-8") as f:
-            db = json.load(f)
-        if "subs" not in db:
-            db["subs"] = {}
-        return db
-    except Exception:
-        return {"subs": {}}
-
-def save_subs_db(db):
-    """구독 DB 저장"""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SUBS_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
 
 def set_subscription(email: str, role: str, days: int = 30):
     email = (email or "").strip()
