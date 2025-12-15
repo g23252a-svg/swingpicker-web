@@ -1,9 +1,8 @@
 """
-LDY Pro Trader Collector v7.4 (Dynamic ATR & Regime Weighting)
+LDY Pro Trader Collector v7.5 (Smart Swing Stop & Volume Power)
+- v7.5: 최근 저점(Swing Low) 기반 스마트 손절 보정 + 매수세 강도(V-Power) 팩터 추가
 - v7.4: 변동성 국면별 ATR Multiplier (1.8~2.5) 동적 적용
 - v7.2: 시장 국면(Bull/Bear)에 따른 스코어링 가중치 동적 변화
-- v7.1: 상대강도(RS) 20/60/120일 다변화
-- v7.0: OHLCV 배치 수집 및 캐싱
 ...
 """
 
@@ -1255,8 +1254,62 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
 
 # ------------------------------- AI 코멘트 / 스코어 -------------------------------
 
-def generate_ai_comment(mfi: float, rsi: float, slope: float, disp: float, score: float, ttm_squeeze: int = 0, bw_squeeze: int = 0, bb_bw: float = np.nan, squeeze_cnt: int = 0) -> str:
+def generate_ai_comment(
+    mfi: float, rsi: float, slope: float, disp: float, score: float, 
+    ttm_squeeze: int = 0, bw_squeeze: int = 0, bb_bw: float = np.nan, squeeze_cnt: int = 0,
+    is_swing_support: bool = False, v_power: float = 0.0
+) -> str:
     comment = ""
+    
+    # 1. 스퀴즈 상태
+    if int(ttm_squeeze) >= 1:
+        if squeeze_cnt >= 5: 
+            comment += f"🌪️ {squeeze_cnt}일 연속 응축 중! 폭발 임박. "
+        else: 
+            comment += f"🌪️ 에너지 응축 시작 ({squeeze_cnt}일차). "
+    elif int(bw_squeeze) >= 1:
+        if np.isfinite(bb_bw): 
+            comment += f"🔇 변동성 축소 (BW {float(bb_bw):.1f}%). "
+        else: 
+            comment += "🔇 변동성 축소 구간. "
+
+    # 2. 구조적 지지/저항 (v7.5)
+    if is_swing_support:
+        comment += "🧱 구조적 지지선(Swing Low) 근접. "
+    
+    # 3. 매수세 강도 (v7.5)
+    if v_power >= 1.5:
+        comment += "💪 매수세 장악(Power Buying). "
+    elif v_power <= 0.6:
+        comment += "📉 매도세 우위. "
+
+    # 4. 수급 (MFI)
+    if mfi >= 70: 
+        comment += "💰 외국인/기관 수급 집중. "
+    elif mfi >= 60: 
+        comment += "💸 자금 유입 지속. "
+
+    # 5. 모멘텀 (MACD Slope)
+    if slope > 0.02: 
+        comment += "🚀 단기 모멘텀 가속. "
+    elif slope > 0.005: 
+        comment += "📈 상승 모멘텀 개선. "
+    
+    # 6. 이격도
+    if -2 <= disp <= 2: 
+        comment += "✅ 20일선 눌림목 구간."
+    elif disp > 5: 
+        comment += "⚠️ 단기 급등 조정 주의."
+    elif disp < -5: 
+        comment += "📉 과매도 기술적 반등 기대."
+
+    # 7. 종합 점수 평가
+    if score >= 90: 
+        comment += " (강력 매수)"
+    elif score >= 80: 
+        comment += " (매수 유효)"
+
+    return comment if comment else "특이사항 없음."
 
     # ✅ [v7.4 수정] 스퀴즈 일수 포함 코멘트
     if int(ttm_squeeze) >= 1:
@@ -1429,58 +1482,28 @@ def route_tag(row: pd.Series) -> str:
 #  안전을 위해 build_global_score 함수 전체 코드를 드립니다)
 
 def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> pd.DataFrame:
-    """
-    v7.2: 시장 국면(market_temp)에 따른 동적 가중치 적용
-    - 🔥 과열: MOM(모멘텀), T1(목표수익) 가중치 상향 (추세 추종)
-    - 🧊 침체: RR(손익비), SL(손절폭), NEAR(타점) 가중치 상향 (방어적)
-    """
     x = lat.copy()
+    # 가중치 설정 (기존과 동일)
+    w = {"RR": 0.25, "T1": 0.18, "SL": 0.12, "NEAR": 0.12, "MOM": 0.10, "LIQ": 0.13, "TEC": 0.10}
+    if "과열" in market_temp: w = {"RR": 0.15, "T1": 0.20, "SL": 0.10, "NEAR": 0.05, "MOM": 0.25, "LIQ": 0.15, "TEC": 0.10}
+    elif "침체" in market_temp: w = {"RR": 0.30, "T1": 0.10, "SL": 0.20, "NEAR": 0.25, "MOM": 0.05, "LIQ": 0.05, "TEC": 0.05}
 
-    # 1. 시장 국면에 따른 가중치 설정 (Dynamic Weighting)
-    # 기본값 (중립)
-    w = {
-        "RR": 0.25, "T1": 0.18, "SL": 0.12, "NEAR": 0.12,
-        "MOM": 0.10, "LIQ": 0.13, "TEC": 0.10
-    }
-
-    if "과열" in market_temp:
-        # 공격적: 추세와 거래량을 중시, 타점은 조금 높아도 OK
-        w = {
-            "RR": 0.15, "T1": 0.20, "SL": 0.10, "NEAR": 0.05,
-            "MOM": 0.25, "LIQ": 0.15, "TEC": 0.10
-        }
-    elif "침체" in market_temp:
-        # 방어적: 손익비와 타점 정밀도, 손절폭을 최우선
-        w = {
-            "RR": 0.30, "T1": 0.10, "SL": 0.20, "NEAR": 0.25,
-            "MOM": 0.05, "LIQ": 0.05, "TEC": 0.05
-        }
-
-    def col_or_zero(df, col):
-        return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
+    def col_or_zero(df, col): return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
 
     # 데이터 로드
-    close = nz_num(x["종가"])
-    entry = nz_num(x["추천매수가"]).replace(0, np.nan)
-    stop = nz_num(x["손절가"])
-    t1 = nz_num(x["추천매도가1"])
-    turn = nz_num(x["거래대금(억원)"])
+    close = nz_num(x["종가"]); entry = nz_num(x["추천매수가"]).replace(0, np.nan)
+    stop = nz_num(x["손절가"]); t1 = nz_num(x["추천매도가1"]); turn = nz_num(x["거래대금(억원)"])
     rsi = nz_num(x["RSI14"]).fillna(50)
-
     slope = nz_num(x["MACD_Slope_PCT"]) if "MACD_Slope_PCT" in x.columns else nz_num(x["MACD_Slope"])
     slope_floor = 0.01 if "MACD_Slope_PCT" in x.columns else 1.0
+    volz = nz_num(x["거래강도"]).fillna(0); kairi = nz_num(x["이격도"])
+    r5 = nz_num(x["ret_5d_%"]); r10 = nz_num(x["ret_10d_%"]); ebs = nz_num(x["EBS"]).fillna(0)
+    rel20 = col_or_zero(x, "rel_20d_%"); rel60 = col_or_zero(x, "rel_60d_%"); rel120 = col_or_zero(x, "rel_120d_%")
+    
+    # ✅ [v7.5] V-Power 로드
+    v_power = col_or_zero(x, "V_POWER")
 
-    volz = nz_num(x["거래강도"]).fillna(0)
-    kairi = nz_num(x["이격도"])
-    r5 = nz_num(x["ret_5d_%"])
-    r10 = nz_num(x["ret_10d_%"])
-    ebs = nz_num(x["EBS"]).fillna(0)
-
-    rel20 = col_or_zero(x, "rel_20d_%")
-    rel60 = col_or_zero(x, "rel_60d_%")
-    rel120 = col_or_zero(x, "rel_120d_%")
-
-    # ----- 팩터 정규화 (Normalization) -----
+    # 팩터 계산
     rr_den = (close - stop).where((close-stop)>0, np.nan)
     rr1 = (t1 - close) / rr_den
     now_gap = ((close - entry).abs() / entry * 100).fillna(0)
@@ -1489,17 +1512,13 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
 
     rr_norm = pct_norm_pos(rr1, q=90, floor=1.0).fillna(0)
     t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, floor=5.0), 0, 1).fillna(0)
-
-    # 손절폭 점수: 최적 구간(7%)에서 멀어질수록 감점
     opt = 7.0; width = 3.0
     sl_norm = pd.Series(np.exp(-((sl_pct - opt) / width) ** 2), index=x.index).fillna(0)
     near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, floor=1.0)).fillna(0)
 
-    # MOM 팩터
     ers_bits = ((ebs >= PASS_EBS).astype(int) + (slope > 0).astype(int) + ((rsi >= RSI_LOW) & (rsi <= RSI_HIGH)).astype(int))
     ers_norm = np.clip(ers_bits / 3.0, 0, 1).fillna(0)
     slope_pos_norm = pct_norm_pos(slope, q=90, floor=slope_floor).fillna(0)
-
     mom_mid_norm = pct_norm_pos(r10.clip(lower=0), q=90, floor=1.0).fillna(0)
     rel20_norm = pct_norm_pos(rel20.clip(lower=0), q=90, floor=1.0).fillna(0)
     rel60_norm = pct_norm_pos(rel60.clip(lower=0), q=90, floor=1.0).fillna(0)
@@ -1510,32 +1529,28 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
         0.10 * rel20_norm + 0.20 * rel60_norm + 0.10 * rel120_norm, 0, 1
     ).fillna(0)
 
-    # LIQ / TEC 팩터
     if turn.notna().any():
         lo, hi = np.nanpercentile(turn, 30), np.nanpercentile(turn, 90)
         denom = max(hi - lo, 1e-9)
         liq_norm = np.clip((turn - lo) / denom, 0, 1).fillna(0)
         liq_low = (turn < lo).astype(float)
-    else:
-        liq_norm = 0.0; liq_low = 0.0
+    else: liq_norm = 0.0; liq_low = 0.0
 
     vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1).fillna(0)
     kairi_abs = kairi.abs()
     kairi_norm = (1 - np.minimum(kairi_abs / cap_q(kairi_abs, q=80, floor=3.0), 1)).clip(0, 1).fillna(0)
-    tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1).fillna(0)
+    
+    # ✅ [v7.5 수정] V-Power 점수화 (TEC 팩터 비중 조절: vol 0.5 + kairi 0.3 + vp 0.2)
+    vp_norm = pct_norm_pos(v_power, q=90, floor=1.0).fillna(0)
+    tec_norm = np.clip(0.5 * vol_sweet + 0.3 * kairi_norm + 0.2 * vp_norm, 0, 1).fillna(0)
 
-    # ✅ [v7.2 핵심] 동적 가중치 적용
+    # (이하 기존 스코어링 로직 동일)
     base_score = (
-        100 * w["RR"] * rr_norm +
-        100 * w["T1"] * t1_norm +
-        100 * w["SL"] * sl_norm +
-        100 * w["NEAR"] * near_norm +
-        100 * w["MOM"] * mom_norm +
-        100 * w["LIQ"] * liq_norm +
+        100 * w["RR"] * rr_norm + 100 * w["T1"] * t1_norm + 100 * w["SL"] * sl_norm +
+        100 * w["NEAR"] * near_norm + 100 * w["MOM"] * mom_norm + 100 * w["LIQ"] * liq_norm +
         100 * w["TEC"] * tec_norm
     )
 
-    # 패널티 적용
     pen = pd.Series(0.0, index=x.index)
     pen += 15.0 * (entry.isna() | ~np.isfinite(entry)).astype(float)
     pen += 10.0 * (stop.isna() | (stop <= 0)).astype(float)
@@ -1550,8 +1565,6 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     pen += P_BIG_SL * (sl_pct > 12).astype(float)
 
     prelim_score = np.clip(base_score - pen, 0, 100)
-
-    # 섹터 보정
     sector_bonus = 0.0
     if "SECTOR_RET_5D" in x.columns:
         try:
@@ -1561,46 +1574,31 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
         except: pass
 
     final_score = np.clip(prelim_score + sector_bonus, 0, 100)
-
-    # Squeeze Bonus
     bb_sq = col_or_zero(x, "BB_SQUEEZE").clip(0, 1)
     final_score = np.clip(final_score + BONUS_BB_SQUEEZE_SCORE * bb_sq, 0, 100)
 
-    # Entry / Rank Score
     raw_entry = (0.3*near_norm + 0.18*rr_norm + 0.12*t1_norm + 0.1*sl_norm + 0.2*mom_norm + 0.1*(1-liq_low))
     entry_score = np.clip(100 * raw_entry + BONUS_BB_SQUEEZE_ENTRY * bb_sq, 0, 100)
 
     above = col_or_zero(x, "Above_MA20").clip(0, 1)
-    entry_s = pd.Series(entry_score, index=x.index)
-    final_s = pd.Series(final_score, index=x.index)
     overheat = (0.6 * np.clip((r5 - 8) / 8, 0, 1) + 0.4 * np.clip((r10 - 18) / 18, 0, 1))
+    rank_score = (0.55 * (entry_score/100) + 0.30 * (final_score/100) + 0.10 * bb_sq + 0.05 * above - 0.20 * overheat)
 
-    rank_score = (0.55 * (entry_s/100) + 0.30 * (final_s/100) + 0.10 * bb_sq + 0.05 * above - 0.20 * overheat)
+    x["NORM_RR"] = rr_norm.round(2); x["NORM_T1"] = t1_norm.round(2); x["NORM_SL"] = sl_norm.round(2)
+    x["NORM_NEAR"] = near_norm.round(2); x["NORM_MOM"] = mom_norm.round(2); x["NORM_LIQ"] = liq_norm.round(2)
+    x["NORM_TEC"] = tec_norm.round(2)
 
-    # ✅ [v7.4 추가] 정규화 팩터 저장 (0.0 ~ 1.0) -> 점수 산출 근거 투명화
-    x["NORM_RR"] = rr_norm.round(2)     # 손익비 매력도
-    x["NORM_T1"] = t1_norm.round(2)     # 목표수익 여력
-    x["NORM_SL"] = sl_norm.round(2)     # 손절폭 적절성
-    x["NORM_NEAR"] = near_norm.round(2) # 타점 근접도
-    x["NORM_MOM"] = mom_norm.round(2)   # 모멘텀 강도
-    x["NORM_LIQ"] = liq_norm.round(2)   # 유동성 점수
-    x["NORM_TEC"] = tec_norm.round(2)   # 기술적 완성도
-
-    x["RR1"] = rr1
-    x["Now%"] = now_gap
-    x["LDY_SCORE"] = final_score.round(1)
-    x["ENTRY_SCORE"] = entry_score.round(1)
-    x["RANK_SCORE"] = np.clip(rank_score * 100, 0, 100).round(1)
-    x["ROUTE"] = x.apply(route_tag, axis=1)
-    x["REGIME"] = x.apply(detect_regime_row, axis=1)
-    x["AI_COMMENT"] = x.apply(
-        lambda row: generate_ai_comment(
-            row.get("MFI14", 50), row.get("RSI14", 50), row.get("MACD_Slope_PCT", 0),
-            row.get("이격도", 0), row.get("LDY_SCORE", 0),
-            row.get("TTM_SQUEEZE", 0), row.get("BB_SQUEEZE_BW", 0), row.get("BB_BW", np.nan),
-            row.get("TTM_SQUEEZE_CNT", 0)
-        ), axis=1
-    )
+    x["RR1"] = rr1; x["Now%"] = now_gap; x["LDY_SCORE"] = final_score.round(1)
+    x["ENTRY_SCORE"] = entry_score.round(1); x["RANK_SCORE"] = np.clip(rank_score * 100, 0, 100).round(1)
+    x["ROUTE"] = x.apply(route_tag, axis=1); x["REGIME"] = x.apply(detect_regime_row, axis=1)
+    
+    # ✅ [v7.5 수정] AI 코멘트 생성 시 V_POWER 전달
+    x["AI_COMMENT"] = x.apply(lambda row: generate_ai_comment(
+        row.get("MFI14", 50), row.get("RSI14", 50), row.get("MACD_Slope_PCT", 0),
+        row.get("이격도", 0), row.get("LDY_SCORE", 0), row.get("TTM_SQUEEZE", 0), 
+        row.get("BB_SQUEEZE_BW", 0), row.get("BB_BW", np.nan), row.get("TTM_SQUEEZE_CNT", 0),
+        row.get("IS_SWING_SUPPORT", False), row.get("V_POWER", 0.0)
+    ), axis=1)
     return x
 
 # ------------------------------- 텔레그램 -------------------------------
@@ -1699,115 +1697,77 @@ def ceil_to_tick(price: float) -> int:
 # [수정 대상] analyze_ticker 함수 전체를 아래 코드로 교체하세요.
 
 def analyze_ticker(
-    t: str,
-    ohlcv_df: pd.DataFrame,
-    top_df: pd.DataFrame,
-    mcap_map: Dict[str, float],
-    kospi_set: set,
-    kosdaq_set: set,
-    name_map: Dict[str, str],
-    sector_map: Dict[str, str],
+    t: str, ohlcv_df: pd.DataFrame, top_df: pd.DataFrame, mcap_map: Dict[str, float],
+    kospi_set: set, kosdaq_set: set, name_map: Dict[str, str], sector_map: Dict[str, str],
     bench_map: Dict[str, Dict[int, float]],
 ) -> Optional[Dict[str, Any]]:
-
     code6 = str(t).zfill(6)
-
-    # 데이터 유효성 검사
-    if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120:
-        return None
-
-    # 250일치 사용
+    if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
-
-    c = ohlcv["종가"]
-    h = ohlcv["고가"]
-    l = ohlcv["저가"]
-    v = ohlcv["거래량"]
+    c = ohlcv["종가"]; h = ohlcv["고가"]; l = ohlcv["저가"]; v = ohlcv["거래량"]; o = ohlcv["시가"]
     last_c = float(c.iloc[-1])
 
-    # 이동평균
-    ma20 = c.rolling(BB_PERIOD).mean()
-    ma60 = c.rolling(60).mean()
-    ma120 = c.rolling(120).mean()
-
-    # 볼린저 밴드 & TTM Squeeze
+    ma20 = c.rolling(BB_PERIOD).mean(); ma60 = c.rolling(60).mean(); ma120 = c.rolling(120).mean()
     std20 = c.rolling(BB_PERIOD).std()
-    bb_upper = ma20 + (BB_STD * std20)
-    bb_lower = ma20 - (BB_STD * std20)
-    bb_bw_series = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
-    bb_bw = float(bb_bw_series.iloc[-1]) if len(bb_bw_series) else np.nan
-    bw_squeeze = 1 if (np.isfinite(bb_bw) and bb_bw < BB_SQUEEZE_BW) else 0
+    bb_upper = ma20 + (BB_STD * std20); bb_lower = ma20 - (BB_STD * std20)
+    bb_bw = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
+    bb_bw_val = float(bb_bw.iloc[-1]) if len(bb_bw) else np.nan
+    bw_squeeze = 1 if (np.isfinite(bb_bw_val) and bb_bw_val < BB_SQUEEZE_BW) else 0
 
     atr_kc_series = calc_atr(h, l, c, KC_ATR_PERIOD)
     kc_mid = ema(c, KC_PERIOD)
-    kc_upper = kc_mid + (KC_MULT * atr_kc_series)
-    kc_lower = kc_mid - (KC_MULT * atr_kc_series)
-
-    # TTM Squeeze 조건: BB가 KC 안에 포함
+    kc_upper = kc_mid + (KC_MULT * atr_kc_series); kc_lower = kc_mid - (KC_MULT * atr_kc_series)
     ttm_series = (bb_lower > kc_lower) & (bb_upper < kc_upper)
     ttm_last = ttm_series.iloc[-1] if len(ttm_series) else False
     ttm_squeeze = 1 if (bool(ttm_last) and not pd.isna(ttm_last)) else 0
     bb_squeeze = int(ttm_squeeze)
 
-    # ✅ [v7.4 추가] Squeeze 연속 발생 일수 카운팅 (Tracking)
     sqz_cnt = 0
     if ttm_squeeze == 1:
-        # 오늘이 스퀴즈라면, 과거로 거슬러 올라가며 연속된 True 개수를 셈
-        # iloc[:-1]은 오늘 제외한 과거 데이터, [::-1]은 역순 정렬
-        vals = ttm_series.iloc[:-1].values[::-1] 
+        vals = ttm_series.iloc[:-1].values[::-1]
         temp_cnt = 0
         for val in vals:
-            if val:
-                temp_cnt += 1
-            else:
-                break
-        sqz_cnt = temp_cnt + 1 # 오늘 포함
+            if val: temp_cnt += 1
+            else: break
+        sqz_cnt = temp_cnt + 1
 
-    # 지표 계산
+    # ✅ [v7.5 핵심] Swing Low & V-Power 계산
+    swing_low_10 = float(l.tail(10).min())
+    dist_to_swing = (last_c - swing_low_10) / last_c * 100
+    is_swing_support = (dist_to_swing < 5.0) and (last_c > swing_low_10)
+
+    # V-Power: (종가-시가)/(고가-저가) * 거래량 (양봉 거래량 비중과 유사)
+    tail5 = ohlcv.tail(5).copy()
+    body = (tail5["종가"] - tail5["시가"]).abs()
+    range_len = (tail5["고가"] - tail5["저가"]).replace(0, 1)
+    sign = np.where(tail5["종가"] >= tail5["시가"], 1, -1)
+    power_raw = (body / range_len) * tail5["거래량"] * sign
+    avg_vol = tail5["거래량"].mean()
+    v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
+
     above_ma20 = 1 if (np.isfinite(ma20.iloc[-1]) and last_c > float(ma20.iloc[-1])) else 0
-    atr = float(atr_series.iloc[-1]) if 'atr_series' in locals() else float(calc_atr(h,l,c,14).iloc[-1])
+    atr = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
     rsi = float(calc_rsi(c, 14).iloc[-1])
     mfi = float(calc_mfi(h, l, c, v, 14).iloc[-1])
 
-    macd = ema(c, 12) - ema(c, 26)
-    sig = ema(macd, 9)
-    hist = macd - sig
-
+    macd = ema(c, 12) - ema(c, 26); sig = ema(macd, 9); hist = macd - sig
     hist_tail = hist.dropna().tail(5)
-    if len(hist_tail) >= 2:
-        x_idx = np.arange(len(hist_tail), dtype=float)
-        slope = float(np.polyfit(x_idx, hist_tail.values.astype(float), 1)[0])
-    else:
-        slope = 0.0
+    slope = float(np.polyfit(np.arange(len(hist_tail)), hist_tail.values.astype(float), 1)[0]) if len(hist_tail) >= 2 else 0.0
     slope_pct = (slope / last_c) * 100.0 if last_c > 0 else 0.0
-
-    vol_z_series = v / v.rolling(20).mean().replace(0, np.nan)
-    vol_z = float(vol_z_series.iloc[-1]) if len(vol_z_series) else 0.0
+    vol_z = float((v / v.rolling(20).mean().replace(0, np.nan)).iloc[-1]) if len(v) else 0.0
     disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100 if ma20.iloc[-1] else 0.0
 
-    def _ret(days):
-        if len(c) >= days + 1:
-            return (last_c / float(c.iloc[-(days + 1)]) - 1.0) * 100
-        return np.nan
+    def _ret(days): return (last_c / float(c.iloc[-(days + 1)]) - 1.0) * 100 if len(c) >= days + 1 else np.nan
+    ret_5 = _ret(5); ret_10 = _ret(10); ret_20 = _ret(20); ret_60 = _ret(60); ret_120 = _ret(120)
 
-    ret_5 = _ret(5)
-    ret_10 = _ret(10)
-    ret_20 = _ret(20)
-    ret_60 = _ret(60)
-    ret_120 = _ret(120)
-
-    # 필터링
     tv_row = top_df.loc[top_df["종목코드"] == code6, "거래대금(원)"]
     if tv_row.empty: return None
     tv_eok = float(tv_row.values[0]) / 1e8
     mcap = get_mcap_eok_from_map(mcap_map, code6)
-
     if mcap_map and mcap <= 0: return None
     if tv_eok < MIN_TURNOVER_EOK: return None
 
-    # 점수 산정 (EBS)
-    score = 0
-    reason = []
+    score = 0; reason = []
     if RSI_LOW <= rsi <= RSI_HIGH: score += 1; reason.append("RSI적정")
     if slope > 0: score += 1; reason.append("MACD상승")
     if -1 <= disp <= 5: score += 1; reason.append("20선근접")
@@ -1818,21 +1778,22 @@ def analyze_ticker(
     if mfi > 60: score += 1; reason.append("자금유입")
     if hist.iloc[-1] > 0: score += 1; reason.append("MACD>Sig")
 
-    # 매매가 산정
-    if np.isnan(atr) or atr <= 0: atr = last_c * 0.03
     buy = min(last_c, ma20.iloc[-1] * 1.03) if (ma20.iloc[-1] > 0 and last_c > ma20.iloc[-1]) else last_c
-
-    # 동적 ATR (v7.4)
     atr_mult = 2.0
-    if ttm_squeeze == 1 or (np.isfinite(bb_bw) and bb_bw < 12.0):
-        atr_mult = 1.8
+    if ttm_squeeze == 1 or (np.isfinite(bb_bw_val) and bb_bw_val < 12.0): atr_mult = 1.8
     is_high_vol = (vol_z > 2.5) or (ret_5 > 10.0) or (disp > 5.0)
-    if is_high_vol:
-        atr_mult = 2.5
+    if is_high_vol: atr_mult = 2.5
 
     stop = buy - (atr_mult * atr)
+    
+    # ✅ [v7.5 핵심] 스마트 손절 보정 로직
+    # ATR 손절가가 스윙 저점보다 위에 있으면(덜 안전), 스윙 저점 살짝 아래로 손절가 이동
+    # 단, 스윙 저점이 너무 멀면(-12% 이상) ATR 방식 유지
+    if (dist_to_swing < 12.0) and (stop > swing_low_10):
+        stop = swing_low_10 * 0.99
+    
     limit_pct = 0.90 if is_high_vol else 0.93
-    stop = max(stop, buy * limit_pct) 
+    stop = max(stop, buy * limit_pct)
     stop = min(stop, buy * 0.98)
 
     risk = buy - stop
@@ -1840,70 +1801,42 @@ def analyze_ticker(
     t1 = buy + risk * rr_mult
     t2 = buy + risk * (rr_mult * 2.0)
 
-    # 틱 보정
-    buy = round_to_tick(buy)
-    tk = tick_size(buy)
+    buy = round_to_tick(buy); tk = tick_size(buy)
     stop = floor_to_tick(stop)
     if buy - stop < tk: stop = buy - tk
-    t1 = ceil_to_tick(t1)
+    t1 = ceil_to_tick(t1); t2 = ceil_to_tick(t2)
     if t1 <= buy: t1 = buy + tk * 2
-    t2 = ceil_to_tick(t2)
 
-    # 메타 정보
     sector = sector_map.get(code6, "기타")
     name = name_map.get(code6, code6)
     m_row = top_df.loc[top_df["종목코드"] == code6, "시장"]
     market = str(m_row.values[0]) if not m_row.empty else ("KOSPI" if code6 in kospi_set else "KOSDAQ")
-
     bench_dict = bench_map.get(market, {})
-    idx_20 = bench_dict.get(20, np.nan)
-    idx_60 = bench_dict.get(60, np.nan)
-    idx_120 = bench_dict.get(120, np.nan)
-
+    idx_20 = bench_dict.get(20, np.nan); idx_60 = bench_dict.get(60, np.nan); idx_120 = bench_dict.get(120, np.nan)
     rel_20 = ret_20 - idx_20 if np.isfinite(idx_20) and np.isfinite(ret_20) else np.nan
     rel_60 = ret_60 - idx_60 if np.isfinite(idx_60) and np.isfinite(ret_60) else np.nan
     rel_120 = ret_120 - idx_120 if np.isfinite(idx_120) and np.isfinite(ret_120) else np.nan
 
     return {
-        "시장": market,
-        "종목명": name,
-        "종목코드": code6,
-        "업종": sector,
-        "종가": int(last_c),
-        "거래대금(억원)": round(tv_eok, 2),
-        "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
-        "RSI14": round(rsi, 1),
-        "MFI14": round(mfi, 1),
-        "이격도": round(disp, 2),
-        "MACD_Hist": round(float(hist.iloc[-1]), 4),
-        "MACD_Slope_PCT": round(slope_pct, 4),
-        "거래강도": round(vol_z, 2),
-
-        "BB_BW": round(bb_bw, 2) if np.isfinite(bb_bw) else np.nan,
-        "BB_SQUEEZE_BW": int(bw_squeeze),
-        "TTM_SQUEEZE": int(ttm_squeeze),
-        "TTM_SQUEEZE_CNT": int(sqz_cnt), # ✅ [v7.4 추가] 스퀴즈 연속 일수
-        "BB_SQUEEZE": int(bb_squeeze),
-        "Above_MA20": int(above_ma20),
-
+        "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
+        "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
+        "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
+        "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
+        "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2), # ✅ 추가된 항목
+        "BB_BW": round(bb_bw_val, 2) if np.isfinite(bb_bw_val) else np.nan,
+        "BB_SQUEEZE_BW": int(bw_squeeze), "TTM_SQUEEZE": int(ttm_squeeze), "TTM_SQUEEZE_CNT": int(sqz_cnt),
+        "BB_SQUEEZE": int(bb_squeeze), "Above_MA20": int(above_ma20), 
+        "IS_SWING_SUPPORT": is_swing_support, # ✅ 추가된 항목
         "ret_5d_%": round(ret_5, 2) if np.isfinite(ret_5) else np.nan,
         "ret_10d_%": round(ret_10, 2) if np.isfinite(ret_10) else np.nan,
         "ret_20d_%": round(ret_20, 2) if np.isfinite(ret_20) else np.nan,
         "ret_60d_%": round(ret_60, 2) if np.isfinite(ret_60) else np.nan,
         "ret_120d_%": round(ret_120, 2) if np.isfinite(ret_120) else np.nan,
-
         "rel_20d_%": round(rel_20, 2) if np.isfinite(rel_20) else np.nan,
         "rel_60d_%": round(rel_60, 2) if np.isfinite(rel_60) else np.nan,
         "rel_120d_%": round(rel_120, 2) if np.isfinite(rel_120) else np.nan,
-
-        "EBS": int(score),
-        "통과": "★" if score >= PASS_EBS else "",
-        "근거": ", ".join(reason),
-        "추천매수가": buy,
-        "손절가": stop,
-        "추천매도가1": t1,
-        "추천매도가2": t2,
-        "ATR_MULT": atr_mult,
+        "EBS": int(score), "통과": "★" if score >= PASS_EBS else "", "근거": ", ".join(reason),
+        "추천매수가": buy, "손절가": stop, "추천매도가1": t1, "추천매도가2": t2, "ATR_MULT": atr_mult,
     }
 
   
@@ -2189,7 +2122,7 @@ def main(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="LDY Pro Trader Collector v7.4")
+    parser = argparse.ArgumentParser(description="LDY Pro Trader Collector v7.5")
     parser.add_argument(
         "--date",
         type=str,
