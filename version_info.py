@@ -25,7 +25,7 @@ def _get_conf(key, default_val):
 # 1) 버전 정보
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "7.4.0") # ✅ [업데이트] 7.4.0
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "7.5.0") # ✅ [Update] v7.5.0
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -57,7 +57,20 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG = [
     {
-        "version": "7.4.0", # ✅ [New] v7.4 추가
+        "version": "7.5.0", # ✅ [New] v7.5
+        "date": "2025-12-15",
+        "title": "Smart Swing Stop & V-Power Revolution",
+        "items": [
+            "🛡️ **Smart Swing Stop-Loss:** 기존 ATR 방식의 한계를 넘어, **최근 10일 전저점(Swing Low)**을 자동으로 인식하여 휩소(Whipsaw)에 의한 불필요한 손절을 방지.",
+            "💪 **V-Power Factor:** 단순 거래량이 아닌 **'상승일 vs 하락일 거래량 비율'**을 분석하여, 주가 횡보 중에도 세력의 매집 강도를 포착하는 **V-Power(매수체결강도)** 팩터 도입.",
+            "📊 **7-Factor Radar Chart:** 기존 6각 레이더에 **'기술/세력(TEC)' 축을 추가**하여 V-Power와 기술적 완성도를 한눈에 시각화.",
+            "🧠 **AI Context Awareness:** 차트의 **구조적 지지선 근접 여부**와 **세력 매집 패턴**을 인식하여 더욱 정교해진 AI 코멘트 제공.",
+            "⚡ **Auth System V2:** Gist DB 로딩 속도를 획기적으로 개선하는 **캐싱 시스템(st.cache_data)** 적용 및 **PBKDF2-HMAC-SHA256** 암호화로 보안성 강화.",
+            "🧹 **Code Clean-up:** 레거시 코드(로컬 파일 I/O 등)를 대거 정리하여 시스템 안정성 및 유지보수성 향상.",
+        ],
+    },
+    {
+        "version": "7.4.0",
         "date": "2025-12-14",
         "title": "Context-Aware AI Quant System",
         "items": [
@@ -69,30 +82,7 @@ CHANGELOG = [
             "📈 **Multi-Period Alpha:** 20일(단기), 60일(중기), 120일(장기) 벤치마크 대비 초과 수익률(Alpha)을 종합 분석하여 추세 판단력 고도화.",
         ],
     },
-    {
-        "version": "6.9.3",
-        "date": "2025-12-13",
-        "title": "TTM Squeeze & Interactive Telegram",
-        "items": [
-            "🌪️ **TTM Squeeze Engine:** 존 카터의 TTM Squeeze 알고리즘 탑재 (Bollinger Bands가 Keltner Channel 안으로 수렴 시 '🔥 SQZ' 포착).",
-            "📉 **Keltner Channel Chart:** 대시보드 차트에 켈트너 채널(1.5 ATR) 표시 옵션을 추가하여 스퀴즈 상태를 시각적으로 확인 가능.",
-            "🚀 **Telegram On-Demand:** 대시보드에서 현재 필터링된 상위 5개 종목을 즉시 텔레그램으로 전송하는 버튼 추가.",
-            "🏷️ **Strategy Tag Upgrade:** '🔥 SQZ (폭발대기)' 전략 태그 추가로 변동성 폭발 임박 종목 우선 순위 노출.",
-        ],
-    },
-    # ... (기존 로그들은 그대로 유지) ...
-    {
-        "version": "6.9.2",
-        "date": "2025-12-13",
-        "title": "Gist DB Split (Users / Subscriptions / Inquiries)",
-        "items": [
-            "🧩 **DB 분리:** 회원 DB(users)와 별개로 **구독 DB(subscriptions)**, **문의 DB(inquiries)** 를 각각 Secret Gist로 분리.",
-            "🔐 **Secrets 확장:** `LDY_GIST_SUBS_ID`, `LDY_GIST_INQ_ID` 지원(미설정 시 기존 `LDY_GIST_ID`로 자동 fallback).",
-            "🕒 **updated_at 표준화:** subscriptions/inquiries 저장 시 `updated_at`을 UTC ISO8601으로 자동 갱신.",
-            "🛡️ **호환성 유지:** 기존 dashboard 로직이 list 형태 문의를 쓰는 경우를 위한 helper(예: inquiry items)로 점진 전환 가능.",
-        ],
-    },
-    # ... (이하 생략) ...
+    # ... (과거 로그 생략) ...
 ]
 
 
