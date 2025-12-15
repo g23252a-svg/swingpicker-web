@@ -38,7 +38,8 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
 # load_inquiry_items, save_inquiry_items, _now_utc_str 를 추가했습니다.
 from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
-    load_inquiry_items, save_inquiry_items, _now_utc_str
+    load_inquiry_items, save_inquiry_items, _now_utc_str,
+    load_subscriptions_db, save_subscriptions_db  # 👈 추가됨
 )
 from plotly.subplots import make_subplots
 from version_info import (
@@ -95,13 +96,15 @@ def save_inquiry_db(db):
         json.dump(db, f, ensure_ascii=False, indent=2)
 
 # ---------------------------
-# 구독/권한(만료일) 관리
+# 구독/권한(만료일) 관리 - Gist 연동으로 변경
 # ---------------------------
-SUBS_DB_PATH    = os.path.join(DATA_DIR, "subscriptions_db.json")
-
 def load_subs_db():
-    """구독 DB 로드"""
-    os.makedirs(DATA_DIR, exist_ok=True)
+    """auth_user.py의 Gist 로드 함수 사용"""
+    return load_subscriptions_db()
+
+def save_subs_db(db):
+    """auth_user.py의 Gist 저장 함수 사용"""
+    return save_subscriptions_db(db)
     if not os.path.exists(SUBS_DB_PATH):
         return {"subs": {}}
     try:
