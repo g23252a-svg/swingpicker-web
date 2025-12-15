@@ -1370,18 +1370,20 @@ def plot_interactive_chart(
         title=dict(
             text=f"{name} ({str(code).zfill(6)})",
             font=dict(size=16),
-            x=0,  # 왼쪽 정렬
+            x=0,  # 제목은 왼쪽 유지
         ),
         xaxis_rangeslider_visible=False,
-        height=700 if show_rsi else 550,  # 모바일 편의성 높이 반영
-        margin=dict(l=10, r=10, t=50, b=10), # 여백 최소화
+        height=700 if show_rsi else 550,
+        # ✅ 상단 여백(t)을 50 -> 80으로 늘려 제목과 범례 사이 공간 확보
+        margin=dict(l=10, r=10, t=80, b=10),
         hovermode="x unified",
         legend=dict(
             orientation="h",
             yanchor="bottom", y=1.02,
-            xanchor="left", x=0
+            # ✅ 범례를 오른쪽(x=1) 끝으로 정렬하여 제목(왼쪽)과 겹침 방지
+            xanchor="right", x=1
         ),
-        dragmode="pan", # 모바일 터치 드래그
+        dragmode="pan",
     )
 
     # Y축 그리드 설정 (눈에 덜 띄게)
