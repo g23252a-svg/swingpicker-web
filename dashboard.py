@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 """
-LDY Pro Trader Dashboard v7.0 (Deep Squeeze & Factor Analysis)
-- v7.0: 팩터 기반 레이더 차트, 스퀴즈 지속일(CNT) 표시, 켈트너 채널 차트
-...
+LDY Pro Trader Dashboard v7.5 (Smart Swing Stop & V-Power)
+- v7.5: 7-Factor 레이더 차트, 스마트 손절/매수세(V-Power) 시각화
+- v7.0: 팩터 기반 분석, 스퀴즈 지속일(CNT) 표시, 켈트너 채널
 """
 
 # ---------------------------
@@ -1130,9 +1129,9 @@ def get_stock_chart_data(code):
 
 def plot_radar_chart(row):
     """
-    v7.0: 팩터 기반 레이더 차트 (가시성 개선 버전)
+    v7.5: 7-Factor (V-Power 포함) 레이더 차트
     """
-    # 1) 팩터 데이터 확인
+    # 1) 팩터 데이터 확인 (Collector v7.5 이상)
     if "NORM_MOM" in row.index:
         stats = {
             "모멘텀(MOM)": row.get("NORM_MOM", 0) * 100,
@@ -1140,10 +1139,11 @@ def plot_radar_chart(row):
             "수익여력(T1)": row.get("NORM_T1", 0) * 100,
             "안전성(SL)": row.get("NORM_SL", 0) * 100,
             "타점(NEAR)": row.get("NORM_NEAR", 0) * 100,
-            "수급(LIQ)": row.get("NORM_LIQ", 0) * 100,
+            "유동성(LIQ)": row.get("NORM_LIQ", 0) * 100,
+            "기술/세력(TEC)": row.get("NORM_TEC", 0) * 100, # ✅ v7.5 추가
         }
     else:
-        # Fallback
+        # Fallback (구버전 데이터용)
         stats = {
             "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
             "수급(MFI)": row.get("MFI14", 50),
@@ -1176,18 +1176,18 @@ def plot_radar_chart(row):
                 visible=True, 
                 range=[0, 100],
                 tickfont=dict(size=10, color='gray'),
-                gridcolor='rgba(128,128,128,0.3)' # 그리드 색상
+                gridcolor='rgba(128,128,128,0.3)'
             ),
             angularaxis=dict(
                 tickfont=dict(size=12, weight='bold'),
                 gridcolor='rgba(128,128,128,0.3)'
             ),
-            bgcolor='rgba(0,0,0,0)' # 투명 배경
+            bgcolor='rgba(0,0,0,0)'
         ),
         showlegend=False,
-        height=280,
+        height=300, # 높이 약간 증가
         margin=dict(l=40, r=40, t=30, b=30),
-        title=dict(text="📊 6-Factor Analysis", x=0.5, y=0.95, font=dict(size=14))
+        title=dict(text="📊 7-Factor Analysis", x=0.5, y=0.95, font=dict(size=14))
     )
     return fig
 
@@ -2625,11 +2625,21 @@ with tab2:
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
+                    
+                    # 📊 레이더 차트
                     st.plotly_chart(plot_radar_chart(row), use_container_width=True)
 
+                    # 📝 AI 코멘트 & 스마트 손절 뱃지
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
+                    
+                    # ✅ [v7.5] 스마트 손절 감지 표시
+                    is_swing = row.get("IS_SWING_SUPPORT", False)
+                    if is_swing:
+                        st.success("🛡️ **스마트 지지선(Swing Low)** 감지됨! (손절가 보정)")
+                    
                     st.info(f"💬 **AI:** {ai_cmt}")
 
+                    # 리스크/리워드 바 차트
                     rr_entry = _to_num(row.get("추천매수가", np.nan), np.nan)
                     rr_stop  = _to_num(row.get("손절가", np.nan), np.nan)
                     rr_t1    = _to_num(row.get("추천매도가1", np.nan), np.nan)
@@ -2642,10 +2652,17 @@ with tab2:
                 else:
                     st.warning("🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다.")
 
+                # 하단 가격 메트릭
                 c_a, c_b = st.columns(2)
                 c_a.metric("진입가", _to_int_str(row.get("추천매수가", 0)))
+                
+                # 손절가 표시에 뱃지 추가 가능 여부 확인
+                stop_label = "손절가"
+                if row.get("IS_SWING_SUPPORT", False):
+                    stop_label += " 🛡️"
+                
                 c_b.metric(
-                    "손절가",
+                    stop_label,
                     _to_int_str(row.get("손절가", 0)),
                     delta="Stop",
                     delta_color="inverse",
