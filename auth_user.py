@@ -1,5 +1,8 @@
-# auth_user.py
 # -*- coding: utf-8 -*-
+"""
+LDY Pro Trader Auth System v7.5
+- v7.5: PBKDF2 보안 강화, Gist 로딩 캐싱(st.cache_data) 적용, 타입 힌트 보강
+"""
 
 import os
 import json
@@ -7,13 +10,14 @@ import hashlib
 import logging
 import re
 import time
-from typing import Tuple, Optional
+import secrets  # ✅ [New] 암호학적으로 안전한 난수 생성
+from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 
 import requests
 import streamlit as st
-import secrets
-# import extra_streamlit_components as stx  # 👈 [임시 주석] 쿠키 라이브러리 비활성화
+
+# import extra_streamlit_components as stx  # 🧹 [삭제] 미사용 라이브러리 제거
 
 AUTH_IMPORT_ERR = None
 
@@ -21,7 +25,7 @@ AUTH_IMPORT_ERR = None
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("auth_user")
 
-# 🔹 auth_user.py가 있는 폴더 기준으로 data 폴더 고정
+# 🔹 기본 경로 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 USER_DB_PATH = os.path.join(DATA_DIR, "users_db.json")
@@ -29,9 +33,8 @@ USER_DB_PATH = os.path.join(DATA_DIR, "users_db.json")
 CURRENT_USER_KEY = "ldy_current_user"
 JUST_REGISTERED_KEY = "just_registered"
 
-# ----------------- Secrets / Env 우선 -----------------
+# ----------------- 설정값 로딩 -----------------
 def _get_conf(key: str, default_val: str) -> str:
-    """Streamlit secrets > 환경변수 > 기본값 순"""
     try:
         if key in st.secrets:
             return st.secrets[key]
@@ -39,12 +42,11 @@ def _get_conf(key: str, default_val: str) -> str:
         pass
     return os.getenv(key, default_val)
 
-# 구독/관리용 키
 KEY_PRO   = _get_conf("LDY_KEY_PRO",   "220577")
 KEY_PRIME = _get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
-# 🔹 Gist 관련 설정
+# Gist 설정
 GIST_ID_USERS = _get_conf("LDY_GIST_ID", "")
 GIST_TOKEN    = _get_conf("LDY_GIST_TOKEN", "")
 GIST_ID_SUBS = _get_conf("LDY_GIST_SUBS_ID", GIST_ID_USERS)
@@ -56,14 +58,13 @@ def get_cookie_manager():
     # return stx.CookieManager(key="cookie_manager_core") # 👈 [임시 주석]
     return None
 
-# ----------------- 공통 유틸 -----------------
+# ----------------- 유틸 함수 -----------------
 def _now_utc_str() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def _normalize_email(email: str) -> str:
     return (email or "").strip().lower()
 
-# ----------------- 기본 로컬 DB 유틸 -----------------
 def _ensure_data_dir() -> None:
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -315,12 +316,22 @@ def save_user_db(db: dict) -> None:
     if GIST_ID_USERS and GIST_TOKEN:
         _save_user_db_to_gist(db)
 
-# ----------------- 인증 로직 -----------------
-def _create_salt(email: str) -> str:
+# ----------------- 보안 유틸 (v7.5 강화) -----------------
+def _create_salt() -> str:
+    """암호학적으로 안전한 32바이트 Salt 생성"""
     return secrets.token_hex(16)
 
 def _hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    """
+    v7.5: PBKDF2-HMAC-SHA256 적용 (100,000 iterations)
+    기존 단순 해싱보다 Rainbow Table 공격 등에 훨씬 안전함.
+    """
+    return hashlib.pbkdf2_hmac(
+        'sha256', 
+        password.encode('utf-8'), 
+        salt.encode('utf-8'), 
+        100000
+    ).hex()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def _validate_email(email: str) -> bool:
