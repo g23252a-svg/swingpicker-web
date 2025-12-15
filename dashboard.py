@@ -70,30 +70,7 @@ SECTOR_FDR_CACHE      = os.path.join(DATA_DIR, "sector_map_fdr_v2.csv")
 os.makedirs(DATA_DIR, exist_ok=True)
 REMOTE_RECOMMEND_URL = os.getenv("LDY_REMOTE_RECOMMEND_URL", "")
 
-# ---------------------------
-# 문의게시판 저장소 설정
-# ---------------------------
-INQUIRY_DB_PATH = os.path.join(DATA_DIR, "inquiries_db.json")
 
-def load_inquiry_db():
-    """문의글 DB 로드"""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    if not os.path.exists(INQUIRY_DB_PATH):
-        return {"inquiries": []}
-    try:
-        with open(INQUIRY_DB_PATH, "r", encoding="utf-8") as f:
-            db = json.load(f)
-        if "inquiries" not in db:
-            db["inquiries"] = []
-        return db
-    except Exception:
-        return {"inquiries": []}
-
-def save_inquiry_db(db):
-    """문의글 DB 저장"""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(INQUIRY_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
 
 # ---------------------------
 # [수정됨] 구독/권한(만료일) 관리 - Gist 연동
