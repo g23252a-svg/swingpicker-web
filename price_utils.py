@@ -20,8 +20,7 @@ KRX(유가/코스닥/코넥스) 호가가격단위(틱) 기반 가격 라운딩/
 from __future__ import annotations  # ✅ 반드시 여기(인코딩/모듈독스트링 다음, 다른 import보다 위)
 
 import math
-from typing import Optional, Union
-
+from typing import Optional, Union, Any  # ✅ Any 추가
 import numpy as np
 
 Number = Union[int, float]
@@ -81,6 +80,28 @@ def round_to_tick(price, method: str = "nearest"):
         return None
 
 
+def add_tick(price: Number, ticks: int = 1) -> int:
+    """
+    현재 가격에서 n호가 위/아래 가격을 계산 (단순 근사치)
+    ※ 경계선 부근에서는 호가 단위가 변하므로 완벽하지 않을 수 있으나,
+       일반적인 목표가/손절가 계산에는 충분함.
+    """
+    if is_nan(price): return 0
+    p = float(price)
+    t = krx_tick_size(p)
+    
+    # 틱을 더한 값 계산
+    target = p + (t * ticks)
+    
+    # 계산된 가격 기준으로 다시 라운딩하여 유효 가격으로 보정
+    return round_to_tick(target, method="nearest") or int(target)
+
+def calc_return(current: Number, base: Number) -> float:
+    """수익률 안전 계산 (0으로 나누기 방지)"""
+    if is_nan(current) or is_nan(base) or base == 0:
+        return 0.0
+    return ((float(current) - float(base)) / float(base)) * 100.0
+
 def format_krw(x) -> str:
     try:
         if x is None:
@@ -92,6 +113,22 @@ def format_krw(x) -> str:
     except Exception:
         return "-"
 
+
+def format_volume(x: Optional[Number], unit: str = "억") -> str:
+    """
+    거래대금 등을 '억' 단위로 변환하여 표시
+    입력값이 '원' 단위라고 가정 (예: 100000000 -> 1억)
+    """
+    if is_nan(x): return "-"
+    try:
+        val = float(x)
+        if unit == "억":
+            # 1억 미만은 그대로 표시
+            if val < 100000000:
+                return f"{int(val):,}"
+            return f"{int(val / 100000000):,}억"
+        return f"{int(val):,}"
+    except: return "-"
 
 def format_signed_krw(value: Optional[Number], suffix: str = "원") -> str:
     if is_nan(value):
