@@ -333,6 +333,8 @@ def _hash_password(password: str, salt: str) -> str:
         100000
     ).hex()
 
+
+
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def _validate_email(email: str) -> bool:
     return bool(EMAIL_REGEX.match(email)) if email else False
@@ -375,22 +377,46 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
     save_user_db(db)
     return True, f"회원가입 완료! 현재 권한: {role}", users[email_norm]
 
+
+# 👇 [추가] 구버전 비밀번호 확인용 함수
+def _hash_password_legacy(password: str, salt: str) -> str:
+    """v7.4 이하 구버전 해싱 (SHA256) - 마이그레이션용"""
+    return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+
 def authenticate_user(email: str, password: str):
     email_norm = _normalize_email(email)
     db = load_user_db()
     users = db.get("users", {})
     user = users.get(email_norm)
+    
     if not user:
         return None, "이메일 또는 비밀번호가 일치하지 않습니다."
+    
     salt = user.get("salt", "")
     pw_hash = user.get("password_hash", "")
-    if _hash_password(password, salt) != pw_hash:
+    
+    # 1. 신규 방식(PBKDF2)으로 검증
+    if _hash_password(password, salt) == pw_hash:
+        pass # 통과
+        
+    # 2. 실패 시, 구버전 방식(SHA256)으로 재검증 (마이그레이션)
+    elif _hash_password_legacy(password, salt) == pw_hash:
+        print(f"[System] Migrating password for {email_norm} to v7.5 security.")
+        # 구버전 암호가 맞으면 -> 신규 방식으로 암호화하여 DB 업데이트
+        new_hash = _hash_password(password, salt)
+        user["password_hash"] = new_hash
+        # (저장은 아래에서 한 번에 처리)
+    else:
         return None, "이메일 또는 비밀번호가 일치하지 않습니다."
+
+    # 로그인 성공 처리
     now_str = _now_utc_str()
     user["last_login"] = now_str
     users[email_norm] = user
+    
     db["users"] = users
     save_user_db(db)
+    
     return user, "로그인 성공"
 
 def get_user():
