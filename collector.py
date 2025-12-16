@@ -1,8 +1,7 @@
 """
-LDY Pro Trader Collector v7.5 (Smart Swing Stop & Volume Power)
+LDY Pro Trader Collector v8.0 (Macro Filter & Smart Regime)
+- v8.0: 매크로(환율/나스닥) 필터링 추가, 시장 위험도에 따른 EBS/종목수 동적 조절
 - v7.5: 최근 저점(Swing Low) 기반 스마트 손절 보정 + 매수세 강도(V-Power) 팩터 추가
-- v7.4: 변동성 국면별 ATR Multiplier (1.8~2.5) 동적 적용
-- v7.2: 시장 국면(Bull/Bear)에 따른 스코어링 가중치 동적 변화
 ...
 """
 
@@ -125,6 +124,63 @@ def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
     ).max(axis=1)
     return tr.rolling(period).mean()
 
+def calc_supertrend(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 10, multiplier: float = 3.0) -> Tuple[pd.Series, pd.Series]:
+    """
+    SuperTrend 지표 계산
+    Returns:
+        super_trend (pd.Series): 슈퍼트렌드 라인 값
+        trend (pd.Series): 1 (상승/Bull), -1 (하락/Bear)
+    """
+    # ATR 계산 (기존 함수 활용)
+    atr = calc_atr(high, low, close, period)
+    
+    hl2 = (high + low) / 2
+    basic_upper = hl2 + (multiplier * atr)
+    basic_lower = hl2 - (multiplier * atr)
+    
+    # 결과 담을 리스트 (Pandas Loop 속도 최적화를 위해 리스트 사용 후 변환)
+    st_out = [0.0] * len(close)
+    trend_out = [1] * len(close)
+    
+    # 초기값 설정
+    final_upper = basic_upper.iloc[0]
+    final_lower = basic_lower.iloc[0]
+    curr_trend = 1
+    
+    vals_c = close.values
+    vals_bu = basic_upper.values
+    vals_bl = basic_lower.values
+    
+    for i in range(1, len(close)):
+        # 1. Final Upper Band 계산
+        if (vals_bu[i] < final_upper) or (vals_c[i-1] > final_upper):
+            final_upper = vals_bu[i]
+        
+        # 2. Final Lower Band 계산
+        if (vals_bl[i] > final_lower) or (vals_c[i-1] < final_lower):
+            final_lower = vals_bl[i]
+            
+        # 3. 추세 결정
+        if curr_trend == 1: # 상승 중이었을 때
+            if vals_c[i] < final_lower:
+                curr_trend = -1
+                st_out[i] = final_upper
+                final_upper = vals_bu[i] # 추세 전환 시 밴드 리셋
+            else:
+                st_out[i] = final_lower
+        else: # 하락 중이었을 때
+            if vals_c[i] > final_upper:
+                curr_trend = 1
+                st_out[i] = final_lower
+                final_lower = vals_bl[i] # 추세 전환 시 밴드 리셋
+            else:
+                st_out[i] = final_upper
+                
+        trend_out[i] = curr_trend
+
+    return pd.Series(st_out, index=close.index), pd.Series(trend_out, index=close.index)
+
+
 def calc_mfi(high: pd.Series, low: pd.Series, close: pd.Series, vol: pd.Series, period: int = 14) -> pd.Series:
     tp = (high + low + close) / 3
     rmf = tp * vol
@@ -133,6 +189,9 @@ def calc_mfi(high: pd.Series, low: pd.Series, close: pd.Series, vol: pd.Series, 
     pos_s = pd.Series(pos, index=close.index).rolling(period).sum()
     neg_s = pd.Series(neg, index=close.index).rolling(period).sum().replace(0, 1)
     return 100 - (100 / (1 + (pos_s / neg_s)))
+
+
+
 
 def round_to_tick(price: float) -> int:
     if price < 2000: t = 1
@@ -313,6 +372,86 @@ def safe_ticker_name(ticker: str) -> Optional[str]:
         return stock.get_market_ticker_name(ticker)
     except Exception:
         return None
+
+
+# ------------------------------- 매크로(Macro) 필터 -------------------------------
+
+def check_macro_env(trade_ymd: str) -> Tuple[str, str, int, int]:
+    """
+    [v8.0] 환율(USD/KRW) 및 나스닥(IXIC) 매크로 지표 분석
+    
+    Returns:
+        risk_level (str): 'CRITICAL', 'HIGH', 'NORMAL'
+        summary_msg (str): 텔레그램 출력용 요약 메시지
+        adj_ebs (int): 조정된 PASS_EBS (기본값 PASS_EBS)
+        rec_limit (int): 텔레그램 추천 종목 수 (기본 5)
+    """
+    try:
+        # 날짜 설정 (데이터 수신 지연 고려하여 넉넉히 10일 전부터 조회)
+        end_dt = datetime.strptime(trade_ymd, "%Y%m%d")
+        start_dt = end_dt - timedelta(days=10)
+        start_s = start_dt.strftime("%Y-%m-%d")
+        
+        # 1. USD/KRW 환율 조회
+        df_usd = fdr.DataReader('USD/KRW', start_s)
+        curr_usd = df_usd['Close'].iloc[-1]
+        prev_usd = df_usd['Close'].iloc[-2]
+        usd_chg = (curr_usd - prev_usd) / prev_usd * 100
+        
+        # 2. 나스닥(IXIC) 조회
+        df_nas = fdr.DataReader('IXIC', start_s)
+        curr_nas = df_nas['Close'].iloc[-1]
+        prev_nas = df_nas['Close'].iloc[-2]
+        nas_chg = (curr_nas - prev_nas) / prev_nas * 100
+        
+        # 기본 설정값 로드
+        adj_ebs = PASS_EBS  # 기본값 4
+        rec_limit = 5       # 기본 Top 5
+        msgs = []
+        risk_score = 0
+        
+        # [로직 1] 환율 체크 (1400원 이상 or +0.5% 급등)
+        if curr_usd >= 1400:
+            msgs.append(f"💸 고환율({int(curr_usd)}원)")
+            risk_score += 1
+        elif usd_chg >= 0.5:
+            msgs.append(f"💸 환율급등(+{usd_chg:.2f}%)")
+            risk_score += 1
+            
+        # [로직 2] 나스닥 체크 (-2.0% 급락)
+        if nas_chg <= -2.0:
+            msgs.append(f"📉 나스닥급락({nas_chg:.2f}%)")
+            risk_score += 2  # 나스닥 급락은 더 큰 위험으로 간주
+            
+        # [결과 판정]
+        risk_level = "NORMAL"
+        
+        if risk_score >= 2:
+            # 위험도 높음: 보수적 진입 + 종목 수 축소
+            risk_level = "CRITICAL"
+            adj_ebs = PASS_EBS + 1  # 기준 점수 상향 (예: 4 -> 5점)
+            rec_limit = 3           # 추천 수 축소 (5 -> 3개)
+            
+        elif risk_score == 1:
+            # 위험도 중간: 보수적 진입만
+            risk_level = "HIGH"
+            adj_ebs = PASS_EBS + 1
+            rec_limit = 5
+            
+        # 요약 메시지 생성
+        summary = f"🌍 매크로: {risk_level}"
+        if msgs:
+            summary += f" ({', '.join(msgs)})"
+            if risk_level != "NORMAL":
+                summary += f"\n   → 🛡️ 보수적 대응 (EBS {adj_ebs}점↑ / Top{rec_limit})"
+                
+        log(f"🔍 매크로 분석 완료: {summary}")
+        return risk_level, summary, adj_ebs, rec_limit
+
+    except Exception as e:
+        log(f"⚠️ 매크로 데이터 수집 실패: {e}")
+        return "NORMAL", "🌍 매크로: N/A (데이터 수집 실패)", PASS_EBS, 5
+
 
 # ------------------------------- v7.0 OHLCV Caching System -------------------------------
 
@@ -1502,6 +1641,9 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     
     # ✅ [v7.5] V-Power 로드
     v_power = col_or_zero(x, "V_POWER")
+    
+    # 🔥 [v8.0] SuperTrend 데이터 로드
+    st_dir = col_or_zero(x, "SUPERTREND_DIR")
 
     # 팩터 계산
     rr_den = (close - stop).where((close-stop)>0, np.nan)
@@ -1544,7 +1686,6 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     vp_norm = pct_norm_pos(v_power, q=90, floor=1.0).fillna(0)
     tec_norm = np.clip(0.5 * vol_sweet + 0.3 * kairi_norm + 0.2 * vp_norm, 0, 1).fillna(0)
 
-    # (이하 기존 스코어링 로직 동일)
     base_score = (
         100 * w["RR"] * rr_norm + 100 * w["T1"] * t1_norm + 100 * w["SL"] * sl_norm +
         100 * w["NEAR"] * near_norm + 100 * w["MOM"] * mom_norm + 100 * w["LIQ"] * liq_norm +
@@ -1574,6 +1715,12 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
         except: pass
 
     final_score = np.clip(prelim_score + sector_bonus, 0, 100)
+    
+    # 🔥 [v8.0] SuperTrend 보너스 점수 추가 (+3점)
+    # 추세가 상승(1)인 경우 점수 상향 -> 추세 지속성 신뢰
+    st_bonus = (st_dir == 1).astype(float) * 3.0
+    final_score = np.clip(final_score + st_bonus, 0, 100)
+
     bb_sq = col_or_zero(x, "BB_SQUEEZE").clip(0, 1)
     final_score = np.clip(final_score + BONUS_BB_SQUEEZE_SCORE * bb_sq, 0, 100)
 
@@ -1591,6 +1738,7 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     x["RR1"] = rr1; x["Now%"] = now_gap; x["LDY_SCORE"] = final_score.round(1)
     x["ENTRY_SCORE"] = entry_score.round(1); x["RANK_SCORE"] = np.clip(rank_score * 100, 0, 100).round(1)
     x["ROUTE"] = x.apply(route_tag, axis=1); x["REGIME"] = x.apply(detect_regime_row, axis=1)
+    x["ST_DIR"] = st_dir # 디버깅용 저장
     
     # ✅ [v7.5 수정] AI 코멘트 생성 시 V_POWER 전달
     x["AI_COMMENT"] = x.apply(lambda row: generate_ai_comment(
@@ -1604,13 +1752,19 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
 # ------------------------------- 텔레그램 -------------------------------
 
 # send_telegram_auto 함수 수정 (인자 추가 및 내용 보강)
-def send_telegram_auto(df: pd.DataFrame, trade_ymd: str, market_summary: str = "") -> None: # ✅ market_summary 인자 추가
-    log("📨 텔레그램 발송 시작...")
+def send_telegram_auto(
+    df: pd.DataFrame, 
+    trade_ymd: str, 
+    market_summary: str = "", 
+    limit_count: int = 5  # ✅ [변경] 기본값 5, 매크로 상황에 따라 변경됨
+) -> None:
+    log(f"📨 텔레그램 발송 시작 (Top {limit_count})...")
+    
     if not TG_TOKEN or not TG_ID:
         log("⚠️ TG_TOKEN / TG_ID 미설정, 발송 생략")
         return
 
-    # ✅ 여기 추가 (텔레그램 출력 안전 포맷)
+    # 숫자 포맷팅 헬퍼 함수
     def _fmt_int(x):
         try:
             if pd.isna(x): return "N/A"                
@@ -1618,16 +1772,19 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str, market_summary: str = "
         except: return "N/A"            
 
     try:
-        top5 = df.head(5).reset_index(drop=True)
+        # ✅ [변경 1] 고정된 5개 대신 limit_count 만큼 자르기
+        top_picks = df.head(limit_count).reset_index(drop=True)
         trade_date = datetime.strptime(trade_ymd, "%Y%m%d").strftime('%Y-%m-%d')
 
-        # ✅ [v7.4 추가] 시장 요약 정보 상단 표시
-        msg = f"🔥 [LDY v7.4] 추천 Top 5 ({trade_date})\n"
+        # ✅ [변경 2] 제목에 버전(v8.0) 및 동적 개수(Top N) 반영
+        msg = f"🔥 [LDY v8.0] 추천 Top {limit_count} ({trade_date})\n"
+        
         if market_summary:
             msg += f"{market_summary}\n"
         msg += "-" * 30 + "\n\n"
 
-        for i, row in top5.iterrows():
+        # ✅ [변경 3] top5 변수 대신 top_picks 순회
+        for i, row in top_picks.iterrows():
             rank = i + 1
             name = row['종목명']
             code = row['종목코드']
@@ -1635,7 +1792,8 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str, market_summary: str = "
             buy = row.get('추천매수가', np.nan)
             score = row.get('LDY_SCORE', 0)
             comment = row.get('AI_COMMENT', '')
-            # ✅ 개별 코멘트 길이 제한(권장 120~180)
+            
+            # 개별 코멘트 길이 제한
             if len(comment) > 140:
                 comment = comment[:140] + "…"
 
@@ -1644,14 +1802,13 @@ def send_telegram_auto(df: pd.DataFrame, trade_ymd: str, market_summary: str = "
             msg += f"   🎯전략: {route}\n"
             msg += f"   💬AI: {comment}\n"
 
-            # ✅ 여기 변경
             msg += f"   🔵매수: {_fmt_int(buy)}\n"
             msg += (
                 f"   🔴손절: {_fmt_int(row.get('손절가'))} / "
                 f"🟢목표: {_fmt_int(row.get('추천매도가1'))}\n\n"
             )
 
-        # ✅ 최종 msg 길이 제한(텔레그램 4096 대비 여유)
+        # 메시지 길이 제한 (텔레그램 4096자 제한 대비)
         MAX_TG_LEN = 3800
         if len(msg) > MAX_TG_LEN:
             msg = msg[:MAX_TG_LEN] + "\n...\n(메시지 길이 제한으로 일부 생략)"
@@ -1731,12 +1888,11 @@ def analyze_ticker(
             else: break
         sqz_cnt = temp_cnt + 1
 
-    # ✅ [v7.5 핵심] Swing Low & V-Power 계산
+    # ✅ [v7.5] Swing Low & V-Power
     swing_low_10 = float(l.tail(10).min())
     dist_to_swing = (last_c - swing_low_10) / last_c * 100
     is_swing_support = (dist_to_swing < 5.0) and (last_c > swing_low_10)
 
-    # V-Power: (종가-시가)/(고가-저가) * 거래량 (양봉 거래량 비중과 유사)
     tail5 = ohlcv.tail(5).copy()
     body = (tail5["종가"] - tail5["시가"]).abs()
     range_len = (tail5["고가"] - tail5["저가"]).replace(0, 1)
@@ -1744,6 +1900,11 @@ def analyze_ticker(
     power_raw = (body / range_len) * tail5["거래량"] * sign
     avg_vol = tail5["거래량"].mean()
     v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
+
+    # 🔥 [v8.0] SuperTrend 계산
+    st_series, st_dir = calc_supertrend(h, l, c, period=10, multiplier=3.0)
+    st_val = float(st_series.iloc[-1])
+    st_trend = int(st_dir.iloc[-1]) # 1: 상승, -1: 하락
 
     above_ma20 = 1 if (np.isfinite(ma20.iloc[-1]) and last_c > float(ma20.iloc[-1])) else 0
     atr = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
@@ -1786,12 +1947,18 @@ def analyze_ticker(
 
     stop = buy - (atr_mult * atr)
     
-    # ✅ [v7.5 핵심] 스마트 손절 보정 로직
-    # ATR 손절가가 스윙 저점보다 위에 있으면(덜 안전), 스윙 저점 살짝 아래로 손절가 이동
-    # 단, 스윙 저점이 너무 멀면(-12% 이상) ATR 방식 유지
+    # ✅ [v7.5] 기존 스윙 로우 보정
     if (dist_to_swing < 12.0) and (stop > swing_low_10):
         stop = swing_low_10 * 0.99
     
+    # 🔥 [v8.0 핵심] SuperTrend 기반 스마트 손절 보정
+    # 상승 추세(trend==1)이고, SuperTrend 라인이 현재가보다 아래에 있다면
+    # 기존 손절가(ATR/SwingLow)와 SuperTrend 중 '더 높은 가격'을 손절가로 채택
+    if st_trend == 1 and st_val < last_c:
+        # 단, 진입가(buy)보다는 낮아야 함 (방어 코드)
+        if st_val < buy:
+            stop = max(stop, st_val)
+
     limit_pct = 0.90 if is_high_vol else 0.93
     stop = max(stop, buy * limit_pct)
     stop = min(stop, buy * 0.98)
@@ -1822,11 +1989,12 @@ def analyze_ticker(
         "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
         "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
-        "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2), # ✅ 추가된 항목
+        "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
+        "SUPERTREND_VAL": int(st_val), "SUPERTREND_DIR": int(st_trend), # 🔥 추가됨
         "BB_BW": round(bb_bw_val, 2) if np.isfinite(bb_bw_val) else np.nan,
         "BB_SQUEEZE_BW": int(bw_squeeze), "TTM_SQUEEZE": int(ttm_squeeze), "TTM_SQUEEZE_CNT": int(sqz_cnt),
         "BB_SQUEEZE": int(bb_squeeze), "Above_MA20": int(above_ma20), 
-        "IS_SWING_SUPPORT": is_swing_support, # ✅ 추가된 항목
+        "IS_SWING_SUPPORT": is_swing_support,
         "ret_5d_%": round(ret_5, 2) if np.isfinite(ret_5) else np.nan,
         "ret_10d_%": round(ret_10, 2) if np.isfinite(ret_10) else np.nan,
         "ret_20d_%": round(ret_20, 2) if np.isfinite(ret_20) else np.nan,
@@ -1859,6 +2027,15 @@ def main(
     # 1) 먼저 거래 기준일 결정
     trade_ymd = resolve_trade_date(trade_date)
 
+    # 🔥 [v8.0 추가] 매크로 필터 적용 ---------------------------------
+    macro_risk, macro_msg, new_ebs, rec_limit_cnt = check_macro_env(trade_ymd)
+    
+    # 전역 변수 PASS_EBS를 동적으로 수정 (주의: ThreadPoolExecutor 사용 시에도 global 변경은 반영됨)
+    global PASS_EBS
+    PASS_EBS = new_ebs
+    log(f"⚙️ 매크로 필터 적용: PASS_EBS={PASS_EBS}, Telegram_Limit={rec_limit_cnt}")
+
+    
     # 2) 그 날짜를 기준으로 시총 맵 생성 시도
     mcap_map, mcap_ymd = build_mcap_map(trade_ymd)
 
@@ -2108,6 +2285,11 @@ def main(
     if enable_telegram:
         # 시장 요약 문구 생성
         summary_text = f"🌡 {mkt_temp} (Breadth: {breadth.get('ALL', 0)}%)"
+
+        # ✅ 매크로 메시지 추가
+        if macro_msg:
+            summary_text += f"\n{macro_msg}"
+            
         if "TOP_SECTORS_5D" in df_out.columns:
             # 상위 2개 섹터만 간략히
             try:
@@ -2115,10 +2297,10 @@ def main(
                 summary_text += f"\n🚀 주도: {' '.join(top_sec_str)}"
             except: pass
 
-        send_telegram_auto(df_out, trade_ymd, market_summary=summary_text) # ✅ 인자 전달
+        send_telegram_auto(df_out, trade_ymd, market_summary=summary_text, limit_count=rec_limit_cnt)
     else:
         log("✉️ --no-telegram 옵션으로 인해 텔레그램 발송 생략")
-
+        
 if __name__ == "__main__":
     import argparse
 
