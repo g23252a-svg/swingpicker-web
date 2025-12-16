@@ -281,6 +281,7 @@ def _validate_password(pw: str) -> Tuple[bool, str]:
 def register_user(email: str, password: str, nickname: str, invite_code: str = ""):
     email_norm = _normalize_email(email)
     
+    # [방어] 'admin' 아이디 등록 시도 차단
     if email_norm == MASTER_ADMIN_ID:
          return False, "해당 ID는 예약어로 사용할 수 없습니다.", None
 
@@ -328,6 +329,7 @@ def authenticate_user(login_input: str, password: str):
     # [New] Master Admin 특수 로그인 처리
     if input_norm == MASTER_ADMIN_ID:
         if password == MASTER_ADMIN_PW:
+            # 관리자 전용 가상 유저 객체 생성
             admin_user = {
                 "login_id": MASTER_ADMIN_ID,
                 "nickname": "System Admin",
@@ -339,7 +341,9 @@ def authenticate_user(login_input: str, password: str):
         else:
             return None, "관리자 비밀번호가 일치하지 않습니다."
 
-    # --- 일반 사용자 로그인 로직 ---
+    # --- 일반 사용자 로그인 로직 (기존 유지) ---
+    
+    # [보안] Rate Limit 체크
     is_allowed, limit_msg = check_rate_limit(input_norm)
     if not is_allowed:
         return None, limit_msg
@@ -355,6 +359,7 @@ def authenticate_user(login_input: str, password: str):
     salt = user.get("salt", "")
     pw_hash = user.get("password_hash", "")
     
+    # 검증 (v7.5 PBKDF2 -> v7.4 SHA256)
     if _hash_password(password, salt) == pw_hash:
         pass
     elif _hash_password_legacy(password, salt) == pw_hash:
@@ -383,6 +388,7 @@ def list_users():
 def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str] = None) -> bool:
     email_norm = _normalize_email(email)
     
+    # 관리자는 role 변경 불가 (항상 admin)
     if email_norm == MASTER_ADMIN_ID: return False
 
     if acting_admin_email:
@@ -392,6 +398,7 @@ def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str
     users = db.get("users", {})
     if email_norm not in users: return False
     
+    # 다른 관리자가 또 다른 관리자를 강등시키는 것 방지 등 로직
     if acting_admin_email == email_norm:
         current_role = users[email_norm].get("role", "free")
         if current_role == "admin" and new_role != "admin": return False
@@ -404,6 +411,7 @@ def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str
 def update_user_profile(email: str, new_nickname: str = None, new_password: str = None) -> Tuple[bool, str]:
     email_norm = _normalize_email(email)
     
+    # [New] 'admin' 계정은 프로필 수정 불가 (하드코딩이므로)
     if email_norm == MASTER_ADMIN_ID:
         return False, "시스템 관리자(admin) 계정은 프로필을 변경할 수 없습니다."
 
@@ -458,6 +466,7 @@ def render_auth_box(show_debug: bool = False):
                 time.sleep(0.5) 
                 st.rerun()
 
+        # admin 계정이 아닐 때만 마이페이지 노출
         if user['login_id'] != MASTER_ADMIN_ID:
             with st.expander(f"⚙️ 내 정보 수정", expanded=False):
                 st.info(f"가입일: {user.get('created_at', '')[:10]}")
