@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Dashboard v7.5 (Smart Swing Stop & V-Power)
+LDY Pro Trader Dashboard v8.0 (Macro View & SuperTrend Chart)
 - v7.5: 7-Factor 레이더 차트, 스마트 손절/매수세(V-Power) 시각화
 - v7.0: 팩터 기반 분석, 스퀴즈 지속일(CNT) 표시, 켈트너 채널
 """
@@ -780,6 +780,38 @@ def get_market_status(scored_df: pd.DataFrame):
     # 2) 실패 시 로컬 fallback (globals() 금지)
     return get_market_status_local(scored_df)
 
+
+@st.cache_data(ttl=600)
+def get_macro_metrics():
+    """
+    [v8.0] 환율(USD/KRW), 나스닥(IXIC) 조회
+    """
+    if not FDR_OK:
+        return None
+
+    metrics = {}
+    try:
+        # 1. 환율
+        # 최근 7일치 가져와서 마지막 영업일 기준 등락 계산
+        df_usd = fdr.DataReader("USD/KRW", (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"))
+        if df_usd is not None and not df_usd.empty:
+            curr = df_usd["Close"].iloc[-1]
+            prev = df_usd["Close"].iloc[-2]
+            metrics["USD"] = (curr, (curr - prev))
+
+        # 2. 나스닥
+        df_nas = fdr.DataReader("IXIC", (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"))
+        if df_nas is not None and not df_nas.empty:
+            curr = df_nas["Close"].iloc[-1]
+            prev = df_nas["Close"].iloc[-2]
+            metrics["IXIC"] = (curr, (curr - prev) / prev * 100)
+            
+    except Exception as e:
+        logger.warning(f"Macro metrics failed: {e}")
+        
+    return metrics
+
+
 @st.cache_data(ttl=600)
 def get_fear_greed_index(scored_df: pd.DataFrame):
     """
@@ -1291,26 +1323,26 @@ def plot_interactive_chart(
                 line=dict(width=1.5, dash='dot', color=COLOR_KC)
             ), row=1, col=1)
 
-    # 5) 슈퍼트렌드 (추세 전환 포인트 강조)
+    # 5) SuperTrend (Trailing Stop Line) - v8.0 개선 (선 차트로 변경)
     if "Trend" in df.columns and "SuperTrend" in df.columns:
-        # 상승 전환점 (밝은 민트색)
-        up = df[df["Trend"] == 1]
-        if not up.empty:
+        # 상승 추세 (초록색 실선 - 지지선 역할)
+        st_up = df[df["Trend"] == 1]["SuperTrend"]
+        if not st_up.empty:
             fig.add_trace(go.Scatter(
-                x=up.index, y=up["SuperTrend"], 
-                mode="markers", 
-                marker=dict(size=4, color='#00E676', symbol='triangle-up'), 
-                name="상승추세"
+                x=st_up.index, y=st_up,
+                mode='lines',
+                line=dict(color='#00E676', width=2), # Solid Green Line
+                name='SuperTrend (Support)'
             ), row=1, col=1)
 
-        # 하락 전환점 (진한 핑크색)
-        down = df[df["Trend"] == -1]
-        if not down.empty:
+        # 하락 추세 (빨간색 점선 - 저항선 역할)
+        st_down = df[df["Trend"] == -1]["SuperTrend"]
+        if not st_down.empty:
             fig.add_trace(go.Scatter(
-                x=down.index, y=down["SuperTrend"], 
-                mode="markers", 
-                marker=dict(size=4, color='#FF4081', symbol='triangle-down'), 
-                name="하락추세"
+                x=st_down.index, y=st_down,
+                mode='lines',
+                line=dict(color='#FF4081', width=2, dash='dot'), # Dotted Red Line
+                name='SuperTrend (Resist)'
             ), row=1, col=1)
 
     # 6) 거래량 (캔들 색상과 일치시키되 투명도 조절)
@@ -2295,6 +2327,35 @@ with tab1:
     c2.metric("KOSDAQ", kq_value, kq_delta, delta_color=kq_color)
 
 
+    # 👇 [여기 삽입] 🔥 [v8.0] 매크로(환율/미증시) 메트릭 및 리스크 배너
+    macro_data = get_macro_metrics()
+    if macro_data:
+        st.markdown("---")
+        m1, m2, m3 = st.columns(3)
+        
+        # 환율
+        if "USD" in macro_data:
+            val, diff = macro_data["USD"]
+            # 1400원 넘으면 경고색 (inverse: 빨강/파랑 반전 효과 활용 or 직접 지정)
+            usd_color = "inverse" if val >= 1400 else "normal" 
+            m1.metric("USD/KRW (환율)", f"{val:,.1f}원", f"{diff:+.1f}원", delta_color=usd_color)
+            
+        # 나스닥
+        if "IXIC" in macro_data:
+            val, pct = macro_data["IXIC"]
+            # -2% 이상 하락 시 경고색
+            nas_color = "inverse" if pct <= -2.0 else "normal"
+            m2.metric("NASDAQ (나스닥)", f"{val:,.0f}", f"{pct:+.2f}%", delta_color=nas_color)
+            
+        # 리스크 상태 요약
+        risk_msg = "✅ 평온 (Normal)"
+        if "USD" in macro_data and macro_data["USD"][0] >= 1400:
+            risk_msg = "⚠️ 주의 (고환율)"
+        if "IXIC" in macro_data and macro_data["IXIC"][1] <= -2.0:
+            risk_msg = "🚨 위험 (미증시 급락)"
+            
+        m3.metric("시장 리스크 모드", risk_msg)
+
     # 🔥 v6.5: 데이터 기준 시각 + 지표 모드 + 소스 태그 + 신선도 경고
     fg_score, fg_status = get_fear_greed_index(scored)
 
@@ -2538,6 +2599,13 @@ with tab2:
 
     if show_only_squeeze and "TTM_SQUEEZE" in filtered.columns:
         filtered = filtered[filtered["TTM_SQUEEZE"] == 1]
+
+    # 👇 [여기 삽입] 🔥 [v8.0] SuperTrend 상승 추세 필터 추가
+    show_supertrend_bull = st.checkbox("📈 SuperTrend 상승 추세만 보기", key="chk_st_bull")
+
+    if show_supertrend_bull and "SUPERTREND_DIR" in filtered.columns:
+        # 1: 상승, -1: 하락 (Collector v8.0 기준)
+        filtered = filtered[filtered["SUPERTREND_DIR"] == 1]
 
 
     if auth_status in ["pro", "prime", "admin"]:
