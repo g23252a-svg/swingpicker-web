@@ -46,6 +46,10 @@ KEY_PRO   = _get_conf("LDY_KEY_PRO",   "220577")
 KEY_PRIME = _get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
+# 👇 [추가] 👑 Master Admin 설정 (DB 없이 즉시 로그인)
+MASTER_ADMIN_ID = "admin"
+MASTER_ADMIN_PW = "2022322"
+
 # Gist 설정
 GIST_ID_USERS = _get_conf("LDY_GIST_ID", "")
 GIST_TOKEN    = _get_conf("LDY_GIST_TOKEN", "")
@@ -385,6 +389,9 @@ def _validate_password(pw: str) -> Tuple[bool, str]:
 
 def register_user(email: str, password: str, nickname: str, invite_code: str = ""):
     email_norm = _normalize_email(email)
+    # 👇 [추가] 'admin' 아이디 등록 시도 차단
+    if email_norm == MASTER_ADMIN_ID:
+         return False, "해당 ID는 예약어로 사용할 수 없습니다.", None
     if not email_norm or not password:
         return False, "이메일 / 비밀번호를 입력해 주세요.", None
     if not _validate_email(email_norm):
@@ -424,6 +431,21 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
 
 def authenticate_user(email: str, password: str):
     email_norm = _normalize_email(email)
+
+    # 👇 [추가] Master Admin 특수 로그인 처리 (DB 조회 건너뜀)
+    if email_norm == MASTER_ADMIN_ID:
+        if password == MASTER_ADMIN_PW:
+            # 관리자 전용 가상 유저 객체 생성
+            admin_user = {
+                "login_id": MASTER_ADMIN_ID,
+                "nickname": "System Admin",
+                "role": "admin",
+                "created_at": _now_utc_str(),
+                "last_login": _now_utc_str()
+            }
+            return admin_user, "👑 관리자 로그인 성공"
+        else:
+            return None, "관리자 비밀번호가 일치하지 않습니다."
     
     # [보안] Rate Limit 체크
     is_allowed, limit_msg = check_rate_limit(email_norm)
@@ -496,6 +518,9 @@ def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str
 # ----------------- [Upgrade 3] 마이페이지 기능 -----------------
 def update_user_profile(email: str, new_nickname: str = None, new_password: str = None) -> Tuple[bool, str]:
     email_norm = _normalize_email(email)
+    # 👇 [추가] 'admin' 계정은 프로필 수정 불가
+    if email_norm == MASTER_ADMIN_ID:
+        return False, "시스템 관리자(admin) 계정은 프로필을 변경할 수 없습니다."  
     db = load_user_db()
     users = db.get("users", {})
     
