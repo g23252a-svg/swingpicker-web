@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Auth System v8.1 (Admin Special)
-- v8.1: 'admin' ID 전용 하드코딩 로그인 기능 추가 (DB 조회 건너뜀)
-- v8.0: Rate Limiting, Native Caching, MyPage 기능 포함
+LDY Pro Trader Auth System v8.2 (Full Feature)
+- v8.2: dashboard.py 호환성 복구 (구독/문의 DB 함수 복원)
+- v8.1: 'admin' 하드코딩 로그인
+- v8.0: Rate Limiting, Native Caching, MyPage
 """
 
 import os
@@ -94,7 +95,7 @@ def _now_utc_str() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def _normalize_email(email: str) -> str:
-    return (email or "").strip().lower() # admin 입력 시 소문자로 처리됨
+    return (email or "").strip().lower() 
 
 def _ensure_data_dir() -> None:
     if not os.path.exists(DATA_DIR):
@@ -115,7 +116,6 @@ def _normalize_user_db_structure(db_raw: dict) -> dict:
         u["login_id"] = _normalize_email(u.get("login_id", email_norm))
         u.setdefault("role", "free")
         
-        # 날짜 필드 보정
         now_utc = _now_utc_str()
         created = u.get("created_at") or now_utc
         last = u.get("last_login") or created
@@ -206,6 +206,43 @@ def save_json_to_gist_file(gist_id: str, file_name: str, data: dict) -> bool:
         return True
     except Exception: return False
 
+# ----------------- [복구됨] 구독/문의 DB 관련 함수 -----------------
+SUBSCRIPTIONS_GIST_FILE = "subscriptions_db.json"
+INQUIRIES_GIST_FILE     = "inquiries_db.json"
+DEFAULT_SUBSCRIPTIONS_DB = {"subs": {}, "updated_at": None}
+DEFAULT_INQUIRIES_DB     = {"inquiries": [], "updated_at": None}
+
+def load_subscriptions_db() -> dict:
+    data = load_json_from_gist_file(GIST_ID_SUBS, SUBSCRIPTIONS_GIST_FILE, default=DEFAULT_SUBSCRIPTIONS_DB)
+    if not isinstance(data, dict): return dict(DEFAULT_SUBSCRIPTIONS_DB)
+    if "subs" not in data: data["subs"] = {}
+    return data
+
+def save_subscriptions_db(db: dict) -> bool:
+    if not isinstance(db, dict): db = dict(DEFAULT_SUBSCRIPTIONS_DB)
+    db["updated_at"] = _now_utc_str()
+    return save_json_to_gist_file(GIST_ID_SUBS, SUBSCRIPTIONS_GIST_FILE, db)
+
+def load_inquiries_db() -> dict:
+    data = load_json_from_gist_file(GIST_ID_INQ, INQUIRIES_GIST_FILE, default=DEFAULT_INQUIRIES_DB)
+    if not isinstance(data, dict): return dict(DEFAULT_INQUIRIES_DB)
+    if "inquiries" not in data: data["inquiries"] = []
+    return data
+
+def save_inquiries_db(db: dict) -> bool:
+    if not isinstance(db, dict): db = dict(DEFAULT_INQUIRIES_DB)
+    db["updated_at"] = _now_utc_str()
+    return save_json_to_gist_file(GIST_ID_INQ, INQUIRIES_GIST_FILE, db)
+
+def load_inquiry_items() -> list:
+    return load_inquiries_db().get("inquiries", [])
+
+def save_inquiry_items(items: list) -> bool:
+    db = load_inquiries_db()
+    db["inquiries"] = list(items) if isinstance(items, list) else []
+    return save_inquiries_db(db)
+
+
 # ----------------- DB 캐싱 -----------------
 @st.cache_data(ttl=60, show_spinner=False)
 def _fetch_user_db_cached() -> dict:
@@ -244,7 +281,6 @@ def _validate_password(pw: str) -> Tuple[bool, str]:
 def register_user(email: str, password: str, nickname: str, invite_code: str = ""):
     email_norm = _normalize_email(email)
     
-    # [방어] 'admin' 아이디 등록 시도 차단
     if email_norm == MASTER_ADMIN_ID:
          return False, "해당 ID는 예약어로 사용할 수 없습니다.", None
 
@@ -292,7 +328,6 @@ def authenticate_user(login_input: str, password: str):
     # [New] Master Admin 특수 로그인 처리
     if input_norm == MASTER_ADMIN_ID:
         if password == MASTER_ADMIN_PW:
-            # 관리자 전용 가상 유저 객체 생성
             admin_user = {
                 "login_id": MASTER_ADMIN_ID,
                 "nickname": "System Admin",
@@ -304,9 +339,7 @@ def authenticate_user(login_input: str, password: str):
         else:
             return None, "관리자 비밀번호가 일치하지 않습니다."
 
-    # --- 일반 사용자 로그인 로직 (기존 유지) ---
-    
-    # [보안] Rate Limit 체크
+    # --- 일반 사용자 로그인 로직 ---
     is_allowed, limit_msg = check_rate_limit(input_norm)
     if not is_allowed:
         return None, limit_msg
@@ -322,7 +355,6 @@ def authenticate_user(login_input: str, password: str):
     salt = user.get("salt", "")
     pw_hash = user.get("password_hash", "")
     
-    # 검증 (v7.5 PBKDF2 -> v7.4 SHA256)
     if _hash_password(password, salt) == pw_hash:
         pass
     elif _hash_password_legacy(password, salt) == pw_hash:
@@ -351,7 +383,6 @@ def list_users():
 def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str] = None) -> bool:
     email_norm = _normalize_email(email)
     
-    # 관리자는 role 변경 불가 (항상 admin)
     if email_norm == MASTER_ADMIN_ID: return False
 
     if acting_admin_email:
@@ -361,7 +392,6 @@ def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str
     users = db.get("users", {})
     if email_norm not in users: return False
     
-    # 다른 관리자가 또 다른 관리자를 강등시키는 것 방지 등 로직
     if acting_admin_email == email_norm:
         current_role = users[email_norm].get("role", "free")
         if current_role == "admin" and new_role != "admin": return False
@@ -374,7 +404,6 @@ def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str
 def update_user_profile(email: str, new_nickname: str = None, new_password: str = None) -> Tuple[bool, str]:
     email_norm = _normalize_email(email)
     
-    # [New] 'admin' 계정은 프로필 수정 불가 (하드코딩이므로)
     if email_norm == MASTER_ADMIN_ID:
         return False, "시스템 관리자(admin) 계정은 프로필을 변경할 수 없습니다."
 
@@ -429,7 +458,6 @@ def render_auth_box(show_debug: bool = False):
                 time.sleep(0.5) 
                 st.rerun()
 
-        # admin 계정이 아닐 때만 마이페이지 노출
         if user['login_id'] != MASTER_ADMIN_ID:
             with st.expander(f"⚙️ 내 정보 수정", expanded=False):
                 st.info(f"가입일: {user.get('created_at', '')[:10]}")
