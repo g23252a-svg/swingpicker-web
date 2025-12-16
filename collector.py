@@ -126,57 +126,64 @@ def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
 
 def calc_supertrend(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 10, multiplier: float = 3.0) -> Tuple[pd.Series, pd.Series]:
     """
-    SuperTrend 지표 계산
-    Returns:
-        super_trend (pd.Series): 슈퍼트렌드 라인 값
-        trend (pd.Series): 1 (상승/Bull), -1 (하락/Bear)
+    SuperTrend 지표 계산 (초기 NaN 예외처리 적용)
     """
-    # ATR 계산 (기존 함수 활용)
     atr = calc_atr(high, low, close, period)
     
     hl2 = (high + low) / 2
     basic_upper = hl2 + (multiplier * atr)
     basic_lower = hl2 - (multiplier * atr)
     
-    # 결과 담을 리스트 (Pandas Loop 속도 최적화를 위해 리스트 사용 후 변환)
-    st_out = [0.0] * len(close)
+    # 결과 배열 초기화 (NaN으로 시작)
+    st_out = [np.nan] * len(close)
     trend_out = [1] * len(close)
-    
-    # 초기값 설정
-    final_upper = basic_upper.iloc[0]
-    final_lower = basic_lower.iloc[0]
-    curr_trend = 1
     
     vals_c = close.values
     vals_bu = basic_upper.values
     vals_bl = basic_lower.values
     
-    for i in range(1, len(close)):
-        # 1. Final Upper Band 계산
+    # 유효한 ATR 값이 나오는 시점부터 계산 시작
+    # period 값 인덱스부터 데이터가 있다고 가정
+    start_idx = period
+    if start_idx >= len(close):
+        # 데이터가 너무 짧은 경우 예외 처리
+        return pd.Series(st_out, index=close.index), pd.Series(trend_out, index=close.index)
+
+    # 초기값 설정 (첫 유효값 기준)
+    final_upper = vals_bu[start_idx]
+    final_lower = vals_bl[start_idx]
+    curr_trend = 1
+    
+    st_out[start_idx] = final_lower
+    trend_out[start_idx] = 1
+    
+    for i in range(start_idx + 1, len(close)):
+        # 1. Upper Band 계산
         if (vals_bu[i] < final_upper) or (vals_c[i-1] > final_upper):
             final_upper = vals_bu[i]
         
-        # 2. Final Lower Band 계산
+        # 2. Lower Band 계산
         if (vals_bl[i] > final_lower) or (vals_c[i-1] < final_lower):
             final_lower = vals_bl[i]
             
         # 3. 추세 결정
-        if curr_trend == 1: # 상승 중이었을 때
+        prev_trend = trend_out[i-1]
+        
+        if prev_trend == 1: # 상승 중
             if vals_c[i] < final_lower:
                 curr_trend = -1
-                st_out[i] = final_upper
-                final_upper = vals_bu[i] # 추세 전환 시 밴드 리셋
+                final_upper = vals_bu[i] # Reset
             else:
-                st_out[i] = final_lower
-        else: # 하락 중이었을 때
+                curr_trend = 1
+        else: # 하락 중
             if vals_c[i] > final_upper:
                 curr_trend = 1
-                st_out[i] = final_lower
-                final_lower = vals_bl[i] # 추세 전환 시 밴드 리셋
+                final_lower = vals_bl[i] # Reset
             else:
-                st_out[i] = final_upper
+                curr_trend = -1
                 
         trend_out[i] = curr_trend
+        st_out[i] = final_upper if curr_trend == -1 else final_lower
 
     return pd.Series(st_out, index=close.index), pd.Series(trend_out, index=close.index)
 
@@ -1990,7 +1997,7 @@ def analyze_ticker(
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
         "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
         "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
-        "SUPERTREND_VAL": int(st_val), "SUPERTREND_DIR": int(st_trend), # 🔥 추가됨
+        "SUPERTREND_VAL": int(st_val) if np.isfinite(st_val) else 0, "SUPERTREND_DIR": int(st_trend) if np.isfinite(st_trend) else 1,
         "BB_BW": round(bb_bw_val, 2) if np.isfinite(bb_bw_val) else np.nan,
         "BB_SQUEEZE_BW": int(bw_squeeze), "TTM_SQUEEZE": int(ttm_squeeze), "TTM_SQUEEZE_CNT": int(sqz_cnt),
         "BB_SQUEEZE": int(bb_squeeze), "Above_MA20": int(above_ma20), 
