@@ -198,7 +198,59 @@ def calc_mfi(high: pd.Series, low: pd.Series, close: pd.Series, vol: pd.Series, 
     return 100 - (100 / (1 + (pos_s / neg_s)))
 
 
+def calc_vwap(df: pd.DataFrame) -> float:
+    """
+    주어진 기간(DataFrame) 동안의 거래량 가중 평균 가격(VWAP) 계산
+    Typical Price = (High + Low + Close) / 3
+    VWAP = Sum(Typical Price * Volume) / Sum(Volume)
+    """
+    if df.empty:
+        return 0.0
+        
+    v = df['거래량']
+    tp = (df['고가'] + df['저가'] + df['종가']) / 3
+    
+    vol_sum = v.sum()
+    if vol_sum == 0:
+        return 0.0
+        
+    return (tp * v).sum() / vol_sum
 
+def check_candle_pattern(o: pd.Series, h: pd.Series, l: pd.Series, c: pd.Series) -> List[str]:
+    """
+    최근 캔들 패턴(망치형, 장악형) 감지
+    """
+    if len(c) < 2:
+        return []
+
+    patterns = []
+    
+    # 마지막 캔들 기준 (오늘)
+    curr_o, curr_h, curr_l, curr_c = o.iloc[-1], h.iloc[-1], l.iloc[-1], c.iloc[-1]
+    # 전일 캔들
+    prev_o, prev_h, prev_l, prev_c = o.iloc[-2], h.iloc[-2], l.iloc[-2], c.iloc[-2]
+
+    # 1. 망치형 (Hammer): 하락 추세 바닥에서 긴 아랫꼬리 + 작은 몸통
+    # (여기서는 추세 판단 없이 캔들 모양만 봅니다)
+    body = abs(curr_c - curr_o)
+    upper_shadow = curr_h - max(curr_c, curr_o)
+    lower_shadow = min(curr_c, curr_o) - curr_l
+    
+    # 조건: 아랫꼬리가 몸통의 2배 이상 & 윗꼬리는 몸통의 0.5배 이하 & 몸통이 아주 작지는 않음
+    if (lower_shadow >= body * 2) and (upper_shadow <= body * 0.5) and (body > 0):
+        patterns.append("망치형")
+
+    # 2. 상승 장악형 (Bullish Engulfing): 전일 음봉 -> 금일 양봉이 전일 몸통을 감쌈
+    is_prev_red = prev_c < prev_o
+    is_curr_green = curr_c > curr_o
+    
+    if is_prev_red and is_curr_green:
+        # 금일 시가가 전일 종가보다 낮거나 같고, 금일 종가가 전일 시가보다 높거나 같음
+        # (몸통이 이전 몸통을 완전히 덮음)
+        if (curr_o <= prev_c) and (curr_c >= prev_o):
+            patterns.append("장악형")
+            
+    return patterns
 
 def round_to_tick(price: float) -> int:
     if price < 2000: t = 1
@@ -1756,14 +1808,40 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     ), axis=1)
     return x
 
-# ------------------------------- 텔레그램 -------------------------------
+# ------------------------------- 텔레그램 (업그레이드) -------------------------------
 
-# send_telegram_auto 함수 수정 (인자 추가 및 내용 보강)
+def get_naver_theme_tags(code: str) -> str:
+    """
+    [v8.5] 네이버 금융에서 '동일업종(섹터)' 정보를 크롤링하여 해시태그로 반환
+    """
+    try:
+        url = f"https://finance.naver.com/item/main.naver?code={code}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        # 타임아웃을 짧게 주어 전체 속도 저하 방지
+        resp = requests.get(url, headers=headers, timeout=2)
+        if resp.status_code != 200:
+            return ""
+        
+        # 네이버 금융은 EUC-KR 인코딩 사용 가능성 있음
+        text = resp.content.decode('euc-kr', 'replace')
+        
+        # 정규식으로 '동일업종비교' 링크 텍스트 추출 (BeautifulSoup 없이 가볍게 처리)
+        # 패턴: <a href="/sise/sise_group_detail.naver?type=upjong...">업종명</a>
+        match = re.search(r'sise_group_detail\.naver\?type=upjong[^>]*>([^<]+)</a>', text)
+        if match:
+            sector_name = match.group(1).strip()
+            # 공백을 언더바(_)로 치환하여 해시태그화
+            return f"#{sector_name.replace(' ', '_')}"
+            
+    except Exception:
+        pass
+    return ""
+
 def send_telegram_auto(
     df: pd.DataFrame, 
     trade_ymd: str, 
     market_summary: str = "", 
-    limit_count: int = 5  # ✅ [변경] 기본값 5, 매크로 상황에 따라 변경됨
+    limit_count: int = 5  # 기본값 5
 ) -> None:
     log(f"📨 텔레그램 발송 시작 (Top {limit_count})...")
     
@@ -1771,26 +1849,25 @@ def send_telegram_auto(
         log("⚠️ TG_TOKEN / TG_ID 미설정, 발송 생략")
         return
 
-    # 숫자 포맷팅 헬퍼 함수
+    # 숫자 포맷팅 헬퍼
     def _fmt_int(x):
         try:
-            if pd.isna(x): return "N/A"                
+            if pd.isna(x): return "N/A"                 
             return f"{int(float(x)):,}"
         except: return "N/A"            
 
     try:
-        # ✅ [변경 1] 고정된 5개 대신 limit_count 만큼 자르기
+        # 상위 종목 자르기
         top_picks = df.head(limit_count).reset_index(drop=True)
         trade_date = datetime.strptime(trade_ymd, "%Y%m%d").strftime('%Y-%m-%d')
 
-        # ✅ [변경 2] 제목에 버전(v8.0) 및 동적 개수(Top N) 반영
-        msg = f"🔥 [LDY v8.0] 추천 Top {limit_count} ({trade_date})\n"
+        # [v8.5] 타이틀 업데이트
+        msg = f"🔥 [LDY v8.5] 추천 Top {limit_count} ({trade_date})\n"
         
         if market_summary:
             msg += f"{market_summary}\n"
         msg += "-" * 30 + "\n\n"
 
-        # ✅ [변경 3] top5 변수 대신 top_picks 순회
         for i, row in top_picks.iterrows():
             rank = i + 1
             name = row['종목명']
@@ -1800,14 +1877,33 @@ def send_telegram_auto(
             score = row.get('LDY_SCORE', 0)
             comment = row.get('AI_COMMENT', '')
             
-            # 개별 코멘트 길이 제한
+            # ✅ [v8.5 추가] 네이버 금융 실시간 테마/섹터 크롤링
+            theme_tag = get_naver_theme_tags(code)
+            
+            # 기존 내부 분류(업종_대분류)가 있다면 함께 표기
+            big_sector = row.get('업종_대분류', '')
+            if big_sector and big_sector != '기타':
+                # 중복 방지: 크롤링한 태그와 대분류가 다를 때만 둘 다 표시
+                if theme_tag and (big_sector not in theme_tag):
+                    theme_tag = f"#{big_sector} {theme_tag}"
+                elif not theme_tag:
+                    theme_tag = f"#{big_sector}"
+            
+            # 코멘트 길이 제한
             if len(comment) > 140:
                 comment = comment[:140] + "…"
 
-            msg += f"{rank}. {name} ({code})\n"
+            # 메시지 포맷팅 (테마 태그 추가됨)
+            msg += f"{rank}. {name} ({code}) {theme_tag}\n"
             msg += f"   🌡점수: {float(score):.1f}점\n"
             msg += f"   🎯전략: {route}\n"
             msg += f"   💬AI: {comment}\n"
+
+            # ✅ [v8.5 추가] 자금 관리(비중) 정보 표시
+            qty = row.get('추천수량', 0)
+            amt = row.get('추천금액(만원)', 0)
+            if qty > 0:
+                msg += f"   💰비중: {qty}주 (약 {amt}만원)\n"
 
             msg += f"   🔵매수: {_fmt_int(buy)}\n"
             msg += (
@@ -1907,7 +2003,13 @@ def analyze_ticker(
     power_raw = (body / range_len) * tail5["거래량"] * sign
     avg_vol = tail5["거래량"].mean()
     v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
-
+    
+    # ✅ [v8.5 추가] VWAP (최근 5일 주간 수급 단가) 계산
+    # 단기 스윙 관점이므로 최근 5일(일주일)간의 거래량 가중 평단을 구합니다.
+    vwap_val = calc_vwap(ohlcv.tail(5))
+    # 현재가가 VWAP 대비 얼마나 위에 있는지(%) - 양수면 강한 수급 지지
+    vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
+    
     # 🔥 [v8.0] SuperTrend 계산
     st_series, st_dir = calc_supertrend(h, l, c, period=10, multiplier=3.0)
     st_val = float(st_series.iloc[-1])
@@ -1946,6 +2048,19 @@ def analyze_ticker(
     if mfi > 60: score += 1; reason.append("자금유입")
     if hist.iloc[-1] > 0: score += 1; reason.append("MACD>Sig")
 
+    # ✅ [v8.5 추가] VWAP 지지 여부 (수급 질적 분석)
+    # 현재가가 최근 5일 평균 매물대(VWAP)보다 높다면, 
+    # 최근 매수자들이 수익 구간이므로 악성 매물이 적다고 판단 (+1점)
+    if last_c > vwap_val: 
+        score += 1
+        reason.append("VWAP상회")
+
+    # ✅ [v8.5 추가] 캔들 패턴 가산점 (+1점)
+    # 기술적 반전 신호(망치형)나 강력한 매수세(장악형)가 떴다면 신뢰도 상승
+    if candle_patterns:
+        score += 1
+        reason.append(f"패턴({','.join(candle_patterns)})")
+
     buy = min(last_c, ma20.iloc[-1] * 1.03) if (ma20.iloc[-1] > 0 and last_c > ma20.iloc[-1]) else last_c
     atr_mult = 2.0
     if ttm_squeeze == 1 or (np.isfinite(bb_bw_val) and bb_bw_val < 12.0): atr_mult = 1.8
@@ -1981,6 +2096,30 @@ def analyze_ticker(
     t1 = ceil_to_tick(t1); t2 = ceil_to_tick(t2)
     if t1 <= buy: t1 = buy + tk * 2
 
+    # -----------------------------------------------------------
+    # ✅ [v8.5 추가] 변동성 기반 비중 조절 (Money Management)
+    # -----------------------------------------------------------
+    # 가정: 총 운용 자금 1,000만원, 1회 거래당 최대 손실 2% 제한, 최대 비중 25%
+    # (실제 운영 시에는 이 값들을 설정 변수나 인자로 빼는 것이 좋습니다)
+    ACCOUNT_CAPITAL = 10_000_000 
+    RISK_PER_TRADE = 0.02         # 2% 리스크 (20만원)
+    MAX_POS_PCT = 0.25            # 종목당 최대 비중 25% (250만원)
+
+    loss_per_share = buy - stop   # 1주당 예상 손실금액
+    rec_qty = 0
+    rec_amt = 0
+
+    if loss_per_share > 0 and buy > 0:
+        # 1. 리스크 기준 허용 수량 (손절 나가도 내 자산의 2%만 잃게 설정)
+        risk_based_qty = (ACCOUNT_CAPITAL * RISK_PER_TRADE) / loss_per_share
+        
+        # 2. 최대 비중 제한 수량 (아무리 좋아도 내 자산의 25% 이상 매수 금지)
+        max_cap_qty = (ACCOUNT_CAPITAL * MAX_POS_PCT) / buy
+        
+        # -> 둘 중 더 적은 수량을 최종 추천 수량으로 선정 (보수적 접근)
+        rec_qty = int(min(risk_based_qty, max_cap_qty))
+        rec_amt = int(rec_qty * buy)
+
     sector = sector_map.get(code6, "기타")
     name = name_map.get(code6, code6)
     m_row = top_df.loc[top_df["종목코드"] == code6, "시장"]
@@ -1995,6 +2134,10 @@ def analyze_ticker(
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
         "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
+        # ✅ [v8.5 추가] VWAP 데이터 저장 (디버깅 및 분석용)
+        "VWAP": int(vwap_val), "VWAP_GAP": round(vwap_gap, 2),
+        # ✅ [v8.5 추가] 감지된 캔들 패턴 저장 (CSV 확인용)
+        "캔들패턴": ",".join(candle_patterns) if candle_patterns else "",
         "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
         "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
         "SUPERTREND_VAL": int(st_val) if np.isfinite(st_val) else 0, "SUPERTREND_DIR": int(st_trend) if np.isfinite(st_trend) else 1,
@@ -2012,6 +2155,9 @@ def analyze_ticker(
         "rel_120d_%": round(rel_120, 2) if np.isfinite(rel_120) else np.nan,
         "EBS": int(score), "통과": "★" if score >= PASS_EBS else "", "근거": ", ".join(reason),
         "추천매수가": buy, "손절가": stop, "추천매도가1": t1, "추천매도가2": t2, "ATR_MULT": atr_mult,
+        # ✅ [v8.5 추가] 자금 관리 필드 추가
+        "추천수량": rec_qty, 
+        "추천금액(만원)": round(rec_amt / 10000, 1)  # 보기 좋게 만원 단위 표기    
     }
 
   
