@@ -2197,29 +2197,27 @@ with st.sidebar:
             wau_pct = f"{wau_count/total_users*100:.1f}%"
             
             st.markdown(f"""
-                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
-                    <div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-size:14px; font-weight:600; opacity:0.9;">👥 총 가입자</span>
-                        <span style="font-size:16px; font-weight:bold;">{total_users}명</span>
-                    </div>
-
-                    <div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-                        <div style="display:flex; flex-direction:column;">
-                            <span style="font-size:14px; font-weight:600; opacity:0.9;">🔥 DAU (24h)</span>
-                            <span style="font-size:11px; color:#4CAF50; font-weight:bold;">참여율 {dau_pct}</span>
-                        </div>
-                        <span style="font-size:16px; font-weight:bold;">{dau_count}명</span>
-                    </div>
-
-                    <div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-                        <div style="display:flex; flex-direction:column;">
-                            <span style="font-size:14px; font-weight:600; opacity:0.9;">📅 WAU (7일)</span>
-                            <span style="font-size:11px; color:#4CAF50; font-weight:bold;">참여율 {wau_pct}</span>
-                        </div>
-                        <span style="font-size:16px; font-weight:bold;">{wau_count}명</span>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
+<div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
+<div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+<span style="font-size:14px; font-weight:600; opacity:0.9;">👥 총 가입자</span>
+<span style="font-size:16px; font-weight:bold;">{total_users}명</span>
+</div>
+<div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+<div style="display:flex; flex-direction:column;">
+<span style="font-size:14px; font-weight:600; opacity:0.9;">🔥 DAU (24h)</span>
+<span style="font-size:11px; color:#4CAF50; font-weight:bold;">참여율 {dau_pct}</span>
+</div>
+<span style="font-size:16px; font-weight:bold;">{dau_count}명</span>
+</div>
+<div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+<div style="display:flex; flex-direction:column;">
+<span style="font-size:14px; font-weight:600; opacity:0.9;">📅 WAU (7일)</span>
+<span style="font-size:11px; color:#4CAF50; font-weight:bold;">참여율 {wau_pct}</span>
+</div>
+<span style="font-size:16px; font-weight:bold;">{wau_count}명</span>
+</div>
+</div>
+""", unsafe_allow_html=True)
             
             st.markdown("---")
         # ---------------------------------------------------------
