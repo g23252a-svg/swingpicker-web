@@ -2193,13 +2193,30 @@ with st.sidebar:
                     except:
                         pass
             
-            # 통계 메트릭 표시
-            k1, k2, k3 = st.columns(3)
-            k1.metric("총 가입자", f"{total_users}명")
-            k2.metric("DAU (24h)", f"{dau_count}명", 
-                      f"{dau_count/total_users*100:.1f}%", help="최근 24시간 내 로그인한 사용자")
-            k3.metric("WAU (7일)", f"{wau_count}명", 
-                      f"{wau_count/total_users*100:.1f}%", help="최근 7일 내 로그인한 사용자")
+# ---------------------------------------------------------
+            # ✅ [v8.5 개선] 관리자 대시보드 통계 (HTML 커스텀 디자인)
+            # ---------------------------------------------------------
+            dau_pct = f"{dau_count/total_users*100:.1f}%"
+            wau_pct = f"{wau_count/total_users*100:.1f}%"
+            
+            st.markdown(f"""
+                <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+                    <div style="flex:1; background:rgba(128,128,128,0.1); padding:10px; border-radius:8px; text-align:center;">
+                        <div style="font-size:12px; opacity:0.8; margin-bottom:4px;">👥 총 가입자</div>
+                        <div style="font-size:18px; font-weight:bold;">{total_users}명</div>
+                    </div>
+                    <div style="flex:1; background:rgba(128,128,128,0.1); padding:10px; border-radius:8px; text-align:center;">
+                        <div style="font-size:12px; opacity:0.8; margin-bottom:4px;">🔥 DAU (24h)</div>
+                        <div style="font-size:18px; font-weight:bold;">{dau_count}명</div>
+                        <div style="font-size:11px; color:#4CAF50; font-weight:bold;">({dau_pct})</div>
+                    </div>
+                    <div style="flex:1; background:rgba(128,128,128,0.1); padding:10px; border-radius:8px; text-align:center;">
+                        <div style="font-size:12px; opacity:0.8; margin-bottom:4px;">📅 WAU (7일)</div>
+                        <div style="font-size:18px; font-weight:bold;">{wau_count}명</div>
+                        <div style="font-size:11px; color:#4CAF50; font-weight:bold;">({wau_pct})</div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
             
             st.markdown("---")
         # ---------------------------------------------------------
