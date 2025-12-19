@@ -2161,7 +2161,7 @@ with st.sidebar:
             tg_chat_id = st.text_input("ChatID")
             send_btn = st.button("🚀 전송")
 
-    # 관리자 전용: 회원 권한 + 구독 만료일 관리
+# 관리자 전용: 회원 권한 + 구독 만료일 관리
     if auth_status == "admin":
         st.divider()
         st.subheader("👑 회원 권한 / 구독 관리 (Admin)")
@@ -2169,7 +2169,7 @@ with st.sidebar:
         users = list_users()
         
         # ---------------------------------------------------------
-        # ✅ [v8.5 추가] 관리자 대시보드 통계 (DAU / WAU 집계)
+        # ✅ [v8.5 개선] 관리자 대시보드 통계 (HTML 커스텀 디자인)
         # ---------------------------------------------------------
         if users:
             total_users = len(users)
@@ -2193,14 +2193,9 @@ with st.sidebar:
                     except:
                         pass
             
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-            # ✅ [v8.5 개선 2차] 사이드바 최적화 디자인 (세로 리스트형)
-            # ---------------------------------------------------------
             dau_pct = f"{dau_count/total_users*100:.1f}%"
             wau_pct = f"{wau_count/total_users*100:.1f}%"
             
-            # 가로(flex-row) 대신 세로(flex-col)로 쌓고, 내부를 좌우 정렬(space-between)
             st.markdown(f"""
                 <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
                     <div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
