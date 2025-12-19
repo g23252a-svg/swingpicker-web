@@ -1964,7 +1964,14 @@ def analyze_ticker(
     code6 = str(t).zfill(6)
     if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
-    c = ohlcv["종가"]; h = ohlcv["고가"]; l = ohlcv["저가"]; v = ohlcv["거래량"]; o = ohlcv["시가"]
+    
+    # 데이터 타입 안전 변환
+    c = pd.to_numeric(ohlcv["종가"], errors='coerce')
+    h = pd.to_numeric(ohlcv["고가"], errors='coerce')
+    l = pd.to_numeric(ohlcv["저가"], errors='coerce')
+    v = pd.to_numeric(ohlcv["거래량"], errors='coerce')
+    o = pd.to_numeric(ohlcv["시가"], errors='coerce')
+    
     last_c = float(c.iloc[-1])
 
     ma20 = c.rolling(BB_PERIOD).mean(); ma60 = c.rolling(60).mean(); ma120 = c.rolling(120).mean()
@@ -2005,15 +2012,16 @@ def analyze_ticker(
     v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
     
     # ✅ [v8.5 추가] VWAP (최근 5일 주간 수급 단가) 계산
-    # 단기 스윙 관점이므로 최근 5일(일주일)간의 거래량 가중 평단을 구합니다.
     vwap_val = calc_vwap(ohlcv.tail(5))
-    # 현재가가 VWAP 대비 얼마나 위에 있는지(%) - 양수면 강한 수급 지지
     vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
     
     # 🔥 [v8.0] SuperTrend 계산
     st_series, st_dir = calc_supertrend(h, l, c, period=10, multiplier=3.0)
     st_val = float(st_series.iloc[-1])
     st_trend = int(st_dir.iloc[-1]) # 1: 상승, -1: 하락
+
+    # 🔥 [v8.5 오류 수정] 캔들 패턴 감지 코드 추가
+    candle_patterns = check_candle_pattern(o, h, l, c)
 
     above_ma20 = 1 if (np.isfinite(ma20.iloc[-1]) and last_c > float(ma20.iloc[-1])) else 0
     atr = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
@@ -2048,15 +2056,12 @@ def analyze_ticker(
     if mfi > 60: score += 1; reason.append("자금유입")
     if hist.iloc[-1] > 0: score += 1; reason.append("MACD>Sig")
 
-    # ✅ [v8.5 추가] VWAP 지지 여부 (수급 질적 분석)
-    # 현재가가 최근 5일 평균 매물대(VWAP)보다 높다면, 
-    # 최근 매수자들이 수익 구간이므로 악성 매물이 적다고 판단 (+1점)
+    # ✅ [v8.5 추가] VWAP 지지 여부
     if last_c > vwap_val: 
         score += 1
         reason.append("VWAP상회")
 
-    # ✅ [v8.5 추가] 캔들 패턴 가산점 (+1점)
-    # 기술적 반전 신호(망치형)나 강력한 매수세(장악형)가 떴다면 신뢰도 상승
+    # ✅ [v8.5 추가] 캔들 패턴 가산점
     if candle_patterns:
         score += 1
         reason.append(f"패턴({','.join(candle_patterns)})")
@@ -2074,10 +2079,7 @@ def analyze_ticker(
         stop = swing_low_10 * 0.99
     
     # 🔥 [v8.0 핵심] SuperTrend 기반 스마트 손절 보정
-    # 상승 추세(trend==1)이고, SuperTrend 라인이 현재가보다 아래에 있다면
-    # 기존 손절가(ATR/SwingLow)와 SuperTrend 중 '더 높은 가격'을 손절가로 채택
     if st_trend == 1 and st_val < last_c:
-        # 단, 진입가(buy)보다는 낮아야 함 (방어 코드)
         if st_val < buy:
             stop = max(stop, st_val)
 
@@ -2099,24 +2101,17 @@ def analyze_ticker(
     # -----------------------------------------------------------
     # ✅ [v8.5 추가] 변동성 기반 비중 조절 (Money Management)
     # -----------------------------------------------------------
-    # 가정: 총 운용 자금 1,000만원, 1회 거래당 최대 손실 2% 제한, 최대 비중 25%
-    # (실제 운영 시에는 이 값들을 설정 변수나 인자로 빼는 것이 좋습니다)
     ACCOUNT_CAPITAL = 10_000_000 
-    RISK_PER_TRADE = 0.02         # 2% 리스크 (20만원)
-    MAX_POS_PCT = 0.25            # 종목당 최대 비중 25% (250만원)
+    RISK_PER_TRADE = 0.02         
+    MAX_POS_PCT = 0.25            
 
-    loss_per_share = buy - stop   # 1주당 예상 손실금액
+    loss_per_share = buy - stop   
     rec_qty = 0
     rec_amt = 0
 
     if loss_per_share > 0 and buy > 0:
-        # 1. 리스크 기준 허용 수량 (손절 나가도 내 자산의 2%만 잃게 설정)
         risk_based_qty = (ACCOUNT_CAPITAL * RISK_PER_TRADE) / loss_per_share
-        
-        # 2. 최대 비중 제한 수량 (아무리 좋아도 내 자산의 25% 이상 매수 금지)
         max_cap_qty = (ACCOUNT_CAPITAL * MAX_POS_PCT) / buy
-        
-        # -> 둘 중 더 적은 수량을 최종 추천 수량으로 선정 (보수적 접근)
         rec_qty = int(min(risk_based_qty, max_cap_qty))
         rec_amt = int(rec_qty * buy)
 
@@ -2134,9 +2129,7 @@ def analyze_ticker(
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
         "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
-        # ✅ [v8.5 추가] VWAP 데이터 저장 (디버깅 및 분석용)
         "VWAP": int(vwap_val), "VWAP_GAP": round(vwap_gap, 2),
-        # ✅ [v8.5 추가] 감지된 캔들 패턴 저장 (CSV 확인용)
         "캔들패턴": ",".join(candle_patterns) if candle_patterns else "",
         "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
         "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
@@ -2155,9 +2148,8 @@ def analyze_ticker(
         "rel_120d_%": round(rel_120, 2) if np.isfinite(rel_120) else np.nan,
         "EBS": int(score), "통과": "★" if score >= PASS_EBS else "", "근거": ", ".join(reason),
         "추천매수가": buy, "손절가": stop, "추천매도가1": t1, "추천매도가2": t2, "ATR_MULT": atr_mult,
-        # ✅ [v8.5 추가] 자금 관리 필드 추가
         "추천수량": rec_qty, 
-        "추천금액(만원)": round(rec_amt / 10000, 1)  # 보기 좋게 만원 단위 표기    
+        "추천금액(만원)": round(rec_amt / 10000, 1)    
     }
 
   
