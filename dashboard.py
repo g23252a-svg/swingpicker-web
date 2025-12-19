@@ -1234,9 +1234,11 @@ def plot_interactive_chart(
     stop=None,
     target1=None,
     target2=None,
+    vwap=None,          # ✅ [v8.5] VWAP 가격 인자 추가
     show_bb: bool = True,
     show_kc: bool = False,
     show_rsi: bool = False,
+    show_vwap: bool = False, # ✅ [v8.5] VWAP 표시 여부
 ):
     if df is None or df.empty:
         return go.Figure()
@@ -1262,6 +1264,7 @@ def plot_interactive_chart(
     COLOR_ENTRY = '#FF9F0A'   # 형광 오렌지 (진입가)
     COLOR_STOP = '#30D158'    # 형광 초록 (목표가 - 상승이라 초록 계열 사용)
     COLOR_LOSS = '#00B0FF'    # 형광 하늘 (손절가 - 파랑 캔들과 구분되는 하늘색)
+    COLOR_VWAP = '#FF00FF'    # ✅ 형광 마젠타 (VWAP)
 
     # 1) 캔들 차트
     fig.add_trace(
@@ -1384,6 +1387,7 @@ def plot_interactive_chart(
     entry_v = _safe_float(entry)
     stop_v = _safe_float(stop)
     t1_v = _safe_float(target1)
+    vwap_v = _safe_float(vwap) # ✅
 
     if entry_v is not None:
         fig.add_hline(y=entry_v, line_dash="dash", line_color=COLOR_ENTRY, line_width=1.5, 
@@ -1395,34 +1399,24 @@ def plot_interactive_chart(
         fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, line_width=1.5,
                       annotation_text=f"💰목표: {int(t1_v):,}", annotation_font_color=COLOR_STOP, row=1, col=1)
 
-    # 레이아웃 설정
-    # 🟢 [붙여넣을 새 코드]
-    # 레이아웃 설정 (모바일 최적화)
+    # ✅ [v8.5] VWAP 라인 추가
+    if show_vwap and vwap_v:
+        fig.add_hline(y=vwap_v, line_dash="solid", line_color=COLOR_VWAP, line_width=1.2, annotation_text=f"🟣VWAP: {int(vwap_v):,}", annotation_font_color=COLOR_VWAP, row=1, col=1)
+
     fig.update_layout(
-        title=dict(
-            text=f"{name} ({str(code).zfill(6)})",
-            font=dict(size=16),
-            x=0,  # 제목은 왼쪽 유지
-        ),
+        title=dict(text=f"{name} ({str(code).zfill(6)})", font=dict(size=16), x=0),
         xaxis_rangeslider_visible=False,
         height=700 if show_rsi else 550,
-        # ✅ 상단 여백(t)을 50 -> 80으로 늘려 제목과 범례 사이 공간 확보
         margin=dict(l=10, r=10, t=80, b=10),
         hovermode="x unified",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom", y=1.02,
-            # ✅ 범례를 오른쪽(x=1) 끝으로 정렬하여 제목(왼쪽)과 겹침 방지
-            xanchor="right", x=1
-        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         dragmode="pan",
     )
-
-    # Y축 그리드 설정 (눈에 덜 띄게)
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
 
     return fig
+    
 def plot_risk_reward_bar(buy, stop, target1, target2):
     fig = go.Figure()
     try:
@@ -2641,54 +2635,50 @@ with tab2:
         ).tolist()
         sel = st.selectbox("종목 선택", opts)
         # [dashboard.py] tab2 내부의 if sel: 블록 전체를 이것으로 교체하세요.
+# --- [v8.5 Upgrade] 탭 2 상세 뷰 로직 ---
         if sel:
             sel_idx = opts.index(sel)
             row = view_df.iloc[sel_idx]
             code = str(row.get("종목코드", "")).zfill(6)
 
-            # --- 여기서부터 들여쓰기(Indent) 주의 ---
+            # 레이아웃: 차트(2) : 정보(1)
             c1, c2 = st.columns([2, 1])
 
-
-            with c1:  # 👈 여기가 c1, c2 정의와 같은 레벨이거나 안쪽이어야 함
-                # 🔧 [수정됨] 모바일 최적화: Expander로 옵션 숨기기
+            with c1:
+                # 🔧 차트 옵션 (모바일 최적화: Expander)
                 with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
-                    c_opt1, c_opt2, c_opt3 = st.columns(3)
-                    with c_opt1:
-                        show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
-                    with c_opt2:
-                        show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
-                    with c_opt3:
-                        show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+                    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns(4) # 컬럼 4개로 확장
+                    with c_opt1: show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
+                    with c_opt2: show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
+                    with c_opt3: show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
+                    # ✅ [v8.5] VWAP 옵션 추가
+                    with c_opt4: show_vwap = st.checkbox("VWAP 표시", value=True, key=f"opt_vwap_{code}")
 
                 chart_df = get_stock_chart_data(code)
 
-                # 차트 데이터 유효성 체크
                 if chart_df is None or getattr(chart_df, "empty", True):
                     st.info("차트 데이터 없음")
                 else:
-                    # 숫자형 안전 변환
+                    # 숫자형 변환
                     entry = pd.to_numeric(row.get("추천매수가", np.nan), errors="coerce")
                     stop  = pd.to_numeric(row.get("손절가", np.nan), errors="coerce")
                     t1    = pd.to_numeric(row.get("추천매도가1", np.nan), errors="coerce")
                     t2    = pd.to_numeric(row.get("추천매도가2", np.nan), errors="coerce")
+                    # ✅ [v8.5] VWAP 데이터 로드
+                    vwap  = pd.to_numeric(row.get("VWAP", np.nan), errors="coerce") 
 
-                    # 목표가2 없으면 자동 계산
                     if pd.isna(t2) and pd.notna(t1):
                         t2 = float(t1) * 1.07
 
-                    # 차트 그리기 함수 호출 (파라미터 전달)
+                    # 차트 그리기
                     fig = plot_interactive_chart(
                         df=chart_df,
                         code=str(code),
                         name=row.get("종목명", "-"),
-                        entry=entry,
-                        stop=stop,
-                        target1=t1,
-                        target2=t2,
-                        show_bb=show_bb,
-                        show_kc=show_kc,  # 🔥 켈트너 채널 옵션 전달
-                        show_rsi=show_rsi,
+                        entry=entry, stop=stop, target1=t1, target2=t2, 
+                        vwap=vwap, # ✅ VWAP 전달
+                        show_bb=show_bb, show_kc=show_kc, show_rsi=show_rsi, 
+                        show_vwap=show_vwap # ✅ 옵션 전달
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -2696,20 +2686,43 @@ with tab2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
                     
-                    # 📊 레이더 차트
+                    # 📊 1. 레이더 차트 (v7.5 유지)
                     st.plotly_chart(plot_radar_chart(row), use_container_width=True)
 
-                    # 📝 AI 코멘트 & 스마트 손절 뱃지
+                    # 📝 2. AI 분석 코멘트 & 뱃지
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
-                    
-                    # ✅ [v7.5] 스마트 손절 감지 표시
                     is_swing = row.get("IS_SWING_SUPPORT", False)
-                    if is_swing:
-                        st.success("🛡️ **스마트 지지선(Swing Low)** 감지됨! (손절가 보정)")
+                    
+                    # 뱃지 모음 (Swing Low, Candle Pattern)
+                    badges = []
+                    if is_swing: badges.append("🛡️스마트지지")
+                    
+                    # ✅ [v8.5] 캔들 패턴 뱃지 추가
+                    patterns = str(row.get("캔들패턴", "")).strip()
+                    if patterns and patterns != "nan":
+                        badges.append(f"🕯️{patterns}")
+
+                    if badges:
+                        st.success(" ".join(badges))
                     
                     st.info(f"💬 **AI:** {ai_cmt}")
 
-                    # 리스크/리워드 바 차트
+                    # ✅ 3. [v8.5] 자금 관리 (Position Sizing) 카드
+                    rec_qty = pd.to_numeric(row.get("추천수량", 0), errors='coerce')
+                    rec_amt = pd.to_numeric(row.get("추천금액(만원)", 0), errors='coerce')
+                    
+                    if rec_qty > 0:
+                        st.markdown(
+                            f"""
+                            <div style="padding:10px; border-radius:5px; background-color:rgba(46, 125, 50, 0.1); border:1px solid #4caf50; margin-bottom:10px;">
+                                <strong style="color:#2e7d32;">💰 자금 관리 (Risk 2%)</strong><br>
+                                🎯 추천 비중: <b>{int(rec_qty)}주</b> (약 {rec_amt}만원)
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
+                    
+                    # 📊 4. 리스크/리워드 차트
                     rr_entry = _to_num(row.get("추천매수가", np.nan), np.nan)
                     rr_stop  = _to_num(row.get("손절가", np.nan), np.nan)
                     rr_t1    = _to_num(row.get("추천매도가1", np.nan), np.nan)
@@ -2720,23 +2733,21 @@ with tab2:
                         use_container_width=True,
                     )
                 else:
-                    st.warning("🔒 상세 분석(레이더 / 리스크-리워드 / AI 코멘트)은 **Pro 등급부터** 확인 가능합니다.")
+                    st.warning("🔒 상세 분석(레이더/자금관리/AI)은 **Pro 등급부터** 확인 가능합니다.")
 
-                # 하단 가격 메트릭
+                # 📉 하단 가격 메트릭
                 c_a, c_b = st.columns(2)
                 c_a.metric("진입가", _to_int_str(row.get("추천매수가", 0)))
                 
-                # 손절가 표시에 뱃지 추가 가능 여부 확인
                 stop_label = "손절가"
-                if row.get("IS_SWING_SUPPORT", False):
-                    stop_label += " 🛡️"
+                if row.get("IS_SWING_SUPPORT", False): stop_label += " 🛡️"
+                c_b.metric(stop_label, _to_int_str(row.get("손절가", 0)), delta="Stop", delta_color="inverse")
                 
-                c_b.metric(
-                    stop_label,
-                    _to_int_str(row.get("손절가", 0)),
-                    delta="Stop",
-                    delta_color="inverse",
-                )
+                # ✅ [v8.5] VWAP GAP 표시 (보조 지표)
+                vwap_gap = pd.to_numeric(row.get("VWAP_GAP", np.nan), errors='coerce')
+                if not pd.isna(vwap_gap) and vwap_gap != 0:
+                    color = "red" if vwap_gap > 0 else "blue"
+                    st.caption(f"🟣 VWAP 이격: :{color}[**{vwap_gap:+.2f}%**] (양수면 수급 우위)")
 
     st.divider()
     st.subheader("📋 Daily Top List (Squeeze Analysis)", anchor=False)
