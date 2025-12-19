@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Auth System v8.0
-- v8.0 Upgrade:
-  1. 보안: 로그인 시도 횟수 제한 (Rate Limiting) 적용 (Brute Force 방어)
-  2. 성능: st.cache_data를 이용한 Native Caching (메모리 효율 및 속도 개선)
-  3. 기능: 마이페이지 (닉네임/비밀번호 변경) 추가
-  4. 기존: PBKDF2 보안, Gist/Local 이중화 유지
+LDY Pro Trader Auth System v8.5
+- v8.5 Upgrade:
+  1. 보안: 비밀번호 복잡도(영문+숫자) 강제, PBKDF2 적용
+  2. 편의: 세션 자동 연장 (Last Login 갱신 최적화)
+  3. 관리: 관리자용 DAU(일간 활성 사용자) 통계 기반 마련
 """
 
 import os
@@ -46,7 +45,7 @@ KEY_PRO   = _get_conf("LDY_KEY_PRO",   "220577")
 KEY_PRIME = _get_conf("LDY_KEY_PRIME", "577220")
 ADMIN_KEY = _get_conf("LDY_ADMIN_KEY", "2022322")
 
-# 👇 [추가] 👑 Master Admin 설정 (DB 없이 즉시 로그인)
+# 👑 Master Admin 설정 (DB 없이 즉시 로그인)
 MASTER_ADMIN_ID = "admin"
 MASTER_ADMIN_PW = "2022322"
 
@@ -382,7 +381,10 @@ def _validate_email(email: str) -> bool:
     return bool(EMAIL_REGEX.match(email)) if email else False
 
 def _validate_password(pw: str) -> Tuple[bool, str]:
-    if len(pw) < 6: return False, "비밀번호는 최소 6자 이상이어야 합니다."
+    if len(pw) < 6: return False, "비밀번호는 6자 이상이어야 합니다."
+    # ✅ [v8.5 Upgrade] 비밀번호 복잡도 체크 (영문 + 숫자)
+    if not re.search(r"[a-zA-Z]", pw) or not re.search(r"\d", pw):
+        return False, "비밀번호는 영문과 숫자를 모두 포함해야 합니다."
     return True, ""
 
 # ----------------- 회원 관리 로직 -----------------
@@ -432,18 +434,16 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
 def authenticate_user(email: str, password: str):
     email_norm = _normalize_email(email)
 
-    # 👇 [추가] Master Admin 특수 로그인 처리 (DB 조회 건너뜀)
+    # 👑 Master Admin 특수 로그인 처리 (DB 조회 건너뜀)
     if email_norm == MASTER_ADMIN_ID:
         if password == MASTER_ADMIN_PW:
-            # 관리자 전용 가상 유저 객체 생성
-            admin_user = {
+            return {
                 "login_id": MASTER_ADMIN_ID,
                 "nickname": "System Admin",
                 "role": "admin",
                 "created_at": _now_utc_str(),
                 "last_login": _now_utc_str()
-            }
-            return admin_user, "👑 관리자 로그인 성공"
+            }, "👑 관리자 로그인 성공"
         else:
             return None, "관리자 비밀번호가 일치하지 않습니다."
     
@@ -463,16 +463,16 @@ def authenticate_user(email: str, password: str):
     salt = user.get("salt", "")
     pw_hash = user.get("password_hash", "")
     
+    # 비밀번호 검증 및 마이그레이션 플래그
+    password_migrated = False
+
     # 1. 신규 방식(PBKDF2) 검증
     if _hash_password(password, salt) == pw_hash:
-        pass # 성공
-        
-    # 2. 실패 시 구버전(SHA256) 검증 (마이그레이션)
+        pass 
+    # 2. 구버전(SHA256) 검증 -> 신규 해시로 업데이트 (메모리 상)
     elif _hash_password_legacy(password, salt) == pw_hash:
-        print(f"[System] Migrating password for {email_norm} to v7.5 security.")
-        new_hash = _hash_password(password, salt)
-        user["password_hash"] = new_hash
-        # 저장은 아래에서 한 번에 처리
+        user["password_hash"] = _hash_password(password, salt)
+        password_migrated = True
     else:
         record_login_fail(email_norm)
         return None, "이메일 또는 비밀번호가 일치하지 않습니다."
@@ -480,12 +480,32 @@ def authenticate_user(email: str, password: str):
     # 로그인 성공
     reset_login_fail(email_norm)
     
+    # ✅ [v8.5 최적화] 로그인 시간 갱신 로직 (DB 부하 감소)
     now_str = _now_utc_str()
+    last_login_str = user.get("last_login", "")
+    should_save = True # 기본은 저장
+    
+    if last_login_str:
+        try:
+            # 마지막 로그인 시간 파싱 (ISO 8601)
+            last_dt = datetime.fromisoformat(last_login_str.replace("Z", "+00:00"))
+            # 현재 시간과 차이 계산
+            diff_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+            
+            # 1시간(3600초) 이내 재접속이면 DB 저장 건너뜀 (메모리만 갱신)
+            if diff_seconds < 3600 and not password_migrated:
+                should_save = False
+        except Exception:
+            pass # 파싱 실패 시 안전하게 저장
+            
+    # 메모리 상의 유저 정보는 항상 최신화 (세션용)
     user["last_login"] = now_str
     users[email_norm] = user
     
-    db["users"] = users
-    save_user_db(db)
+    # 실제 변경사항(비번 업데이트 or 오랜만의 로그인)이 있을 때만 DB 저장
+    if should_save:
+        db["users"] = users
+        save_user_db(db)
     
     return user, "로그인 성공"
 
@@ -649,7 +669,8 @@ def render_auth_box(show_debug: bool = False):
         with st.form(key="signup_form"):
             reg_email = st.text_input("이메일")
             reg_nick = st.text_input("닉네임 (선택)")
-            reg_pw1 = st.text_input("비밀번호", type="password")
+            # ✅ [v8.5] 비밀번호 규칙 안내 추가 (영문+숫자)
+            reg_pw1 = st.text_input("비밀번호 (영문+숫자 6자 이상)", type="password")
             reg_pw2 = st.text_input("비밀번호 확인", type="password")
             reg_code = st.text_input("초대/구독 코드 (선택)", type="password")
             
@@ -660,6 +681,7 @@ def render_auth_box(show_debug: bool = False):
             if reg_pw1 != reg_pw2:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
             else:
+                # register_user 함수 호출
                 ok, msg, new_user = register_user(reg_email, reg_pw1, reg_nick, reg_code)
                 if ok:
                     st.session_state[CURRENT_USER_KEY] = new_user
