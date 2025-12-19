@@ -2544,6 +2544,7 @@ def _to_int_str(x, default=0):
 with tab2:
     st.subheader("🎯 추천 종목 필터")
 
+    # ✅ [v8.5] 회원가입 직후 Top 5 프리뷰 (숫자 콤마 적용)
     if just_registered:
         st.success("🎉 첫 가입을 환영합니다! 오늘 기준 TOP 5 프리뷰를 먼저 보여드릴게요.")
         try:
@@ -2554,13 +2555,23 @@ with tab2:
         if not preview.empty:
             cols = ["종목명", "종목코드", "LDY_SCORE", "추천매수가", "손절가", "추천매도가1"]
             cols = [c for c in cols if c in preview.columns]
-            if "종목명" in cols:
-                prev_view = preview[cols].set_index("종목명")
-            else:
-                prev_view = preview[cols]
+            
+            # 포맷팅용 복사본 생성
+            prev_view = preview[cols].copy()
+            
+            # 콤마 포맷팅 적용 (매수가, 손절가, 목표가)
+            fmt_cols = ["추천매수가", "손절가", "추천매도가1"]
+            for c in fmt_cols:
+                if c in prev_view.columns:
+                    prev_view[c] = pd.to_numeric(prev_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+
+            if "종목명" in prev_view.columns:
+                prev_view = prev_view.set_index("종목명")
+            
             st.dataframe(prev_view, use_container_width=True)
         else:
             st.info("프리뷰로 표시할 종목이 없습니다.")
+        
         st.session_state["just_registered"] = False
         st.divider()
 
