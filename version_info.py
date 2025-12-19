@@ -1,3 +1,7 @@
+제시해주신 version_info.py 파일에 v8.5.0 업데이트 내용을 반영한 최종 코드 블록입니다. 버전 정보를 최신 사양인 8.5.0으로 올리고, CHANGELOG 최상단에 오늘 업데이트한 핵심 기능들(VWAP, 자금 관리, 캔들 패턴, 관리자 통계)을 요약하여 추가했습니다.
+
+Python
+
 # version_info.py
 # -*- coding: utf-8 -*-
 
@@ -24,7 +28,7 @@ def _get_conf(key: str, default_val: str) -> str:
 # 1) 버전 정보
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "8.0.0")  # ✅ [Update] v8.0.0
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "8.5.0")  # ✅ [Update] v8.5.0 (오늘 업데이트 반영)
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -56,7 +60,19 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG: List[Dict] = [
     {
-        "version": "8.0.0",  # ✅ [New] Major Update
+        "version": "8.5.0",  # ✅ [New] 오늘 업데이트 내용 추가
+        "date": "2025-12-19",
+        "title": "Institutional-Grade Analytics & Smart Money Management",
+        "items": [
+            "🟣 **VWAP Analytics Integration:** 기관 투자자의 핵심 지표인 **거래량 가중 평균 가격(VWAP)**을 도입하여 실시간 수급 지지 여부를 정밀 분석합니다.",
+            "💰 **Smart Position Sizing:** 총 자산 대비 리스크(2%)를 기반으로 한 **적정 매수 수량 및 금액** 자동 계산 시스템을 구축했습니다.",
+            "🕯️ **Price Action Detection:** 차트의 **망치형, 장악형** 등 주요 캔들 패턴을 자동으로 감지하여 기술적 신뢰도를 시각화합니다.",
+            "📊 **Admin Performance Insights:** 관리자 전용 대시보드 내에 **DAU(일간 활성자) 및 WAU(주간 활성자)** 통계 집계 기능을 탑재했습니다.",
+            "⚙️ **System Optimization:** 로그인 세션 갱신 로직 최적화 및 UI 컴포넌트 디자인 고도화를 진행했습니다.",
+        ],
+    },
+    {
+        "version": "8.0.0",
         "date": "2025-12-16",
         "title": "Ironclad Security & Native Performance",
         "items": [
@@ -76,17 +92,6 @@ CHANGELOG: List[Dict] = [
             "💪 **V-Power Factor:** 단순 거래량이 아닌 **'상승일 vs 하락일 거래량 비율'**을 분석하여 세력 매집 강도를 포착하는 **V-Power** 팩터 도입.",
             "📊 **7-Factor Radar Chart:** 기술/세력(TEC) 축을 추가하여 V-Power와 기술적 완성도를 시각화.",
             "🧠 **AI Context Awareness:** 차트의 구조적 지지선 및 세력 매집 패턴을 인식하여 더욱 정교해진 AI 코멘트 제공.",
-        ],
-    },
-    {
-        "version": "7.4.0",
-        "date": "2025-12-14",
-        "title": "Context-Aware AI Quant System",
-        "items": [
-            "🧠 **Dynamic Regime Weighting:** 시장 국면(과열/침체/중립) 자동 인식 및 가중치 최적화.",
-            "🛡️ **Adaptive Stop-Loss:** 변동성 국면(Squeeze vs High Vol)에 따른 유동적 손절폭 조절.",
-            "⏳ **Squeeze Duration Tracking:** 에너지 응축 기간 추적을 통한 폭발 임박 구간 포착.",
-            "⚡ **Hyper-Speed Data Engine:** 데이터 배치 수집 및 피클(Pickle) 캐싱 도입.",
         ],
     },
     # ... (과거 로그 생략) ...
@@ -113,7 +118,7 @@ def get_version_label(include_build: bool = True) -> str:
     return APP_VERSION if include_build else VERSION_SHORT
 
 
-# ✅ [New] UI Helper: 사이드바나 메인화면에 업데이트 내역 표시
+# ✅ UI Helper: 사이드바나 메인화면에 업데이트 내역 표시
 def show_recent_updates(limit: int = 1, expanded: bool = True):
     """최신 업데이트 내역을 Streamlit Expander로 렌더링"""
     for i, log in enumerate(CHANGELOG[:limit]):
