@@ -2167,6 +2167,43 @@ with st.sidebar:
         st.subheader("👑 회원 권한 / 구독 관리 (Admin)")
 
         users = list_users()
+        
+        # ---------------------------------------------------------
+        # ✅ [v8.5 추가] 관리자 대시보드 통계 (DAU / WAU 집계)
+        # ---------------------------------------------------------
+        if users:
+            total_users = len(users)
+            now_utc_dt = datetime.now(timezone.utc)
+            dau_count = 0  # Daily Active Users (24시간)
+            wau_count = 0  # Weekly Active Users (7일)
+            
+            for u in users:
+                last_s = u.get("last_login")
+                if last_s:
+                    try:
+                        # 저장된 시간 문자열 파싱 (ISO 8601)
+                        # Z가 붙어있을 경우 UTC로 처리
+                        last_dt = datetime.fromisoformat(last_s.replace("Z", "+00:00"))
+                        diff = now_utc_dt - last_dt
+                        
+                        if diff < timedelta(days=1):
+                            dau_count += 1
+                        if diff < timedelta(days=7):
+                            wau_count += 1
+                    except:
+                        pass
+            
+            # 통계 메트릭 표시
+            k1, k2, k3 = st.columns(3)
+            k1.metric("총 가입자", f"{total_users}명")
+            k2.metric("DAU (24h)", f"{dau_count}명", 
+                      f"{dau_count/total_users*100:.1f}%", help="최근 24시간 내 로그인한 사용자")
+            k3.metric("WAU (7일)", f"{wau_count}명", 
+                      f"{wau_count/total_users*100:.1f}%", help="최근 7일 내 로그인한 사용자")
+            
+            st.markdown("---")
+        # ---------------------------------------------------------
+
         if not users:
             st.info("등록된 회원이 없습니다.")
         else:
@@ -2180,7 +2217,7 @@ with st.sidebar:
                 email = u.get("login_id")
                 sub = subs.get(email, {})
                 
-                # 1. 실제 권한 확인 (구독정보 없으면 기본 유저 권한 사용)
+                # 1. 실제 권한 확인
                 current_role = sub.get("role") or u.get("role", "free")
                 
                 # 2. 만료일 문자열 가져오기
@@ -2202,52 +2239,65 @@ with st.sidebar:
                             remain = (d_exp - today).days
                             days_left = f"{remain}일"
                             
-                            # (선택) 만료된 경우 표시
                             if remain < 0:
                                 days_left = f"만료 ({remain}일)"
                         except Exception:
                             days_left = "날짜오류"
                     else:
-                        # 권한은 있는데 날짜가 없는 경우 (DB 불일치 등)
                         exp_str = "미설정"
                         days_left = "?"
 
                 rows.append({
                     "이메일": email,
                     "닉네임": u.get("nickname"),
-                    "권한(auth_user)": u.get("role"),
-                    "구독 역할(sub)": current_role,  # 수정됨
+                    "권한": current_role, # 표시용 권한
                     "만료일": exp_str,
-                    "잔여일수": days_left,
+                    "잔여": days_left,
                     "가입일": to_kst_str(u.get("created_at")),
-                    "마지막 로그인": to_kst_str(u.get("last_login")),
+                    "최근접속": to_kst_str(u.get("last_login")), # 최근 접속일 추가
                 })
 
             df_users = pd.DataFrame(rows)
-            st.dataframe(df_users, use_container_width=True, height=230)
+            # 최근 접속순 정렬
+            if not df_users.empty and "최근접속" in df_users.columns:
+                df_users = df_users.sort_values("최근접속", ascending=False)
+            
+            st.dataframe(
+                df_users, 
+                use_container_width=True, 
+                height=250,
+                column_config={
+                    "최근접속": st.column_config.TextColumn("최근 접속", width="medium"),
+                }
+            )
 
-            target_email = st.selectbox(
-                "권한을 변경할 회원 선택",
-                options=[u["이메일"] for u in rows],
-                key="admin_target_user",
-            )
-            new_role = st.selectbox(
-                "새 권한",
-                options=["free", "pro", "prime", "admin"],
-                index=1,
-                key="admin_new_role",
-            )
+            c_admin1, c_admin2 = st.columns([2, 1])
+            with c_admin1:
+                target_email = st.selectbox(
+                    "권한을 변경할 회원 선택",
+                    options=df_users["이메일"].tolist() if not df_users.empty else [],
+                    key="admin_target_user",
+                )
+            with c_admin2:
+                new_role = st.selectbox(
+                    "새 권한",
+                    options=["free", "pro", "prime", "admin"],
+                    index=1,
+                    key="admin_new_role",
+                )
 
             if st.button("권한 변경 적용", key="btn_update_role"):
                 ok = update_user_role(target_email, new_role)
                 if ok:
                     set_subscription(target_email, new_role)
-                    msg = f"{target_email} → {new_role} 으로 변경되었습니다."
+                    msg = f"✅ {target_email} → **{new_role}** 변경 완료."
                     if new_role in ["pro", "prime"]:
                         sub_info = get_subscription(target_email)
                         if sub_info:
-                            msg += f" (만료일: {sub_info.get('expire_at')})"
-                    st.success(msg + " (새로고침 후 반영)")
+                            msg += f" (만료: {sub_info.get('expire_at')})"
+                    st.success(msg)
+                    time.sleep(1)
+                    st.rerun()
                 else:
                     st.error("권한 변경에 실패했습니다.")
 
