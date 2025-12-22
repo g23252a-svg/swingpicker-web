@@ -1907,6 +1907,25 @@ def send_telegram_auto(
         log("⚠️ TG_TOKEN / TG_ID 미설정, 발송 생략")
         return
 
+    if df.empty or limit_count == 0:
+        try:
+            trade_date = datetime.strptime(trade_ymd, "%Y%m%d").strftime('%Y-%m-%d')
+            msg = f"🔥 [LDY v9.1] 추천 종목 없음 ({trade_date})\n"
+            if market_summary:
+                msg += f"{market_summary}\n"
+            msg += "-" * 30 + "\n\n"
+            msg += "오늘은 조건에 부합하는 종목이 없습니다.\n무리한 진입보다는 관망을 권장합니다. ☕"
+            
+            requests.post(
+                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                data={"chat_id": TG_ID, "text": msg},
+                timeout=15
+            )
+            log("🚀 텔레그램 전송 완료 (결과 없음 알림)")
+        except Exception as e:
+            log(f"⚠️ 텔레그램 전송 실패: {e}")
+        return
+
     # 숫자 포맷팅 헬퍼
     def _fmt_int(x):
         try:
@@ -2427,7 +2446,27 @@ def main(
         log(f"⚠️ 분석 중 오류 발생/데이터 부족 종목 수: {err_cnt}건")
 
     if not rows:
-        raise RuntimeError("No Result (필터를 모두 통과한 종목 없음)")
+        log("⚠️ 필터 조건을 통과한 종목이 없습니다 (결과 0건). 프로그램 정상 종료.")
+        
+        # 텔레그램으로 '결과 없음' 알림 발송 (Crash 방지)
+        if enable_telegram:
+            try:
+                # 빈 데이터프레임으로 시장 온도 계산 시도 (안전 장치)
+                temp_breadth = compute_market_breadth(pd.DataFrame(columns=["Above_MA20", "시장"]))
+                temp_label = label_market_temp(temp_breadth.get("ALL", np.nan))
+            except:
+                temp_label = "N/A"
+
+            summary_text = f"🌡 {temp_label} (시장 급랭/조건 미달)"
+            if macro_msg: 
+                summary_text += f"\n{macro_msg}"
+                
+            summary_text += "\n⚠️ 조건 검색 결과 없음 (0건)\n   → 관망 권장 / 필터 기준 높음"
+
+            # 0건 알림 전송 (limit_count=0으로 호출)
+            send_telegram_auto(pd.DataFrame(), trade_ymd, market_summary=summary_text, limit_count=0)
+            
+        return  # 여기서 함수를 종료하여 이후 로직(CSV 저장 등) 실행 방지
 
     df_raw = pd.DataFrame(rows)
 
