@@ -187,7 +187,53 @@ def calc_supertrend(high: pd.Series, low: pd.Series, close: pd.Series, period: i
 
     return pd.Series(st_out, index=close.index), pd.Series(trend_out, index=close.index)
 
+# [v9.0 추가] 주봉 변환 및 고급 지표 함수들 -------------------------------------
 
+def resample_to_weekly(daily_df: pd.DataFrame) -> pd.DataFrame:
+    """일봉 데이터를 주봉 데이터로 변환 (MTF 분석용)"""
+    df = daily_df.copy()
+    # 인덱스가 날짜가 아니면 변환 시도
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if '날짜' in df.columns:
+            df.set_index('날짜', inplace=True)
+        else:
+            df.index = pd.to_datetime(df.index)
+            
+    # 주봉 리샘플링 (월요일 시작 기준)
+    logic = {
+        '시가': 'first', '고가': 'max', '저가': 'min', '종가': 'last', '거래량': 'sum'
+    }
+    # 존재하는 컬럼만 적용
+    agg_dict = {k: v for k, v in logic.items() if k in df.columns}
+    
+    if not agg_dict: return pd.DataFrame()
+
+    weekly = df.resample('W-MON', closed='left', label='left').agg(agg_dict)
+    return weekly.dropna()
+
+def calc_efficiency_ratio(close: pd.Series, period: int = 10) -> float:
+    """
+    Kaufman's Efficiency Ratio (ER)
+    - 1.0에 가까울수록 노이즈 없는 깨끗한 추세 (High Quality Trend)
+    - 0.0에 가까울수록 횡보/혼조세 (Choppy)
+    """
+    if len(close) < period + 1: return 0.0
+    
+    change = abs(close.iloc[-1] - close.iloc[-(period + 1)]) # 전체 가격 변화량
+    volatility = close.diff().abs().tail(period).sum()       # 개별 변화량의 합
+    
+    if volatility == 0: return 0.0
+    return change / volatility
+
+def calc_hv(close: pd.Series, period: int = 20) -> float:
+    """역사적 변동성 (Historical Volatility, 연환산 표준편차 %)"""
+    if len(close) < period: return 0.0
+    ret = np.log(close / close.shift(1))
+    std = ret.tail(period).std()
+    return std * np.sqrt(252) * 100
+
+
+    
 def calc_mfi(high: pd.Series, low: pd.Series, close: pd.Series, vol: pd.Series, period: int = 14) -> pd.Series:
     tp = (high + low + close) / 3
     rmf = tp * vol
@@ -1962,10 +2008,22 @@ def analyze_ticker(
     bench_map: Dict[str, Dict[int, float]],
 ) -> Optional[Dict[str, Any]]:
     code6 = str(t).zfill(6)
-    if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
+    
+    # 1. 데이터 검증 (최소 데이터 수 증가: 주봉 생성 및 120일선 확보 등)
+    if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120:
+        return None
+    
+    # 인덱스 Datetime 보장 (resample을 위해)
+    if not isinstance(ohlcv_df.index, pd.DatetimeIndex):
+        try:
+            ohlcv_df.index = pd.to_datetime(ohlcv_df.index)
+        except:
+            return None
+
+    # 분석용 데이터 (일봉)
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
     
-    # 데이터 타입 안전 변환
+    # 데이터 타입 변환
     c = pd.to_numeric(ohlcv["종가"], errors='coerce')
     h = pd.to_numeric(ohlcv["고가"], errors='coerce')
     l = pd.to_numeric(ohlcv["저가"], errors='coerce')
@@ -1973,36 +2031,72 @@ def analyze_ticker(
     o = pd.to_numeric(ohlcv["시가"], errors='coerce')
     
     last_c = float(c.iloc[-1])
+    if last_c <= 0: return None
 
-    ma20 = c.rolling(BB_PERIOD).mean(); ma60 = c.rolling(60).mean(); ma120 = c.rolling(120).mean()
+    # -----------------------------------------------------------
+    # 🔥 [v9.0 신규] MTF (Multi-Timeframe) 주봉 분석
+    # -----------------------------------------------------------
+    weekly_df = resample_to_weekly(ohlcv_df)
+    is_weekly_bull = False
+    
+    if len(weekly_df) >= 20:
+        w_c = weekly_df["종가"]
+        w_ma20 = w_c.rolling(20).mean()
+        w_last_ma20 = float(w_ma20.iloc[-1])
+        
+        # 주봉상 20주선 위에 있는가? (대추세 확인)
+        if w_last_ma20 > 0 and last_c > w_last_ma20:
+            is_weekly_bull = True
+
+    # -----------------------------------------------------------
+    # 🔥 [v9.0 신규] 추세 효율성(ER) & 변동성(HV)
+    # -----------------------------------------------------------
+    er_val = calc_efficiency_ratio(c, period=10) # 1.0에 가까울수록 좋음
+    hv_val = calc_hv(c, period=20)               # 높을수록 위험(변동성 큼)
+
+    # -----------------------------------------------------------
+    # 기존 지표 계산 (v8.5 로직 유지)
+    # -----------------------------------------------------------
+    ma20 = c.rolling(BB_PERIOD).mean()
+    ma60 = c.rolling(60).mean()
+    ma120 = c.rolling(120).mean()
+    
+    # 볼린저 밴드 & 스퀴즈
     std20 = c.rolling(BB_PERIOD).std()
-    bb_upper = ma20 + (BB_STD * std20); bb_lower = ma20 - (BB_STD * std20)
+    bb_upper = ma20 + (BB_STD * std20)
+    bb_lower = ma20 - (BB_STD * std20)
+    
+    val_ma20 = float(ma20.iloc[-1]) if len(ma20) > 0 else 0
     bb_bw = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
     bb_bw_val = float(bb_bw.iloc[-1]) if len(bb_bw) else np.nan
-    bw_squeeze = 1 if (np.isfinite(bb_bw_val) and bb_bw_val < BB_SQUEEZE_BW) else 0
-
+    
+    # TTM Squeeze (KC vs BB)
     atr_kc_series = calc_atr(h, l, c, KC_ATR_PERIOD)
     kc_mid = ema(c, KC_PERIOD)
-    kc_upper = kc_mid + (KC_MULT * atr_kc_series); kc_lower = kc_mid - (KC_MULT * atr_kc_series)
+    kc_upper = kc_mid + (KC_MULT * atr_kc_series)
+    kc_lower = kc_mid - (KC_MULT * atr_kc_series)
+    
     ttm_series = (bb_lower > kc_lower) & (bb_upper < kc_upper)
     ttm_last = ttm_series.iloc[-1] if len(ttm_series) else False
-    ttm_squeeze = 1 if (bool(ttm_last) and not pd.isna(ttm_last)) else 0
-    bb_squeeze = int(ttm_squeeze)
-
+    ttm_squeeze = 1 if (bool(ttm_last)) else 0
+    bw_squeeze = 1 if (np.isfinite(bb_bw_val) and bb_bw_val < BB_SQUEEZE_BW) else 0
+    
+    # 스퀴즈 연속 일수
     sqz_cnt = 0
     if ttm_squeeze == 1:
+        # 역순으로 True 개수 카운트
         vals = ttm_series.iloc[:-1].values[::-1]
-        temp_cnt = 0
         for val in vals:
-            if val: temp_cnt += 1
+            if val: sqz_cnt += 1
             else: break
-        sqz_cnt = temp_cnt + 1
+        sqz_cnt += 1 # 오늘 포함
 
-    # ✅ [v7.5] Swing Low & V-Power
+    # 지지/저항 & V-Power
     swing_low_10 = float(l.tail(10).min())
     dist_to_swing = (last_c - swing_low_10) / last_c * 100
     is_swing_support = (dist_to_swing < 5.0) and (last_c > swing_low_10)
 
+    # V-Power (매수세 강도)
     tail5 = ohlcv.tail(5).copy()
     body = (tail5["종가"] - tail5["시가"]).abs()
     range_len = (tail5["고가"] - tail5["저가"]).replace(0, 1)
@@ -2010,99 +2104,161 @@ def analyze_ticker(
     power_raw = (body / range_len) * tail5["거래량"] * sign
     avg_vol = tail5["거래량"].mean()
     v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
-    
-    # ✅ [v8.5 추가] VWAP (최근 5일 주간 수급 단가) 계산
+
+    # VWAP
     vwap_val = calc_vwap(ohlcv.tail(5))
     vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
-    
-    # 🔥 [v8.0] SuperTrend 계산
+
+    # SuperTrend
     st_series, st_dir = calc_supertrend(h, l, c, period=10, multiplier=3.0)
     st_val = float(st_series.iloc[-1])
-    st_trend = int(st_dir.iloc[-1]) # 1: 상승, -1: 하락
+    st_trend = int(st_dir.iloc[-1])
 
-    # 🔥 [v8.5 오류 수정] 캔들 패턴 감지 코드 추가
+    # 캔들 패턴 & 기타 지표
     candle_patterns = check_candle_pattern(o, h, l, c)
-
-    above_ma20 = 1 if (np.isfinite(ma20.iloc[-1]) and last_c > float(ma20.iloc[-1])) else 0
-    atr = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
     rsi = float(calc_rsi(c, 14).iloc[-1])
     mfi = float(calc_mfi(h, l, c, v, 14).iloc[-1])
-
-    macd = ema(c, 12) - ema(c, 26); sig = ema(macd, 9); hist = macd - sig
+    
+    # MACD Slope
+    macd = ema(c, 12) - ema(c, 26)
+    sig = ema(macd, 9)
+    hist = macd - sig
     hist_tail = hist.dropna().tail(5)
-    slope = float(np.polyfit(np.arange(len(hist_tail)), hist_tail.values.astype(float), 1)[0]) if len(hist_tail) >= 2 else 0.0
-    slope_pct = (slope / last_c) * 100.0 if last_c > 0 else 0.0
+    slope = 0.0
+    if len(hist_tail) >= 2:
+        slope = float(np.polyfit(np.arange(len(hist_tail)), hist_tail.values.astype(float), 1)[0])
+    slope_pct = (slope / last_c) * 100.0
+
+    # 이격도 및 거래량 강도
+    disp = (last_c / val_ma20 - 1.0) * 100 if val_ma20 > 0 else 0.0
     vol_z = float((v / v.rolling(20).mean().replace(0, np.nan)).iloc[-1]) if len(v) else 0.0
-    disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100 if ma20.iloc[-1] else 0.0
 
-    def _ret(days): return (last_c / float(c.iloc[-(days + 1)]) - 1.0) * 100 if len(c) >= days + 1 else np.nan
-    ret_5 = _ret(5); ret_10 = _ret(10); ret_20 = _ret(20); ret_60 = _ret(60); ret_120 = _ret(120)
+    # 수익률 계산
+    def _ret(days):
+        if len(c) < days + 1: return np.nan
+        ref = float(c.iloc[-(days + 1)])
+        return (last_c / ref - 1.0) * 100 if ref > 0 else np.nan
+        
+    ret_5, ret_10 = _ret(5), _ret(10)
+    ret_20, ret_60, ret_120 = _ret(20), _ret(60), _ret(120)
 
+    # 기본 필터링 (거래대금 & 시총)
     tv_row = top_df.loc[top_df["종목코드"] == code6, "거래대금(원)"]
     if tv_row.empty: return None
     tv_eok = float(tv_row.values[0]) / 1e8
+    
     mcap = get_mcap_eok_from_map(mcap_map, code6)
-    if mcap_map and mcap <= 0: return None
+    if mcap_map and mcap <= 0: return None # 시총 맵이 있는데 값이 없으면 스킵
     if tv_eok < MIN_TURNOVER_EOK: return None
 
-    score = 0; reason = []
-    if RSI_LOW <= rsi <= RSI_HIGH: score += 1; reason.append("RSI적정")
-    if slope > 0: score += 1; reason.append("MACD상승")
-    if -1 <= disp <= 5: score += 1; reason.append("20선근접")
-    if vol_z > 1.2: score += 1; reason.append("거래량↑")
-    if ma20.iloc[-1] > ma60.iloc[-1]: score += 1; reason.append("정배열(단)")
-    if last_c > ma120.iloc[-1]: score += 1; reason.append("장기추세(120↑)")
-    else: score -= 1
-    if mfi > 60: score += 1; reason.append("자금유입")
-    if hist.iloc[-1] > 0: score += 1; reason.append("MACD>Sig")
+    # -----------------------------------------------------------
+    # 🏆 [v9.0] SCORING SYSTEM (가산점 로직 강화)
+    # -----------------------------------------------------------
+    score = 0
+    reason = []
 
-    # ✅ [v8.5 추가] VWAP 지지 여부
+    # 1. 기술적 기본 점수
+    if RSI_LOW <= rsi <= RSI_HIGH: 
+        score += 1; reason.append("RSI적정")
+    if slope > 0: 
+        score += 1; reason.append("MACD상승")
+    if -1 <= disp <= 5: 
+        score += 1; reason.append("20선근접")
+    
+    # 2. 거래량 & 수급
+    if vol_z > 1.2: 
+        score += 1; reason.append("거래량↑")
+    if mfi > 60: 
+        score += 1; reason.append("자금유입")
+    
+    # 3. 추세 (정배열)
+    if val_ma20 > float(ma60.iloc[-1]): 
+        score += 1; reason.append("정배열(단)")
+    if last_c > float(ma120.iloc[-1]): 
+        score += 1; reason.append("장기추세(120↑)")
+    else: 
+        score -= 1 # 장기 역배열은 감점
+
+    # 4. 🔥 v9.0 신규 팩터 가산점
+    if is_weekly_bull:
+        score += 2 # 주봉이 살아있으면 강력한 가산점 (+2)
+        reason.append("주봉상승(MTF)")
+    
+    if er_val >= 0.5: # 효율성 지수가 높음 (깨끗한 상승)
+        score += 1
+        reason.append(f"고효율추세(ER:{er_val:.2f})")
+    elif er_val < 0.2: # 너무 지저분함
+        score -= 1
+
+    # 5. 보조 지표
+    if hist.iloc[-1] > 0: 
+        score += 1; reason.append("MACD>Sig")
     if last_c > vwap_val: 
-        score += 1
-        reason.append("VWAP상회")
+        score += 1; reason.append("VWAP상회")
+    if candle_patterns: 
+        score += 1; reason.append(f"패턴({','.join(candle_patterns)})")
 
-    # ✅ [v8.5 추가] 캔들 패턴 가산점
-    if candle_patterns:
-        score += 1
-        reason.append(f"패턴({','.join(candle_patterns)})")
+    # -----------------------------------------------------------
+    # 🛡️ [v9.0] 전략 수립 (변동성 기반 손절 자동 조절)
+    # -----------------------------------------------------------
+    # 진입가: 20일선과 현재가 사이에서 보수적으로 산정 (단, 급등 시 현재가 추격)
+    buy = last_c
+    if (val_ma20 > 0) and (last_c > val_ma20 * 1.05): # 이격이 5% 이상 벌어지면
+        buy = max(val_ma20 * 1.02, last_c * 0.99) # 살짝 눌림 대기
 
-    buy = min(last_c, ma20.iloc[-1] * 1.03) if (ma20.iloc[-1] > 0 and last_c > ma20.iloc[-1]) else last_c
+    # ATR Multiplier 동적 조절 (HV 반영)
+    atr = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
+    
+    # 기본 ATR 배수
     atr_mult = 2.0
-    if ttm_squeeze == 1 or (np.isfinite(bb_bw_val) and bb_bw_val < 12.0): atr_mult = 1.8
-    is_high_vol = (vol_z > 2.5) or (ret_5 > 10.0) or (disp > 5.0)
-    if is_high_vol: atr_mult = 2.5
+    if ttm_squeeze == 1: 
+        atr_mult = 1.8 # 스퀴즈 시에는 타이트하게
+    
+    # 고변동성(HV > 60%) 종목은 휩소 방지를 위해 손절폭 확대
+    is_high_vol = (hv_val > 60.0) or (vol_z > 3.0) or (ret_5 > 15.0)
+    if is_high_vol:
+        atr_mult = 2.8 
 
     stop = buy - (atr_mult * atr)
-    
-    # ✅ [v7.5] 기존 스윙 로우 보정
-    if (dist_to_swing < 12.0) and (stop > swing_low_10):
-        stop = swing_low_10 * 0.99
-    
-    # 🔥 [v8.0 핵심] SuperTrend 기반 스마트 손절 보정
+
+    # 구조적 지지선(Swing Low) 활용
+    if (dist_to_swing < 15.0) and (stop > swing_low_10):
+        # ATR 손절이 Swing Low보다 위에 있으면, Swing Low 밑으로 조정 (휩소 방지)
+        stop = swing_low_10 * 0.98 
+
+    # SuperTrend 활용 (상승 추세면 ST 라인을 지지로 활용)
     if st_trend == 1 and st_val < last_c:
-        if st_val < buy:
-            stop = max(stop, st_val)
+        # 단, ST가 너무 가까우면 제외, 적절하면 ST를 손절라인으로 올림
+        if st_val < buy and st_val > stop:
+            stop = st_val
 
-    limit_pct = 0.90 if is_high_vol else 0.93
-    stop = max(stop, buy * limit_pct)
-    stop = min(stop, buy * 0.98)
+    # 손절 하한선 강제 (최대 손실폭 제한)
+    max_loss_pct = 0.88 if is_high_vol else 0.92
+    stop = max(stop, buy * max_loss_pct)
+    stop = min(stop, buy * 0.99) # 최소 1% 공간은 둠
 
+    # 목표가 설정 (Risk:Reward)
     risk = buy - stop
-    rr_mult = 2.0 if score >= 8 else (1.5 if score >= 6 else 1.2)
-    t1 = buy + risk * rr_mult
-    t2 = buy + risk * (rr_mult * 2.0)
+    # 점수가 높고 주봉이 좋으면 목표를 크게 잡음
+    rr_ratio = 2.5 if (score >= 9 and is_weekly_bull) else (2.0 if score >= 7 else 1.5)
+    t1 = buy + (risk * rr_ratio)
+    t2 = buy + (risk * rr_ratio * 2.0)
 
-    buy = round_to_tick(buy); tk = tick_size(buy)
+    # 호가 단위(Tick) 보정
+    buy = round_to_tick(buy)
+    tk = tick_size(buy)
     stop = floor_to_tick(stop)
-    if buy - stop < tk: stop = buy - tk
-    t1 = ceil_to_tick(t1); t2 = ceil_to_tick(t2)
-    if t1 <= buy: t1 = buy + tk * 2
-
-    # -----------------------------------------------------------
-    # ✅ [v8.5 추가] 변동성 기반 비중 조절 (Money Management)
-    # -----------------------------------------------------------
+    
+    # 손절가가 매수가보다 한 호가라도 아래에 있어야 함
+    if buy - stop < tk: 
+        stop = buy - tk
+        
+    t1 = ceil_to_tick(t1)
+    t2 = ceil_to_tick(t2)
+    
+    # 자금 관리 (v8.5 로직 유지)
     ACCOUNT_CAPITAL = 10_000_000 
-    RISK_PER_TRADE = 0.02         
+    RISK_PER_TRADE = 0.02          
     MAX_POS_PCT = 0.25            
 
     loss_per_share = buy - stop   
@@ -2115,15 +2271,20 @@ def analyze_ticker(
         rec_qty = int(min(risk_based_qty, max_cap_qty))
         rec_amt = int(rec_qty * buy)
 
+    # 메타 정보 (벤치마크 상대수익률 등)
     sector = sector_map.get(code6, "기타")
     name = name_map.get(code6, code6)
     m_row = top_df.loc[top_df["종목코드"] == code6, "시장"]
     market = str(m_row.values[0]) if not m_row.empty else ("KOSPI" if code6 in kospi_set else "KOSDAQ")
+    
     bench_dict = bench_map.get(market, {})
-    idx_20 = bench_dict.get(20, np.nan); idx_60 = bench_dict.get(60, np.nan); idx_120 = bench_dict.get(120, np.nan)
-    rel_20 = ret_20 - idx_20 if np.isfinite(idx_20) and np.isfinite(ret_20) else np.nan
-    rel_60 = ret_60 - idx_60 if np.isfinite(idx_60) and np.isfinite(ret_60) else np.nan
-    rel_120 = ret_120 - idx_120 if np.isfinite(idx_120) and np.isfinite(ret_120) else np.nan
+    idx_20 = bench_dict.get(20, np.nan)
+    idx_60 = bench_dict.get(60, np.nan)
+    idx_120 = bench_dict.get(120, np.nan)
+    
+    rel_20 = (ret_20 - idx_20) if (np.isfinite(idx_20) and np.isfinite(ret_20)) else np.nan
+    rel_60 = (ret_60 - idx_60) if (np.isfinite(idx_60) and np.isfinite(ret_60)) else np.nan
+    rel_120 = (ret_120 - idx_120) if (np.isfinite(idx_120) and np.isfinite(ret_120)) else np.nan
 
     return {
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
@@ -2133,19 +2294,22 @@ def analyze_ticker(
         "캔들패턴": ",".join(candle_patterns) if candle_patterns else "",
         "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
         "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
-        "SUPERTREND_VAL": int(st_val) if np.isfinite(st_val) else 0, "SUPERTREND_DIR": int(st_trend) if np.isfinite(st_trend) else 1,
+        "SUPERTREND_VAL": int(st_val) if np.isfinite(st_val) else 0, "SUPERTREND_DIR": int(st_trend),
+        
+        # 🔥 v9.0 신규 지표
+        "ER_INDEX": round(er_val, 2), 
+        "HV_PCT": round(hv_val, 1), 
+        "IS_WEEKLY_BULL": is_weekly_bull,
+
         "BB_BW": round(bb_bw_val, 2) if np.isfinite(bb_bw_val) else np.nan,
         "BB_SQUEEZE_BW": int(bw_squeeze), "TTM_SQUEEZE": int(ttm_squeeze), "TTM_SQUEEZE_CNT": int(sqz_cnt),
-        "BB_SQUEEZE": int(bb_squeeze), "Above_MA20": int(above_ma20), 
+        "BB_SQUEEZE": int(bb_squeeze), "Above_MA20": 1 if last_c > val_ma20 else 0, 
         "IS_SWING_SUPPORT": is_swing_support,
-        "ret_5d_%": round(ret_5, 2) if np.isfinite(ret_5) else np.nan,
-        "ret_10d_%": round(ret_10, 2) if np.isfinite(ret_10) else np.nan,
-        "ret_20d_%": round(ret_20, 2) if np.isfinite(ret_20) else np.nan,
-        "ret_60d_%": round(ret_60, 2) if np.isfinite(ret_60) else np.nan,
-        "ret_120d_%": round(ret_120, 2) if np.isfinite(ret_120) else np.nan,
-        "rel_20d_%": round(rel_20, 2) if np.isfinite(rel_20) else np.nan,
-        "rel_60d_%": round(rel_60, 2) if np.isfinite(rel_60) else np.nan,
-        "rel_120d_%": round(rel_120, 2) if np.isfinite(rel_120) else np.nan,
+        
+        "ret_5d_%": round(ret_5, 2), "ret_10d_%": round(ret_10, 2),
+        "ret_20d_%": round(ret_20, 2), "ret_60d_%": round(ret_60, 2), "ret_120d_%": round(ret_120, 2),
+        "rel_20d_%": round(rel_20, 2), "rel_60d_%": round(rel_60, 2), "rel_120d_%": round(rel_120, 2),
+        
         "EBS": int(score), "통과": "★" if score >= PASS_EBS else "", "근거": ", ".join(reason),
         "추천매수가": buy, "손절가": stop, "추천매도가1": t1, "추천매도가2": t2, "ATR_MULT": atr_mult,
         "추천수량": rec_qty, 
