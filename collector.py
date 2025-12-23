@@ -2300,9 +2300,9 @@ def analyze_ticker(
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
         "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
-        # ✅ [v8.5 추가] VWAP 데이터 저장 (디버깅 및 분석용)
+        # ✅ [v8.5 추가] VWAP 데이터 저장
         "VWAP": int(vwap_val), "VWAP_GAP": round(vwap_gap, 2),
-        # ✅ [v8.5 추가] 감지된 캔들 패턴 저장 (CSV 확인용)
+        # ✅ [v8.5 추가] 감지된 캔들 패턴 저장
         "캔들패턴": ",".join(candle_patterns) if candle_patterns else "",
         "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
         "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
@@ -2323,13 +2323,13 @@ def analyze_ticker(
         "추천매수가": buy, "손절가": stop, "추천매도가1": t1, "추천매도가2": t2, "ATR_MULT": atr_mult,
         # ✅ [v8.5 추가] 자금 관리 필드 추가
         "추천수량": rec_qty, 
-        "추천금액(만원)": round(rec_amt / 10000, 1)  # 보기 좋게 만원 단위 표기    
-        # ... (기존 필드들 사이에 추가) ...
+        "추천금액(만원)": round(rec_amt / 10000, 1),  # <--- 여기에 쉼표(,)가 꼭 필요합니다!
+        
+        # ✅ [v9.0 추가] HMA & OBV 지표
         "HMA20": int(curr_hma) if np.isfinite(curr_hma) else 0,
         "HMA_Trend": "▲" if hma_trend_up else "▼",
         "HMA_On": "O" if above_hma else "X",
         "OBV_Div": "O" if is_obv_div else "X",
-           
     }
 
 
