@@ -452,7 +452,10 @@ def _validate_password(pw: str) -> Tuple[bool, str]:
 
 # ----------------- 회원 관리 로직 -----------------
 
-def register_user(email: str, password: str, nickname: str, q_idx: int, q_answer: str,  # 👈 [v9.0] 추가된 인자 invite_code: str = ""):
+# ✅ (수정된 코드: 줄바꿈하여 주석과 코드를 분리했습니다)
+def register_user(email: str, password: str, nickname: str, 
+                  q_idx: int, q_answer: str,  # 👈 [v9.0] 추가된 인자
+                  invite_code: str = ""):
     email_norm = _normalize_email(email)
     # 👇 [추가] 'admin' 아이디 등록 시도 차단
     if email_norm == MASTER_ADMIN_ID:
