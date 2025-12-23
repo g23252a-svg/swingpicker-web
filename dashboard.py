@@ -2778,7 +2778,7 @@ with tab2:
             with c1:
                 # 🔧 차트 옵션 (모바일 최적화: Expander)
                 with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
-                    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns(4) # 컬럼 4개로 확장
+                    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns(5)
                     with c_opt1: show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
                     with c_opt2: show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
                     with c_opt3: show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
