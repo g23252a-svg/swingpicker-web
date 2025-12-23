@@ -28,6 +28,25 @@ def normalize_code(x) -> str:
     s = re.sub(r"[^0-9]", "", s)    # 숫자만 남김
     return s.zfill(6) if s else ""  # 6자리로
 
+# -------------------- [v9.0 유틸리티 추가] --------------------
+def wma(s: pd.Series, period: int) -> pd.Series:
+    weights = np.arange(1, period + 1)
+    def _calc(x):
+        return np.dot(x, weights) / weights.sum()
+    return s.rolling(period).apply(_calc, raw=True)
+
+def calc_hma_series(s: pd.Series, period: int) -> pd.Series:
+    """차트용 HMA 시리즈 계산"""
+    if len(s) < period:
+        return pd.Series(np.nan, index=s.index)
+    half_length = int(period / 2)
+    sqrt_length = int(math.sqrt(period))
+    wma_half = wma(s, half_length)
+    wma_full = wma(s, period)
+    raw_hma = 2 * wma_half - wma_full
+    return wma(raw_hma, sqrt_length)
+# -----------------------------------------------------------
+
 def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
     if "종목코드" in df.columns:
         df["종목코드"] = df["종목코드"].apply(normalize_code)
@@ -1149,6 +1168,10 @@ def get_stock_chart_data(code):
         down = -delta.clip(upper=0)
         rs = up.rolling(14).mean() / down.rolling(14).mean()
         df['RSI14_CHART'] = 100 - (100 / (1 + rs))
+        # -------------------- [v9.0 HMA 추가] --------------------
+        # HMA 20일선 계산 (캔들 차트에 표시용)
+        df['HMA20'] = calc_hma_series(df['Close'], 20)
+        # ---------------------------------------------------------
 
         # SuperTrend
         df = calculate_supertrend(df)
@@ -1239,6 +1262,7 @@ def plot_interactive_chart(
     show_kc: bool = False,
     show_rsi: bool = False,
     show_vwap: bool = False, # ✅ [v8.5] VWAP 표시 여부
+    show_hma: bool = False,  # ✅ [v9.0] HMA 표시 옵션 추가
 ):
     if df is None or df.empty:
         return go.Figure()
@@ -1290,6 +1314,18 @@ def plot_interactive_chart(
             ), 
             row=1, col=1
         )
+
+    # -------------------- [v9.0 HMA 라인 추가] --------------------
+    if show_hma and "HMA20" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index, y=df["HMA20"],
+                name="HMA(20)",
+                line=dict(color='#00BCD4', width=2.5), # 밝은 Cyan 색상
+            ),
+            row=1, col=1
+        )
+    # -------------------------------------------------------------
 
     # 3) 볼린저 밴드 (은은한 회색 영역)
     if show_bb:
@@ -2680,6 +2716,22 @@ with tab2:
         # 1: 상승, -1: 하락 (Collector v8.0 기준)
         filtered = filtered[filtered["SUPERTREND_DIR"] == 1]
 
+    # -------------------- [v9.0 필터 추가: OBV & HMA] --------------------
+    # SuperTrend 필터 바로 아래에 추가하여 필터링 단계가 이어지도록 합니다.
+    
+    c_f1, c_f2 = st.columns(2)
+    with c_f1:
+        show_obv_only = st.checkbox("💰 OBV 매집(다이버전스) 종목만", key="chk_obv")
+    with c_f2:
+        show_hma_up = st.checkbox("🚀 HMA 추세 상승 종목만", key="chk_hma")
+
+    if show_obv_only and "OBV_Div" in filtered.columns:
+        filtered = filtered[filtered["OBV_Div"] == "O"]
+    
+    if show_hma_up and "HMA_Trend" in filtered.columns:
+        filtered = filtered[filtered["HMA_Trend"] == "▲"]
+    # ---------------------------------------------------------------------
+
 
     if auth_status in ["pro", "prime", "admin"]:
         if auth_status == "pro":
@@ -2732,6 +2784,8 @@ with tab2:
                     with c_opt3: show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
                     # ✅ [v8.5] VWAP 옵션 추가
                     with c_opt4: show_vwap = st.checkbox("VWAP 표시", value=True, key=f"opt_vwap_{code}")
+                    # ✅ [v9.0] HMA 옵션 추가
+                    with c_opt5: show_hma = st.checkbox("HMA", value=True, key=f"opt_hma_{code}")
 
                 chart_df = get_stock_chart_data(code)
 
@@ -2757,7 +2811,8 @@ with tab2:
                         entry=entry, stop=stop, target1=t1, target2=t2, 
                         vwap=vwap, # ✅ VWAP 전달
                         show_bb=show_bb, show_kc=show_kc, show_rsi=show_rsi, 
-                        show_vwap=show_vwap # ✅ 옵션 전달
+                        show_vwap=show_vwap, # ✅ 쉼표(,) 추가 필수!
+                        show_hma=show_hma  # ✅ 전달
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -2772,16 +2827,31 @@ with tab2:
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
                     is_swing = row.get("IS_SWING_SUPPORT", False)
                     
-                    # 뱃지 모음 (Swing Low, Candle Pattern)
+                    # 뱃지 모음 (Swing Low, Candle, OBV, HMA)
                     badges = []
-                    if is_swing: badges.append("🛡️스마트지지")
+                    if row.get("IS_SWING_SUPPORT", False): badges.append("🛡️스마트지지")
+
+                    # [v9.0] OBV & HMA 뱃지
+                    if row.get("OBV_Div") == "O": badges.append("💰OBV매집")
+                    if row.get("HMA_Trend") == "▲": badges.append("🚀HMA상승")
+                    if row.get("HMA_On") == "O": badges.append("✅HMA지지")
                     
-                    # ✅ [v8.5] 캔들 패턴 뱃지 추가
+                    # 캔들 패턴
                     patterns = str(row.get("캔들패턴", "")).strip()
                     if patterns and patterns != "nan":
                         badges.append(f"🕯️{patterns}")
 
                     if badges:
+                        # 뱃지 스타일링 (파란색 배경)
+                        st.markdown(
+                            "".join([
+                                f"<span style='background-color:#E3F2FD; color:#1565C0; padding:4px 8px; border-radius:4px; margin-right:5px; font-size:0.85em; font-weight:600;'>{b}</span>"
+                                for b in badges
+                            ]),
+                            unsafe_allow_html=True
+                        )
+                        st.write("") # 간격 띄우기
+                        
                         st.success(" ".join(badges))
                     
                     st.info(f"💬 **AI:** {ai_cmt}")
