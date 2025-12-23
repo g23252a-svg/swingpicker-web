@@ -90,6 +90,49 @@ def ensure_dir(path: str) -> None:
 def ema(s: pd.Series, span: int) -> pd.Series:
     return s.ewm(span=span, adjust=False).mean()
 
+def wma(s: pd.Series, period: int) -> pd.Series:
+    """
+    [v9.0] 가중 이동 평균 (HMA 계산용)
+    """
+    weights = np.arange(1, period + 1)
+    
+    def _calc(x):
+        return np.dot(x, weights) / weights.sum()
+    
+    # raw=True로 속도 최적화
+    return s.rolling(period).apply(_calc, raw=True)
+
+def calc_hma(s: pd.Series, period: int) -> pd.Series:
+    """
+    [v9.0] Hull Moving Average (HMA)
+    - 반응 속도가 빠르고 휩소가 적음
+    """
+    if len(s) < period:
+        return pd.Series(np.nan, index=s.index)
+
+    half_length = int(period / 2)
+    sqrt_length = int(math.sqrt(period))
+
+    wma_half = wma(s, half_length)
+    wma_full = wma(s, period)
+
+    raw_hma = 2 * wma_half - wma_full
+    return wma(raw_hma, sqrt_length)
+
+def calc_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """
+    [v9.0] On-Balance Volume (OBV)
+    - 주가 등락에 따른 거래량 누적 지표 (스마트 머니 추적)
+    - 공식: 주가 상승 시 거래량 더하기, 하락 시 빼기
+    """
+    # 전일 대비 등락 부호 (-1, 0, 1)
+    change = np.sign(close.diff()).fillna(0)
+    # 부호 * 거래량 누적 합계
+    obv = (change * volume).cumsum()
+    return obv
+
+# -------------------- [여기까지] --------------------
+
 def _safe_sum(x: pd.Series) -> float:
     return pd.to_numeric(x, errors="coerce").fillna(0).sum()
 
@@ -273,17 +316,36 @@ def tick_size(price: float) -> int:
 
 def add_sector_momentum(df: pd.DataFrame, group_col: str = "업종_대분류") -> Tuple[pd.DataFrame, pd.Series]:
     """
-    업종(대분류)별 5일 평균 수익률을 계산해서 컬럼으로 주입
+    [v9.0] 섹터 주도주 로직 강화
+    - 단순 등락률(Ret)뿐만 아니라 시장 대비 초과수익(RS, Relative Strength)을 반영
+    - 시장이 하락해도 버티거나 오르는 '진짜 주도 섹터' 발굴
     """
-    if group_col not in df.columns or "ret_5d_%" not in df.columns:
-        df["SECTOR_RET_5D"] = np.nan
+    # 필수 컬럼 체크
+    if group_col not in df.columns:
+        df["SECTOR_RS"] = np.nan
         df["SECTOR_RANK"] = np.nan
         return df, pd.Series(dtype=float)
 
-    g = df.groupby(group_col)["ret_5d_%"].mean().sort_values(ascending=False)
-    df["SECTOR_RET_5D"] = df[group_col].map(g)
-    df["SECTOR_RANK"] = df[group_col].map(g.rank(ascending=False, method="min"))
-    return df, g
+    # 1. 단순 모멘텀 (최근 5일 평균 수익률)
+    col_ret = "ret_5d_%" if "ret_5d_%" in df.columns else "등락률"
+    g_ret = df.groupby(group_col)[col_ret].mean()
+    
+    # 2. [핵심] 시장 대비 초과 수익 (20일 평균 상대강도)
+    # analyze_ticker에서 계산된 'rel_20d_%' (종목수익률 - 지수수익률) 활용
+    col_rs = "rel_20d_%" if "rel_20d_%" in df.columns else col_ret
+    g_rs = df.groupby(group_col)[col_rs].mean()
+    
+    # 3. 종합 섹터 점수 산출 (RS에 가중치 60%, 단순수익 40%)
+    # RS가 높아야 진짜 주도주임
+    sector_score = (g_ret * 0.4) + (g_rs * 0.6)
+    sector_score = sector_score.sort_values(ascending=False)
+    
+    # 4. 데이터프레임에 매핑
+    df["SECTOR_RET_5D"] = df[group_col].map(g_ret)
+    df["SECTOR_RS"] = df[group_col].map(g_rs)   # RS 지표 저장
+    df["SECTOR_RANK"] = df[group_col].map(sector_score.rank(ascending=False, method="min"))
+    
+    return df, sector_score
 
 
 def compute_market_breadth(df: pd.DataFrame) -> Dict[str, float]:
@@ -1766,12 +1828,20 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
 
     prelim_score = np.clip(base_score - pen, 0, 100)
     sector_bonus = 0.0
-    if "SECTOR_RET_5D" in x.columns:
+    # -------------------- [v9.0 섹터 보너스 강화] --------------------
+    # 단순 상승 섹터가 아니라, 시장 대비 강한(RS > 0) 섹터에 보너스 부여
+    if "SECTOR_RS" in x.columns:
         try:
-            sec5 = nz_num(x["SECTOR_RET_5D"]).clip(lower=0)
-            sec_norm = pct_norm_pos(sec5, q=85, floor=1.0).fillna(0)
+            # RS(상대강도)가 양수일 때만 가산점 (시장보다 강할 때)
+            sec_rs = nz_num(x["SECTOR_RS"]).clip(lower=0)
+            
+            # 상위 10% 섹터에 최대 점수 부여
+            sec_norm = pct_norm_pos(sec_rs, q=90, floor=1.0).fillna(0)
+            
+            # W_SECTOR 가중치 적용 (기본 5점 ~ 최대 10점 효과)
             sector_bonus = 100 * W_SECTOR * sec_norm
         except: pass
+    # -------------------------------------------------------------
 
     final_score = np.clip(prelim_score + sector_bonus, 0, 100)
 
@@ -1976,6 +2046,45 @@ def analyze_ticker(
     last_c = float(c.iloc[-1])
 
     ma20 = c.rolling(BB_PERIOD).mean(); ma60 = c.rolling(60).mean(); ma120 = c.rolling(120).mean()
+    # -------------------- [v9.0 HMA 로직 추가] --------------------
+    # HMA 20일선 계산
+    hma20 = calc_hma(c, 20)
+    curr_hma = float(hma20.iloc[-1]) if len(hma20) > 0 else np.nan
+    prev_hma = float(hma20.iloc[-2]) if len(hma20) > 1 else np.nan
+
+    # 1) HMA 추세 (상승/하락)
+    hma_trend_up = False
+    if np.isfinite(curr_hma) and np.isfinite(prev_hma):
+        hma_trend_up = curr_hma > prev_hma
+
+    # 2) 현재가가 HMA 위에 있는지 (지지)
+    above_hma = 1 if (np.isfinite(curr_hma) and last_c > curr_hma) else 0
+
+    # 3) 골든크로스 (전일 아래 -> 금일 위)
+    prev_c = float(c.iloc[-2])
+    hma_cross_up = False
+    if (prev_c < prev_hma) and (last_c > curr_hma):
+        hma_cross_up = True
+
+    # -------------------- [v9.0 OBV 다이버전스 로직] --------------------
+    obv = calc_obv(c, v)
+    obv_ma20 = obv.rolling(20).mean() # OBV 추세선
+
+    # [매집 패턴 감지]
+    term = 20
+    is_obv_div = False
+
+    if len(c) > term:
+        # 20일 전 대비 주가 변동률
+        price_chg_pct = (last_c - float(c.iloc[-(term+1)])) / float(c.iloc[-(term+1)])
+        # 20일 전 대비 OBV 변동량
+        obv_chg_val = float(obv.iloc[-1] - obv.iloc[-(term+1)])
+
+        # 조건: 주가 횡보/약세(-inf ~ 3%) & OBV 증가 & OBV가 이평선 위
+        if (price_chg_pct < 0.03) and (obv_chg_val > 0) and (float(obv.iloc[-1]) > float(obv_ma20.iloc[-1])):
+            is_obv_div = True
+    # ------------------------------------------------------------------
+    # -------------------------------------------------------------
     std20 = c.rolling(BB_PERIOD).std()
     bb_upper = ma20 + (BB_STD * std20); bb_lower = ma20 - (BB_STD * std20)
     bb_bw = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
@@ -2049,6 +2158,23 @@ def analyze_ticker(
     if tv_eok < MIN_TURNOVER_EOK: return None
 
     score = 0; reason = []
+    # -------------------- [v9.0 HMA 가산점] --------------------
+    # 전략 1: HMA 우상향 + 주가 지지 (+1.5점) -> 강력한 추세
+    if hma_trend_up and above_hma:
+        score += 1.5
+        reason.append("HMA추세↑")
+    
+    # 전략 2: HMA 상향 돌파 (+1.0점) -> 진입 타이밍
+    if hma_cross_up:
+        score += 1.0
+        reason.append("HMA돌파")
+
+    # -------------------- [v9.0 OBV 가산점] --------------------
+    if is_obv_div:
+        score += 2.0
+        reason.append("OBV매집")
+    # -------------------------------------------------------------
+    # -------------------------------------------------------------
     if RSI_LOW <= rsi <= RSI_HIGH: score += 1; reason.append("RSI적정")
     if slope > 0: score += 1; reason.append("MACD상승")
     if -1 <= disp <= 5: score += 1; reason.append("20선근접")
@@ -2098,10 +2224,34 @@ def analyze_ticker(
     stop = max(stop, buy * limit_pct)
     stop = min(stop, buy * 0.98)
 
-    risk = buy - stop
-    rr_mult = 2.0 if score >= 8 else (1.5 if score >= 6 else 1.2)
-    t1 = buy + risk * rr_mult
-    t2 = buy + risk * (rr_mult * 2.0)
+# -------------------- [v9.0 동적 이익 실현 (Dynamic Profit Taking)] --------------------
+    # 기존 고정 RR 방식 대신, 변동성(ATR)과 거래강도(vol_z)에 따라 목표가를 탄력적으로 조절
+    
+    risk = buy - stop  # 확정된 1주당 리스크 금액 (1R)
+    
+    # 1. 기본 목표 배수 (점수가 높을수록 신뢰도↑ -> 목표가 상향)
+    base_mult = 2.0 if score >= 8 else (1.5 if score >= 6 else 1.2)
+    
+    # 2. 동적 확장 계수 (Dynamic Boost)
+    # 거래량이 평소보다 폭발적(vol_z > 2.0)이라면 추세가 강하므로 목표가를 확장
+    dynamic_boost = 1.0
+    if vol_z > 3.0: 
+        dynamic_boost = 1.5    # 초강력 수급 -> 목표가 50% 추가 상향
+    elif vol_z > 2.0: 
+        dynamic_boost = 1.2    # 강한 수급 -> 목표가 20% 추가 상향
+    
+    # 3. ATR 기반 최소 목표치 보정
+    # 리스크가 너무 작게 잡혔을 경우(손절이 너무 타이트할 때), 
+    # 최소한 ATR(일평균진폭)의 2배만큼은 먹을 구간을 확보
+    min_target_dist = atr * 2.0
+    
+    # 4. 최종 목표가 산출
+    # (리스크 기반 목표) vs (ATR 기반 목표) 중 더 큰 값을 채택하여 조기 매도 방지
+    target_dist = max(risk * base_mult * dynamic_boost, min_target_dist)
+    
+    t1 = buy + target_dist
+    t2 = buy + (target_dist * 2.0) # 2차 목표가는 1차 수익폭의 2배 지점
+    # -------------------------------------------------------------------------------------
 
     buy = round_to_tick(buy); tk = tick_size(buy)
     stop = floor_to_tick(stop)
@@ -2174,6 +2324,11 @@ def analyze_ticker(
         # ✅ [v8.5 추가] 자금 관리 필드 추가
         "추천수량": rec_qty, 
         "추천금액(만원)": round(rec_amt / 10000, 1)  # 보기 좋게 만원 단위 표기    
+        # ... (기존 필드들 사이에 추가) ...
+        "HMA20": int(curr_hma) if np.isfinite(curr_hma) else 0,
+        "HMA_Trend": "▲" if hma_trend_up else "▼",
+        "HMA_On": "O" if above_hma else "X",
+        "OBV_Div": "O" if is_obv_div else "X",
            
     }
 
