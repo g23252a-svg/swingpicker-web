@@ -24,7 +24,7 @@ def _get_conf(key: str, default_val: str) -> str:
 # 1) 버전 정보
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "8.5.0")  # ✅ [Update] v8.5.0 (오늘 업데이트 반영)
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "9.0.0")  # ✅ [Update] v9.0.0 (Deep Insight Edition)
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -56,6 +56,19 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG: List[Dict] = [
     {
+        "version": "9.0.0",
+        "date": "2025-12-23",
+        "title": "Deep Insight Edition: HMA, OBV & Smart Sector",
+        "items": [
+            "🚀 **Hull Moving Average (HMA):** 기존 이평선보다 반응이 빠르고 휩소가 적은 **HMA 지표**를 탑재하여 추세 전환을 신속하게 포착합니다.",
+            "💰 **Smart Money Tracker (OBV):** 주가는 횡보/하락하는데 거래량이 증가하는 **'OBV 다이버전스'**를 감지하여 세력 매집 구간을 식별합니다.",
+            "🎯 **Dynamic Profit Taking:** 시장 변동성(ATR)과 거래 강도에 따라 **목표가를 유동적으로 상향**조절하여 수익을 극대화(Let Profits Run)합니다.",
+            "🏗️ **Alpha Sector Rotation:** 단순 등락률이 아닌, 시장 지수 대비 **초과 수익(RS)**이 발생하는 '진짜 주도 섹터'에 가산점을 부여합니다.",
+            "🛡️ **Security & Admin Control:** 비밀번호 분실 시 **'보안 질문'**을 통한 재설정 기능 및 관리자용 악성 유저 차단(Ban) 시스템이 추가되었습니다.",
+        ],
+    },
+    {
+        
         "version": "8.5.0",  # ✅ [New] 오늘 업데이트 내용 추가
         "date": "2025-12-19",
         "title": "Institutional-Grade Analytics & Smart Money Management",
