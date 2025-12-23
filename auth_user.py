@@ -32,6 +32,17 @@ USER_DB_PATH = os.path.join(DATA_DIR, "users_db.json")
 CURRENT_USER_KEY = "ldy_current_user"
 JUST_REGISTERED_KEY = "just_registered"
 
+# [v9.0] 보안 질문 리스트 (비밀번호 찾기용)
+SECURITY_QUESTIONS = [
+    "선택하세요...",
+    "가장 기억에 남는 여행지는?",
+    "어릴 적 살던 동네 이름은?",
+    "가장 좋아하는 보물 1호는?",
+    "초등학교 담임 선생님 성함은?",
+    "나의 좌우명은?",
+    "부모님의 고향은 어디인가요?",
+]
+
 # ----------------- 설정값 로딩 -----------------
 def _get_conf(key: str, default_val: str) -> str:
     try:
@@ -372,11 +383,63 @@ def _hash_password(password: str, salt: str) -> str:
         100000
     ).hex()
 
+# ✅ [v9.0] 보안 질문 답변 해싱 (소문자 변환/공백 제거 후 해싱)
+def _hash_answer(answer: str, salt: str) -> str:
+    norm_ans = answer.strip().lower()
+    return _hash_password(norm_ans, salt)
+
+# ✅ [v9.0] 비밀번호 찾기: 정보 검증
+def verify_recovery_info(email: str, question_idx: int, answer: str) -> bool:
+    email_norm = _normalize_email(email)
+    db = load_user_db()
+    users = db.get("users", {})
+    user = users.get(email_norm)
+    
+    if not user: return False
+    
+    saved_q_idx = user.get("security_q_idx", 0)
+    saved_a_hash = user.get("security_a_hash", "")
+    salt = user.get("salt", "")
+    
+    # 1. 질문 유형 일치 여부 확인
+    if saved_q_idx != question_idx:
+        return False
+        
+    # 2. 답변 해시 일치 여부 확인
+    input_hash = _hash_answer(answer, salt)
+    return input_hash == saved_a_hash
+
+# ✅ [v9.0] 비밀번호 찾기: 새 비밀번호 강제 설정
+def reset_password_with_recovery(email: str, new_pw: str) -> Tuple[bool, str]:
+    email_norm = _normalize_email(email)
+    ok, msg = _validate_password(new_pw)
+    if not ok: return False, msg
+    
+    db = load_user_db()
+    users = db.get("users", {})
+    if email_norm not in users: return False, "유저 정보를 찾을 수 없습니다."
+    
+    user = users[email_norm]
+    # Salt 재발급 (보안 강화)
+    new_salt = _create_salt() 
+    user["salt"] = new_salt
+    user["password_hash"] = _hash_password(new_pw, new_salt)
+    
+    # Salt가 바뀌었으므로 기존 보안 답변 해시는 무효화됨 -> 초기화
+    user["security_a_hash"] = "" 
+    user["security_q_idx"] = 0
+    
+    db["users"] = users
+    save_user_db(db)
+    return True, "비밀번호가 재설정되었습니다. (보안 질문이 초기화되었습니다. 로그인 후 다시 설정해주세요.)"
+
 def _hash_password_legacy(password: str, salt: str) -> str:
     """v7.4 이하 구버전 해싱 (SHA256) - 마이그레이션용"""
     return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 def _validate_email(email: str) -> bool:
     return bool(EMAIL_REGEX.match(email)) if email else False
 
@@ -389,7 +452,7 @@ def _validate_password(pw: str) -> Tuple[bool, str]:
 
 # ----------------- 회원 관리 로직 -----------------
 
-def register_user(email: str, password: str, nickname: str, invite_code: str = ""):
+def register_user(email: str, password: str, nickname: str, q_idx: int, q_answer: str,  # 👈 [v9.0] 추가된 인자 invite_code: str = ""):
     email_norm = _normalize_email(email)
     # 👇 [추가] 'admin' 아이디 등록 시도 차단
     if email_norm == MASTER_ADMIN_ID:
@@ -401,6 +464,10 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
     ok_pw, pw_msg = _validate_password(password)
     if not ok_pw:
         return False, pw_msg, None
+
+    # [v9.0] 보안 답변 필수 체크
+    if not q_answer or not q_answer.strip():
+        return False, "비밀번호 찾기에 사용할 보안 답변을 입력해 주세요.", None
     
     db = load_user_db()
     users = db.get("users", {})
@@ -415,6 +482,10 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
     
     salt = _create_salt()
     pw_hash = _hash_password(password, salt)
+
+    # [v9.0] 답변 해싱
+    ans_hash = _hash_answer(q_answer, salt)
+
     now_utc = _now_utc_str()
     
     users[email_norm] = {
@@ -425,6 +496,10 @@ def register_user(email: str, password: str, nickname: str, invite_code: str = "
         "password_hash": pw_hash,
         "created_at": now_utc,
         "last_login": now_utc,
+        # [v9.0] 신규 필드
+        "is_banned": False,
+        "security_q_idx": int(q_idx),
+        "security_a_hash": ans_hash,
     }
     
     db["users"] = users
@@ -459,6 +534,10 @@ def authenticate_user(email: str, password: str):
     if not user:
         record_login_fail(email_norm)
         return None, "이메일 또는 비밀번호가 일치하지 않습니다."
+
+    # ✅ [v9.0] 차단 여부 확인 (비밀번호 확인 전에 수행)
+    if user.get("is_banned", False):
+        return None, "🚫 관리자에 의해 이용이 정지된 계정입니다."
     
     salt = user.get("salt", "")
     pw_hash = user.get("password_hash", "")
@@ -534,6 +613,27 @@ def update_user_role(email: str, new_role: str, acting_admin_email: Optional[str
     db["users"] = users
     save_user_db(db)
     return True
+
+# ✅ [v9.0] 관리자 기능: 유저 차단 토글
+def toggle_user_ban(email: str, acting_admin: str) -> Tuple[bool, str]:
+    email_norm = _normalize_email(email)
+    db = load_user_db()
+    users = db.get("users", {})
+    
+    if email_norm not in users:
+        return False, "유저를 찾을 수 없습니다."
+    
+    if email_norm == _normalize_email(acting_admin):
+        return False, "관리자 자신을 차단할 수 없습니다."
+        
+    current_status = users[email_norm].get("is_banned", False)
+    users[email_norm]["is_banned"] = not current_status # 상태 반전
+    
+    db["users"] = users
+    save_user_db(db)
+    
+    action = "해제" if current_status else "차단(Ban)"
+    return True, f"사용자 {email_norm} {action} 처리 완료."
 
 # ----------------- [Upgrade 3] 마이페이지 기능 -----------------
 def update_user_profile(email: str, new_nickname: str = None, new_password: str = None) -> Tuple[bool, str]:
@@ -669,9 +769,16 @@ def render_auth_box(show_debug: bool = False):
         with st.form(key="signup_form"):
             reg_email = st.text_input("이메일")
             reg_nick = st.text_input("닉네임 (선택)")
-            # ✅ [v8.5] 비밀번호 규칙 안내 추가 (영문+숫자)
             reg_pw1 = st.text_input("비밀번호 (영문+숫자 6자 이상)", type="password")
             reg_pw2 = st.text_input("비밀번호 확인", type="password")
+            
+            # [v9.0] 보안 질문/답변 UI 추가
+            st.markdown("---")
+            st.caption("🔒 비밀번호 분실 시 찾기 위한 질문입니다.")
+            q_idx = st.selectbox("보안 질문 선택", range(len(SECURITY_QUESTIONS)), format_func=lambda x: SECURITY_QUESTIONS[x])
+            q_answer = st.text_input("보안 질문 답변")
+            st.markdown("---")
+            
             reg_code = st.text_input("초대/구독 코드 (선택)", type="password")
             
             st.caption("ℹ️ 가입 시 **상위 5개 추천 종목** 무료 열람 가능")
@@ -680,9 +787,13 @@ def render_auth_box(show_debug: bool = False):
         if submit_reg:
             if reg_pw1 != reg_pw2:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
+            elif q_idx == 0:
+                st.error("보안 질문을 선택해 주세요.")
+            elif not q_answer.strip():
+                st.error("보안 질문 답변을 입력해 주세요.")
             else:
-                # register_user 함수 호출
-                ok, msg, new_user = register_user(reg_email, reg_pw1, reg_nick, reg_code)
+                # register_user 함수 호출 (인자 추가됨!)
+                ok, msg, new_user = register_user(reg_email, reg_pw1, reg_nick, q_idx, q_answer, reg_code)
                 if ok:
                     st.session_state[CURRENT_USER_KEY] = new_user
                     st.session_state[JUST_REGISTERED_KEY] = True
