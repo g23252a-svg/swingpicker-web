@@ -2694,6 +2694,56 @@ def main(
     df_out["기준일"] = trade_ymd
     df_out["시총기준일"] = mcap_ymd
 
+    # -------------------------------------------------------------
+    # 🔥 [v9.0 추가] 상위 Top 10 종목 뉴스 심층 분석 (LLM)
+    # -------------------------------------------------------------
+    if LLM_AVAILABLE:
+        log("🧠 상위 10개 종목 뉴스/재료 심층 분석 중 (LLM)...")
+        
+        # 컬럼 초기화
+        df_out["NEWS_SCORE"] = 0.0
+        df_out["NEWS_REASON"] = ""
+
+        # 상위 10개만 순회 (API 비용/속도 최적화)
+        target_indices = df_out.index[:10]
+        
+        for idx in target_indices:
+            code = str(df_out.loc[idx, "종목코드"]).zfill(6)
+            name = df_out.loc[idx, "종목명"]
+            
+            # 1. 뉴스 수집 (최근 2일)
+            headlines = fetch_naver_news_headlines(code, days=2)
+            
+            # 2. LLM 감성 분석
+            if headlines:
+                l_score, l_reason = analyze_sentiment_llm(name, headlines)
+            else:
+                l_score, l_reason = 0.0, "뉴스없음"
+            
+            # 3. 결과 반영
+            df_out.at[idx, "NEWS_SCORE"] = l_score
+            df_out.at[idx, "NEWS_REASON"] = l_reason
+            
+            # 4. 점수 보정 (호재면 가산점, 악재면 감점)
+            old_score = df_out.at[idx, "LDY_SCORE"]
+            # 뉴스 점수(-5 ~ +5)를 그대로 더함 (최대 100점 제한)
+            new_score = np.clip(old_score + l_score, 0, 100)
+            df_out.at[idx, "LDY_SCORE"] = new_score
+            
+            # 5. 코멘트에 뉴스 요약 추가
+            if l_reason and l_reason != "뉴스없음":
+                # 기존 AI 코멘트가 있으면 뒤에 덧붙임
+                old_comment = str(df_out.at[idx, "AI_COMMENT"])
+                if old_comment == "nan": old_comment = ""
+                df_out.at[idx, "AI_COMMENT"] = f"{old_comment} 📰재료: {l_reason}"
+                
+            time.sleep(1) # API 호출 제한 방지
+            
+    else:
+        log("ℹ️ LLM 설정(API Key)이 없거나 라이브러리가 없어 뉴스 분석을 건너뜁니다.")
+        df_out["NEWS_SCORE"] = 0.0
+        df_out["NEWS_REASON"] = ""
+
     # 🚨 [수정 완료] bench_ret_60 -> bench_map 사용으로 변경
     # bench_map 구조: {'KOSPI': {20: 1.1, 60: 2.2, ...}, ...}
     df_out["벤치_60d_KOSPI_%"] = bench_map.get("KOSPI", {}).get(60, np.nan)
@@ -2727,6 +2777,7 @@ def main(
         "종가","거래대금(억원)","시가총액(억원)",
         "추천매수가","손절가","추천매도가1","추천매도가2",
         "RANK_SCORE","LDY_SCORE","ENTRY_SCORE",
+        "NEWS_SCORE", "NEWS_REASON",  # 👈 여기에 추가하면 보기 좋습니다
         "ROUTE","REGIME",
         "ret_20d_%", "ret_120d_%", 
         "rel_20d_%", "rel_60d_%", "rel_120d_%",
