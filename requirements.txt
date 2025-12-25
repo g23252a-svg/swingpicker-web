@@ -7,3 +7,5 @@ finance-datareader>=0.9.6
 pykrx==1.0.51
 tqdm>=4.66
 setuptools
+google-generativeai
+beautifulsoup4
