@@ -60,7 +60,7 @@ from auth_user import (
     load_subscriptions_db, save_subscriptions_db  # 👈 이 2개가 꼭 있어야 합니다!
 )
 from plotly.subplots import make_subplots
-from version_info import (
+from version_info import (  # 👈 왼쪽 끝에 딱 붙여야 함
     PRIME_TG_JOIN_URL,
     APP_VERSION,
     CHANGELOG,
