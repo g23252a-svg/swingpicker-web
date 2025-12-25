@@ -2825,7 +2825,7 @@ with tab2:
                         vwap=vwap, # ✅ VWAP 전달
                         show_bb=show_bb, show_kc=show_kc, show_rsi=show_rsi, 
                         show_vwap=show_vwap, # ✅ 쉼표(,) 추가 필수!
-                        show_hma=show_hma  # ✅ 전달
+                        show_hma=show_hma,
                         show_obv=show_obv
                     )
                     st.plotly_chart(fig, use_container_width=True)
