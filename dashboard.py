@@ -760,7 +760,11 @@ def get_market_status(scored_df: pd.DataFrame):
             return None
 
     def _status_for(ticker: str):
-        df = _via_fdr(ticker) or _via_pykrx_index(ticker)
+        # ✅ 순차적으로 확인하도록 수정
+        df = _via_fdr(ticker)
+        if df is None or df.empty:
+            df = _via_pykrx_index(ticker)
+            
         if df is None or df.empty:
             return None
 
