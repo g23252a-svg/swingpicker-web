@@ -2219,120 +2219,111 @@ with st.sidebar:
 # 관리자 전용: 회원 권한 + 구독 만료일 관리
     if auth_status == "admin":
         st.divider()
-        st.subheader("👑 회원 권한 / 구독 관리 (Admin)")
+        st.subheader("👑 회원 관리 (Admin)")
 
         users = list_users()
         
-        # ---------------------------------------------------------
-        # ✅ [v8.5 개선] 관리자 대시보드 통계 (HTML 커스텀 디자인)
-        # ---------------------------------------------------------
+        # 1. 관리자 대시보드 통계 (DAU/WAU)
         if users:
             total_users = len(users)
             now_utc_dt = datetime.now(timezone.utc)
-            dau_count = 0  # Daily Active Users (24시간)
-            wau_count = 0  # Weekly Active Users (7일)
+            dau_count = 0  # Daily Active Users
+            wau_count = 0  # Weekly Active Users
             
             for u in users:
                 last_s = u.get("last_login")
                 if last_s:
                     try:
-                        # 저장된 시간 문자열 파싱 (ISO 8601)
-                        # Z가 붙어있을 경우 UTC로 처리
                         last_dt = datetime.fromisoformat(last_s.replace("Z", "+00:00"))
                         diff = now_utc_dt - last_dt
-                        
-                        if diff < timedelta(days=1):
-                            dau_count += 1
-                        if diff < timedelta(days=7):
-                            wau_count += 1
-                    except:
-                        pass
+                        if diff < timedelta(days=1): dau_count += 1
+                        if diff < timedelta(days=7): wau_count += 1
+                    except: pass
             
             dau_pct = f"{dau_count/total_users*100:.1f}%"
             wau_pct = f"{wau_count/total_users*100:.1f}%"
             
             st.markdown(f"""
-<div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
-<div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-<span style="font-size:14px; font-weight:600; opacity:0.9;">👥 총 가입자</span>
-<span style="font-size:16px; font-weight:bold;">{total_users}명</span>
-</div>
-<div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-<div style="display:flex; flex-direction:column;">
-<span style="font-size:14px; font-weight:600; opacity:0.9;">🔥 DAU (24h)</span>
-<span style="font-size:11px; color:#4CAF50; font-weight:bold;">참여율 {dau_pct}</span>
-</div>
-<span style="font-size:16px; font-weight:bold;">{dau_count}명</span>
-</div>
-<div style="background:rgba(128,128,128,0.1); padding:12px 15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-<div style="display:flex; flex-direction:column;">
-<span style="font-size:14px; font-weight:600; opacity:0.9;">📅 WAU (7일)</span>
-<span style="font-size:11px; color:#4CAF50; font-weight:bold;">참여율 {wau_pct}</span>
-</div>
-<span style="font-size:16px; font-weight:bold;">{wau_count}명</span>
-</div>
-</div>
-""", unsafe_allow_html=True)
-            
-            st.markdown("---")
-        # ---------------------------------------------------------
+            <div style="background:rgba(128,128,128,0.1); padding:10px; border-radius:5px; margin-bottom:15px; font-size:0.9em;">
+                <div>👥 <b>총 가입자:</b> {total_users}명</div>
+                <div>🔥 <b>DAU (24h):</b> {dau_count}명 ({dau_pct})</div>
+                <div>📅 <b>WAU (7일):</b> {wau_count}명 ({wau_pct})</div>
+            </div>
+            """, unsafe_allow_html=True)
 
         if not users:
-            st.info("등록된 회원이 없습니다.")
+            st.info("회원이 없습니다.")
         else:
+            # 2. 회원 목록 테이블
             subs_db = load_subs_db()
             subs = subs_db.get("subs", {})
             rows = []
             
-            today = now_kst().date()
-            
             for u in users:
                 email = u.get("login_id")
-                sub = subs.get(email, {})
-
+                
                 # 차단 여부 확인
                 is_banned = u.get("is_banned", False)
                 status_icon = "🚫차단됨" if is_banned else "✅정상"
+                
                 rows.append({
                     "Email": email,
                     "닉네임": u.get("nickname"),
                     "권한": u.get("role", "free"),
-                    "상태": status_icon, # 상태 표시 추가
+                    "상태": status_icon,
                     "최근접속": to_kst_str(u.get("last_login"))
                 })
 
             df_users = pd.DataFrame(rows)
-            st.dataframe(df_users, use_container_width=True, height=200)
+            # 최근 접속순 정렬
+            if "최근접속" in df_users.columns:
+                df_users = df_users.sort_values("최근접속", ascending=False)
+                
+            st.dataframe(
+                df_users, 
+                use_container_width=True, 
+                height=200,
+                column_config={
+                    "최근접속": st.column_config.TextColumn("최근접속", width="medium")
+                }
+            )
 
-            # --- 권한 변경 및 차단 제어 ---
+            # 3. 통합 계정 제어 (권한 변경 + 차단)
             st.markdown("##### 🛠️ 계정 제어")
-            target_email = st.selectbox("대상 회원 선택", options=df_users["Email"].tolist(), key="admin_target")
+            
+            # 대상 선택 (이게 하나만 있어야 합니다!)
+            target_email = st.selectbox("대상 회원 선택", options=df_users["Email"].tolist(), key="admin_target_unified")
             
             c_adm1, c_adm2 = st.columns(2)
+            
+            # [왼쪽] 권한 변경
             with c_adm1:
-                new_role = st.selectbox("권한 변경", ["free", "pro", "prime", "admin"], key="admin_role_sel")
-                if st.button("권한 적용"):
+                new_role = st.selectbox("권한", ["free", "pro", "prime", "admin"], key="admin_role_unified")
+                if st.button("권한 적용", type="primary", use_container_width=True):
                     if update_user_role(target_email, new_role, user.get("login_id")):
                         set_subscription(target_email, new_role)
-                        st.success(f"{target_email} → {new_role} 변경 완료")
+                        st.success(f"변경 완료: {new_role}")
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.error("변경 실패 (자기 자신의 관리자 권한 해제 불가)")
-
+                        st.error("변경 실패")
+            
+            # [오른쪽] 차단 토글
             with c_adm2:
-                # 차단/해제 버튼 (동적으로 라벨 변경)
-                # 현재 선택된 유저의 상태 파악
+                # 현재 상태 확인
                 target_user_info = next((u for u in users if u["login_id"] == target_email), {})
                 current_ban = target_user_info.get("is_banned", False)
-                btn_label = "⭕ 차단 해제" if current_ban else "🚫 계정 차단"
                 
-                st.write("") # 줄맞춤용 공백
+                # 버튼 상태 설정
+                btn_label = "⭕ 차단 해제" if current_ban else "🚫 계정 차단"
+                btn_type = "primary" if current_ban else "secondary"
+                
+                st.write("") # 라벨 높이 맞춤용
                 st.write("") 
-                if st.button(btn_label, type="primary" if not current_ban else "secondary"):
+                if st.button(btn_label, type=btn_type, use_container_width=True):
                     ok, msg = toggle_user_ban(target_email, user.get("login_id"))
                     if ok:
-                        st.success(msg)
+                        st.warning(msg) if not current_ban else st.success(msg)
                         time.sleep(1)
                         st.rerun()
                     else:
