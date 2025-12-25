@@ -24,6 +24,8 @@ jobs:
       TZ: Asia/Seoul
       TG_TOKEN: ${{ secrets.TG_TOKEN }}
       TG_ID: ${{ secrets.TG_ID }}
+      # ▼▼▼ [여기 추가] GitHub Secret에 저장된 Gemini 키를 환경변수로 연결 ▼▼▼
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
       - name: Checkout Repository
