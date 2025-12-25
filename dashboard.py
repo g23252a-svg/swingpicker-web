@@ -1397,7 +1397,6 @@ def plot_interactive_chart(
 
     # ▼▼▼ [여기부터 붙여넣기] ▼▼▼
     current_row = 2
-    
 
     # 6) 거래량 (항상 표시)
     if "Volume" in df.columns:
