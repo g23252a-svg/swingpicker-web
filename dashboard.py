@@ -57,10 +57,10 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
 from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
-    load_subscriptions_db, save_subscriptions_db  # 👈 이 2개가 꼭 있어야 합니다!
+    load_subscriptions_db, save_subscriptions_db
 )
 from plotly.subplots import make_subplots
-from version_info import (  # 👈 왼쪽 끝에 딱 붙여야 함
+from version_info import (
     PRIME_TG_JOIN_URL,
     APP_VERSION,
     CHANGELOG,
