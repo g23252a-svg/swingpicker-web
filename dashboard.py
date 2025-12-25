@@ -2842,6 +2842,12 @@ with tab2:
                     news_score = pd.to_numeric(row.get("NEWS_SCORE", 0), errors="coerce")
                     news_reason = str(row.get("NEWS_REASON", "")).strip()
 
+                    # (테스트용) 뉴스없음이라도 일단 표시하려면 아래 조건문 주석 처리
+                    # if news_reason and news_reason != "nan" and news_reason != "뉴스없음":
+
+                    # 카드가 무조건 보이게 수정 (데이터가 없으면 '뉴스 없음' 표시)
+                    display_reason = news_reason if (news_reason and news_reason != "nan") else "분석된 특이 뉴스가 없습니다."
+
                     # 뉴스 내용이 유효할 때만 표시
                     if news_reason and news_reason != "nan" and news_reason != "뉴스없음":
                         # 점수에 따른 색상 및 아이콘 결정
@@ -3065,292 +3071,165 @@ with tab3:
     # 1) 권한 체크
     if auth_status in ["guest", "free"]:
         st.info("🔒 내 자산 분석은 Pro 등급부터 가능합니다.")
-    elif pf_input:
-        try:
-            # 2) 종목 코드 매핑 준비
-            code_map = get_code_map() if 'get_code_map' in globals() else {}
-            if not code_map and FDR_OK:
+    else:
+        st.subheader("💼 내 자산 관리 (엑셀형 에디터)")
+
+        # 1. 데이터 로드 (Gist에서 가져오기)
+        saved_str = load_portfolio_file()
+        default_data = []
+        
+        # 저장된 데이터 파싱 (기존 텍스트 포맷 -> 리스트 변환)
+        if saved_str:
+            try:
+                lines = saved_str.strip().split("\n")
+                for line in lines:
+                    if ":" in line:
+                        parts = line.split(":")
+                        if len(parts) >= 3:
+                            # 콤마 제거 및 숫자 변환
+                            try:
+                                p_val = int(float(parts[1].replace(",","").strip()))
+                                q_val = int(float(parts[2].replace(",","").strip()))
+                                default_data.append({
+                                    "종목명": parts[0].strip(),
+                                    "평단가": p_val,
+                                    "수량": q_val,
+                                    "비고": ""
+                                })
+                            except: pass
+            except: pass
+        
+        # 데이터가 없으면 빈 행 추가 (사용자 입력 유도용)
+        if not default_data:
+            default_data = [{"종목명": "", "평단가": 0, "수량": 0, "비고": ""}]
+
+        # 2. 데이터 에디터 출력 (엑셀처럼 편집 가능)
+        edited_df = st.data_editor(
+            pd.DataFrame(default_data),
+            num_rows="dynamic",  # 행 추가/삭제 허용
+            use_container_width=True,
+            key="portfolio_editor",
+            column_config={
+                "종목명": st.column_config.TextColumn(required=True),
+                "평단가": st.column_config.NumberColumn(format="%d원", min_value=0, required=True),
+                "수량": st.column_config.NumberColumn(format="%d주", min_value=0, required=True),
+                "비고": st.column_config.TextColumn(width="small")
+            }
+        )
+
+        # 3. 데이터 저장 및 분석 대상 생성
+        targets = []
+        cash_amt = 0.0
+        save_lines = []
+        
+        # 코드 매핑 함수가 있으면 가져오기 (전역 함수 사용)
+        code_map = get_code_map() if 'get_code_map' in globals() else {}
+
+        # 에디터의 내용을 순회하며 저장용 문자열과 분석용 타겟 리스트 생성
+        if edited_df is not None and not edited_df.empty:
+            for _, row in edited_df.iterrows():
+                nm = str(row.get("종목명", "")).strip()
+                if not nm: continue
+                
                 try:
-                    df_krx = fdr.StockListing('KRX')
-                    code_map = dict(
-                        zip(df_krx['Name'], df_krx['Code'].astype(str).str.zfill(6))
-                    )
-                except Exception:
-                    pass
+                    price = float(row.get("평단가", 0))
+                    qty = int(row.get("수량", 0))
+                except: continue
 
-            # 3) 포트폴리오 파싱
-            targets = []     # 종목 리스트
-            cash_amt = 0.0   # 현금(예수금) 총액
+                # 저장 포맷 (종목:평단:수량) 생성
+                save_lines.append(f"{nm}:{int(price)}:{int(qty)}")
 
-            lines = pf_input.strip().split('\n')
-            for line in lines:
-                if ":" not in line:
-                    continue
+                # 현금(CASH)인지 일반 종목인지 구분
+                if nm.upper() == "CASH" or "현금" in nm:
+                    cash_amt += price * qty
+                else:
+                    # 종목명을 코드로 변환 (매핑 실패 시 입력한 이름 그대로 사용)
+                    # 전역 함수 find_code_by_name 사용
+                    real_code = find_code_by_name(nm, code_map) or nm
+                    targets.append((real_code, nm, price, qty))
+            
+            # 변경 사항이 있으면 자동 저장 (Gist/파일)
+            new_save_str = "\n".join(save_lines)
+            if new_save_str != saved_str:
+                save_portfolio_file(new_save_str)
 
-                parts = [p.strip() for p in line.split(':')]
-                if len(parts) != 3:
-                    continue
-
-                name_input, avg_str, qty_str = parts
-
-                # ✅ CASH / 현금 라인 분리 처리
-                if name_input.strip().upper().startswith("CASH") or "현금" in name_input:
-                    try:
-                        cash_amt += float(avg_str.replace(',', '')) * int(qty_str.replace(',', ''))
-                    except Exception:
-                        pass
-                    continue
-
-                # ✅ 일반 종목 라인
-                code = str(name_input).strip()
-                if not code.isdigit():
-                    code = code_map.get(code, code)  # 종목명 → 코드 매핑
-                code = str(code).zfill(6)
-
-                try:
-                    avg = float(avg_str.replace(',', ''))
-                    qty = int(qty_str.replace(',', ''))
-                except Exception:
-                    continue
-
-                targets.append((code, name_input, avg, qty))
-
-            if not targets and cash_amt <= 0:
-                st.warning("포트폴리오 입력 형식이 올바른지 확인해 주세요. 예시: `NAVER:261000:10` 또는 `CASH:1000000:1`")
-                st.stop()
-
-            # 4) 현재가 조회 (병렬 처리)
+        # 4. 실시간 시세 조회 및 카드 출력
+        if not targets and cash_amt <= 0:
+             st.info("👆 위 표에 보유 종목명, 평단가, 수량을 입력하면 실시간으로 분석됩니다.")
+        else:
+            # 병렬 처리로 현재가 조회
             price_map = {}
-            with st.spinner('⚡ 실시간 시세를 조회 중입니다...'):
+            with st.spinner('⚡ 보유 종목 시세 조회 중...'):
                 with ThreadPoolExecutor(max_workers=10) as executor:
-                    futures = [
-                        executor.submit(fetch_current_price, t[0], t[1])
-                        for t in targets
-                    ]
+                    # 전역 함수 fetch_current_price 사용
+                    futures = [executor.submit(fetch_current_price, t[0], t[1]) for t in targets]
                     for future in futures:
                         c, n, p = future.result()
                         price_map[c] = p
-
-            # 5) 기본 지표 계산 (종목별/전체)
-            cols_layout = st.columns(3)
             
-            total_buy = 0.0
+            # 종목별 카드 출력
+            cols = st.columns(3)
             total_eval = 0.0
+            total_buy = 0.0
+            rows_pf = []
 
-            rows_pf = []  # 섹터/파이차트용
+            for idx, (code, name, avg, qty) in enumerate(targets):
+                curr = price_map.get(code, 0)
+                
+                # 시세가 있고 코드가 숫자면 실제 종목명(KRX) 가져오기, 아니면 입력한 이름 사용
+                real_name = name
+                if PYKRX_OK and curr > 0 and str(code).isdigit():
+                    try:
+                        kn = stock.get_market_ticker_name(code)
+                        if kn: real_name = kn
+                    except: pass
 
-            for idx, (code, name_input, avg, qty) in enumerate(targets):
-                cur_price = price_map.get(code, 0)
-                real_name = (
-                    stock.get_market_ticker_name(code)
-                    if (PYKRX_OK and cur_price > 0)
-                    else name_input
-                )
-
+                eval_amt = curr * qty
                 buy_amt = avg * qty
-                eval_amt = cur_price * qty
-                total_buy += buy_amt
                 total_eval += eval_amt
+                total_buy += buy_amt
+                
+                rows_pf.append({"name": real_name, "eval": eval_amt, "code": code})
+                
+                # 수익률 계산
+                pct = (curr - avg) / avg * 100 if avg > 0 and curr > 0 else 0
+                pnl = eval_amt - buy_amt
+                
+                color = "green" if pct > 0 else ("red" if pct < 0 else "gray")
+                signal = "🟢" if pct > 0 else ("🔴" if pct < 0 else "⚪")
 
-                rows_pf.append(
-                    {
-                        "code": code,
-                        "name": real_name,
-                        "avg": avg,
-                        "qty": qty,
-                        "eval": eval_amt,
-                    }
-                )
+                # 카드 UI (3열 배치)
+                with cols[idx % 3]:
+                    with st.container(border=True):
+                        c_main, c_pnl = st.columns([1.5, 1])
+                        c_main.markdown(f"**{real_name}** {signal}")
+                        c_main.caption(f"평단 {int(avg):,} / {qty}주")
+                        c_pnl.markdown(f":{color}[{pct:+.2f}%]")
+                        c_pnl.markdown(f"**{int(curr):,}원**" if curr > 0 else "확인불가")
 
-                # 수익률/평가손익
-                # 수익률/평가손익 계산
-                if cur_price > 0:
-                    profit_rate = (cur_price - avg) / avg * 100
-                    pnl = eval_amt - buy_amt
-                    if profit_rate > 0:
-                        signal = "🟢 수익"
-                    elif profit_rate > -3:
-                        signal = "🟡 보합"
-                    else:
-                        signal = "🔴 손실"
-                else:
-                    signal = "❓ 확인불가"
-                    profit_rate = 0
-                    pnl = 0
-
-                with cols_layout[idx % 3]:
-                    st.metric(
-                        label=f"{real_name} ({signal})",
-                        value=f"{cur_price:,}원" if cur_price > 0 else "시세 없음",
-                        delta=f"{profit_rate:+.2f}% ({int(pnl):,}원)",
-                        delta_color="normal" if profit_rate >= 0 else "inverse",
-                    )
-                # 🚨 [수정됨] 모바일 최적화: 카드형 UI (컨테이너 사용)
-                with st.container(border=True):
-                    c_main, c_pnl = st.columns([1.5, 1])
-                    with c_main:
-                        st.markdown(f"**{real_name}**")
-                        st.caption(f"평단: {int(avg):,} / 수량: {qty}")
-                        if cur_price > 0:
-                            st.markdown(f"현재: **{cur_price:,}원**")
-                        else:
-                            st.markdown("시세 확인 불가")
-                    
-                    with c_pnl:
-                        # 수익률 색상 강조
-                        color = "green" if profit_rate > 0 else "red"
-                        if profit_rate == 0: color = "gray"
-                        
-                        # 우측에 수익률 크게 표시
-                        st.markdown(f":{color}[**{profit_rate:+.2f}%**]")
-                        st.markdown(f":{color}[{int(pnl):,}원]")
-
-            st.divider()
-
-            # 6) 전체 포트폴리오 요약
-            c1, c2, c3 = st.columns(3)
-            tot_rate = (
-                (total_eval - total_buy) / total_buy * 100
-                if total_buy > 0
-                else 0
-            )
-
-            c1.metric("총 매수", f"{int(total_buy):,}원")
-            c2.metric("총 평가", f"{int(total_eval):,}원")
-            c3.metric(
-                "총 수익률",
-                f"{tot_rate:+.2f}%",
-                f"{int(total_eval - total_buy):,}원",
-                delta_color="normal" if tot_rate >= 0 else "inverse",
-            )
-
-            # 7) 현금 비중 계산
+            # 5. 전체 요약 (현금 포함)
             total_asset = total_eval + cash_amt
-            if cash_amt > 0 and total_asset > 0:
-                cash_ratio = cash_amt / total_asset * 100
-                st.info(
-                    f"💰 현재 현금(예수금) 비중은 **{cash_ratio:.1f}%** 입니다.\n"
-                    "시장 변동성에 따라 보통 **10~30%** 사이에서 조절하는 전략이 많이 사용됩니다."
-                )
+            total_invest = total_buy + cash_amt
+            total_rate = (total_asset - total_invest) / total_invest * 100 if total_invest > 0 else 0
+            
+            st.divider()
+            m1, m2, m3 = st.columns(3)
+            m1.metric("총 매수금(현금포함)", f"{int(total_invest):,}원")
+            m2.metric("총 평가금(현금포함)", f"{int(total_asset):,}원")
+            m3.metric("총 수익률", f"{total_rate:+.2f}%", 
+                      delta=f"{int(total_asset - total_invest):,}원", 
+                      delta_color="normal" if total_rate >= 0 else "inverse")
 
-            # 8) 종목별 평가금액 비중 파이차트
-            try:
-                if total_eval > 0:
-                    df_pf = pd.DataFrame(rows_pf)
-                    df_pf = df_pf[df_pf["eval"] > 0]
+            # 6. 파이 차트 (자산 구성)
+            if cash_amt > 0:
+                rows_pf.append({"name": "💰 현금 (CASH)", "eval": cash_amt, "code": "CASH"})
 
-                    if not df_pf.empty:
-                        fig_pie = go.Figure(
-                            data=[
-                                go.Pie(
-                                    labels=df_pf["name"],
-                                    values=df_pf["eval"],
-                                    hole=0.4,
-                                )
-                            ]
-                        )
-                        fig_pie.update_layout(
-                            title="📊 종목별 평가 금액 비중",
-                            height=300,
-                            margin=dict(l=10, r=10, t=40, b=10),
-                            showlegend=True,
-                        )
-                        st.plotly_chart(fig_pie, use_container_width=True)
-            except Exception:
-                logger.exception("portfolio pie chart failed")
-
-            # 9) 포트폴리오 Health Check (섹터 편중 + 현금 비중)
-            try:
-                st.subheader("🏥 포트폴리오 건강검진", anchor=False)
-
-                df_pf = pd.DataFrame(rows_pf)
-                df_pf = df_pf[df_pf["eval"] > 0]
-
-                # 섹터 컬럼 선택
-                sector_col = None
-                if "업종_대분류" in scored.columns:
-                    sector_col = "업종_대분류"
-                elif "업종" in scored.columns:
-                    sector_col = "업종"
-
-                if sector_col:
-                    # 종목코드 → 섹터 매핑
-                    sector_map = (
-                        scored
-                        .dropna(subset=[sector_col, "종목코드"])
-                        .drop_duplicates("종목코드")
-                        .set_index("종목코드")[sector_col]
-                        .to_dict()
-                    )
-
-                    df_pf["섹터"] = df_pf["code"].map(sector_map).fillna("기타")
-
-                    sector_grp = (
-                        df_pf.groupby("섹터")["eval"]
-                        .sum()
-                        .sort_values(ascending=False)
-                    )
-                    total_eval_safe = sector_grp.sum()
-
-                    if total_eval_safe > 0:
-                        # 섹터 비중 (%)
-                        sector_ratio = (sector_grp / total_eval_safe * 100).round(1)
-
-                        fig_sector = go.Figure(
-                            data=[
-                                go.Bar(
-                                    x=sector_ratio.values,
-                                    y=sector_ratio.index,
-                                    orientation="h",
-                                    text=[f"{v:.1f}%" for v in sector_ratio.values],
-                                    textposition="auto",
-                                )
-                            ]
-                        )
-                        fig_sector.update_layout(
-                            title="섹터별 비중 (평가금액 기준)",
-                            height=320,
-                            margin=dict(l=10, r=10, t=40, b=10),
-                        )
-                        st.plotly_chart(fig_sector, use_container_width=True)
-
-                        # 편중 진단 코멘트
-                        top_sector = sector_ratio.index[0]
-                        top_ratio = float(sector_ratio.iloc[0])
-
-                        comment = f"현재 가장 큰 비중은 **{top_sector} ({top_ratio:.1f}%)** 입니다.  \n"
-
-                        if top_ratio >= 60:
-                            comment += "➡ 단일 섹터 비중이 60%를 넘어 **위험도가 상당히 높은 편**입니다. 분산을 강하게 추천합니다."
-                        elif top_ratio >= 40:
-                            comment += "➡ 특정 섹터 비중이 40% 이상으로 **다소 편중된 상태**입니다. 다른 섹터 편입을 고민해 볼 만합니다."
-                        else:
-                            comment += "➡ 섹터 비중이 비교적 고르게 분산되어 있습니다."
-
-                        # 현금 비중까지 함께 코멘트
-                        total_asset = total_eval + cash_amt
-                        if cash_amt > 0 and total_asset > 0:
-                            cash_ratio = cash_amt / total_asset * 100
-                            comment += f"\n\n또한 현금(예수금) 비중은 약 **{cash_ratio:.1f}%** 입니다."
-
-                            if cash_ratio < 5:
-                                comment += " 변동성이 큰 장세에서는 다소 낮은 편입니다. 방어력을 조금 보강하는 것도 고려해 보세요."
-                            elif cash_ratio > 40:
-                                comment += " 상당히 보수적인 비중으로, 기회 포착 속도는 느려질 수 있지만 하락 방어에는 유리한 편입니다."
-
-                        st.info(comment)
-                    else:
-                        st.caption("※ 섹터별 평가금액이 거의 없어 건강검진을 생략했습니다.")
-                else:
-                    st.caption("※ 스코어 데이터에 섹터 정보(업종, 업종_대분류)가 없어 건강검진을 생략했습니다.")
-            except Exception:
-                logger.exception("portfolio health check failed")
-                st.caption("※ 포트폴리오 건강검진 중 오류가 발생했습니다.")
-        except Exception as e:
-            st.error(f"포트폴리오 분석 중 오류 발생: {e}")
-
-    else:
-        st.info("👈 사이드바에 포트폴리오를 입력하고 '저장/분석' 버튼을 누르세요.")
+            if total_asset > 0:
+                df_chart = pd.DataFrame(rows_pf)
+                if not df_chart.empty:
+                    fig = px.pie(df_chart, values="eval", names="name", title="📊 자산 비중", hole=0.4)
+                    fig.update_layout(height=300, margin=dict(t=30, b=10, l=10, r=10))
+                    st.plotly_chart(fig, use_container_width=True)
 
 with tab4:
     st.subheader("📮 문의 게시판")
