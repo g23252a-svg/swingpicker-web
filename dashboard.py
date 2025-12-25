@@ -59,8 +59,8 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
 from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
-    load_subscriptions_db, save_subscriptions_db
-    toggle_user_ban  # 👈 이거 하나 추가!
+    load_subscriptions_db, save_subscriptions_db,  # 👈 여기에 쉼표(,)가 꼭 있어야 합니다!
+    toggle_user_ban
 )
 from plotly.subplots import make_subplots
 from version_info import (
