@@ -1172,7 +1172,13 @@ def get_stock_chart_data(code):
         # HMA 20일선 계산 (캔들 차트에 표시용)
         df['HMA20'] = calc_hma_series(df['Close'], 20)
         # ---------------------------------------------------------
+        # -------------------- [v9.0 OBV 계산 추가] --------------------
+        # OBV: 주가 등락에 따른 거래량 누적
+        change = np.sign(df['Close'].diff()).fillna(0)
+        df['OBV'] = (change * df['Volume']).cumsum()
+        # -------------------------------------------------------------
 
+        
         # SuperTrend
         df = calculate_supertrend(df)
 
@@ -1263,19 +1269,24 @@ def plot_interactive_chart(
     show_rsi: bool = False,
     show_vwap: bool = False, # ✅ [v8.5] VWAP 표시 여부
     show_hma: bool = False,  # ✅ [v9.0] HMA 표시 옵션 추가
+    show_obv: bool = False,  # 👈 [v9.0] 추가
+    
 ):
     if df is None or df.empty:
         return go.Figure()
 
-    rows = 3 if show_rsi else 2
-    row_heights = [0.6, 0.2, 0.2] if show_rsi else [0.7, 0.3]
+    # OBV가 켜지면 행을 하나 더 늘림 (총 3개 or 4개)
+    rows = 2
+    if show_rsi: rows += 1
+    if show_obv: rows += 1
+    
+    # 높이 비율 동적 할당
+    if rows == 2: row_heights = [0.7, 0.3]
+    elif rows == 3: row_heights = [0.6, 0.2, 0.2]
+    else: row_heights = [0.5, 0.15, 0.15, 0.2] # 4행일 때
 
     fig = make_subplots(
-        rows=rows,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.05,
-        row_heights=row_heights,
+        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=row_heights
     )
 
     # --- 🎨 색상 팔레트 정의 ---
@@ -1384,33 +1395,35 @@ def plot_interactive_chart(
                 name='SuperTrend (Resist)'
             ), row=1, col=1)
 
-    # 6) 거래량 (캔들 색상과 일치시키되 투명도 조절)
-    if "Volume" in df.columns:
-        colors = [
-            COLOR_UP if c >= o else COLOR_DOWN 
-            for c, o in zip(df["Close"], df["Open"])
-        ]
-        fig.add_trace(go.Bar(
-            x=df.index, y=df["Volume"], 
-            name="거래량", 
-            marker_color=colors, 
-            opacity=0.8,
-            showlegend=False
-        ), row=2, col=1)
+    # ▼▼▼ [여기부터 붙여넣기] ▼▼▼
+    current_row = 2
+    
 
-    # 7) RSI (과매수/과매도 영역 강조)
+    # 6) 거래량 (항상 표시)
+    if "Volume" in df.columns:
+        colors = [COLOR_UP if c >= o else COLOR_DOWN for c, o in zip(df["Close"], df["Open"])]
+        fig.add_trace(go.Bar(
+            x=df.index, y=df["Volume"], name="거래량", marker_color=colors, opacity=0.8, showlegend=False
+        ), row=current_row, col=1)
+        current_row += 1
+
+    # 7) RSI
     if show_rsi and "RSI14_CHART" in df.columns:
         fig.add_trace(go.Scatter(
-            x=df.index, y=df["RSI14_CHART"], 
-            name="RSI(14)", 
-            line=dict(color='#AB47BC', width=1.5)
-        ), row=3, col=1)
-
+            x=df.index, y=df["RSI14_CHART"], name="RSI(14)", line=dict(color='#AB47BC', width=1.5)
+        ), row=current_row, col=1)
         # 기준선 30/70
-        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=70, y1=70,
-                      line=dict(color="red", width=1, dash="dot"), row=3, col=1)
-        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=30, y1=30,
-                      line=dict(color="blue", width=1, dash="dot"), row=3, col=1)
+        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=70, y1=70, line=dict(color="red", width=1, dash="dot"), row=current_row, col=1)
+        fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=30, y1=30, line=dict(color="blue", width=1, dash="dot"), row=current_row, col=1)
+        current_row += 1
+
+    # 8) [v9.0] OBV 차트 (새로 추가됨)
+    if show_obv and "OBV" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["OBV"], name="💰OBV", 
+            line=dict(color='#2962FF', width=1.5), fill='tozeroy', fillcolor='rgba(41, 98, 255, 0.1)'
+        ), row=current_row, col=1)
+        current_row += 1
 
     # 8) 가격 라인 (가시성 높은 형광색 사용)
     def _safe_float(v):
