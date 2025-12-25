@@ -685,10 +685,10 @@ def update_user_profile(email: str, new_nickname: str = None, new_password: str 
     return True, "변경할 내용이 없습니다."
 
 
-# ----------------- UI: 로그인 / 회원가입 박스 -----------------
+# ----------------- UI: 로그인 / 회원가입 / 비밀번호 찾기 박스 -----------------
 def render_auth_box(show_debug: bool = False):
     """
-    브라우저 탭 전환 / 새로고침 시에도 로그인을 유지하기 위해 CookieManager 사용 (임시 비활성화)
+    사용자 인증 UI (로그인 / 회원가입 / 비밀번호 찾기)
     """
     cookie_user_email = None
 
@@ -744,9 +744,11 @@ def render_auth_box(show_debug: bool = False):
         
         return user
 
-    # ---------------- [상태 2] 비로그인 상태 (로그인 폼) ----------------
+    # ---------------- [상태 2] 비로그인 상태 ----------------
     st.subheader("🔐 계정 로그인 / 회원가입")
-    tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
+    
+    # [v9.0] 탭 3개로 확장 (비밀번호 찾기 추가)
+    tab_login, tab_signup, tab_find = st.tabs(["로그인", "회원가입", "비밀번호 찾기"])
 
     # 1) 로그인 탭
     with tab_login:
@@ -795,7 +797,7 @@ def render_auth_box(show_debug: bool = False):
             elif not q_answer.strip():
                 st.error("보안 질문 답변을 입력해 주세요.")
             else:
-                # register_user 함수 호출 (인자 추가됨!)
+                # register_user 함수 호출
                 ok, msg, new_user = register_user(reg_email, reg_pw1, reg_nick, q_idx, q_answer, reg_code)
                 if ok:
                     st.session_state[CURRENT_USER_KEY] = new_user
@@ -805,5 +807,73 @@ def render_auth_box(show_debug: bool = False):
                     st.rerun()
                 else:
                     st.error(msg)
+
+    # 3) [New] 비밀번호 찾기 탭
+    with tab_find:
+        st.markdown("##### 🔑 비밀번호 재설정")
+        
+        # 상태 관리를 위한 세션 초기화
+        if "rec_step" not in st.session_state:
+            st.session_state["rec_step"] = 1
+            st.session_state["rec_email"] = ""
+            st.session_state["rec_q_idx"] = 0
+
+        # [Step 1] 이메일 입력
+        if st.session_state["rec_step"] == 1:
+            with st.form("find_pw_step1"):
+                email_input = st.text_input("가입한 이메일 입력", placeholder="example@email.com")
+                btn_check = st.form_submit_button("확인")
+            
+            if btn_check:
+                db = load_user_db()
+                users = db.get("users", {})
+                u_norm = _normalize_email(email_input)
+                
+                if u_norm in users:
+                    user_data = users[u_norm]
+                    q_idx = user_data.get("security_q_idx", 0)
+                    # 유효한 질문 인덱스가 있는지 확인
+                    if q_idx > 0 and q_idx < len(SECURITY_QUESTIONS):
+                        st.session_state["rec_email"] = u_norm
+                        st.session_state["rec_q_idx"] = q_idx
+                        st.session_state["rec_step"] = 2
+                        st.rerun()
+                    else:
+                        st.error("이 계정은 보안 질문이 설정되지 않았습니다. 관리자에게 문의하세요.")
+                else:
+                    st.error("등록되지 않은 이메일입니다.")
+
+        # [Step 2] 보안 질문 답변 및 새 비밀번호 설정
+        elif st.session_state["rec_step"] == 2:
+            target_email = st.session_state["rec_email"]
+            q_idx = st.session_state["rec_q_idx"]
+            q_text = SECURITY_QUESTIONS[q_idx]
+
+            st.info(f"대상 계정: **{target_email}**")
+            st.warning(f"❓ 보안 질문: **{q_text}**")
+
+            with st.form("find_pw_step2"):
+                ans_input = st.text_input("답변 입력")
+                new_pw_input = st.text_input("새로운 비밀번호 (영문+숫자 6자 이상)", type="password")
+                btn_reset = st.form_submit_button("비밀번호 변경")
+
+            if btn_reset:
+                if verify_recovery_info(target_email, q_idx, ans_input):
+                    ok, msg = reset_password_with_recovery(target_email, new_pw_input)
+                    if ok:
+                        st.success("✅ " + msg)
+                        st.session_state["rec_step"] = 1
+                        st.session_state["rec_email"] = ""
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                else:
+                    st.error("❌ 보안 질문 답변이 틀렸습니다.")
+
+            if st.button("뒤로가기"):
+                st.session_state["rec_step"] = 1
+                st.session_state["rec_email"] = ""
+                st.rerun()
 
     return None
