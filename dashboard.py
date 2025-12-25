@@ -60,6 +60,7 @@ from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
     load_subscriptions_db, save_subscriptions_db
+    toggle_user_ban  # 👈 이거 하나 추가!
 )
 from plotly.subplots import make_subplots
 from version_info import (
@@ -2281,13 +2282,61 @@ with st.sidebar:
         else:
             subs_db = load_subs_db()
             subs = subs_db.get("subs", {})
-
             rows = []
+            
             today = now_kst().date()
             
             for u in users:
                 email = u.get("login_id")
                 sub = subs.get(email, {})
+
+                # 차단 여부 확인
+                is_banned = u.get("is_banned", False)
+                status_icon = "🚫차단됨" if is_banned else "✅정상"
+                rows.append({
+                    "Email": email,
+                    "닉네임": u.get("nickname"),
+                    "권한": u.get("role", "free"),
+                    "상태": status_icon, # 상태 표시 추가
+                    "최근접속": to_kst_str(u.get("last_login"))
+                })
+
+            df_users = pd.DataFrame(rows)
+            st.dataframe(df_users, use_container_width=True, height=200)
+
+            # --- 권한 변경 및 차단 제어 ---
+            st.markdown("##### 🛠️ 계정 제어")
+            target_email = st.selectbox("대상 회원 선택", options=df_users["Email"].tolist(), key="admin_target")
+            
+            c_adm1, c_adm2 = st.columns(2)
+            with c_adm1:
+                new_role = st.selectbox("권한 변경", ["free", "pro", "prime", "admin"], key="admin_role_sel")
+                if st.button("권한 적용"):
+                    if update_user_role(target_email, new_role, user.get("login_id")):
+                        set_subscription(target_email, new_role)
+                        st.success(f"{target_email} → {new_role} 변경 완료")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("변경 실패 (자기 자신의 관리자 권한 해제 불가)")
+
+            with c_adm2:
+                # 차단/해제 버튼 (동적으로 라벨 변경)
+                # 현재 선택된 유저의 상태 파악
+                target_user_info = next((u for u in users if u["login_id"] == target_email), {})
+                current_ban = target_user_info.get("is_banned", False)
+                btn_label = "⭕ 차단 해제" if current_ban else "🚫 계정 차단"
+                
+                st.write("") # 줄맞춤용 공백
+                st.write("") 
+                if st.button(btn_label, type="primary" if not current_ban else "secondary"):
+                    ok, msg = toggle_user_ban(target_email, user.get("login_id"))
+                    if ok:
+                        st.success(msg)
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(msg)
                 
                 # 1. 실제 권한 확인
                 current_role = sub.get("role") or u.get("role", "free")
