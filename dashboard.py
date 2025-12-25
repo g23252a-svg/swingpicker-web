@@ -2835,6 +2835,34 @@ with tab2:
                     # 📊 1. 레이더 차트 (v7.5 유지)
                     st.plotly_chart(plot_radar_chart(row), use_container_width=True)
 
+                    # ▼▼▼ [여기부터 붙여넣으세요] ▼▼▼
+                    # 🔥 [v9.0] LLM 뉴스 분석 카드 표시
+                    news_score = pd.to_numeric(row.get("NEWS_SCORE", 0), errors="coerce")
+                    news_reason = str(row.get("NEWS_REASON", "")).strip()
+
+                    if news_reason and news_reason != "nan" and news_reason != "뉴스없음":
+                        # 점수에 따른 색상 및 아이콘
+                        if news_score >= 3:
+                            n_color = "#E8F5E9" # 연한 초록
+                            n_border = "#43A047"
+                            n_icon = "🔥 호재"
+                        elif news_score <= -3:
+                            n_color = "#FFEBEE" # 연한 빨강
+                            n_border = "#E53935"
+                            n_icon = "🚨 악재"
+                        else:
+                            n_color = "#F3E5F5" # 연한 보라
+                            n_border = "#8E24AA"
+                            n_icon = "📢 이슈"
+
+                        st.markdown(f"""
+                        <div style="background-color:{n_color}; border-left: 4px solid {n_border}; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                            <span style="color:{n_border}; font-weight:bold; font-size:0.9em;">{n_icon} (점수: {news_score})</span><br>
+                            <span style="color:#333; font-size:0.95em;">{news_reason}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    # ▲▲▲ [여기까지 붙여넣으세요] ▲▲▲
+
                     # 📝 2. AI 분석 코멘트 & 뱃지
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
                     is_swing = row.get("IS_SWING_SUPPORT", False)
