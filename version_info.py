@@ -148,10 +148,5 @@ _latest = get_latest_log()
 if _latest:
     latest_ver = _latest.get("version")
     if latest_ver and latest_ver != APP_VERSION:
-        logger.warning(
-            "version_info: APP_VERSION(%s) != CHANGELOG[0](%s). Check consistency.",
-            APP_VERSION, latest_ver
-        )
-            "version_info: APP_VERSION(%s) != CHANGELOG[0](%s). Check consistency.",
-            APP_VERSION, latest_ver
-        )
+        # 안전하게 한 줄로 작성 (들여쓰기 오류 방지)
+        logger.warning(f"version_info: APP_VERSION({APP_VERSION}) != CHANGELOG[0]({latest_ver})")
