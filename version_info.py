@@ -60,11 +60,11 @@ CHANGELOG: List[Dict] = [
         "date": "2025-12-25", # ✅ 크리스마스 선물 업데이트! 🎅
         "title": "Deep Insight Edition: HMA, OBV & Smart Sector",
         "items": [
-            "🚀 **Hull Moving Average (HMA):** 기존 이평선보다 반응이 빠르고 휩소가 적은 **HMA 지표**를 탑재하여 추세 전환을 신속하게 포착합니다.",
-            "💰 **Smart Money Tracker (OBV):** 주가는 횡보/하락하는데 거래량이 증가하는 **'OBV 다이버전스'**를 감지하여 세력 매집 구간을 식별합니다.",
-            "🤖 **AI News Analysis:** Gemini LLM을 활용해 상위 종목의 **최신 호재/악재 뉴스**를 자동으로 수집하고 분석하여 핵심만 요약 제공합니다.",
-            "📊 **Excel-Style Portfolio:** 내 자산을 **엑셀처럼 편하게 수정**하고 자동 저장할 수 있는 최신 데이터 에디터를 도입했습니다.",
-            "🛡️ **Security & Recovery:** 비밀번호 분실 시 **'보안 질문'**을 통한 재설정 기능 및 관리자용 악성 유저 차단(Ban) 시스템이 추가되었습니다.",
+            "🚀 **Hull Moving Average (HMA):** 기존 이평선보다 반응이 빠르고 휩소가 적은 HMA 지표 탑재",
+            "💰 **Smart Money Tracker (OBV):** 거래량 다이버전스를 통한 세력 매집 구간 식별",
+            "🤖 **AI News Analysis:** Gemini LLM 기반 최신 호재/악재 뉴스 자동 요약",
+            "📊 **Excel-Style Portfolio:** 엑셀처럼 수정 가능한 포트폴리오 에디터 도입",
+            "🛡️ **Security & Recovery:** 보안 질문을 통한 비밀번호 찾기 기능 추가",
         ],
     },
     {
