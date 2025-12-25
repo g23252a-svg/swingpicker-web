@@ -52,8 +52,10 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
         df["종목코드"] = df["종목코드"].apply(normalize_code)
     return df
 
+# -----------------------------------------------------------
+# [주의] 아래 import 구문들은 맨 앞줄(들여쓰기 없음)에 있어야 합니다.
+# -----------------------------------------------------------
 
-# load_inquiry_items, save_inquiry_items, _now_utc_str 를 추가했습니다.
 from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
