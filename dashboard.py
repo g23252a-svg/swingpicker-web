@@ -2291,7 +2291,7 @@ with st.sidebar:
             # 3. 통합 계정 제어 (권한 변경 + 차단)
             st.markdown("##### 🛠️ 계정 제어")
             
-            # 대상 선택 (이게 하나만 있어야 합니다!)
+            # 대상 선택 (하나만 있어야 함)
             target_email = st.selectbox("대상 회원 선택", options=df_users["Email"].tolist(), key="admin_target_unified")
             
             c_adm1, c_adm2 = st.columns(2)
@@ -2328,90 +2328,6 @@ with st.sidebar:
                         st.rerun()
                     else:
                         st.error(msg)
-                
-                # 1. 실제 권한 확인
-                current_role = sub.get("role") or u.get("role", "free")
-                
-                # 2. 만료일 문자열 가져오기
-                exp_str = sub.get("expire_at", "")
-                days_left = ""
-
-                # 3. 권한별 표시 로직 분기
-                if current_role in ["free", "guest"]:
-                    exp_str = "-"
-                    days_left = "-"
-                elif current_role == "admin":
-                    exp_str = "무제한"
-                    days_left = "∞"
-                else:
-                    # Pro / Prime 인 경우
-                    if exp_str:
-                        try:
-                            d_exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
-                            remain = (d_exp - today).days
-                            days_left = f"{remain}일"
-                            
-                            if remain < 0:
-                                days_left = f"만료 ({remain}일)"
-                        except Exception:
-                            days_left = "날짜오류"
-                    else:
-                        exp_str = "미설정"
-                        days_left = "?"
-
-                rows.append({
-                    "이메일": email,
-                    "닉네임": u.get("nickname"),
-                    "권한": current_role, # 표시용 권한
-                    "만료일": exp_str,
-                    "잔여": days_left,
-                    "가입일": to_kst_str(u.get("created_at")),
-                    "최근접속": to_kst_str(u.get("last_login")), # 최근 접속일 추가
-                })
-
-            df_users = pd.DataFrame(rows)
-            # 최근 접속순 정렬
-            if not df_users.empty and "최근접속" in df_users.columns:
-                df_users = df_users.sort_values("최근접속", ascending=False)
-            
-            st.dataframe(
-                df_users, 
-                use_container_width=True, 
-                height=250,
-                column_config={
-                    "최근접속": st.column_config.TextColumn("최근 접속", width="medium"),
-                }
-            )
-
-            c_admin1, c_admin2 = st.columns([2, 1])
-            with c_admin1:
-                target_email = st.selectbox(
-                    "권한을 변경할 회원 선택",
-                    options=df_users["이메일"].tolist() if not df_users.empty else [],
-                    key="admin_target_user",
-                )
-            with c_admin2:
-                new_role = st.selectbox(
-                    "새 권한",
-                    options=["free", "pro", "prime", "admin"],
-                    index=1,
-                    key="admin_new_role",
-                )
-
-            if st.button("권한 변경 적용", key="btn_update_role"):
-                ok = update_user_role(target_email, new_role)
-                if ok:
-                    set_subscription(target_email, new_role)
-                    msg = f"✅ {target_email} → **{new_role}** 변경 완료."
-                    if new_role in ["pro", "prime"]:
-                        sub_info = get_subscription(target_email)
-                        if sub_info:
-                            msg += f" (만료: {sub_info.get('expire_at')})"
-                    st.success(msg)
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("권한 변경에 실패했습니다.")
 
 # ---------------------------
 # Telegram send
