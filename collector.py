@@ -31,6 +31,27 @@ import random
 from time_utils import now_kst, now_utc, KST
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# [v9.0 추가] LLM 및 뉴스 크롤링용 라이브러리
+try:
+    from bs4 import BeautifulSoup
+    BS4_OK = True
+except ImportError:
+    BS4_OK = False
+    print("⚠️ BeautifulSoup4가 설치되지 않았습니다. (pip install beautifulsoup4)")
+
+# LLM API 키 설정 (환경변수 또는 직접 입력)
+# Google Gemini (무료 티어 가능) 또는 OpenAI 사용 권장
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") 
+try:
+    import google.generativeai as genai
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        LLM_AVAILABLE = True
+    else:
+        LLM_AVAILABLE = False
+except ImportError:
+    LLM_AVAILABLE = False
+
 # [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
@@ -1514,6 +1535,86 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
 
 # ------------------------------- AI 코멘트 / 스코어 -------------------------------
 
+def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
+    """
+    [v9.0] 네이버 금융 종목별 뉴스/공시 제목 크롤링
+    """
+    if not BS4_OK: return []
+    
+    headlines = []
+    try:
+        url = f"https://finance.naver.com/item/news_news.naver?code={code}&page=1"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=3)
+        
+        soup = BeautifulSoup(resp.content.decode('euc-kr', 'replace'), "html.parser")
+        titles = soup.select("td.title > a")
+        dates = soup.select("td.date")
+        
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        for t, d in zip(titles, dates):
+            article_date_str = d.text.strip()
+            try:
+                if len(article_date_str) > 10:
+                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d %H:%M")
+                else:
+                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d")
+                
+                if a_date >= cutoff_date:
+                    subject = t.text.strip()
+                    if "특징주" in subject or "공시" in subject or "체결" in subject or "계약" in subject:
+                        headlines.append(subject)
+            except:
+                continue
+    except Exception as e:
+        pass
+        
+    return list(set(headlines))[:10]
+
+def analyze_sentiment_llm(stock_name: str, headlines: List[str]) -> Tuple[float, str]:
+    """
+    [v9.0] LLM을 이용해 뉴스 헤드라인의 호재/악재 여부를 판별
+    Returns: (점수 -5 ~ +5, "요약 코멘트")
+    """
+    if not LLM_AVAILABLE or not headlines:
+        return 0.0, ""
+
+    # 프롬프트 엔지니어링
+    news_text = "\n".join(headlines)
+    prompt = f"""
+    당신은 주식 시장 전문가입니다. 아래는 '{stock_name}' 종목의 최근 뉴스입니다.
+    이 뉴스들이 주가에 미칠 영향을 분석하여 점수(-5:매우악재 ~ 0:중립 ~ +5:매우호재)와
+    한 줄 요약을 JSON 형식으로 답하세요.
+    
+    [뉴스 목록]
+    {news_text}
+    
+    [응답 형식]
+    {{"score": 점수, "reason": "핵심재료 요약"}}
+    """
+    
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # JSON 파싱 (간이)
+        import json
+        if "```" in text:
+            text = text.split("```")[1].replace("json", "").strip()
+        
+        data = json.loads(text)
+        score = float(data.get("score", 0))
+        reason = data.get("reason", "")
+        
+        return score, reason
+        
+    except Exception as e:
+        # log(f"⚠️ LLM 분석 실패: {e}")
+        return 0.0, ""
+
+
 def generate_ai_comment(
     mfi: float, rsi: float, slope: float, disp: float, score: float, 
     ttm_squeeze: int = 0, bw_squeeze: int = 0, bb_bw: float = np.nan, squeeze_cnt: int = 0,
@@ -1946,6 +2047,7 @@ def send_telegram_auto(
             buy = row.get('추천매수가', np.nan)
             score = row.get('LDY_SCORE', 0)
             comment = row.get('AI_COMMENT', '')
+            news_reason = row.get('NEWS_REASON', '') # 추가됨
 
             # ✅ [v8.5 추가] 네이버 금융 실시간 테마/섹터 크롤링
             theme_tag = get_naver_theme_tags(code)
@@ -1967,6 +2069,8 @@ def send_telegram_auto(
             msg += f"{rank}. {name} ({code}) {theme_tag}\n"
             msg += f"   🌡점수: {float(score):.1f}점\n"
             msg += f"   🎯전략: {route}\n"
+            if news_reason and news_reason != "뉴스없음":
+                msg += f"   📰재료: {news_reason}\n"
             msg += f"   💬AI: {comment}\n"
 
             # ✅ [v8.5 추가] 자금 관리(비중) 정보 표시
@@ -2021,6 +2125,52 @@ def ceil_to_tick(price: float) -> int:
         return 0
     tk = tick_size(float(price))
     return ceil_to_tick_by(float(price), tk)
+
+def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
+    """
+    [v9.0] 네이버 금융 종목별 뉴스/공시 제목 크롤링
+    - 최근 'days'일 이내의 뉴스만 수집
+    """
+    if not BS4_OK: return []
+    
+    headlines = []
+    try:
+        # 네이버 금융 뉴스 리스트 URL
+        url = f"https://finance.naver.com/item/news_news.naver?code={code}&page=1"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=3)
+        
+        # 인코딩 처리 (EUC-KR -> UTF-8)
+        soup = BeautifulSoup(resp.content.decode('euc-kr', 'replace'), "html.parser")
+        
+        # 뉴스 테이블 파싱
+        # 구조: <tr> <td class="title"> <a ...>제목</a> </td> <td class="date">...</td> </tr>
+        titles = soup.select("td.title > a")
+        dates = soup.select("td.date")
+        
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        for t, d in zip(titles, dates):
+            article_date_str = d.text.strip() # 예: '2024.05.21 14:00'
+            try:
+                # 날짜 파싱 (시간 포맷이 다양할 수 있어 예외처리)
+                if len(article_date_str) > 10:
+                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d %H:%M")
+                else:
+                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d")
+                
+                if a_date >= cutoff_date:
+                    subject = t.text.strip()
+                    # 중복/광고성 필터링 (간단 예시)
+                    if "특징주" in subject or "공시" in subject or "체결" in subject or "계약" in subject:
+                        headlines.append(subject)
+            except:
+                continue
+                
+    except Exception as e:
+        pass # 뉴스 수집 실패는 조용히 넘김
+        
+    return list(set(headlines))[:10] # 중복 제거 후 최대 10개
 
 
 
