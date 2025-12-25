@@ -2790,13 +2790,13 @@ with tab2:
             with c1:
                 # 🔧 차트 옵션 (모바일 최적화: Expander)
                 with st.expander("⚙️ 차트 보조지표 설정 (터치하여 열기)", expanded=False):
-                    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns(5)
+                    # 👇 6개로 늘리고 변수도 6개로 받아주세요!
+                    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5, c_opt6 = st.columns(6)
+                    
                     with c_opt1: show_bb = st.checkbox("볼린저 밴드", value=True, key=f"opt_bb_{code}")
                     with c_opt2: show_kc = st.checkbox("켈트너 채널", value=True, key=f"opt_kc_{code}")
                     with c_opt3: show_rsi = st.checkbox("RSI 표시", value=False, key=f"opt_rsi_{code}")
-                    # ✅ [v8.5] VWAP 옵션 추가
                     with c_opt4: show_vwap = st.checkbox("VWAP 표시", value=True, key=f"opt_vwap_{code}")
-                    # ✅ [v9.0] HMA 옵션 추가
                     with c_opt5: show_hma = st.checkbox("HMA", value=True, key=f"opt_hma_{code}")
                     with c_opt6: show_obv = st.checkbox("OBV", value=True, key=f"opt_obv_{code}")
 
