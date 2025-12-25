@@ -2798,6 +2798,7 @@ with tab2:
                     with c_opt4: show_vwap = st.checkbox("VWAP 표시", value=True, key=f"opt_vwap_{code}")
                     # ✅ [v9.0] HMA 옵션 추가
                     with c_opt5: show_hma = st.checkbox("HMA", value=True, key=f"opt_hma_{code}")
+                    with c_opt6: show_obv = st.checkbox("OBV", value=True, key=f"opt_obv_{code}")
 
                 chart_df = get_stock_chart_data(code)
 
@@ -2825,6 +2826,7 @@ with tab2:
                         show_bb=show_bb, show_kc=show_kc, show_rsi=show_rsi, 
                         show_vwap=show_vwap, # ✅ 쉼표(,) 추가 필수!
                         show_hma=show_hma  # ✅ 전달
+                        show_obv=show_obv
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
