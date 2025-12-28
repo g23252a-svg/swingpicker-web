@@ -499,10 +499,10 @@ def register_user(email: str, password: str, nickname: str,
         "password_hash": pw_hash,
         "created_at": now_utc,
         "last_login": now_utc,
-        # [v9.0] 신규 필드
         "is_banned": False,
         "security_q_idx": int(q_idx),
         "security_a_hash": ans_hash,
+        "session_token": secrets.token_urlsafe(32), # ✅ 자동 로그인 및 세션 검증용 고유 토큰
     }
     
     db["users"] = users
@@ -561,6 +561,9 @@ def authenticate_user(email: str, password: str):
 
     # 로그인 성공
     reset_login_fail(email_norm)
+
+    # ✅ v10.0 세션 토큰 새로 발급 (기존 세션 무효화 및 신규 세션 생성)
+    user["session_token"] = secrets.token_urlsafe(32)
     
     # ✅ [v8.5 최적화] 로그인 시간 갱신 로직 (DB 부하 감소)
     now_str = _now_utc_str()
@@ -581,7 +584,7 @@ def authenticate_user(email: str, password: str):
             pass # 파싱 실패 시 안전하게 저장
             
     # 메모리 상의 유저 정보는 항상 최신화 (세션용)
-    user["last_login"] = now_str
+    user["last_login"] = _now_utc_str()
     users[email_norm] = user
     
     # 실제 변경사항(비번 업데이트 or 오랜만의 로그인)이 있을 때만 DB 저장
@@ -709,7 +712,54 @@ def render_auth_box(show_debug: bool = False):
     # 현재 세션 사용자 가져오기
     user = get_user()
 
+    # -------------------- [v10.0 추가] 실시간 보안 & 세션 검증 --------------------
+    if user and user['login_id'] != MASTER_ADMIN_ID:
+        # Gist DB를 다시 로드하여 현재 사용자의 상태를 실시간 확인
+        db = load_user_db()
+        current_db_user = db.get("users", {}).get(user['login_id'])
+        
+        # 1. 관리자가 유저를 차단(is_banned)했는지 즉시 확인
+        if not current_db_user or current_db_user.get("is_banned", False):
+            st.session_state[CURRENT_USER_KEY] = None
+            st.error("🚨 보안 정책에 의해 이용이 정지되었습니다. 관리자에게 문의하세요.")
+            time.sleep(2)
+            st.rerun()
+
+        # 2. 권한 변경(Role) 실시간 반영 (로그아웃 없이 즉시 적용)
+        if current_db_user.get("role") != user.get("role"):
+            user["role"] = current_db_user.get("role")
+            st.session_state[CURRENT_USER_KEY] = user
+            st.rerun()
+            
+        # 3. 세션 토큰 무결성 체크 (중복 로그인 방지용)
+        # 만약 다른 기기에서 로그인하여 토큰이 바뀌었다면 현재 기기는 로그아웃됨
+        if current_db_user.get("session_token") != user.get("session_token"):
+            st.session_state[CURRENT_USER_KEY] = None
+            st.warning("⚠️ 다른 기기에서 로그인하여 현재 세션이 종료되었습니다.")
+            time.sleep(2)
+            st.rerun()
+
     # ---------------- [상태 1] 로그인 된 상태 ----------------
+
+    # -------------------- [v10.0 추가] 실시간 보안 & 세션 체크 --------------------
+    if user:
+        # 1. 차단 유저 및 권한 변경 실시간 체크
+        db = load_user_db()
+        current_db_user = db.get("users", {}).get(user['login_id'])
+        
+        # 유저가 DB에 없거나, 차단되었거나, 세션 토큰이 유효하지 않은 경우
+        if not current_db_user or current_db_user.get("is_banned", False):
+            st.session_state[CURRENT_USER_KEY] = None
+            st.error("🚨 보안 정책에 의해 로그아웃 되었습니다. (계정 정지 또는 정보 변경)")
+            time.sleep(2)
+            st.rerun()
+            
+        # 2. (선택사항) 권한 실시간 동기화
+        if current_db_user.get("role") != user.get("role"):
+            user["role"] = current_db_user.get("role")
+            st.session_state[CURRENT_USER_KEY] = user
+            st.rerun()
+    
     if user:
         # 상단 정보 표시
         col1, col2 = st.columns([3, 1])
