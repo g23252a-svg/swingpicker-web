@@ -1409,19 +1409,20 @@ def plot_interactive_chart(
             fig.add_trace(go.Scatter(
                 x=st_down.index, y=st_down,
                 mode='lines',
-                line=dict(color='#FF4081', width=2, dash='dot'), # Dotted Red Line
+                line=dict(color='#FF4081', width=2, dash='dot'),
                 name='SuperTrend (Resist)'
-                # >>>>>>> 여기에 아래 코드를 삽입하세요 <<<<<<<
-    # -------------------- [v10.0 추가] 주봉 20선 렌더링 --------------------
-    # 굵은 주봉 20선 추가 (회색 점선으로 '심리적 지지선' 표시)
-    if "WEEKLY_MA20" in df.columns:
+            ), row=1, col=1)
+
+        # -------------------- [v10.0 추가] 주봉 20선 렌더링 --------------------
+        # 굵은 주봉 20선 추가 (회색 점선으로 '심리적 지지선' 표시)
+        if "WEEKLY_MA20" in df.columns:
             fig.add_trace(go.Scatter(
                 x=df.index, 
                 y=df["WEEKLY_MA20"],
                 name="주봉 20선",
                 line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dashdot'),
                 hovertemplate="주봉20선: %{y:,.0f}원<extra></extra>"
-            ), row=1, col=1)  # <--- 이 부분의 괄호들을 확인하세요.
+            ), row=1, col=1)  # <--- 이 부분의 괄호가 닫혀야 에러가 해결됩니다.
         # ---------------------------------------------------------------------
 
         current_row = 2
