@@ -1422,7 +1422,7 @@ def plot_interactive_chart(
                 name="주봉 20선",
                 line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dashdot'),
                 hovertemplate="주봉20선: %{y:,.0f}원<extra></extra>"
-            ), row=1, col=1)  # <--- 이 부분의 괄호가 닫혀야 에러가 해결됩니다.
+            ), row=1, col=1)  # <--- 여기서 괄호를 닫아주어야 에러가 나지 않습니다.
         # ---------------------------------------------------------------------
 
         current_row = 2
