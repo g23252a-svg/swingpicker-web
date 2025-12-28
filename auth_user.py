@@ -712,54 +712,43 @@ def render_auth_box(show_debug: bool = False):
     # 현재 세션 사용자 가져오기
     user = get_user()
 
-    # -------------------- [v10.0 추가] 실시간 보안 & 세션 검증 --------------------
-    if user and user['login_id'] != MASTER_ADMIN_ID:
-        # Gist DB를 다시 로드하여 현재 사용자의 상태를 실시간 확인
-        db = load_user_db()
-        current_db_user = db.get("users", {}).get(user['login_id'])
-        
-        # 1. 관리자가 유저를 차단(is_banned)했는지 즉시 확인
-        if not current_db_user or current_db_user.get("is_banned", False):
-            st.session_state[CURRENT_USER_KEY] = None
-            st.error("🚨 보안 정책에 의해 이용이 정지되었습니다. 관리자에게 문의하세요.")
-            time.sleep(2)
-            st.rerun()
-
-        # 2. 권한 변경(Role) 실시간 반영 (로그아웃 없이 즉시 적용)
-        if current_db_user.get("role") != user.get("role"):
-            user["role"] = current_db_user.get("role")
-            st.session_state[CURRENT_USER_KEY] = user
-            st.rerun()
+    # -------------------- [v10.1 긴급 수정] 실시간 보안 & 세션 검증 --------------------
+    if user:
+        # 👑 Master Admin은 모든 검증을 건너뛰고 항상 통과 (복구용)
+        if user.get('login_id') == MASTER_ADMIN_ID:
+            pass 
+        else:
+            # 일반 유저만 DB 대조 및 차단 여부 확인
+            db = load_user_db()
+            current_db_user = db.get("users", {}).get(user['login_id'])
             
-        # 3. 세션 토큰 무결성 체크 (중복 로그인 방지용)
-        # 만약 다른 기기에서 로그인하여 토큰이 바뀌었다면 현재 기기는 로그아웃됨
-        if current_db_user.get("session_token") != user.get("session_token"):
-            st.session_state[CURRENT_USER_KEY] = None
-            st.warning("⚠️ 다른 기기에서 로그인하여 현재 세션이 종료되었습니다.")
-            time.sleep(2)
-            st.rerun()
+            # 1. 관리자가 유저를 차단(is_banned)했는지 즉시 확인
+            # (DB에 유저 정보가 없거나, is_banned가 True면 로그아웃)
+            if not current_db_user or current_db_user.get("is_banned", False):
+                st.session_state[CURRENT_USER_KEY] = None
+                st.error("🚨 보안 정책에 의해 이용이 정지되었습니다. 관리자에게 문의하세요.")
+                time.sleep(2)
+                st.rerun()
+
+            # 2. 권한 변경(Role) 실시간 반영
+            if current_db_user.get("role") != user.get("role"):
+                user["role"] = current_db_user.get("role")
+                st.session_state[CURRENT_USER_KEY] = user
+                st.rerun()
+                
+            # 3. 세션 토큰 무결성 체크 (중복 로그인 방지용)
+            # DB에 토큰이 없으면(구버전 유저) 통과, 토큰이 있는데 다르면 로그아웃
+            db_token = current_db_user.get("session_token")
+            user_token = user.get("session_token")
+            
+            if db_token and user_token and db_token != user_token:
+                st.session_state[CURRENT_USER_KEY] = None
+                st.warning("⚠️ 다른 기기에서 로그인하여 현재 세션이 종료되었습니다.")
+                time.sleep(2)
+                st.rerun()
+    # ------------------------------------------------------------------------------
 
     # ---------------- [상태 1] 로그인 된 상태 ----------------
-
-    # -------------------- [v10.0 추가] 실시간 보안 & 세션 체크 --------------------
-    if user:
-        # 1. 차단 유저 및 권한 변경 실시간 체크
-        db = load_user_db()
-        current_db_user = db.get("users", {}).get(user['login_id'])
-        
-        # 유저가 DB에 없거나, 차단되었거나, 세션 토큰이 유효하지 않은 경우
-        if not current_db_user or current_db_user.get("is_banned", False):
-            st.session_state[CURRENT_USER_KEY] = None
-            st.error("🚨 보안 정책에 의해 로그아웃 되었습니다. (계정 정지 또는 정보 변경)")
-            time.sleep(2)
-            st.rerun()
-            
-        # 2. (선택사항) 권한 실시간 동기화
-        if current_db_user.get("role") != user.get("role"):
-            user["role"] = current_db_user.get("role")
-            st.session_state[CURRENT_USER_KEY] = user
-            st.rerun()
-    
     if user:
         # 상단 정보 표시
         col1, col2 = st.columns([3, 1])
@@ -773,7 +762,7 @@ def render_auth_box(show_debug: bool = False):
                 time.sleep(0.5) 
                 st.rerun()
 
-        # [Upgrade 3] 마이페이지 (정보 수정)
+        # [Upgrade 3] 마이페이지 (정보 수정) - Admin은 수정 불가 예외 처리됨
         with st.expander(f"⚙️ 내 정보 수정 (권한: {user.get('role', 'free')})", expanded=False):
             st.info(f"가입일: {user.get('created_at', '')[:10]}")
             
@@ -795,9 +784,9 @@ def render_auth_box(show_debug: bool = False):
         return user
 
     # ---------------- [상태 2] 비로그인 상태 ----------------
+    # (이하 기존 로그인/회원가입 탭 코드 그대로 유지)
     st.subheader("🔐 계정 로그인 / 회원가입")
     
-    # [v9.0] 탭 3개로 확장 (비밀번호 찾기 추가)
     tab_login, tab_signup, tab_find = st.tabs(["로그인", "회원가입", "비밀번호 찾기"])
 
     # 1) 로그인 탭
@@ -827,7 +816,6 @@ def render_auth_box(show_debug: bool = False):
             reg_pw1 = st.text_input("비밀번호 (영문+숫자 6자 이상)", type="password")
             reg_pw2 = st.text_input("비밀번호 확인", type="password")
             
-            # [v9.0] 보안 질문/답변 UI 추가
             st.markdown("---")
             st.caption("🔒 비밀번호 분실 시 찾기 위한 질문입니다.")
             q_idx = st.selectbox("보안 질문 선택", range(len(SECURITY_QUESTIONS)), format_func=lambda x: SECURITY_QUESTIONS[x])
@@ -847,7 +835,6 @@ def render_auth_box(show_debug: bool = False):
             elif not q_answer.strip():
                 st.error("보안 질문 답변을 입력해 주세요.")
             else:
-                # register_user 함수 호출
                 ok, msg, new_user = register_user(reg_email, reg_pw1, reg_nick, q_idx, q_answer, reg_code)
                 if ok:
                     st.session_state[CURRENT_USER_KEY] = new_user
@@ -858,17 +845,15 @@ def render_auth_box(show_debug: bool = False):
                 else:
                     st.error(msg)
 
-    # 3) [New] 비밀번호 찾기 탭
+    # 3) 비밀번호 찾기 탭
     with tab_find:
         st.markdown("##### 🔑 비밀번호 재설정")
         
-        # 상태 관리를 위한 세션 초기화
         if "rec_step" not in st.session_state:
             st.session_state["rec_step"] = 1
             st.session_state["rec_email"] = ""
             st.session_state["rec_q_idx"] = 0
 
-        # [Step 1] 이메일 입력
         if st.session_state["rec_step"] == 1:
             with st.form("find_pw_step1"):
                 email_input = st.text_input("가입한 이메일 입력", placeholder="example@email.com")
@@ -882,7 +867,6 @@ def render_auth_box(show_debug: bool = False):
                 if u_norm in users:
                     user_data = users[u_norm]
                     q_idx = user_data.get("security_q_idx", 0)
-                    # 유효한 질문 인덱스가 있는지 확인
                     if q_idx > 0 and q_idx < len(SECURITY_QUESTIONS):
                         st.session_state["rec_email"] = u_norm
                         st.session_state["rec_q_idx"] = q_idx
@@ -893,7 +877,6 @@ def render_auth_box(show_debug: bool = False):
                 else:
                     st.error("등록되지 않은 이메일입니다.")
 
-        # [Step 2] 보안 질문 답변 및 새 비밀번호 설정
         elif st.session_state["rec_step"] == 2:
             target_email = st.session_state["rec_email"]
             q_idx = st.session_state["rec_q_idx"]
