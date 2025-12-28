@@ -24,7 +24,7 @@ def _get_conf(key: str, default_val: str) -> str:
 # 1) 버전 정보
 #    - LDY_APP_VERSION 으로 오버라이드 가능
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "9.0.0")  # ✅ [Update] v9.0.0 (Deep Insight Edition)
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "10.1.0")  # ✅ [Update] v10.1.0 (Weekly Trend & Security)
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -56,8 +56,29 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG: List[Dict] = [
     {
+        "version": "10.1.0",
+        "date": "2025-12-28",
+        "title": "Admin Control & Stability Patch",
+        "items": [
+            "👮 **Admin Power Tools:** 관리자 패널에서 회원의 **'이용권 만료일'**을 즉시 확인하고, 만료된 회원만 필터링하여 관리할 수 있습니다.",
+            "🔐 **Session Integrity Fix:** 관리자(Admin) 계정의 로그인 안정성을 확보하고, 일반 유저의 중복 로그인을 방지하는 세션 토큰 로직을 강화했습니다.",
+            "📉 **Auto Expiration Handling:** 이용 기간이 만료된 회원이 접속 시, 자동으로 등급이 조정(Prime→Free)되며 DB에 즉시 반영됩니다.",
+        ],
+    },
+    {
+        "version": "10.0.0",
+        "date": "2025-12-28",
+        "title": "Weekly Trend Traffic Light & Ironclad Security",
+        "items": [
+            "🚥 **Weekly Trend Traffic Light:** 일봉의 노이즈를 제거한 **'주봉 20선 대추세'** 신호등 UI를 도입했습니다. (초록: 상승장 / 빨강: 하락장)",
+            "🛡️ **Instant Ban System:** 관리자가 차단(Ban) 버튼을 누르는 즉시, 해당 유저의 화면이 종료되고 강제 로그아웃되는 실시간 보안 체계를 구축했습니다.",
+            "📈 **Weekly Overlay:** 차트에 은은한 **주봉 20일선 점선**을 추가하여, 현재 주가가 대추세 대비 어디에 위치하는지 직관적으로 파악할 수 있습니다.",
+            "🔑 **Secure Session Token:** 기기별 고유 세션 토큰을 발급하여 세션 탈취 및 불법 공유를 원천 차단합니다.",
+        ],
+    },
+    {
         "version": "9.0.0",
-        "date": "2025-12-25", # ✅ 크리스마스 선물 업데이트! 🎅
+        "date": "2025-12-25",
         "title": "Deep Insight Edition: HMA, OBV & Smart Sector",
         "items": [
             "🚀 **Hull Moving Average (HMA):** 기존 이평선보다 반응이 빠르고 휩소가 적은 HMA 지표 탑재",
@@ -65,41 +86,6 @@ CHANGELOG: List[Dict] = [
             "🤖 **AI News Analysis:** Gemini LLM 기반 최신 호재/악재 뉴스 자동 요약",
             "📊 **Excel-Style Portfolio:** 엑셀처럼 수정 가능한 포트폴리오 에디터 도입",
             "🛡️ **Security & Recovery:** 보안 질문을 통한 비밀번호 찾기 기능 추가",
-        ],
-    },
-    {
-        "version": "8.5.0",
-        "date": "2025-12-19",
-        "title": "Institutional-Grade Analytics & Smart Money Management",
-        "items": [
-            "🟣 **VWAP Analytics Integration:** 기관 투자자의 핵심 지표인 **거래량 가중 평균 가격(VWAP)**을 도입하여 실시간 수급 지지 여부를 정밀 분석합니다.",
-            "💰 **Smart Position Sizing:** 총 자산 대비 리스크(2%)를 기반으로 한 **적정 매수 수량 및 금액** 자동 계산 시스템을 구축했습니다.",
-            "🕯️ **Price Action Detection:** 차트의 **망치형, 장악형** 등 주요 캔들 패턴을 자동으로 감지하여 기술적 신뢰도를 시각화합니다.",
-            "📊 **Admin Performance Insights:** 관리자 전용 대시보드 내에 **DAU(일간 활성자) 및 WAU(주간 활성자)** 통계 집계 기능을 탑재했습니다.",
-            "⚙️ **System Optimization:** 로그인 세션 갱신 로직 최적화 및 UI 컴포넌트 디자인 고도화를 진행했습니다.",
-        ],
-    },
-    {
-        "version": "8.0.0",
-        "date": "2025-12-16",
-        "title": "Ironclad Security & Native Performance",
-        "items": [
-            "🛡️ **Security Shield (Rate Limiting):** 무차별 대입 공격(Brute Force)을 방어하기 위한 **로그인 시도 횟수 제한** 기능 탑재 (5회 실패 시 15분 잠금).",
-            "🚀 **Native Turbo Caching:** 기존 수동 캐싱을 Streamlit의 **`st.cache_data` 네이티브 엔진**으로 교체하여 메모리 효율성 극대화 및 로딩 속도 향상.",
-            "👤 **User Self-Service (MyPage):** 사용자 스스로 **닉네임 및 비밀번호**를 변경할 수 있는 마이페이지 기능 추가.",
-            "🔐 **PBKDF2 Standard:** v7.5에서 도입된 고강도 암호화(PBKDF2-HMAC-SHA256)가 모든 인증 로직에 표준으로 적용.",
-            "🔧 **System Stabilization:** 레이스 컨디션 방지를 위한 데이터 로딩/저장 구조 최적화.",
-        ],
-    },
-    {
-        "version": "7.5.0",
-        "date": "2025-12-15",
-        "title": "Smart Swing Stop & V-Power Revolution",
-        "items": [
-            "🛡️ **Smart Swing Stop-Loss:** 기존 ATR 방식의 한계를 넘어, **최근 10일 전저점(Swing Low)**을 자동으로 인식하여 휩소(Whipsaw)에 의한 불필요한 손절 방지.",
-            "💪 **V-Power Factor:** 단순 거래량이 아닌 **'상승일 vs 하락일 거래량 비율'**을 분석하여 세력 매집 강도를 포착하는 **V-Power** 팩터 도입.",
-            "📊 **7-Factor Radar Chart:** 기술/세력(TEC) 축을 추가하여 V-Power와 기술적 완성도를 시각화.",
-            "🧠 **AI Context Awareness:** 차트의 구조적 지지선 및 세력 매집 패턴을 인식하여 더욱 정교해진 AI 코멘트 제공.",
         ],
     },
     # ... (과거 로그 생략) ...
@@ -129,18 +115,37 @@ def get_version_label(include_build: bool = True) -> str:
 # ✅ UI Helper: 사이드바나 메인화면에 업데이트 내역 표시
 def show_recent_updates(limit: int = 1, expanded: bool = True):
     """최신 업데이트 내역을 Streamlit Expander로 렌더링"""
+    
+    # 스타일링을 위한 CSS (선택 사항)
+    st.markdown("""
+        <style>
+        .update-badge {
+            background-color: #FF4B4B;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     for i, log in enumerate(CHANGELOG[:limit]):
         ver = log['version']
         date = log['date']
         title = log['title']
         
-        # 최신 버전은 'New' 뱃지 효과
-        header_prefix = "🔥" if i == 0 else "📜"
-        label = f"{header_prefix} v{ver} ({date}): {title}"
+        # 최신 버전은 아이콘 강조
+        header_icon = "🚀" if i == 0 else "📜"
+        label = f"{header_icon} v{ver} ({date}): {title}"
         
         with st.expander(label, expanded=(expanded and i == 0)):
             for item in log['items']:
                 st.markdown(f"- {item}")
+            
+            if i == 0:
+                st.caption("✨ 최신 기능이 적용되었습니다. 강력해진 보안과 트렌드 분석을 경험해보세요!")
 
 
 # 버전 정합성 체크
