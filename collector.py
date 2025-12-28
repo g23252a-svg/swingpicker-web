@@ -2308,6 +2308,39 @@ def analyze_ticker(
     if tv_eok < MIN_TURNOVER_EOK: return None
 
     score = 0; reason = []
+
+    # === [v10.0 추가] 주봉(Weekly) 대추세 확증 필터 시작 ===
+    try:
+        # 주봉 변환 로직
+        logic = {'시가': 'first', '고가': 'max', '저가': 'min', '종가': 'last', '거래량': 'sum'}
+        
+        # 인덱스를 Datetime으로 복사 (리샘플링용)
+        ohlcv_tmp = ohlcv.copy()
+        if not isinstance(ohlcv_tmp.index, pd.DatetimeIndex):
+            ohlcv_tmp.index = pd.to_datetime(ohlcv_tmp.index)
+            
+        df_w = ohlcv_tmp.resample('W').apply(logic)
+        w_ma20 = df_w['종가'].rolling(window=20).mean()
+        
+        curr_w_c = float(df_w['종가'].iloc[-1])
+        curr_w_ma = float(w_ma20.iloc[-1])
+        prev_w_ma = float(w_ma20.iloc[-2]) if len(w_ma20) > 1 else curr_w_ma
+        
+        is_above_w20 = curr_w_c > curr_w_ma if np.isfinite(curr_w_ma) else False
+        is_w20_up = curr_w_ma > prev_w_ma if np.isfinite(curr_w_ma) and np.isfinite(prev_w_ma) else False
+
+        if is_above_w20:
+            score += 1.5
+            reason.append("주봉20선↑")
+        if is_w20_up:
+            score += 0.5
+            reason.append("주봉추세우상향")
+        if not is_above_w20:
+            score -= 2.0  # 주봉 역배열 종목은 강력하게 감점
+            reason.append("주봉역배열주의")
+    except Exception:
+        pass
+    # === [v10.0 추가] 주봉(Weekly) 대추세 확증 필터 끝 ===
     # -------------------- [v9.0 HMA 가산점] --------------------
     # 전략 1: HMA 우상향 + 주가 지지 (+1.5점) -> 강력한 추세
     if hma_trend_up and above_hma:
@@ -2469,6 +2502,10 @@ def analyze_ticker(
         "rel_20d_%": round(rel_20, 2) if np.isfinite(rel_20) else np.nan,
         "rel_60d_%": round(rel_60, 2) if np.isfinite(rel_60) else np.nan,
         "rel_120d_%": round(rel_120, 2) if np.isfinite(rel_120) else np.nan,
+        # === [v10.0 추가] 주봉 지표 데이터 저장 ===
+        "주봉20선_상회": "O" if is_above_w20 else "X",
+        "주봉추세": "▲" if is_w20_up else "▼",
+        # ========================================
         "EBS": int(score), "통과": "★" if score >= PASS_EBS else "", "근거": ", ".join(reason),
         "추천매수가": buy, "손절가": stop, "추천매도가1": t1, "추천매도가2": t2, "ATR_MULT": atr_mult,
         # ✅ [v8.5 추가] 자금 관리 필드 추가
