@@ -1415,15 +1415,16 @@ def plot_interactive_chart(
     # -------------------- [v10.0 추가] 주봉 20선 렌더링 --------------------
     # 굵은 주봉 20선 추가 (회색 점선으로 '심리적 지지선' 표시)
     if "WEEKLY_MA20" in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["WEEKLY_MA20"],
-            name="주봉 20선",
-            line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dashdot'),
-            hovertemplate="주봉20선: %{y:,.0f}원<extra></extra>"
-        ), row=1, col=1)         
+            fig.add_trace(go.Scatter(
+                x=df.index, 
+                y=df["WEEKLY_MA20"],
+                name="주봉 20선",
+                line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dashdot'),
+                hovertemplate="주봉20선: %{y:,.0f}원<extra></extra>"
+            ), row=1, col=1)  # <--- 이 부분의 괄호들을 확인하세요.
+        # ---------------------------------------------------------------------
 
-    # ▼▼▼ [여기부터 붙여넣기] ▼▼▼
-    current_row = 2
+        current_row = 2
 
     # 6) 거래량 (항상 표시)
     if "Volume" in df.columns:
