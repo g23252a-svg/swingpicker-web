@@ -2830,8 +2830,8 @@ with tab2:
                         t_color, t_bg, t_msg = "#C62828", "#FFEBEE", "🔴 대세 하락 (High Risk)"
 
                     st.markdown(f"""
-                        <div style="background-color:{t_bg}; padding:12px; border-radius:8px; border-left: 5px solid {t_color}; margin-bottom:10px;">
-                            <p style="margin:0; font-size:0.85em; color:#666;">주봉 대추세</p>
+                        <div style="background-color:{t_bg}; border-left: 5px solid {t_color}; padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                            <p style="margin:0; font-size:0.85em; color:#666;">주봉 대추세 확증</p>
                             <p style="margin:0; font-weight:bold; color:{t_color}; font-size:1.1em;">{t_msg}</p>
                         </div>
                     """, unsafe_allow_html=True)
