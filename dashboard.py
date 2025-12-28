@@ -1189,6 +1189,17 @@ def get_stock_chart_data(code):
         # SuperTrend
         df = calculate_supertrend(df)
 
+        # -------------------- [v10.0 추가] 주봉 20선 계산 --------------------
+        # 일봉 데이터를 주봉으로 리샘플링하여 대추세선 산출
+        logic_w = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
+        df_w = df.resample('W').apply(logic_w)
+        df_w['WMA20'] = df_w['Close'].rolling(window=20).mean()
+        
+        # 일봉 데이터프레임에 주봉 20선 값을 매핑 (시각화용 점선)
+        # 현재 일봉 날짜보다 작거나 같은 가장 최근의 주봉 20선 값을 가져옴
+        df['WEEKLY_MA20'] = df.index.map(lambda x: df_w.loc[df_w.index <= x, 'WMA20'].iloc[-1] if not df_w.loc[df_w.index <= x, 'WMA20'].empty else np.nan)
+        # ------------------------------------------------------------------
+
         # 최근 120일 데이터 반환
         return df.tail(120)
     except Exception:
@@ -1400,7 +1411,16 @@ def plot_interactive_chart(
                 mode='lines',
                 line=dict(color='#FF4081', width=2, dash='dot'), # Dotted Red Line
                 name='SuperTrend (Resist)'
-            ), row=1, col=1)
+                # >>>>>>> 여기에 아래 코드를 삽입하세요 <<<<<<<
+    # -------------------- [v10.0 추가] 주봉 20선 렌더링 --------------------
+    # 굵은 주봉 20선 추가 (회색 점선으로 '심리적 지지선' 표시)
+    if "WEEKLY_MA20" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["WEEKLY_MA20"],
+            name="주봉 20선",
+            line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dashdot'),
+            hovertemplate="주봉20선: %{y:,.0f}원<extra></extra>"
+        ), row=1, col=1)         
 
     # ▼▼▼ [여기부터 붙여넣기] ▼▼▼
     current_row = 2
@@ -2795,6 +2815,24 @@ with tab2:
             with c2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
+
+                    # 🚥 [v10.0 추가] 주봉 추세 신호등 UI
+                    w_above = row.get("주봉20선_상회") == "O"
+                    w_up = row.get("주봉추세") == "▲"
+                    
+                    if w_above and w_up:
+                        t_color, t_bg, t_msg = "#2E7D32", "#E8F5E9", "🟢 대세 상승 (Strong Bull)"
+                    elif w_above:
+                        t_color, t_bg, t_msg = "#EF6C00", "#FFF3E0", "🟡 추세 유지 (Watching)"
+                    else:
+                        t_color, t_bg, t_msg = "#C62828", "#FFEBEE", "🔴 대세 하락 (High Risk)"
+
+                    st.markdown(f"""
+                        <div style="background-color:{t_bg}; padding:12px; border-radius:8px; border-left: 5px solid {t_color}; margin-bottom:10px;">
+                            <p style="margin:0; font-size:0.85em; color:#666;">주봉 대추세</p>
+                            <p style="margin:0; font-weight:bold; color:{t_color}; font-size:1.1em;">{t_msg}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
                     
                     # 📊 1. 레이더 차트 (v7.5 유지)
                     st.plotly_chart(plot_radar_chart(row), use_container_width=True)
