@@ -2276,45 +2276,95 @@ with st.sidebar:
         if not users:
             st.info("회원이 없습니다.")
         else:
-            # 2. 회원 목록 테이블
-            subs_db = load_subs_db()
+            # 2. 회원 목록 테이블 (구독 만료일 연동 + 필터링 기능 추가)
+            subs_db = load_subs_db() # subscriptions_db.json 로드
             subs = subs_db.get("subs", {})
             rows = []
             
+            today = now_kst().date() # 오늘 날짜 (만료 여부 비교용)
+
             for u in users:
                 email = u.get("login_id")
+                role = u.get("role", "free")
                 
-                # 차단 여부 확인
+                # 차단 여부
                 is_banned = u.get("is_banned", False)
-                status_icon = "🚫차단됨" if is_banned else "✅정상"
                 
+                # 만료일 확인 및 상태 결정
+                expire_at_str = "-"
+                is_expired = False
+                
+                if role == "admin":
+                    expire_at_str = "∞ (Admin)"
+                elif email in subs:
+                    # 구독 DB에 정보가 있으면 가져옴
+                    expire_at_str = subs[email].get("expire_at", "-")
+                    try:
+                        # 날짜 비교: 만료일이 오늘보다 이전이면 만료됨 처리
+                        exp_date = datetime.strptime(expire_at_str, "%Y-%m-%d").date()
+                        if exp_date < today:
+                            is_expired = True
+                    except:
+                        pass
+                
+                # 상태 텍스트 결정 (우선순위: 차단 > 만료 > 정상)
+                if is_banned:
+                    status_txt = "🚫차단됨"
+                elif is_expired:
+                    status_txt = "❌만료됨"
+                else:
+                    status_txt = "✅정상"
+
                 rows.append({
                     "Email": email,
                     "닉네임": u.get("nickname"),
-                    "권한": u.get("role", "free"),
-                    "상태": status_icon,
-                    "최근접속": to_kst_str(u.get("last_login"))
+                    "권한": role,
+                    "만료일": expire_at_str,  # ✅ 추가됨
+                    "상태": status_txt,       # ✅ 업데이트됨
+                    "최근접속": to_kst_str(u.get("last_login")),
+                    "_is_expired": is_expired # 필터링용 히든 컬럼
                 })
 
             df_users = pd.DataFrame(rows)
+            
+            # 🔥 [UI 기능 추가] 만료 회원 필터링 & 검색 옵션
+            c_filter1, c_filter2 = st.columns(2)
+            with c_filter1:
+                show_expired = st.checkbox("📉 만료된 회원만 보기")
+            with c_filter2:
+                search_query = st.text_input("🔍 이메일 검색", placeholder="user@example.com")
+
+            # 필터 로직 적용
+            if show_expired:
+                df_users = df_users[df_users["_is_expired"] == True]
+            
+            if search_query:
+                # 대소문자 구분 없이 검색
+                df_users = df_users[df_users["Email"].str.contains(search_query, case=False, na=False)]
+
             # 최근 접속순 정렬
-            if "최근접속" in df_users.columns:
+            if not df_users.empty and "최근접속" in df_users.columns:
                 df_users = df_users.sort_values("최근접속", ascending=False)
                 
+            # 테이블 출력
             st.dataframe(
-                df_users, 
+                df_users.drop(columns=["_is_expired"]), # 히든 컬럼 제외하고 출력
                 use_container_width=True, 
-                height=200,
+                height=300,
                 column_config={
-                    "최근접속": st.column_config.TextColumn("최근접속", width="medium")
+                    "최근접속": st.column_config.TextColumn("최근접속", width="medium"),
+                    "만료일": st.column_config.TextColumn("만료일", width="small"), # ✅ UI 표시 설정
+                    "권한": st.column_config.TextColumn("권한", width="small"),
+                    "상태": st.column_config.TextColumn("상태", width="small"),
                 }
             )
 
             # 3. 통합 계정 제어 (권한 변경 + 차단)
             st.markdown("##### 🛠️ 계정 제어")
             
-            # 대상 선택 (하나만 있어야 함)
-            target_email = st.selectbox("대상 회원 선택", options=df_users["Email"].tolist(), key="admin_target_unified")
+            # (만료된 회원도 리스트에 나와야 제어가 가능하므로 원본 리스트 사용 권장)
+            target_list = df_users["Email"].tolist() if not df_users.empty else []
+            target_email = st.selectbox("대상 회원 선택", options=target_list, key="admin_target_unified")
             
             c_adm1, c_adm2 = st.columns(2)
             
@@ -2332,15 +2382,18 @@ with st.sidebar:
             
             # [오른쪽] 차단 토글
             with c_adm2:
-                # 현재 상태 확인
-                target_user_info = next((u for u in users if u["login_id"] == target_email), {})
-                current_ban = target_user_info.get("is_banned", False)
-                
-                # 버튼 상태 설정
+                # 현재 차단 상태 확인
+                current_ban = False
+                if target_email:
+                    # users 원본 딕셔너리에서 찾아야 정확함
+                    u_target = next((u for u in users if u["login_id"] == target_email), None)
+                    if u_target:
+                        current_ban = u_target.get("is_banned", False)
+
                 btn_label = "⭕ 차단 해제" if current_ban else "🚫 계정 차단"
                 btn_type = "primary" if current_ban else "secondary"
                 
-                st.write("") # 라벨 높이 맞춤용
+                st.write("") 
                 st.write("") 
                 if st.button(btn_label, type=btn_type, use_container_width=True):
                     ok, msg = toggle_user_ban(target_email, user.get("login_id"))
