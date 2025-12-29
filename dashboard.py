@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import glob
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -579,66 +580,89 @@ def send_telegram_msg(token, chat_id, message):
 @st.cache_data(ttl=3600)
 def get_code_map():
     """
-    종목명 → 6자리 코드 매핑
-    1순위: pykrx (KRX 공식 종목명)
-    2순위: FinanceDataReader(KRX) 보조
-    - 공백 제거 / 두 가지 key(원문, 공백제거문) 모두 저장
+    종목명 -> 종목코드 매핑
+    1순위: Collector가 수집해둔 로컬 파일 (data/krx_codes_*.csv) 사용 -> 가장 빠르고 안전
+    2순위: pykrx 라이브러리 (Live)
+    3순위: FinanceDataReader (Live)
     """
     mapping = {}
 
-    # 1) pykrx 우선 (이게 KRX 종목명 그대로라서 제일 믿을 만함)
+    # 1. 로컬 캐시 파일 우선 로드 (Collector가 수집한 파일 활용)
+    #    -> 외부 통신 없이 즉시 로드되므로 에러가 안 납니다.
+    try:
+        # data 폴더 내의 krx_codes_*.csv 파일 검색
+        pattern = os.path.join(DATA_DIR, "krx_codes_*.csv")
+        files = glob.glob(pattern)
+        
+        if files:
+            # 가장 최근에 수정된 파일 선택
+            latest_file = max(files, key=os.path.getmtime)
+            df = pd.read_csv(latest_file, dtype=str)
+            
+            if "종목명" in df.columns and "종목코드" in df.columns:
+                for _, row in df.iterrows():
+                    name = str(row["종목명"]).strip()
+                    code = str(row["종목코드"]).strip().zfill(6)
+                    if name and code:
+                        # 그대로 저장
+                        mapping.setdefault(name, code)
+                        # 공백 제거 버전도 저장 (예: 'HD현대일렉트릭', 'HD 현대일렉트릭')
+                        mapping.setdefault(name.replace(" ", ""), code)
+                
+                # 로컬 로드 성공 시 로그 남기고 바로 반환 (외부 API 호출 생략)
+                logger.info(f"✅ Loaded code map from local file: {os.path.basename(latest_file)} ({len(mapping)} items)")
+                return mapping
+    except Exception as e:
+        logger.warning(f"Local code map load failed: {e}")
+
+    # 2. pykrx (Live Fallback) - 로컬 파일 없을 때만 실행
     if PYKRX_OK:
         try:
             today_dt = now_kst().date()
-
-            # ✅ 최근 10일 안에서 "티커가 실제로 나오는 날짜"를 찾는다 (주말/휴장일 대응)
             today = None
-            for i in range(10):
+            # 최근 5일 내 거래일 찾기
+            for i in range(5):
                 ymd = (today_dt - timedelta(days=i)).strftime("%Y%m%d")
                 try:
-                    chk = stock.get_market_ticker_list(ymd, market="KOSPI")
-                    if chk:  # 빈 리스트 아니면 그 날짜가 거래일
+                    # 해당 날짜에 티커 리스트가 나오는지 확인
+                    if stock.get_market_ticker_list(ymd, market="KOSPI"):
                         today = ymd
                         break
-                except Exception:
-                    pass
-
-            if today is None:
-                today = now_kst().strftime("%Y%m%d")
-            for mkt in ["KOSPI", "KOSDAQ"]:
-                tickers = stock.get_market_ticker_list(today, market=mkt)
-                for t in tickers:
-                    code = str(t).zfill(6)
-                    name = stock.get_market_ticker_name(t)  # 예: '삼성SDI'
-                    if not isinstance(name, str):
-                        continue
-                    name = name.strip()
-                    if not name:
-                        continue
-
-                    # 그대로
-                    mapping.setdefault(name, code)
-                    # 공백 제거 버전도 추가 (예: 'HD현대일렉트릭', 'HD 현대일렉트릭')
-                    mapping.setdefault(name.replace(" ", ""), code)
+                except: pass
+            
+            if today:
+                for mkt in ["KOSPI", "KOSDAQ"]:
+                    tickers = stock.get_market_ticker_list(today, market=mkt)
+                    for t in tickers:
+                        name = stock.get_market_ticker_name(t)
+                        if not isinstance(name, str): continue
+                        name = name.strip()
+                        if not name: continue
+                        
+                        code = str(t).zfill(6)
+                        
+                        # 그대로 저장
+                        mapping.setdefault(name, code)
+                        # 공백 제거 버전도 저장
+                        mapping.setdefault(name.replace(" ", ""), code)
         except Exception as e:
-            logger.exception("get_code_map via pykrx failed: %s", e)
+            logger.warning(f"pykrx code map failed: {e}")
 
-    # 2) FDR 보조 (pykrx가 안 되거나 빠진 종목 채우기용)
-    if FDR_OK:
+    # 3. FDR (Last Resort) - 위 두 방법 다 실패했을 때만 실행
+    if not mapping and FDR_OK:
         try:
             df = fdr.StockListing("KRX")
-            df["Code"] = df["Code"].astype(str).str.zfill(6)
             for _, row in df.iterrows():
                 name = str(row.get("Name", "")).strip()
-                code = row["Code"]
-                if not name:
-                    continue
-
-                # 기존에 없을 때만 채움 (pykrx 우선 유지)
-                mapping.setdefault(name, code)
-                mapping.setdefault(name.replace(" ", ""), code)
+                code = str(row.get("Code", "")).strip().zfill(6)
+                if name:
+                    # 그대로 저장
+                    mapping.setdefault(name, code)
+                    # 공백 제거 버전도 저장
+                    mapping.setdefault(name.replace(" ", ""), code)
         except Exception as e:
-            logger.exception("get_code_map via FDR failed: %s", e)
+            # FDR 에러는 로그만 남기고 무시 (앱 중단 방지)
+            logger.warning(f"FDR code map failed: {e}")
 
     return mapping
 
