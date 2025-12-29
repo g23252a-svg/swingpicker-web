@@ -22,9 +22,8 @@ def _get_conf(key: str, default_val: str) -> str:
 
 # --------------------------------------------------------------------
 # 1) 버전 정보
-#    - LDY_APP_VERSION 으로 오버라이드 가능
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "10.1.0")  # ✅ [Update] v10.1.0 (Weekly Trend & Security)
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "11.0.0")  # ✅ [Major Update] v11.0.0 (AI Hybrid)
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -56,6 +55,17 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG: List[Dict] = [
     {
+        "version": "11.0.0",
+        "date": "2025-12-29",
+        "title": "The Singularity: Hybrid AI Trading System",
+        "items": [
+            "🧠 **Auto-ML Engine:** 과거 데이터를 스스로 학습하여 상승 패턴을 예측하는 **머신러닝(Random Forest) 엔진**을 탑재했습니다. (AI 점수 도입)",
+            "🤝 **AI Consensus Matrix:** 기존 퀀트 로직과 AI 예측 모델이 **동시에 강력 추천하는 종목**을 한눈에 찾는 산점도 차트를 제공합니다.",
+            "🏆 **Total Score System:** 퀀트 점수(70%)와 AI 점수(30%)를 결합한 **'종합 점수'**로 랭킹 정확도를 비약적으로 높였습니다.",
+            "⚡ **Robust Data Pipeline:** KRX/FDR 외부 데이터 장애 시에도 **로컬 캐시를 우선 사용하여 중단 없는 서비스**를 제공합니다.",
+        ],
+    },
+    {
         "version": "10.1.0",
         "date": "2025-12-28",
         "title": "Admin Control & Stability Patch",
@@ -73,19 +83,6 @@ CHANGELOG: List[Dict] = [
             "🚥 **Weekly Trend Traffic Light:** 일봉의 노이즈를 제거한 **'주봉 20선 대추세'** 신호등 UI를 도입했습니다. (초록: 상승장 / 빨강: 하락장)",
             "🛡️ **Instant Ban System:** 관리자가 차단(Ban) 버튼을 누르는 즉시, 해당 유저의 화면이 종료되고 강제 로그아웃되는 실시간 보안 체계를 구축했습니다.",
             "📈 **Weekly Overlay:** 차트에 은은한 **주봉 20일선 점선**을 추가하여, 현재 주가가 대추세 대비 어디에 위치하는지 직관적으로 파악할 수 있습니다.",
-            "🔑 **Secure Session Token:** 기기별 고유 세션 토큰을 발급하여 세션 탈취 및 불법 공유를 원천 차단합니다.",
-        ],
-    },
-    {
-        "version": "9.0.0",
-        "date": "2025-12-25",
-        "title": "Deep Insight Edition: HMA, OBV & Smart Sector",
-        "items": [
-            "🚀 **Hull Moving Average (HMA):** 기존 이평선보다 반응이 빠르고 휩소가 적은 HMA 지표 탑재",
-            "💰 **Smart Money Tracker (OBV):** 거래량 다이버전스를 통한 세력 매집 구간 식별",
-            "🤖 **AI News Analysis:** Gemini LLM 기반 최신 호재/악재 뉴스 자동 요약",
-            "📊 **Excel-Style Portfolio:** 엑셀처럼 수정 가능한 포트폴리오 에디터 도입",
-            "🛡️ **Security & Recovery:** 보안 질문을 통한 비밀번호 찾기 기능 추가",
         ],
     },
     # ... (과거 로그 생략) ...
@@ -116,7 +113,6 @@ def get_version_label(include_build: bool = True) -> str:
 def show_recent_updates(limit: int = 1, expanded: bool = True):
     """최신 업데이트 내역을 Streamlit Expander로 렌더링"""
     
-    # 스타일링을 위한 CSS (선택 사항)
     st.markdown("""
         <style>
         .update-badge {
@@ -145,7 +141,7 @@ def show_recent_updates(limit: int = 1, expanded: bool = True):
                 st.markdown(f"- {item}")
             
             if i == 0:
-                st.caption("✨ 최신 기능이 적용되었습니다. 강력해진 보안과 트렌드 분석을 경험해보세요!")
+                st.caption("✨ 이제 AI와 퀀트가 함께 시장을 분석합니다. 압도적인 성능을 경험해보세요!")
 
 
 # 버전 정합성 체크
@@ -153,5 +149,4 @@ _latest = get_latest_log()
 if _latest:
     latest_ver = _latest.get("version")
     if latest_ver and latest_ver != APP_VERSION:
-        # 안전하게 한 줄로 작성 (들여쓰기 오류 방지)
         logger.warning(f"version_info: APP_VERSION({APP_VERSION}) != CHANGELOG[0]({latest_ver})")
