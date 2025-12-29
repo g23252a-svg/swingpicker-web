@@ -2995,7 +2995,7 @@ with tab2:
             # ✅ 표시할 컬럼 정의 (ML_SCORE, TOTAL_SCORE 추가)
             cols = [
                 "REGIME", "ROUTE", 
-                "TOTAL_SCORE", "ML_SCORE", "LDY_SCORE", 
+                "TOTAL_SCORE", "ML_SCORE", "RANK_SCORE", "LDY_SCORE", # 👈 RANK_SCORE 추가됨
                 "TTM_SQUEEZE_CNT",
                 "업종", "종목코드",
                 "종가", "추천매수가", "손절가", "추천매도가1",
@@ -3010,8 +3010,11 @@ with tab2:
                 "ML_SCORE": st.column_config.ProgressColumn(
                     "🤖AI", format="%.1f", min_value=0, max_value=100, width="small"
                 ),
+                "RANK_SCORE": st.column_config.NumberColumn(
+                    "📊랭킹", format="%.1f", help="기초체력+가격메리트(손익비) 점수" # 👈 설정 추가
+                ),
                 "LDY_SCORE": st.column_config.NumberColumn(
-                    "퀀트", format="%.1f"
+                    "기초", format="%.1f", help="수급/모멘텀 등 기초 체력"
                 ),
                 "TTM_SQUEEZE_CNT": st.column_config.NumberColumn(
                     "🌪️응축", help="TTM Squeeze 연속 발생 일수", format="%d일", width="small"
