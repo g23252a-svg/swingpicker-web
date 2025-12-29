@@ -9,3 +9,5 @@ tqdm>=4.66
 setuptools
 google-generativeai
 beautifulsoup4
+scikit-learn
+joblib
