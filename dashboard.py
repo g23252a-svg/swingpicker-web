@@ -2793,7 +2793,9 @@ with tab2:
             base_view = scored.head(50).copy()
 
     filtered = base_view.copy()
-    filtered = filtered[filtered["LDY_SCORE"] >= min_score]
+    # 🔥 [수정] 더 똑똑한 점수(종합점수 > 랭크점수 > 기초점수)를 기준으로 필터링
+    filter_col = "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else ("RANK_SCORE" if "RANK_SCORE" in filtered.columns else "LDY_SCORE")
+    filtered = filtered[filtered[filter_col] >= min_score]
 
     if sel_routes:
         filtered = filtered[filtered["ROUTE"].isin(sel_routes)]
