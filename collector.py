@@ -12,6 +12,7 @@ import math
 import pickle  # ✅ [v7.0 추가] 데이터 직렬화/캐싱용
 from typing import Dict, Any, Optional, Callable, Tuple, List
 
+import ml_engine  # ✅ [v10.0 추가]
 import numpy as np
 import pandas as pd
 import requests
@@ -1977,6 +1978,19 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
         row.get("BB_SQUEEZE_BW", 0), row.get("BB_BW", np.nan), row.get("TTM_SQUEEZE_CNT", 0),
         row.get("IS_SWING_SUPPORT", False), row.get("V_POWER", 0.0)
     ), axis=1)
+
+    # ✅ [v10.0 추가] ML 엔진을 통한 AI 점수 예측 및 반영
+    # 먼저 ML 점수를 계산해옴
+    x = ml_engine.apply_ml_score(x)
+    
+    # 기존 RANK_SCORE와 ML_SCORE를 7:3 비율로 섞어 'FINAL_RANK_SCORE' 생성
+    # (모델이 없으면 ML_SCORE가 0이므로 기존 점수만 사용되게 방어 로직 필요)
+    if "ML_SCORE" in x.columns and x["ML_SCORE"].sum() > 0:
+        x["TOTAL_SCORE"] = (x["RANK_SCORE"] * 0.7) + (x["ML_SCORE"] * 0.3)
+    else:
+        x["TOTAL_SCORE"] = x["RANK_SCORE"]
+        
+    x["TOTAL_SCORE"] = x["TOTAL_SCORE"].round(1)
     return x
 
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
@@ -2529,8 +2543,14 @@ def main(
     enable_telegram: bool = True,
     tag: Optional[str] = None,
 ) -> None:
-    log("🚀 LDY Collector v7.0 (Caching Enabled) 시작...")
+    log("🚀 LDY Collector v10.0 (AI Powered) 시작...")
 
+    # ✅ [v10.0 추가] 주말이거나, 모델 파일이 없으면 학습 시도
+    # (매번 학습하면 느리므로 파일이 없을 때만 수행하거나 별도 인자로 제어 가능)
+    if not os.path.exists(ml_engine.MODEL_PATH):
+        log("🤖 모델이 없습니다. 과거 데이터로 학습을 시작합니다...")
+        ml_engine.train_model()
+    
     # ✅ 여기에 넣기 (resolve_trade_date() 호출 전에!)
     if not PYKRX_OK:
         log("❌ pykrx 미사용 환경에서는 거래대금 TopN/스냅샷 생성이 불가합니다.")
