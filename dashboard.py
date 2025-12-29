@@ -3007,6 +3007,50 @@ with tab2:
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 전체 다운로드", csv, "ldy_rank.csv", "text/csv")
+        
+# ---------------------------
+# 내 자산 (병렬 처리)
+# ---------------------------
+def fetch_current_price(code, name):
+    """
+    현재가 조회 함수 (FDR 우선 시도 -> 실패 시 pykrx 시도)
+    """
+    price = 0
+
+    # 1차 시도: FinanceDataReader (속도가 빠름)
+    if FDR_OK:
+        try:
+            # 최근 7일 데이터 조회 (휴장일 고려)
+            start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            df = fdr.DataReader(str(code).zfill(6), start_date)
+
+            if df is not None and not df.empty:
+                price = int(df.iloc[-1]['Close'])
+        except Exception:
+            pass # FDR 실패 시 그냥 넘어감
+
+    # 2차 시도: pykrx (FDR 실패 시 백업)
+    if price == 0 and PYKRX_OK:
+        try:
+            end_dt = datetime.now()
+            start_dt = end_dt - timedelta(days=7)
+
+            df_k = stock.get_market_ohlcv_by_date(
+                start_dt.strftime("%Y%m%d"), 
+                end_dt.strftime("%Y%m%d"), 
+                str(code).zfill(6)
+            )
+
+            if df_k is not None and not df_k.empty:
+                if '종가' in df_k.columns:
+                    price = int(df_k.iloc[-1]['종가'])
+                elif 'Close' in df_k.columns:
+                    price = int(df_k.iloc[-1]['Close'])
+        except Exception:
+            pass
+
+    return code, name, price
+
 with tab3:
     # 1) 권한 체크
     if auth_status in ["guest", "free"]:
