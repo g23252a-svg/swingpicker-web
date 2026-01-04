@@ -1411,55 +1411,72 @@ def get_benchmark_returns(trade_ymd: str) -> Dict[str, Dict[int, float]]:
 # ------------------------------- 기타 수집 로직 -------------------------------
 
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
-    frames: List[pd.DataFrame] = []
-
-    for m in ["KOSPI", "KOSDAQ"]:
-        try:
+    """
+    [수정됨] pykrx 수집 실패 시 fdr.StockListing으로 자동 우회하여 
+    서버/주말 환경에서도 에러 없이 데이터를 가져옵니다.
+    """
+    # ------------------------------------------------------------
+    # 1. 1차 시도: 기존 pykrx 로직
+    # ------------------------------------------------------------
+    try:
+        frames = []
+        for m in ["KOSPI", "KOSDAQ"]:
             df = safe_ohlcv_by_ticker(date_yyyymmdd, market=m)
-            if df is None or df.empty:
-                log(f"⚠️ {m} 거래대금 데이터 비어있음: {date_yyyymmdd}")
-                continue
+            if df is not None and not df.empty:
+                df = df.reset_index()
+                
+                # 컬럼명 정리
+                code_col = next((c for c in df.columns if "코드" in str(c) or "티커" in str(c)), None)
+                if code_col:
+                    df = df.rename(columns={code_col: "종목코드"})
+                
+                if "거래대금" in df.columns and "거래대금(원)" not in df.columns:
+                    df = df.rename(columns={"거래대금": "거래대금(원)"})
+                
+                if "종목코드" in df.columns and "거래대금(원)" in df.columns:
+                    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+                    df["시장"] = m
+                    df["거래대금(원)"] = pd.to_numeric(df["거래대금(원)"], errors="coerce").fillna(0)
+                    frames.append(df[["종목코드", "시장", "거래대금(원)"]])
 
-            df = df.reset_index()
+        if frames:
+            df_all = pd.concat(frames, ignore_index=True)
+            if not df_all.empty and df_all["거래대금(원)"].sum() > 0:
+                log(f"✅ KRX(pykrx) 데이터 수집 성공 ({len(df_all)}종목)")
+                return df_all.sort_values("거래대금(원)", ascending=False).head(top_n)
+                
+    except Exception as e:
+        log(f"⚠️ KRX(pykrx) 수집 실패, FDR 백업 시도: {e}")
 
-            # 코드 컬럼명 통일
-            code_col = None
-            for c in df.columns:
-                if ("티커" in str(c)) or ("코드" in str(c)) or (str(c) == "종목코드"):
-                    code_col = c
-                    break
-            if code_col is None:
-                log(f"⚠️ {m} 코드 컬럼을 찾을 수 없음: {df.columns.tolist()}")
-                continue
+    # ------------------------------------------------------------
+    # 2. 2차 시도 (백업): FinanceDataReader (서버/주말용)
+    # ------------------------------------------------------------
+    log("🔄 FDR(FinanceDataReader)로 우회하여 전 종목 시세를 가져옵니다...")
+    try:
+        # FDR은 날짜 지정이 없으면 자동으로 '최근 영업일' 데이터를 가져옴 (주말 에러 방지)
+        df_krx = fdr.StockListing("KRX") 
+        
+        # FDR 컬럼 매핑: Code -> 종목코드, Amount -> 거래대금(원), Market -> 시장
+        rename_map = {"Code": "종목코드", "Amount": "거래대금(원)", "Market": "시장"}
+        df_krx = df_krx.rename(columns=rename_map)
+        
+        if "종목코드" not in df_krx.columns or "거래대금(원)" not in df_krx.columns:
+            raise RuntimeError("FDR 데이터 컬럼 매핑 실패")
 
-            df = df.rename(columns={code_col: "종목코드"})
+        df_krx["종목코드"] = df_krx["종목코드"].astype(str).str.zfill(6)
+        df_krx["거래대금(원)"] = pd.to_numeric(df_krx["거래대금(원)"], errors="coerce").fillna(0)
+        
+        # 시장 구분 (KOSPI/KOSDAQ만 필터링)
+        # FDR은 Market 컬럼에 'KOSPI', 'KOSDAQ', 'KONEX' 등이 들어있음
+        df_krx = df_krx[df_krx["시장"].isin(["KOSPI", "KOSDAQ"])].copy()
 
-            # 거래대금 컬럼명 통일
-            if "거래대금" in df.columns and "거래대금(원)" not in df.columns:
-                df = df.rename(columns={"거래대금": "거래대금(원)"})
+        log(f"✅ FDR 데이터 수집 성공 ({len(df_krx)}종목)")
+        return df_krx.sort_values("거래대금(원)", ascending=False).head(top_n)
 
-            if "거래대금(원)" not in df.columns:
-                log(f"⚠️ {m} 거래대금 컬럼이 없음: {df.columns.tolist()}")
-                continue
-
-            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
-            df["시장"] = m
-            df["거래대금(원)"] = pd.to_numeric(df["거래대금(원)"], errors="coerce")
-
-            # ✅ 여기서 frames에 넣어야 함 (이게 누락돼서 지금 에러 난 것)
-            frames.append(df[["종목코드", "시장", "거래대금(원)"]])
-
-        except Exception as e:
-            log(f"⚠️ {m} 거래대금 수집 실패({date_yyyymmdd}): {e}")
-            continue
-
-    if not frames:
-        raise RuntimeError("No Data from KRX (거래대금)")
-
-    df_all = pd.concat(frames, ignore_index=True).dropna(subset=["거래대금(원)"])
-    df_all["종목코드"] = df_all["종목코드"].astype(str).str.zfill(6)
-
-    return df_all.sort_values("거래대금(원)", ascending=False).head(top_n)
+    except Exception as e:
+        # 최후의 수단으로 빈 데이터프레임 대신 에러 로그 출력 후 종료
+        log(f"❌ 치명적 오류: FDR 수집마저 실패했습니다. ({e})")
+        raise RuntimeError(f"No Data from KRX & FDR ({date_yyyymmdd})")
 
 def get_market_sets(d: str) -> Tuple[set, set]:
     try:
