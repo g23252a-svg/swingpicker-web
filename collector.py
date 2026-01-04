@@ -27,6 +27,9 @@ except Exception:
     PYKRX_OK = False
 from tqdm import tqdm
 import FinanceDataReader as fdr
+import asyncio  # 비동기 실행용
+from db_utils import LDYDBManager       # [신규] DB 매니저
+from async_crawler import AsyncNewsFetcher # [신규] 비동기 크롤러
 import random
 
 from time_utils import now_kst, now_utc, KST
@@ -1487,6 +1490,7 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
     trade_ymd 기준으로 KOSPI/KOSDAQ 전 종목 '종가' 스냅샷을 저장한다.
     - data/price_snapshot_YYYYMMDD.csv
     - data/price_snapshot_latest.csv
+    - DuckDB: price_snapshots 테이블
     """
     ensure_dir(OUT_DIR)
     frames: List[pd.DataFrame] = []
@@ -1525,13 +1529,21 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
 
     snap = pd.concat(frames, ignore_index=True)
 
+    # 1. 기존 CSV 저장 (유지)
     dated = os.path.join(OUT_DIR, f"price_snapshot_{trade_ymd}.csv")
     latest = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
-
     snap.to_csv(dated, index=False, encoding=UTF8)
     snap.to_csv(latest, index=False, encoding=UTF8)
+    log(f"💾 가격 스냅샷 CSV 저장 완료")
 
-    log(f"💾 가격 스냅샷 저장 완료 → {dated}")
+    # 🔥 [2. DuckDB 저장 추가] --------------------------
+    try:
+        db = LDYDBManager()
+        db.save_snapshot(snap, trade_ymd)
+        db.close()
+    except Exception as e:
+        log(f"⚠️ 스냅샷 DB 저장 실패: {e}")
+    # --------------------------------------------------
 
 
 # ------------------------------- AI 코멘트 / 스코어 -------------------------------
@@ -2752,50 +2764,54 @@ def main(
     df_out["시총기준일"] = mcap_ymd
 
     # -------------------------------------------------------------
-    # 🔥 [v9.0 추가] 상위 Top 10 종목 뉴스 심층 분석 (LLM)
+    # 🔥 [v11.0 수정] 비동기 뉴스 수집 & LLM 분석 & DB 저장 통합
     # -------------------------------------------------------------
     if LLM_AVAILABLE:
-        log("🧠 상위 10개 종목 뉴스/재료 심층 분석 중 (LLM)...")
+        log("🧠 상위 10개 종목 뉴스/재료 심층 분석 중 (Async & LLM)...")
         
-        # 컬럼 초기화
+        # 1. 분석 대상 선정 (상위 10개)
+        target_indices = df_out.index[:10]
+        # 코드 포맷팅 (005930 등)
+        target_codes = [str(df_out.loc[i, "종목코드"]).zfill(6) for i in target_indices]
+        
+        # 2. 비동기 뉴스 수집 실행 (병렬 처리로 속도 향상)
+        try:
+            fetcher = AsyncNewsFetcher(max_concurrent=5)
+            # 윈도우 환경에서 asyncio 오류 발생 시 loop 정책 설정이 필요할 수 있음
+            # if os.name == 'nt': asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            news_map = asyncio.run(fetcher.fetch_all(target_codes))
+        except Exception as e:
+            log(f"⚠️ 뉴스 수집 중 오류: {e}")
+            news_map = {}
+
+        # 3. LLM 분석 및 결과 반영
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = ""
-
-        # 상위 10개만 순회 (API 비용/속도 최적화)
-        target_indices = df_out.index[:10]
         
         for idx in target_indices:
             code = str(df_out.loc[idx, "종목코드"]).zfill(6)
             name = df_out.loc[idx, "종목명"]
+            headlines = news_map.get(code, [])
             
-            # 1. 뉴스 수집 (최근 2일)
-            headlines = fetch_naver_news_headlines(code, days=2)
-            
-            # 2. LLM 감성 분석
+            # 뉴스 있으면 LLM 분석, 없으면 스킵
             if headlines:
                 l_score, l_reason = analyze_sentiment_llm(name, headlines)
             else:
                 l_score, l_reason = 0.0, "뉴스없음"
             
-            # 3. 결과 반영
+            # 점수 반영 (기존 로직 유지)
+            old_score = df_out.at[idx, "LDY_SCORE"]
+            new_score = np.clip(old_score + l_score, 0, 100)
+            df_out.at[idx, "LDY_SCORE"] = new_score
             df_out.at[idx, "NEWS_SCORE"] = l_score
             df_out.at[idx, "NEWS_REASON"] = l_reason
             
-            # 4. 점수 보정 (호재면 가산점, 악재면 감점)
-            old_score = df_out.at[idx, "LDY_SCORE"]
-            # 뉴스 점수(-5 ~ +5)를 그대로 더함 (최대 100점 제한)
-            new_score = np.clip(old_score + l_score, 0, 100)
-            df_out.at[idx, "LDY_SCORE"] = new_score
-            
-            # 5. 코멘트에 뉴스 요약 추가
+            # 코멘트에 추가
             if l_reason and l_reason != "뉴스없음":
-                # 기존 AI 코멘트가 있으면 뒤에 덧붙임
                 old_comment = str(df_out.at[idx, "AI_COMMENT"])
                 if old_comment == "nan": old_comment = ""
                 df_out.at[idx, "AI_COMMENT"] = f"{old_comment} 📰재료: {l_reason}"
                 
-            time.sleep(1) # API 호출 제한 방지
-            
     else:
         log("ℹ️ LLM 설정(API Key)이 없거나 라이브러리가 없어 뉴스 분석을 건너뜁니다.")
         df_out["NEWS_SCORE"] = 0.0
@@ -2860,6 +2876,15 @@ def main(
 
     log(f"💾 저장 완료 ({len(df_out)}건) → {out_path_dated}")
     log(f"💾 최신 파일 업데이트 → {out_path_latest}")
+
+    # 🔥 [DuckDB에 추천 결과 저장] --------------------------
+    try:
+        db = LDYDBManager()
+        db.save_recommendations(df_out, trade_ymd)
+        db.close()
+    except Exception as e:
+        log(f"⚠️ 추천 결과 DB 저장 실패: {e}")
+    # -----------------------------------------------------
 
     run_reality_check(OUT_DIR, trade_ymd)
     make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd)
