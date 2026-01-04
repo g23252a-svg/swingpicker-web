@@ -930,21 +930,34 @@ def _has_ohlcv_and_mcap(ymd: str) -> bool:
             pass
     return False
 
-def find_latest_valid_date(check_fn, max_back_days: int = 10) -> str:
+def find_latest_valid_date(check_fn, max_back_days: int = 14) -> str:
+    """
+    [수정됨] 현재 시간이 18시 이전이거나, 주말(토/일)인 경우 
+    자동으로 가장 최근의 평일(데이터가 있는 날)을 찾습니다.
+    """
     now = now_kst()
-    d = now.date()
+    
+    # 1. 18시 이전이면 당일 장 마감 전이므로 '어제'부터 탐색 시작
     if now.hour < 18:
-        d -= timedelta(days=1)
+        now -= timedelta(days=1)
 
-    last_checked = d.strftime("%Y%m%d")
     for _ in range(max_back_days):
-        ymd = d.strftime("%Y%m%d")
-        last_checked = ymd
+        # 2. 주말(토=5, 일=6)이면 금요일이 될 때까지 날짜를 뒤로 미룸 (API 호출 절약)
+        while now.weekday() >= 5:
+            now -= timedelta(days=1)
+        
+        ymd = now.strftime("%Y%m%d")
+        
+        # 3. 데이터가 실제로 존재하는지 체크 (평일이어도 공휴일일 수 있음)
         if check_fn(ymd):
+            log(f"✅ 유효한 거래일 발견: {ymd} (Today was {now_kst().strftime('%a')})")
             return ymd
-        d -= timedelta(days=1)
+        
+        # 4. 평일인데 데이터가 없으면(공휴일), 하루 더 과거로 이동
+        now -= timedelta(days=1)
 
-    return last_checked
+    # 루프를 다 돌 때까지 못 찾으면, 마지막으로 계산된 평일 반환
+    return now.strftime("%Y%m%d")
 
 def resolve_trade_date(force_ymd: Optional[str] = None) -> str:
     """
