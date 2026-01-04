@@ -21,6 +21,101 @@ import plotly.express as px
 import re
 from typing import Optional, Dict, Any, Tuple
 
+# ---------------------------
+# [v11.0] DB 연동 및 히스토리 차트 함수
+# ---------------------------
+import duckdb  # 👈 필수
+
+@st.cache_data(ttl=60)  # DB 조회는 1분 캐싱
+def get_stock_history_from_db(code: str):
+    """
+    DuckDB(ldy_trader.db)에서 특정 종목의 과거 추천 내역(점수, 주가)을 조회
+    """
+    db_path = "ldy_trader.db"
+    if not os.path.exists(db_path):
+        return pd.DataFrame()
+
+    try:
+        # 읽기 전용으로 연결
+        conn = duckdb.connect(db_path, read_only=True)
+        code_str = str(code).zfill(6)
+        
+        # 날짜순 정렬하여 데이터 가져오기
+        query = f"""
+            SELECT trade_date, close_price, ldy_score, rank_score, ai_comment
+            FROM daily_recommend
+            WHERE code = '{code_str}'
+            ORDER BY trade_date ASC
+        """
+        df = conn.execute(query).fetchdf()
+        conn.close()
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+
+def plot_score_history_chart(history_df, stock_name):
+    """
+    점수(LDY, RANK)와 주가(Close)를 이중축 차트로 시각화
+    """
+    if history_df is None or history_df.empty:
+        return None
+
+    # 날짜 처리
+    df = history_df.copy()
+    df['trade_date'] = pd.to_datetime(df['trade_date'])
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # 1. 점수 (좌측 축)
+    fig.add_trace(
+        go.Scatter(
+            x=df['trade_date'], y=df['ldy_score'],
+            name="기초 점수 (LDY)",
+            mode='lines+markers',
+            line=dict(color='#29B6F6', width=2),
+            marker=dict(size=6)
+        ),
+        secondary_y=False,
+    )
+    
+    # 2. 랭크 점수 (좌측 축)
+    if 'rank_score' in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df['trade_date'], y=df['rank_score'],
+                name="랭킹 점수 (Rank)",
+                mode='lines',
+                line=dict(color='#FFA726', width=2, dash='dot'),
+            ),
+            secondary_y=False,
+        )
+
+    # 3. 주가 (우측 축)
+    fig.add_trace(
+        go.Scatter(
+            x=df['trade_date'], y=df['close_price'],
+            name="주가",
+            mode='lines',
+            line=dict(color='#BDBDBD', width=1),
+            opacity=0.4
+        ),
+        secondary_y=True,
+    )
+
+    fig.update_layout(
+        title=dict(text=f"📈 {stock_name} - 점수 히스토리", font=dict(size=15)),
+        height=300,
+        margin=dict(l=10, r=10, t=40, b=10),
+        legend=dict(orientation="h", y=1.1),
+        hovermode="x unified"
+    )
+    
+    # 축 설정
+    fig.update_yaxes(title_text="점수", range=[0, 105], secondary_y=False, showgrid=True)
+    fig.update_yaxes(title_text="주가", showgrid=False, secondary_y=True)
+
+    return fig
+
 def normalize_code(x) -> str:
     if x is None or (isinstance(x, float) and pd.isna(x)) or pd.isna(x):
         return ""
@@ -2937,6 +3032,8 @@ with tab2:
                         </div>
                         """, unsafe_allow_html=True)
 
+                        
+
                     # AI 코멘트 & 뱃지
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
                     badges = []
@@ -2952,6 +3049,42 @@ with tab2:
                         st.write("")
                     
                     st.info(f"💬 **AI:** {ai_cmt}")
+
+                    # ---------------------------------------------------------
+                    # 🔥 [v11.0 Upgrade] DB 기반 히스토리 분석 추가
+                    # ---------------------------------------------------------
+                    if auth_status in ["pro", "prime", "admin"]:
+                        st.markdown("---")
+                        
+                        # DB에서 과거 기록 조회 (함수 호출)
+                        hist_df = get_stock_history_from_db(code)
+                        
+                        if not hist_df.empty and len(hist_df) > 1:
+                            st.markdown("##### 📜 과거 추천 이력 (Trend)")
+                            
+                            # 1. 히스토리 차트 (함수 호출)
+                            hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
+                            if hist_fig:
+                                st.plotly_chart(hist_fig, use_container_width=True)
+                            
+                            # 2. 과거 AI 코멘트 (최근 3건 역순)
+                            with st.expander("💬 과거 AI 코멘트 보기"):
+                                for _, h_row in hist_df.tail(5).sort_values("trade_date", ascending=False).iterrows():
+                                    # 날짜 포맷팅 (datetime 객체인 경우)
+                                    if isinstance(h_row['trade_date'], (pd.Timestamp, datetime)):
+                                        d_str = h_row['trade_date'].strftime("%Y-%m-%d")
+                                    else:
+                                        d_str = str(h_row['trade_date'])[:10]
+                                        
+                                    sc = h_row['ldy_score']
+                                    cmt = str(h_row.get('ai_comment', '')).strip()
+                                    if cmt and cmt != 'nan':
+                                        st.markdown(f"**[{d_str}]** `Click {sc:.0f}점` : {cmt}")
+                        
+                        elif len(hist_df) == 1:
+                            st.info("💡 오늘 처음 데이터베이스에 기록된 종목입니다.")
+                        else:
+                            st.caption("※ 과거 히스토리 데이터가 없습니다.")
 
                     # 자금 관리
                     rec_qty = pd.to_numeric(row.get("추천수량", 0), errors='coerce')
