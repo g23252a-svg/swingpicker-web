@@ -1834,11 +1834,10 @@ def route_tag(row: pd.Series) -> str:
         slope = _fv("MACD_Slope", 0.0)
     ebs = _fv("EBS", 0.0)
     now_pct = _fv("Now%", 999.0)
-    now_pct = _fv("Now%", 999.0) # 이제 0.0이 들어와도 999가 되지 않음!
+   
     rr1 = _fv("RR1", 0.0)
     mfi = _fv("MFI14", 50.0)
-    rel60 = _fv("rel_60d_%", 0.0)  # 60일 상대강도(α)
-    rel60 = _fv("rel_60d_%", 0.0)
+    rel60 = _fv("rel_60d_%", 0.0)  # 60일 상대강도(α)    
     bb_sq = _fv("TTM_SQUEEZE", _fv("BB_SQUEEZE", 0.0))
 
     # 1) 강한 돌파 BRK
