@@ -11,3 +11,7 @@ google-generativeai
 beautifulsoup4
 scikit-learn
 joblib
+xgboost
+shap
+duckdb
+aiohttp
