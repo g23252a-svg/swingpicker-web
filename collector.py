@@ -2751,7 +2751,11 @@ def main(
         log(f"⚠️ 분석 중 오류 발생/데이터 부족 종목 수: {err_cnt}건")
 
     if not rows:
-        raise RuntimeError("No Result (필터를 모두 통과한 종목 없음)")
+        log("⚠️ 필터를 통과한 종목이 없습니다. (시장 상황 악화 또는 데이터 부족)")
+        # 빈 데이터프레임을 만들어서 텔레그램이라도 보내거나, 그냥 정상 종료
+        if enable_telegram:
+             send_telegram_auto(pd.DataFrame(), trade_ymd, market_summary="⚠️ 필터 통과 종목 없음 (휴장일/데이터부족)", limit_count=0)
+        return
 
     df_raw = pd.DataFrame(rows)
 
