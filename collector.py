@@ -932,33 +932,42 @@ def _has_ohlcv_and_mcap(ymd: str) -> bool:
 
 def find_latest_valid_date(check_fn, max_back_days: int = 14) -> str:
     """
-    [수정됨] 현재 시간이 18시 이전이거나, 주말(토/일)인 경우 
-    자동으로 가장 최근의 유효한 영업일(데이터가 있는 날)을 찾습니다.
+    [수정됨] 데이터 확인(check_fn)이 모두 실패하더라도(IP차단 등),
+    최후의 수단으로 '가장 최근의 평일(금요일)'을 반환하여 
+    일요일/휴장일 에러를 방지합니다.
     """
     now = now_kst()
     
-    # 1. 18시 이전이면 당일 장 마감 전이므로 '어제'부터 탐색 시작
+    # 1. 장 마감 전이면 어제로 설정
     if now.hour < 18:
         now -= timedelta(days=1)
 
+    # 2. 주말이면 금요일로 조정 (1차 보정)
+    while now.weekday() >= 5: # 5:토, 6:일
+        now -= timedelta(days=1)
+    
+    # 최후의 보루: 탐색이 다 실패했을 때 사용할 '최근 평일' 저장
+    fallback_date = now.strftime("%Y%m%d")
+
+    # 3. 데이터 존재 여부 확인 (최대 N일 과거까지)
+    d = now
     for _ in range(max_back_days):
-        # 2. 주말(토=5, 일=6)이면 금요일이 될 때까지 날짜를 뒤로 미룸 (API 호출 절약)
-        while now.weekday() >= 5:
-            now -= timedelta(days=1)
+        # 탐색 중 주말 만나면 스킵
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+            
+        ymd = d.strftime("%Y%m%d")
         
-        ymd = now.strftime("%Y%m%d")
-        
-        # 3. 데이터가 실제로 존재하는지 체크
-        # (평일이라도 공휴일일 수 있으므로 check_fn으로 확인)
+        # 데이터가 있다고 확인되면 그 날짜 반환
         if check_fn(ymd):
-            log(f"✅ 유효한 거래일 발견: {ymd} (Today: {now_kst().strftime('%a')})")
+            log(f"✅ 유효한 거래일 확정: {ymd}")
             return ymd
         
-        # 4. 평일인데 데이터가 없으면(공휴일 등), 하루 더 과거로 이동
-        now -= timedelta(days=1)
+        d -= timedelta(days=1)
 
-    # 루프를 다 돌 때까지 못 찾으면, 마지막으로 계산된 날짜 반환 (최후의 수단)
-    return now.strftime("%Y%m%d")
+    # 4. 모든 확인이 실패하면(IP차단 등), 에러 내지 말고 '최근 평일'로 강제 진행
+    log(f"⚠️ 날짜 확인 실패(IP차단 가능성) -> 최근 평일({fallback_date})로 강제 설정")
+    return fallback_date
 
 def resolve_trade_date(force_ymd: Optional[str] = None) -> str:
     """
@@ -1412,11 +1421,10 @@ def get_benchmark_returns(trade_ymd: str) -> Dict[str, Dict[int, float]]:
 
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
     """
-    [수정됨] pykrx 수집 실패 시 fdr.StockListing으로 자동 우회하여 
-    서버/주말 환경에서도 에러 없이 데이터를 가져옵니다.
+    [수정됨] JSONDecodeError 대응 및 3차 백업(단순 리스트) 추가
     """
     # ------------------------------------------------------------
-    # 1. 1차 시도: 기존 pykrx 로직
+    # 1. 1차 시도: pykrx (IP 차단 시 실패 확률 높음)
     # ------------------------------------------------------------
     try:
         frames = []
@@ -1424,13 +1432,10 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
             df = safe_ohlcv_by_ticker(date_yyyymmdd, market=m)
             if df is not None and not df.empty:
                 df = df.reset_index()
-                
-                # 컬럼명 정리
                 code_col = next((c for c in df.columns if "코드" in str(c) or "티커" in str(c)), None)
                 if code_col:
                     df = df.rename(columns={code_col: "종목코드"})
-                
-                if "거래대금" in df.columns and "거래대금(원)" not in df.columns:
+                if "거래대금" in df.columns:
                     df = df.rename(columns={"거래대금": "거래대금(원)"})
                 
                 if "종목코드" in df.columns and "거래대금(원)" in df.columns:
@@ -1441,42 +1446,55 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
 
         if frames:
             df_all = pd.concat(frames, ignore_index=True)
-            if not df_all.empty and df_all["거래대금(원)"].sum() > 0:
-                log(f"✅ KRX(pykrx) 데이터 수집 성공 ({len(df_all)}종목)")
+            if not df_all.empty:
+                log(f"✅ KRX(pykrx) 수집 성공 ({len(df_all)}종목)")
                 return df_all.sort_values("거래대금(원)", ascending=False).head(top_n)
-                
     except Exception as e:
-        log(f"⚠️ KRX(pykrx) 수집 실패, FDR 백업 시도: {e}")
+        log(f"⚠️ KRX(pykrx) 수집 실패: {e}")
 
     # ------------------------------------------------------------
-    # 2. 2차 시도 (백업): FinanceDataReader (서버/주말용)
+    # 2. 2차 시도: FinanceDataReader (JSON 에러 방어)
     # ------------------------------------------------------------
-    log("🔄 FDR(FinanceDataReader)로 우회하여 전 종목 시세를 가져옵니다...")
+    log("🔄 2차 시도: FDR(FinanceDataReader)로 수집 시도...")
     try:
-        # FDR은 날짜 지정이 없으면 자동으로 '최근 영업일' 데이터를 가져옴 (주말 에러 방지)
-        df_krx = fdr.StockListing("KRX") 
+        import json
+        # FDR StockListing은 날짜 인자가 없으면 최근일 기준 조회
+        df_krx = fdr.StockListing("KRX")
         
-        # FDR 컬럼 매핑: Code -> 종목코드, Amount -> 거래대금(원), Market -> 시장
         rename_map = {"Code": "종목코드", "Amount": "거래대금(원)", "Market": "시장"}
         df_krx = df_krx.rename(columns=rename_map)
-        
-        if "종목코드" not in df_krx.columns or "거래대금(원)" not in df_krx.columns:
-            raise RuntimeError("FDR 데이터 컬럼 매핑 실패")
-
         df_krx["종목코드"] = df_krx["종목코드"].astype(str).str.zfill(6)
-        df_krx["거래대금(원)"] = pd.to_numeric(df_krx["거래대금(원)"], errors="coerce").fillna(0)
         
-        # 시장 구분 (KOSPI/KOSDAQ만 필터링)
-        # FDR은 Market 컬럼에 'KOSPI', 'KOSDAQ', 'KONEX' 등이 들어있음
+        # 거래대금 컬럼이 없으면(FDR 버전에 따라 다름) 0으로 채움
+        if "거래대금(원)" not in df_krx.columns:
+            df_krx["거래대금(원)"] = 0 
+            
         df_krx = df_krx[df_krx["시장"].isin(["KOSPI", "KOSDAQ"])].copy()
-
-        log(f"✅ FDR 데이터 수집 성공 ({len(df_krx)}종목)")
+        log(f"✅ FDR 수집 성공 ({len(df_krx)}종목)")
         return df_krx.sort_values("거래대금(원)", ascending=False).head(top_n)
 
+    except (json.decoder.JSONDecodeError, ValueError, Exception) as e:
+        log(f"⚠️ FDR 수집 실패 (IP차단 의심): {e}")
+
+    # ------------------------------------------------------------
+    # 3. 3차 시도 (최후의 보루): 섹터 맵 활용
+    # ------------------------------------------------------------
+    log("🚨 3차 시도: KIND 섹터 맵을 이용해 종목 리스트만 복구합니다.")
+    try:
+        # 이미 로드된/저장된 sector_map_krx.csv가 있다면 활용
+        sec_map = get_sector_map_krx()
+        if sec_map:
+            # 리스트만 만들고 거래대금은 0으로 설정 (분석 단계에서 걸러지더라도 프로그램은 안 죽음)
+            rows = [{"종목코드": k, "종목명": "Unknown", "시장": "KOSPI", "거래대금(원)": 0} for k in sec_map.keys()]
+            df_fallback = pd.DataFrame(rows)
+            log(f"✅ KIND 섹터 맵 기반 복구 성공 ({len(df_fallback)}종목)")
+            # 거래대금이 0이라 Top N 정렬은 의미 없지만, 분석은 진행 가능
+            return df_fallback.head(top_n)
+            
     except Exception as e:
-        # 최후의 수단으로 빈 데이터프레임 대신 에러 로그 출력 후 종료
-        log(f"❌ 치명적 오류: FDR 수집마저 실패했습니다. ({e})")
-        raise RuntimeError(f"No Data from KRX & FDR ({date_yyyymmdd})")
+        log(f"❌ 3차 복구 실패: {e}")
+
+    raise RuntimeError(f"모든 데이터 수집 수단 실패 ({date_yyyymmdd})")
 
 def get_market_sets(d: str) -> Tuple[set, set]:
     try:
