@@ -2258,7 +2258,6 @@ def analyze_ticker(
     code6 = str(t).zfill(6)
     if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
-    c = ohlcv["종가"]; h = ohlcv["고가"]; l = ohlcv["저가"]; v = ohlcv["거래량"]; o = ohlcv["시가"]
     
     # 데이터 타입 안전 변환
     c = pd.to_numeric(ohlcv["종가"], errors='coerce')
@@ -2269,13 +2268,49 @@ def analyze_ticker(
     
     last_c = float(c.iloc[-1])
 
+    # -------------------------------------------------------------
+    # 🔥 [핵심 수정] 거래대금 필터링 보강 (3차 백업 대응)
+    # -------------------------------------------------------------
+    # 1. 리스트(top_df)에서 거래대금 가져오기
+    tv_row = top_df.loc[top_df["종목코드"] == code6, "거래대금(원)"]
+    tv_eok = 0.0
+    if not tv_row.empty:
+        tv_eok = float(tv_row.values[0]) / 1e8
+
+    # 2. 리스트에 값이 없거나 0이면(백업 데이터), 차트 데이터로 직접 계산
+    if tv_eok <= 0:
+        # OHLCV에 '거래대금' 컬럼이 있으면 사용
+        if "거래대금" in ohlcv.columns:
+            try:
+                val = float(pd.to_numeric(ohlcv["거래대금"].iloc[-1], errors='coerce'))
+                tv_eok = val / 1e8
+            except: pass
+        
+        # 여전히 0이면 '종가 * 거래량'으로 추산
+        if tv_eok <= 0:
+            try:
+                est_val = last_c * float(v.iloc[-1])
+                tv_eok = est_val / 1e8
+            except: pass
+
+    # 3. 시총 필터 (데이터 있으면 적용)
+    mcap = get_mcap_eok_from_map(mcap_map, code6)
+    if mcap_map and mcap > 0 and mcap < MIN_MCAP_EOK:
+        return None # 시총 너무 작으면 탈락
+
+    # 4. 거래대금 최종 필터 (50억 미만 잡주 제거)
+    if tv_eok < MIN_TURNOVER_EOK: 
+        return None
+    # -------------------------------------------------------------
+
+    # 기술적 지표 계산
     ma20 = c.rolling(BB_PERIOD).mean(); ma60 = c.rolling(60).mean(); ma120 = c.rolling(120).mean()
-    # -------------------- [v9.0 HMA 로직 추가] --------------------
+    
     # HMA 20일선 계산
     hma20 = calc_hma(c, 20)
     curr_hma = float(hma20.iloc[-1]) if len(hma20) > 0 else np.nan
     prev_hma = float(hma20.iloc[-2]) if len(hma20) > 1 else np.nan
-
+    
     # 1) HMA 추세 (상승/하락)
     hma_trend_up = False
     if np.isfinite(curr_hma) and np.isfinite(prev_hma):
@@ -2290,25 +2325,18 @@ def analyze_ticker(
     if (prev_c < prev_hma) and (last_c > curr_hma):
         hma_cross_up = True
 
-    # -------------------- [v9.0 OBV 다이버전스 로직] --------------------
+    # OBV 다이버전스 로직
     obv = calc_obv(c, v)
     obv_ma20 = obv.rolling(20).mean() # OBV 추세선
-
-    # [매집 패턴 감지]
     term = 20
     is_obv_div = False
-
     if len(c) > term:
-        # 20일 전 대비 주가 변동률
         price_chg_pct = (last_c - float(c.iloc[-(term+1)])) / float(c.iloc[-(term+1)])
-        # 20일 전 대비 OBV 변동량
         obv_chg_val = float(obv.iloc[-1] - obv.iloc[-(term+1)])
-
-        # 조건: 주가 횡보/약세(-inf ~ 3%) & OBV 증가 & OBV가 이평선 위
         if (price_chg_pct < 0.03) and (obv_chg_val > 0) and (float(obv.iloc[-1]) > float(obv_ma20.iloc[-1])):
             is_obv_div = True
-    # ------------------------------------------------------------------
-    # -------------------------------------------------------------
+
+    # BB / KC / TTM Squeeze
     std20 = c.rolling(BB_PERIOD).std()
     bb_upper = ma20 + (BB_STD * std20); bb_lower = ma20 - (BB_STD * std20)
     bb_bw = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
@@ -2332,7 +2360,7 @@ def analyze_ticker(
             else: break
         sqz_cnt = temp_cnt + 1
 
-    # ✅ [v7.5] Swing Low & V-Power
+    # Swing Low & V-Power
     swing_low_10 = float(l.tail(10).min())
     dist_to_swing = (last_c - swing_low_10) / last_c * 100
     is_swing_support = (dist_to_swing < 5.0) and (last_c > swing_low_10)
@@ -2345,18 +2373,16 @@ def analyze_ticker(
     avg_vol = tail5["거래량"].mean()
     v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
 
-    # ✅ [v8.5 추가] VWAP (최근 5일 주간 수급 단가) 계산
-    # 단기 스윙 관점이므로 최근 5일(일주일)간의 거래량 가중 평단을 구합니다.
+    # VWAP (최근 5일 주간 수급 단가)
     vwap_val = calc_vwap(ohlcv.tail(5))
-    # 현재가가 VWAP 대비 얼마나 위에 있는지(%) - 양수면 강한 수급 지지
     vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
 
-    # 🔥 [v8.0] SuperTrend 계산
+    # SuperTrend
     st_series, st_dir = calc_supertrend(h, l, c, period=10, multiplier=3.0)
     st_val = float(st_series.iloc[-1])
-    st_trend = int(st_dir.iloc[-1]) # 1: 상승, -1: 하락
+    st_trend = int(st_dir.iloc[-1])
 
-    # 🔥 [v8.5 오류 수정] 캔들 패턴 감지 코드 추가
+    # 캔들 패턴
     candle_patterns = check_candle_pattern(o, h, l, c)
 
     above_ma20 = 1 if (np.isfinite(ma20.iloc[-1]) and last_c > float(ma20.iloc[-1])) else 0
@@ -2374,25 +2400,15 @@ def analyze_ticker(
     def _ret(days): return (last_c / float(c.iloc[-(days + 1)]) - 1.0) * 100 if len(c) >= days + 1 else np.nan
     ret_5 = _ret(5); ret_10 = _ret(10); ret_20 = _ret(20); ret_60 = _ret(60); ret_120 = _ret(120)
 
-    tv_row = top_df.loc[top_df["종목코드"] == code6, "거래대금(원)"]
-    if tv_row.empty: return None
-    tv_eok = float(tv_row.values[0]) / 1e8
-    mcap = get_mcap_eok_from_map(mcap_map, code6)
-    if mcap_map and mcap <= 0: return None
-    if tv_eok < MIN_TURNOVER_EOK: return None
-
+    # Scoring Logic
     score = 0; reason = []
 
-    # === [v10.0 추가] 주봉(Weekly) 대추세 확증 필터 시작 ===
+    # 주봉 (Weekly)
     try:
-        # 주봉 변환 로직
-        logic = {'시가': 'first', '고가': 'max', '저가': 'min', '종가': 'last', '거래량': 'sum'}
-        
-        # 인덱스를 Datetime으로 복사 (리샘플링용)
         ohlcv_tmp = ohlcv.copy()
         if not isinstance(ohlcv_tmp.index, pd.DatetimeIndex):
             ohlcv_tmp.index = pd.to_datetime(ohlcv_tmp.index)
-            
+        logic = {'시가': 'first', '고가': 'max', '저가': 'min', '종가': 'last', '거래량': 'sum'}
         df_w = ohlcv_tmp.resample('W').apply(logic)
         w_ma20 = df_w['종가'].rolling(window=20).mean()
         
@@ -2403,35 +2419,17 @@ def analyze_ticker(
         is_above_w20 = curr_w_c > curr_w_ma if np.isfinite(curr_w_ma) else False
         is_w20_up = curr_w_ma > prev_w_ma if np.isfinite(curr_w_ma) and np.isfinite(prev_w_ma) else False
 
-        if is_above_w20:
-            score += 1.5
-            reason.append("주봉20선↑")
-        if is_w20_up:
-            score += 0.5
-            reason.append("주봉추세우상향")
-        if not is_above_w20:
-            score -= 2.0  # 주봉 역배열 종목은 강력하게 감점
-            reason.append("주봉역배열주의")
-    except Exception:
-        pass
-    # === [v10.0 추가] 주봉(Weekly) 대추세 확증 필터 끝 ===
-    # -------------------- [v9.0 HMA 가산점] --------------------
-    # 전략 1: HMA 우상향 + 주가 지지 (+1.5점) -> 강력한 추세
-    if hma_trend_up and above_hma:
-        score += 1.5
-        reason.append("HMA추세↑")
-    
-    # 전략 2: HMA 상향 돌파 (+1.0점) -> 진입 타이밍
-    if hma_cross_up:
-        score += 1.0
-        reason.append("HMA돌파")
+        if is_above_w20: score += 1.5; reason.append("주봉20선↑")
+        if is_w20_up: score += 0.5; reason.append("주봉추세우상향")
+        if not is_above_w20: score -= 2.0; reason.append("주봉역배열주의")
+    except: pass
 
-    # -------------------- [v9.0 OBV 가산점] --------------------
-    if is_obv_div:
-        score += 2.0
-        reason.append("OBV매집")
-    # -------------------------------------------------------------
-    # -------------------------------------------------------------
+    # HMA / OBV
+    if hma_trend_up and above_hma: score += 1.5; reason.append("HMA추세↑")
+    if hma_cross_up: score += 1.0; reason.append("HMA돌파")
+    if is_obv_div: score += 2.0; reason.append("OBV매집")
+
+    # Basic Indicators
     if RSI_LOW <= rsi <= RSI_HIGH: score += 1; reason.append("RSI적정")
     if slope > 0: score += 1; reason.append("MACD상승")
     if -1 <= disp <= 5: score += 1; reason.append("20선근접")
@@ -2441,22 +2439,10 @@ def analyze_ticker(
     else: score -= 1
     if mfi > 60: score += 1; reason.append("자금유입")
     if hist.iloc[-1] > 0: score += 1; reason.append("MACD>Sig")
+    if last_c > vwap_val: score += 1; reason.append("VWAP상회")
+    if candle_patterns: score += 1; reason.append(f"패턴({','.join(candle_patterns)})")
 
-    # ✅ [v8.5 추가] VWAP 지지 여부 (수급 질적 분석)
-    # 현재가가 최근 5일 평균 매물대(VWAP)보다 높다면, 
-    # 최근 매수자들이 수익 구간이므로 악성 매물이 적다고 판단 (+1점)
-    # ✅ [v8.5 추가] VWAP 지지 여부
-    if last_c > vwap_val: 
-        score += 1
-        reason.append("VWAP상회")
-
-    # ✅ [v8.5 추가] 캔들 패턴 가산점 (+1점)
-    # 기술적 반전 신호(망치형)나 강력한 매수세(장악형)가 떴다면 신뢰도 상승
-    # ✅ [v8.5 추가] 캔들 패턴 가산점
-    if candle_patterns:
-        score += 1
-        reason.append(f"패턴({','.join(candle_patterns)})")
-
+    # Entry / Stop / Target
     buy = min(last_c, ma20.iloc[-1] * 1.03) if (ma20.iloc[-1] > 0 and last_c > ma20.iloc[-1]) else last_c
     atr_mult = 2.0
     if ttm_squeeze == 1 or (np.isfinite(bb_bw_val) and bb_bw_val < 12.0): atr_mult = 1.8
@@ -2464,51 +2450,27 @@ def analyze_ticker(
     if is_high_vol: atr_mult = 2.5
 
     stop = buy - (atr_mult * atr)
-
-    # ✅ [v7.5] 기존 스윙 로우 보정
-    if (dist_to_swing < 12.0) and (stop > swing_low_10):
-        stop = swing_low_10 * 0.99
-
-    # 🔥 [v8.0 핵심] SuperTrend 기반 스마트 손절 보정
-    # 상승 추세(trend==1)이고, SuperTrend 라인이 현재가보다 아래에 있다면
-    # 기존 손절가(ATR/SwingLow)와 SuperTrend 중 '더 높은 가격'을 손절가로 채택
+    if (dist_to_swing < 12.0) and (stop > swing_low_10): stop = swing_low_10 * 0.99
+    
+    # Smart Stop (SuperTrend)
     if st_trend == 1 and st_val < last_c:
-        # 단, 진입가(buy)보다는 낮아야 함 (방어 코드)
-        if st_val < buy:
-            stop = max(stop, st_val)
+        if st_val < buy: stop = max(stop, st_val)
 
     limit_pct = 0.90 if is_high_vol else 0.93
     stop = max(stop, buy * limit_pct)
     stop = min(stop, buy * 0.98)
 
-# -------------------- [v9.0 동적 이익 실현 (Dynamic Profit Taking)] --------------------
-    # 기존 고정 RR 방식 대신, 변동성(ATR)과 거래강도(vol_z)에 따라 목표가를 탄력적으로 조절
-    
-    risk = buy - stop  # 확정된 1주당 리스크 금액 (1R)
-    
-    # 1. 기본 목표 배수 (점수가 높을수록 신뢰도↑ -> 목표가 상향)
+    # Dynamic Profit Taking
+    risk = buy - stop
     base_mult = 2.0 if score >= 8 else (1.5 if score >= 6 else 1.2)
-    
-    # 2. 동적 확장 계수 (Dynamic Boost)
-    # 거래량이 평소보다 폭발적(vol_z > 2.0)이라면 추세가 강하므로 목표가를 확장
     dynamic_boost = 1.0
-    if vol_z > 3.0: 
-        dynamic_boost = 1.5    # 초강력 수급 -> 목표가 50% 추가 상향
-    elif vol_z > 2.0: 
-        dynamic_boost = 1.2    # 강한 수급 -> 목표가 20% 추가 상향
+    if vol_z > 3.0: dynamic_boost = 1.5
+    elif vol_z > 2.0: dynamic_boost = 1.2
     
-    # 3. ATR 기반 최소 목표치 보정
-    # 리스크가 너무 작게 잡혔을 경우(손절이 너무 타이트할 때), 
-    # 최소한 ATR(일평균진폭)의 2배만큼은 먹을 구간을 확보
     min_target_dist = atr * 2.0
-    
-    # 4. 최종 목표가 산출
-    # (리스크 기반 목표) vs (ATR 기반 목표) 중 더 큰 값을 채택하여 조기 매도 방지
     target_dist = max(risk * base_mult * dynamic_boost, min_target_dist)
-    
     t1 = buy + target_dist
-    t2 = buy + (target_dist * 2.0) # 2차 목표가는 1차 수익폭의 2배 지점
-    # -------------------------------------------------------------------------------------
+    t2 = buy + (target_dist * 2.0)
 
     buy = round_to_tick(buy); tk = tick_size(buy)
     stop = floor_to_tick(stop)
@@ -2516,30 +2478,17 @@ def analyze_ticker(
     t1 = ceil_to_tick(t1); t2 = ceil_to_tick(t2)
     if t1 <= buy: t1 = buy + tk * 2
 
-    # -----------------------------------------------------------
-    # ✅ [v8.5 추가] 변동성 기반 비중 조절 (Money Management)
-    # -----------------------------------------------------------
-    # 가정: 총 운용 자금 1,000만원, 1회 거래당 최대 손실 2% 제한, 최대 비중 25%
-    # (실제 운영 시에는 이 값들을 설정 변수나 인자로 빼는 것이 좋습니다)
+    # Money Management
     ACCOUNT_CAPITAL = 10_000_000 
-    RISK_PER_TRADE = 0.02         # 2% 리스크 (20만원)
-    MAX_POS_PCT = 0.25            # 종목당 최대 비중 25% (250만원)
-    RISK_PER_TRADE = 0.02         
-    MAX_POS_PCT = 0.25            
-
-    loss_per_share = buy - stop   # 1주당 예상 손실금액
-    loss_per_share = buy - stop   
+    RISK_PER_TRADE = 0.02
+    MAX_POS_PCT = 0.25
+    
+    loss_per_share = buy - stop
     rec_qty = 0
     rec_amt = 0
-
     if loss_per_share > 0 and buy > 0:
-        # 1. 리스크 기준 허용 수량 (손절 나가도 내 자산의 2%만 잃게 설정)
         risk_based_qty = (ACCOUNT_CAPITAL * RISK_PER_TRADE) / loss_per_share
-        
-        # 2. 최대 비중 제한 수량 (아무리 좋아도 내 자산의 25% 이상 매수 금지)
         max_cap_qty = (ACCOUNT_CAPITAL * MAX_POS_PCT) / buy
-        
-        # -> 둘 중 더 적은 수량을 최종 추천 수량으로 선정 (보수적 접근)
         rec_qty = int(min(risk_based_qty, max_cap_qty))
         rec_amt = int(rec_qty * buy)
 
@@ -2557,9 +2506,7 @@ def analyze_ticker(
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
         "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1) if mcap_map else np.nan,
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
-        # ✅ [v8.5 추가] VWAP 데이터 저장
         "VWAP": int(vwap_val), "VWAP_GAP": round(vwap_gap, 2),
-        # ✅ [v8.5 추가] 감지된 캔들 패턴 저장
         "캔들패턴": ",".join(candle_patterns) if candle_patterns else "",
         "MACD_Hist": round(float(hist.iloc[-1]), 4), "MACD_Slope_PCT": round(slope_pct, 4),
         "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
@@ -2576,17 +2523,11 @@ def analyze_ticker(
         "rel_20d_%": round(rel_20, 2) if np.isfinite(rel_20) else np.nan,
         "rel_60d_%": round(rel_60, 2) if np.isfinite(rel_60) else np.nan,
         "rel_120d_%": round(rel_120, 2) if np.isfinite(rel_120) else np.nan,
-        # === [v10.0 추가] 주봉 지표 데이터 저장 ===
         "주봉20선_상회": "O" if is_above_w20 else "X",
         "주봉추세": "▲" if is_w20_up else "▼",
-        # ========================================
         "EBS": int(score), "통과": "★" if score >= PASS_EBS else "", "근거": ", ".join(reason),
         "추천매수가": buy, "손절가": stop, "추천매도가1": t1, "추천매도가2": t2, "ATR_MULT": atr_mult,
-        # ✅ [v8.5 추가] 자금 관리 필드 추가
-        "추천수량": rec_qty, 
-        "추천금액(만원)": round(rec_amt / 10000, 1),  # <--- 여기에 쉼표(,)가 꼭 필요합니다!
-        
-        # ✅ [v9.0 추가] HMA & OBV 지표
+        "추천수량": rec_qty, "추천금액(만원)": round(rec_amt / 10000, 1),
         "HMA20": int(curr_hma) if np.isfinite(curr_hma) else 0,
         "HMA_Trend": "▲" if hma_trend_up else "▼",
         "HMA_On": "O" if above_hma else "X",
