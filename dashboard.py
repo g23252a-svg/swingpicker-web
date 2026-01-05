@@ -3132,17 +3132,40 @@ with tab2:
         safe_view = view_df.copy().reset_index(drop=True)
 
         if not safe_view.empty:
-            # 🚨 [중요 수정] 종목명을 인덱스로 넘기면 안 보일 수 있으므로 주석 처리 또는 삭제하세요.
-            # if "종목명" in safe_view.columns:
-            #     safe_view.set_index("종목명", inplace=True)
+            # -----------------------------------------------------------
+            # 🛠️ [긴급 수정] 종목명 데이터 복구 로직
+            # 데이터에 종목명 대신 코드가 들어있는 경우, 매핑 테이블을 이용해 한글 이름을 복구합니다.
+            # -----------------------------------------------------------
+            try:
+                # 1. (이름 -> 코드) 매핑 로드
+                name_map = get_code_map()
+                # 2. (코드 -> 이름) 역방향 매핑 생성
+                code_to_name = {v: k for k, v in name_map.items()}
+                
+                def _recover_name(r):
+                    curr_name = str(r.get("종목명", "")).strip()
+                    code = str(r.get("종목코드", "")).strip().zfill(6)
+                    
+                    # 이름이 없거나, 숫자로만 되어 있거나, 코드와 똑같다면 복구 시도
+                    if not curr_name or curr_name.isdigit() or curr_name == code:
+                        return code_to_name.get(code, curr_name) # 매핑된 이름 반환
+                    return curr_name
+                
+                if "종목명" in safe_view.columns and "종목코드" in safe_view.columns:
+                    safe_view["종목명"] = safe_view.apply(_recover_name, axis=1)
+            except Exception as e:
+                # 에러 발생 시 로그만 남기고 기존 데이터 그대로 사용
+                pass
+            # -----------------------------------------------------------
 
+            # 숫자 포맷팅 (천단위 콤마)
             for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
                 if c in safe_view.columns:
                     safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
-            # ✅ [수정] 표시할 컬럼 리스트에 '종목명'을 맨 앞으로 명시적으로 추가
+            # 컬럼 순서 지정 ('종목명'을 맨 앞으로)
             cols = [
-                "종목명", "종목코드",  # 👈 이렇게 맨 앞에 넣어주세요
+                "종목명", "종목코드",
                 "REGIME", "ROUTE", 
                 "TOTAL_SCORE", "ML_SCORE", "RANK_SCORE", "LDY_SCORE", 
                 "TTM_SQUEEZE_CNT",
@@ -3153,10 +3176,8 @@ with tab2:
 
             # 컬럼 설정 (Column Config)
             cfg = {
-                # 👇 종목명 설정 추가 (고정되어 보이도록 pinned=True 추천)
                 "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
                 "종목코드": st.column_config.TextColumn("코드", width="small"),
-                
                 "TOTAL_SCORE": st.column_config.ProgressColumn(
                     "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
                 ),
@@ -3184,7 +3205,7 @@ with tab2:
                 use_container_width=True, 
                 column_config=cfg, 
                 height=600,
-                hide_index=True  # 👈 불필요한 숫자 인덱스(0,1,2...)는 숨깁니다
+                hide_index=True  # 인덱스 숨김
             )
 
     if auth_status in ["prime", "admin"]:
