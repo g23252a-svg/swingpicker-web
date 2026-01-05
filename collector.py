@@ -1505,8 +1505,13 @@ def get_market_sets(d: str) -> Tuple[set, set]:
         return set(), set()
 
 def get_name_map_cached(d: str) -> Dict[str, str]:
+    """
+    종목코드 -> 종목명 매핑 생성 (FDR 우선 사용 -> 실패 시 pykrx 시도)
+    """
     ensure_dir(OUT_DIR)
     path = os.path.join(OUT_DIR, f"krx_codes_{d}.csv")
+    
+    # 1. 이미 저장된 캐시 파일이 있으면 로드
     if os.path.exists(path):
         try:
             df = pd.read_csv(path, dtype=str)
@@ -1514,24 +1519,55 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
         except Exception:
             pass
 
-    rows: List[Dict[str, str]] = []
-    for m in ["KOSPI", "KOSDAQ"]:
-        try:
-            tickers = safe_ticker_list(d, market=m)
-            for t in tickers:
-                nm = safe_ticker_name(t) or str(t)
-                rows.append({
-                    "종목코드": str(t).zfill(6),
-                    "종목명": nm
-                })
-                time.sleep(0.001)
-        except Exception:
-            pass
+    log("🔄 종목명 매핑 정보 생성 중... (FDR 우선)")
+    name_map = {}
 
-    if rows:
+    # 2. FDR로 전체 종목명 한방에 가져오기 (가장 확실하고 빠름)
+    try:
+        # KRX 전체 상장 종목 리스트 다운로드
+        df_fdr = fdr.StockListing("KRX")
+        
+        # FDR 버전에 따라 컬럼명이 Code/Symbol로 다를 수 있음
+        code_col = "Code" if "Code" in df_fdr.columns else ("Symbol" if "Symbol" in df_fdr.columns else None)
+        
+        if code_col and "Name" in df_fdr.columns:
+            for _, row in df_fdr.iterrows():
+                code = str(row[code_col]).strip().zfill(6)
+                name = str(row["Name"]).strip()
+                name_map[code] = name
+            log(f"✅ FDR 종목명 확보 완료: {len(name_map)}개")
+    except Exception as e:
+        log(f"⚠️ FDR 종목명 조회 실패: {e}")
+
+    # 3. FDR 실패했거나 누락된 게 있다면 pykrx로 보완 (기존 방식)
+    # (FDR이 성공했다면 이 부분은 거의 실행되지 않음)
+    if (not name_map) and PYKRX_OK and (stock is not None):
+        log("🔄 FDR 데이터 부족 -> pykrx로 개별 조회 시도 (느림)")
+        for m in ["KOSPI", "KOSDAQ"]:
+            try:
+                tickers = safe_ticker_list(d, market=m)
+                for t in tickers:
+                    code = str(t).zfill(6)
+                    # 이미 FDR로 확보했으면 패스
+                    if code in name_map:
+                        continue
+                        
+                    nm = safe_ticker_name(t)
+                    if nm:
+                        name_map[code] = nm
+                    else:
+                        name_map[code] = code # 이름 없으면 코드라도 사용
+                    time.sleep(0.001) 
+            except:
+                pass
+
+    # 4. 결과 저장 및 반환
+    if name_map:
+        rows = [{"종목코드": c, "종목명": n} for c, n in name_map.items()]
         df = pd.DataFrame(rows)
         df.to_csv(path, index=False, encoding=UTF8)
-        return dict(zip(df["종목코드"], df["종목명"]))
+        return name_map
+    
     return {}
 
 def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
