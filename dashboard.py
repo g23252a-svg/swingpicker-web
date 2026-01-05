@@ -3132,25 +3132,31 @@ with tab2:
         safe_view = view_df.copy().reset_index(drop=True)
 
         if not safe_view.empty:
-            if "종목명" in safe_view.columns:
-                safe_view.set_index("종목명", inplace=True)
+            # 🚨 [삭제/주석] 종목명을 인덱스로 보내던 기존 로직 제거
+            # if "종목명" in safe_view.columns:
+            #     safe_view.set_index("종목명", inplace=True)
 
             for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
                 if c in safe_view.columns:
                     safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
-            # ✅ 표시할 컬럼 정의 (ML_SCORE, TOTAL_SCORE 추가)
+            # ✅ [수정] 표시할 컬럼 정의에 '종목명'을 맨 앞으로 추가
             cols = [
+                "종목명", "종목코드",  # 👈 종목명, 코드를 리스트 최상단에 배치
                 "REGIME", "ROUTE", 
-                "TOTAL_SCORE", "ML_SCORE", "RANK_SCORE", "LDY_SCORE", # 👈 RANK_SCORE 추가됨
+                "TOTAL_SCORE", "ML_SCORE", "RANK_SCORE", "LDY_SCORE", 
                 "TTM_SQUEEZE_CNT",
-                "업종", "종목코드",
+                "업종", 
                 "종가", "추천매수가", "손절가", "추천매도가1",
             ]
             display_cols = [c for c in cols if c in safe_view.columns]
 
             # 컬럼 설정 (Column Config)
             cfg = {
+                # 👇 종목명 설정 추가 (고정되어 보이도록 pinned=True 추천)
+                "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
+                "종목코드": st.column_config.TextColumn("코드", width="small"),
+                
                 "TOTAL_SCORE": st.column_config.ProgressColumn(
                     "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
                 ),
@@ -3158,7 +3164,7 @@ with tab2:
                     "🤖AI", format="%.1f", min_value=0, max_value=100, width="small"
                 ),
                 "RANK_SCORE": st.column_config.NumberColumn(
-                    "📊랭킹", format="%.1f", help="기초체력+가격메리트(손익비) 점수" # 👈 설정 추가
+                    "📊랭킹", format="%.1f", help="기초체력+가격메리트(손익비) 점수" 
                 ),
                 "LDY_SCORE": st.column_config.NumberColumn(
                     "기초", format="%.1f", help="수급/모멘텀 등 기초 체력"
@@ -3177,7 +3183,8 @@ with tab2:
                 safe_view[display_cols], 
                 use_container_width=True, 
                 column_config=cfg, 
-                height=600
+                height=600,
+                hide_index=True  # 👈 불필요한 숫자 인덱스(0,1,2...) 숨김
             )
 
     if auth_status in ["prime", "admin"]:
