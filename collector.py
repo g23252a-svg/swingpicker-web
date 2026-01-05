@@ -2546,11 +2546,13 @@ def main(
 ) -> None:
     log("🚀 LDY Collector v10.0 (AI Powered) 시작...")
 
-    # ✅ [v10.0 추가] 주말이거나, 모델 파일이 없으면 학습 시도
-    # (매번 학습하면 느리므로 파일이 없을 때만 수행하거나 별도 인자로 제어 가능)
-    if not os.path.exists(ml_engine.MODEL_PATH):
-        log("🤖 모델이 없습니다. 과거 데이터로 학습을 시작합니다...")
+    # 👇 [수정] 모델이 있어도 강제로 다시 학습하도록 변경 (에러 해결용)
+    # if not os.path.exists(ml_engine.MODEL_PATH):
+    log("🤖 AI 모델 최적화(재학습) 진행 중...")
+    try:
         ml_engine.train_model()
+    except Exception as e:
+        log(f"⚠️ 모델 학습 실패 (기존 모델 사용 또는 AI 점수 0점 처리): {e}")
     
     # ✅ 여기에 넣기 (resolve_trade_date() 호출 전에!)
     if not PYKRX_OK:
