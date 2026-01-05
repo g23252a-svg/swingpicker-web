@@ -3132,7 +3132,7 @@ with tab2:
         safe_view = view_df.copy().reset_index(drop=True)
 
         if not safe_view.empty:
-            # 🚨 [삭제/주석] 종목명을 인덱스로 보내던 기존 로직 제거
+            # 🚨 [중요 수정] 종목명을 인덱스로 넘기면 안 보일 수 있으므로 주석 처리 또는 삭제하세요.
             # if "종목명" in safe_view.columns:
             #     safe_view.set_index("종목명", inplace=True)
 
@@ -3140,9 +3140,9 @@ with tab2:
                 if c in safe_view.columns:
                     safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
-            # ✅ [수정] 표시할 컬럼 정의에 '종목명'을 맨 앞으로 추가
+            # ✅ [수정] 표시할 컬럼 리스트에 '종목명'을 맨 앞으로 명시적으로 추가
             cols = [
-                "종목명", "종목코드",  # 👈 종목명, 코드를 리스트 최상단에 배치
+                "종목명", "종목코드",  # 👈 이렇게 맨 앞에 넣어주세요
                 "REGIME", "ROUTE", 
                 "TOTAL_SCORE", "ML_SCORE", "RANK_SCORE", "LDY_SCORE", 
                 "TTM_SQUEEZE_CNT",
@@ -3184,7 +3184,7 @@ with tab2:
                 use_container_width=True, 
                 column_config=cfg, 
                 height=600,
-                hide_index=True  # 👈 불필요한 숫자 인덱스(0,1,2...) 숨김
+                hide_index=True  # 👈 불필요한 숫자 인덱스(0,1,2...)는 숨깁니다
             )
 
     if auth_status in ["prime", "admin"]:
