@@ -2826,6 +2826,20 @@ with tab2:
                 if c in prev_view.columns:
                     prev_view[c] = pd.to_numeric(prev_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
+            # 🛠️ [수정] 여기서도 종목명 복구 시도
+            try:
+                name_map = get_code_map()
+                code_to_name = {v: k for k, v in name_map.items()}
+                def _fix_prev_name(r):
+                    nm = str(r.get("종목명", "")).strip()
+                    cd = str(r.get("종목코드", "")).strip().zfill(6)
+                    if not nm or nm.isdigit() or nm == cd:
+                        return code_to_name.get(cd, nm)
+                    return nm
+                if "종목명" in prev_view.columns:
+                    prev_view["종목명"] = prev_view.apply(_fix_prev_name, axis=1)
+            except: pass
+
             if "종목명" in prev_view.columns:
                 prev_view = prev_view.set_index("종목명")
             
@@ -2904,6 +2918,11 @@ with tab2:
     filtered = base_view.copy()
     # 🔥 [수정] 더 똑똑한 점수(종합점수 > 랭크점수 > 기초점수)를 기준으로 필터링
     filter_col = "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else ("RANK_SCORE" if "RANK_SCORE" in filtered.columns else "LDY_SCORE")
+    
+    # 🛠️ [수정] 필터링 전에 점수 컬럼 숫자형 변환 (에러 방지)
+    if filter_col in filtered.columns:
+        filtered[filter_col] = pd.to_numeric(filtered[filter_col], errors='coerce').fillna(0)
+
     filtered = filtered[filtered[filter_col] >= min_score]
 
     if sel_routes:
@@ -2931,6 +2950,13 @@ with tab2:
 
     # 🔥 [v10.0] 정렬 기준 변경 (TOTAL_SCORE 우선)
     sort_col = "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else "LDY_SCORE"
+    
+    # 정렬 전 숫자형 변환 보장
+    if sort_col in filtered.columns:
+        filtered[sort_col] = pd.to_numeric(filtered[sort_col], errors='coerce').fillna(0)
+    if "거래대금(억원)" in filtered.columns:
+        filtered["거래대금(억원)"] = pd.to_numeric(filtered["거래대금(억원)"], errors='coerce').fillna(0)
+
     filtered = filtered.sort_values(
         [sort_col, "거래대금(억원)"], 
         ascending=[False, False]
@@ -2951,6 +2977,36 @@ with tab2:
     if view_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
+        # =============================================================================
+        # 🔥 [핵심 수정 구간] 데이터 전처리 (이름 복구 & 점수 강제 변환) - UI 그리기 전 수행
+        # =============================================================================
+        
+        # 1. 종목명 복구 (코드 -> 한글 이름)
+        try:
+            name_map = get_code_map() # 캐시된 매핑 로드
+            code_to_name = {v: k for k, v in name_map.items()}
+
+            def _fix_name(r):
+                c_name = str(r.get("종목명", "")).strip()
+                c_code = str(r.get("종목코드", "")).strip().zfill(6)
+                # 이름이 없거나, 숫자로만 되어 있거나, 코드와 같다면 복구
+                if not c_name or c_name.isdigit() or c_name == c_code:
+                    return code_to_name.get(c_code, c_name)
+                return c_name
+
+            if "종목명" in view_df.columns:
+                view_df["종목명"] = view_df.apply(_fix_name, axis=1)
+        except Exception:
+            pass
+
+        # 2. AI 점수(ML_SCORE) 등 핵심 지표 숫자형 강제 변환 (0점 문제 해결)
+        numeric_cols = ["ML_SCORE", "TOTAL_SCORE", "RANK_SCORE", "LDY_SCORE"]
+        for col in numeric_cols:
+            if col in view_df.columns:
+                # 에러 발생 시(문자 섞임 등) NaN 처리 후 0으로 채움
+                view_df[col] = pd.to_numeric(view_df[col], errors='coerce').fillna(0)
+        # =============================================================================
+
         # ---------------------------------------------------------
         # 🔥 [v10.0 New] AI 컨센서스 차트 (리스트 위에 배치)
         # ---------------------------------------------------------
@@ -2964,15 +3020,17 @@ with tab2:
         # ---------------------------
         # 상세 종목 분석 (SelectBox)
         # ---------------------------
+        # view_df의 '종목명'이 위에서 복구되었으므로, 여기서도 한글 이름이 나옵니다.
         opts = view_df.apply(
             lambda r: f"{r.get('종목명','-')} ({r.get('종목코드','-')}) / {r.get('REGIME','-')}",
             axis=1
         ).tolist()
+        
         sel = st.selectbox("종목 선택 (상세 분석)", opts)
 
         if sel:
             sel_idx = opts.index(sel)
-            row = view_df.iloc[sel_idx]
+            row = view_df.iloc[sel_idx] # 복구된 이름이 담긴 row 사용
             code = str(row.get("종목코드", "")).zfill(6)
 
             c1, c2 = st.columns([2, 1])
@@ -3132,40 +3190,17 @@ with tab2:
         safe_view = view_df.copy().reset_index(drop=True)
 
         if not safe_view.empty:
-            # -----------------------------------------------------------
-            # 🛠️ [긴급 수정] 종목명 데이터 복구 로직
-            # 데이터에 종목명 대신 코드가 들어있는 경우, 매핑 테이블을 이용해 한글 이름을 복구합니다.
-            # -----------------------------------------------------------
-            try:
-                # 1. (이름 -> 코드) 매핑 로드
-                name_map = get_code_map()
-                # 2. (코드 -> 이름) 역방향 매핑 생성
-                code_to_name = {v: k for k, v in name_map.items()}
-                
-                def _recover_name(r):
-                    curr_name = str(r.get("종목명", "")).strip()
-                    code = str(r.get("종목코드", "")).strip().zfill(6)
-                    
-                    # 이름이 없거나, 숫자로만 되어 있거나, 코드와 똑같다면 복구 시도
-                    if not curr_name or curr_name.isdigit() or curr_name == code:
-                        return code_to_name.get(code, curr_name) # 매핑된 이름 반환
-                    return curr_name
-                
-                if "종목명" in safe_view.columns and "종목코드" in safe_view.columns:
-                    safe_view["종목명"] = safe_view.apply(_recover_name, axis=1)
-            except Exception as e:
-                # 에러 발생 시 로그만 남기고 기존 데이터 그대로 사용
-                pass
-            # -----------------------------------------------------------
+            # 🚨 [중요] 종목명을 인덱스로 넘기면 사라질 수 있으므로 주석 처리
+            # if "종목명" in safe_view.columns:
+            #     safe_view.set_index("종목명", inplace=True)
 
-            # 숫자 포맷팅 (천단위 콤마)
             for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
                 if c in safe_view.columns:
                     safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
-            # 컬럼 순서 지정 ('종목명'을 맨 앞으로)
+            # ✅ [수정] 표시할 컬럼 리스트 (종목명, 종목코드를 맨 앞에 배치)
             cols = [
-                "종목명", "종목코드",
+                "종목명", "종목코드", 
                 "REGIME", "ROUTE", 
                 "TOTAL_SCORE", "ML_SCORE", "RANK_SCORE", "LDY_SCORE", 
                 "TTM_SQUEEZE_CNT",
@@ -3178,6 +3213,7 @@ with tab2:
             cfg = {
                 "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
                 "종목코드": st.column_config.TextColumn("코드", width="small"),
+                
                 "TOTAL_SCORE": st.column_config.ProgressColumn(
                     "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
                 ),
@@ -3205,7 +3241,7 @@ with tab2:
                 use_container_width=True, 
                 column_config=cfg, 
                 height=600,
-                hide_index=True  # 인덱스 숨김
+                hide_index=True  # 숫자 인덱스 숨김
             )
 
     if auth_status in ["prime", "admin"]:
