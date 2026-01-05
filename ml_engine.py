@@ -113,8 +113,13 @@ def train_model():
     XGBoost 모델 학습 및 저장
     """
     df = build_dataset_from_history()
-    if df.empty or len(df) < 100: # XGBoost는 데이터가 좀 더 필요함
-        print("⚠️ [ML] 학습 데이터 부족(<100)으로 모델 생성을 건너뜁니다.")
+    
+    # 🔴 [수정 전] 100개 미만이면 포기
+    # if df.empty or len(df) < 100: 
+    
+    # 🟢 [수정 후] 10개만 있어도 학습 진행하도록 완화
+    if df.empty or len(df) < 10: 
+        print("⚠️ [ML] 학습 데이터 부족(<10)으로 모델 생성을 건너뜁니다.")
         return
 
     X = df[FEATURE_COLS].fillna(0)
