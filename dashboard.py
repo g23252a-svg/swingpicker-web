@@ -1336,8 +1336,7 @@ def plot_radar_chart(row):
     else:
         stock_name = str(raw_name)
 
-    # 1) 팩터 데이터 확인 및 NaN 처리 (Collector v7.5 이상)
-    # row.get()이 NaN을 반환할 경우를 대비해 pd.to_numeric().fillna(0) 처리
+    # 1) 팩터 데이터 확인 및 NaN 처리
     def _safe_get(key, default=0):
         val = pd.to_numeric(row.get(key), errors='coerce')
         return default if pd.isna(val) else val
@@ -1350,7 +1349,7 @@ def plot_radar_chart(row):
             "안전성(SL)": _safe_get("NORM_SL") * 100,
             "타점(NEAR)": _safe_get("NORM_NEAR") * 100,
             "유동성(LIQ)": _safe_get("NORM_LIQ") * 100,
-            "기술/세력(TEC)": _safe_get("NORM_TEC") * 100, # ✅ v7.5 추가
+            "기술/세력(TEC)": _safe_get("NORM_TEC") * 100,
         }
     else:
         # Fallback (구버전 데이터용)
@@ -1363,7 +1362,6 @@ def plot_radar_chart(row):
         }
 
     # 값 클리핑 (0~100 사이)
-    # NaN이 들어오면 min/max 연산 시 의도치 않은 결과가 나올 수 있으므로 위에서 _safe_get 처리함
     values = [max(0, min(100, v)) for v in stats.values()]
     keys = list(stats.keys())
 
@@ -1376,12 +1374,13 @@ def plot_radar_chart(row):
             r=values,
             theta=keys,
             fill='toself',
-            name=stock_name,  # ✅ 수정된 부분: 안전한 문자열 변수 사용
-            # 🔥 색상 변경: 밝은 Cyan + 반투명 채우기
+            name=stock_name, 
             line=dict(color='#00E5FF', width=3),
             fillcolor='rgba(0, 229, 255, 0.2)'
         )
     )
+    
+    # 🔥 [수정됨] 차트 제목에 종목명을 동적으로 반영
     fig.update_layout(
         polar=dict(
             radialaxis=dict(
@@ -1397,9 +1396,10 @@ def plot_radar_chart(row):
             bgcolor='rgba(0,0,0,0)'
         ),
         showlegend=False,
-        height=300, # 높이 약간 증가
+        height=300,
         margin=dict(l=40, r=40, t=30, b=30),
-        title=dict(text="📊 7-Factor Analysis", x=0.5, y=0.95, font=dict(size=14))
+        # 👇 기존 고정 텍스트 대신 stock_name 변수 사용
+        title=dict(text=f"📊 {stock_name} 7-Factor", x=0.5, y=0.95, font=dict(size=14))
     )
     return fig
 
