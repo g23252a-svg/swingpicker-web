@@ -1329,27 +1329,41 @@ def plot_radar_chart(row):
     """
     v7.5: 7-Factor (V-Power 포함) 레이더 차트
     """
-    # 1) 팩터 데이터 확인 (Collector v7.5 이상)
+    # 0) 종목명 안전 처리 (NaN 방지)
+    raw_name = row.get('종목명')
+    if pd.isna(raw_name) or str(raw_name).strip() == "":
+        stock_name = "종목"
+    else:
+        stock_name = str(raw_name)
+
+    # 1) 팩터 데이터 확인 및 NaN 처리 (Collector v7.5 이상)
+    # row.get()이 NaN을 반환할 경우를 대비해 pd.to_numeric().fillna(0) 처리
+    def _safe_get(key, default=0):
+        val = pd.to_numeric(row.get(key), errors='coerce')
+        return default if pd.isna(val) else val
+
     if "NORM_MOM" in row.index:
         stats = {
-            "모멘텀(MOM)": row.get("NORM_MOM", 0) * 100,
-            "가성비(RR)": row.get("NORM_RR", 0) * 100,
-            "수익여력(T1)": row.get("NORM_T1", 0) * 100,
-            "안전성(SL)": row.get("NORM_SL", 0) * 100,
-            "타점(NEAR)": row.get("NORM_NEAR", 0) * 100,
-            "유동성(LIQ)": row.get("NORM_LIQ", 0) * 100,
-            "기술/세력(TEC)": row.get("NORM_TEC", 0) * 100, # ✅ v7.5 추가
+            "모멘텀(MOM)": _safe_get("NORM_MOM") * 100,
+            "가성비(RR)": _safe_get("NORM_RR") * 100,
+            "수익여력(T1)": _safe_get("NORM_T1") * 100,
+            "안전성(SL)": _safe_get("NORM_SL") * 100,
+            "타점(NEAR)": _safe_get("NORM_NEAR") * 100,
+            "유동성(LIQ)": _safe_get("NORM_LIQ") * 100,
+            "기술/세력(TEC)": _safe_get("NORM_TEC") * 100, # ✅ v7.5 추가
         }
     else:
         # Fallback (구버전 데이터용)
         stats = {
-            "모멘텀": min(100, (row.get("ret_5d_%", 0) + 5) * 10),
-            "수급(MFI)": row.get("MFI14", 50),
-            "가성비(RR)": min(100, row.get("RR1", 1) * 50),
-            "안전성": 100 - (row.get("이격도", 0) * 2),
-            "종합점수": row.get("LDY_SCORE", 0),
+            "모멘텀": min(100, (_safe_get("ret_5d_%", 0) + 5) * 10),
+            "수급(MFI)": _safe_get("MFI14", 50),
+            "가성비(RR)": min(100, _safe_get("RR1", 1) * 50),
+            "안전성": 100 - (_safe_get("이격도", 0) * 2),
+            "종합점수": _safe_get("LDY_SCORE", 0),
         }
 
+    # 값 클리핑 (0~100 사이)
+    # NaN이 들어오면 min/max 연산 시 의도치 않은 결과가 나올 수 있으므로 위에서 _safe_get 처리함
     values = [max(0, min(100, v)) for v in stats.values()]
     keys = list(stats.keys())
 
@@ -1362,7 +1376,7 @@ def plot_radar_chart(row):
             r=values,
             theta=keys,
             fill='toself',
-            name=row.get('종목명', '종목'),
+            name=stock_name,  # ✅ 수정된 부분: 안전한 문자열 변수 사용
             # 🔥 색상 변경: 밝은 Cyan + 반투명 채우기
             line=dict(color='#00E5FF', width=3),
             fillcolor='rgba(0, 229, 255, 0.2)'
