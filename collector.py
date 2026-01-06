@@ -2075,20 +2075,20 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
         row.get("IS_SWING_SUPPORT", False), row.get("V_POWER", 0.0)
     ), axis=1)
 
-    # ✅ [v10.0 추가] ML 엔진을 통한 AI 점수 예측 및 반영
-    # 먼저 ML 점수를 계산해옴
-    x = ml_engine.apply_ml_score(x)
+    # ❌ [삭제 또는 주석 처리] 기존 v10.0 코드는 여기서 지우세요!
+    # x = ml_engine.apply_ml_score(x)  <-- 이 줄을 삭제하거나 주석(#) 처리
     
     # 기존 RANK_SCORE와 ML_SCORE를 7:3 비율로 섞어 'FINAL_RANK_SCORE' 생성
     # (모델이 없으면 ML_SCORE가 0이므로 기존 점수만 사용되게 방어 로직 필요)
-    if "ML_SCORE" in x.columns and x["ML_SCORE"].sum() > 0:
-        x["TOTAL_SCORE"] = (x["RANK_SCORE"] * 0.7) + (x["ML_SCORE"] * 0.3)
-    else:
-        x["TOTAL_SCORE"] = x["RANK_SCORE"]
+    if "ML_SCORE" not in x.columns:
+        x["ML_SCORE"] = 0
         
+    # 🟢 [수정] 일단 퀀트 점수(RANK_SCORE)를 기본 토탈 점수로 설정
+    # (나중에 main 함수에서 AI 점수가 나오면 그 때 합산합니다)
+    x["TOTAL_SCORE"] = x["RANK_SCORE"] 
+    
     x["TOTAL_SCORE"] = x["TOTAL_SCORE"].round(1)
     return x
-
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
 
 def get_naver_theme_tags(code: str) -> str:
@@ -2759,6 +2759,24 @@ def main(
 
     # [수정] 스코어링 (mkt_temp 전달)
     df_out = build_global_score(df_raw, market_temp=mkt_temp)
+
+    # 👇👇 [여기부터 추가하세요] 👇👇
+    # --------------------------------------------------------------------------
+    # 🔥 [1단계 업그레이드] 여기서 ML 점수 주입 (full_ohlcv_map 전달)
+    # --------------------------------------------------------------------------
+    try:
+        # ml_engine이 시계열 데이터(full_ohlcv_map)를 참고하여 점수를 예측합니다.
+        df_out = ml_engine.apply_ml_score(df_out, full_ohlcv_map)
+        
+        # ML 점수가 있는 종목들만 가중 합산 (퀀트 70% + AI 30%)
+        if "ML_SCORE" in df_out.columns:
+            mask = df_out["ML_SCORE"] > 0
+            if mask.any():
+                df_out.loc[mask, "TOTAL_SCORE"] = (df_out.loc[mask, "RANK_SCORE"] * 0.7) + (df_out.loc[mask, "ML_SCORE"] * 0.3)
+                df_out["TOTAL_SCORE"] = df_out["TOTAL_SCORE"].round(1)
+        
+    except Exception as e:
+        log(f"⚠️ ML 점수 반영 중 에러 (main): {e}")
 
     df_out["MKT_BREADTH_ALL_%"] = breadth.get("ALL", np.nan)
     df_out["MKT_BREADTH_KOSPI_%"] = breadth.get("KOSPI", np.nan)
