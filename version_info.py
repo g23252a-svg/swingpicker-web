@@ -1,4 +1,4 @@
-# version_info.py
+# version_info.py (v12.0)
 # -*- coding: utf-8 -*-
 
 import os
@@ -23,7 +23,7 @@ def _get_conf(key: str, default_val: str) -> str:
 # --------------------------------------------------------------------
 # 1) 버전 정보
 # --------------------------------------------------------------------
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "11.0.0")  # ✅ [Major Update] v11.0.0 (AI Hybrid)
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "12.0.0")  # ✅ [Major Update] v12.0.0 (AI + Kelly + DART)
 APP_VERSION = _RAW_APP_VERSION
 
 
@@ -55,6 +55,17 @@ PRIME_TG_JOIN_URL = _get_conf(
 # --------------------------------------------------------------------
 CHANGELOG: List[Dict] = [
     {
+        "version": "12.0.0",
+        "date": "2026-01-07",
+        "title": "Quantum Leap: AI Trust & Money Management",
+        "items": [
+            "💰 **Kelly Betting System:** '얼마를 걸어야 할까?'에 대한 수학적 해답. 승률과 손익비를 계산하여 **최적의 자금 관리 비중**을 제안합니다.",
+            "👁️ **AI Trust Gauge:** 복잡한 수치 대신 직관적인 **속도계(Gauge) 차트**로 AI와 퀀트가 합의한 종합 신뢰도를 한눈에 보여줍니다.",
+            "📜 **DART Deep Dive:** 단순 뉴스 키워드 매칭을 넘어, **공시 원문을 뜯어보고 호재/악재를 판별**하는 심층 분석 엔진을 탑재했습니다.",
+            "🧪 **Strategy Lab:** (별도 실행) 내가 세운 가설(RSI<30 등)이 과거에 실제로 통했는지 검증하는 **백테스팅 시뮬레이터**가 추가되었습니다.",
+        ],
+    },
+    {
         "version": "11.0.0",
         "date": "2025-12-29",
         "title": "The Singularity: Hybrid AI Trading System",
@@ -75,17 +86,7 @@ CHANGELOG: List[Dict] = [
             "📉 **Auto Expiration Handling:** 이용 기간이 만료된 회원이 접속 시, 자동으로 등급이 조정(Prime→Free)되며 DB에 즉시 반영됩니다.",
         ],
     },
-    {
-        "version": "10.0.0",
-        "date": "2025-12-28",
-        "title": "Weekly Trend Traffic Light & Ironclad Security",
-        "items": [
-            "🚥 **Weekly Trend Traffic Light:** 일봉의 노이즈를 제거한 **'주봉 20선 대추세'** 신호등 UI를 도입했습니다. (초록: 상승장 / 빨강: 하락장)",
-            "🛡️ **Instant Ban System:** 관리자가 차단(Ban) 버튼을 누르는 즉시, 해당 유저의 화면이 종료되고 강제 로그아웃되는 실시간 보안 체계를 구축했습니다.",
-            "📈 **Weekly Overlay:** 차트에 은은한 **주봉 20일선 점선**을 추가하여, 현재 주가가 대추세 대비 어디에 위치하는지 직관적으로 파악할 수 있습니다.",
-        ],
-    },
-    # ... (과거 로그 생략) ...
+    # ... (과거 로그 생략 가능) ...
 ]
 
 
