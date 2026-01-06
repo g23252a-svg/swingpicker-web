@@ -3122,7 +3122,7 @@ with tab2:
                     
                     # 🔥 [v12.0] AI 신뢰도 게이지 추가
                     total_score = float(row.get("TOTAL_SCORE", row.get("LDY_SCORE", 0)))
-                    st.plotly_chart(plot_ai_gauge_chart(total_score), use_container_width=True)
+                    st.plotly_chart(plot_radar_chart(row), use_container_width=True, key=f"radar_{code}")
 
                     # 기존: 주봉 신호등
                     w_above = row.get("주봉20선_상회") == "O"
@@ -3192,7 +3192,7 @@ with tab2:
                             # 1. 히스토리 차트 (함수 호출)
                             hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
                             if hist_fig:
-                                st.plotly_chart(hist_fig, use_container_width=True)
+                                st.plotly_chart(hist_fig, use_container_width=True, key=f"history_chart_{code}")
                             
                             # 2. 과거 AI 코멘트 (최근 3건 역순)
                             with st.expander("💬 과거 AI 코멘트 보기"):
@@ -3241,8 +3241,7 @@ with tab2:
                         # 켈리 비중 (최대 30% 기준)
                         kelly_vis = min(rec_amt * 10000 / 10_000_000, 0.3) 
                         
-                        st.plotly_chart(plot_kelly_visual(win_est, rr_ratio, kelly_vis), use_container_width=True)
-
+                        st.plotly_chart(plot_kelly_visual(win_est, rr_ratio, kelly_vis), use_container_width=True, key=f"kelly_{code}")
                     # 🔥 [v11.0] 히스토리 차트
                     st.markdown("---")
                     hist_df = get_stock_history_from_db(code)
@@ -3250,7 +3249,7 @@ with tab2:
                         st.markdown("##### 📜 과거 추천 이력 (Trend)")
                         hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
                         if hist_fig:
-                            st.plotly_chart(hist_fig, use_container_width=True)
+                            st.plotly_chart(hist_fig, use_container_width=True, key=f"history_chart_{code}")
                     else:
                         st.caption("※ 과거 데이터가 충분하지 않습니다.")
 
