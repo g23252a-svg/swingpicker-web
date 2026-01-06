@@ -16,3 +16,5 @@ shap
 duckdb
 aiohttp
 torch
+opendartreader
+xmltodict
