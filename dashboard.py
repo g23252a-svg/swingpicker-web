@@ -3193,9 +3193,9 @@ with tab2:
                             hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
                             if hist_fig:
                             # 🧩 랜덤 ID를 붙여서 '키 중복' 에러 완전 차단
-                            import uuid
-                            unique_key = f"hist_{code}_{uuid.uuid4().hex[:8]}"
-                            st.plotly_chart(hist_fig, use_container_width=True, key=unique_key)
+                                import uuid
+                                unique_key = f"hist_{code}_{uuid.uuid4().hex[:8]}"
+                                st.plotly_chart(hist_fig, use_container_width=True, key=unique_key)
                             
                             # 2. 과거 AI 코멘트 (최근 3건 역순)
                             with st.expander("💬 과거 AI 코멘트 보기"):
@@ -3253,7 +3253,6 @@ with tab2:
                         hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
                         
                         if hist_fig:
-                            # 👇 들여쓰기를 맞춰주세요 (Tab 키 또는 스페이스 4칸)
                             import uuid
                             unique_key = f"hist_{code}_{uuid.uuid4().hex[:8]}"
                             st.plotly_chart(hist_fig, use_container_width=True, key=unique_key)
