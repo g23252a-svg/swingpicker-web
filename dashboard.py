@@ -3251,8 +3251,9 @@ with tab2:
                     if not hist_df.empty and len(hist_df) > 1:
                         st.markdown("##### 📜 과거 추천 이력 (Trend)")
                         hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
+                        
                         if hist_fig:
-                            # 🧩 랜덤 ID를 붙여서 '키 중복' 에러 완전 차단
+                            # 👇 들여쓰기를 맞춰주세요 (Tab 키 또는 스페이스 4칸)
                             import uuid
                             unique_key = f"hist_{code}_{uuid.uuid4().hex[:8]}"
                             st.plotly_chart(hist_fig, use_container_width=True, key=unique_key)
