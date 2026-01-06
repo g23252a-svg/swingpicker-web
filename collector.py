@@ -2570,7 +2570,74 @@ def analyze_ticker(
         "OBV_Div": "O" if is_obv_div else "X",
     }
 
+# 👇👇 [여기 사이에 함수를 통째로 붙여넣으세요] 👇👇
 
+# [v11.0 신규 추가] 켈리 공식을 이용한 최적 비중 계산
+def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000) -> pd.DataFrame:
+    """
+    Kelly Criterion을 적용하여 종목별 최적 매수 금액/수량을 다시 계산합니다.
+    - 승률(p) 추정: TOTAL_SCORE(0~100)를 30%~70% 확률로 매핑
+    - 손익비(b): (1차목표가 - 매수가) / (매수가 - 손절가)
+    """
+    log("💰 [Money Management] 켈리 공식(Kelly Criterion)으로 비중 최적화 중...")
+    
+    # 1. 안전 장치 (Half-Kelly 사용)
+    KELLY_MULTIPLIER = 0.5   # 켈리 비율의 50%만 진입 (변동성 관리)
+    MAX_ALLOCATION = 0.30    # 한 종목당 최대 비중 30% 제한
+
+    def _calc_row(row):
+        try:
+            # 데이터 추출
+            score = float(row.get("TOTAL_SCORE", 0))
+            buy = float(row.get("추천매수가", 0))
+            stop = float(row.get("손절가", 0))
+            target = float(row.get("추천매도가1", 0))
+            
+            if buy <= 0 or stop <= 0 or target <= 0: return 0, 0
+
+            # (1) 손익비(b) 계산 (Reward / Risk)
+            risk = buy - stop
+            reward = target - buy
+            if risk <= 0: return 0, 0
+            
+            b = reward / risk 
+            
+            # (2) 승률(p) 추정 (60점=40%, 80점=60%, 100점=80%)
+            p = 0.4 + (max(score, 0) - 60) * 0.01
+            p = min(max(p, 0.3), 0.85)
+
+            # 점수가 너무 낮으면(60점 미만) 켈리 적용 위험 -> 0
+            if score < 60:
+                return 0, 0
+
+            # (3) 켈리 공식: f = p - (1-p)/b
+            q = 1 - p
+            f = p - (q / b)
+            
+            # (4) Half-Kelly 적용 및 최대 비중 제한
+            f_safe = f * KELLY_MULTIPLIER
+            f_final = min(max(f_safe, 0.0), MAX_ALLOCATION)
+            
+            # (5) 최종 금액 및 수량 산출
+            final_amt = int(total_capital * f_final)
+            final_qty = int(final_amt / buy)
+            
+            return final_qty, final_amt
+
+        except Exception:
+            return 0, 0
+
+    # DataFrame에 적용
+    res = df.apply(_calc_row, axis=1, result_type='expand')
+    df["켈리_수량"] = res[0]
+    df["켈리_금액(원)"] = res[1]
+    
+    # 켈리 결과가 유의미하면 기존 추천 수량을 덮어씀
+    mask = df["켈리_수량"] > 0
+    df.loc[mask, "추천수량"] = df.loc[mask, "켈리_수량"]
+    df.loc[mask, "추천금액(만원)"] = (df.loc[mask, "켈리_금액(원)"] / 10000).round(1)
+    
+    return df
 
 # ------------------------------- 메인 실행 -------------------------------
 
@@ -2777,6 +2844,19 @@ def main(
         
     except Exception as e:
         log(f"⚠️ ML 점수 반영 중 에러 (main): {e}")
+
+    # 👇👇 [여기부터 추가하세요] 👇👇
+    # --------------------------------------------------------------------------
+    # 🔥 [3단계 업그레이드] 켈리 베팅(Kelly Betting) 자금 관리 적용
+    # --------------------------------------------------------------------------
+    try:
+        # TOTAL_SCORE가 계산된 상태이므로, 이를 바탕으로 비중을 재산정합니다.
+        # 기본 자본금 1,000만원 가정 (필요 시 수정 가능)
+        df_out = apply_kelly_betting(df_out, total_capital=10_000_000)
+    except Exception as e:
+        log(f"⚠️ 켈리 베팅 적용 실패: {e}")
+    # --------------------------------------------------------------------------
+    # 👆👆 [여기까지 추가] 👆👆
 
     df_out["MKT_BREADTH_ALL_%"] = breadth.get("ALL", np.nan)
     df_out["MKT_BREADTH_KOSPI_%"] = breadth.get("KOSPI", np.nan)
