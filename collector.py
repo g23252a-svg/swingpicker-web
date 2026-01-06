@@ -31,6 +31,7 @@ import asyncio  # 비동기 실행용
 from db_utils import LDYDBManager       # [신규] DB 매니저
 from async_crawler import AsyncNewsFetcher # [신규] 비동기 크롤러
 import random
+import dart_analyzer  # ✅ [2단계] DART 분석기 추가
 
 from time_utils import now_kst, now_utc, KST
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -2896,53 +2897,78 @@ def main(
     # 🔥 [v11.0 수정] 비동기 뉴스 수집 & LLM 분석 & DB 저장 통합
     # -------------------------------------------------------------
     if LLM_AVAILABLE:
-        log("🧠 상위 10개 종목 뉴스/재료 심층 분석 중 (Async & LLM)...")
+        log("🧠 상위 10개 종목 심층 분석 중 (뉴스 + DART 공시)...")
         
-        # 1. 분석 대상 선정 (상위 10개)
+        # 1. DART 분석기 초기화 (API Key 환경변수 확인)
+        dart_key = os.environ.get("DART_API_KEY")
+        dart_engine = dart_analyzer.DartAnalyzer(dart_api_key=dart_key)
+        
+        if not dart_key:
+            log("⚠️ DART_API_KEY가 없습니다. 공시 분석은 건너뜁니다.")
+
+        # 2. 분석 대상 선정 (상위 10개)
         target_indices = df_out.index[:10]
-        # 코드 포맷팅 (005930 등)
         target_codes = [str(df_out.loc[i, "종목코드"]).zfill(6) for i in target_indices]
         
-        # 2. 비동기 뉴스 수집 실행 (병렬 처리로 속도 향상)
+        # 3. 비동기 뉴스 수집 (기존 유지)
+        news_map = {}
         try:
             fetcher = AsyncNewsFetcher(max_concurrent=5)
-            # 윈도우 환경에서 asyncio 오류 발생 시 loop 정책 설정이 필요할 수 있음
-            # if os.name == 'nt': asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            if os.name == 'nt': 
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
             news_map = asyncio.run(fetcher.fetch_all(target_codes))
         except Exception as e:
             log(f"⚠️ 뉴스 수집 중 오류: {e}")
-            news_map = {}
 
-        # 3. LLM 분석 및 결과 반영
+        # 4. 통합 분석 및 점수 반영
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = ""
         
         for idx in target_indices:
             code = str(df_out.loc[idx, "종목코드"]).zfill(6)
             name = df_out.loc[idx, "종목명"]
-            headlines = news_map.get(code, [])
             
-            # 뉴스 있으면 LLM 분석, 없으면 스킵
+            # (A) 뉴스 분석
+            headlines = news_map.get(code, [])
+            l_score, l_reason = 0.0, ""
             if headlines:
                 l_score, l_reason = analyze_sentiment_llm(name, headlines)
-            else:
-                l_score, l_reason = 0.0, "뉴스없음"
             
-            # 점수 반영 (기존 로직 유지)
+            # (B) DART 공시 분석 (여기가 핵심!)
+            d_score, d_reason = 0.0, ""
+            if dart_engine.dart: # DART 객체가 정상 초기화되었을 때만 실행
+                disclosures = dart_engine.get_major_disclosures(code, days=3)
+                if disclosures:
+                    # 가장 최근 중요 공시 1개만 정밀 분석
+                    recent = disclosures[0]
+                    d_score, d_reason = dart_engine.analyze_report(recent['rcept_no'], recent['report_nm'])
+                    log(f"   📄 {name} DART 분석: {recent['report_nm']} -> {d_score}점")
+
+            # (C) 점수 및 코멘트 합산
+            final_event_score = np.clip(l_score + d_score, -10, 10)
+            
             old_score = df_out.at[idx, "LDY_SCORE"]
-            new_score = np.clip(old_score + l_score, 0, 100)
-            df_out.at[idx, "LDY_SCORE"] = new_score
-            df_out.at[idx, "NEWS_SCORE"] = l_score
-            df_out.at[idx, "NEWS_REASON"] = l_reason
+            # 점수 반영 (기존 점수 + 이벤트 점수)
+            new_score = np.clip(old_score + final_event_score, 0, 100)
             
-            # 코멘트에 추가
-            if l_reason and l_reason != "뉴스없음":
+            df_out.at[idx, "LDY_SCORE"] = new_score
+            df_out.at[idx, "NEWS_SCORE"] = final_event_score
+            
+            # 이유 병합
+            reasons = []
+            if d_reason: reasons.append(f"[공시]{d_reason}")
+            if l_reason and l_reason != "뉴스없음": reasons.append(f"[뉴스]{l_reason}")
+            
+            final_reason = " / ".join(reasons) if reasons else "특이사항 없음"
+            df_out.at[idx, "NEWS_REASON"] = final_reason
+            
+            if reasons:
                 old_comment = str(df_out.at[idx, "AI_COMMENT"])
                 if old_comment == "nan": old_comment = ""
-                df_out.at[idx, "AI_COMMENT"] = f"{old_comment} 📰재료: {l_reason}"
+                df_out.at[idx, "AI_COMMENT"] = f"{old_comment} 📢재료: {final_reason}"
                 
     else:
-        log("ℹ️ LLM 설정(API Key)이 없거나 라이브러리가 없어 뉴스 분석을 건너뜁니다.")
+        log("ℹ️ LLM 설정(API Key)이 없어 심층 분석을 건너뜁니다.")
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = ""
 
