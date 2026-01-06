@@ -25,6 +25,7 @@ from typing import Optional, Dict, Any, Tuple
 # [v11.0] DB 연동 및 히스토리 차트 함수
 # ---------------------------
 import duckdb  # 👈 필수
+from plotly.subplots import make_subplots
 
 @st.cache_data(ttl=60)  # DB 조회는 1분 캐싱
 def get_stock_history_from_db(code: str):
@@ -158,7 +159,7 @@ from auth_user import (
     load_subscriptions_db, save_subscriptions_db,  # 👈 여기에 쉼표(,)가 꼭 있어야 합니다!
     toggle_user_ban
 )
-from plotly.subplots import make_subplots
+
 from version_info import (
     PRIME_TG_JOIN_URL,
     APP_VERSION,
@@ -1324,6 +1325,56 @@ def get_stock_chart_data(code):
     except Exception:
         logger.exception("get_stock_chart_data failed")
         return None
+
+
+# -----------------------------------------------------------
+# [v12.0 New] AI 게이지 & 켈리 자금관리 차트
+# -----------------------------------------------------------
+def plot_ai_gauge_chart(score):
+    """종합 점수(AI+Quant) 게이지 차트"""
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number+delta",
+        value = score,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': "🏆 AI 종합 신뢰도", 'font': {'size': 18}},
+        delta = {'reference': 80, 'increasing': {'color': "green"}},
+        gauge = {
+            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': "#2979FF"},
+            'bgcolor': "white",
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [0, 60], 'color': '#FFEBEE'},
+                {'range': [60, 80], 'color': '#E3F2FD'},
+                {'range': [80, 100], 'color': '#E8F5E9'}],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': score}}))
+    fig.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=20))
+    return fig
+
+def plot_kelly_visual(win_rate_est, reward_risk, kelly_pct):
+    """켈리 베팅 비중 시각화"""
+    metrics = ['승률(Win Rate)', '손익비(Reward/Risk)', '켈리 권장 비중']
+    # 시각화를 위해 스케일 조정 (손익비 x10, 비중 x100)
+    values = [win_rate_est * 100, reward_risk * 10, kelly_pct * 100] 
+    colors = ['#FF7043', '#42A5F5', '#66BB6A']
+    text_vals = [f"{win_rate_est*100:.1f}%", f"{reward_risk:.2f}배", f"{kelly_pct*100:.1f}%"]
+
+    fig = go.Figure(go.Bar(
+        x=values, y=metrics, orientation='h',
+        marker_color=colors, text=text_vals, textposition='auto'
+    ))
+    fig.update_layout(
+        title="💰 켈리 자금 관리 (승률 vs 손익비)",
+        height=200, margin=dict(l=10, r=10, t=40, b=10),
+        xaxis=dict(range=[0, 100], visible=False),
+        yaxis=dict(autorange="reversed")
+    )
+    return fig
+
 
 def plot_radar_chart(row):
     """
@@ -3069,7 +3120,11 @@ with tab2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
                     
-                    # 주봉 신호등
+                    # 🔥 [v12.0] AI 신뢰도 게이지 추가
+                    total_score = float(row.get("TOTAL_SCORE", row.get("LDY_SCORE", 0)))
+                    st.plotly_chart(plot_ai_gauge_chart(total_score), use_container_width=True)
+
+                    # 기존: 주봉 신호등
                     w_above = row.get("주봉20선_상회") == "O"
                     w_up = row.get("주봉추세") == "▲"
                     if w_above and w_up:
@@ -3161,13 +3216,45 @@ with tab2:
                     # 자금 관리
                     rec_qty = pd.to_numeric(row.get("추천수량", 0), errors='coerce')
                     rec_amt = pd.to_numeric(row.get("추천금액(만원)", 0), errors='coerce')
+                    
                     if rec_qty > 0:
                         st.markdown(f"""
                             <div style="padding:10px; border-radius:5px; background-color:rgba(46, 125, 50, 0.1); border:1px solid #4caf50; margin-bottom:10px;">
-                                <strong style="color:#2e7d32;">💰 자금 관리 (Risk 2%)</strong><br>
+                                <strong style="color:#2e7d32;">💰 Kelly Money Management</strong><br>
                                 🎯 추천 비중: <b>{int(rec_qty)}주</b> (약 {rec_amt}만원)
                             </div>
                         """, unsafe_allow_html=True)
+                        
+                        # 켈리 그래프 그리기용 변수 계산 (역산)
+                        cur_score = float(row.get("TOTAL_SCORE", 0))
+                        win_est = 0.4 + (max(cur_score, 0) - 60) * 0.01  # 승률 추정
+                        
+                        buy_p = float(row.get("추천매수가", 0))
+                        stop_p = float(row.get("손절가", 0))
+                        t1_p = float(row.get("추천매도가1", 0))
+                        
+                        if buy_p > stop_p:
+                            rr_ratio = (t1_p - buy_p) / (buy_p - stop_p)
+                        else:
+                            rr_ratio = 0
+                            
+                        # 켈리 비중 (최대 30% 기준)
+                        kelly_vis = min(rec_amt * 10000 / 10_000_000, 0.3) 
+                        
+                        st.plotly_chart(plot_kelly_visual(win_est, rr_ratio, kelly_vis), use_container_width=True)
+
+                    # 🔥 [v11.0] 히스토리 차트
+                    st.markdown("---")
+                    hist_df = get_stock_history_from_db(code)
+                    if not hist_df.empty and len(hist_df) > 1:
+                        st.markdown("##### 📜 과거 추천 이력 (Trend)")
+                        hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
+                        if hist_fig:
+                            st.plotly_chart(hist_fig, use_container_width=True)
+                    else:
+                        st.caption("※ 과거 데이터가 충분하지 않습니다.")
+
+                
 
                     # 리스크/리워드 차트
                     rr_entry = _to_num(row.get("추천매수가", np.nan), np.nan)
