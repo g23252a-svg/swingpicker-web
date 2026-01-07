@@ -3121,7 +3121,7 @@ with tab2:
                 if auth_status in ["pro", "prime", "admin"]:
                     st.markdown(f"### {row.get('종목명','-')}")
                     
-                    # 🔥 [v12.0] AI 신뢰도 게이지 추가
+                    # 🔥 [v12.0] AI 신뢰도 게이지 (레이더 차트) - 중복 호출 제거됨 (1회만 호출)
                     total_score = float(row.get("TOTAL_SCORE", row.get("LDY_SCORE", 0)))
                     st.plotly_chart(plot_radar_chart(row), use_container_width=True, key=f"radar_{code}")
 
@@ -3142,8 +3142,7 @@ with tab2:
                         </div>
                     """, unsafe_allow_html=True)
 
-                    # 레이더 차트
-                    st.plotly_chart(plot_radar_chart(row), use_container_width=True, key=f"radar_{code}_{uuid.uuid4().hex[:8]}")
+                    # (여기 있던 중복된 레이더 차트 코드 삭제됨)
 
                     # 뉴스 카드
                     news_score = pd.to_numeric(row.get("NEWS_SCORE", 0), errors="coerce")
@@ -3159,8 +3158,6 @@ with tab2:
                             <span style="color:#333; font-size:0.95em;">{news_reason}</span>
                         </div>
                         """, unsafe_allow_html=True)
-
-                        
 
                     # AI 코멘트 & 뱃지
                     ai_cmt = row.get("AI_COMMENT", row.get("WHY", "-"))
@@ -3178,46 +3175,7 @@ with tab2:
                     
                     st.info(f"💬 **AI:** {ai_cmt}")
 
-                    # ---------------------------------------------------------
-                    # 🔥 [v11.0 Upgrade] DB 기반 히스토리 분석 추가
-                    # ---------------------------------------------------------
-                    if auth_status in ["pro", "prime", "admin"]:
-                        st.markdown("---")
-                        
-                        # DB에서 과거 기록 조회 (함수 호출)
-                        hist_df = get_stock_history_from_db(code)
-                        
-                        if not hist_df.empty and len(hist_df) > 1:
-                            st.markdown("##### 📜 과거 추천 이력 (Trend)")
-                            
-                            # 1. 히스토리 차트 (함수 호출)
-                            hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
-                            if hist_fig:
-                            # 🧩 랜덤 ID를 붙여서 '키 중복' 에러 완전 차단
-                                import uuid
-                                unique_key = f"hist_{code}_{uuid.uuid4().hex[:8]}"
-                                st.plotly_chart(hist_fig, use_container_width=True, key=unique_key)
-                            
-                            # 2. 과거 AI 코멘트 (최근 3건 역순)
-                            with st.expander("💬 과거 AI 코멘트 보기"):
-                                for _, h_row in hist_df.tail(5).sort_values("trade_date", ascending=False).iterrows():
-                                    # 날짜 포맷팅 (datetime 객체인 경우)
-                                    if isinstance(h_row['trade_date'], (pd.Timestamp, datetime)):
-                                        d_str = h_row['trade_date'].strftime("%Y-%m-%d")
-                                    else:
-                                        d_str = str(h_row['trade_date'])[:10]
-                                        
-                                    sc = h_row['ldy_score']
-                                    cmt = str(h_row.get('ai_comment', '')).strip()
-                                    if cmt and cmt != 'nan':
-                                        st.markdown(f"**[{d_str}]** `Click {sc:.0f}점` : {cmt}")
-                        
-                        elif len(hist_df) == 1:
-                            st.info("💡 오늘 처음 데이터베이스에 기록된 종목입니다.")
-                        else:
-                            st.caption("※ 과거 히스토리 데이터가 없습니다.")
-
-                    # 자금 관리
+                    # 자금 관리 (Kelly Betting)
                     rec_qty = pd.to_numeric(row.get("추천수량", 0), errors='coerce')
                     rec_amt = pd.to_numeric(row.get("추천금액(만원)", 0), errors='coerce')
                     
@@ -3229,10 +3187,9 @@ with tab2:
                             </div>
                         """, unsafe_allow_html=True)
                         
-                        # 켈리 그래프 그리기용 변수 계산 (역산)
+                        # 켈리 그래프
                         cur_score = float(row.get("TOTAL_SCORE", 0))
-                        win_est = 0.4 + (max(cur_score, 0) - 60) * 0.01  # 승률 추정
-                        
+                        win_est = 0.4 + (max(cur_score, 0) - 60) * 0.01
                         buy_p = float(row.get("추천매수가", 0))
                         stop_p = float(row.get("손절가", 0))
                         t1_p = float(row.get("추천매도가1", 0))
@@ -3242,25 +3199,45 @@ with tab2:
                         else:
                             rr_ratio = 0
                             
-                        # 켈리 비중 (최대 30% 기준)
-                        kelly_vis = min(rec_amt * 10000 / 10_000_000, 0.3) 
+                        kelly_vis = min(rec_amt * 10000 / 10_000_000, 0.3)
                         
+                        import uuid
                         st.plotly_chart(plot_kelly_visual(win_est, rr_ratio, kelly_vis), use_container_width=True, key=f"kelly_{code}_{uuid.uuid4().hex[:8]}")
-                    # 🔥 [v11.0] 히스토리 차트
+
+                    # ---------------------------------------------------------
+                    # 🔥 [v11.0 Upgrade] DB 기반 히스토리 분석 (중복 제거됨)
+                    # ---------------------------------------------------------
                     st.markdown("---")
+                    
                     hist_df = get_stock_history_from_db(code)
+                    
                     if not hist_df.empty and len(hist_df) > 1:
                         st.markdown("##### 📜 과거 추천 이력 (Trend)")
-                        hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
                         
+                        # 1. 히스토리 차트
+                        hist_fig = plot_score_history_chart(hist_df, row.get("종목명"))
                         if hist_fig:
                             import uuid
                             unique_key = f"hist_{code}_{uuid.uuid4().hex[:8]}"
                             st.plotly_chart(hist_fig, use_container_width=True, key=unique_key)
+                        
+                        # 2. 과거 AI 코멘트 (최근 3건 역순)
+                        with st.expander("💬 과거 AI 코멘트 보기"):
+                            for _, h_row in hist_df.tail(5).sort_values("trade_date", ascending=False).iterrows():
+                                if isinstance(h_row['trade_date'], (pd.Timestamp, datetime)):
+                                    d_str = h_row['trade_date'].strftime("%Y-%m-%d")
+                                else:
+                                    d_str = str(h_row['trade_date'])[:10]
+                                
+                                sc = h_row['ldy_score']
+                                cmt = str(h_row.get('ai_comment', '')).strip()
+                                if cmt and cmt != 'nan':
+                                    st.markdown(f"**[{d_str}]** `Click {sc:.0f}점` : {cmt}")
+                    
+                    elif len(hist_df) == 1:
+                        st.info("💡 오늘 처음 데이터베이스에 기록된 종목입니다.")
                     else:
-                        st.caption("※ 과거 데이터가 충분하지 않습니다.")
-
-                
+                        st.caption("※ 과거 히스토리 데이터가 없습니다.")
 
                     # 리스크/리워드 차트
                     rr_entry = _to_num(row.get("추천매수가", np.nan), np.nan)
