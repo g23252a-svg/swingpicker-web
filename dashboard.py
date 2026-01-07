@@ -3679,28 +3679,48 @@ with tab4:
 
     st.markdown("#### 📂 최근 문의 내역")
 
-    # ✅ [수정됨] Gist에서 데이터를 불러와서 보여줍니다.
+    # Gist에서 데이터를 불러옴
     inquiries = load_inquiry_items()
 
     if not inquiries:
         st.info("아직 등록된 문의가 없습니다.")
     else:
         # 최신순 정렬 (리스트 뒤집기)
-        for item in reversed(inquiries[-50:]):
+        # enumerate를 사용하여 고유 key 생성
+        for i, item in enumerate(reversed(inquiries[-50:])):
             box = st.container(border=True)
             with box:
-                st.markdown(f"**제목:** {item.get('title', '-')}")
+                c_head, c_btn = st.columns([8, 1])
+                
+                with c_head:
+                    st.markdown(f"**제목:** {item.get('title', '-')}")
 
-                # 날짜 포맷팅 (UTC -> KST 변환은 to_kst_str 함수가 있다면 사용, 없으면 그대로)
+                # 날짜 포맷팅
                 date_str = item.get('created_at','-')
                 if 'to_kst_str' in globals():
-                    date_str = to_kst_str(date_str)
+                    date_str_disp = to_kst_str(date_str)
+                else:
+                    date_str_disp = date_str
 
-                meta = f"작성자: {item.get('nickname','익명')} · 작성일: {date_str}"
+                meta = f"작성자: {item.get('nickname','익명')} · 작성일: {date_str_disp}"
                 if item.get("email"):
                     meta += f" · 이메일: {item.get('email')}"
-                st.caption(meta)
-                st.markdown(item.get("content", "").replace("\n", "  \n"))
+                
+                with c_head:
+                    st.caption(meta)
+                    st.markdown(item.get("content", "").replace("\n", "  \n"))
+
+                # 🔥 [추가된 기능] 관리자일 경우 삭제 버튼 표시
+                with c_btn:
+                    if auth_status == "admin":
+                        # 버튼 키를 유니크하게 만들기 위해 인덱스와 날짜 조합
+                        if st.button("🗑️", key=f"del_inq_{i}_{date_str}", help="글 삭제"):
+                            # 삭제 로직: 원본 리스트에서 해당 created_at을 가진 항목 제거
+                            new_list = [x for x in inquiries if x.get('created_at') != date_str]
+                            save_inquiry_items(new_list)
+                            st.toast("글이 삭제되었습니다.")
+                            time.sleep(1)
+                            st.rerun()
 
 with tab5:
     st.subheader("⚖️ 이용 약관 / 투자 유의사항")
