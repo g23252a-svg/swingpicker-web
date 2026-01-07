@@ -44,6 +44,41 @@ except ImportError:
     BS4_OK = False
     print("⚠️ BeautifulSoup4가 설치되지 않았습니다. (pip install beautifulsoup4)")
 
+# ▼▼▼ [여기] 아래 코드를 삽입하세요 (secrets.toml 강제 로드) ▼▼▼
+def load_secrets_to_env():
+    """
+    Streamlit 없이 실행될 때 .streamlit/secrets.toml 파일을 읽어 
+    환경변수(os.environ)에 로드하는 함수
+    """
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        secrets_path = os.path.join(base_dir, ".streamlit", "secrets.toml")
+        
+        if os.path.exists(secrets_path):
+            with open(secrets_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    # 주석이나 빈 줄 건너뛰기
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    # [Section] 헤더 건너뛰기
+                    if line.startswith("[") and line.endswith("]"):
+                        continue
+                        
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip().strip('"').strip("'")
+                    
+                    if key and val:
+                        os.environ[key] = val
+                        # print(f"🔑 Key Loaded: {key}") 
+    except Exception as e:
+        print(f"⚠️ Secrets 로드 실패: {e}")
+
+# 실행 초기화 시점에 키 로드
+load_secrets_to_env()
+# ▲▲▲ [여기] 까지 삽입 ▲▲▲
+
 # LLM API 키 설정 (환경변수 또는 직접 입력)
 # Google Gemini (무료 티어 가능) 또는 OpenAI 사용 권장
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") 
