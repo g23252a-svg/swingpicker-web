@@ -9,6 +9,7 @@ LDY Pro Trader Dashboard v8.0 (Macro View & SuperTrend Chart)
 # import
 # ---------------------------
 import os, io, math, json, requests, logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
