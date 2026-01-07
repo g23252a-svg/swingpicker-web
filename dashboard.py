@@ -3364,15 +3364,14 @@ def fetch_current_price(code, name):
 with tab3:
     # 1) 권한 체크
     if auth_status in ["guest", "free"]:
-        st.info("🔒 내 자산 분석은 Pro 등급부터 가능합니다.")
+        st.info("🔒 내 자산 분석 및 리밸런싱 제안은 **Pro 등급**부터 가능합니다.")
     else:
-        st.subheader("💼 내 자산 관리 (엑셀형 에디터)")
+        st.subheader("💼 내 자산: AI 리밸런싱 & 진단")
 
-        # 1. 데이터 로드 (Gist에서 가져오기)
+        # 1. 데이터 로드 (Gist/Local)
         saved_str = load_portfolio_file()
         default_data = []
         
-        # 저장된 데이터 파싱 (기존 텍스트 포맷 -> 리스트 변환)
         if saved_str:
             try:
                 lines = saved_str.strip().split("\n")
@@ -3380,97 +3379,82 @@ with tab3:
                     if ":" in line:
                         parts = line.split(":")
                         if len(parts) >= 3:
-                            # 콤마 제거 및 숫자 변환
                             try:
+                                nm = parts[0].strip()
                                 p_val = int(float(parts[1].replace(",","").strip()))
                                 q_val = int(float(parts[2].replace(",","").strip()))
-                                default_data.append({
-                                    "종목명": parts[0].strip(),
-                                    "평단가": p_val,
-                                    "수량": q_val,
-                                    "비고": ""
-                                })
+                                default_data.append({"종목명": nm, "평단가": p_val, "수량": q_val, "비고": ""})
                             except: pass
             except: pass
         
-        # 데이터가 없으면 빈 행 추가 (사용자 입력 유도용)
         if not default_data:
             default_data = [{"종목명": "", "평단가": 0, "수량": 0, "비고": ""}]
 
-        # 2. 데이터 에디터 출력 (엑셀처럼 편집 가능)
+        # 2. 데이터 에디터
+        st.caption("👇 현재 보유 중인 종목을 입력하세요. AI가 점수를 분석해 조언을 드립니다.")
         edited_df = st.data_editor(
             pd.DataFrame(default_data),
-            num_rows="dynamic",  # 행 추가/삭제 허용
+            num_rows="dynamic",
             use_container_width=True,
             key="portfolio_editor",
             column_config={
                 "종목명": st.column_config.TextColumn(required=True),
                 "평단가": st.column_config.NumberColumn(format="%d원", min_value=0, required=True),
                 "수량": st.column_config.NumberColumn(format="%d주", min_value=0, required=True),
-                "비고": st.column_config.TextColumn(width="small")
             }
         )
 
-        # 3. 데이터 저장 및 분석 대상 생성
+        # 3. 데이터 저장 및 분석 대상 추출
         targets = []
         cash_amt = 0.0
         save_lines = []
-        
-        # 코드 매핑 함수가 있으면 가져오기 (전역 함수 사용)
         code_map = get_code_map() if 'get_code_map' in globals() else {}
 
-        # 에디터의 내용을 순회하며 저장용 문자열과 분석용 타겟 리스트 생성
         if edited_df is not None and not edited_df.empty:
             for _, row in edited_df.iterrows():
                 nm = str(row.get("종목명", "")).strip()
                 if not nm: continue
-                
                 try:
                     price = float(row.get("평단가", 0))
                     qty = int(row.get("수량", 0))
                 except: continue
 
-                # 저장 포맷 (종목:평단:수량) 생성
                 save_lines.append(f"{nm}:{int(price)}:{int(qty)}")
 
-                # 현금(CASH)인지 일반 종목인지 구분
                 if nm.upper() == "CASH" or "현금" in nm:
                     cash_amt += price * qty
                 else:
-                    # 종목명을 코드로 변환 (매핑 실패 시 입력한 이름 그대로 사용)
-                    # 전역 함수 find_code_by_name 사용
                     real_code = find_code_by_name(nm, code_map) or nm
                     targets.append((real_code, nm, price, qty))
             
-            # 변경 사항이 있으면 자동 저장 (Gist/파일)
             new_save_str = "\n".join(save_lines)
             if new_save_str != saved_str:
                 save_portfolio_file(new_save_str)
 
-        # 4. 실시간 시세 조회 및 카드 출력
+        # 4. AI 진단 로직 (현재가 조회 + 점수 매핑)
         if not targets and cash_amt <= 0:
-             st.info("👆 위 표에 보유 종목명, 평단가, 수량을 입력하면 실시간으로 분석됩니다.")
+             st.info("👆 보유 종목을 입력하면 AI가 진단을 시작합니다.")
         else:
-            # 병렬 처리로 현재가 조회
+            # 현재가 조회 (병렬)
             price_map = {}
-            with st.spinner('⚡ 보유 종목 시세 조회 중...'):
+            with st.spinner('⚡ 보유 종목 시세 및 AI 점수 조회 중...'):
                 with ThreadPoolExecutor(max_workers=10) as executor:
-                    # 전역 함수 fetch_current_price 사용
                     futures = [executor.submit(fetch_current_price, t[0], t[1]) for t in targets]
                     for future in futures:
                         c, n, p = future.result()
                         price_map[c] = p
             
-            # 종목별 카드 출력
-            cols = st.columns(3)
             total_eval = 0.0
             total_buy = 0.0
-            rows_pf = []
+            pf_rows = []
 
-            for idx, (code, name, avg, qty) in enumerate(targets):
+            # 점수 데이터(scored)가 있다면 활용
+            scored_df = scored if 'scored' in globals() else pd.DataFrame()
+
+            for code, name, avg, qty in targets:
                 curr = price_map.get(code, 0)
                 
-                # 시세가 있고 코드가 숫자면 실제 종목명(KRX) 가져오기, 아니면 입력한 이름 사용
+                # 종목명 보정
                 real_name = name
                 if PYKRX_OK and curr > 0 and str(code).isdigit():
                     try:
@@ -3483,47 +3467,133 @@ with tab3:
                 total_eval += eval_amt
                 total_buy += buy_amt
                 
-                rows_pf.append({"name": real_name, "eval": eval_amt, "code": code})
+                pct = (curr - avg) / avg * 100 if avg > 0 and curr > 0 else 0.0
                 
-                # 수익률 계산
-                pct = (curr - avg) / avg * 100 if avg > 0 and curr > 0 else 0
-                pnl = eval_amt - buy_amt
+                # 🔥 [핵심] AI 점수 매핑 & 조언 생성
+                ai_score = 0
+                rank_score = 0
+                advice = "관망"
+                advice_color = "gray"
                 
-                color = "green" if pct > 0 else ("red" if pct < 0 else "gray")
-                signal = "🟢" if pct > 0 else ("🔴" if pct < 0 else "⚪")
+                if not scored_df.empty:
+                    # 코드 기준 검색
+                    match = scored_df[scored_df['종목코드'] == str(code).zfill(6)]
+                    if not match.empty:
+                        ai_score = float(match.iloc[0].get('ML_SCORE', 0))
+                        rank_score = float(match.iloc[0].get('RANK_SCORE', 0))
+                
+                # 점수가 0이면 이름으로 한 번 더 검색 (Fallback)
+                if ai_score == 0 and not scored_df.empty:
+                     match_name = scored_df[scored_df['종목명'] == real_name]
+                     if not match_name.empty:
+                        ai_score = float(match_name.iloc[0].get('ML_SCORE', 0))
+                        rank_score = float(match_name.iloc[0].get('RANK_SCORE', 0))
 
-                # 카드 UI (3열 배치)
-                with cols[idx % 3]:
-                    with st.container(border=True):
-                        c_main, c_pnl = st.columns([1.5, 1])
-                        c_main.markdown(f"**{real_name}** {signal}")
-                        c_main.caption(f"평단 {int(avg):,} / {qty}주")
-                        c_pnl.markdown(f":{color}[{pct:+.2f}%]")
-                        c_pnl.markdown(f"**{int(curr):,}원**" if curr > 0 else "확인불가")
+                # 종합 점수 (AI 60% + 퀀트 40%)
+                final_s = 0
+                if ai_score > 0:
+                    final_s = (ai_score * 0.6) + (rank_score * 0.4)
+                else:
+                    final_s = rank_score # AI 점수 없으면 퀀트 점수만
 
-            # 5. 전체 요약 (현금 포함)
+                # 조언 로직
+                if final_s >= 80:
+                    advice = "💪강력홀딩/추매"
+                    advice_color = "green"
+                elif final_s >= 60:
+                    advice = "👌보유(양호)"
+                    advice_color = "blue"
+                elif final_s == 0:
+                    advice = "❓정보없음"
+                    advice_color = "gray"
+                elif final_s <= 40:
+                    advice = "⚠️교체권장/매도"
+                    advice_color = "red"
+                else:
+                    advice = "👀관망(중립)"
+                    advice_color = "orange"
+
+                pf_rows.append({
+                    "종목명": real_name,
+                    "수익률": pct,
+                    "평가금": eval_amt,
+                    "점수": final_s,
+                    "AI조언": advice,
+                    "Color": advice_color,
+                    "Code": code
+                })
+
+            # 5. 포트폴리오 카드 UI
+            st.divider()
+            
+            # 전체 자산 요약
             total_asset = total_eval + cash_amt
             total_invest = total_buy + cash_amt
             total_rate = (total_asset - total_invest) / total_invest * 100 if total_invest > 0 else 0
             
-            st.divider()
             m1, m2, m3 = st.columns(3)
-            m1.metric("총 매수금(현금포함)", f"{int(total_invest):,}원")
-            m2.metric("총 평가금(현금포함)", f"{int(total_asset):,}원")
-            m3.metric("총 수익률", f"{total_rate:+.2f}%", 
-                      delta=f"{int(total_asset - total_invest):,}원", 
-                      delta_color="normal" if total_rate >= 0 else "inverse")
+            m1.metric("총 자산 (현금포함)", f"{int(total_asset):,}원")
+            m2.metric("총 수익금", f"{int(total_asset - total_invest):,}원", delta_color="normal")
+            m3.metric("총 수익률", f"{total_rate:+.2f}%", delta_color="normal" if total_rate >= 0 else "inverse")
 
-            # 6. 파이 차트 (자산 구성)
+            st.markdown("##### 🩺 AI 포트폴리오 진단 결과")
+            
+            if not pf_rows:
+                st.info("보유 종목 정보가 없습니다.")
+            else:
+                # 점수 낮은 순으로 정렬 (위험 종목 먼저 보기)
+                pf_rows.sort(key=lambda x: x["점수"])
+
+                for row in pf_rows:
+                    with st.container(border=True):
+                        c1, c2, c3 = st.columns([2, 1.5, 2])
+                        
+                        # 왼쪽: 종목 정보
+                        with c1:
+                            st.markdown(f"**{row['종목명']}**")
+                            p_color = "red" if row['수익률'] > 0 else "blue" # 국내장 컬러 (빨강=상승)
+                            st.markdown(f"<span style='color:{p_color}; font-weight:bold;'>{row['수익률']:+.2f}%</span>", unsafe_allow_html=True)
+                            st.caption(f"평가금: {int(row['평가금']):,}원")
+
+                        # 가운데: AI 점수
+                        with c2:
+                            st.markdown("🤖 **AI Score**")
+                            if row['점수'] > 0:
+                                st.progress(min(row['점수'] / 100, 1.0))
+                                st.caption(f"{row['점수']:.1f}점")
+                            else:
+                                st.caption("분석불가 (데이터부족)")
+
+                        # 오른쪽: 조언 및 교체 제안
+                        with c3:
+                            st.markdown(f"**AI 의견:** :{row['Color']}[{row['AI조언']}]")
+                            
+                            # 교체 매매 제안 (점수가 40점 미만인 경우)
+                            if row['점수'] > 0 and row['점수'] <= 40:
+                                # Top 20 중 같은 업종이거나 점수 높은 종목 1개 추천
+                                rec_stock = None
+                                if not scored_df.empty:
+                                    # 1순위: 같은 업종 내 1등
+                                    # (업종 정보가 있으면 좋겠지만 없으면 전체 1등 추천)
+                                    rec_stock = scored_df.iloc[0] 
+                                    
+                                if rec_stock is not None:
+                                    rec_name = rec_stock.get('종목명', '추천주')
+                                    rec_score = rec_stock.get('TOTAL_SCORE', 0)
+                                    st.info(f"💡 **교체 추천:** {rec_name} ({rec_score:.0f}점)")
+                            
+                            elif row['점수'] >= 80:
+                                st.success("🚀 추세가 강력합니다. 수익 극대화 구간!")
+
+            # 6. 현금 비중 차트
             if cash_amt > 0:
-                rows_pf.append({"name": "💰 현금 (CASH)", "eval": cash_amt, "code": "CASH"})
-
-            if total_asset > 0:
-                df_chart = pd.DataFrame(rows_pf)
-                if not df_chart.empty:
-                    fig = px.pie(df_chart, values="eval", names="name", title="📊 자산 비중", hole=0.4)
-                    fig.update_layout(height=300, margin=dict(t=30, b=10, l=10, r=10))
-                    st.plotly_chart(fig, use_container_width=True)
+                pf_rows.append({"종목명": "현금 (CASH)", "평가금": cash_amt})
+            
+            df_pie = pd.DataFrame(pf_rows)
+            if not df_pie.empty:
+                fig = px.pie(df_pie, values="평가금", names="종목명", title="📊 자산 구성", hole=0.4)
+                fig.update_layout(height=300, margin=dict(t=30, b=10, l=10, r=10))
+                st.plotly_chart(fig, use_container_width=True)
 
 with tab4:
     st.subheader("📮 문의 게시판")
