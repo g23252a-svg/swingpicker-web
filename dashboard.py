@@ -21,6 +21,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import re
 from typing import Optional, Dict, Any, Tuple
+from dart_analyzer import DartAnalyzer
 
 # ---------------------------
 # [v11.0] DB 연동 및 히스토리 차트 함수
@@ -2286,6 +2287,32 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     # ✅ df_raw 기준 랭크/행순서 붙이기 (row align 전제)
     scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
     scored["_CSV_ROW"]  = df_raw["_CSV_ROW"].values
+
+    # ▼▼▼ [여기] 아래 코드를 삽입하세요 ▼▼▼
+    # ==========================================================
+    # 🔥 [Upgrade 2] DART 공시 리스크 반영 (API Key 연동 수정됨)
+    # ==========================================================
+    try:
+        # secrets.toml에서 키를 가져와서 전달
+        dart_key = get_conf("DART_API_KEY", "")
+        gemini_key = get_conf("GEMINI_API_KEY", "")
+        
+        # 키를 직접 넣어주며 초기화
+        analyzer = DartAnalyzer(dart_api_key=dart_key, gemini_api_key=gemini_key)
+        scored = analyzer.apply_dart_filter(scored)
+        
+        # DART 악재가 반영된 TOTAL_SCORE 계산 (안전장치)
+        if "TOTAL_SCORE" not in scored.columns:
+             scored["TOTAL_SCORE"] = scored["LDY_SCORE"] 
+             
+             # 악재(-4점 이하) 종목 점수 0점 처리
+             bad_mask = scored.get('DART_SCORE', pd.Series(0, index=scored.index)) <= -4
+             scored.loc[bad_mask, "TOTAL_SCORE"] = 0
+             scored.loc[bad_mask, "LDY_SCORE"] = 0
+             
+    except Exception as e:
+        logger.warning(f"DART Filter Failed: {e}")
+    # ▲▲▲ [여기] 까지 삽입 ▲▲▲
 
     # 5) TH/ROUTE 계산 (1회만)
     TH = compute_dynamic_thresholds(scored)
