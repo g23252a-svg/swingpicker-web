@@ -3812,18 +3812,18 @@ with tab7:
         dfs = []
         for f in files:
             try:
-                df = pd.read_csv(f)
-                
                 # 1. 파일명에서 날짜 추출 (예: rank_validation_summary_20251230.csv)
                 base_name = os.path.basename(f)
+                
+                # 'latest' 파일은 중복되므로 제외
+                if "latest" in base_name:
+                    continue
+
                 date_str = base_name.replace("rank_validation_summary_", "").replace(".csv", "")
                 
-                # 'latest' 파일은 날짜 불확실하므로 제외하거나 별도 처리 (여기선 제외)
-                if "latest" in date_str:
-                    continue
-                    
+                df = pd.read_csv(f)
+                
                 # 2. 날짜 컬럼 생성
-                # 파일명이 날짜 형식이면 변환, 아니면 문자열 그대로 사용
                 try:
                     dt = pd.to_datetime(date_str, format="%Y%m%d")
                     df['Date'] = dt
@@ -3846,64 +3846,142 @@ with tab7:
             
         return combined
 
-    # 데이터 로딩 및 시각화
+    # 데이터 로딩
     history_df = load_performance_history()
 
     if history_df.empty:
         st.info("📉 아직 축적된 성과 검증 데이터(history)가 충분하지 않습니다.")
     else:
-        # 데이터가 있다면 차트 그리기
-        # 필요한 컬럼 확인 (Win_Rate, Avg_Return 등은 summary 파일에 존재한다고 가정)
-        target_cols = ['Win_Rate', 'Avg_Return']
-        available_cols = [c for c in target_cols if c in history_df.columns]
+        # 🛠️ [수정됨] 실제 컬럼명 확인 및 매핑
+        # CSV 파일의 실제 컬럼: WIN_RATE_% , AVG_RET_%
+        col_win = 'WIN_RATE_%'
+        col_ret = 'AVG_RET_%'
 
-        if not available_cols:
-            st.warning("데이터는 로드되었으나, 승률/수익률 컬럼을 찾을 수 없습니다.")
-            st.dataframe(history_df.head())
+        if col_win not in history_df.columns or col_ret not in history_df.columns:
+            st.error(f"데이터 컬럼을 찾을 수 없습니다. (필요: {col_win}, {col_ret})")
+            st.write("현재 컬럼 목록:", history_df.columns.tolist())
         else:
-            # 최근 30일 데이터만 보기 (옵션)
-            recent_days = st.slider("조회 기간 (최근 N일)", 7, 90, 30)
-            chart_df = history_df.tail(recent_days)
-
-            # 이중축 차트 생성
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            # ---------------------------
+            # 필터링 UI (복합 데이터 중 하나만 선택해서 추세 보기)
+            # ---------------------------
+            st.markdown("##### 🔍 지표 상세 필터")
+            f_col1, f_col2, f_col3 = st.columns(3)
             
-            # 막대: 승률 (Win Rate)
-            if 'Win_Rate' in chart_df.columns:
-                # % 단위로 변환되어 있지 않다면 * 100
-                y_val = chart_df['Win_Rate']
-                if y_val.max() <= 1.0: y_val = y_val * 100
+            # 1) 전략 선택 (Method)
+            methods = sorted(history_df['METHOD'].unique()) if 'METHOD' in history_df.columns else []
+            if methods:
+                # 기본값으로 'RANK_SCORE' 우선 선택
+                def_m = 'RANK_SCORE' if 'RANK_SCORE' in methods else methods[0]
+                sel_method = f_col1.selectbox("스코어링 기준 (Method)", methods, index=methods.index(def_m))
+            else:
+                sel_method = None
+
+            # 2) Top K 선택
+            topks = sorted(history_df['TOPK'].unique()) if 'TOPK' in history_df.columns else []
+            if topks:
+                # 기본값 5
+                def_k = 5 if 5 in topks else topks[0]
+                sel_k = f_col2.selectbox("Top K (상위 N개)", topks, index=topks.index(def_k))
+            else:
+                sel_k = None
+
+            # 3) 보유 기간 (H)
+            holds = sorted(history_df['H(영업일)'].unique()) if 'H(영업일)' in history_df.columns else []
+            if holds:
+                # 기본값 5일
+                def_h = 5 if 5 in holds else holds[0]
+                sel_h = f_col3.selectbox("보유 기간 (H일)", holds, index=holds.index(def_h))
+            else:
+                sel_h = None
+            
+            # 필터링 적용
+            chart_df = history_df.copy()
+            if sel_method:
+                chart_df = chart_df[chart_df['METHOD'] == sel_method]
+            if sel_k:
+                chart_df = chart_df[chart_df['TOPK'] == sel_k]
+            if sel_h:
+                chart_df = chart_df[chart_df['H(영업일)'] == sel_h]
+
+            # ---------------------------
+            # 차트 그리기
+            # ---------------------------
+            if chart_df.empty:
+                st.warning("선택한 조건에 맞는 데이터가 없습니다.")
+            else:
+                # 날짜 기준 재정렬
+                chart_df = chart_df.sort_values('Date')
                 
+                # 최근 30일/60일/전체 옵션
+                # d_range = st.radio("조회 기간", ["최근 30건", "전체"], horizontal=True)
+                # if d_range == "최근 30건":
+                #     chart_df = chart_df.tail(30)
+                chart_df = chart_df.tail(30) # 기본 30개만 보여주기
+
+                # 이중축 차트
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # 막대: 승률 (이미 % 단위임)
                 fig.add_trace(
-                    go.Bar(x=chart_df['Date'], y=y_val, name="승률(%)", marker_color='#FFA726', opacity=0.6),
+                    go.Bar(
+                        x=chart_df['Date'], 
+                        y=chart_df[col_win], 
+                        name="승률(%)", 
+                        marker_color='#FFA726', 
+                        opacity=0.6,
+                        text=chart_df[col_win].apply(lambda x: f"{x:.1f}%"),
+                        textposition='auto'
+                    ),
                     secondary_y=False
                 )
 
-            # 선: 평균 수익률 (Avg Return)
-            if 'Avg_Return' in chart_df.columns:
-                # % 단위 가정
+                # 선: 평균 수익률
                 fig.add_trace(
-                    go.Scatter(x=chart_df['Date'], y=chart_df['Avg_Return'], name="평균수익률(%)", 
-                               mode='lines+markers', line=dict(color='#29B6F6', width=3)),
+                    go.Scatter(
+                        x=chart_df['Date'], 
+                        y=chart_df[col_ret], 
+                        name="평균수익률(%)", 
+                        mode='lines+markers+text', 
+                        line=dict(color='#29B6F6', width=3),
+                        text=chart_df[col_ret].apply(lambda x: f"{x:.1f}%"),
+                        textposition="top center"
+                    ),
                     secondary_y=True
                 )
 
-            fig.update_layout(
-                title="<b>📊 일별 승률 및 수익률 추이</b>",
-                hovermode="x unified",
-                height=400,
-                legend=dict(orientation="h", y=1.1)
-            )
-            # 축 설정
-            fig.update_yaxes(title_text="승률 (%)", range=[0, 100], secondary_y=False)
-            fig.update_yaxes(title_text="수익률 (%)", secondary_y=True)
+                fig.update_layout(
+                    title=dict(
+                        text=f"<b>📊 {sel_method} (Top {sel_k}, {sel_h}일 보유) 성과 추이</b>",
+                        font=dict(size=16)
+                    ),
+                    hovermode="x unified",
+                    height=450,
+                    legend=dict(orientation="h", y=1.1),
+                    margin=dict(l=20, r=20, t=60, b=20)
+                )
+                
+                # 축 설정
+                fig.update_yaxes(title_text="승률 (%)", range=[0, 100], secondary_y=False, showgrid=True)
+                fig.update_yaxes(title_text="수익률 (%)", secondary_y=True, showgrid=False)
 
-            st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True)
 
-            # 상세 데이터 테이블
-            with st.expander("📄 상세 데이터 보기"):
-                # 날짜 포맷팅하여 표시
-                display_df = chart_df.copy()
-                if 'Date' in display_df.columns:
-                    display_df['Date'] = display_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d') if isinstance(x, pd.Timestamp) else x)
-                st.dataframe(display_df.sort_values('Date', ascending=False), use_container_width=True)
+                # 요약 통계
+                avg_win = chart_df[col_win].mean()
+                avg_ret = chart_df[col_ret].mean()
+                
+                m1, m2, m3 = st.columns(3)
+                m1.metric("기간 평균 승률", f"{avg_win:.1f}%")
+                m2.metric("기간 평균 수익률", f"{avg_ret:.2f}%")
+                m3.caption(f"※ 최근 {len(chart_df)}건 기준")
+                
+                with st.expander("📄 상세 데이터 보기"):
+                    # 보기 좋게 컬럼 정리
+                    disp_cols = ['Date', 'METHOD', 'TOPK', 'H(영업일)', col_win, col_ret, 'TOTAL_N']
+                    disp_df = chart_df[ [c for c in disp_cols if c in chart_df.columns] ].copy()
+                    
+                    # 날짜 포맷
+                    if 'Date' in disp_df.columns:
+                        disp_df['Date'] = disp_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d') if isinstance(x, pd.Timestamp) else x)
+                        
+                    st.dataframe(disp_df.sort_values('Date', ascending=False), use_container_width=True)
