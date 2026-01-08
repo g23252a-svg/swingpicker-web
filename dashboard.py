@@ -2681,7 +2681,8 @@ df_latest = load_recommend_latest(local_path=RECOMMEND_LATEST_PATH, remote_url=R
 user = get_user()
 user_role = (user or {}).get("role", "guest")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+# tab7 변수와 목록 맨 끝에 "📈 시스템 성과 (Performance)" 추가
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
         "📊 시장 (Market)",
         "🔭 종목 분석",
@@ -2689,6 +2690,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         "📮 문의 게시판",
         "⚖️ 이용 약관 / 투자 유의사항",
         "🧩 LDY Pro Trader 업데이트 노트",
+        "📈 시스템 성과 (Performance)", 
     ]
 )
 
@@ -3792,3 +3794,116 @@ with tab6:
             ):
                 for item in log.get("items", []):
                     st.markdown(f"- {item}")
+
+
+# ---------------------------
+# [Tab 7] 시스템 성과 히스토리 (System Performance Lab)
+# ---------------------------
+with tab7:
+    st.subheader("📈 시스템 성과 추세 (System Performance Lab)")
+    st.caption("과거 추천 종목들의 검증 데이터(Validation Summary)를 기반으로 시스템의 승률 변화를 추적합니다.")
+
+    @st.cache_data(ttl=3600)
+    def load_performance_history():
+        # data 폴더의 모든 rank_validation_summary_*.csv 파일 로드
+        pattern = os.path.join(DATA_DIR, "rank_validation_summary_*.csv")
+        files = sorted(glob.glob(pattern))
+        
+        dfs = []
+        for f in files:
+            try:
+                df = pd.read_csv(f)
+                
+                # 1. 파일명에서 날짜 추출 (예: rank_validation_summary_20251230.csv)
+                base_name = os.path.basename(f)
+                date_str = base_name.replace("rank_validation_summary_", "").replace(".csv", "")
+                
+                # 'latest' 파일은 날짜 불확실하므로 제외하거나 별도 처리 (여기선 제외)
+                if "latest" in date_str:
+                    continue
+                    
+                # 2. 날짜 컬럼 생성
+                # 파일명이 날짜 형식이면 변환, 아니면 문자열 그대로 사용
+                try:
+                    dt = pd.to_datetime(date_str, format="%Y%m%d")
+                    df['Date'] = dt
+                except:
+                    df['Date'] = date_str
+
+                dfs.append(df)
+            except Exception as e:
+                pass
+        
+        if not dfs:
+            return pd.DataFrame()
+            
+        # 모든 파일 합치기
+        combined = pd.concat(dfs, ignore_index=True)
+        
+        # 날짜순 정렬
+        if 'Date' in combined.columns:
+            combined = combined.sort_values('Date')
+            
+        return combined
+
+    # 데이터 로딩 및 시각화
+    history_df = load_performance_history()
+
+    if history_df.empty:
+        st.info("📉 아직 축적된 성과 검증 데이터(history)가 충분하지 않습니다.")
+    else:
+        # 데이터가 있다면 차트 그리기
+        # 필요한 컬럼 확인 (Win_Rate, Avg_Return 등은 summary 파일에 존재한다고 가정)
+        target_cols = ['Win_Rate', 'Avg_Return']
+        available_cols = [c for c in target_cols if c in history_df.columns]
+
+        if not available_cols:
+            st.warning("데이터는 로드되었으나, 승률/수익률 컬럼을 찾을 수 없습니다.")
+            st.dataframe(history_df.head())
+        else:
+            # 최근 30일 데이터만 보기 (옵션)
+            recent_days = st.slider("조회 기간 (최근 N일)", 7, 90, 30)
+            chart_df = history_df.tail(recent_days)
+
+            # 이중축 차트 생성
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # 막대: 승률 (Win Rate)
+            if 'Win_Rate' in chart_df.columns:
+                # % 단위로 변환되어 있지 않다면 * 100
+                y_val = chart_df['Win_Rate']
+                if y_val.max() <= 1.0: y_val = y_val * 100
+                
+                fig.add_trace(
+                    go.Bar(x=chart_df['Date'], y=y_val, name="승률(%)", marker_color='#FFA726', opacity=0.6),
+                    secondary_y=False
+                )
+
+            # 선: 평균 수익률 (Avg Return)
+            if 'Avg_Return' in chart_df.columns:
+                # % 단위 가정
+                fig.add_trace(
+                    go.Scatter(x=chart_df['Date'], y=chart_df['Avg_Return'], name="평균수익률(%)", 
+                               mode='lines+markers', line=dict(color='#29B6F6', width=3)),
+                    secondary_y=True
+                )
+
+            fig.update_layout(
+                title="<b>📊 일별 승률 및 수익률 추이</b>",
+                hovermode="x unified",
+                height=400,
+                legend=dict(orientation="h", y=1.1)
+            )
+            # 축 설정
+            fig.update_yaxes(title_text="승률 (%)", range=[0, 100], secondary_y=False)
+            fig.update_yaxes(title_text="수익률 (%)", secondary_y=True)
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 상세 데이터 테이블
+            with st.expander("📄 상세 데이터 보기"):
+                # 날짜 포맷팅하여 표시
+                display_df = chart_df.copy()
+                if 'Date' in display_df.columns:
+                    display_df['Date'] = display_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d') if isinstance(x, pd.Timestamp) else x)
+                st.dataframe(display_df.sort_values('Date', ascending=False), use_container_width=True)
