@@ -3077,7 +3077,13 @@ def main(
     # -----------------------------------------------------
 
     run_reality_check(OUT_DIR, trade_ymd)
-    make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd)
+    
+    # 🔥 [수정] AI 점수(ML_SCORE)와 종합 점수(TOTAL_SCORE)도 검증 대상에 포함
+    make_rank_validation_report(
+        OUT_DIR, 
+        asof_ymd=trade_ymd, 
+        methods=["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE", "ML_SCORE", "TOTAL_SCORE"]
+    )
 
     # main 함수 마지막 부분
     if enable_telegram:
