@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from db_utils import LDYDBManager
 
-# Logging and DB Initialization
+# 로깅 및 DB 초기화
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("auth_user")
 
@@ -27,7 +27,7 @@ SECURITY_QUESTIONS = [
     "나의 좌우명은?", "부모님의 고향은 어디인가요?",
 ]
 
-# ----------------- Security Utils -----------------
+# ----------------- 보안 유틸 -----------------
 def _create_salt() -> str:
     return secrets.token_hex(16)
 
@@ -43,46 +43,46 @@ def check_rate_limit(email: str, limit: int = 5):
     if attempts >= limit: return False, "⛔ 시도 횟수 초과. 잠시 후 다시 시도하세요."
     return True, ""
 
-# ----------------- 🚨 CORE: Dashboard Compatibility Functions -----------------
-# These functions are required by dashboard.py to prevent ImportError.
+# ----------------- 🚨 핵심: 대시보드(dashboard.py) 호환 함수들 -----------------
+# 이 함수들이 없으면 dashboard.py에서 ImportError가 발생합니다.
 
 def get_user():
-    """Returns current logged-in user session info."""
+    """현재 로그인된 사용자 세션 정보 반환"""
     return st.session_state.get(CURRENT_USER_KEY)
 
 def list_users():
-    """[Admin] Retrieve all users."""
+    """[관리자용] 모든 사용자 목록 조회"""
     return db.get_all_users()
 
 def update_user_role(email, new_role, acting_admin="system"):
-    """[Admin] Update user role."""
+    """[관리자용] 사용자 권한 변경"""
     return db.update_user_role(email, new_role)
 
 def toggle_user_ban(email, acting_admin="system"):
-    """[Admin] Toggle user ban status."""
+    """[관리자용] 사용자 차단/해제 토글"""
     return db.toggle_user_ban(email)
 
 def load_inquiry_items():
-    """Load inquiry board items."""
+    """문의 게시판 글 목록 로드"""
     return db.get_all_inquiries()
 
 def save_inquiry_items(items):
-    """Save inquiry board items."""
+    """문의 게시판 글 저장"""
     return db.save_inquiries(items)
 
-def _now_utc_str():
-    """Returns current UTC time as string (Required by dashboard.py)."""
+def _now_utc_str() -> str:
+    """[추가됨] 현재 UTC 시간을 문자열로 반환 (dashboard.py 호환용)"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 def load_subscriptions_db():
-    """[Subscription] Load subscription DB as dict."""
+    """[구독관리] 구독 정보 DB 로드 (dict 형태로 변환)"""
     users = db.get_all_users()
     subs_map = {}
     for u in users:
         email = u['id']
         expire = u.get('prime_expire_date')
         if expire:
-            # Convert datetime to YYYY-MM-DD string
+            # datetime 객체를 YYYY-MM-DD 문자열로 변환
             exp_str = str(expire).split(" ")[0]
             join_str = str(u.get('join_date', '')).split(" ")[0]
             subs_map[email] = {
@@ -93,7 +93,7 @@ def load_subscriptions_db():
     return {"subs": subs_map}
 
 def save_subscriptions_db(db_dict):
-    """[Subscription] Save changed subscription info."""
+    """[구독관리] 변경된 구독 정보 저장"""
     subs = db_dict.get("subs", {})
     for email, info in subs.items():
         role = info.get("role")
@@ -102,22 +102,22 @@ def save_subscriptions_db(db_dict):
             db.update_user_subscription(email, role, expire)
     return True
 
-# ----------------- UI Component (Login/Join) -----------------
+# ----------------- UI Component (로그인/가입 화면) -----------------
 def render_auth_box(show_debug=False):
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
 
     user = st.session_state[CURRENT_USER_KEY]
 
-    # 1. Logged In State
+    # 1. 로그인 상태
     if user:
         user_id = user if isinstance(user, str) else user.get('id')
         
-        # Admin Exception
+        # 관리자 예외
         if user_id == MASTER_ADMIN_ID:
             st.sidebar.success("😎 관리자 모드")
         else:
-            # Fetch User Info from DB
+            # DB 정보 조회
             user_info = db.get_user_by_id(user_id)
             if not user_info:
                 st.session_state[CURRENT_USER_KEY] = None
@@ -130,9 +130,10 @@ def render_auth_box(show_debug=False):
             is_prime = False
             remain_msg = "무료 회원"
             
-            # Check Prime Status
+            # 프라임 기간 체크
             if role in ['prime', 'pro', 'admin'] and expire:
                 try:
+                    # str인 경우와 datetime인 경우 모두 처리
                     if isinstance(expire, str):
                         expire_dt = datetime.strptime(expire.split('.')[0], "%Y-%m-%d %H:%M:%S")
                     else:
@@ -159,22 +160,22 @@ def render_auth_box(show_debug=False):
         if st.sidebar.button("로그아웃", type="primary"):
             st.session_state[CURRENT_USER_KEY] = None
             st.rerun()
-            
-        # Return dict for compatibility
+        
+        # 리턴값은 dict 형태로 맞춤 (dashboard.py 호환)
         if user_id == MASTER_ADMIN_ID:
              return {"id": MASTER_ADMIN_ID, "login_id": MASTER_ADMIN_ID, "role": "admin", "nickname": "관리자"}
         
         u_info = db.get_user_by_id(user_id)
         if u_info:
-            u_info['login_id'] = u_info['id']
+            u_info['login_id'] = u_info['id'] # 호환성 키 추가
             return u_info
         return None
 
-    # 2. Logged Out State
+    # 2. 비로그인 상태
     st.markdown("### 🔐 LDY Pro Trader")
     tab1, tab2, tab3 = st.tabs(["로그인", "회원가입", "비밀번호 찾기"])
 
-    # [Login]
+    # [로그인]
     with tab1:
         with st.form("login_form"):
             login_id = st.text_input("이메일")
@@ -197,7 +198,7 @@ def render_auth_box(show_debug=False):
                     else:
                         st.error("로그인 실패")
 
-    # [Join]
+    # [회원가입]
     with tab2:
         st.info("🎁 가입 즉시 **7일간 프라임(유료) 기능** 무료!")
         with st.form("join_form"):
@@ -215,18 +216,18 @@ def render_auth_box(show_debug=False):
                     salt = _create_salt()
                     ph = _hash_password(npw, salt)
                     ah = _hash_answer(a, salt)
-                    
+                    # DB 저장 호출
                     ok, msg = db.register_user(nid, ph, salt, nnick, q, ah)
                     if ok:
                         st.balloons()
                         st.success(msg)
                         st.session_state[CURRENT_USER_KEY] = nid
-                        st.session_state["just_registered"] = True
+                        st.session_state["just_registered"] = True # 가입 직후 플래그
                         time.sleep(2)
                         st.rerun()
                     else: st.error(msg)
 
-    # [Find Password]
+    # [비번찾기]
     with tab3:
         if "fs" not in st.session_state: st.session_state.fs = 1
         
