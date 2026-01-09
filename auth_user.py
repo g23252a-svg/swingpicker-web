@@ -1,16 +1,21 @@
 # -*- coding: utf-8 -*-
+"""
+LDY Pro Trader Auth System (Integrated with db_utils)
+"""
+
 import streamlit as st
 import hashlib
 import secrets
 import time
-import re
 import logging
 from datetime import datetime
-from db_utils import LDYDBManager
+from db_utils import LDYDBManager  # ✅ 업데이트된 DB 매니저 연결
 
 # 로깅 및 DB 초기화
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("auth_user")
+
+# 🔥 핵심: 여기서 db_utils를 불러와야 연동이 됩니다!
 db = LDYDBManager()
 
 CURRENT_USER_KEY = "ldy_current_user"
@@ -34,7 +39,7 @@ def _hash_answer(answer: str, salt: str) -> str:
     return _hash_password(answer.strip().lower(), salt)
 
 def check_rate_limit(email: str, limit: int = 5):
-    """메모리 기반 레이트 리밋"""
+    """메모리 기반 레이트 리밋 (간소화)"""
     if "login_attempts" not in st.session_state: st.session_state.login_attempts = {}
     attempts = st.session_state.login_attempts.get(email, 0)
     if attempts >= limit: return False, "⛔ 시도 횟수 초과. 잠시 후 다시 시도하세요."
@@ -47,54 +52,61 @@ def render_auth_box():
 
     user = st.session_state[CURRENT_USER_KEY]
 
-    # 1. 로그인 상태
+    # 1. 로그인 상태 (대시보드 사이드바)
     if user:
         user_id = user if isinstance(user, str) else user.get('id')
         
-        # 관리자 예외
+        # 관리자 예외 처리
         if user_id == MASTER_ADMIN_ID:
             st.sidebar.success("😎 관리자 모드")
         else:
-            # DB 정보 조회
+            # 🔍 DB에서 최신 정보 조회 (프라임 여부 확인)
             user_info = db.get_user_by_id(user_id)
+            
             if not user_info:
                 st.session_state[CURRENT_USER_KEY] = None
                 st.rerun()
 
             nickname = user_info.get('nickname', user_id)
-            
-            # 프라임 기간 체크
             expire = user_info.get('prime_expire_date')
+            
             is_prime = False
             remain_msg = "무료 회원"
             
+            # 프라임 만료일 계산
             if expire:
-                # DB에서 문자열로 넘어올 수 있으므로 파싱
                 if isinstance(expire, str):
-                    expire = datetime.strptime(expire.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                    try:
+                        expire = datetime.strptime(expire.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                    except:
+                        pass # 파싱 실패 시 무시
                 
-                remain = expire - datetime.now()
-                if remain.total_seconds() > 0:
-                    is_prime = True
-                    remain_msg = f"👑 프라임 (남은 시간: {remain.days}일)"
-                else:
-                    remain_msg = "🌑 체험 만료됨"
+                if isinstance(expire, datetime):
+                    remain = expire - datetime.now()
+                    if remain.total_seconds() > 0:
+                        is_prime = True
+                        remain_msg = f"👑 프라임 (남은 시간: {remain.days}일)"
+                    else:
+                        remain_msg = "🌑 체험 만료됨"
 
             st.sidebar.markdown(f"### 👋 **{nickname}**님")
-            st.sidebar.info(remain_msg)
-            
-            if not is_prime and user_id != MASTER_ADMIN_ID:
-                st.sidebar.button("멤버십 구독하기")
+            if is_prime:
+                st.sidebar.success(remain_msg)
+            else:
+                st.sidebar.info(remain_msg)
+                if user_id != MASTER_ADMIN_ID:
+                    st.sidebar.button("멤버십 구독하기")
 
         if st.sidebar.button("로그아웃", type="primary"):
             st.session_state[CURRENT_USER_KEY] = None
             st.rerun()
         return
 
-    # 2. 비로그인 상태 (로그인/가입/찾기)
+    # 2. 비로그인 상태 (로그인창)
+    st.markdown("### 🔐 LDY Pro Trader")
     tab1, tab2, tab3 = st.tabs(["로그인", "회원가입", "비밀번호 찾기"])
 
-    # [로그인]
+    # [로그인 탭]
     with tab1:
         with st.form("login_form"):
             login_id = st.text_input("이메일")
@@ -105,15 +117,16 @@ def render_auth_box():
                     st.session_state[CURRENT_USER_KEY] = MASTER_ADMIN_ID
                     st.rerun()
                 
-                # 일반 유저
+                # 일반 유저 로그인
                 ok, msg = check_rate_limit(login_id)
-                if not ok: st.error(msg)
+                if not ok: 
+                    st.error(msg)
                 else:
                     user_data = db.get_user_by_id(login_id)
                     if user_data:
                         # 비번 검증
-                        salt = user_data['salt']
-                        pw_hash = user_data['password']
+                        salt = user_data.get('salt')
+                        pw_hash = user_data.get('password')
                         if _hash_password(login_pw, salt) == pw_hash:
                             db.update_login_timestamp(login_id)
                             st.session_state[CURRENT_USER_KEY] = login_id
@@ -121,14 +134,13 @@ def render_auth_box():
                             time.sleep(0.5)
                             st.rerun()
                         else:
-                            st.error("비밀번호 불일치")
-                            # record_fail...
+                            st.error("비밀번호가 일치하지 않습니다.")
                     else:
                         st.error("존재하지 않는 계정입니다.")
 
-    # [회원가입]
+    # [회원가입 탭]
     with tab2:
-        st.info("🎁 가입 즉시 **7일간 프라임(유료) 기능**을 무료로 드립니다!")
+        st.info("🎁 가입 즉시 **7일간 프라임 기능**을 무료로 드립니다!")
         with st.form("signup_form"):
             new_id = st.text_input("이메일")
             new_nick = st.text_input("닉네임")
@@ -146,23 +158,25 @@ def render_auth_box():
                 elif not q_ans:
                     st.error("보안 질문 답변을 입력해주세요.")
                 else:
-                    # 암호화 및 저장
+                    # 암호화
                     salt = _create_salt()
                     pw_hash = _hash_password(new_pw, salt)
                     a_hash = _hash_answer(q_ans, salt)
                     
+                    # 🔥 [핵심] 여기서 db_utils의 register_user를 호출해야 
+                    # 7일 무료 혜택이 적용됩니다!
                     ok, msg = db.register_user(new_id, pw_hash, salt, new_nick, q_idx, a_hash)
+                    
                     if ok:
                         st.success(msg)
                         st.balloons()
-                        # 자동 로그인
-                        st.session_state[CURRENT_USER_KEY] = new_id
                         time.sleep(2)
+                        st.session_state[CURRENT_USER_KEY] = new_id
                         st.rerun()
                     else:
                         st.error(msg)
 
-    # [비밀번호 찾기] (기존 로직 복원)
+    # [비번 찾기 탭]
     with tab3:
         if "fs" not in st.session_state: st.session_state.fs = 1
         
@@ -173,35 +187,32 @@ def render_auth_box():
                     u = db.get_user_by_id(f_email)
                     if u:
                         st.session_state.f_email = f_email
-                        st.session_state.f_salt = u['salt']
-                        st.session_state.f_q_idx = u['security_q_idx']
-                        st.session_state.f_a_hash = u['security_a_hash']
+                        st.session_state.f_salt = u.get('salt')
+                        st.session_state.f_q_idx = u.get('security_q_idx')
+                        st.session_state.f_a_hash = u.get('security_a_hash')
                         st.session_state.fs = 2
                         st.rerun()
                     else:
                         st.error("계정을 찾을 수 없습니다.")
         
         elif st.session_state.fs == 2:
-            q_text = SECURITY_QUESTIONS[st.session_state.f_q_idx]
+            q_text = SECURITY_QUESTIONS[st.session_state.f_q_idx] if st.session_state.f_q_idx < len(SECURITY_QUESTIONS) else "질문 오류"
             st.info(f"질문: {q_text}")
             with st.form("find_step2"):
                 f_ans = st.text_input("답변")
                 f_new_pw = st.text_input("새 비밀번호", type="password")
                 if st.form_submit_button("변경하기"):
-                    # 답변 검증
                     input_a_hash = _hash_answer(f_ans, st.session_state.f_salt)
                     if input_a_hash == st.session_state.f_a_hash:
-                        # 비번 변경
                         new_salt = _create_salt()
                         new_pw_hash = _hash_password(f_new_pw, new_salt)
                         db.update_password(st.session_state.f_email, new_pw_hash, new_salt)
                         
-                        st.success("비밀번호가 변경되었습니다. 로그인해주세요.")
+                        st.success("비밀번호가 변경되었습니다.")
                         st.session_state.fs = 1
                         st.rerun()
                     else:
                         st.error("답변이 틀렸습니다.")
-            
             if st.button("취소"):
                 st.session_state.fs = 1
                 st.rerun()
