@@ -1,4 +1,4 @@
-# db_utils.py (Fixed for Data Restoration)
+# db_utils.py (Admin Event Feature Added)
 
 import duckdb
 import pandas as pd
@@ -12,13 +12,11 @@ from datetime import datetime, timedelta
 GIST_ID = st.secrets.get("LDY_GIST_ID") or os.environ.get("LDY_GIST_ID")
 GIST_TOKEN = st.secrets.get("LDY_GIST_TOKEN") or os.environ.get("LDY_GIST_TOKEN")
 
-# [수정] 파일명을 사용자가 가진 실제 파일명으로 변경
-USER_DB_FILE = "users_db.json"       
+USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json" 
 
 class LDYDBManager:
     def __init__(self):
-        # 메모리 DB 연결
         self.conn = duckdb.connect(":memory:")
         self._init_tables()
         self._load_users_from_gist()
@@ -74,49 +72,68 @@ class LDYDBManager:
                     data = json.loads(content)
                     if not data: return
                     
-                    # [핵심 수정] 딕셔너리 형태(Legacy)와 리스트 형태(New) 모두 처리
-                    
-                    # 1. Users 테이블 처리
+                    # 1. Users 테이블
                     if tablename == 'users':
-                        # Case A: {"users": {"email": {...}}} 형태 (제공해주신 데이터 포맷)
                         if isinstance(data, dict) and "users" in data:
                             user_dict = data["users"]
-                            count = 0
                             for u in user_dict.values():
-                                # 필드 매핑 (JSON -> DB)
+                                join_dt_str = u.get('created_at', u.get('join_date'))
+                                join_dt = None
+                                try:
+                                    if join_dt_str:
+                                        clean_str = str(join_dt_str)[:19].replace("T", " ")
+                                        join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+                                except: pass
+
+                                # 만료일 없으면 가입일 + 7일로 자동 설정 (복구 로직)
+                                expire_val = u.get('prime_expire_date')
+                                role = u.get('role', 'free')
+                                
+                                if not expire_val and role in ['prime', 'pro'] and join_dt:
+                                    expire_val = join_dt + timedelta(days=7)
+                                
                                 vals = [
-                                    u.get('login_id', u.get('id')),          # id
-                                    u.get('password_hash', u.get('password')), # password
+                                    u.get('login_id', u.get('id')),
+                                    u.get('password_hash', u.get('password')),
                                     u.get('salt'),
                                     u.get('nickname'),
-                                    u.get('role', 'free'),
-                                    u.get('created_at', u.get('join_date')), # join_date
+                                    role,
+                                    join_dt_str,
                                     u.get('last_login'),
                                     u.get('is_banned', False),
                                     u.get('security_q_idx', 0),
                                     u.get('security_a_hash'),
                                     u.get('session_token'),
-                                    u.get('prime_expire_date')
+                                    expire_val
                                 ]
                                 self.conn.execute("INSERT OR IGNORE INTO users VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", vals)
-                                count += 1
-                            print(f"✅ {tablename} 복원 완료 (Dict Format: {count}건)")
+                            print(f"✅ {tablename} 복원 완료 (Dict Format)")
                             return
 
-                        # Case B: 리스트 형태 (Standard)
                         elif isinstance(data, list):
                             for item in data:
+                                join_dt_str = item.get('join_date')
+                                expire_val = item.get('prime_expire_date')
+                                role = item.get('role', 'free')
+                                
+                                if not expire_val and role in ['prime', 'pro'] and join_dt_str:
+                                    try:
+                                        clean_str = str(join_dt_str)[:19].replace("T", " ")
+                                        join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+                                        expire_val = join_dt + timedelta(days=7)
+                                    except: pass
+
                                 vals = [
                                     item.get('id'), item.get('password'), item.get('salt'), item.get('nickname'),
-                                    item.get('role'), item.get('join_date'), item.get('last_login'), item.get('is_banned'),
+                                    role, join_dt_str, item.get('last_login'), item.get('is_banned'),
                                     item.get('security_q_idx'), item.get('security_a_hash'), item.get('session_token'),
-                                    item.get('prime_expire_date')
+                                    expire_val
                                 ]
                                 self.conn.execute("INSERT OR IGNORE INTO users VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", vals)
-                            print(f"✅ {tablename} 로드 완료 (List Format: {len(data)}건)")
+                            print(f"✅ {tablename} 로드 완료 (List Format)")
                             return
 
-                    # 2. Inquiries 테이블 처리
+                    # 2. Inquiries 테이블
                     elif tablename == 'inquiries':
                         if isinstance(data, list):
                             for item in data:
@@ -125,7 +142,7 @@ class LDYDBManager:
                                     item.get('content'), item.get('created_at')
                                 ]
                                 self.conn.execute("INSERT INTO inquiries VALUES (?,?,?,?,?)", vals)
-                            print(f"✅ {tablename} 로드 완료 ({len(data)}건)")
+                            print(f"✅ {tablename} 로드 완료")
 
         except Exception as e:
             print(f"⚠️ {tablename} 로드 실패: {e}")
@@ -134,12 +151,10 @@ class LDYDBManager:
         if not GIST_ID or not GIST_TOKEN: return
         try:
             df = self.conn.execute(f"SELECT * FROM {tablename}").fetchdf()
-            # 날짜 및 객체 타입 문자열 변환
             for col in df.columns:
                 if df[col].dtype == 'object' or 'date' in str(df[col].dtype):
                     df[col] = df[col].astype(str).replace('NaT', None).replace('nan', None)
             
-            # 항상 리스트 형태(records)로 저장하여 포맷 통일
             json_str = df.to_json(orient='records', force_ascii=False, indent=2)
             
             url = f"https://api.github.com/gists/{GIST_ID}"
@@ -163,9 +178,11 @@ class LDYDBManager:
         except Exception as e: return False, f"DB Error: {e}"
 
     def get_user_by_id(self, email):
-        cols = [x[0] for x in self.conn.execute("DESCRIBE users").fetchall()]
-        row = self.conn.execute("SELECT * FROM users WHERE id = ?", [email]).fetchone()
-        return dict(zip(cols, row)) if row else None
+        try:
+            cols = [x[0] for x in self.conn.execute("DESCRIBE users").fetchall()]
+            row = self.conn.execute("SELECT * FROM users WHERE id = ?", [email]).fetchone()
+            return dict(zip(cols, row)) if row else None
+        except: return None
 
     def update_login_timestamp(self, email):
         self.conn.execute("UPDATE users SET last_login = ? WHERE id = ?", [datetime.now(), email])
@@ -177,15 +194,16 @@ class LDYDBManager:
 
     # --- Admin Support Methods ---
     def get_all_users(self):
-        """관리자 페이지용 전체 유저 리스트"""
-        cols = [x[0] for x in self.conn.execute("DESCRIBE users").fetchall()]
-        rows = self.conn.execute("SELECT * FROM users").fetchall()
-        result = []
-        for r in rows:
-            d = dict(zip(cols, r))
-            d['login_id'] = d['id'] # 호환성
-            result.append(d)
-        return result
+        try:
+            cols = [x[0] for x in self.conn.execute("DESCRIBE users").fetchall()]
+            rows = self.conn.execute("SELECT * FROM users").fetchall()
+            result = []
+            for r in rows:
+                d = dict(zip(cols, r))
+                d['login_id'] = d['id']
+                result.append(d)
+            return result
+        except: return []
 
     def update_user_role(self, email, new_role):
         self.conn.execute("UPDATE users SET role = ? WHERE id = ?", [new_role, email])
@@ -208,6 +226,17 @@ class LDYDBManager:
             self._sync_table_to_gist("users", USER_DB_FILE)
         except:
             pass 
+            
+    # [NEW] 이벤트: 모든 회원에게 N일 체험권 지급
+    def grant_all_users_trial(self, days=7):
+        try:
+            new_expire = datetime.now() + timedelta(days=days)
+            # Admin 제외하고 모두 업데이트
+            self.conn.execute("UPDATE users SET role = 'prime', prime_expire_date = ? WHERE role != 'admin'", [new_expire])
+            self._sync_table_to_gist("users", USER_DB_FILE)
+            return True, f"모든 회원(관리자 제외)에게 {days}일 Prime 권한이 부여되었습니다."
+        except Exception as e:
+            return False, f"DB Error: {e}"
 
     # --- Inquiry Methods ---
     def get_all_inquiries(self):
@@ -217,11 +246,10 @@ class LDYDBManager:
             result = []
             for r in rows:
                 d = dict(zip(cols, r))
-                d['email'] = d['id'] # 호환성
+                d['email'] = d['id']
                 result.append(d)
             return result
-        except:
-            return []
+        except: return []
 
     def save_inquiries(self, items):
         self.conn.execute("DELETE FROM inquiries")
