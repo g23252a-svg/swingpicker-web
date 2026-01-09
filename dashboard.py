@@ -463,13 +463,7 @@ def calc_rsi_series(close: pd.Series, period: int = 14) -> pd.Series:
 # ---------------------------
 # 오픈베타 영구 PRIME 사용자
 # ---------------------------
-BETA_PRIME_USERS = {
-    "coolguyhaeng@naver.com",
-    "kiljung87@nate.com",
-    "coiil@naver.com",
-    "quartzk123@gmail.com",
-    "user5@example.com",
-}
+BETA_PRIME_USERS = set()  # 👈 베타 테스터 목록 제거 (이제 모두 결제 필요)
 
 def sync_user_role_with_subscription(user):
     """
@@ -484,6 +478,7 @@ def sync_user_role_with_subscription(user):
     base_role = user.get("role", "free")
 
     # (1) 베타 PRIME 유저: 무조건 PRIME 취급
+    # (BETA_PRIME_USERS가 비어있으므로 이 로직은 이제 실행되지 않습니다)
     if email in BETA_PRIME_USERS:
         try:
             if base_role != "prime":
