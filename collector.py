@@ -2341,43 +2341,6 @@ def analyze_ticker(
     kospi_set: set, kosdaq_set: set, name_map: Dict[str, str], sector_map: Dict[str, str],
     bench_map: Dict[str, Dict[int, float]],
 ) -> Optional[Dict[str, Any]]:
-    # [기존 로직 아래에 추가] ---------------------------------------------------
-    # 🔥 [v13.0 New] Immediate Entry Trigger Logic (즉시 진입 타이밍 포착)
-    # -----------------------------------------------------------------------
-    triggers = []
-    
-    # 1. 눌림 회복 (Pullback Recovery)
-    # 조건: 어제는 5일선 아래였으나 오늘 5일선 회복(CrossUp) + 당일 양봉 + 거래량 전일대비 증가
-    ma5 = c.rolling(5).mean()
-    if len(ma5) > 5:
-        prev_c = float(c.iloc[-2])
-        prev_ma5 = float(ma5.iloc[-2])
-        curr_ma5 = float(ma5.iloc[-1])
-        
-        if (prev_c < prev_ma5) and (last_c >= curr_ma5):
-            # 양봉 & 거래량 증가 확인 (단, 거래량이 너무 없으면 무효)
-            if (last_c > o.iloc[-1]) and (float(v.iloc[-1]) > float(v.iloc[-2])):
-                triggers.append("눌림회복")
-
-    # 2. 고가 돌파 (Breakout)
-    # 조건: 당일 종가가 전일 고가 돌파 + 거래량 10% 이상 증가 + 양봉
-    if (last_c > float(h.iloc[-2])) and \
-       (float(v.iloc[-1]) > float(v.iloc[-2]) * 1.1) and \
-       (last_c > o.iloc[-1]):
-        triggers.append("고가돌파")
-
-    # 3. 박스권 돌파 (Box Expansion / Squeeze Firing)
-    # 조건: 어제까지 TTM Squeeze(1)였다가 오늘 풀림(0) + 양봉 + 볼린저 상단 지지/돌파
-    if len(ttm_series) > 2:
-        was_sqz = ttm_series.iloc[-2]
-        is_sqz = ttm_series.iloc[-1] # ttm_squeeze 변수 활용
-        # 어제는 스퀴즈, 오늘은 아님 (발산 시작)
-        if was_sqz and not is_sqz and (last_c > o.iloc[-1]):
-             # 추가확인: 주가가 볼린저 상단 근처이거나 돌파했는지 (하락 발산 제외)
-             if last_c >= float(bb_upper.iloc[-1]) * 0.98:
-                 triggers.append("박스돌파")
-
-    trigger_str = "/".join(triggers) if triggers else ""
     code6 = str(t).zfill(6)
     if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
@@ -2496,6 +2459,41 @@ def analyze_ticker(
     avg_vol = tail5["거래량"].mean()
     v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
 
+    # -------------------------------------------------------------
+    # 2. [위치 이동] 🔥 Trigger Logic을 여기로 옮기세요!
+    #    (모든 지표 계산이 끝난 후, Scoring Logic 직전 또는 내부)
+    # -------------------------------------------------------------
+    triggers = []
+    
+    # 1. 눌림 회복 (Pullback Recovery)
+    ma5 = c.rolling(5).mean()
+    if len(ma5) > 5:
+        prev_c = float(c.iloc[-2])
+        prev_ma5 = float(ma5.iloc[-2])
+        curr_ma5 = float(ma5.iloc[-1])
+        
+        if (prev_c < prev_ma5) and (last_c >= curr_ma5):
+            if (last_c > o.iloc[-1]) and (float(v.iloc[-1]) > float(v.iloc[-2])):
+                triggers.append("눌림회복")
+
+    # 2. 고가 돌파 (Breakout)
+    if (last_c > float(h.iloc[-2])) and \
+       (float(v.iloc[-1]) > float(v.iloc[-2]) * 1.1) and \
+       (last_c > o.iloc[-1]):
+        triggers.append("고가돌파")
+
+    # 3. 박스권 돌파 (Box Expansion)
+    # ttm_series와 bb_upper가 위에서 이미 계산되어 있어야 함
+    if len(ttm_series) > 2:
+        was_sqz = ttm_series.iloc[-2]
+        is_sqz = ttm_series.iloc[-1]
+        if was_sqz and not is_sqz and (last_c > o.iloc[-1]):
+             if last_c >= float(bb_upper.iloc[-1]) * 0.98:
+                 triggers.append("박스돌파")
+
+    trigger_str = "/".join(triggers) if triggers else ""
+
+    
     # VWAP (최근 5일 주간 수급 단가)
     vwap_val = calc_vwap(ohlcv.tail(5))
     vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
