@@ -2465,31 +2465,52 @@ def analyze_ticker(
     # -------------------------------------------------------------
     triggers = []
     
-    # 1. 눌림 회복 (Pullback Recovery)
+    # 변수 사전 계산
     ma5 = c.rolling(5).mean()
+    ma20 = c.rolling(20).mean()
+    vol_avg_20 = v.rolling(20).mean() # 20일 평균 거래량
+    
+    # [조건 변수]
+    is_sunny = last_c > o.iloc[-1] # 양봉 확인
+    vol_spike = float(v.iloc[-1]) > float(v.iloc[-2]) * 2.0 # 전일 대비 거래량 2배 폭발
+    vol_spike_avg = float(v.iloc[-1]) > float(vol_avg_20.iloc[-1]) * 2.5 # 평소 대비 2.5배 폭발
+    low_disparity = (last_c / float(ma20.iloc[-1]) - 1) * 100 < 10 # 20일선 이격도 10% 미만 (아직 안 비쌈)
+    not_overheated = float(rsi.iloc[-1]) < 70 # RSI 70 미만 (과열 아님)
+    recent_calm = (last_c / float(c.iloc[-6]) - 1) * 100 < 15 # 최근 5일간 15% 이상 안 오름 (이미 급등한 놈 제외)
+
+    # 1. 🚀 급등 시동 (Ignition) - 선생님이 원하시는 "초입"
+    # 조건: 바닥권(이격도 낮음) + 5일간 잠잠함 + 오늘 거래량 폭발 + 양봉
+    if low_disparity and recent_calm and (vol_spike or vol_spike_avg) and is_sunny:
+        # 추가 조건: 윗꼬리가 너무 길면 매집봉일 수 있으므로 몸통이 어느정도 있어야 함
+        body_size = abs(last_c - o.iloc[-1])
+        upper_shadow = h.iloc[-1] - last_c
+        if body_size > upper_shadow * 0.5: # 몸통이 윗꼬리의 반은 넘어야 함
+            triggers.append("🚀급등시동")
+
+    # 2. ⚡ 눌림 회복 (Safe Pullback) - 가장 안전
+    # 조건: 5일선 회복 + 양봉 + 거래량 소폭 증가
     if len(ma5) > 5:
         prev_c = float(c.iloc[-2])
         prev_ma5 = float(ma5.iloc[-2])
         curr_ma5 = float(ma5.iloc[-1])
         
-        if (prev_c < prev_ma5) and (last_c >= curr_ma5):
-            if (last_c > o.iloc[-1]) and (float(v.iloc[-1]) > float(v.iloc[-2])):
+        if (prev_c < prev_ma5) and (last_c >= curr_ma5) and is_sunny:
+            # 거래량이 전일보다 늘어나면 신뢰도 상승
+            if float(v.iloc[-1]) > float(v.iloc[-2]):
                 triggers.append("눌림회복")
 
-    # 2. 고가 돌파 (Breakout)
-    if (last_c > float(h.iloc[-2])) and \
-       (float(v.iloc[-1]) > float(v.iloc[-2]) * 1.1) and \
-       (last_c > o.iloc[-1]):
-        triggers.append("고가돌파")
-
-    # 3. 박스권 돌파 (Box Expansion)
-    # ttm_series와 bb_upper가 위에서 이미 계산되어 있어야 함
+    # 3. 📦 박스 돌파 (Squeeze Break)
+    # 조건: TTM Squeeze 해제 + 볼린저 상단 돌파 + 과열 아님
     if len(ttm_series) > 2:
         was_sqz = ttm_series.iloc[-2]
         is_sqz = ttm_series.iloc[-1]
-        if was_sqz and not is_sqz and (last_c > o.iloc[-1]):
+        
+        # 스퀴즈가 풀리면서 상승하는데, 아직 RSI가 70을 안 넘은 놈만 잡기 (안전장치)
+        if was_sqz and not is_sqz and is_sunny and not_overheated:
              if last_c >= float(bb_upper.iloc[-1]) * 0.98:
                  triggers.append("박스돌파")
+
+    # (기존 '고가돌파'는 삭제하거나 주석 처리했습니다. 지금 시장에선 독약입니다.)
 
     trigger_str = "/".join(triggers) if triggers else ""
 
