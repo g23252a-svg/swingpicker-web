@@ -3299,8 +3299,10 @@ with tab2:
                     safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
 
             # ✅ [수정] 표시할 컬럼 리스트 (종목명, 종목코드를 맨 앞에 배치)
+            # ✅ [수정] 표시할 컬럼 리스트에 'TRIGGER' 추가 및 순서 조정
             cols = [
                 "종목명", "종목코드", 
+                "TRIGGER",  # 👈 [New] 진입 신호 컬럼 추가 (종목코드 바로 뒤)
                 "REGIME", "ROUTE", 
                 "TOTAL_SCORE", "ML_SCORE", "RANK_SCORE", "LDY_SCORE", 
                 "TTM_SQUEEZE_CNT",
@@ -3313,6 +3315,9 @@ with tab2:
             cfg = {
                 "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
                 "종목코드": st.column_config.TextColumn("코드", width="small"),
+                "TRIGGER": st.column_config.TextColumn(
+                    "⚡진입신호", width="small", help="눌림회복 / 고가돌파 / 박스돌파 등 즉시 진입 시그널"
+                ),
                 
                 "TOTAL_SCORE": st.column_config.ProgressColumn(
                     "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
@@ -3341,7 +3346,7 @@ with tab2:
                 use_container_width=True, 
                 column_config=cfg, 
                 height=600,
-                hide_index=True  # 숫자 인덱스 숨김
+                hide_index=True
             )
 
     if auth_status in ["prime", "admin"]:
