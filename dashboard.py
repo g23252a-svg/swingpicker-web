@@ -160,8 +160,7 @@ from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
     load_subscriptions_db, save_subscriptions_db,  # 👈 여기에 쉼표(,)가 꼭 있어야 합니다!
-    toggle_user_ban, grant_all_users_trial  # 👈 여기에 추가!
-    toggle_user_ban
+    toggle_user_ban, grant_all_users_trial         # 👈 새로 추가된 함수들
 )
 
 from version_info import (
