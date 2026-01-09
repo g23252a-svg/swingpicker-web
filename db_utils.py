@@ -1,53 +1,29 @@
-# -----------------------------------------------------------
-# [Upgrade 2] DuckDB Manager Class (User & Prime Logic Added)
-# -----------------------------------------------------------
 import duckdb
 import pandas as pd
-from datetime import datetime, timedelta  # ✅ timedelta 추가 (날짜 계산용)
+import requests
+import json
+import os
+import streamlit as st
+from datetime import datetime, timedelta
+
+# Gist 설정 (secrets.toml에서 가져오기)
+GIST_ID = st.secrets.get("LDY_GIST_ID") or os.environ.get("LDY_GIST_ID")
+GIST_TOKEN = st.secrets.get("LDY_GIST_TOKEN") or os.environ.get("LDY_GIST_TOKEN")
+USER_DB_FILE = "users_db_v2.json"  # Gist에 저장될 파일명
 
 class LDYDBManager:
-    def __init__(self, db_path="ldy_trader.db"):
-        self.db_path = db_path
-        # DuckDB는 동시성 제어가 엄격하므로, read_only=False로 확실히 명시
-        self.conn = duckdb.connect(self.db_path, read_only=False)
+    def __init__(self):
+        # 1. 파일이 아닌 '메모리' DB 사용 (휘발성이지만 빠름)
+        self.conn = duckdb.connect(":memory:")
         self._init_tables()
+        self._load_from_gist() # 2. 켜질 때 Gist에서 데이터 복원
 
     def _init_tables(self):
-        """테이블 스키마 초기화"""
-        
-        # 1. 추천 종목 테이블
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS daily_recommend (
-                trade_date DATE,
-                code VARCHAR,
-                name VARCHAR,
-                sector VARCHAR,
-                close_price DOUBLE,
-                ldy_score DOUBLE,
-                rank_score DOUBLE,
-                route VARCHAR,
-                ai_comment VARCHAR,
-                PRIMARY KEY (trade_date, code)
-            )
-        """)
-        
-        # 2. 가격 스냅샷 테이블
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS price_snapshots (
-                snap_date DATE,
-                code VARCHAR,
-                name VARCHAR,
-                market VARCHAR,
-                close DOUBLE,
-                PRIMARY KEY (snap_date, code)
-            )
-        """)
-
-        # 3. ✅ [NEW] 사용자 테이블 (프라임 만료일 포함)
+        """사용자 테이블 생성"""
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id VARCHAR PRIMARY KEY,
-                password VARCHAR NOT NULL,
+                password VARCHAR,
                 join_date TIMESTAMP,
                 prime_expire_date TIMESTAMP,
                 is_admin BOOLEAN DEFAULT FALSE
@@ -55,118 +31,96 @@ class LDYDBManager:
         """)
 
     # -------------------------------------------------------
-    # 🆕 사용자 관리 & 프라임 로직 추가됨
+    # ☁️ Gist 연동 (데이터 영구 보존용)
     # -------------------------------------------------------
-    
-    def add_user(self, user_id, password):
-        """
-        신규 회원가입: 가입 즉시 1주일(7일) 무료 프라임 체험 부여
-        """
+    def _load_from_gist(self):
+        """Gist에서 JSON 데이터를 가져와 DuckDB에 넣음"""
+        if not GIST_ID or not GIST_TOKEN:
+            print("⚠️ Gist 설정이 없습니다. 데이터가 저장되지 않습니다.")
+            return
+
         try:
-            # ID 중복 체크
+            url = f"https://api.github.com/gists/{GIST_ID}"
+            headers = {"Authorization": f"token {GIST_TOKEN}"}
+            resp = requests.get(url, headers=headers, timeout=5)
+            
+            if resp.status_code == 200:
+                files = resp.json().get("files", {})
+                if USER_DB_FILE in files:
+                    content = files[USER_DB_FILE]["content"]
+                    users_data = json.loads(content)
+                    
+                    # DuckDB에 데이터 삽입
+                    for u in users_data:
+                        self.conn.execute("""
+                            INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?)
+                        """, [u['id'], u['password'], u['join_date'], u['prime_expire_date'], u['is_admin']])
+                    print(f"✅ Gist에서 {len(users_data)}명 유저 복원 완료")
+        except Exception as e:
+            print(f"⚠️ Gist 로드 실패: {e}")
+
+    def _sync_to_gist(self):
+        """DuckDB 데이터를 JSON으로 변환하여 Gist에 업로드"""
+        if not GIST_ID or not GIST_TOKEN: return
+
+        try:
+            # DuckDB 데이터를 딕셔너리 리스트로 변환
+            df = self.conn.execute("SELECT * FROM users").fetchdf()
+            # 날짜 객체를 문자열로 변환
+            df['join_date'] = df['join_date'].astype(str)
+            df['prime_expire_date'] = df['prime_expire_date'].astype(str)
+            
+            users_json = df.to_dict(orient='records')
+            json_str = json.dumps(users_json, ensure_ascii=False, indent=2)
+
+            # Gist 업데이트 API 호출
+            url = f"https://api.github.com/gists/{GIST_ID}"
+            headers = {"Authorization": f"token {GIST_TOKEN}"}
+            payload = {"files": {USER_DB_FILE: {"content": json_str}}}
+            
+            requests.patch(url, headers=headers, json=payload, timeout=5)
+            print("☁️ Gist 동기화(저장) 완료")
+        except Exception as e:
+            print(f"⚠️ Gist 저장 실패: {e}")
+
+    # -------------------------------------------------------
+    # 👤 사용자 기능 (가입/로그인)
+    # -------------------------------------------------------
+    def add_user(self, user_id, password):
+        """회원가입 + 1주일 무료 + Gist 저장"""
+        try:
             check = self.conn.execute("SELECT id FROM users WHERE id = ?", [user_id]).fetchone()
-            if check:
-                return False, "이미 존재하는 아이디입니다."
+            if check: return False, "이미 존재하는 아이디입니다."
 
             now = datetime.now()
-            # 🔥 [핵심] 가입일 + 7일 = 무료 체험 만료일
             expire_date = now + timedelta(days=7)
 
+            # DB Insert
             self.conn.execute("""
-                INSERT INTO users (id, password, join_date, prime_expire_date, is_admin)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO users VALUES (?, ?, ?, ?, ?)
             """, [user_id, password, now, expire_date, False])
             
-            return True, f"회원가입 완료! 🎁 1주일 프라임 무료 체험이 시작됩니다. (~{expire_date.strftime('%Y-%m-%d')})"
+            # 🔥 중요: 변경사항 생길 때마다 Gist에 업로드
+            self._sync_to_gist()
             
+            return True, f"가입 완료! 1주일 무료 체험이 시작됩니다. (~{expire_date.strftime('%Y-%m-%d')})"
         except Exception as e:
-            return False, f"가입 오류 발생: {e}"
+            return False, f"오류: {e}"
 
     def login(self, user_id, password):
-        """로그인 확인"""
-        row = self.conn.execute("""
-            SELECT id FROM users WHERE id = ? AND password = ?
-        """, [user_id, password]).fetchone()
-        
+        """로그인"""
+        row = self.conn.execute("SELECT id FROM users WHERE id = ? AND password = ?", [user_id, password]).fetchone()
         return True if row else False
 
     def check_prime_status(self, user_id):
-        """
-        프라임 멤버십 상태 확인
-        Returns: (is_prime: bool, message: str)
-        """
+        """프라임 만료 확인"""
         row = self.conn.execute("SELECT prime_expire_date FROM users WHERE id = ?", [user_id]).fetchone()
-        
         if row and row[0]:
-            expire_dt = row[0]  # DuckDB는 datetime 객체로 반환함
+            expire_dt = row[0]
             remaining = expire_dt - datetime.now()
             
             if remaining.total_seconds() > 0:
-                days = remaining.days
-                return True, f"프라임 이용 중 (남은 기간: {days}일)"
+                return True, f"프라임 이용 중 (남은 시간: {remaining.days}일)"
             else:
-                return False, "프라임 체험이 만료되었습니다. 구독이 필요합니다."
-        
-        return False, "멤버십 정보가 없습니다."
-
-    # -------------------------------------------------------
-    # (기존 데이터 저장 함수들 유지)
-    # -------------------------------------------------------
-
-    def save_recommendations(self, df: pd.DataFrame, ymd: str):
-        if df is None or df.empty: return
-        
-        date_str = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}"
-        save_df = df.copy()
-        save_df['trade_date'] = date_str
-        
-        col_map = {
-            '종목코드': 'code', '종목명': 'name', '업종': 'sector',
-            '종가': 'close_price', 'LDY_SCORE': 'ldy_score',
-            'RANK_SCORE': 'rank_score', 'ROUTE': 'route',
-            'AI_COMMENT': 'ai_comment'
-        }
-        # 존재하는 컬럼만 rename
-        existing_cols = {k: v for k, v in col_map.items() if k in save_df.columns}
-        save_df = save_df.rename(columns=existing_cols)
-        
-        try:
-            # DuckDB register 기능을 이용해 DataFrame을 SQL에서 바로 사용
-            self.conn.register('temp_rec_df', save_df)
-            self.conn.execute(f"""
-                INSERT OR IGNORE INTO daily_recommend 
-                (trade_date, code, name, sector, close_price, ldy_score, rank_score, route, ai_comment)
-                SELECT 
-                    CAST(trade_date AS DATE), code, name, sector, close_price, ldy_score, rank_score, route, ai_comment
-                FROM temp_rec_df
-            """)
-            self.conn.unregister('temp_rec_df')
-            print(f"✅ [DuckDB] 추천 종목 저장 완료 ({len(save_df)}건)")
-        except Exception as e:
-            print(f"⚠️ [DuckDB] 저장 실패: {e}")
-
-    def save_snapshot(self, df: pd.DataFrame, ymd: str):
-        if df is None or df.empty: return
-            
-        date_str = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}"
-        save_df = df.copy()
-        
-        col_map = {'종목코드': 'code', '종목명': 'name', '시장': 'market', '종가': 'close'}
-        existing_cols = {k: v for k, v in col_map.items() if k in save_df.columns}
-        save_df = save_df.rename(columns=existing_cols)
-        
-        try:
-            self.conn.register('temp_snap_df', save_df)
-            self.conn.execute(f"""
-                INSERT OR IGNORE INTO price_snapshots (snap_date, code, name, market, close)
-                SELECT 
-                    CAST('{date_str}' AS DATE), code, name, market, close
-                FROM temp_snap_df
-            """)
-            self.conn.unregister('temp_snap_df')
-            print(f"✅ [DuckDB] 가격 스냅샷 저장 완료 ({len(save_df)}건)")
-        except Exception as e:
-            print(f"⚠️ [DuckDB] 스냅샷 저장 실패: {e}")
-
-    def close(self):
-        self.conn.close()
+                return False, "프라임 체험이 만료되었습니다."
+        return False, "멤버십 정보 없음"
