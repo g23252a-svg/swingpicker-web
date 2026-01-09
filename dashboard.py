@@ -160,6 +160,7 @@ from auth_user import (
     render_auth_box, get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
     load_subscriptions_db, save_subscriptions_db,  # 👈 여기에 쉼표(,)가 꼭 있어야 합니다!
+    toggle_user_ban, grant_all_users_trial  # 👈 여기에 추가!
     toggle_user_ban
 )
 
@@ -2494,9 +2495,18 @@ with st.sidebar:
 # 관리자 전용: 회원 권한 + 구독 만료일 관리
     if auth_status == "admin":
         st.divider()
-        st.subheader("👑 회원 관리 (Admin)")
-
-        users = list_users()
+            st.markdown("##### 🎉 이벤트 관리")
+            st.caption("버튼을 누르면 관리자를 제외한 **모든 회원**의 권한이 Prime으로 변경되고, 만료일이 오늘부터 **7일 후**로 설정됩니다.")
+            
+            if st.button("🎁 전원 7일 Prime 무료 지급", type="primary", use_container_width=True):
+                ok, msg = grant_all_users_trial(days=7)
+                if ok:
+                    st.balloons()
+                    st.success(msg)
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error(msg)
         
         # 1. 관리자 대시보드 통계 (DAU/WAU)
         if users:
