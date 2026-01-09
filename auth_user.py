@@ -70,6 +70,10 @@ def save_inquiry_items(items):
     """문의 게시판 글 저장"""
     return db.save_inquiries(items)
 
+def _now_utc_str():
+    """[추가됨] 현재 UTC 시간을 문자열로 반환 (dashboard.py 호환용)"""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
 def load_subscriptions_db():
     """[구독관리] 구독 정보 DB 로드 (dict 형태로 변환)"""
     users = db.get_all_users()
@@ -99,7 +103,7 @@ def save_subscriptions_db(db_dict):
     return True
 
 # ----------------- UI Component (로그인/가입 화면) -----------------
-def render_auth_box():
+def render_auth_box(show_debug=False): # show_debug 인자 추가하여 호환성 확보
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
 
@@ -129,16 +133,20 @@ def render_auth_box():
             # 프라임 기간 체크
             if role in ['prime', 'pro', 'admin'] and expire:
                 try:
+                    # str인 경우와 datetime인 경우 모두 처리
                     if isinstance(expire, str):
-                        expire = datetime.strptime(expire.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                        expire_dt = datetime.strptime(expire.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                    else:
+                        expire_dt = expire
                     
-                    remain = expire - datetime.now()
+                    remain = expire_dt - datetime.now()
                     if remain.total_seconds() > 0:
                         is_prime = True
                         remain_msg = f"👑 {role.upper()} ({remain.days}일 남음)"
                     else:
                         remain_msg = "🌑 이용권 만료됨"
-                except:
+                except Exception as e:
+                    logger.warning(f"Expire date parsing failed: {e}")
                     pass
 
             st.sidebar.markdown(f"### 👋 **{nickname}**님")
@@ -152,7 +160,16 @@ def render_auth_box():
         if st.sidebar.button("로그아웃", type="primary"):
             st.session_state[CURRENT_USER_KEY] = None
             st.rerun()
-        return user_id
+        
+        # 리턴값은 dict 형태로 맞춤 (dashboard.py 호환)
+        if user_id == MASTER_ADMIN_ID:
+             return {"id": MASTER_ADMIN_ID, "login_id": MASTER_ADMIN_ID, "role": "admin", "nickname": "관리자"}
+        
+        u_info = db.get_user_by_id(user_id)
+        if u_info:
+            u_info['login_id'] = u_info['id'] # 호환성 키 추가
+            return u_info
+        return None
 
     # 2. 비로그인 상태
     st.markdown("### 🔐 LDY Pro Trader")
@@ -205,6 +222,7 @@ def render_auth_box():
                         st.balloons()
                         st.success(msg)
                         st.session_state[CURRENT_USER_KEY] = nid
+                        st.session_state["just_registered"] = True # 가입 직후 플래그
                         time.sleep(2)
                         st.rerun()
                     else: st.error(msg)
@@ -244,3 +262,5 @@ def render_auth_box():
             if st.button("취소"):
                 st.session_state.fs = 1
                 st.rerun()
+    
+    return None
