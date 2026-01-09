@@ -1982,6 +1982,13 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     if "과열" in market_temp: w = {"RR": 0.15, "T1": 0.20, "SL": 0.10, "NEAR": 0.05, "MOM": 0.25, "LIQ": 0.15, "TEC": 0.10}
     elif "침체" in market_temp: w = {"RR": 0.30, "T1": 0.10, "SL": 0.20, "NEAR": 0.25, "MOM": 0.05, "LIQ": 0.05, "TEC": 0.05}
 
+    # 🔥 [v13.0] Trigger Bonus Logic
+    # 진입 시그널이 뜬 종목은 ENTRY_SCORE에 가산점 (+5점) 부여하여 랭킹 상향 유도
+    trigger_bonus = pd.Series(0.0, index=x.index)
+    if "TRIGGER" in x.columns:
+        # 빈 문자열이 아니면 보너스 부여
+        trigger_bonus = x["TRIGGER"].fillna("").astype(str).apply(lambda s: 5.0 if s.strip() else 0.0)
+
     def col_or_zero(df, col): return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
 
     # 데이터 로드
@@ -2124,6 +2131,13 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     x["TOTAL_SCORE"] = x["RANK_SCORE"] 
     
     x["TOTAL_SCORE"] = x["TOTAL_SCORE"].round(1)
+
+    # Calculate Entry Score (Added trigger_bonus)
+    raw_entry = (0.3*near_norm + 0.18*rr_norm + 0.12*t1_norm + 0.1*sl_norm + 0.2*mom_norm + 0.1*(1-liq_low))
+    
+    # ✅ ENTRY_SCORE에 trigger_bonus 추가
+    entry_score = np.clip(100 * raw_entry + BONUS_BB_SQUEEZE_ENTRY * bb_sq + trigger_bonus, 0, 100)
+    
     return x
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
 
@@ -2327,6 +2341,43 @@ def analyze_ticker(
     kospi_set: set, kosdaq_set: set, name_map: Dict[str, str], sector_map: Dict[str, str],
     bench_map: Dict[str, Dict[int, float]],
 ) -> Optional[Dict[str, Any]]:
+    # [기존 로직 아래에 추가] ---------------------------------------------------
+    # 🔥 [v13.0 New] Immediate Entry Trigger Logic (즉시 진입 타이밍 포착)
+    # -----------------------------------------------------------------------
+    triggers = []
+    
+    # 1. 눌림 회복 (Pullback Recovery)
+    # 조건: 어제는 5일선 아래였으나 오늘 5일선 회복(CrossUp) + 당일 양봉 + 거래량 전일대비 증가
+    ma5 = c.rolling(5).mean()
+    if len(ma5) > 5:
+        prev_c = float(c.iloc[-2])
+        prev_ma5 = float(ma5.iloc[-2])
+        curr_ma5 = float(ma5.iloc[-1])
+        
+        if (prev_c < prev_ma5) and (last_c >= curr_ma5):
+            # 양봉 & 거래량 증가 확인 (단, 거래량이 너무 없으면 무효)
+            if (last_c > o.iloc[-1]) and (float(v.iloc[-1]) > float(v.iloc[-2])):
+                triggers.append("눌림회복")
+
+    # 2. 고가 돌파 (Breakout)
+    # 조건: 당일 종가가 전일 고가 돌파 + 거래량 10% 이상 증가 + 양봉
+    if (last_c > float(h.iloc[-2])) and \
+       (float(v.iloc[-1]) > float(v.iloc[-2]) * 1.1) and \
+       (last_c > o.iloc[-1]):
+        triggers.append("고가돌파")
+
+    # 3. 박스권 돌파 (Box Expansion / Squeeze Firing)
+    # 조건: 어제까지 TTM Squeeze(1)였다가 오늘 풀림(0) + 양봉 + 볼린저 상단 지지/돌파
+    if len(ttm_series) > 2:
+        was_sqz = ttm_series.iloc[-2]
+        is_sqz = ttm_series.iloc[-1] # ttm_squeeze 변수 활용
+        # 어제는 스퀴즈, 오늘은 아님 (발산 시작)
+        if was_sqz and not is_sqz and (last_c > o.iloc[-1]):
+             # 추가확인: 주가가 볼린저 상단 근처이거나 돌파했는지 (하락 발산 제외)
+             if last_c >= float(bb_upper.iloc[-1]) * 0.98:
+                 triggers.append("박스돌파")
+
+    trigger_str = "/".join(triggers) if triggers else ""
     code6 = str(t).zfill(6)
     if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
@@ -2604,6 +2655,7 @@ def analyze_ticker(
         "HMA_Trend": "▲" if hma_trend_up else "▼",
         "HMA_On": "O" if above_hma else "X",
         "OBV_Div": "O" if is_obv_div else "X",
+        "TRIGGER": trigger_str,  # ✅ [New] 트리거 정보 저장
     }
 
 # 👇👇 [여기 사이에 함수를 통째로 붙여넣으세요] 👇👇
@@ -2959,6 +3011,7 @@ def main(
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = ""
         
+        
         for idx in target_indices:
             code = str(df_out.loc[idx, "종목코드"]).zfill(6)
             name = df_out.loc[idx, "종목명"]
@@ -3041,6 +3094,7 @@ def main(
         "추천매수가","손절가","추천매도가1","추천매도가2",
         "RANK_SCORE","LDY_SCORE","ENTRY_SCORE",
         "NEWS_SCORE", "NEWS_REASON",  # 👈 여기에 추가하면 보기 좋습니다
+        "TRIGGER",  # ✅ [New] CSV 저장 컬럼 추가
         "ROUTE","REGIME",
         "ret_20d_%", "ret_120d_%", 
         "rel_20d_%", "rel_60d_%", "rel_120d_%",
