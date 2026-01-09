@@ -33,7 +33,7 @@ def get_db():
         logger.error(f"DB Load Error: {e}")
         return None
 
-# ----------------- 2. 핵심 함수 (오류 수정됨) -----------------
+# ----------------- 2. 핵심 함수 -----------------
 
 def get_user():
     if CURRENT_USER_KEY not in st.session_state:
@@ -110,7 +110,7 @@ def save_subscriptions_db(db_dict):
             db.update_user_subscription(email, info["role"], info["expire_at"])
     return True
 
-# [New] 전체 유저 이벤트
+# [New] 전체 유저 이벤트 함수 (반드시 있어야 함)
 def grant_all_users_trial(days=7):
     db = get_db()
     return db.grant_all_users_trial(days) if db else (False, "DB Error")
