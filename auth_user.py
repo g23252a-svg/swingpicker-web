@@ -9,14 +9,15 @@ import secrets
 import time
 import logging
 from datetime import datetime, timezone
+# db_utils import는 파일 맨 아래나 필요 시점에 하는 것이 안전할 수 있으나,
+# 여기서는 클래스만 가져오고 인스턴스 생성을 뒤로 미룹니다.
 from db_utils import LDYDBManager
 
-# 로깅 및 DB 초기화
+# 로깅 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("auth_user")
 
-db = LDYDBManager()
-
+# 상수 정의
 CURRENT_USER_KEY = "ldy_current_user"
 MASTER_ADMIN_ID = "admin"
 MASTER_ADMIN_PW = "2022322"
@@ -27,55 +28,44 @@ SECURITY_QUESTIONS = [
     "나의 좌우명은?", "부모님의 고향은 어디인가요?",
 ]
 
-# ----------------- 보안 유틸 -----------------
-def _create_salt() -> str:
-    return secrets.token_hex(16)
-
-def _hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
-
-def _hash_answer(answer: str, salt: str) -> str:
-    return _hash_password(answer.strip().lower(), salt)
-
-def check_rate_limit(email: str, limit: int = 5):
-    if "login_attempts" not in st.session_state: st.session_state.login_attempts = {}
-    attempts = st.session_state.login_attempts.get(email, 0)
-    if attempts >= limit: return False, "⛔ 시도 횟수 초과. 잠시 후 다시 시도하세요."
-    return True, ""
-
-# ----------------- 🚨 핵심: 대시보드(dashboard.py) 호환 함수들 -----------------
-# 이 함수들이 없으면 dashboard.py에서 ImportError가 발생합니다.
+# ----------------- 1. 함수 정의 (먼저 정의하여 Import 오류 방지) -----------------
 
 def get_user():
     """현재 로그인된 사용자 세션 정보 반환"""
     return st.session_state.get(CURRENT_USER_KEY)
 
+def _now_utc_str() -> str:
+    """현재 UTC 시간을 문자열로 반환 (dashboard.py 호환용)"""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
 def list_users():
     """[관리자용] 모든 사용자 목록 조회"""
-    return db.get_all_users()
+    if db: return db.get_all_users()
+    return []
 
 def update_user_role(email, new_role, acting_admin="system"):
     """[관리자용] 사용자 권한 변경"""
-    return db.update_user_role(email, new_role)
+    if db: return db.update_user_role(email, new_role)
+    return False
 
 def toggle_user_ban(email, acting_admin="system"):
     """[관리자용] 사용자 차단/해제 토글"""
-    return db.toggle_user_ban(email)
+    if db: return db.toggle_user_ban(email)
+    return False, "DB Not Initialized"
 
 def load_inquiry_items():
     """문의 게시판 글 목록 로드"""
-    return db.get_all_inquiries()
+    if db: return db.get_all_inquiries()
+    return []
 
 def save_inquiry_items(items):
     """문의 게시판 글 저장"""
-    return db.save_inquiries(items)
-
-def _now_utc_str() -> str:
-    """[추가됨] 현재 UTC 시간을 문자열로 반환 (dashboard.py 호환용)"""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    if db: return db.save_inquiries(items)
+    return False
 
 def load_subscriptions_db():
     """[구독관리] 구독 정보 DB 로드 (dict 형태로 변환)"""
+    if not db: return {"subs": {}}
     users = db.get_all_users()
     subs_map = {}
     for u in users:
@@ -94,6 +84,7 @@ def load_subscriptions_db():
 
 def save_subscriptions_db(db_dict):
     """[구독관리] 변경된 구독 정보 저장"""
+    if not db: return False
     subs = db_dict.get("subs", {})
     for email, info in subs.items():
         role = info.get("role")
@@ -102,8 +93,30 @@ def save_subscriptions_db(db_dict):
             db.update_user_subscription(email, role, expire)
     return True
 
-# ----------------- UI Component (로그인/가입 화면) -----------------
+# ----------------- 2. 보안 유틸리티 -----------------
+
+def _create_salt() -> str:
+    return secrets.token_hex(16)
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
+
+def _hash_answer(answer: str, salt: str) -> str:
+    return _hash_password(answer.strip().lower(), salt)
+
+def check_rate_limit(email: str, limit: int = 5):
+    if "login_attempts" not in st.session_state: st.session_state.login_attempts = {}
+    attempts = st.session_state.login_attempts.get(email, 0)
+    if attempts >= limit: return False, "⛔ 시도 횟수 초과. 잠시 후 다시 시도하세요."
+    return True, ""
+
+# ----------------- 3. UI Component (로그인/가입 화면) -----------------
+
 def render_auth_box(show_debug=False):
+    if not db:
+        st.error("DB 연결 오류: 잠시 후 다시 시도해주세요.")
+        return None
+
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
 
@@ -133,7 +146,6 @@ def render_auth_box(show_debug=False):
             # 프라임 기간 체크
             if role in ['prime', 'pro', 'admin'] and expire:
                 try:
-                    # str인 경우와 datetime인 경우 모두 처리
                     if isinstance(expire, str):
                         expire_dt = datetime.strptime(expire.split('.')[0], "%Y-%m-%d %H:%M:%S")
                     else:
@@ -167,7 +179,7 @@ def render_auth_box(show_debug=False):
         
         u_info = db.get_user_by_id(user_id)
         if u_info:
-            u_info['login_id'] = u_info['id'] # 호환성 키 추가
+            u_info['login_id'] = u_info['id']
             return u_info
         return None
 
@@ -216,13 +228,13 @@ def render_auth_box(show_debug=False):
                     salt = _create_salt()
                     ph = _hash_password(npw, salt)
                     ah = _hash_answer(a, salt)
-                    # DB 저장 호출
+                    
                     ok, msg = db.register_user(nid, ph, salt, nnick, q, ah)
                     if ok:
                         st.balloons()
                         st.success(msg)
                         st.session_state[CURRENT_USER_KEY] = nid
-                        st.session_state["just_registered"] = True # 가입 직후 플래그
+                        st.session_state["just_registered"] = True
                         time.sleep(2)
                         st.rerun()
                     else: st.error(msg)
@@ -264,3 +276,11 @@ def render_auth_box(show_debug=False):
                 st.rerun()
     
     return None
+
+# ----------------- 4. DB 초기화 (맨 마지막으로 이동) -----------------
+# 주의: 이 줄이 실행되기 전에 위 함수들은 이미 정의되어야 합니다.
+try:
+    db = LDYDBManager()
+except Exception as e:
+    logger.error(f"DB Initialization Failed: {e}")
+    db = None
