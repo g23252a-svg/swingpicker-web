@@ -36,31 +36,23 @@ def get_db():
 # ----------------- 2. 핵심 함수 (오류 수정됨) -----------------
 
 def get_user():
-    """
-    현재 로그인된 사용자 세션 정보를 반환합니다.
-    [수정 사항] 세션에 ID 문자열만 있어도 DB에서 전체 정보를 조회하여 Dict로 반환합니다.
-    """
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
     
     val = st.session_state[CURRENT_USER_KEY]
-    
     if not val:
         return None
     
-    # 만약 세션 값이 문자열(ID)이라면 DB에서 정보 조회 (AttributeError 방지)
     if isinstance(val, str):
         if val == MASTER_ADMIN_ID:
             return {"id": MASTER_ADMIN_ID, "login_id": MASTER_ADMIN_ID, "role": "admin", "nickname": "관리자"}
-        
         db = get_db()
         if db:
             user_info = db.get_user_by_id(val)
             if user_info:
-                user_info['login_id'] = user_info['id'] # 호환성
+                user_info['login_id'] = user_info['id']
                 return user_info
     
-    # 이미 딕셔너리라면 그대로 반환
     if isinstance(val, dict):
         return val
         
@@ -118,6 +110,11 @@ def save_subscriptions_db(db_dict):
             db.update_user_subscription(email, info["role"], info["expire_at"])
     return True
 
+# [New] 전체 유저 이벤트
+def grant_all_users_trial(days=7):
+    db = get_db()
+    return db.grant_all_users_trial(days) if db else (False, "DB Error")
+
 # ----------------- 4. 보안 및 UI -----------------
 
 def _create_salt(): return secrets.token_hex(16)
@@ -136,10 +133,8 @@ def render_auth_box(show_debug=False):
         st.error("시스템 연결 실패")
         return None
 
-    # get_user()를 통해 항상 최신 Dict 정보를 가져옴
     user = get_user()
 
-    # [로그인 상태]
     if user:
         user_id = user['id']
         role = user.get('role', 'free')
@@ -149,7 +144,6 @@ def render_auth_box(show_debug=False):
             st.sidebar.success("😎 관리자 모드")
         else:
             st.sidebar.markdown(f"### 👋 **{nickname}**님")
-            # 만료일 체크 로직 등은 간소화하여 표시
             expire = user.get('prime_expire_date')
             if role in ['prime', 'pro'] and expire:
                  st.sidebar.info(f"👑 {role.upper()} 회원")
@@ -163,7 +157,6 @@ def render_auth_box(show_debug=False):
         
         return user
 
-    # [비로그인 상태]
     st.markdown("### 🔐 LDY Pro Trader")
     tab1, tab2, tab3 = st.tabs(["로그인", "회원가입", "비번찾기"])
 
@@ -175,13 +168,11 @@ def render_auth_box(show_debug=False):
                 if lid == MASTER_ADMIN_ID and lpw == MASTER_ADMIN_PW:
                     st.session_state[CURRENT_USER_KEY] = MASTER_ADMIN_ID
                     st.rerun()
-                
                 ok, msg = check_rate_limit(lid)
                 if not ok: st.error(msg)
                 else:
                     u = db.get_user_by_id(lid)
                     if u and _hash_password(lpw, u['salt']) == u['password']:
-                        # 세션에는 ID만 저장해도 get_user()가 해결함
                         st.session_state[CURRENT_USER_KEY] = lid
                         st.success("로그인 성공")
                         time.sleep(0.5)
