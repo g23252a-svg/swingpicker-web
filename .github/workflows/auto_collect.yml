@@ -27,6 +27,11 @@ jobs:
       # ▼▼▼ [여기 추가] GitHub Secret에 저장된 Gemini 키를 환경변수로 연결 ▼▼▼
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
+      # ▼▼▼ [필수 추가] 아래 3줄을 넣어주세요 ▼▼▼
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      LDY_GIST_ID: ${{ secrets.LDY_GIST_ID }}
+      LDY_GIST_TOKEN: ${{ secrets.LDY_GIST_TOKEN }}
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
