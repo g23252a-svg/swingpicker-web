@@ -188,6 +188,15 @@ def render_auth_box(show_debug=False):
         
         if role == 'admin':
             st.sidebar.success("😎 관리자 모드")
+            db = get_db()
+            if not db:
+                st.sidebar.error("DB 연결 실패 (db_utils / secrets / 경로 확인)")
+            else:
+                try:
+                    cnt = len(db.get_all_users() or [])
+                    st.sidebar.info(f"DB 연결 OK · 회원수: {cnt}")
+                except Exception as e:
+                    st.sidebar.error(f"DB 조회 실패: {e}")
         else:
             st.sidebar.markdown(f"### 👋 **{nickname}**님")
             expire = user.get('prime_expire_date')
