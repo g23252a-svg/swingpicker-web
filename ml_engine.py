@@ -1,4 +1,4 @@
-# ml_engine.py (v13.0: Attention LSTM + Technical Indicators)
+# ml_engine.py (v14.0: State Separation & Energy Quality)
 import os
 import joblib
 import numpy as np
@@ -11,21 +11,21 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 
 # ---------------- 설 정 ----------------
-MODEL_PATH = "data/trading_model_lstm_attn.pth"  # 모델 파일명 변경 (v13.0)
-SCALER_PATH = "data/trading_scaler_v2.pkl"       # 스케일러 버전 변경
+MODEL_PATH = "data/trading_model_lstm_attn_v14.pth"  # 모델 버전 업
+SCALER_PATH = "data/trading_scaler_v14.pkl"
 SEQ_LENGTH = 20   # 20일치 데이터로 예측
 TARGET_RET = 3.0  # 3% 이상 상승 시 성공(1)
 
-# 학습에 사용할 기본 컬럼 (전처리 전)
+# 학습에 사용할 기본 컬럼
 BASIC_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
 # -----------------------------------------------------------
-# 1. Feature Engineering (보조지표 생성)
+# 1. Feature Engineering (상태 분리 및 에너지 질 측정)
 # -----------------------------------------------------------
 def add_technical_features(df):
     """
-    OHLCV 데이터프레임에 기술적 지표를 추가하고,
-    NaN을 처리하여 반환합니다.
+    OHLCV 데이터프레임에 '살아있는 횡보'와 '죽은 횡보'를 구분하기 위한
+    구조적(Structural) 피처를 추가합니다.
     """
     if df.empty:
         return pd.DataFrame()
@@ -37,58 +37,79 @@ def add_technical_features(df):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
-    # 데이터가 너무 적으면 지표 계산 불가 -> 원본 리턴 혹은 빈 DF 처리
     if len(df) < 30:
         return df
 
     close = df['Close']
+    low = df['Low']
+    high = df['High']
+    volume = df['Volume']
     
-    # 1) 로그 수익률 (가격의 절대값 대신 변화율 학습)
-    # 0으로 나누기 방지 등을 위해 shift(1)이 0인 경우 처리 필요하나, 주가 데이터라 가정
-    df['Log_Ret'] = np.log(close / close.shift(1).replace(0, np.nan)).fillna(0)
+    # ---------------------------------------------------------
+    # 1️⃣ Higher Low Score (저점 상승 강도) - 핵심: 추세가 살아있는가?
+    # ---------------------------------------------------------
+    # 최근 20일간의 저점들의 기울기를 계산 (단순화: 전반부 10일 최저점 vs 후반부 10일 최저점)
+    min_l_prev = low.rolling(window=10).min().shift(10)
+    min_l_curr = low.rolling(window=10).min()
+    # 양수면 저점 상승 중, 음수면 저점 하락/붕괴
+    df['Low_Trend'] = (min_l_curr - min_l_prev) / min_l_prev.replace(0, np.nan)
+
+    # ---------------------------------------------------------
+    # 2️⃣ Volume Quality (거래량의 질) - 핵심: 매집인가 이탈인가?
+    # ---------------------------------------------------------
+    # 횡보 중 양봉 거래량은 많고, 음봉 거래량은 적어야 "살아있는 횡보"
+    # Close > Open (양봉)일 때의 거래량 vs 음봉일 때의 거래량 비율
+    is_up = (df['Close'] > df['Open']).astype(int)
+    vol_up = (volume * is_up).rolling(window=20).mean()
+    vol_down = (volume * (1 - is_up)).rolling(window=20).mean()
+    # 1보다 크면 매수세 우위, 1보다 작으면 매도세 우위
+    df['Vol_Quality'] = vol_up / vol_down.replace(0, np.nan)
+
+    # ---------------------------------------------------------
+    # 3️⃣ Price Range Position (박스권 내 위치) - 핵심: 돌파 임박인가?
+    # ---------------------------------------------------------
+    # 최근 20일 고가-저가 박스권 내에서 현재 종가의 위치 (0~1)
+    # 상단(0.8 이상)에서 놀고 있어야 돌파가 임박한 것 ("고가 놀이")
+    period_high = high.rolling(window=20).max()
+    period_low = low.rolling(window=20).min()
+    df['Range_Pos'] = (close - period_low) / (period_high - period_low).replace(0, np.nan)
+
+    # ---------------------------------------------------------
+    # 4️⃣ MA Support (이평선 지지력) - 핵심: 가격이 MA 위에 얹혀있는가?
+    # ---------------------------------------------------------
+    # 20일 이평선과의 이격도. (너무 높으면 급등 피로감, 음수면 역배열/하락)
+    # 0에 가깝지만 살짝 양수(0~5%)인 구간이 가장 좋은 눌림목
+    ma20 = close.rolling(window=20).mean()
+    df['Dist_MA20'] = (close - ma20) / ma20.replace(0, np.nan)
+
+    # 5️⃣ 기존 보조지표 (변동성 체크용)
+    # Bollinger Band Width (수렴 여부 확인)
+    std20 = close.rolling(window=20).std()
+    df['BB_Width'] = (ma20 + 2 * std20 - (ma20 - 2 * std20)) / ma20.replace(0, np.nan)
     
-    # 2) RSI (14)
+    # RSI (과매도/과매수 필터링)
     delta = close.diff()
     up = delta.clip(lower=0)
     down = -1 * delta.clip(upper=0)
-    ma_up = up.rolling(window=14).mean()
-    ma_down = down.rolling(window=14).mean()
-    rs = ma_up / ma_down.replace(0, np.nan) # 0 나누기 방지
+    rs = up.rolling(window=14).mean() / down.rolling(window=14).mean().replace(0, np.nan)
     df['RSI'] = 100 - (100 / (1 + rs.fillna(0)))
-    
-    # 3) MACD (12, 26, 9)
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    df['MACD'] = ema12 - ema26
-    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
-    
-    # 4) Bollinger Bands (20, 2)
-    ma20 = close.rolling(window=20).mean()
-    std20 = close.rolling(window=20).std()
-    # 밴드폭 (변동성 지표)
-    df['BB_Width'] = (ma20 + 2 * std20 - (ma20 - 2 * std20)) / ma20.replace(0, np.nan)
-    # 밴드 내 위치 % (0=하단, 1=상단)
-    df['BB_Pct'] = (close - (ma20 - 2 * std20)) / (4 * std20.replace(0, np.nan))
-    
-    # 5) 거래량 변화율
-    df['Vol_Chg'] = df['Volume'].pct_change().fillna(0)
-    
-    # NaN 채우기 (앞부분 이동평균 계산 구간 등)
+
+    # NaN 채우기
     df = df.fillna(0)
-    
-    # 무한대 값 제거 (log, div 0 등)
     df = df.replace([np.inf, -np.inf], 0)
 
-    # 최종적으로 사용할 피처 컬럼들만 선택
-    # 주의: 모델 입력 차원과 순서가 항상 일치해야 함
+    # 최종 Feature Selection
+    # [기본] + [구조적 피처] + [변동성]
     use_cols = [
-        "Open", "High", "Low", "Close", "Volume",   # 기본
-        "Log_Ret", "RSI", "MACD", "MACD_Hist",      # 추세/모멘텀
-        "BB_Width", "BB_Pct", "Vol_Chg"             # 변동성/거래량
+        "Open", "High", "Low", "Close", "Volume",   # 0-4
+        "Low_Trend",    # 5: 저점이 올라가는가? (Higher Low)
+        "Vol_Quality",  # 6: 매수 거래량이 더 많은가? (Accumulation)
+        "Range_Pos",    # 7: 박스권 상단에서 준비 중인가? (Ready to Break)
+        "Dist_MA20",    # 8: 이평선 지지를 받고 있는가? (Support)
+        "BB_Width",     # 9: 에너지가 응축되었는가? (Compression)
+        "RSI"           # 10: 과열/침체 방지
     ]
     
-    # 데이터프레임에 없는 컬럼이 있다면 0으로 생성 (안전장치)
     for c in use_cols:
         if c not in df.columns:
             df[c] = 0.0
@@ -96,61 +117,38 @@ def add_technical_features(df):
     return df[use_cols]
 
 # -----------------------------------------------------------
-# 2. Attention LSTM Model Definition
+# 2. Attention LSTM Model (구조 유지)
 # -----------------------------------------------------------
 class Attention(nn.Module):
-    """LSTM 출력(Sequence)에 가중치를 부여하는 Attention Layer"""
     def __init__(self, hidden_dim):
         super(Attention, self).__init__()
         self.attn = nn.Linear(hidden_dim, 1)
 
     def forward(self, lstm_output):
-        # lstm_output: (batch, seq_len, hidden_dim)
-        # 1. 각 시점(t)의 점수 계산
-        attn_scores = self.attn(lstm_output)  # (batch, seq_len, 1)
-        
-        # 2. Softmax로 확률(가중치) 변환
-        attn_weights = F.softmax(attn_scores, dim=1) # (batch, seq_len, 1)
-        
-        # 3. 가중합 (Context Vector)
-        context = torch.sum(attn_weights * lstm_output, dim=1)  # (batch, hidden_dim)
+        attn_scores = self.attn(lstm_output)
+        attn_weights = F.softmax(attn_scores, dim=1)
+        context = torch.sum(attn_weights * lstm_output, dim=1)
         return context, attn_weights
 
 class TradingAttnLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim):
         super(TradingAttnLSTM, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        
-        # LSTM Layer
-        # batch_first=True -> (batch, seq, feature)
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=0.2)
-        
-        # Attention Layer
         self.attention = Attention(hidden_dim)
-        
-        # Fully Connected Layer
         self.fc = nn.Sequential(
             nn.Linear(hidden_dim, 64),
-            nn.BatchNorm1d(64), # 학습 안정화
+            nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(64, output_dim),
-            nn.Sigmoid() # 확률 출력 (0~1)
+            nn.Sigmoid()
         )
 
     def forward(self, x):
-        # x: (batch, seq_len, input_dim)
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
-        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
-        
-        # lstm_out: (batch, seq_len, hidden_dim)
+        h0 = torch.zeros(2, x.size(0), 64).to(x.device)
+        c0 = torch.zeros(2, x.size(0), 64).to(x.device)
         lstm_out, _ = self.lstm(x, (h0, c0))
-        
-        # Attention 적용 (마지막 hidden state만 쓰는 게 아니라, 전체 시퀀스를 가중합)
         context, _ = self.attention(lstm_out)
-        
-        # FC Layer
         out = self.fc(context)
         return out
 
@@ -171,115 +169,91 @@ class StockDataset(Dataset):
 # 3. Data Processing & Training
 # -----------------------------------------------------------
 def build_dataset_from_history(data_dir="data"):
-    """과거 ohlcv_cache 파일들을 로드하여 Feature Engineering 후 데이터셋 구축"""
     import glob
     import pickle
     
-    print("🔄 [ML] 데이터셋 구축 중... (v13.0: Technical Features + Attention)")
+    print("🔄 [ML] 데이터셋 구축 중... (v14.0: Structural Features)")
     
     files = glob.glob(os.path.join(data_dir, "ohlcv_cache_*.pkl"))
     files.sort(reverse=True)
-    # 너무 오래된 데이터는 패턴이 다를 수 있으니 최근 60일치 사용 (늘림)
+    # 데이터 범위: 최근 60일 (패턴 변화 반영)
     files = files[:60] 
 
     X_list = []
     y_list = []
     
-    # 스케일링용
-    all_features_flatten = []
-
     for f_path in files:
         try:
             with open(f_path, 'rb') as f:
                 data_map = pickle.load(f)
             
             for code, df in data_map.items():
-                # 최소 데이터 길이 체크 (SEQ_LENGTH + 미래확인용 5일 + 지표계산용 여유 30일)
-                if len(df) < SEQ_LENGTH + 35: 
-                    continue
+                if len(df) < SEQ_LENGTH + 35: continue
                 
-                # 컬럼 매핑
                 df = df.rename(columns={"시가":"Open", "고가":"High", "저가":"Low", "종가":"Close", "거래량":"Volume"})
                 
-                # --- Feature Engineering 적용 ---
+                # Feature Engineering
                 df_feat = add_technical_features(df)
                 if df_feat.empty: continue
                 
-                # 데이터 추출 (학습용: D-5일 기준)
-                # 입력 시퀀스: T-SEQ ~ T
-                # 타겟: T ~ T+5 최고가 수익률
-                
-                # 마지막 5일은 정답 확인용으로 남겨둠
                 train_data = df_feat.iloc[:-5] 
-                target_data = df.iloc[-5:] # 미래 가격 확인용 (원본 df 사용)
+                target_data = df.iloc[-5:]
                 
-                # 입력 데이터 (최근 SEQ_LENGTH 개)
                 seq_data = train_data.iloc[-SEQ_LENGTH:].values
                 if len(seq_data) != SEQ_LENGTH: continue
                 
-                # 라벨링
-                current_close = train_data.iloc[-1]['Close'] # 기준 시점 종가
-                future_high = target_data['High'].max()      # 향후 5일간 최고가
+                # 라벨링: 단순 상승이 아니라 "유의미한 상승" (3% 이상)
+                current_close = train_data.iloc[-1]['Close']
+                future_high = target_data['High'].max()
                 
                 if current_close > 0:
                     ret = (future_high / current_close - 1) * 100
+                    # 타겟 강화: 상승폭이 3% 이상이어야 함
                     target = 1 if ret >= TARGET_RET else 0
                     
                     X_list.append(seq_data)
                     y_list.append(target)
-                    all_features_flatten.append(seq_data)
                     
-        except Exception as e:
+        except Exception:
             continue
 
     if not X_list:
         return None, None, None
 
-    # 배열 변환
-    X_arr = np.array(X_list) # (N, SEQ_LENGTH, FEATURE_DIM)
+    X_arr = np.array(X_list)
     y_arr = np.array(y_list)
     
-    # Scaling
     N, L, D = X_arr.shape
     scaler = StandardScaler()
-    
-    # 3D -> 2D 펼쳐서 학습
     X_reshaped = X_arr.reshape(-1, D)
     scaler.fit(X_reshaped)
     
     joblib.dump(scaler, SCALER_PATH)
-    
     X_scaled = scaler.transform(X_reshaped).reshape(N, L, D)
     
     return X_scaled, y_arr, scaler
 
 def train_model():
-    """Attention LSTM 모델 학습"""
     X, y, scaler = build_dataset_from_history()
     
-    if X is None or len(X) < 100:
-        print("⚠️ [ML] 학습 데이터 부족(<100)으로 모델 생성을 건너뜁니다.")
+    if X is None:
+        print("⚠️ 학습 데이터 부족")
         return
 
-    # Dataset & DataLoader
     dataset = StockDataset(X, y)
     dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
     
-    # 입력 차원 확인
-    input_dim = X.shape[2] 
-    
+    input_dim = X.shape[2]
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Attention LSTM 모델 생성
     model = TradingAttnLSTM(input_dim=input_dim, hidden_dim=64, num_layers=2, output_dim=1).to(device)
-    
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
-    print(f"🔄 [ML] Attention LSTM 학습 시작 (Device: {device}, Samples: {len(X)}, Dim: {input_dim})")
+    print(f"🔄 [ML] 학습 시작 (Samples: {len(X)}, Dim: {input_dim})")
     
     model.train()
-    epochs = 15 # Epoch 조금 늘림
+    epochs = 20 # Epoch 증가
     for epoch in range(epochs):
         epoch_loss = 0
         for batch_X, batch_y in dataloader:
@@ -297,17 +271,9 @@ def train_model():
             print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss/len(dataloader):.4f}")
 
     torch.save(model.state_dict(), MODEL_PATH)
-    print(f"✅ [ML] Attention LSTM 모델 저장 완료 -> {MODEL_PATH}")
+    print("✅ [ML] 모델 업데이트 완료")
 
-
-# -----------------------------------------------------------
-# 4. Inference (Apply Score)
-# -----------------------------------------------------------
 def apply_ml_score(current_df, full_ohlcv_map):
-    """
-    현재 데이터프레임에 ML 점수 반영
-    Feature Engineering -> Scaling -> Attention LSTM Inference
-    """
     if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
         current_df["ML_SCORE"] = 0
         return current_df
@@ -316,11 +282,8 @@ def apply_ml_score(current_df, full_ohlcv_map):
         device = torch.device('cpu')
         scaler = joblib.load(SCALER_PATH)
         
-        # 모델 차원 정보는 저장된게 없으므로, 임시로 데이터 하나 만들어보거나 
-        # Feature Engineering 함수의 출력 차원을 알아야 함.
-        # add_technical_features 함수는 고정된 12개 컬럼을 반환하므로 12로 하드코딩 가능하나,
-        # 안전하게 더미 데이터로 체크
-        input_dim = 12 # add_technical_features의 use_cols 개수
+        # 모델 입력 차원 자동 감지 (scaler mean shape 이용)
+        input_dim = scaler.mean_.shape[0]
         
         model = TradingAttnLSTM(input_dim=input_dim, hidden_dim=64, num_layers=2, output_dim=1)
         model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
@@ -332,55 +295,33 @@ def apply_ml_score(current_df, full_ohlcv_map):
         
         for idx, row in current_df.iterrows():
             code = str(row['종목코드']).zfill(6)
-            if code not in full_ohlcv_map:
-                continue
-                
+            if code not in full_ohlcv_map: continue
             df = full_ohlcv_map[code]
-            if len(df) < SEQ_LENGTH + 30: # 지표 계산 여유분 필요
-                continue
-                
-            # 컬럼 매핑
-            df = df.rename(columns={"시가":"Open", "고가":"High", "저가":"Low", "종가":"Close", "거래량":"Volume"})
+            if len(df) < SEQ_LENGTH + 30: continue
             
-            # Feature Engineering
+            df = df.rename(columns={"시가":"Open", "고가":"High", "저가":"Low", "종가":"Close", "거래량":"Volume"})
             df_feat = add_technical_features(df)
             if df_feat.empty: continue
             
-            # 최신 SEQ_LENGTH 데이터 추출
             seq_data = df_feat.iloc[-SEQ_LENGTH:].values
-            
             if len(seq_data) == SEQ_LENGTH:
                 indices.append(idx)
                 scores.append(seq_data)
 
-        if not scores:
-            current_df["ML_SCORE"] = 0
-            return current_df
+        if scores:
+            X_arr = np.array(scores)
+            N, L, D = X_arr.shape
+            X_scaled = scaler.transform(X_arr.reshape(-1, D)).reshape(N, L, D)
+            X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(device)
             
-        # Batch Inference
-        X_arr = np.array(scores)
-        N, L, D = X_arr.shape
-        
-        # Scaling
-        X_reshaped = X_arr.reshape(-1, D)
-        # scaler의 feature 개수와 D가 일치해야 함. 다르면 에러나고 try-except로 빠짐.
-        X_scaled = scaler.transform(X_reshaped).reshape(N, L, D)
-        
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(device)
-        
-        with torch.no_grad():
-            outputs = model(X_tensor).cpu().numpy().flatten()
+            with torch.no_grad():
+                outputs = model(X_tensor).cpu().numpy().flatten()
             
-        final_scores = (outputs * 100).round(1)
-        
-        current_df.loc[indices, "ML_SCORE"] = final_scores
-        print(f"🤖 [ML] {len(indices)}개 종목 AI(Attention) 점수 예측 완료 (Avg: {np.mean(final_scores):.1f}점)")
-        
+            current_df.loc[indices, "ML_SCORE"] = (outputs * 100).round(1)
+            print(f"🤖 [ML] AI 점수 산출 완료 (Avg: {np.mean(outputs)*100:.1f})")
+            
     except Exception as e:
         print(f"⚠️ [ML] 점수 반영 실패: {e}")
-        # 모델 구조가 바뀌어서(dim 불일치) 에러날 수 있음 -> 재학습 필요 메시지
-        if "size mismatch" in str(e) or "feature names" in str(e):
-            print("💡 모델이나 스케일러가 이전 버전입니다. 'python collector.py'를 실행해 모델을 재학습해주세요.")
         current_df["ML_SCORE"] = 0
 
     return current_df
