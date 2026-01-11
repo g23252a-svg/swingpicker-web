@@ -3074,10 +3074,23 @@ def main(
     except Exception as e:
         log(f"⚠️ 메타 요약 계산 실패: {e}")
 
+    # ✅ dashboard 호환용 상태/활성 플래그 생성 (must_cols 만들기 직전)
+    df_out["상태"] = df_out["ROUTE"].astype(str)
+    
+    # 지금 "들어가도 되는 타입"을 넓게 잡으면: 🚀(추세진입) + ⭐️(트리거 직전) + 🔋(대기)
+    df_out["IS_ACTIVE"] = df_out["상태"].str.contains("🚀|⭐️|🔋", na=False)
+    
+    # 더 엄격하게 "지금 진입 가능"만 잡으면: 🚀 + ⭐️ (🔋는 관찰로 제외)
+    df_out["IS_NOW_ENTRY"] = df_out["상태"].str.contains("🚀|⭐️", na=False)
+    
+    # 관찰 전용
+    df_out["IS_WATCH"] = df_out["상태"].str.contains("🔋", na=False)
+    
     # [수정 대상] main 함수 하단 must_cols 리스트 업데이트
     must_cols = [
         "종목코드","종목명","시장","업종","업종_상세","업종_대분류",
         "종가","거래대금(억원)","시가총액(억원)",
+        "상태", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
         "추천매수가","손절가","추천매도가1","추천매도가2",
         "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", # 👈 여기 추가됨
         "RANK_SCORE","LDY_SCORE","ENTRY_SCORE", "ML_SCORE",
