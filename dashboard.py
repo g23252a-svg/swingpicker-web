@@ -1827,63 +1827,11 @@ def get_survival_days(current_codes: list, lookback: int = 15) -> dict:
             
     return days_map
 
-def determine_state_v2(row, days_alive):
-    """
-    [v14.4 Upgrade] FINAL_SCORE 및 TRIGGER_SCORE 기반 상태 판단
-    """
-    # 1. 데이터 로드 (새로운 점수 우선 사용)
-    # FINAL_SCORE가 없으면 기존 LDY_SCORE 사용
-    score = float(row.get("FINAL_SCORE", 0) or row.get("LDY_SCORE", 0) or 0)
-    trigger_score = float(row.get("TRIGGER_SCORE", 0) or 0)
-    
-    # 기존 텍스트 트리거
-    trigger_text = str(row.get("TRIGGER", ""))
-    
-    low_trend = float(row.get("Low_Trend_PCT", 0) or 0)
-    rsi_rising = int(row.get("RSI_Rising", 0) or 0)
-    bb_expanding = int(row.get("BB_Expanding", 0) or 0)
-    vol_qual = float(row.get("Vol_Quality", 0) or 0)
-    
-    # ----------------------------------------------------
-    # 🔴 1. 무효화 (INVALID)
-    # ----------------------------------------------------
-    if low_trend < -1.0: # 기준 완화 (-0.5 -> -1.0)
-        return "💀 붕괴 (삭제)", 99
-    
-    # ----------------------------------------------------
-    # 🟠 2. 발사 (FIRED) - 텍스트 트리거 OR 점수 트리거
-    # ----------------------------------------------------
-    # [수정] 텍스트가 없어도 TRIGGER_SCORE가 80점 이상이면 발사!
-    if (trigger_text and trigger_text != "nan") or (trigger_score >= 80):
-        # 텍스트가 없으면 점수 기반 메시지 출력
-        msg = trigger_text if (trigger_text and trigger_text != "nan") else "🚀 급등포착 (Score)"
-        return msg, 0 
 
-    # ----------------------------------------------------
-    # 🟢 3. 진입 대기 (READY)
-    # ----------------------------------------------------
-    if bb_expanding == 1 and score >= 70:
-        return "⭐️ 확장초입 (Ready)", 10
-        
-    if score >= 80 and (1 <= days_alive <= 10):
-        return "⭐️ 타점임박 (Ready)", 11
-
-    # ----------------------------------------------------
-    # 🔵 4. 매집/관찰 (ACCUM)
-    # ----------------------------------------------------
-    if score >= 60:
-        if rsi_rising == 1 or vol_qual > 1.0:
-            return "🔋 에너지응축 (Accum)", 20
-        return "👀 단순관찰 (Watch)", 25
-            
-    # ----------------------------------------------------
-    # ⚪ 5. 소음 (NOISE)
-    # ----------------------------------------------------
-    return "⏳ 관망 (Wait)", 50
 
 def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    데이터 해석 및 정렬용 파생 컬럼 생성
+    [v15.0] Collector의 상태 머신 결과(ROUTE)를 UI용 텍스트로 매핑 및 정렬
     """
     if df.empty: return df
     
@@ -1893,26 +1841,56 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     else:
         return df
     
-    # 1. 시간축 (Days Alive)
-    survival_map = get_survival_days(codes, lookback=20)
-    df["생존일"] = df["종목코드"].apply(lambda x: survival_map.get(str(x).zfill(6), 1))
-    
-    # 2. 상태 결정 (State & Sort Key)
-    # determine_state_v2는 (텍스트, 정렬순서) 튜플을 반환
-    state_results = df.apply(lambda row: determine_state_v2(row, survival_map.get(str(row["종목코드"]).zfill(6), 1)), axis=1)
-    
-    df["상태"] = state_results.apply(lambda x: x[0])
-    df["_STATE_SORT"] = state_results.apply(lambda x: x[1]) # 정렬용 히든 컬럼
-    # 로직용 Active/Passive 플래그 (UI 문자열이 로직을 지배하지 않도록)
-    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30   # 🚀0, ⭐️10~19, 🔋20~29, 👀도 Active로 볼 거면 30까지 포함 등
+    # 1. 시간축 (Days Alive) - 기존 로직 유지
+    try:
+        survival_map = get_survival_days(codes, lookback=20)
+        df["생존일"] = df["종목코드"].apply(lambda x: survival_map.get(str(x).zfill(6), 1))
+    except:
+        df["생존일"] = 1
 
-    # Passive 디버깅용: 제외 사유(Active에는 표시하지 않고 Passive 뷰에서만 노출)
+    # 2. 상태 매핑 (Collector ROUTE -> UI Text & Sort Order)
+    # 0에 가까울수록 상단 노출 (우선순위: 발사임박 > 추세 > 응축 > 관망 > 위험)
+    
+    def map_route_to_ui(route_val):
+        r = str(route_val)
+        
+        # (1) 🔫 발사 준비 (가장 중요)
+        if "ARMED" in r:
+            return "🔫 발사임박 (Armed)", 0
+            
+        # (2) 🚀 추세 (이미 터짐)
+        if "TREND" in r:
+            return "🚀 상승추세 (Trend)", 10
+            
+        # (3) 👀 응축/대기 (관찰)
+        if "SQUEEZE" in r:
+            return "🌪️ 응축중 (Squeeze)", 20
+            
+        # (4) 🚫 위험/과열 (하위)
+        if "OVERHEAT" in r:
+            return "⛔ 과열/위험 (Caution)", 90
+            
+        # (5) 그 외
+        return "⚪ 관망 (Neutral)", 50
+
+    # Apply mapping
+    mapped = df["ROUTE"].apply(map_route_to_ui)
+    
+    # 결과 분리
+    df["상태"] = mapped.apply(lambda x: x[0])
+    df["_STATE_SORT"] = mapped.apply(lambda x: x[1])
+
+    # 3. Active 플래그 (UI 탭 분리용)
+    # 과열(90)이나 관망(50)이 아니면 Active 탭에 표시
+    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30
+
+    # 4. 제외 사유 (Passive 탭용)
     df["제외사유"] = np.where(
-        df["상태"].astype(str).str.contains("좀비"), "⛔ 타이밍 초과",
-        np.where(df["상태"].astype(str).str.contains("붕괴"), "📉 구조 붕괴", "관망")
+        df["_STATE_SORT"] == 90, "⚠️ 과열/급등주의",
+        np.where(df["_STATE_SORT"] == 50, "⏳ 모멘텀 부족", "-")
     )
 
-    # 3. 추세 데코레이션
+    # 5. 추세 데코레이션 (기존 유지)
     def _deco_trend(val):
         try: v = float(val)
         except: return "-"
