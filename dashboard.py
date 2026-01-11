@@ -1778,89 +1778,126 @@ def plot_ai_consensus(df):
     return fig
 
 # -------------------------------------------------------------
-# 🔥 [v14.1 Dashboard Engine] 상태/시간/유효성 해석기
+# 🔥 [v14.2 Dashboard Engine] Time-Aware State Machine
 # -------------------------------------------------------------
-def get_survival_days(current_codes: list, lookback: int = 10) -> dict:
+def get_survival_days(current_codes: list, lookback: int = 15) -> dict:
     """
-    최근 N일간의 recommend 파일을 역추적하여
-    각 종목이 '며칠째 상위권에 살아남아 있는지' 계산합니다.
+    최근 N일간의 데이터를 역추적하여 '상위권 생존 일수(Days Alive)'를 계산합니다.
+    단순 등장이 아니라 '연속 생존' 여부가 핵심입니다.
     """
-    days_map = {code: 1 for code in current_codes} # 기본 1일차
+    days_map = {code: 1 for code in current_codes} # 신규 진입은 1일차
     
-    # DATA_DIR 내의 recommend_*.csv 파일 조회 (latest 제외)
+    # 최신순 정렬 (latest 제외, 날짜 역순)
     files = sorted([f for f in glob.glob(os.path.join(DATA_DIR, "recommend_*.csv")) if "latest" not in f], reverse=True)
     
-    # 오늘 파일(0번) 제외하고 과거 파일(1번부터) 탐색
+    # 오늘(0번) 제외, 어제(1번)부터 탐색
     history_files = files[1:lookback+1] 
     
     if not history_files:
         return days_map
 
+    # 연속성 체크를 위한 임시 집합
+    survivors = set(current_codes)
+
     for f_path in history_files:
         try:
-            # 전체 로드하지 않고 종목코드 컬럼만 빠르게 스캔
             df_past = pd.read_csv(f_path, usecols=["종목코드"], dtype=str)
             past_set = set(df_past["종목코드"].apply(lambda x: str(x).zfill(6)))
             
-            for code in current_codes:
-                # 이미 끊긴 종목은 더 이상 체크 안 함 (연속 생존만 의미 있음)
+            # 이번 과거 파일에도 살아남은 종목만 카운트 증가
+            # 한 번이라도 끊기면(탈락했으면) 더 이상 카운트하지 않음 (연속성)
+            next_survivors = set()
+            for code in survivors:
                 if code in past_set:
                     days_map[code] += 1
+                    next_survivors.add(code)
+            
+            survivors = next_survivors
+            if not survivors: break # 더 이상 생존자가 없으면 중단
+            
         except:
             continue
+            
     return days_map
 
-def determine_state(row, days_alive):
-    """Collector 수치 데이터를 '스윙 트레이더의 언어'로 번역"""
+def determine_state_v2(row, days_alive):
+    """
+    v14.2 상태 머신: 무효화(Invalid)를 최우선으로 판별합니다.
+    Priority: INVALID > FIRED > READY > ACCUM > STALE > WAIT
+    """
     # 안전하게 값 가져오기
     low_trend = float(row.get("Low_Trend_PCT", 0) or 0)
     score = float(row.get("LDY_SCORE", 0) or 0)
     trigger = str(row.get("TRIGGER", ""))
-    
-    # 1. 💀 무효화 (Invalidation) 판정
-    if low_trend < -0.5:
-        return "💀 구조붕괴"
-    
-    # 2. 🧟 좀비 판정 (10일 이상 체류)
-    if days_alive >= 10:
-        return "🧟 좀비(시간초과)"
-        
-    # 3. 🚀 발사 (Fired) 판정
-    if trigger and trigger != "nan" and trigger != "":
-        return f"🚀 {trigger}" 
-    
-    # 4. 🔋 축적 vs ⏳ 대기 판정
-    # v14.1 컬럼이 없으면 기본값 처리
     rsi_rising = int(row.get("RSI_Rising", 0) or 0)
-    vol_qual = float(row.get("Vol_Quality", 0) or 0)
+    bb_expanding = int(row.get("BB_Expanding", 0) or 0)
     
-    if rsi_rising == 1 and vol_qual > 1.0:
-        return "🔋 에너지응축"
+    # ----------------------------------------------------
+    # 🔴 1. 무효화 (INVALID) - 즉시 탈락 대상
+    # ----------------------------------------------------
+    # 구조 붕괴: 저점이 낮아짐
+    if low_trend < -0.5:
+        return "💀 붕괴 (구조깨짐)", 99
     
-    if score >= 85:
-        return "⭐️ 강력대기"
-        
-    return "⏳ 관찰"
+    # 좀비(STALE): 12일 이상 상위권인데 변화(확장/트리거)가 없음
+    if days_alive >= 12 and not trigger and bb_expanding == 0:
+        return "🧟 좀비 (시간초과)", 90
+
+    # ----------------------------------------------------
+    # 🟠 2. 발사 (FIRED) - 진입 시그널
+    # ----------------------------------------------------
+    if trigger and trigger != "nan" and trigger != "":
+        return f"🚀 {trigger}", 0 # 최우선 노출
+
+    # ----------------------------------------------------
+    # 🟢 3. 준비 완료 (READY) - 스윙 최적기
+    # ----------------------------------------------------
+    # 점수 우수 + 구조 튼튼 + (상태 개선 중 or 적당한 숙성)
+    if score >= 80 and low_trend >= 0:
+        if bb_expanding == 1:
+            return "⭐️ 확장초입 (Ready)", 10
+        if 3 <= days_alive <= 10:
+            return "⭐️ 숙성완료 (Ready)", 11
+
+    # ----------------------------------------------------
+    # 🔵 4. 매집/축적 (ACCUMULATING) - 관찰기
+    # ----------------------------------------------------
+    # 점수 양호 + RSI 개선 중 + 신선한 종목
+    if score >= 60:
+        if rsi_rising == 1:
+            return "🔋 에너지응축 (Accum)", 20
+        if days_alive <= 3:
+            return "🆕 신규진입 (Fresh)", 21
+            
+    # ----------------------------------------------------
+    # ⚪ 5. 그 외 (WAIT)
+    # ----------------------------------------------------
+    return "⏳ 관망 (Wait)", 50
 
 def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
-    """원본 데이터프레임에 시각화용 파생 컬럼(상태, 생존일 등)을 붙입니다."""
+    """
+    데이터 해석 및 정렬용 파생 컬럼 생성
+    """
     if df.empty: return df
     
     df = df.copy()
-    # 코드 정규화
     if "종목코드" in df.columns:
         codes = df["종목코드"].astype(str).str.zfill(6).tolist()
     else:
         return df
     
-    # 1. 시간축 계산 (Days Alive)
-    survival_map = get_survival_days(codes)
+    # 1. 시간축 (Days Alive)
+    survival_map = get_survival_days(codes, lookback=20)
     df["생존일"] = df["종목코드"].apply(lambda x: survival_map.get(str(x).zfill(6), 1))
     
-    # 2. 상태 결정 (State)
-    df["상태"] = df.apply(lambda row: determine_state(row, survival_map.get(str(row["종목코드"]).zfill(6), 1)), axis=1)
+    # 2. 상태 결정 (State & Sort Key)
+    # determine_state_v2는 (텍스트, 정렬순서) 튜플을 반환
+    state_results = df.apply(lambda row: determine_state_v2(row, survival_map.get(str(row["종목코드"]).zfill(6), 1)), axis=1)
     
-    # 3. 주요 지표 이모지 데코레이션 (Low Trend)
+    df["상태"] = state_results.apply(lambda x: x[0])
+    df["_STATE_SORT"] = state_results.apply(lambda x: x[1]) # 정렬용 히든 컬럼
+    
+    # 3. 추세 데코레이션
     def _deco_trend(val):
         try: v = float(val)
         except: return "-"
@@ -3383,94 +3420,104 @@ with tab2:
         safe_view = view_df.copy().reset_index(drop=True)
 
         if view_df.empty:
-            st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
-        else:
-            # =============================================================================
-            # 🔥 [핵심 수정] 데이터 전처리 & 상태 해석 (Augmentation)
-            # =============================================================================
-            
-            # 1. 데이터 해석 (상태/생존일/추세 추가)
-            safe_view = augment_display_data(view_df.copy()) # 🔥 이 함수가 핵심
+        st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
+    else:
+        # =============================================================================
+        # 🔥 [v14.2 핵심] 데이터 전처리 & 상태 해석 (Augmentation)
+        # =============================================================================
+        
+        # 1. 데이터 해석 (상태/생존일/추세 추가) - 상단에 추가한 augment_display_data 함수 사용
+        safe_view = augment_display_data(view_df.copy())
 
-            # 2. 종목명 복구 (코드 -> 한글 이름)
-            try:
-                name_map = get_code_map() 
-                code_to_name = {v: k for k, v in name_map.items()}
-                def _fix_name(r):
-                    c_name = str(r.get("종목명", "")).strip()
-                    c_code = str(r.get("종목코드", "")).strip().zfill(6)
-                    if not c_name or c_name.isdigit() or c_name == c_code:
-                        return code_to_name.get(c_code, c_name)
-                    return c_name
-                if "종목명" in safe_view.columns:
-                    safe_view["종목명"] = safe_view.apply(_fix_name, axis=1)
-            except: pass
-
-            # 3. 포맷팅 (숫자 -> 문자열)
-            for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
-                if c in safe_view.columns:
-                    safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
-
-            # ---------------------------------------------------------
-            # 🔥 [v14.1] 컬럼 재배치 및 스타일링 (상태, 생존일 추가)
-            # ---------------------------------------------------------
-            cols = [
-                "종목명", "종목코드", 
-                "상태", "생존일",  # 🔥 New!
-                "TRIGGER", 
-                "TOTAL_SCORE", "LDY_SCORE", 
-                "추세", "Low_Trend_PCT", # 🔥 New!
-                "종가", "추천매수가", "손절가", "추천매도가1",
-                "ROUTE", "업종"
-            ]
-            display_cols = [c for c in cols if c in safe_view.columns]
-
-            # 컬럼 설정 (Column Config)
-            cfg = {
-                "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
-                "종목코드": st.column_config.TextColumn("코드", width="small"),
-                
-                # 🔥 새로 추가된 핵심 컬럼 설정
-                "상태": st.column_config.TextColumn(
-                    "현재 상태", 
-                    help="🚀:발사, 🔋:응축, ⏳:대기, 💀:붕괴, 🧟:좀비",
-                    width="medium"
-                ),
-                "생존일": st.column_config.ProgressColumn(
-                    "생존(일)", 
-                    help="상위권 유지 일수 (10일 넘어가면 탄력 둔화 가능성)",
-                    format="%d일", 
-                    min_value=0, 
-                    max_value=10, # 10일 넘어가면 Full Bar (위험)
-                ),
-                "추세": st.column_config.TextColumn("구조", width="small"),
-                "Low_Trend_PCT": st.column_config.NumberColumn(
-                    "저점강도", format="%.2f%%", help="양수: 저점 상승중 / 음수: 저점 붕괴"
-                ),
-
-                "TRIGGER": st.column_config.TextColumn(
-                    "⚡진입신호", width="small", help="눌림회복 / 고가돌파 / 박스돌파 등"
-                ),
-                "TOTAL_SCORE": st.column_config.ProgressColumn(
-                    "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
-                ),
-                "LDY_SCORE": st.column_config.NumberColumn(
-                    "기초", format="%.1f"
-                ),
-                "종가": st.column_config.TextColumn("현재가", width="small"),
-                "추천매수가": st.column_config.TextColumn("매수", width="small"),
-                "손절가": st.column_config.TextColumn("손절", width="small"),
-                "추천매도가1": st.column_config.TextColumn("목표", width="small"),
-                "ROUTE": st.column_config.TextColumn("전략", width="small"),
-            }
-
-            st.dataframe(
-                safe_view[display_cols], 
-                use_container_width=True, 
-                column_config=cfg, 
-                height=600, 
-                hide_index=True
+        # 2. 상태 기반 정렬 (State Sorting)
+        # 사용자 옵션: "상태우선(State)" vs "점수우선(Score)"
+        sort_mode = st.radio("정렬 기준", ["🚦 상태 우선 (추천)", "🔢 점수 우선"], horizontal=True, label_visibility="collapsed")
+        
+        if sort_mode == "🚦 상태 우선 (추천)":
+            # 상태 코드(오름차순) -> 종합 점수(내림차순) -> 거래대금(내림차순)
+            safe_view = safe_view.sort_values(
+                by=["_STATE_SORT", "TOTAL_SCORE", "거래대금(억원)"], 
+                ascending=[True, False, False]
             )
+        else:
+            # 기존 방식 (점수 우선)
+            safe_view = safe_view.sort_values(
+                by=["TOTAL_SCORE", "거래대금(억원)"], 
+                ascending=[False, False]
+            )
+
+        # 3. 종목명 복구 (코드 -> 한글 이름)
+        try:
+            name_map = get_code_map() 
+            code_to_name = {v: k for k, v in name_map.items()}
+            def _fix_name(r):
+                c_name = str(r.get("종목명", "")).strip()
+                c_code = str(r.get("종목코드", "")).strip().zfill(6)
+                if not c_name or c_name.isdigit() or c_name == c_code:
+                    return code_to_name.get(c_code, c_name)
+                return c_name
+            if "종목명" in safe_view.columns:
+                safe_view["종목명"] = safe_view.apply(_fix_name, axis=1)
+        except: pass
+
+        # 4. 숫자 포맷팅 (문자열 변환)
+        for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
+            if c in safe_view.columns:
+                safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+
+        # 5. 컬럼 재배치 (상태를 가장 앞으로)
+        cols = [
+            "상태", "종목명", "생존일",  # 🔥 상태 정보 최우선 배치
+            "TRIGGER", 
+            "TOTAL_SCORE", "LDY_SCORE", 
+            "추세", "Low_Trend_PCT",
+            "종가", "추천매수가", "손절가", "추천매도가1",
+            "ROUTE", "업종"
+        ]
+        display_cols = [c for c in cols if c in safe_view.columns]
+
+        # 6. 컬럼 설정 및 출력
+        cfg = {
+            "상태": st.column_config.TextColumn(
+                "현재 상태", 
+                width="medium",
+                help="🚀:발사(진입) > ⭐️:준비(대기) > 🔋:축적(관찰) > 🧟:좀비(제외) > 💀:붕괴(삭제)"
+            ),
+            "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
+            "생존일": st.column_config.ProgressColumn(
+                "생존(일)", 
+                help="상위권 유지 일수 (10일 넘어가면 탄력 둔화 가능성)",
+                format="%d일", 
+                min_value=0, 
+                max_value=12, # 12일 넘어가면 Full Bar (위험)
+            ),
+            "TRIGGER": st.column_config.TextColumn(
+                "⚡진입신호", width="small", help="눌림회복 / 고가돌파 / 박스돌파 등"
+            ),
+            "TOTAL_SCORE": st.column_config.ProgressColumn(
+                "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
+            ),
+            "LDY_SCORE": st.column_config.NumberColumn(
+                "기초", format="%.1f", help="수급/모멘텀 등 기초 체력"
+            ),
+            "추세": st.column_config.TextColumn("구조", width="small"),
+            "Low_Trend_PCT": st.column_config.NumberColumn(
+                "저점강도", format="%.2f%%", help="양수: 저점 상승중 / 음수: 저점 붕괴"
+            ),
+            "종가": st.column_config.TextColumn("현재가", width="small"),
+            "추천매수가": st.column_config.TextColumn("매수", width="small"),
+            "손절가": st.column_config.TextColumn("손절", width="small"),
+            "추천매도가1": st.column_config.TextColumn("목표", width="small"),
+            "ROUTE": st.column_config.TextColumn("전략", width="small"),
+        }
+
+        st.dataframe(
+            safe_view[display_cols], 
+            use_container_width=True, 
+            column_config=cfg, 
+            height=600, 
+            hide_index=True
+        )
 
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
