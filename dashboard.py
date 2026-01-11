@@ -3257,11 +3257,17 @@ with tab2:
         )
     
         if sort_mode == "🚦 상태 우선 (행동순)":
-            sort_cols = ["_STATE_SORT", "TOTAL_SCORE", "거래대금(억원)"]
-            sort_cols = [c for c in sort_cols if c in active_df.columns]  # ✅ 컬럼 없을 때 방어
-            active_df = active_df.sort_values(by=sort_cols, ascending=[True] + [False]*(len(sort_cols)-1))
+            # 상태(State) -> 종합점수(Final) -> 트리거(Trigger) 순
+            sort_cols = ["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
+            # 데이터프레임에 실제 존재하는 컬럼만 필터링
+            sort_cols = [c for c in sort_cols if c in active_df.columns]
+            
+            # _STATE_SORT는 오름차순(0, 10, ...), 나머지는 내림차순(점수 높은순)
+            ascending_list = [True] + [False] * (len(sort_cols) - 1)
+            active_df = active_df.sort_values(by=sort_cols, ascending=ascending_list)
         else:
-            sort_cols = ["TOTAL_SCORE", "거래대금(억원)"]
+            # 점수 우선: FINAL_SCORE 최우선
+            sort_cols = ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
             sort_cols = [c for c in sort_cols if c in active_df.columns]
             active_df = active_df.sort_values(by=sort_cols, ascending=[False]*len(sort_cols))
     
@@ -3295,7 +3301,7 @@ with tab2:
         # 5. 컬럼 설정 (상태 컬럼 강조)
         cols = [
             "상태", "종목명", "생존일",
-            "TOTAL_SCORE", "LDY_SCORE",
+            "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", # 👈 핵심 변경
             "추세", "Low_Trend_PCT",
             "종가", "추천매수가", "손절가", "추천매도가1",
             "ROUTE", "업종"
@@ -3303,11 +3309,16 @@ with tab2:
     
         cfg = {
             "상태": st.column_config.TextColumn("Action State", width="medium",
-                                              help="🚀발사(진입) > ⭐️준비(대기) > 🔋축적(관찰)"),
+                                                help="🚀발사(진입) > ⭐️준비(대기) > 🔋축적(관찰)"),
             "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
             "생존일": st.column_config.ProgressColumn("Time", format="%d일", min_value=0, max_value=12,
-                                                   help="3~8일차: 골든타임 / 10일 이상: 상한 음식"),
-            "TOTAL_SCORE": st.column_config.ProgressColumn("종합점수", format="%.0f", min_value=0, max_value=100, width="small"),
+                                                    help="3~8일차: 골든타임 / 10일 이상: 상한 음식"),
+            
+            # 👇 새로 추가된 점수 컬럼 설정
+            "FINAL_SCORE": st.column_config.ProgressColumn("종합강도(Final)", format="%.1f", min_value=0, max_value=100, width="small"),
+            "TRIGGER_SCORE": st.column_config.NumberColumn("🔥트리거", format="%.0f", width="small"),
+            "TOTAL_SCORE": st.column_config.NumberColumn("기본점수", format="%.0f", width="small"), # Progress 대신 숫자로 변경하여 공간 확보
+            
             "Low_Trend_PCT": st.column_config.NumberColumn("저점강도", format="%.2f%%"),
             "추세": st.column_config.TextColumn("구조", width="small"),
             "종가": st.column_config.TextColumn("현재가", width="small"),
