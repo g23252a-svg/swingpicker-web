@@ -11,6 +11,7 @@ LDY Pro Trader Dashboard v8.0 (Macro View & SuperTrend Chart)
 import os, io, math, json, requests, logging
 import time
 import uuid
+import version_info
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
@@ -24,6 +25,10 @@ import re
 from typing import Optional, Dict, Any, Tuple
 from dart_analyzer import DartAnalyzer
 
+
+
+# 1. 앱 시작 부분 (상단)에 알림 추가
+version_info.show_toast_notification()
 # ---------------------------
 # [v11.0] DB 연동 및 히스토리 차트 함수
 # ---------------------------
@@ -535,6 +540,8 @@ st.set_page_config(
 )
 
 with st.sidebar:
+    # 기존 버전 표시 코드 대신 아래 함수 사용
+    version_info.render_sidebar_version_badge()
     if st.button("🔄 데이터/캐시 강제 새로고침"):
         st.cache_data.clear()
         if hasattr(st, "rerun"):
@@ -3767,6 +3774,7 @@ with tab5:
 
 with tab6:
     st.subheader("🧩 LDY Pro Trader 업데이트 노트")
+    version_info.show_recent_updates(limit=5)
 
     if not CHANGELOG:
         st.info("아직 등록된 업데이트 기록이 없습니다.")
