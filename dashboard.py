@@ -3199,16 +3199,16 @@ with tab2:
         passive_df = full_df[~active_mask].copy()
     
     # ✅ 3) Active 우선 정렬
-    sort_cols = [c for c in ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"] if c in active_all.columns]
+    sort_cols = [c for c in ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"] if c in active_df.columns]
     if sort_cols:
         active_all = active_all.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
     
     # ✅ 4) 화면 노출용 view
-    active_view  = active_all.head(limit).copy()
-    passive_view = passive_all.copy()
+    active_view  = active_df.head(limit).copy()
+    passive_view = passive_df.copy()
     
     # 기존 흐름 유지용(아래에서 view_df.empty 분기 타게)
-    view_df = full_all
+    view_df = full_df
     
 
     if view_df.empty:
