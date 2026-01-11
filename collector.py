@@ -2868,15 +2868,20 @@ def main(
              df_out["TOTAL_SCORE"] = df_out["RANK_SCORE"]
 
     # 🔥 [수정] Trigger Score 계산 및 FINAL_SCORE 반영
-    log("🔥 Trigger Score (타이밍) 계산 중...")
-    trigger_scores = []
+    log("🔥 Trigger Score (타이밍) 계산 및 최종 점수 산출 중...")
+    trigger_list = []  
     for idx, row in df_out.iterrows():
         code = str(row['종목코드']).zfill(6)
-        if code in full_ohlcv_map:
-            ts = calculate_trigger_score(full_ohlcv_map[code])
+        
+        # 미리 수집해둔 full_ohlcv_map에서 해당 종목의 일봉 데이터 가져오기
+        ohlcv_df = full_ohlcv_map.get(code)
+        
+        # Trigger 점수 계산 (함수 호출)
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            ts = calculate_trigger_score(ohlcv_df)
         else:
             ts = 0.0
-        trigger_scores.append(ts)
+        trigger_list.append(ts)
     
     df_out['TRIGGER_SCORE'] = trigger_scores
     
@@ -2889,6 +2894,7 @@ def main(
     # 켈리 베팅 자금 관리 (FINAL_SCORE 기준으로 적용 권장, 여기서는 TOTAL_SCORE 유지 또는 변경 가능)
     # --------------------------------------------------------------------------
     try:
+        # 기존 함수 유지 (TOTAL_SCORE 기준)
         df_out = apply_kelly_betting(df_out, total_capital=10_000_000)
     except Exception as e:
         log(f"⚠️ 켈리 베팅 적용 실패: {e}")
