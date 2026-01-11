@@ -3175,8 +3175,8 @@ with tab2:
 
     # 권한별 노출 개수 제한
     if auth_status in ["pro", "prime", "admin"]:
-    limit = 20 if auth_status == "pro" else 100
-    st.success(f"🥇 {auth_status.upper()} 회원: AI 종합 랭킹 Top {limit} 열람 중")
+        limit = 20 if auth_status == "pro" else 100  # 👈 여기 들여쓰기 4칸 적용
+        st.success(f"🥇 {auth_status.upper()} 회원: AI 종합 랭킹 Top {limit} 열람 중")
     else:
         limit = 5 if user else 3
         user_type = "Free" if user else "Guest"
