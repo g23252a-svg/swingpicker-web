@@ -3175,18 +3175,42 @@ with tab2:
 
     # 권한별 노출 개수 제한
     if auth_status in ["pro", "prime", "admin"]:
-        limit = 20 if auth_status == "pro" else 100
-        view_df = filtered.head(limit).copy()
-        st.success(f"🥇 {auth_status.upper()} 회원: AI 종합 랭킹 Top {limit} 열람 중")
+    limit = 20 if auth_status == "pro" else 100
+    st.success(f"🥇 {auth_status.upper()} 회원: AI 종합 랭킹 Top {limit} 열람 중")
     else:
         limit = 5 if user else 3
-        view_df = filtered.head(limit).copy()
         user_type = "Free" if user else "Guest"
         st.info(f"✅ {user_type} 회원: 상위 {limit}개 열람 중 (Pro/Prime 업그레이드 시 더 많은 종목 확인 가능)")
+    
+    # ✅ 1) 전체 filtered에 상태/IS_ACTIVE 부여
+    full_all = augment_display_data(filtered.copy())
+    
+    # ✅ 2) 전체에서 Active/Passive 분리
+    if "IS_ACTIVE" in full_all.columns:
+        active_all  = full_all[full_all["IS_ACTIVE"]].copy()
+        passive_all = full_all[~full_all["IS_ACTIVE"]].copy()
+    elif "_STATE_SORT" in full_all.columns:
+        full_all["_STATE_SORT"] = pd.to_numeric(full_all["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
+        active_all  = full_all[full_all["_STATE_SORT"] <= 30].copy()
+        passive_all = full_all[full_all["_STATE_SORT"] > 30].copy()
+    else:
+        active_mask = full_all["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
+        active_all  = full_all[active_mask].copy()
+        passive_all = full_all[~active_mask].copy()
+    
+    # ✅ 3) Active 우선 정렬
+    sort_cols = [c for c in ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"] if c in active_all.columns]
+    if sort_cols:
+        active_all = active_all.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+    
+    # ✅ 4) 화면 노출용 view
+    active_view  = active_all.head(limit).copy()
+    passive_view = passive_all.copy()
+    
+    # 기존 흐름 유지용(아래에서 view_df.empty 분기 타게)
+    view_df = full_all
+    
 
-    # ===========================
-    # ✅ 여기부터는 “view_df가 비었는지” 1번만 분기
-    # ===========================
     if view_df.empty:
             st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
@@ -3194,8 +3218,7 @@ with tab2:
         # 🔥 [v14.3 핵심] 데이터 해석 및 행동 강제 (Action Enforcement)
         # =============================================================================
         # 1. 데이터 해석 (State/Time Calculation)
-        full_df = augment_display_data(view_df.copy())
-
+        full_df = full_all.copy()
         # 2. Active vs Passive 분리 (소음 제거)
         # ✅ 2-1) 로직은 숫자/불리언(=IS_ACTIVE) 기준으로 Active/Passive 분리 (UI 문자열 의존 제거)
         if "IS_ACTIVE" in full_df.columns:
