@@ -1897,83 +1897,57 @@ def detect_regime_row(row: pd.Series) -> str:
     # ⑤ 하락 / 약세
     return "⑤ 하락 / 약세"
 
-def route_tag(row: pd.Series) -> str:
+# --- [새로 추가 1] 곡선형 패널티 계산 함수 ---
+def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
     """
-    v6.7 ROUTE 분류
-    - BRK: 강한 돌파
-    - SQZ: 진성 스퀴즈(폭발대기)
-    - Watch: 상승 준비 / 관찰
-    - REV: 역추세 반등 (지수·섹터 대비 바닥권에서 턴)
-    - PULL: 눌림/중립
+    [v15.0] 곡선형 패널티 (Curved Penalty)
+    임계치(threshold)를 넘어가면 감점 폭이 제곱(power)으로 커짐
     """
-    # ✅ [수정됨] 0.0 값을 안전하게 처리
-    def _fv(key: str, default: float = 0.0) -> float:
-        try:
-            return float(row.get(key, default) or default)
-            val = row.get(key)
-            if val is None or pd.isna(val):
-                return default
-            return float(val)
-        except Exception:
-            return default
+    if val <= threshold:
+        return 0.0
+    # (초과분 ^ power) * 가중치
+    return ((val - threshold) ** power) * weight
 
-    r5 = _fv("ret_5d_%", 0.0)
-    r10 = _fv("ret_10d_%", 0.0)
-    slope = _fv("MACD_Slope_PCT", 0.0)
-    if slope == 0.0:
-        slope = _fv("MACD_Slope", 0.0)
-    ebs = _fv("EBS", 0.0)
-    now_pct = _fv("Now%", 999.0)
-   
-    rr1 = _fv("RR1", 0.0)
-    mfi = _fv("MFI14", 50.0)
-    rel60 = _fv("rel_60d_%", 0.0)  # 60일 상대강도(α)    
-    bb_sq = _fv("TTM_SQUEEZE", _fv("BB_SQUEEZE", 0.0))
 
-    # 1) 강한 돌파 BRK
-    strong_break = (
-        (r5 >= 3) and (r10 >= 5) and (slope > 0) and (ebs >= PASS_EBS)
-        and (now_pct <= 10) and (mfi >= 55)
-    )
-    # RR1이 너무 나쁘면 BRK에서 제외
-    if strong_break and np.isfinite(rr1) and rr1 < 0.6:
-        strong_break = False
+# --- [새로 추가 2] 상태 머신 기반 ROUTE 결정 함수 (기존 route_tag 대체) ---
+def determine_state(row):
+    """
+    [v15.0] 상태 머신 기반 ROUTE 결정 (AI_COMMENT 의존)
+    """
+    # 데이터프레임 컬럼명에 맞춰 AI_COMMENT 사용 (없으면 빈 문자열)
+    why_text = str(row.get('AI_COMMENT', ''))
+    
+    # 1. 과열/위험 상태 (최우선 체크)
+    # "단기 급등 조정 주의" 문구가 있거나 RSI가 72 이상이면 무조건 과열
+    if "단기 급등 조정 주의" in why_text or row.get('RSI14', 50) >= 72:
+        return "🚫 STATE_OVERHEAT"  # 진입 금지
 
-    if strong_break:
-        return "🔼 BRK (돌파)"
+    # 2. 트리거 대기 (응축)
+    # 스퀴즈 상태(1)이고 아직 확장(BB_Expanding)이 안 된 경우
+    if row.get('TTM_SQUEEZE', 0) == 1 and row.get('BB_Expanding', 0) == 0:
+        return "👀 STATE_SQUEEZE"   # 관찰 대상
 
-    # 2) 역추세 반등 REV
-    #    - 60일 상대강도는 약하지만, 단기 r5>0 + slope>0 + 과도한 갭 아님
-    rev = (
-        (rel60 <= -5.0) and   # 지수 대비 꽤 처졌던 종목
-        (r5 >= 1.0) and       # 최근 5일은 플러스
-        (slope > 0) and       # 상승 기울기
-        (now_pct <= 10)       # 진입가에서 너무 멀지 않음
-    )
-    if rev:
-        return "🔻 REV (역추세 반등)"
+    # 3. 발사 준비 (Armed) - 응축 후 거래량/변동성 고개 듦
+    # 스퀴즈가 3일 이상 지속되다가 확장이 시작됨
+    if row.get('TTM_SQUEEZE_CNT', 0) >= 3 and row.get('BB_Expanding', 0) == 1:
+        return "🔫 STATE_ARMED"     # 진입 임박
 
-    # 2.5) 진성 스퀴즈(TTM) + 모멘텀 플러스 = 🔥 SQZ(폭발대기)
-    # 2.5) 진성 스퀴즈(TTM)
-    if (bb_sq >= 1) and (slope > 0) and (now_pct <= 10):
-        return "🔥 SQZ (폭발대기)"
+    # 4. 추세 (Trend) - 이미 상승 궤도
+    # MACD가 상승 중이고 20일선 위에 있음
+    if row.get('MACD_Slope_PCT', 0) > 0 and row.get('Above_MA20', 0) == 1:
+        return "🚀 STATE_TREND"      # 눌림목 공략
 
-    # 3) Watch 영역
-    watch = ((slope > 0) and (r5 > 0)) or ((ebs >= PASS_EBS) and (now_pct <= 8))
-    if watch:
-        if r5 >= 1.5 and slope > 0:
-            return "🔺 Watch (관찰·돌파예상)"
-        return "🔺 Watch (상승 준비)"
+    return "⚪ STATE_NEUTRAL"
 
-    # 4) 그 외는 기본적으로 PULL
-    if r5 <= -2 and slope > 0:
-        return "🔁 MR (반전)"
-
-    return "↩️ PULL (눌림)"
-
-# [수정 대상] build_global_score 함수 내부의 MOM 계산 부분을 아래로 교체하세요.
-# (함수 전체를 다 바꿀 필요는 없고, mom_norm 계산 부분만 찾아서 바꿔도 되지만, 
-#  안전을 위해 build_global_score 함수 전체 코드를 드립니다)
+def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
+    """
+    [v15.0] 곡선형 패널티 (Curved Penalty)
+    임계치(threshold)를 넘어가면 감점 폭이 제곱(power)으로 커짐
+    """
+    if val <= threshold:
+        return 0.0
+    # (초과분 ^ power) * 가중치
+    return ((val - threshold) ** power) * weight
 
 def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> pd.DataFrame:
     x = lat.copy()
@@ -1989,7 +1963,8 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
         "NEAR": 0.05, # 타점 (유지)
         "SL":  0.05   # 손절폭 (유지)
     }
-    
+
+
     # Helper functions
     def nz_num(s): return pd.to_numeric(s, errors='coerce').fillna(0)
     def col_or_zero(df, col): return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
@@ -2059,41 +2034,49 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
         100 * w["TEC"] * tec_norm  # 👈 수정된 TEC 적용
     )
 
-    # --- 🔥 [Step 1: 무효화 로직] Invalidation Check ---
-    pen = 0.0
+    # 👇👇 [여기부터 수정/교체] 👇👇
     
-    # (1) [Fix A: 급등 쿨다운]
-    # 당일 18% 이상 급등했거나, 이격도가 20% 넘으면 랭킹에서 사실상 퇴출 (패널티 50점)
-    # 랭킹엔 보일 수 있어도 상위권은 절대 불가
-    is_overheated = (r1d >= 18.0) | (disp >= 20.0)
-    pen += 50.0 * is_overheated.astype(float)
+    # --- 🔥 [Step 1: 고점 추격 방지 (Curved Penalty)] ---
+    # 벡터 연산을 위해 apply 사용
+    
+    # (1) RSI 과열 (70점 넘으면 급격히 감점)
+    # ex) 75점 -> (5^2)*0.5 = 12.5점 감점
+    rsi_s = nz_num(x["RSI14"])
+    pen_rsi = rsi_s.apply(lambda v: apply_curve_penalty(v, threshold=70, power=2.0, weight=0.5))
 
-    # (2) 구조 붕괴 (기존 유지)
-    pen += 20.0 * (low_trend < 0).astype(float)
-    
-    # (3) 좀비 (기존 유지)
+    # (2) 이격도 과열 (10% 넘으면 급격히 감점)
+    disp_s = nz_num(x["이격도"])
+    pen_disp = disp_s.apply(lambda v: apply_curve_penalty(v, threshold=10, power=2.0, weight=1.0))
+
+    # (3) 단기 급등 피로감 (5일 수익률 20% 초과 시)
+    r5_s = nz_num(x["ret_5d_%"])
+    pen_ret = r5_s.apply(lambda v: apply_curve_penalty(v, threshold=20, power=1.5, weight=0.5))
+
+    # (4~6) 기존 무효화 로직
+    pen_struct = 20.0 * (low_trend < 0).astype(float)
     is_zombie = (col_or_zero(x, "TTM_SQUEEZE") == 1) & (low_trend <= 0.1) & (vol_qual < 0.8)
-    pen += 15.0 * is_zombie.astype(float)
+    pen_zombie = 15.0 * is_zombie.astype(float)
+    pen_reverse = 10.0 * (col_or_zero(x, "Above_MA20") == 0).astype(float)
 
-    # (4) 역배열 (기존 유지)
-    pen += 10.0 * (col_or_zero(x, "Above_MA20") == 0).astype(float)
+    # 패널티 합산
+    total_pen = pen_rsi + pen_disp + pen_ret + pen_struct + pen_zombie + pen_reverse
 
-    final_score = np.clip(base_score - pen, 0, 100)
+    # ------------------------------------------------------------------
+    # [최종 점수 반영]
+    # ------------------------------------------------------------------
+    final_score = np.clip(base_score - total_pen, 0, 100)
 
     # --- 6. 보너스 (Trigger는 별도) ---
-    # Trigger 발생 시 점수 살짝 보정 (Entry Engine 연결 고리)
     has_trigger = x["TRIGGER"].fillna("").astype(str) != ""
     final_score = np.clip(final_score + (5.0 * has_trigger.astype(float)), 0, 100)
     
-    # SuperTrend 방향 일치 시 보너스
     st_dir = col_or_zero(x, "SUPERTREND_DIR")
     final_score = np.clip(final_score + (3.0 * (st_dir == 1).astype(float)), 0, 100)
     
-    # 저장
+    # --- 저장 ---
     if "ML_SCORE" not in x.columns: x["ML_SCORE"] = 0
     x["RANK_SCORE"] = final_score.round(1)
     
-    # Entry Score (진입 매력도 - 단기)
     x["ENTRY_SCORE"] = np.clip(
         40 * eng_score + 30 * near_norm + 20 * mom_score + 10 * has_trigger.astype(float), 0, 100
     ).round(1)
@@ -2110,17 +2093,23 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     x["RR1"] = (t1 - close) / (close - stop).replace(0, 1)
     x["Now%"] = now_gap
 
-    # ROUTE / REGIME (기존 함수 활용)
-    x["ROUTE"] = x.apply(route_tag, axis=1)
-    x["REGIME"] = x.apply(detect_regime_row, axis=1)
+    # ------------------------------------------------------------------
+    # 🔥 [순서 중요] AI 코멘트 생성 -> ROUTE 결정
+    # ------------------------------------------------------------------
     
-    # AI 코멘트 업데이트 (새 지표 반영)
+    # 1. AI 코멘트 생성 (먼저!)
     x["AI_COMMENT"] = x.apply(lambda row: generate_ai_comment(
         row.get("MFI14", 50), row.get("RSI14", 50), row.get("MACD_Slope_PCT", 0),
         row.get("이격도", 0), row.get("LDY_SCORE", 0), row.get("TTM_SQUEEZE", 0), 
         row.get("BB_SQUEEZE_BW", 0), row.get("BB_BW", np.nan), row.get("TTM_SQUEEZE_CNT", 0),
         row.get("IS_SWING_SUPPORT", False), row.get("V_POWER", 0.0)
     ), axis=1)
+    
+    # 2. REGIME (순서 상관 없음)
+    x["REGIME"] = x.apply(detect_regime_row, axis=1)
+    
+    # 3. ROUTE 결정 (AI_COMMENT 의존하므로 가장 마지막에!)
+    x["ROUTE"] = x.apply(determine_state, axis=1)
 
     return x
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
