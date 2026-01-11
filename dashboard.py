@@ -3193,125 +3193,122 @@ with tab2:
     # ===========================
     if view_df.empty:
             st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
-        else:
-            # =============================================================================
-            # 🔥 [v14.3 핵심] 데이터 해석 및 행동 강제 (Action Enforcement)
-            # =============================================================================
-            
-            # 1. 데이터 해석 (State/Time Calculation)
-            full_df = augment_display_data(view_df.copy())
+    else:
+        # =============================================================================
+        # 🔥 [v14.3 핵심] 데이터 해석 및 행동 강제 (Action Enforcement)
+        # =============================================================================
+        # 1. 데이터 해석 (State/Time Calculation)
+        full_df = augment_display_data(view_df.copy())
 
-            # 2. Active vs Passive 분리 (소음 제거)
-            # 메인 화면에는 '당장 볼 종목'만 남깁니다.
-            active_mask = full_df["상태"].str.contains("🚀|⭐️|🔋|👀|🆕")
-            
+        # 2. Active vs Passive 분리 (소음 제거)
+        # ✅ 2-1) _STATE_SORT가 있으면 그걸로 분리 (싱크 안정)
+        if "_STATE_SORT" in full_df.columns:
+            full_df["_STATE_SORT"] = pd.to_numeric(full_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
+            active_df  = full_df[full_df["_STATE_SORT"] <= 30].copy()   # 🚀0, ⭐️10~19, 🔋20~29 등 (네 정의에 맞게 조절)
+            passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
+        else:
+            # ✅ 2-2) fallback: contains 사용 시 NaN 방어
+            active_mask = full_df["상태"].astype(str).str.contains("🚀|⭐️|🔋|👀|🆕", na=False)
             active_df = full_df[active_mask].copy()
             passive_df = full_df[~active_mask].copy()
-
-            # 3. 정렬 로직 (Active DF 대상)
-            sort_mode = st.radio(
-                "정렬 기준", 
-                ["🚦 상태 우선 (행동순)", "🔢 점수 우선 (능력순)"], 
-                horizontal=True, 
-                label_visibility="collapsed"
-            )
-            
-            if sort_mode == "🚦 상태 우선 (행동순)":
-                active_df = active_df.sort_values(
-                    by=["_STATE_SORT", "TOTAL_SCORE", "거래대금(억원)"], 
-                    ascending=[True, False, False]
-                )
-            else:
-                active_df = active_df.sort_values(
-                    by=["TOTAL_SCORE", "거래대금(억원)"], 
-                    ascending=[False, False]
-                )
-
-            # 4. 종목명 복구 & 포맷팅 (공통 함수화)
-            try:
-                name_map = get_code_map() 
-                code_to_name = {v: k for k, v in name_map.items()}
-                def _process_display_df(df_target):
-                    if df_target.empty: return df_target
-                    # 이름 복구
-                    if "종목명" in df_target.columns:
-                        df_target["종목명"] = df_target.apply(
-                            lambda r: code_to_name.get(str(r.get("종목코드","")).zfill(6), r.get("종목명")) 
-                            if str(r.get("종목명")).isdigit() else r.get("종목명"), axis=1
-                        )
-                    # 숫자 포맷
-                    for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
-                        if c in df_target.columns:
-                            df_target[c] = pd.to_numeric(df_target[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+    
+        # 3. 정렬 로직 (Active DF 대상)
+        # ✅ key 부여 (탭/리렌더 중복 방지)
+        sort_mode = st.radio(
+            "정렬 기준",
+            ["🚦 상태 우선 (행동순)", "🔢 점수 우선 (능력순)"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="tab2_sort_mode"
+        )
+    
+        if sort_mode == "🚦 상태 우선 (행동순)":
+            sort_cols = ["_STATE_SORT", "TOTAL_SCORE", "거래대금(억원)"]
+            sort_cols = [c for c in sort_cols if c in active_df.columns]  # ✅ 컬럼 없을 때 방어
+            active_df = active_df.sort_values(by=sort_cols, ascending=[True] + [False]*(len(sort_cols)-1))
+        else:
+            sort_cols = ["TOTAL_SCORE", "거래대금(억원)"]
+            sort_cols = [c for c in sort_cols if c in active_df.columns]
+            active_df = active_df.sort_values(by=sort_cols, ascending=[False]*len(sort_cols))
+    
+        # 4. 종목명 복구 & 포맷팅 (공통 함수화)
+        try:
+            name_map = get_code_map()
+            code_to_name = {v: k for k, v in name_map.items()}
+    
+            def _process_display_df(df_target):
+                if df_target.empty:
                     return df_target
-
-                active_view = _process_display_df(active_df)
-                passive_view = _process_display_df(passive_df)
-            except: 
-                active_view = active_df
-                passive_view = passive_df
-
-            # 5. 컬럼 설정 (상태 컬럼 강조)
-            cols = [
-                "상태", "종목명", "생존일", 
-                "TOTAL_SCORE", "LDY_SCORE", 
-                "추세", "Low_Trend_PCT",
-                "종가", "추천매수가", "손절가", "추천매도가1",
-                "ROUTE", "업종"
-            ]
-            
-            cfg = {
-                "상태": st.column_config.TextColumn(
-                    "Action State", width="medium",
-                    help="🚀발사(진입) > ⭐️준비(대기) > 🔋축적(관찰)"
-                ),
-                "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
-                "생존일": st.column_config.ProgressColumn(
-                    "Time", format="%d일", min_value=0, max_value=12,
-                    help="3~8일차: 골든타임 / 10일 이상: 상한 음식"
-                ),
-                "TOTAL_SCORE": st.column_config.ProgressColumn(
-                    "종합점수", format="%.0f", min_value=0, max_value=100, width="small"
-                ),
-                "Low_Trend_PCT": st.column_config.NumberColumn(
-                    "저점강도", format="%.2f%%"
-                ),
-                "추세": st.column_config.TextColumn("구조", width="small"),
-                "종가": st.column_config.TextColumn("현재가", width="small"),
-                "추천매수가": st.column_config.TextColumn("매수", width="small"),
-                "손절가": st.column_config.TextColumn("손절", width="small"),
-                "추천매도가1": st.column_config.TextColumn("목표", width="small"),
-            }
-
-            # ---------------------------------------------------------
-            # 🎯 [Main View] 살아있는 종목 (Active)
-            # ---------------------------------------------------------
-            if not active_view.empty:
-                st.markdown(f"### 🔥 집중 공략 후보 ({len(active_view)}개)")
-                st.caption("🚀(진입) / ⭐️(준비) / 🔋(관찰) 상태인 종목만 표시합니다.")
-                
+    
+                if "종목명" in df_target.columns:
+                    df_target["종목명"] = df_target.apply(
+                        lambda r: code_to_name.get(str(r.get("종목코드", "")).zfill(6), r.get("종목명"))
+                        if str(r.get("종목명")).isdigit() else r.get("종목명"),
+                        axis=1
+                    )
+    
+                for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
+                    if c in df_target.columns:
+                        df_target[c] = pd.to_numeric(df_target[c], errors="coerce").fillna(0).apply(lambda x: f"{int(x):,}")
+                return df_target
+    
+            active_view = _process_display_df(active_df)
+            passive_view = _process_display_df(passive_df)
+        except Exception:
+            active_view = active_df
+            passive_view = passive_df
+    
+        # 5. 컬럼 설정 (상태 컬럼 강조)
+        cols = [
+            "상태", "종목명", "생존일",
+            "TOTAL_SCORE", "LDY_SCORE",
+            "추세", "Low_Trend_PCT",
+            "종가", "추천매수가", "손절가", "추천매도가1",
+            "ROUTE", "업종"
+        ]
+    
+        cfg = {
+            "상태": st.column_config.TextColumn("Action State", width="medium",
+                                              help="🚀발사(진입) > ⭐️준비(대기) > 🔋축적(관찰)"),
+            "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
+            "생존일": st.column_config.ProgressColumn("Time", format="%d일", min_value=0, max_value=12,
+                                                   help="3~8일차: 골든타임 / 10일 이상: 상한 음식"),
+            "TOTAL_SCORE": st.column_config.ProgressColumn("종합점수", format="%.0f", min_value=0, max_value=100, width="small"),
+            "Low_Trend_PCT": st.column_config.NumberColumn("저점강도", format="%.2f%%"),
+            "추세": st.column_config.TextColumn("구조", width="small"),
+            "종가": st.column_config.TextColumn("현재가", width="small"),
+            "추천매수가": st.column_config.TextColumn("매수", width="small"),
+            "손절가": st.column_config.TextColumn("손절", width="small"),
+            "추천매도가1": st.column_config.TextColumn("목표", width="small"),
+        }
+    
+        # Active
+        if not active_view.empty:
+            st.markdown(f"### 🔥 집중 공략 후보 ({len(active_view)}개)")
+            st.caption("🚀(진입) / ⭐️(준비) / 🔋(관찰) 상태인 종목만 표시합니다.")
+            st.dataframe(
+                active_view[[c for c in cols if c in active_view.columns]],
+                use_container_width=True,
+                column_config=cfg,
+                height=500,
+                hide_index=True
+            )
+        else:
+            st.info("현재 '집중 공략' 기준을 만족하는 종목이 없습니다. 관망하세요.")
+    
+        # Passive (딱 1번)
+        if not passive_view.empty:
+            st.write("")
+            with st.expander(f"💤 보류/제외 종목 보기 ({len(passive_view)}개) - 좀비, 붕괴, 단순관망"):
                 st.dataframe(
-                    active_view[[c for c in cols if c in active_view.columns]], 
-                    use_container_width=True, 
-                    column_config=cfg, 
-                    height=500, 
+                    passive_view[[c for c in cols if c in passive_view.columns]],
+                    use_container_width=True,
+                    column_config=cfg,
                     hide_index=True
                 )
-            else:
-                st.info("현재 '집중 공략' 기준을 만족하는 종목이 없습니다. 관망하세요.")
 
-            # ---------------------------------------------------------
-            # 🗑️ [Hidden View] 좀비/붕괴/관망 (Passive)
-            # ---------------------------------------------------------
-            if not passive_view.empty:
-                st.write("")
-                with st.expander(f"💤 보류/제외 종목 보기 ({len(passive_view)}개) - 좀비, 붕괴, 단순관망"):
-                    st.dataframe(
-                        passive_view[[c for c in cols if c in passive_view.columns]], 
-                        use_container_width=True, 
-                        column_config=cfg, 
-                        hide_index=True
-                    )
+            
+          
 
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
