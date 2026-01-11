@@ -2883,7 +2883,7 @@ def main(
             ts = 0.0
         trigger_list.append(ts)
     
-    df_out['TRIGGER_SCORE'] = trigger_scores
+    df_out['TRIGGER_SCORE'] = trigger_list
     
     # 🌟 FINAL_SCORE = 펀더멘털/구조(60%) + 타이밍(40%)
     df_out['FINAL_SCORE'] = (df_out['TOTAL_SCORE'] * 0.6) + (df_out['TRIGGER_SCORE'] * 0.4)
