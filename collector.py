@@ -936,7 +936,7 @@ def make_rank_validation_report(
             "HIT_5%_%": round(_wavg(g, "HIT_5%_%"), 1),
             "AVG_MDD_%": round(_wavg(g, "AVG_MDD_%"), 2),
             "WORST_MDD_%": round(float(np.nanmin(g["WORST_MDD_%"].values)), 2),
-        })).reset_index(drop=True)
+        }), include_groups=False).reset_index(drop=True)
 
         detail_path = os.path.join(out_dir, f"rank_validation_{asof_ymd}.csv")
         summ_path = os.path.join(out_dir, f"rank_validation_summary_{asof_ymd}.csv")
