@@ -2633,8 +2633,7 @@ def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000) -> pd
     
     # 1. 안전 장치 (Half-Kelly 사용)
     KELLY_MULTIPLIER = 0.5   # 켈리 비율의 50%만 진입 (변동성 관리)
-    MAX_ALLOCATION = 0.30    # 한 종목당 최대 비중 30% 제한
-
+    MAX_ALLOCATION = 0.25    # 🔥 최대 비중 25%로 강화 (분산 투자 유도)
     def _calc_row(row):
         try:
             # 데이터 추출
@@ -2907,11 +2906,8 @@ def main(
     trigger_list = []  
     for idx, row in df_out.iterrows():
         code = str(row['종목코드']).zfill(6)
-        
-        # 미리 수집해둔 full_ohlcv_map에서 해당 종목의 일봉 데이터 가져오기
         ohlcv_df = full_ohlcv_map.get(code)
         
-        # Trigger 점수 계산 (함수 호출)
         if ohlcv_df is not None and not ohlcv_df.empty:
             ts = calculate_trigger_score(ohlcv_df)
         else:
@@ -2919,9 +2915,20 @@ def main(
         trigger_list.append(ts)
     
     df_out['TRIGGER_SCORE'] = trigger_list
+    # ✅ 2. 시장 상황에 따른 동적 가중치 적용 (Bear Regime 대응)
+    # macro_risk는 main 함수 초반에 check_macro_env()로 계산됨
+    if macro_risk in ["CRITICAL", "HIGH"]:
+        log(f"🐻 시장 위험({macro_risk}) 감지: 구조(Total) 비중 확대")
+        w_structure = 0.8
+        w_timing = 0.2
+    else:
+        # Normal
+        w_structure = 0.6
+        w_timing = 0.4
     
-    # 🌟 FINAL_SCORE = 펀더멘털/구조(60%) + 타이밍(40%)
-    df_out['FINAL_SCORE'] = (df_out['TOTAL_SCORE'] * 0.6) + (df_out['TRIGGER_SCORE'] * 0.4)
+    # 🌟 FINAL_SCORE 계산 (동적 가중치 사용)
+    df_out['FINAL_SCORE'] = (df_out['TOTAL_SCORE'] * w_structure) + (df_out['TRIGGER_SCORE'] * w_timing)
+    
     df_out['FINAL_SCORE'] = df_out['FINAL_SCORE'].round(1)
     df_out['TRIGGER_SCORE'] = pd.to_numeric(df_out['TRIGGER_SCORE']).round(1)
 
