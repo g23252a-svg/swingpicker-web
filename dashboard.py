@@ -1859,7 +1859,7 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
         df["_STATE_SORT"] = 50
 
     # 3. Active 플래그 기준 완화 (여기서 30 이하는 다 보여줌)
-    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30
+    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 50
 
     # 4. 제외 사유
     df["제외사유"] = np.where(
