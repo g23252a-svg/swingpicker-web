@@ -3197,32 +3197,13 @@ with tab2:
         active_mask = full_df["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
         active_df  = full_df[active_mask].copy()
         passive_df = full_df[~active_mask].copy()
-    
-    # ✅ 3) Active 우선 정렬
-    sort_cols = [c for c in ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"] if c in active_df.columns]
-    if sort_cols:
-        active_df = active_df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
-    
-    # ✅ 4) 화면 노출용 view
-    active_view  = active_df.head(limit).copy()
-    passive_view = passive_df.copy()
-    
+        
     # 기존 흐름 유지용(아래에서 view_df.empty 분기 타게)
-    view_df = full_df
-    
+    view_df = full_df    
 
     if view_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
-    else:
-        # =============================================================================
-        # 🔥 [v14.3 핵심] 데이터 해석 및 행동 강제 (Action Enforcement)
-        # =============================================================================
-        # 1. 데이터 해석 (State/Time Calculation)
-
-        full_df = view_df.copy()
-        active_df = active_view.copy()
-        passive_df = passive_view.copy()
-        
+    else:       
           
         # 3. 정렬 로직 (Active DF 대상)
         sort_mode = st.radio(
@@ -3250,8 +3231,9 @@ with tab2:
             if sort_cols:
                 active_df = active_df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
                 
-        active_df = active_df.head(limit).copy()
-        view_df = full_df
+        # ✅ 4) 화면 노출용 view
+        active_view  = active_df.head(limit).copy()
+        passive_view = passive_df.copy()
         
         # 4. 종목명 복구 & 포맷팅 (공통 함수화)
         try:
