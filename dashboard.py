@@ -2224,7 +2224,7 @@ def route_tag_dynamic(row, th):
     if ma20_gap > 1 and slope > 0 and ebs >= PASS_EBS:
         return "🔼 BRK (MA20상승)"
 
-    return "↩️ PULL (눌림)"
+    return "🔺 Watch (상승 준비)" # 기본값을 Watch로 격상
 
 # 👉 데이터 기준일 추론
 def infer_data_timestamp(df_raw: pd.DataFrame):
