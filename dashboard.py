@@ -3419,7 +3419,10 @@ with tab2:
         st.subheader("📋 Daily Top List (AI Powered)", anchor=False)
         safe_view = view_df.copy().reset_index(drop=True)
 
-            if view_df.empty:
+        # [수정 위치] with tab2: 블록 내부 (들여쓰기 8칸으로 시작)
+        # 기존의 if view_df.empty: ... else: ... 부분을 전부 지우고 아래로 교체하세요.
+
+        if view_df.empty:
             st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
         else:
             # =============================================================================
@@ -3427,11 +3430,9 @@ with tab2:
             # =============================================================================
             
             # 1. 데이터 해석 (상태/생존일/추세 추가)
-            # (주의: 상단에 augment_display_data 함수가 선언되어 있어야 합니다)
             safe_view = augment_display_data(view_df.copy())
-    
+
             # 2. 상태 기반 정렬 (State Sorting)
-            # 사용자 옵션: "상태우선(State)" vs "점수우선(Score)"
             sort_mode = st.radio("정렬 기준", ["🚦 상태 우선 (추천)", "🔢 점수 우선"], horizontal=True, label_visibility="collapsed")
             
             if sort_mode == "🚦 상태 우선 (추천)":
@@ -3441,12 +3442,12 @@ with tab2:
                     ascending=[True, False, False]
                 )
             else:
-                # 기존 방식
+                # 기존 방식 (점수 우선)
                 safe_view = safe_view.sort_values(
                     by=["TOTAL_SCORE", "거래대금(억원)"], 
                     ascending=[False, False]
                 )
-    
+
             # 3. 종목명 복구 (코드 -> 한글 이름)
             try:
                 name_map = get_code_map() 
@@ -3460,12 +3461,12 @@ with tab2:
                 if "종목명" in safe_view.columns:
                     safe_view["종목명"] = safe_view.apply(_fix_name, axis=1)
             except: pass
-    
+
             # 4. 숫자 포맷팅 (문자열 변환)
             for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
                 if c in safe_view.columns:
                     safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
-    
+
             # 5. 컬럼 재배치 (상태를 가장 앞으로)
             cols = [
                 "상태", "종목명", "생존일",  # 🔥 상태 정보 최우선 배치
@@ -3476,7 +3477,7 @@ with tab2:
                 "ROUTE", "업종"
             ]
             display_cols = [c for c in cols if c in safe_view.columns]
-    
+
             # 6. 컬럼 설정 및 출력
             cfg = {
                 "상태": st.column_config.TextColumn(
@@ -3511,7 +3512,7 @@ with tab2:
                 "추천매도가1": st.column_config.TextColumn("목표", width="small"),
                 "ROUTE": st.column_config.TextColumn("전략", width="small"),
             }
-    
+
             st.dataframe(
                 safe_view[display_cols], 
                 use_container_width=True, 
