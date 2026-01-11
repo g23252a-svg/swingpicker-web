@@ -3090,7 +3090,9 @@ with tab2:
     with col_f1:
         min_score = st.slider(
             "최소 퀀트(LDY) 점수",
-            min_value=0, max_value=100, value=70, step=1,
+            min_value=0, max_value=100, 
+            value=50,  # 👈 [수정] 70 -> 50으로 변경 (시장 점수 하락 반영)
+            step=1,
             key="min_score",
         )
 
@@ -3149,8 +3151,10 @@ with tab2:
             base_view = scored.head(50).copy()
 
     filtered = base_view.copy()
-    filter_col = "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else (
-        "RANK_SCORE" if "RANK_SCORE" in filtered.columns else "LDY_SCORE"
+    filter_col = "FINAL_SCORE" if "FINAL_SCORE" in filtered.columns else (
+        "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else (
+            "RANK_SCORE" if "RANK_SCORE" in filtered.columns else "LDY_SCORE"
+        )
     )
 
     if filter_col in filtered.columns:
