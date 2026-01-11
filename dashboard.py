@@ -1900,7 +1900,7 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     df["상태"] = state_results.apply(lambda x: x[0])
     df["_STATE_SORT"] = state_results.apply(lambda x: x[1]) # 정렬용 히든 컬럼
     # 로직용 Active/Passive 플래그 (UI 문자열이 로직을 지배하지 않도록)
-    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 3
+    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30   # 🚀0, ⭐️10~19, 🔋20~29, 👀도 Active로 볼 거면 30까지 포함 등
 
     # Passive 디버깅용: 제외 사유(Active에는 표시하지 않고 Passive 뷰에서만 노출)
     df["제외사유"] = np.where(
@@ -3216,8 +3216,8 @@ with tab2:
         # (호환) 예전 데이터에는 IS_ACTIVE가 없을 수 있으니 _STATE_SORT로 fallback
         elif "_STATE_SORT" in full_df.columns:
             full_df["_STATE_SORT"] = pd.to_numeric(full_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
-            active_df  = full_df[full_df["_STATE_SORT"] <= 3].copy()
-            passive_df = full_df[full_df["_STATE_SORT"] > 3].copy()
+            active_df  = full_df[full_df["_STATE_SORT"] <= 30].copy()
+            passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
         else:
             # ✅ 2-2) fallback: contains 사용 시 NaN 방어
             active_mask = full_df["상태"].astype(str).str.contains("🚀|⭐️|🔋|👀|🆕", na=False)
@@ -3293,6 +3293,7 @@ with tab2:
             "손절가": st.column_config.TextColumn("손절", width="small"),
             "추천매도가1": st.column_config.TextColumn("목표", width="small"),
         }
+        cfg["제외사유"] = st.column_config.TextColumn("제외사유", width="small")
     
         # Active
         if not active_view.empty:
@@ -3312,7 +3313,7 @@ with tab2:
         if not passive_view.empty:
             st.write("")
             with st.expander(f"💤 보류/제외 종목 보기 ({len(passive_view)}개) - 좀비, 붕괴, 단순관망"):
-                passive_cols = [c for c in cols if c in passive_view.columns]
+                passive_cols = [c for c in (cols + ["제외사유"]) if c in passive_view.columns]
                 if "제외사유" in passive_view.columns and "제외사유" not in passive_cols:
                     passive_cols.append("제외사유")
 
