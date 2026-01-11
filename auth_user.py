@@ -16,7 +16,7 @@ logger = logging.getLogger("auth_user")
 # 상수 정의
 CURRENT_USER_KEY = "ldy_current_user"
 MASTER_ADMIN_ID = "admin"
-MASTER_ADMIN_PW = "2022322"
+MASTER_ADMIN_PW = st.secrets.get("auth", {}).get("master_admin_pw", "")
 
 SECURITY_QUESTIONS = [
     "선택하세요...", "가장 기억에 남는 여행지는?", "어릴 적 살던 동네 이름은?",
