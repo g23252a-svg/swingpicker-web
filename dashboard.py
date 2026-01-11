@@ -1830,62 +1830,38 @@ def get_survival_days(current_codes: list, lookback: int = 15) -> dict:
 
 
 def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    [v15.0] Collector의 상태 머신 결과(ROUTE)를 UI용 텍스트로 매핑 및 정렬
-    (Dashboard 자체 재계산 로직 제거 버전)
-    """
     if df.empty: return df
-    
     df = df.copy()
-    if "종목코드" in df.columns:
-        codes = df["종목코드"].astype(str).str.zfill(6).tolist()
-    else:
-        return df
     
-    # 1. 시간축 (Days Alive) - 기존 로직 유지
+    # 1. 생존일 계산 로직 (기존 유지)
     try:
+        codes = df["종목코드"].astype(str).str.zfill(6).tolist()
         survival_map = get_survival_days(codes, lookback=20)
         df["생존일"] = df["종목코드"].apply(lambda x: survival_map.get(str(x).zfill(6), 1))
     except:
         df["생존일"] = 1
 
-    # 2. 상태 매핑 (Collector ROUTE 컬럼 값을 그대로 UI 텍스트 & 정렬 순서로 변환)
-    # 0에 가까울수록 상단 노출 (우선순위: 발사임박 > 추세 > 응축 > 관망 > 위험)
-    
+    # 2. 핵심: Collector의 ROUTE를 UI 상태로 매핑
     def map_route_to_ui(route_val):
         r = str(route_val)
-        
-        # (1) 🔫 발사 준비 (가장 중요 - ARMED)
-        if "ARMED" in r:
-            return "🔫 발사임박 (Armed)", 0
-            
-        # (2) 🚀 추세 (이미 터짐 - TREND)
-        if "TREND" in r:
-            return "🚀 상승추세 (Trend)", 10
-            
-        # (3) 👀 응축/대기 (관찰 - SQUEEZE)
-        if "SQUEEZE" in r:
-            return "🌪️ 응축중 (Squeeze)", 20
-            
-        # (4) 🚫 위험/과열 (하위 - OVERHEAT)
-        if "OVERHEAT" in r:
-            return "⛔ 과열/위험 (Caution)", 90
-            
-        # (5) 그 외 (NEUTRAL 등)
+        if "ARMED" in r: return "🔫 발사임박 (Armed)", 0
+        if "TREND" in r: return "🚀 상승추세 (Trend)", 10
+        if "SQUEEZE" in r: return "🌪️ 응축중 (Squeeze)", 20
+        if "OVERHEAT" in r: return "⛔ 과열/위험 (Caution)", 90
         return "⚪ 관망 (Neutral)", 50
 
-    # Apply mapping
-    mapped = df["ROUTE"].apply(map_route_to_ui)
-    
-    # 결과 분리
-    df["상태"] = mapped.apply(lambda x: x[0])
-    df["_STATE_SORT"] = mapped.apply(lambda x: x[1])
+    if "ROUTE" in df.columns:
+        mapped = df["ROUTE"].apply(map_route_to_ui)
+        df["상태"] = mapped.apply(lambda x: x[0])
+        df["_STATE_SORT"] = mapped.apply(lambda x: x[1])
+    else:
+        df["상태"] = "⚪ 관망 (Neutral)"
+        df["_STATE_SORT"] = 50
 
-    # 3. Active 플래그 (UI 탭 분리용)
-    # 과열(90)이나 관망(50)이 아니면 '집중 공략' 탭에 표시
+    # 3. Active 플래그 기준 완화 (여기서 30 이하는 다 보여줌)
     df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30
 
-    # 4. 제외 사유 (Passive 탭용)
+    # 4. 제외 사유
     df["제외사유"] = np.where(
         df["_STATE_SORT"] == 90, "⚠️ 과열/급등주의",
         np.where(df["_STATE_SORT"] == 50, "⏳ 모멘텀 부족", "-")
@@ -3092,7 +3068,7 @@ with tab2:
         min_score = st.slider(
             "최소 퀀트(LDY) 점수",
             min_value=0, max_value=100, 
-            value=50,  # 👈 [수정] 70 -> 50으로 변경 (시장 점수 하락 반영)
+            value=50,  # 70 -> 50으로 변경
             step=1,
             key="min_score",
         )
