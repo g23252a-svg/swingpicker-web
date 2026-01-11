@@ -2304,7 +2304,75 @@ def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
         
     return list(set(headlines))[:10] # 중복 제거 후 최대 10개
 
+# ------------------------------- Trigger Score Calculation -------------------------------
 
+def calculate_trigger_score(df: pd.DataFrame) -> float:
+    """
+    [New] 단기 급등 타이밍 포착을 위한 Trigger Score 계산
+    df: 일봉 데이터 (OHLCV) - 컬럼명: 시가, 고가, 저가, 종가, 거래량
+    """
+    if df is None or df.empty or len(df) < 30:
+        return 0.0
+
+    # 데이터 타입 안전 변환
+    try:
+        vol = pd.to_numeric(df['거래량'], errors='coerce').fillna(0)
+        close = pd.to_numeric(df['종가'], errors='coerce').fillna(0)
+        high = pd.to_numeric(df['고가'], errors='coerce').fillna(0)
+        
+        curr_vol = float(vol.iloc[-1])
+        curr_close = float(close.iloc[-1])
+        curr_high = float(high.iloc[-1])
+        prev_high = float(high.iloc[-2])
+    except:
+        return 0.0
+
+    # 1. Volume Accel (거래량 가속도) - 비중 30%
+    # 최근 3일(어제 기준) 평균 거래량 대비 오늘 거래량
+    vol_ma3 = vol.iloc[-4:-1].mean()
+    if vol_ma3 == 0: vol_ma3 = 1
+    vol_ratio = curr_vol / vol_ma3
+    # 2배 이상 터지면 만점(100)
+    score_vol = min(vol_ratio * 50, 100) 
+
+    # 2. Breakout Potential (돌파 임박/시도) - 비중 40%
+    sma20 = close.rolling(window=20).mean().iloc[-1]
+    std20 = close.rolling(window=20).std().iloc[-1]
+    bb_upper = sma20 + (2 * std20)
+    
+    bb_pos = 0.0
+    if bb_upper > 0:
+        bb_pos = curr_close / bb_upper
+    
+    # 당일 고가 갱신 여부
+    high_break = 1 if curr_high > prev_high else 0
+    
+    score_breakout = 0
+    if bb_pos > 0.95: score_breakout += 70 # 상단 근접
+    if bb_pos > 1.0: score_breakout += 30  # 돌파 시 추가 가산점
+    if high_break: score_breakout = min(score_breakout + 20, 100)
+
+    # 3. Momentum Accel (에너지 가속) - 비중 30%
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    hist = macd - signal
+    
+    hist_curr = float(hist.iloc[-1])
+    hist_prev = float(hist.iloc[-2])
+    
+    score_mom = 0
+    if hist_curr > 0 and hist_curr > hist_prev:
+        # 가속 강도 (변화율)
+        denom = abs(hist_prev) if abs(hist_prev) > 0 else 0.0001
+        change = (hist_curr - hist_prev) / denom
+        score_mom = min(50 + (change * 100), 100) 
+    elif hist_curr > 0:
+        score_mom = 30 # 양수지만 가속은 아님
+        
+    final_trigger = (score_vol * 0.3) + (score_breakout * 0.4) + (score_mom * 0.3)
+    return float(final_trigger)
 
 # [수정 대상] analyze_ticker 함수 전체를 아래 코드로 교체하세요.
 
@@ -2779,26 +2847,48 @@ def main(
     # 🔥 [1단계 업그레이드] 여기서 ML 점수 주입 (full_ohlcv_map 전달)
     # --------------------------------------------------------------------------
     try:
-        # ml_engine이 시계열 데이터(full_ohlcv_map)를 참고하여 점수를 예측합니다.
         df_out = ml_engine.apply_ml_score(df_out, full_ohlcv_map)
         
-        # ML 점수가 있는 종목들만 가중 합산 (퀀트 70% + AI 30%)
-        if "ML_SCORE" in df_out.columns:
-            mask = df_out["ML_SCORE"] > 0
-            if mask.any():
-                df_out.loc[mask, "TOTAL_SCORE"] = (df_out.loc[mask, "RANK_SCORE"] * 0.7) + (df_out.loc[mask, "ML_SCORE"] * 0.3)
-                df_out["TOTAL_SCORE"] = df_out["TOTAL_SCORE"].round(1)
+        # 기본 TOTAL_SCORE 계산 (ML 없으면 RANK_SCORE 사용)
+        if "ML_SCORE" not in df_out.columns:
+            df_out["ML_SCORE"] = 0
         
+        # TOTAL_SCORE 초기화
+        df_out["TOTAL_SCORE"] = df_out["RANK_SCORE"] # 기본값
+        
+        mask = df_out["ML_SCORE"] > 0
+        if mask.any():
+            df_out.loc[mask, "TOTAL_SCORE"] = (df_out.loc[mask, "RANK_SCORE"] * 0.7) + (df_out.loc[mask, "ML_SCORE"] * 0.3)
+        
+        df_out["TOTAL_SCORE"] = df_out["TOTAL_SCORE"].round(1)
+
     except Exception as e:
         log(f"⚠️ ML 점수 반영 중 에러 (main): {e}")
+        if "TOTAL_SCORE" not in df_out.columns:
+             df_out["TOTAL_SCORE"] = df_out["RANK_SCORE"]
 
-    # 👇👇 [여기부터 추가하세요] 👇👇
+    # 🔥 [수정] Trigger Score 계산 및 FINAL_SCORE 반영
+    log("🔥 Trigger Score (타이밍) 계산 중...")
+    trigger_scores = []
+    for idx, row in df_out.iterrows():
+        code = str(row['종목코드']).zfill(6)
+        if code in full_ohlcv_map:
+            ts = calculate_trigger_score(full_ohlcv_map[code])
+        else:
+            ts = 0.0
+        trigger_scores.append(ts)
+    
+    df_out['TRIGGER_SCORE'] = trigger_scores
+    
+    # 🌟 FINAL_SCORE = 펀더멘털/구조(60%) + 타이밍(40%)
+    df_out['FINAL_SCORE'] = (df_out['TOTAL_SCORE'] * 0.6) + (df_out['TRIGGER_SCORE'] * 0.4)
+    df_out['FINAL_SCORE'] = df_out['FINAL_SCORE'].round(1)
+    df_out['TRIGGER_SCORE'] = pd.to_numeric(df_out['TRIGGER_SCORE']).round(1)
+
     # --------------------------------------------------------------------------
-    # 🔥 [3단계 업그레이드] 켈리 베팅(Kelly Betting) 자금 관리 적용
+    # 켈리 베팅 자금 관리 (FINAL_SCORE 기준으로 적용 권장, 여기서는 TOTAL_SCORE 유지 또는 변경 가능)
     # --------------------------------------------------------------------------
     try:
-        # TOTAL_SCORE가 계산된 상태이므로, 이를 바탕으로 비중을 재산정합니다.
-        # 기본 자본금 1,000만원 가정 (필요 시 수정 가능)
         df_out = apply_kelly_betting(df_out, total_capital=10_000_000)
     except Exception as e:
         log(f"⚠️ 켈리 베팅 적용 실패: {e}")
@@ -2831,7 +2921,7 @@ def main(
     df_out["REGIME_RANK"] = df_out["REGIME"].map(_regime_rank).fillna(999).astype(int)
 
     df_out = df_out.sort_values(
-        ["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE", "거래대금(억원)"],
+        ["FINAL_SCORE", "TRIGGER_SCORE", "RANK_SCORE", "거래대금(억원)"],
         ascending=[False, False, False, False]
     )
 
@@ -2951,7 +3041,8 @@ def main(
         "종목코드","종목명","시장","업종","업종_상세","업종_대분류",
         "종가","거래대금(억원)","시가총액(억원)",
         "추천매수가","손절가","추천매도가1","추천매도가2",
-        "RANK_SCORE","LDY_SCORE","ENTRY_SCORE",
+        "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", # 👈 여기 추가됨
+        "RANK_SCORE","LDY_SCORE","ENTRY_SCORE", "ML_SCORE",
         "NEWS_SCORE", "NEWS_REASON",  # 👈 여기에 추가하면 보기 좋습니다
         "TRIGGER",  # ✅ [New] CSV 저장 컬럼 추가
         "ROUTE","REGIME",
