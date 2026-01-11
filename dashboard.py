@@ -2839,6 +2839,16 @@ if send_btn and tg_token and tg_chat_id:
         st.error(f"전송 실패: {res}")
 
 df_latest = load_recommend_latest(local_path=RECOMMEND_LATEST_PATH, remote_url=RAW_SRC)
+# 👇 [안전 장치 코드 추가] FINAL_SCORE 컬럼이 없으면 임시로 생성 (에러 방지)
+if df_latest is not None and not df_latest.empty:
+    if "FINAL_SCORE" not in df_latest.columns:
+        # FINAL_SCORE가 없으면 TOTAL_SCORE나 LDY_SCORE를 대신 사용
+        fallback_score = "TOTAL_SCORE" if "TOTAL_SCORE" in df_latest.columns else "LDY_SCORE"
+        df_latest["FINAL_SCORE"] = df_latest[fallback_score]
+        
+    if "TRIGGER_SCORE" not in df_latest.columns:
+        # TRIGGER_SCORE가 없으면 0점으로 초기화
+        df_latest["TRIGGER_SCORE"] = 0.0
 user = get_user()
 user_role = (user or {}).get("role", "guest")
 
@@ -3247,7 +3257,6 @@ with tab2:
             passive_df = full_df[~active_mask].copy()
     
         # 3. 정렬 로직 (Active DF 대상)
-        # ✅ key 부여 (탭/리렌더 중복 방지)
         sort_mode = st.radio(
             "정렬 기준",
             ["🚦 상태 우선 (행동순)", "🔢 점수 우선 (능력순)"],
@@ -3255,18 +3264,17 @@ with tab2:
             label_visibility="collapsed",
             key="tab2_sort_mode"
         )
-    
+       
         if sort_mode == "🚦 상태 우선 (행동순)":
-            # 상태(State) -> 종합점수(Final) -> 트리거(Trigger) 순
+            # 🔥 [수정] FINAL_SCORE, TRIGGER_SCORE 추가
             sort_cols = ["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
-            # 데이터프레임에 실제 존재하는 컬럼만 필터링
             sort_cols = [c for c in sort_cols if c in active_df.columns]
             
-            # _STATE_SORT는 오름차순(0, 10, ...), 나머지는 내림차순(점수 높은순)
+            # _STATE_SORT(상태)는 오름차순, 나머지는 내림차순
             ascending_list = [True] + [False] * (len(sort_cols) - 1)
             active_df = active_df.sort_values(by=sort_cols, ascending=ascending_list)
         else:
-            # 점수 우선: FINAL_SCORE 최우선
+            # 🔥 [수정] 점수 우선: FINAL_SCORE 최우선
             sort_cols = ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
             sort_cols = [c for c in sort_cols if c in active_df.columns]
             active_df = active_df.sort_values(by=sort_cols, ascending=[False]*len(sort_cols))
