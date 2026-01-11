@@ -226,8 +226,8 @@ def render_auth_box(show_debug=False):
                         st.rerun()
                     else:
                         st.error("비밀번호가 일치하지 않습니다.")
-                        # [디버깅] 필요시 아래 주석 해제하여 값 확인 (보안 주의)
-                        # st.warning(f"DEBUG: 입력='{input_pw_str}', 설정='{MASTER_ADMIN_PW}'") 
+                        # 주석(#)을 지워서 화면에 값을 출력합니다.
+                        st.warning(f"DEBUG: 입력='{input_pw_str}', 설정='{MASTER_ADMIN_PW}'")
                 
                 # 2. 일반 유저 체크 (관리자가 아닐 경우)
                 else:
