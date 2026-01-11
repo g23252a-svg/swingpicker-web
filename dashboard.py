@@ -3232,7 +3232,7 @@ with tab2:
             passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
         else:
             # ✅ 2-2) fallback: contains 사용 시 NaN 방어
-            active_mask = full_df["상태"].astype(str).str.contains("🚀|⭐️|🔋|👀|🆕", na=False)
+            active_mask = full_df["상태"].astype(str).str.contains("🚀|🔫|👀|⭐️|🔋|🆕", na=False)
             active_df = full_df[active_mask].copy()
             passive_df = full_df[~active_mask].copy()
     
@@ -3319,7 +3319,7 @@ with tab2:
         # Active
         if not active_view.empty:
             st.markdown(f"### 🔥 집중 공략 후보 ({len(active_view)}개)")
-            st.caption("🚀(진입) / ⭐️(준비) / 🔋(관찰) 상태인 종목만 표시합니다.")
+            st.caption("🚀(추세) / 🔫(발사 준비) / 👀(응축 관찰) 상태인 종목만 표시합니다.")
             st.dataframe(
                 active_view[[c for c in cols if c in active_view.columns]],
                 use_container_width=True,
