@@ -2823,7 +2823,8 @@ user = get_user()
 user_role = (user or {}).get("role", "guest")
 
 # tab7 변수와 목록 맨 끝에 "📈 시스템 성과 (Performance)" 추가
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+# tab8 변수 추가 및 "👑 회원관리" 탭 라벨 추가
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
     [
         "📊 시장 (Market)",
         "🔭 종목 분석",
@@ -2832,6 +2833,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "⚖️ 이용 약관 / 투자 유의사항",
         "🧩 LDY Pro Trader 업데이트 노트",
         "📈 시스템 성과 (Performance)", 
+        "👑 회원관리",  # 👈 추가된 부분
     ]
 )
 
@@ -3968,3 +3970,30 @@ with tab7:
                         disp_df['Date'] = disp_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d') if isinstance(x, pd.Timestamp) else x)
                         
                     st.dataframe(disp_df.sort_values('Date', ascending=False), use_container_width=True)
+
+with tab8:
+    st.subheader("👑 회원 관리")
+    
+    # 관리자 권한 체크 (보안을 위해 필수)
+    if auth_status == "admin":
+        users = list_users()
+        if not users:
+            st.info("등록된 회원이 없습니다.")
+        else:
+            # 회원 목록 및 관리 UI 표시 (기존 사이드바 코드를 활용)
+            st.write(f"총 가입자: {len(users)}명")
+            
+            rows = []
+            for u in users:
+                rows.append({
+                    "Email": u.get("login_id"),
+                    "닉네임": u.get("nickname"),
+                    "권한": u.get("role", "free"),
+                    "최근접속": to_kst_str(u.get("last_login"))
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            
+            # (선택) 여기에 등급 변경, 차단 등 관리 기능 추가
+            
+    else:
+        st.error("🚫 관리자 전용 메뉴입니다. 접근 권한이 없습니다.")
