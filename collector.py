@@ -1914,30 +1914,25 @@ def determine_state(row):
     """
     [v15.0] 상태 머신 기반 ROUTE 결정 (AI_COMMENT 의존)
     """
-    # 데이터프레임 컬럼명에 맞춰 AI_COMMENT 사용 (없으면 빈 문자열)
     why_text = str(row.get('AI_COMMENT', ''))
-    
-    # 1. 과열/위험 상태 (최우선 체크)
-    # "단기 급등 조정 주의" 문구가 있거나 RSI가 72 이상이면 무조건 과열
+
+    # 1) 과열/위험 (진입 금지)
     if "단기 급등 조정 주의" in why_text or row.get('RSI14', 50) >= 72:
-        return "🚫 STATE_OVERHEAT"  # 진입 금지
+        return "🚫 과열/위험"
 
-    # 2. 트리거 대기 (응축)
-    # 스퀴즈 상태(1)이고 아직 확장(BB_Expanding)이 안 된 경우
+    # 2) 트리거 대기(응축) - 관찰
     if row.get('TTM_SQUEEZE', 0) == 1 and row.get('BB_Expanding', 0) == 0:
-        return "🔋 STATE_SQUEEZE"   # 관찰
+        return "👀 트리거 대기"
 
-    # 3. 발사 준비 (Armed) - 응축 후 거래량/변동성 고개 듦
-    # 스퀴즈가 3일 이상 지속되다가 확장이 시작됨
+    # 3) 트리거 임박(Armed) - 곧 발사
     if row.get('TTM_SQUEEZE_CNT', 0) >= 3 and row.get('BB_Expanding', 0) == 1:
-        return "⭐️ STATE_ARMED"    # 준비
+        return "🔫 트리거 임박"
 
-    # 4. 추세 (Trend) - 이미 상승 궤도
-    # MACD가 상승 중이고 20일선 위에 있음
+    # 4) 추세 진입(Trend) - 집중 공략
     if row.get('MACD_Slope_PCT', 0) > 0 and row.get('Above_MA20', 0) == 1:
-        return "🚀 STATE_TREND"     # 진입
+        return "🚀 집중 공략"
 
-    return "⚪ STATE_NEUTRAL"
+    return "⚪ 관망"
 
 def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
     """
@@ -2111,6 +2106,10 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     # 3. ROUTE 결정 (AI_COMMENT 의존하므로 가장 마지막에!)
     x["ROUTE"] = x.apply(determine_state, axis=1)
 
+    # ✅ 대시보드 필터용 컬럼 (너가 원한 그 코드 "정확히" 여기)
+    x["상태"] = x["ROUTE"]
+    x["IS_ACTIVE"] = x["상태"].astype(str).str.contains(r"🚀|🔫|👀", na=False)
+    
     return x
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
 
