@@ -1925,17 +1925,17 @@ def determine_state(row):
     # 2. 트리거 대기 (응축)
     # 스퀴즈 상태(1)이고 아직 확장(BB_Expanding)이 안 된 경우
     if row.get('TTM_SQUEEZE', 0) == 1 and row.get('BB_Expanding', 0) == 0:
-        return "👀 STATE_SQUEEZE"   # 관찰 대상
+        return "🔋 STATE_SQUEEZE"   # 관찰
 
     # 3. 발사 준비 (Armed) - 응축 후 거래량/변동성 고개 듦
     # 스퀴즈가 3일 이상 지속되다가 확장이 시작됨
     if row.get('TTM_SQUEEZE_CNT', 0) >= 3 and row.get('BB_Expanding', 0) == 1:
-        return "🔫 STATE_ARMED"     # 진입 임박
+        return "⭐️ STATE_ARMED"    # 준비
 
     # 4. 추세 (Trend) - 이미 상승 궤도
     # MACD가 상승 중이고 20일선 위에 있음
     if row.get('MACD_Slope_PCT', 0) > 0 and row.get('Above_MA20', 0) == 1:
-        return "🚀 STATE_TREND"      # 눌림목 공략
+        return "🚀 STATE_TREND"     # 진입
 
     return "⚪ STATE_NEUTRAL"
 
