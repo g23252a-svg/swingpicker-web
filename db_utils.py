@@ -252,7 +252,7 @@ class LDYDBManager:
             return result
         except: return []
 
-    def save_recommendations(self, df):
+    def save_recommendations(self, df, trade_ymd=None):
         """
         [v11.0] 일일 추천 종목 결과 저장 (History 용)
         DB 스키마: daily_recommend 테이블에 저장
@@ -277,8 +277,19 @@ class LDYDBManager:
             # 2. 데이터 전처리
             save_df = df.copy()
             
-            # 날짜 설정 (데이터프레임에 '기준일'이 있으면 사용, 없으면 오늘 날짜)
-            if '기준일' in save_df.columns:
+            # 날짜 설정 우선순위:
+            # 1순위: 인자로 받은 trade_ymd
+            # 2순위: DataFrame 내 '기준일' 컬럼
+            # 3순위: 오늘 날짜
+            if trade_ymd:
+                # YYYYMMDD 형식이면 YYYY-MM-DD로 변환
+                s_ymd = str(trade_ymd)
+                if len(s_ymd) == 8 and s_ymd.isdigit():
+                    formatted_date = f"{s_ymd[:4]}-{s_ymd[4:6]}-{s_ymd[6:]}"
+                else:
+                    formatted_date = s_ymd
+                save_df['trade_date'] = formatted_date
+            elif '기준일' in save_df.columns:
                 save_df['trade_date'] = save_df['기준일'].astype(str)
             else:
                 save_df['trade_date'] = datetime.now().strftime("%Y-%m-%d")
@@ -315,10 +326,6 @@ class LDYDBManager:
             date_val = target_df['trade_date'].iloc[0]
             self.conn.execute(f"DELETE FROM daily_recommend WHERE trade_date = '{date_val}'")
             self.conn.execute("INSERT INTO daily_recommend SELECT * FROM target_df")
-            
-            # (옵션) DuckDB 파일로 영구 저장하려면 로컬 파일에 export 하는 로직 필요
-            # 현재는 :memory: DB를 쓰므로 앱 재시작 시 사라짐. 
-            # 영구 저장이 필요하면 __init__에서 'ldy_trader.db'로 연결해야 함.
             
             # print(f"✅ DB Saved: {len(target_df)} rows for {date_val}") # 로그용
             
