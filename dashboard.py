@@ -3182,30 +3182,32 @@ with tab2:
         user_type = "Free" if user else "Guest"
         st.info(f"✅ {user_type} 회원: 상위 {limit}개 열람 중 (Pro/Prime 업그레이드 시 더 많은 종목 확인 가능)")
     
-    # ✅ 1) 전체 filtered에 상태/IS_ACTIVE 부여
+    # --- 2. 데이터 상태 해석 및 분리 (IS_ACTIVE 생성) ---
     full_df = augment_display_data(filtered.copy())
     
-    # ✅ 2) 전체에서 Active/Passive 분리
+    # Active/Passive 분리 및 NameError 방지를 위한 변수 생성 (active_all)
     if "IS_ACTIVE" in full_df.columns:
-        active_df  = full_df[full_df["IS_ACTIVE"]].copy()
-        passive_df = full_df[~full_df["IS_ACTIVE"]].copy()
+        active_all  = full_df[full_df["IS_ACTIVE"]].copy()
+        passive_all = full_df[~full_all["IS_ACTIVE"]].copy()
     elif "_STATE_SORT" in full_df.columns:
         full_df["_STATE_SORT"] = pd.to_numeric(full_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
-        active_df  = full_df[full_df["_STATE_SORT"] <= 30].copy()
-        passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
+        active_all  = full_df[full_df["_STATE_SORT"] <= 30].copy()
+        passive_all = full_df[full_df["_STATE_SORT"] > 30].copy()
     else:
         active_mask = full_df["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
-        active_df  = full_df[active_mask].copy()
-        passive_df = full_df[~active_mask].copy()
-        
-    # 기존 흐름 유지용(아래에서 view_df.empty 분기 타게)
-    view_df = full_df    
+        active_all  = full_df[active_mask].copy()
+        passive_all = full_df[~active_mask].copy()
+    
+    # 기존 코드 흐름 유지용 변수 할당
+    active_df = active_all.copy()
+    passive_df = passive_all.copy()
+    view_df = full_df.copy() # <--- 여기서 정의되어야 라인 3204 에러가 안 납니다.
 
+    # --- 3. 정렬 및 화면 출력 조건 체크 ---
     if view_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
-    else:       
-          
-        # 3. 정렬 로직 (Active DF 대상)
+    else:
+        # 정렬 기준 라디오
         sort_mode = st.radio(
             "정렬 기준",
             ["🚦 상태 우선 (행동순)", "🔢 점수 우선 (능력순)"],
@@ -3213,26 +3215,22 @@ with tab2:
             label_visibility="collapsed",
             key="tab2_sort_mode"
         )
-        if "_STATE_SORT" in active_df.columns:
-            active_df["_STATE_SORT"] = pd.to_numeric(active_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
-       
+        
+        # 정렬 실행 (active_df 기준)
         if sort_mode == "🚦 상태 우선 (행동순)":
-            # 🔥 [수정] FINAL_SCORE, TRIGGER_SCORE 추가
             sort_cols = ["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
             sort_cols = [c for c in sort_cols if c in active_df.columns]
             if sort_cols:
                 ascending_list = [True] + [False] * (len(sort_cols) - 1)
                 active_df = active_df.sort_values(by=sort_cols, ascending=ascending_list)
-
         else:
-            # 🔥 [수정] 점수 우선: FINAL_SCORE 최우선
             sort_cols = ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
             sort_cols = [c for c in sort_cols if c in active_df.columns]
             if sort_cols:
-                active_df = active_df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
-                
-        # ✅ 4) 화면 노출용 view
-        active_view  = active_df.head(limit).copy()
+                active_df = active_df.sort_values(by=sort_cols, ascending=[False]*len(sort_cols))
+
+        # 최종 표시용 view (개수 제한 적용)
+        active_view = active_df.head(limit).copy()
         passive_view = passive_df.copy()
         
         # 4. 종목명 복구 & 포맷팅 (공통 함수화)
