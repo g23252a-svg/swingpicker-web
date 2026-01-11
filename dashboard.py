@@ -3429,10 +3429,11 @@ with tab2:
             # 🔥 [v14.2 핵심] 데이터 전처리 & 상태 해석 (Augmentation)
             # =============================================================================
             
-            # 1. 데이터 해석 (상태/생존일/추세 추가)
+            # 1. 데이터 해석 (상태/생존일/추세 추가) - 상단에 추가한 augment_display_data 함수 사용
             safe_view = augment_display_data(view_df.copy())
 
             # 2. 상태 기반 정렬 (State Sorting)
+            # 사용자 옵션: "상태우선(State)" vs "점수우선(Score)"
             sort_mode = st.radio("정렬 기준", ["🚦 상태 우선 (추천)", "🔢 점수 우선"], horizontal=True, label_visibility="collapsed")
             
             if sort_mode == "🚦 상태 우선 (추천)":
