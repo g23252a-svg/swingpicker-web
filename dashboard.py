@@ -1829,58 +1829,55 @@ def get_survival_days(current_codes: list, lookback: int = 15) -> dict:
 
 def determine_state_v2(row, days_alive):
     """
-    v14.3 상태 머신: 행동 강제성 부여
-    - READY: 즉시 진입 고려 (엄격한 기준)
-    - ACCUM: 관심종목 등록 후 관찰 (매수 금지)
-    - STALE/INVALID: 메인 화면 퇴출 대상
+    [v14.4 Upgrade] FINAL_SCORE 및 TRIGGER_SCORE 기반 상태 판단
     """
-    # 데이터 로드
+    # 1. 데이터 로드 (새로운 점수 우선 사용)
+    # FINAL_SCORE가 없으면 기존 LDY_SCORE 사용
+    score = float(row.get("FINAL_SCORE", 0) or row.get("LDY_SCORE", 0) or 0)
+    trigger_score = float(row.get("TRIGGER_SCORE", 0) or 0)
+    
+    # 기존 텍스트 트리거
+    trigger_text = str(row.get("TRIGGER", ""))
+    
     low_trend = float(row.get("Low_Trend_PCT", 0) or 0)
-    score = float(row.get("LDY_SCORE", 0) or 0)
-    trigger = str(row.get("TRIGGER", ""))
     rsi_rising = int(row.get("RSI_Rising", 0) or 0)
     bb_expanding = int(row.get("BB_Expanding", 0) or 0)
     vol_qual = float(row.get("Vol_Quality", 0) or 0)
     
     # ----------------------------------------------------
-    # 🔴 1. 무효화 (INVALID) - 즉시 퇴출
+    # 🔴 1. 무효화 (INVALID)
     # ----------------------------------------------------
-    if low_trend < -0.5:
+    if low_trend < -1.0: # 기준 완화 (-0.5 -> -1.0)
         return "💀 붕괴 (삭제)", 99
     
-    # 좀비(STALE): 10일 이상 묵었는데 아직도 Trigger가 없음 -> 소외주
-    if days_alive >= 10 and not trigger:
-        return "🧟 좀비 (시간초과)", 90
+    # ----------------------------------------------------
+    # 🟠 2. 발사 (FIRED) - 텍스트 트리거 OR 점수 트리거
+    # ----------------------------------------------------
+    # [수정] 텍스트가 없어도 TRIGGER_SCORE가 80점 이상이면 발사!
+    if (trigger_text and trigger_text != "nan") or (trigger_score >= 80):
+        # 텍스트가 없으면 점수 기반 메시지 출력
+        msg = trigger_text if (trigger_text and trigger_text != "nan") else "🚀 급등포착 (Score)"
+        return msg, 0 
 
     # ----------------------------------------------------
-    # 🟠 2. 발사 (FIRED) - 추격/불타기 영역
+    # 🟢 3. 진입 대기 (READY)
     # ----------------------------------------------------
-    if trigger and trigger != "nan" and trigger != "":
-        return f"🚀 {trigger}", 0 
-
-    # ----------------------------------------------------
-    # 🟢 3. 진입 대기 (READY) - 분할 진입 고려
-    # "그냥 좋은 종목"은 안됨. "지금 움직이는 종목"이어야 함.
-    # ----------------------------------------------------
-    # 조건 A: 변동성 확장이 시작됨 (BB 입벌림)
     if bb_expanding == 1 and score >= 70:
         return "⭐️ 확장초입 (Ready)", 10
         
-    # 조건 B: 점수 최상위권 + 스윙 골든타임 (3~7일차) + 저점 상승 중
-    if score >= 80 and (3 <= days_alive <= 8) and low_trend > 0:
+    if score >= 80 and (1 <= days_alive <= 10):
         return "⭐️ 타점임박 (Ready)", 11
 
     # ----------------------------------------------------
-    # 🔵 4. 매집/관찰 (ACCUM) - 째려보기만 함 (매수 보류)
+    # 🔵 4. 매집/관찰 (ACCUM)
     # ----------------------------------------------------
-    # 점수는 좋지만 아직 때가 아님 (너무 이르거나, 약간 늦음)
     if score >= 60:
         if rsi_rising == 1 or vol_qual > 1.0:
             return "🔋 에너지응축 (Accum)", 20
         return "👀 단순관찰 (Watch)", 25
             
     # ----------------------------------------------------
-    # ⚪ 5. 소음 (NOISE) - 화면에서 숨김 처리될 것들
+    # ⚪ 5. 소음 (NOISE)
     # ----------------------------------------------------
     return "⏳ 관망 (Wait)", 50
 
