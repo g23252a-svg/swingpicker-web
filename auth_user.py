@@ -121,11 +121,53 @@ def _create_salt(): return secrets.token_hex(16)
 def _hash_password(pw, salt): return hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
 def _hash_answer(ans, salt): return _hash_password(ans.strip().lower(), salt)
 
-def check_rate_limit(email, limit=5):
-    if "login_attempts" not in st.session_state: st.session_state.login_attempts = {}
-    attempts = st.session_state.login_attempts.get(email, 0)
-    if attempts >= limit: return False, "⛔ 횟수 초과"
+def check_rate_limit(email, limit=5, window_sec=300, lock_sec=600):
+    """
+    limit: window_sec 동안 허용 실패 횟수
+    window_sec: 실패 카운트 유지 시간(예: 5분)
+    lock_sec: limit 초과 시 잠금 시간(예: 10분)
+    """
+    if "login_rl" not in st.session_state:
+        st.session_state.login_rl = {}
+
+    now = time.time()
+    rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
+
+    # 잠금 상태면 바로 차단
+    if now < rec.get("lock_until", 0):
+        remain = int(rec["lock_until"] - now)
+        return False, f"⛔ 로그인 잠금({remain}s 남음)"
+
+    # 윈도우 만료면 초기화
+    if now - rec.get("first_ts", now) > window_sec:
+        rec = {"fails": 0, "first_ts": now, "lock_until": 0}
+
+    # 아직 시도 가능
+    st.session_state.login_rl[email] = rec
     return True, ""
+
+def record_login_failure(email, limit=5, window_sec=300, lock_sec=600):
+    if "login_rl" not in st.session_state:
+        st.session_state.login_rl = {}
+    now = time.time()
+    rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
+
+    # 윈도우 만료면 새로 시작
+    if now - rec.get("first_ts", now) > window_sec:
+        rec = {"fails": 0, "first_ts": now, "lock_until": 0}
+
+    rec["fails"] = rec.get("fails", 0) + 1
+
+    # 초과하면 잠금
+    if rec["fails"] >= limit:
+        rec["lock_until"] = now + lock_sec
+
+    st.session_state.login_rl[email] = rec
+
+
+def reset_login_failures(email):
+    if "login_rl" in st.session_state and email in st.session_state.login_rl:
+        st.session_state.login_rl.pop(email, None)
 
 def render_auth_box(show_debug=False):
     db = get_db()
@@ -165,19 +207,44 @@ def render_auth_box(show_debug=False):
             lid = st.text_input("이메일")
             lpw = st.text_input("비밀번호", type="password")
             if st.form_submit_button("로그인", type="primary"):
-                if lid == MASTER_ADMIN_ID and lpw == MASTER_ADMIN_PW:
+                if lid == MASTER_ADMIN_ID and MASTER_ADMIN_PW and lpw == MASTER_ADMIN_PW:
+                    reset_login_failures(lid)
                     st.session_state[CURRENT_USER_KEY] = MASTER_ADMIN_ID
                     st.rerun()
-                ok, msg = check_rate_limit(lid)
-                if not ok: st.error(msg)
+                ok, msg = check_rate_limit(lid, limit=5, window_sec=300, lock_sec=600)
+                if not ok:
+                    st.error(msg)
                 else:
                     u = db.get_user_by_id(lid)
-                    if u and _hash_password(lpw, u['salt']) == u['password']:
-                        st.session_state[CURRENT_USER_KEY] = lid
-                        st.success("로그인 성공")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else: st.error("실패")
+            
+                    # 2) 유저 존재 여부
+                    if not u:
+                        record_login_failure(lid, limit=5, window_sec=300, lock_sec=600)
+                        st.error("실패")
+                    else:
+                        # 3) BAN 체크 (DB 컬럼명이 다를 수 있어서 최대한 안전하게)
+                        banned = (
+                            u.get("is_banned") is True
+                            or u.get("banned") is True
+                            or str(u.get("is_banned", "")).upper() in ["Y", "TRUE", "1"]
+                            or str(u.get("banned", "")).upper() in ["Y", "TRUE", "1"]
+                        )
+                        if banned:
+                            st.error("⛔ 이용 제한 계정입니다. 관리자에게 문의하세요.")
+                            # 밴은 비번 대입 시도 자체를 막는게 목적이라 실패 카운트는 선택
+                            # 원하면 아래 한 줄 유지, 싫으면 삭제
+                            record_login_failure(lid, limit=5, window_sec=300, lock_sec=600)
+                        else:
+                            # 4) 비밀번호 검증
+                            if _hash_password(lpw, u["salt"]) == u["password"]:
+                                reset_login_failures(lid)
+                                st.session_state[CURRENT_USER_KEY] = lid
+                                st.success("로그인 성공")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                record_login_failure(lid, limit=5, window_sec=300, lock_sec=600)
+                                st.error("실패")
 
     with tab2:
         st.info("🎁 가입 시 7일 무료!")
