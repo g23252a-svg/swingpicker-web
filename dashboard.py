@@ -1870,8 +1870,15 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
         df["상태"] = "⚪ 관망 (Neutral)"
         df["_STATE_SORT"] = 50
 
+    # ==========================================
+    # 🔍 [여기에 추가] 실제로 상태가 어떻게 분류되는지 화면에 출력
+    import streamlit as st
+    st.write("--- 📊 현재 종목 상태 분류 현황 ---")
+    st.write(df['상태'].value_counts()) 
+    # ==========================================
+
     # 3. Active 플래그 기준 완화 (여기서 30 이하는 다 보여줌)
-    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 50
+    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30
 
     # 4. 제외 사유
     df["제외사유"] = np.where(
