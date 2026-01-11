@@ -65,7 +65,11 @@ def _now_utc_str():
 
 def list_users():
     db = get_db()
-    return db.get_all_users() if db else []
+    if not db:
+        # 핵심: DB 실패를 "회원 없음"으로 숨기지 말고 화면에서 보이게
+        st.error("❌ DB 연결 실패: 회원 목록을 불러올 수 없습니다.")
+        return None
+    return db.get_all_users()
 
 def update_user_role(email, new_role, acting_admin="system"):
     db = get_db()
