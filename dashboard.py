@@ -1899,7 +1899,15 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     
     df["상태"] = state_results.apply(lambda x: x[0])
     df["_STATE_SORT"] = state_results.apply(lambda x: x[1]) # 정렬용 히든 컬럼
-    
+    # 로직용 Active/Passive 플래그 (UI 문자열이 로직을 지배하지 않도록)
+    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 3
+
+    # Passive 디버깅용: 제외 사유(Active에는 표시하지 않고 Passive 뷰에서만 노출)
+    df["제외사유"] = np.where(
+        df["상태"].astype(str).str.contains("좀비"), "⛔ 타이밍 초과",
+        np.where(df["상태"].astype(str).str.contains("붕괴"), "📉 구조 붕괴", "관망")
+    )
+
     # 3. 추세 데코레이션
     def _deco_trend(val):
         try: v = float(val)
@@ -3201,11 +3209,15 @@ with tab2:
         full_df = augment_display_data(view_df.copy())
 
         # 2. Active vs Passive 분리 (소음 제거)
-        # ✅ 2-1) _STATE_SORT가 있으면 그걸로 분리 (싱크 안정)
-        if "_STATE_SORT" in full_df.columns:
+        # ✅ 2-1) 로직은 숫자/불리언(=IS_ACTIVE) 기준으로 Active/Passive 분리 (UI 문자열 의존 제거)
+        if "IS_ACTIVE" in full_df.columns:
+            active_df  = full_df[full_df["IS_ACTIVE"]].copy()
+            passive_df = full_df[~full_df["IS_ACTIVE"]].copy()
+        # (호환) 예전 데이터에는 IS_ACTIVE가 없을 수 있으니 _STATE_SORT로 fallback
+        elif "_STATE_SORT" in full_df.columns:
             full_df["_STATE_SORT"] = pd.to_numeric(full_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
-            active_df  = full_df[full_df["_STATE_SORT"] <= 30].copy()   # 🚀0, ⭐️10~19, 🔋20~29 등 (네 정의에 맞게 조절)
-            passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
+            active_df  = full_df[full_df["_STATE_SORT"] <= 3].copy()
+            passive_df = full_df[full_df["_STATE_SORT"] > 3].copy()
         else:
             # ✅ 2-2) fallback: contains 사용 시 NaN 방어
             active_mask = full_df["상태"].astype(str).str.contains("🚀|⭐️|🔋|👀|🆕", na=False)
@@ -3300,8 +3312,12 @@ with tab2:
         if not passive_view.empty:
             st.write("")
             with st.expander(f"💤 보류/제외 종목 보기 ({len(passive_view)}개) - 좀비, 붕괴, 단순관망"):
+                passive_cols = [c for c in cols if c in passive_view.columns]
+                if "제외사유" in passive_view.columns and "제외사유" not in passive_cols:
+                    passive_cols.append("제외사유")
+
                 st.dataframe(
-                    passive_view[[c for c in cols if c in passive_view.columns]],
+                    passive_view[passive_cols],
                     use_container_width=True,
                     column_config=cfg,
                     hide_index=True
