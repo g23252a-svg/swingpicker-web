@@ -3426,97 +3426,103 @@ with tab2:
         # 기존의 if view_df.empty: ... else: ... 부분을 전부 지우고 아래로 교체하세요.
 
         if view_df.empty:
-        st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
-    else:
-        # 1. 데이터 해석 (State/Time Calculation)
-        full_df = augment_display_data(view_df.copy())
-
-        # 2. 🔥 [v14.3 핵심] Active vs Passive 분리 (소음 제거)
-        # 메인 화면에는 '당장 볼 종목'만 남깁니다.
-        # 포함: 🚀 발사, ⭐️ Ready, 🔋 Accum, 👀 Watch(일부)
-        # 제외: 🧟 좀비, 💀 붕괴, ⏳ 관망
-        
-        # 상태 텍스트에 포함된 키워드로 필터링
-        active_mask = full_df["상태"].str.contains("🚀|⭐️|🔋|👀|🆕")
-        
-        active_df = full_df[active_mask].copy()
-        passive_df = full_df[~active_mask].copy()
-
-        # 3. 정렬 로직 (Active DF 대상)
-        sort_mode = st.radio("정렬 기준", ["🚦 상태 우선 (행동순)", "🔢 점수 우선 (능력순)"], horizontal=True, label_visibility="collapsed")
-        
-        if sort_mode == "🚦 상태 우선 (행동순)":
-            active_df = active_df.sort_values(
-                by=["_STATE_SORT", "TOTAL_SCORE", "거래대금(억원)"], 
-                ascending=[True, False, False]
-            )
+            st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
         else:
-            active_df = active_df.sort_values(
-                by=["TOTAL_SCORE", "거래대금(억원)"], 
-                ascending=[False, False]
-            )
-
-        # 4. 종목명 복구 & 포맷팅 (공통 함수화)
-        try:
-            name_map = get_code_map() 
-            code_to_name = {v: k for k, v in name_map.items()}
-            def _process_display_df(df_target):
-                if df_target.empty: return df_target
-                # 이름 복구
-                if "종목명" in df_target.columns:
-                    df_target["종목명"] = df_target.apply(
-                        lambda r: code_to_name.get(str(r.get("종목코드","")).zfill(6), r.get("종목명")) 
-                        if str(r.get("종목명")).isdigit() else r.get("종목명"), axis=1
-                    )
-                # 숫자 포맷
-                for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
-                    if c in df_target.columns:
-                        df_target[c] = pd.to_numeric(df_target[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
-                return df_target
-
-            active_view = _process_display_df(active_df)
-            passive_view = _process_display_df(passive_df)
-        except: 
-            active_view = active_df
-            passive_view = passive_df
-
-        # 5. 컬럼 설정 (상태 컬럼 강조)
-        cols = [
-            "상태", "종목명", "생존일", 
-            "TOTAL_SCORE", "LDY_SCORE", 
-            "추세", "Low_Trend_PCT",
-            "종가", "추천매수가", "손절가", "추천매도가1",
-            "ROUTE", "업종"
-        ]
-        
-        cfg = {
-            "상태": st.column_config.TextColumn("Action State", width="medium"),
-            "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
-            "생존일": st.column_config.ProgressColumn(
-                "Time", format="%d일", min_value=0, max_value=12,
-                help="3~8일차: 골든타임 / 10일 이상: 상한 음식"
-            ),
-            "TOTAL_SCORE": st.column_config.ProgressColumn("종합점수", format="%.0f", min_value=0, max_value=100),
-            "Low_Trend_PCT": st.column_config.NumberColumn("저점강도", format="%.2f%%"),
-            "추세": st.column_config.TextColumn("구조", width="small"),
-            "종가": st.column_config.TextColumn("현재가", width="small"),
-            "추천매수가": st.column_config.TextColumn("매수", width="small"),
-            "손절가": st.column_config.TextColumn("손절", width="small"),
-            "추천매도가1": st.column_config.TextColumn("목표", width="small"),
-        }
-
-        # ---------------------------------------------------------
-        # 🎯 [Main View] 살아있는 종목 (Active)
-        # ---------------------------------------------------------
-        if not active_view.empty:
-            st.markdown(f"### 🔥 집중 공략 후보 ({len(active_view)}개)")
-            st.caption("🚀(진입) / ⭐️(준비) / 🔋(관찰) 상태인 종목만 표시합니다.")
+            # =============================================================================
+            # 🔥 [v14.2 핵심] 데이터 전처리 & 상태 해석 (Augmentation)
+            # =============================================================================
             
+            # 1. 데이터 해석 (상태/생존일/추세 추가)
+            safe_view = augment_display_data(view_df.copy())
+
+            # 2. 상태 기반 정렬 (State Sorting)
+            # 사용자 옵션: "상태우선(State)" vs "점수우선(Score)"
+            sort_mode = st.radio(
+                "정렬 기준", 
+                ["🚦 상태 우선 (추천)", "🔢 점수 우선"], 
+                horizontal=True, 
+                label_visibility="collapsed"
+            )
+            
+            if sort_mode == "🚦 상태 우선 (추천)":
+                # 상태 코드(오름차순) -> 종합 점수(내림차순) -> 거래대금(내림차순)
+                safe_view = safe_view.sort_values(
+                    by=["_STATE_SORT", "TOTAL_SCORE", "거래대금(억원)"], 
+                    ascending=[True, False, False]
+                )
+            else:
+                # 기존 방식 (점수 우선)
+                safe_view = safe_view.sort_values(
+                    by=["TOTAL_SCORE", "거래대금(억원)"], 
+                    ascending=[False, False]
+                )
+
+            # 3. 종목명 복구 (코드 -> 한글 이름)
+            try:
+                name_map = get_code_map() 
+                code_to_name = {v: k for k, v in name_map.items()}
+                def _fix_name(r):
+                    c_name = str(r.get("종목명", "")).strip()
+                    c_code = str(r.get("종목코드", "")).strip().zfill(6)
+                    if not c_name or c_name.isdigit() or c_name == c_code:
+                        return code_to_name.get(c_code, c_name)
+                    return c_name
+                if "종목명" in safe_view.columns:
+                    safe_view["종목명"] = safe_view.apply(_fix_name, axis=1)
+            except: pass
+
+            # 4. 숫자 포맷팅 (문자열 변환)
+            for c in ["종가", "추천매수가", "손절가", "추천매도가1", "거래대금(억원)"]:
+                if c in safe_view.columns:
+                    safe_view[c] = pd.to_numeric(safe_view[c], errors='coerce').fillna(0).apply(lambda x: f"{int(x):,}")
+
+            # 5. 컬럼 재배치 (상태를 가장 앞으로, TRIGGER 컬럼은 제거하여 상태 컬럼에 통합)
+            cols = [
+                "상태", "종목명", "생존일",  # 🔥 상태 정보 최우선 배치
+                "TOTAL_SCORE", "LDY_SCORE", 
+                "추세", "Low_Trend_PCT",
+                "종가", "추천매수가", "손절가", "추천매도가1",
+                "ROUTE", "업종"
+            ]
+            display_cols = [c for c in cols if c in safe_view.columns]
+
+            # 6. 컬럼 설정 및 출력
+            cfg = {
+                "상태": st.column_config.TextColumn(
+                    "현재 상태", 
+                    width="medium",
+                    help="🚀:발사(진입) > ⭐️:준비(대기) > 🔋:축적(관찰) > 🧟:좀비(제외) > 💀:붕괴(삭제)"
+                ),
+                "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
+                "생존일": st.column_config.ProgressColumn(
+                    "생존(일)", 
+                    help="상위권 유지 일수 (10일 넘어가면 탄력 둔화 가능성)",
+                    format="%d일", 
+                    min_value=0, 
+                    max_value=12, # 12일 넘어가면 Full Bar (위험)
+                ),
+                "TOTAL_SCORE": st.column_config.ProgressColumn(
+                    "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
+                ),
+                "LDY_SCORE": st.column_config.NumberColumn(
+                    "기초", format="%.1f", help="수급/모멘텀 등 기초 체력"
+                ),
+                "추세": st.column_config.TextColumn("구조", width="small"),
+                "Low_Trend_PCT": st.column_config.NumberColumn(
+                    "저점강도", format="%.2f%%", help="양수: 저점 상승중 / 음수: 저점 붕괴"
+                ),
+                "종가": st.column_config.TextColumn("현재가", width="small"),
+                "추천매수가": st.column_config.TextColumn("매수", width="small"),
+                "손절가": st.column_config.TextColumn("손절", width="small"),
+                "추천매도가1": st.column_config.TextColumn("목표", width="small"),
+                "ROUTE": st.column_config.TextColumn("전략", width="small"),
+            }
+
             st.dataframe(
-                active_view[[c for c in cols if c in active_view.columns]], 
+                safe_view[display_cols], 
                 use_container_width=True, 
                 column_config=cfg, 
-                height=500, 
+                height=600, 
                 hide_index=True
             )
         else:
