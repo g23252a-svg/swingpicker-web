@@ -3201,7 +3201,7 @@ with tab2:
     # ✅ 3) Active 우선 정렬
     sort_cols = [c for c in ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"] if c in active_df.columns]
     if sort_cols:
-        active_all = active_all.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+        active_df = active_df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
     
     # ✅ 4) 화면 노출용 view
     active_view  = active_df.head(limit).copy()
@@ -3212,29 +3212,18 @@ with tab2:
     
 
     if view_df.empty:
-            st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
+        st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
         # =============================================================================
         # 🔥 [v14.3 핵심] 데이터 해석 및 행동 강제 (Action Enforcement)
         # =============================================================================
         # 1. 데이터 해석 (State/Time Calculation)
-        full_df = full_all.copy()
-        # 2. Active vs Passive 분리 (소음 제거)
-        # ✅ 2-1) 로직은 숫자/불리언(=IS_ACTIVE) 기준으로 Active/Passive 분리 (UI 문자열 의존 제거)
-        if "IS_ACTIVE" in full_df.columns:
-            active_df  = full_df[full_df["IS_ACTIVE"]].copy()
-            passive_df = full_df[~full_df["IS_ACTIVE"]].copy()
-        # (호환) 예전 데이터에는 IS_ACTIVE가 없을 수 있으니 _STATE_SORT로 fallback
-        elif "_STATE_SORT" in full_df.columns:
-            full_df["_STATE_SORT"] = pd.to_numeric(full_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
-            active_df  = full_df[full_df["_STATE_SORT"] <= 30].copy()
-            passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
-        else:
-            # ✅ 2-2) fallback: contains 사용 시 NaN 방어
-            active_mask = full_df["상태"].astype(str).str.contains("🚀|🔫|👀|⭐️|🔋|🆕", na=False)
-            active_df = full_df[active_mask].copy()
-            passive_df = full_df[~active_mask].copy()
-    
+
+        full_df = view_df.copy()
+        active_df = active_view.copy()
+        passive_df = passive_view.copy()
+        
+          
         # 3. 정렬 로직 (Active DF 대상)
         sort_mode = st.radio(
             "정렬 기준",
@@ -3243,6 +3232,8 @@ with tab2:
             label_visibility="collapsed",
             key="tab2_sort_mode"
         )
+        if "_STATE_SORT" in active_df.columns:
+            active_df["_STATE_SORT"] = pd.to_numeric(active_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
        
         if sort_mode == "🚦 상태 우선 (행동순)":
             # 🔥 [수정] FINAL_SCORE, TRIGGER_SCORE 추가
@@ -3258,6 +3249,7 @@ with tab2:
             sort_cols = [c for c in sort_cols if c in active_df.columns]
             if sort_cols:
                 active_df = active_df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+                
         active_df = active_df.head(limit).copy()
         view_df = full_df
         
