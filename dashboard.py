@@ -3182,31 +3182,27 @@ with tab2:
         user_type = "Free" if user else "Guest"
         st.info(f"✅ {user_type} 회원: 상위 {limit}개 열람 중 (Pro/Prime 업그레이드 시 더 많은 종목 확인 가능)")
     
-    # --- 2. 데이터 해석 및 변수 초기화 (NameError 방지 핵심 구역) ---
-    # filtered 데이터가 비어있을 수도 있으므로, 빈 데이터프레임이라도 augment_display_data를 통과시킵니다.
-    full_df = augment_display_data(filtered.copy()) if not filtered.empty else filtered.copy()
+    # --- 2. 데이터 상태 해석 (Augment) ---
+    # 여기서 '상태', 'IS_ACTIVE' 등의 컬럼이 생성됩니다.
+    full_df = augment_display_data(filtered.copy())
     
-    # NameError 방지를 위해 미리 빈 데이터프레임으로 초기화
+    # NameError 방지를 위한 초기화
     active_df = pd.DataFrame()
     passive_df = pd.DataFrame()
-    view_df = full_df.copy() 
-
-    # 데이터가 있을 때만 분리 로직 수행
+    
+    # 데이터가 있을 때만 분류 작업 수행
     if not full_df.empty:
         if "IS_ACTIVE" in full_df.columns:
             active_df  = full_df[full_df["IS_ACTIVE"]].copy()
             passive_df = full_df[~full_df["IS_ACTIVE"]].copy()
-        elif "_STATE_SORT" in full_df.columns:
-            full_df["_STATE_SORT"] = pd.to_numeric(full_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
-            active_df  = full_df[full_df["_STATE_SORT"] <= 30].copy()
-            passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
         else:
+            # IS_ACTIVE 컬럼이 없을 경우를 대비한 하이브리드 필터링
             active_mask = full_df["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
             active_df  = full_df[active_mask].copy()
             passive_df = full_df[~active_mask].copy()
 
-    # --- 3. 정렬 및 화면 출력 조건 체크 ---
-    if view_df.empty:
+    # --- 3. 화면 출력 로직 (여기가 중요: 데이터 없으면 아래 실행 안 함) ---
+    if full_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
         # 정렬 기준 라디오 버튼
@@ -3218,7 +3214,7 @@ with tab2:
             key="tab2_sort_mode"
         )
         
-        # 정렬 실행 (active_df가 비어있지 않을 때만)
+        # 정렬 실행 (active_df가 있을 때만)
         if not active_df.empty:
             if sort_mode == "🚦 상태 우선 (행동순)":
                 sort_cols = ["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
@@ -3232,7 +3228,7 @@ with tab2:
                 if sort_cols:
                     active_df = active_df.sort_values(by=sort_cols, ascending=[False]*len(sort_cols))
 
-        # 최종 표시용 뷰 (개수 제한 적용)
+        # 최종 표시용 view (개수 제한 적용)
         active_view = active_df.head(limit).copy()
         passive_view = passive_df.copy()
         
