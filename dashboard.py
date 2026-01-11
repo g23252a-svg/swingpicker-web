@@ -3470,8 +3470,7 @@ with tab2:
 
             # 5. 컬럼 재배치 (상태를 가장 앞으로)
             cols = [
-                "상태", "종목명", "생존일",  # 🔥 상태 정보 최우선 배치
-                "TRIGGER", 
+                "상태", "종목명", "생존일",  # 🚀 상태가 진입신호를 포함하므로 TRIGGER 컬럼 삭제
                 "TOTAL_SCORE", "LDY_SCORE", 
                 "추세", "Low_Trend_PCT",
                 "종가", "추천매수가", "손절가", "추천매도가1",
@@ -3482,9 +3481,10 @@ with tab2:
             # 6. 컬럼 설정 및 출력
             cfg = {
                 "상태": st.column_config.TextColumn(
-                    "현재 상태", 
+                    "현재 상태 (State)", 
                     width="medium",
-                    help="🚀:발사(진입) > ⭐️:준비(대기) > 🔋:축적(관찰) > 🧟:좀비(제외) > 💀:붕괴(삭제)"
+                    # 🚀 진입신호가 뜨면 여기에 같이 표시됩니다.
+                    help="🚀:진입신호 > ⭐️:준비 > 🔋:축적 > 🧟:좀비 > 💀:붕괴"
                 ),
                 "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
                 "생존일": st.column_config.ProgressColumn(
@@ -3492,11 +3492,10 @@ with tab2:
                     help="상위권 유지 일수 (10일 넘어가면 탄력 둔화 가능성)",
                     format="%d일", 
                     min_value=0, 
-                    max_value=12, # 12일 넘어가면 Full Bar (위험)
+                    max_value=12, 
                 ),
-                "TRIGGER": st.column_config.TextColumn(
-                    "⚡진입신호", width="small", help="눌림회복 / 고가돌파 / 박스돌파 등"
-                ),
+                # "TRIGGER": ...  <-- 삭제됨
+                
                 "TOTAL_SCORE": st.column_config.ProgressColumn(
                     "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
                 ),
