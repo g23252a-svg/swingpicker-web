@@ -3175,7 +3175,7 @@ with tab2:
 
     # 권한별 노출 개수 제한
     if auth_status in ["pro", "prime", "admin"]:
-        limit = 20 if auth_status == "pro" else 100  # 👈 여기 들여쓰기 4칸 적용
+        limit = 20 if auth_status == "pro" else 100
         st.success(f"🥇 {auth_status.upper()} 회원: AI 종합 랭킹 Top {limit} 열람 중")
     else:
         limit = 5 if user else 3
@@ -3183,20 +3183,20 @@ with tab2:
         st.info(f"✅ {user_type} 회원: 상위 {limit}개 열람 중 (Pro/Prime 업그레이드 시 더 많은 종목 확인 가능)")
     
     # ✅ 1) 전체 filtered에 상태/IS_ACTIVE 부여
-    full_all = augment_display_data(filtered.copy())
+    full_df = augment_display_data(filtered.copy())
     
     # ✅ 2) 전체에서 Active/Passive 분리
-    if "IS_ACTIVE" in full_all.columns:
-        active_all  = full_all[full_all["IS_ACTIVE"]].copy()
-        passive_all = full_all[~full_all["IS_ACTIVE"]].copy()
-    elif "_STATE_SORT" in full_all.columns:
-        full_all["_STATE_SORT"] = pd.to_numeric(full_all["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
-        active_all  = full_all[full_all["_STATE_SORT"] <= 30].copy()
-        passive_all = full_all[full_all["_STATE_SORT"] > 30].copy()
+    if "IS_ACTIVE" in full_df.columns:
+        active_df  = full_df[full_df["IS_ACTIVE"]].copy()
+        passive_df = full_df[~full_df["IS_ACTIVE"]].copy()
+    elif "_STATE_SORT" in full_df.columns:
+        full_df["_STATE_SORT"] = pd.to_numeric(full_df["_STATE_SORT"], errors="coerce").fillna(999).astype(int)
+        active_df  = full_df[full_df["_STATE_SORT"] <= 30].copy()
+        passive_df = full_df[full_df["_STATE_SORT"] > 30].copy()
     else:
-        active_mask = full_all["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
-        active_all  = full_all[active_mask].copy()
-        passive_all = full_all[~active_mask].copy()
+        active_mask = full_df["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
+        active_df  = full_df[active_mask].copy()
+        passive_df = full_df[~active_mask].copy()
     
     # ✅ 3) Active 우선 정렬
     sort_cols = [c for c in ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"] if c in active_all.columns]
@@ -3248,16 +3248,19 @@ with tab2:
             # 🔥 [수정] FINAL_SCORE, TRIGGER_SCORE 추가
             sort_cols = ["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
             sort_cols = [c for c in sort_cols if c in active_df.columns]
-            
-            # _STATE_SORT(상태)는 오름차순, 나머지는 내림차순
-            ascending_list = [True] + [False] * (len(sort_cols) - 1)
-            active_df = active_df.sort_values(by=sort_cols, ascending=ascending_list)
+            if sort_cols:
+                ascending_list = [True] + [False] * (len(sort_cols) - 1)
+                active_df = active_df.sort_values(by=sort_cols, ascending=ascending_list)
+
         else:
             # 🔥 [수정] 점수 우선: FINAL_SCORE 최우선
             sort_cols = ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
             sort_cols = [c for c in sort_cols if c in active_df.columns]
-            active_df = active_df.sort_values(by=sort_cols, ascending=[False]*len(sort_cols))
-    
+            if sort_cols:
+                active_df = active_df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+        active_df = active_df.head(limit).copy()
+        view_df = full_df
+        
         # 4. 종목명 복구 & 포맷팅 (공통 함수화)
         try:
             name_map = get_code_map()
