@@ -3426,7 +3426,8 @@ with tab2:
         # 🔥 [v14.2 핵심] 데이터 전처리 & 상태 해석 (Augmentation)
         # =============================================================================
         
-        # 1. 데이터 해석 (상태/생존일/추세 추가) - 상단에 추가한 augment_display_data 함수 사용
+        # 1. 데이터 해석 (상태/생존일/추세 추가)
+        # (주의: 상단에 augment_display_data 함수가 선언되어 있어야 합니다)
         safe_view = augment_display_data(view_df.copy())
 
         # 2. 상태 기반 정렬 (State Sorting)
@@ -3440,7 +3441,7 @@ with tab2:
                 ascending=[True, False, False]
             )
         else:
-            # 기존 방식 (점수 우선)
+            # 기존 방식
             safe_view = safe_view.sort_values(
                 by=["TOTAL_SCORE", "거래대금(억원)"], 
                 ascending=[False, False]
