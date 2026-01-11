@@ -79,9 +79,24 @@ CHANGELOG: List[Dict] = [
 def get_latest_log() -> Optional[Dict]:
     return CHANGELOG[0] if CHANGELOG else None
 
-def get_version_label() -> str:
-    """v12.0.0 형태의 라벨 반환"""
-    return f"v{APP_VERSION}"
+def get_version_label(include_build: bool = True) -> str:
+    """
+    버전 문자열 반환 (dashboard.py 호환성 유지용)
+    include_build: True면 전체 버전(12.0.0), False면 단축 버전(12.0) 반환
+    """
+    if include_build:
+        return APP_VERSION
+    
+    # x.y.z 형식에서 앞의 두 자리만 추출 (예: 12.0.0 -> 12.0)
+    try:
+        parts = APP_VERSION.split(".")
+        if len(parts) >= 2:
+            return f"{parts[0]}.{parts[1]}"
+    except:
+        pass
+    
+    return APP_VERSION
+
 
 def is_major_update(ver_str: str) -> bool:
     """버전 문자열을 분석하여 메이저 업데이트인지 확인 (x.0.0)"""
