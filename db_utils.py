@@ -17,7 +17,8 @@ INQUIRY_DB_FILE = "inquiries_db.json"
 
 class LDYDBManager:
     def __init__(self):
-        self.conn = duckdb.connect(":memory:")
+        # 파일 DB 사용 (없으면 생성됨)
+        self.conn = duckdb.connect("ldy_trader.db") 
         self._init_tables()
         self._load_users_from_gist()
         self._load_inquiries_from_gist()
@@ -250,6 +251,79 @@ class LDYDBManager:
                 result.append(d)
             return result
         except: return []
+
+    def save_recommendations(self, df):
+        """
+        [v11.0] 일일 추천 종목 결과 저장 (History 용)
+        DB 스키마: daily_recommend 테이블에 저장
+        """
+        if df is None or df.empty:
+            return
+            
+        try:
+            # 1. daily_recommend 테이블이 없으면 생성
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_recommend (
+                    trade_date VARCHAR,
+                    code VARCHAR,
+                    name VARCHAR,
+                    close_price DOUBLE,
+                    ldy_score DOUBLE,
+                    rank_score DOUBLE,
+                    ai_comment VARCHAR
+                )
+            """)
+
+            # 2. 데이터 전처리
+            save_df = df.copy()
+            
+            # 날짜 설정 (데이터프레임에 '기준일'이 있으면 사용, 없으면 오늘 날짜)
+            if '기준일' in save_df.columns:
+                save_df['trade_date'] = save_df['기준일'].astype(str)
+            else:
+                save_df['trade_date'] = datetime.now().strftime("%Y-%m-%d")
+                
+            # 컬럼 매핑 (한글 컬럼명 -> DB 컬럼명)
+            save_df['code'] = save_df['종목코드'].astype(str).str.zfill(6)
+            save_df['name'] = save_df['종목명']
+            save_df['close_price'] = pd.to_numeric(save_df['종가'], errors='coerce').fillna(0)
+            
+            # 점수 컬럼 (없으면 0 처리)
+            if 'LDY_SCORE' in save_df.columns:
+                save_df['ldy_score'] = pd.to_numeric(save_df['LDY_SCORE'], errors='coerce').fillna(0)
+            else:
+                save_df['ldy_score'] = 0.0
+                
+            if 'RANK_SCORE' in save_df.columns:
+                save_df['rank_score'] = pd.to_numeric(save_df['RANK_SCORE'], errors='coerce').fillna(0)
+            else:
+                save_df['rank_score'] = 0.0
+                
+            # AI 코멘트 (없으면 빈 문자열)
+            save_df['ai_comment'] = save_df.get('AI_COMMENT', '').astype(str)
+
+            # 3. 필요한 컬럼만 추출하여 DB용 DataFrame 생성
+            target_cols = ['trade_date', 'code', 'name', 'close_price', 'ldy_score', 'rank_score', 'ai_comment']
+            # 실제로 존재하는 컬럼만 선택 (방어 코드)
+            final_cols = [c for c in target_cols if c in save_df.columns]
+            target_df = save_df[final_cols]
+
+            if target_df.empty:
+                return
+
+            # 4. DuckDB에 저장 (중복 방지: 해당 날짜 데이터 삭제 후 재입력)
+            date_val = target_df['trade_date'].iloc[0]
+            self.conn.execute(f"DELETE FROM daily_recommend WHERE trade_date = '{date_val}'")
+            self.conn.execute("INSERT INTO daily_recommend SELECT * FROM target_df")
+            
+            # (옵션) DuckDB 파일로 영구 저장하려면 로컬 파일에 export 하는 로직 필요
+            # 현재는 :memory: DB를 쓰므로 앱 재시작 시 사라짐. 
+            # 영구 저장이 필요하면 __init__에서 'ldy_trader.db'로 연결해야 함.
+            
+            # print(f"✅ DB Saved: {len(target_df)} rows for {date_val}") # 로그용
+            
+        except Exception as e:
+            print(f"❌ DB Save Failed: {e}")
 
     def save_inquiries(self, items):
         self.conn.execute("DELETE FROM inquiries")
