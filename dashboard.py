@@ -2642,6 +2642,19 @@ with st.sidebar:
         st.divider()
         st.subheader("👑 회원 관리 (Admin)")
 
+        # 1. 회원 목록 불러오기 및 디버깅
+        users = list_users()
+        
+        # --- [디버깅 코드 시작] ---
+        st.write(f"DEBUG: users count = {len(users) if users else 0}")
+        if not users:
+            st.warning("⚠️ 회원 목록이 비어 있습니다. Gist 연동 상태를 확인하세요.")
+            # db_utils 인스턴스를 직접 확인 (가능한 경우)
+            # from db_utils import LDYDBManager
+            # db_manager = LDYDBManager()
+            # st.write("DEBUG: DB Conn Status:", db_manager.conn)
+        # --- [디버깅 코드 끝] ---
+
         users = list_users()
         
         # 1. 관리자 대시보드 통계 (DAU/WAU)
