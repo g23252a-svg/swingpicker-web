@@ -1833,7 +1833,7 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty: return df
     df = df.copy()
     
-    # 1. 생존일 계산 로직 (기존 유지)
+    # 1. 생존일 계산 로직
     try:
         codes = df["종목코드"].astype(str).str.zfill(6).tolist()
         survival_map = get_survival_days(codes, lookback=20)
@@ -1841,25 +1841,25 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     except:
         df["생존일"] = 1
 
-    # 2. 핵심: Collector의 ROUTE를 UI 상태로 매핑
+    # 2. [핵심 수정] 실제 데이터 라벨(BRK, Watch, SQZ)을 UI 상태로 매핑
     def map_route_to_ui(route_val):
         r = str(route_val)
-        # 1. 발사임박/BRK (Active) - BRK 또는 ARMED 키워드 인식
-        if any(x in r for x in ["ARMED", "BRK", "트리거", "발사"]): 
-            return "🔫 발사임박 (Armed)", 0
-        # 2. 상승추세/집중공략 (Active) - TREND 또는 집중 공략 키워드 인식
-        if any(x in r for x in ["TREND", "집중 공략", "상승추세"]): 
-            return "🚀 상승추세 (Trend)", 10
-        # 3. 응축중/SQZ (Active) - SQUEEZE 또는 SQZ 키워드 인식
-        if any(x in r for x in ["SQUEEZE", "SQZ", "응축"]): 
-            return "🌪️ 응축중 (Squeeze)", 20
-        # 4. 관찰/Watch (Active) - Watch 키워드 인식
-        if "Watch" in r:
-            return "👀 관찰 (Watch)", 30
-        # 5. 과열/위험 (Caution)
+        # 강력 돌파 (BRK) 또는 발사 임박
+        if any(x in r for x in ["BRK", "ARMED", "트리거", "발사"]): 
+            return "🚀 집중 공략 (Active)", 0
+        # 응축/Squeeze (SQZ)
+        if any(x in r for x in ["SQZ", "SQUEEZE", "폭발", "응축"]): 
+            return "🌪️ 응축중 (Squeeze)", 10
+        # 관찰/Watch
+        if any(x in r for x in ["Watch", "관찰", "준비"]): 
+            return "👀 관찰 (Watch)", 20
+        # 상승 추세 (Trend)
+        if "TREND" in r: 
+            return "📈 상승추세 (Trend)", 30
+        # 과열/위험 (Caution)
         if any(x in r for x in ["OVERHEAT", "과열", "위험"]): 
             return "⛔ 과열/위험 (Caution)", 90
-        # 6. 기본값: 관망/눌림
+        # 그 외 모두 관망
         return "⚪ 관망 (Neutral)", 50
 
     if "ROUTE" in df.columns:
@@ -1870,23 +1870,16 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
         df["상태"] = "⚪ 관망 (Neutral)"
         df["_STATE_SORT"] = 50
 
-    # ==========================================
-    # 🔍 [여기에 추가] 실제로 상태가 어떻게 분류되는지 화면에 출력
-    import streamlit as st
-    st.write("--- 📊 현재 종목 상태 분류 현황 ---")
-    st.write(df['상태'].value_counts()) 
-    # ==========================================
-
-    # 3. Active 플래그 기준 완화 (여기서 30 이하는 다 보여줌)
+    # 3. [중요] Active 플래그 기준: 30점 이하(공략, 응축, 관찰)는 모두 활성 상태로 표시
     df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30
 
-    # 4. 제외 사유
+    # 4. 제외 사유 매핑
     df["제외사유"] = np.where(
         df["_STATE_SORT"] == 90, "⚠️ 과열/급등주의",
         np.where(df["_STATE_SORT"] == 50, "⏳ 모멘텀 부족", "-")
     )
 
-    # 5. 추세 데코레이션 (기존 유지)
+    # 5. 추세 데코레이션
     def _deco_trend(val):
         try: v = float(val)
         except: return "-"
