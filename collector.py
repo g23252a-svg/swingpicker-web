@@ -2003,6 +2003,7 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     range_pos = col_or_zero(x, "Range_Pos")
     rsi_rising = col_or_zero(x, "RSI_Rising")
     bb_expand = col_or_zero(x, "BB_Expanding")
+    r1d = col_or_zero(x, "ret_1d_%")
     
     # --- 1. 에너지 점수 (ENG) ---
     # 구조(Structure): 저점이 올라가는가?
@@ -2033,6 +2034,7 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     liq_norm = pct_norm_pos(turn, q=90, floor=10.0)
     
     disp = nz_num(x["이격도"])
+    disp_score = np.exp(-((disp - 3.0) ** 2) / 50.0)
     now_gap = ((close - entry).abs() / entry * 100).fillna(0)
     near_norm = np.clip(1 - (now_gap / 5.0), 0, 1)
     
@@ -2042,28 +2044,37 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     
     # v7.5 팩터 호환성
     v_power = col_or_zero(x, "V_POWER")
+    v_score = pct_norm_pos(v_power)
     volz = col_or_zero(x, "거래강도")
-    tec_norm = np.clip(0.5 * pct_norm_pos(volz) + 0.3 * pct_norm_pos(disp.abs()) + 0.2 * pct_norm_pos(v_power), 0, 1)
+    vol_score = pct_norm_pos(volz)
+    tec_norm = np.clip(0.4 * vol_score + 0.4 * disp_score + 0.2 * v_score, 0, 1)
 
     # --- 4. Base Score ---
     base_score = (
         100 * w["ENG"] * eng_score + 100 * w["MOM"] * mom_score +
         100 * w["RR"] * rr_norm + 100 * w["LIQ"] * liq_norm +
         100 * w["NEAR"] * near_norm + 100 * w["SL"] * sl_norm +
-        100 * w["T1"] * t1_norm
+        100 * w["T1"] * t1_norm +
+        100 * w["TEC"] * tec_norm  # 👈 수정된 TEC 적용
     )
 
     # --- 🔥 [Step 1: 무효화 로직] Invalidation Check ---
     pen = 0.0
     
-    # (1) 구조 붕괴: 저점 추세가 꺾임 -> 즉시 아웃
+    # (1) [Fix A: 급등 쿨다운]
+    # 당일 18% 이상 급등했거나, 이격도가 20% 넘으면 랭킹에서 사실상 퇴출 (패널티 50점)
+    # 랭킹엔 보일 수 있어도 상위권은 절대 불가
+    is_overheated = (r1d >= 18.0) | (disp >= 20.0)
+    pen += 50.0 * is_overheated.astype(float)
+
+    # (2) 구조 붕괴 (기존 유지)
     pen += 20.0 * (low_trend < 0).astype(float)
     
-    # (2) 좀비(Dead) 횡보: 스퀴즈는 있는데 구조/거래량 변화 없음
+    # (3) 좀비 (기존 유지)
     is_zombie = (col_or_zero(x, "TTM_SQUEEZE") == 1) & (low_trend <= 0.1) & (vol_qual < 0.8)
     pen += 15.0 * is_zombie.astype(float)
-    
-    # (3) 역배열 심화: 20일선 한참 아래
+
+    # (4) 역배열 (기존 유지)
     pen += 10.0 * (col_or_zero(x, "Above_MA20") == 0).astype(float)
 
     final_score = np.clip(base_score - pen, 0, 100)
@@ -2555,6 +2566,29 @@ def analyze_ticker(
     # MACD Slope
     slope = float(np.polyfit(np.arange(len(hist.tail(5))), hist.tail(5).values.astype(float), 1)[0]) if len(hist) >= 5 else 0.0
     slope_pct = (slope / last_c) * 100.0 if last_c > 0 else 0.0
+    # 🔥 [Fix B: Smart Entry Price]
+    # 이격도가 15% 이상 벌어졌으면, 현재가가 아니라 '눌림목 가격'을 진입가로 설정
+    # 결과: Entry < Close 상태가 되어 Now% Gap이 커짐 -> 점수 패널티 발동
+    disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100
+    if disp >= 15.0: 
+        # 과열 상태: 20일선 + 5% 지점까지 기다려라
+        buy = float(ma20.iloc[-1]) * 1.05 
+    else:
+        # 정상 상태: 현재가 진입 (돌파/추세추종)
+        buy = last_c
+
+    # 손절가/목표가 재계산 (변경된 buy 기준)
+    atr_val = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
+    stop = buy - (2.0 * atr_val)
+    if (dist_to_swing < 10.0) and (swing_low_10 > 0): stop = max(stop, swing_low_10 * 0.98) 
+    target = buy + (buy - stop) * 2.0
+    
+    # Tick 단위 보정
+    buy = round_to_tick(buy); stop = floor_to_tick(stop); target = ceil_to_tick(target)
+
+    # 🔥 [Fix A 준비: 1일 등락률 계산]
+    prev_c = float(c.iloc[-2]) if len(c) > 1 else last_c
+    ret_1d = (last_c / prev_c - 1.0) * 100
 
     return {
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
@@ -2562,6 +2596,7 @@ def analyze_ticker(
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
         "BB_BW": round(bb_bw_val, 2), "TTM_SQUEEZE": int(ttm_squeeze), "TTM_SQUEEZE_CNT": sqz_cnt,
         "BB_SQUEEZE_BW": int(bw_squeeze),
+        "ret_1d_%": round(ret_1d, 2),  # 👈 [New] 당일 등락률 추가
         "ret_5d_%": round(ret_5, 2), "ret_10d_%": round(ret_10, 2), "ret_20d_%": round(ret_20, 2),
         "ret_60d_%": round(ret_60, 2), "ret_120d_%": round(ret_120, 2),
         "rel_20d_%": round(rel_20, 2), "rel_60d_%": round(rel_60, 2), "rel_120d_%": round(rel_120, 2),
