@@ -3425,7 +3425,12 @@ with tab2:
         # [수정 위치] with tab2: 블록 내부 (들여쓰기 8칸으로 시작)
         # 기존의 if view_df.empty: ... else: ... 부분을 전부 지우고 아래로 교체하세요.
 
-        if view_df.empty:
+    # --------------------------------------------------------------------------
+    # [수정 위치] dashboard.py의 with tab2: 내부 (기존 if view_df.empty: 블록 교체)
+    # 주의: 이 코드는 with tab2: 아래에 있으므로, 맨 왼쪽 줄이 4칸 들여쓰기 되어야 합니다.
+    # --------------------------------------------------------------------------
+
+    if view_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
         # =============================================================================
@@ -3433,9 +3438,11 @@ with tab2:
         # =============================================================================
         
         # 1. 데이터 해석 (상태/생존일/추세 추가)
+        # (주의: 상단에 augment_display_data 함수가 선언되어 있어야 합니다)
         safe_view = augment_display_data(view_df.copy())
 
         # 2. 상태 기반 정렬 (State Sorting)
+        # 사용자 옵션: "상태우선(State)" vs "점수우선(Score)"
         sort_mode = st.radio(
             "정렬 기준", 
             ["🚦 상태 우선 (추천)", "🔢 점수 우선"], 
@@ -3450,7 +3457,7 @@ with tab2:
                 ascending=[True, False, False]
             )
         else:
-            # 기존 방식 (점수 우선)
+            # 기존 방식
             safe_view = safe_view.sort_values(
                 by=["TOTAL_SCORE", "거래대금(억원)"], 
                 ascending=[False, False]
@@ -3477,7 +3484,7 @@ with tab2:
 
         # 5. 컬럼 재배치 (상태를 가장 앞으로)
         cols = [
-            "상태", "종목명", "생존일", 
+            "상태", "종목명", "생존일",  # 🔥 상태 정보 최우선 배치
             "TOTAL_SCORE", "LDY_SCORE", 
             "추세", "Low_Trend_PCT",
             "종가", "추천매수가", "손절가", "추천매도가1",
@@ -3498,7 +3505,7 @@ with tab2:
                 help="상위권 유지 일수 (10일 넘어가면 탄력 둔화 가능성)",
                 format="%d일", 
                 min_value=0, 
-                max_value=12, 
+                max_value=12, # 12일 넘어가면 Full Bar (위험)
             ),
             "TOTAL_SCORE": st.column_config.ProgressColumn(
                 "🏆종합", format="%.1f", min_value=0, max_value=100, width="small"
@@ -3524,6 +3531,8 @@ with tab2:
             height=600, 
             hide_index=True
         )
+
+
         else:
             st.info("현재 '집중 공략' 기준을 만족하는 종목이 없습니다. 관망하세요.")
 
