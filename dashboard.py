@@ -1844,22 +1844,24 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     # 2. [핵심 수정] 실제 데이터 라벨(BRK, Watch, SQZ)을 UI 상태로 매핑
     def map_route_to_ui(route_val):
         r = str(route_val)
-        # 강력 돌파 (BRK) 또는 발사 임박
-        if any(x in r for x in ["BRK", "ARMED", "트리거", "발사"]): 
+        # 1. 강력 돌파 (BRK) - 데이터의 '🔼 BRK'와 매칭
+        if "BRK" in r or "강력 돌파" in r: 
             return "🚀 집중 공략 (Active)", 0
-        # 응축/Squeeze (SQZ)
-        if any(x in r for x in ["SQZ", "SQUEEZE", "폭발", "응축"]): 
+        
+        # 2. 응축/폭발대기 (SQZ) - 데이터의 '🔥 SQZ'와 매칭
+        if "SQZ" in r or "폭발대기" in r: 
             return "🌪️ 응축중 (Squeeze)", 10
-        # 관찰/Watch
-        if any(x in r for x in ["Watch", "관찰", "준비"]): 
+        
+        # 3. 관찰/돌파예상 (Watch) - 데이터의 '🔺 Watch'와 매칭
+        if "Watch" in r or "상승 준비" in r or "돌파예상" in r: 
+            # 💡 중요: 'Watch' 종목들도 Active(20점)로 분류하여 상단에 노출
             return "👀 관찰 (Watch)", 20
-        # 상승 추세 (Trend)
-        if "TREND" in r: 
-            return "📈 상승추세 (Trend)", 30
-        # 과열/위험 (Caution)
-        if any(x in r for x in ["OVERHEAT", "과열", "위험"]): 
+        
+        # 4. 과열/위험 - 데이터의 '🚫 과열/위험'과 매칭
+        if "과열" in r or "위험" in r: 
             return "⛔ 과열/위험 (Caution)", 90
-        # 그 외 모두 관망
+        
+        # 5. 기본값: 관망
         return "⚪ 관망 (Neutral)", 50
 
     if "ROUTE" in df.columns:
