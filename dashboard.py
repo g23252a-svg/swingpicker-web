@@ -1844,10 +1844,22 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     # 2. 핵심: Collector의 ROUTE를 UI 상태로 매핑
     def map_route_to_ui(route_val):
         r = str(route_val)
-        if "ARMED" in r: return "🔫 발사임박 (Armed)", 0
-        if "TREND" in r: return "🚀 상승추세 (Trend)", 10
-        if "SQUEEZE" in r: return "🌪️ 응축중 (Squeeze)", 20
-        if "OVERHEAT" in r: return "⛔ 과열/위험 (Caution)", 90
+        # 1. 발사임박/BRK (Active) - BRK 또는 ARMED 키워드 인식
+        if any(x in r for x in ["ARMED", "BRK", "트리거", "발사"]): 
+            return "🔫 발사임박 (Armed)", 0
+        # 2. 상승추세/집중공략 (Active) - TREND 또는 집중 공략 키워드 인식
+        if any(x in r for x in ["TREND", "집중 공략", "상승추세"]): 
+            return "🚀 상승추세 (Trend)", 10
+        # 3. 응축중/SQZ (Active) - SQUEEZE 또는 SQZ 키워드 인식
+        if any(x in r for x in ["SQUEEZE", "SQZ", "응축"]): 
+            return "🌪️ 응축중 (Squeeze)", 20
+        # 4. 관찰/Watch (Active) - Watch 키워드 인식
+        if "Watch" in r:
+            return "👀 관찰 (Watch)", 30
+        # 5. 과열/위험 (Caution)
+        if any(x in r for x in ["OVERHEAT", "과열", "위험"]): 
+            return "⛔ 과열/위험 (Caution)", 90
+        # 6. 기본값: 관망/눌림
         return "⚪ 관망 (Neutral)", 50
 
     if "ROUTE" in df.columns:
