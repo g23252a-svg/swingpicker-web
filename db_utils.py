@@ -254,14 +254,27 @@ class LDYDBManager:
 
     def save_recommendations(self, df, trade_ymd=None):
         """
-        [v11.0] 일일 추천 종목 결과 저장 (History 용)
-        DB 스키마: daily_recommend 테이블에 저장
+        [v11.1 Fix] 일일 추천 종목 결과 저장 (스키마 충돌 자동 해결 포함)
         """
         if df is None or df.empty:
             return
             
         try:
-            # 1. daily_recommend 테이블이 없으면 생성
+            # -------------------------------------------------------
+            # 🚨 [Schema Fix] 기존 테이블과 컬럼 수가 다르면 재생성
+            # -------------------------------------------------------
+            try:
+                # 현재 DB에 있는 테이블 정보 조회
+                table_info = self.conn.execute("PRAGMA table_info(daily_recommend)").fetchall()
+                # 테이블이 존재하고(len>0), 컬럼 수가 7개가 아니면(스키마 변경됨) -> 삭제
+                if len(table_info) > 0 and len(table_info) != 7:
+                    print(f"⚠️ 스키마 불일치 감지 (기존 {len(table_info)}컬럼 vs 현재 7컬럼). 테이블을 재생성합니다.")
+                    self.conn.execute("DROP TABLE daily_recommend")
+            except Exception:
+                pass # 테이블이 없으면 무시
+            # -------------------------------------------------------
+
+            # 1. 테이블 생성 (7개 컬럼)
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS daily_recommend (
                     trade_date VARCHAR,
@@ -277,12 +290,8 @@ class LDYDBManager:
             # 2. 데이터 전처리
             save_df = df.copy()
             
-            # 날짜 설정 우선순위:
-            # 1순위: 인자로 받은 trade_ymd
-            # 2순위: DataFrame 내 '기준일' 컬럼
-            # 3순위: 오늘 날짜
+            # 날짜 설정
             if trade_ymd:
-                # YYYYMMDD 형식이면 YYYY-MM-DD로 변환
                 s_ymd = str(trade_ymd)
                 if len(s_ymd) == 8 and s_ymd.isdigit():
                     formatted_date = f"{s_ymd[:4]}-{s_ymd[4:6]}-{s_ymd[6:]}"
@@ -294,12 +303,11 @@ class LDYDBManager:
             else:
                 save_df['trade_date'] = datetime.now().strftime("%Y-%m-%d")
                 
-            # 컬럼 매핑 (한글 컬럼명 -> DB 컬럼명)
+            # 컬럼 매핑
             save_df['code'] = save_df['종목코드'].astype(str).str.zfill(6)
             save_df['name'] = save_df['종목명']
             save_df['close_price'] = pd.to_numeric(save_df['종가'], errors='coerce').fillna(0)
             
-            # 점수 컬럼 (없으면 0 처리)
             if 'LDY_SCORE' in save_df.columns:
                 save_df['ldy_score'] = pd.to_numeric(save_df['LDY_SCORE'], errors='coerce').fillna(0)
             else:
@@ -310,24 +318,22 @@ class LDYDBManager:
             else:
                 save_df['rank_score'] = 0.0
                 
-            # AI 코멘트 (없으면 빈 문자열)
             save_df['ai_comment'] = save_df.get('AI_COMMENT', '').astype(str)
 
-            # 3. 필요한 컬럼만 추출하여 DB용 DataFrame 생성
+            # 3. Insert
             target_cols = ['trade_date', 'code', 'name', 'close_price', 'ldy_score', 'rank_score', 'ai_comment']
-            # 실제로 존재하는 컬럼만 선택 (방어 코드)
             final_cols = [c for c in target_cols if c in save_df.columns]
             target_df = save_df[final_cols]
 
             if target_df.empty:
                 return
 
-            # 4. DuckDB에 저장 (중복 방지: 해당 날짜 데이터 삭제 후 재입력)
+            # 해당 날짜 중복 데이터 삭제 후 삽입
             date_val = target_df['trade_date'].iloc[0]
             self.conn.execute(f"DELETE FROM daily_recommend WHERE trade_date = '{date_val}'")
             self.conn.execute("INSERT INTO daily_recommend SELECT * FROM target_df")
             
-            # print(f"✅ DB Saved: {len(target_df)} rows for {date_val}") # 로그용
+            print(f"✅ DB Saved: {len(target_df)} rows for {date_val}")
             
         except Exception as e:
             print(f"❌ DB Save Failed: {e}")
@@ -340,3 +346,12 @@ class LDYDBManager:
                                   [i.get('email', i.get('id')), i.get('nickname'), i.get('title'), i.get('content'), i.get('created_at')])
         self._sync_table_to_gist("inquiries", INQUIRY_DB_FILE)
         return True
+
+
+    # 👇👇 [여기] 클래스 맨 마지막에 close 메서드 추가 👇👇
+    def close(self):
+        """DB 연결 종료"""
+        try:
+            self.conn.close()
+        except Exception as e:
+            print(f"⚠️ DB Close Error: {e}")
