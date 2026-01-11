@@ -3073,17 +3073,27 @@ def main(
     except Exception as e:
         log(f"⚠️ 메타 요약 계산 실패: {e}")
 
-    # ✅ dashboard 호환용 상태/활성 플래그 생성 (must_cols 만들기 직전)
-    df_out["상태"] = df_out["ROUTE"].astype(str)
+    # 1) ROUTE → 상태(표시용) 복사
+    if "상태" not in df_out.columns:
+        df_out["상태"] = df_out.get("ROUTE", "").astype(str)
     
-    # 지금 "들어가도 되는 타입"을 넓게 잡으면: 🚀(추세진입) + ⭐️(트리거 직전) + 🔋(대기)
-    df_out["IS_ACTIVE"] = df_out["상태"].str.contains("🚀|⭐️|🔋", na=False)
+    # 2) 이모지 불일치 대비: ROUTE에 ⭐️/🔋를 쓰는 버전까지 같이 허용
+    #    - 너 로직이 🚀/⭐️/🔋를 쓰면 이걸로 해야 활성 종목이 생김
+    status_str = df_out["상태"].astype(str)
     
-    # 더 엄격하게 "지금 진입 가능"만 잡으면: 🚀 + ⭐️ (🔋는 관찰로 제외)
-    df_out["IS_NOW_ENTRY"] = df_out["상태"].str.contains("🚀|⭐️", na=False)
+    # (A) 넓게: 추세/준비/관찰을 전부 ACTIVE로
+    df_out["IS_ACTIVE"] = status_str.str.contains(r"🚀|🔫|👀|⭐️|🔋", na=False)
     
-    # 관찰 전용
-    df_out["IS_WATCH"] = df_out["상태"].str.contains("🔋", na=False)
+    # (B) 지금 진입(타이트): 추세/임박만
+    df_out["IS_NOW_ENTRY"] = status_str.str.contains(r"🚀|🔫|⭐️", na=False)
+    
+    # (C) 관찰(응축)만
+    df_out["IS_WATCH"] = status_str.str.contains(r"👀|🔋", na=False)
+
+    print("[DEBUG] 상태 상위 10개:\n", df_out["상태"].value_counts().head(10))
+    print("[DEBUG] IS_ACTIVE True count:", int(df_out["IS_ACTIVE"].sum()))
+    print("[DEBUG] IS_NOW_ENTRY True count:", int(df_out["IS_NOW_ENTRY"].sum()))
+    print("[DEBUG] IS_WATCH True count:", int(df_out["IS_WATCH"].sum()))
     
     # [수정 대상] main 함수 하단 must_cols 리스트 업데이트
     must_cols = [
