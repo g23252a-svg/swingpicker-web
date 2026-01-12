@@ -2356,14 +2356,16 @@ def reality_check_top(df_top: pd.DataFrame, data_ts, n: int = 5):
 @st.cache_data(ttl=600, show_spinner=False)
 def prepare_scored_data(raw_url, local_raw, pass_ebs):
     """
-    [Updated] 로컬 파일 우선 로드 방식
+    [Updated] 1. 로컬 파일 우선 로드 (방금 수집한 데이터 즉시 반영)
+              2. ROUTE 상태 덮어쓰기 방지 (ATTACK/ARMED 유지)
     """
     df_raw = None
     src_type = "unknown"
 
-    # 1) Local First (로컬 파일이 있으면 무조건 우선 사용)
-    # 로컬 테스트 시: 방금 수집한 따끈한 데이터를 보여줌
-    # 서버(Streamlit Cloud) 시: Git Pull 된 최신 데이터를 보여줌 (안전)
+    # -----------------------------------------------------------
+    # 1. 데이터 로드 (Local First Strategy)
+    # -----------------------------------------------------------
+    # 로컬(수집기 실행 위치)에 파일이 있으면 무조건 우선 사용
     if local_raw and os.path.exists(local_raw):
         try:
             df_raw = load_csv_path(local_raw)
@@ -2374,7 +2376,7 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
         except Exception as e:
             logger.warning(f"Local load failed: {e}")
 
-    # 2) Remote Fallback (로컬이 없을 때만 원격 시도)
+    # 로컬이 없을 때만 원격(GitHub) 시도
     if df_raw is None or df_raw.empty:
         try:
             df_raw = load_csv_url(raw_url)
@@ -2382,12 +2384,14 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
             log_src(df_raw, "Remote (Fallback)")
             src_type = "remote"
         except Exception as e:
-            logger.warning("Remote load failed: %s", e)
+            logger.warning(f"Remote load failed: {e}")
 
     if df_raw is None or df_raw.empty:
         raise RuntimeError("데이터를 로컬/원격 어디서도 불러오지 못했습니다.")
 
-    # ✅ 2) CSV 순서/랭크 안정화(여기가 반드시 raise 밖이어야 함)
+    # -----------------------------------------------------------
+    # 2. 데이터 전처리 (순서 및 랭크 안정화)
+    # -----------------------------------------------------------
     df_raw = df_raw.copy().reset_index(drop=True)
 
     rank_col = None
@@ -2403,60 +2407,52 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
 
     df_raw["_CSV_ROW"] = np.arange(len(df_raw))
 
-    # 3) 기준 시점 추출
+    # 기준 시점 추출
     data_ts = infer_data_timestamp(df_raw)
 
-    # 4) 스코어링 (정렬 금지)
+    # 스코어링 (기존 점수 유지)
     df = normalize_cols(df_raw)
     scored = build_global_score(df, keep_order=True).reset_index(drop=True)
 
-    # ✅ df_raw 기준 랭크/행순서 붙이기 (row align 전제)
+    # 랭크 정보 복원
     scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
     scored["_CSV_ROW"]  = df_raw["_CSV_ROW"].values
 
-    # ▼▼▼ [여기] 아래 코드를 삽입하세요 ▼▼▼
-    # ==========================================================
-    # 🔥 [Upgrade 2] DART 공시 리스크 반영 (API Key 연동 수정됨)
-    # ==========================================================
+    # -----------------------------------------------------------
+    # 3. DART 필터 (옵션)
+    # -----------------------------------------------------------
     try:
-        # secrets.toml에서 키를 가져와서 전달
         dart_key = get_conf("DART_API_KEY", "")
         gemini_key = get_conf("GEMINI_API_KEY", "")
-        
-        # 키를 직접 넣어주며 초기화
         analyzer = DartAnalyzer(dart_api_key=dart_key, gemini_api_key=gemini_key)
         scored = analyzer.apply_dart_filter(scored)
         
-        # DART 악재가 반영된 TOTAL_SCORE 계산 (안전장치)
         if "TOTAL_SCORE" not in scored.columns:
              scored["TOTAL_SCORE"] = scored["LDY_SCORE"] 
-             
-             # 악재(-4점 이하) 종목 점수 0점 처리
              bad_mask = scored.get('DART_SCORE', pd.Series(0, index=scored.index)) <= -4
              scored.loc[bad_mask, "TOTAL_SCORE"] = 0
              scored.loc[bad_mask, "LDY_SCORE"] = 0
-             
     except Exception as e:
         logger.warning(f"DART Filter Failed: {e}")
-    # ▲▲▲ [여기] 까지 삽입 ▲▲▲
 
-    # 5) TH/ROUTE 계산
-    # 🔥 [수정] CSV에 이미 신규 ROUTE(ATTACK 등)가 있다면 재계산하지 않음!
-    # 기존 로직이 데이터를 덮어써서 'ATTACK'이 사라지는 문제를 방지합니다.
-    
-    # 만약 CSV에 ROUTE 컬럼이 없거나 비어있다면 구버전 로직(route_tag_dynamic) 사용
-    if "ROUTE" not in scored.columns or scored["ROUTE"].isnull().all():
+    # -----------------------------------------------------------
+    # 4. ROUTE 상태 결정 (핵심 수정: 덮어쓰기 방지)
+    # -----------------------------------------------------------
+    # CSV에 이미 ROUTE 값이 있다면(ATTACK 등), 재계산하지 않고 그대로 씀!
+    if "ROUTE" in scored.columns and not scored["ROUTE"].isnull().all():
+        scored["ROUTE"] = scored["ROUTE"].astype(str).str.strip()
+        # 분포 계산용 TH만 별도 산출 (상태 결정엔 안 씀)
+        TH = compute_dynamic_thresholds(scored)
+    else:
+        # ROUTE가 없으면 구버전 로직으로 계산 (Fallback)
         TH = compute_dynamic_thresholds(scored)
         scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
-    else:
-        # CSV에 있는 값을 그대로 신뢰 (공백 제거만 수행)
-        scored["ROUTE"] = scored["ROUTE"].astype(str).str.strip()
 
-    # ✅ 표시/기본 랭크는 CSV 기준 고정
+    # 정렬 및 랭크 부여
     scored = scored.sort_values(["_CSV_RANK", "_CSV_ROW"], ascending=[True, True]).reset_index(drop=True)
     scored["LDY_RANK"] = pd.to_numeric(scored["_CSV_RANK"], errors="coerce")
 
-    # 6) base/top20
+    # Base / Top20 생성
     base = scored[(pd.to_numeric(scored["EBS"], errors="coerce") >= pass_ebs) & (scored["_GATE_OK"])].copy()
     if len(base) < 20:
         base = scored.head(20).copy()
