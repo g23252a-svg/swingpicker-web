@@ -2340,39 +2340,36 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
     # 0. 데이터 준비 (Data Preparation)
     # ---------------------------------------------------------
     try:
-        # 기존: 거래량, 종가, 고가만 변환 -> 수정: 시가, 저가도 필요
         vol = pd.to_numeric(df['거래량'], errors='coerce').fillna(0)
         close = pd.to_numeric(df['종가'], errors='coerce').fillna(0)
         high = pd.to_numeric(df['고가'], errors='coerce').fillna(0)
         open_p = pd.to_numeric(df['시가'], errors='coerce').fillna(0)
         low = pd.to_numeric(df['저가'], errors='coerce').fillna(0)
         
-        # 현재 값 (Today)
+        # 현재 값
         curr_vol = float(vol.iloc[-1])
         curr_close = float(close.iloc[-1])
         curr_high = float(high.iloc[-1])
         curr_open = float(open_p.iloc[-1])
         curr_low = float(low.iloc[-1])
         
-        # 전일 값 (Yesterday)
+        # 전일 값
         prev_close = float(close.iloc[-2])
         prev_high = float(high.iloc[-2])
 
     except Exception as e:
-        # 데이터 오류 시 안전하게 0 반환
         return 0.0
 
     # ---------------------------------------------------------
-    # [Positive Factors] 상승 동력 점수 계산 (기존 로직 유지)
+    # [Positive Factors] 상승 동력 (기존 로직)
     # ---------------------------------------------------------
-
-    # 1. Volume Accel (거래량 가속도) - 비중 30%
+    # 1. Volume Accel
     vol_ma3 = vol.iloc[-4:-1].mean()
     if vol_ma3 == 0: vol_ma3 = 1
     vol_ratio = curr_vol / vol_ma3
     score_vol = min(vol_ratio * 50, 100) 
 
-    # 2. Breakout Potential (돌파 임박/시도) - 비중 40%
+    # 2. Breakout Potential
     sma20 = close.rolling(window=20).mean().iloc[-1]
     std20 = close.rolling(window=20).std().iloc[-1]
     bb_upper = sma20 + (2 * std20)
@@ -2388,7 +2385,7 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
     if bb_pos > 1.0: score_breakout += 30 
     if high_break: score_breakout = min(score_breakout + 20, 100)
 
-    # 3. Momentum Accel (에너지 가속) - 비중 30%
+    # 3. Momentum Accel
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
     macd = ema12 - ema26
@@ -2406,54 +2403,38 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
     elif hist_curr > 0:
         score_mom = 30 
         
-    # 기본 점수 합산
     base_score = (score_vol * 0.3) + (score_breakout * 0.4) + (score_mom * 0.3)
 
     # ---------------------------------------------------------
-    # [Negative Factors] 리스크 감점 (Penalty Logic) - 신규 추가
+    # [Negative Factors] 리스크 감점 (Penalty Logic)
     # ---------------------------------------------------------
     penalty = 0.0
 
-    # A. 갭상승 과다 (Excessive Gap Up)
-    # 시가가 전일 종가 대비 15% 이상 떴다면 추격 매수 위험 (차익실현 매물 폭탄 가능성)
+    # A. 갭상승 과다 (15% 이상)
     if prev_close > 0:
         gap_pct = ((curr_open - prev_close) / prev_close) * 100
-        if gap_pct >= 15.0:
-            penalty += 30  # 강력한 감점
-        elif gap_pct >= 10.0:
-            penalty += 15
+        if gap_pct >= 15.0: penalty += 30
+        elif gap_pct >= 10.0: penalty += 15
 
-    # B. 윗꼬리 비율 (Upper Shadow Ratio)
-    # 고가 대비 종가가 많이 밀렸다면 매도세가 강하다는 뜻
+    # B. 윗꼬리 비율 (몸통보다 긴 윗꼬리 위험)
     candle_range = curr_high - curr_low
     upper_shadow = curr_high - curr_close
-    
-    # 변동성이 좀 있는 상태에서(range > 0), 윗꼬리가 전체 길이의 50%를 넘으면 위험
     if candle_range > 0:
         shadow_ratio = upper_shadow / candle_range
-        if shadow_ratio > 0.6: # 윗꼬리가 몸통+아래꼬리보다 훨씬 김
-            penalty += 20
-        elif shadow_ratio > 0.5:
-            penalty += 10
+        if shadow_ratio > 0.6: penalty += 20
+        elif shadow_ratio > 0.5: penalty += 10
 
-    # C. 거래량 실린 음봉/밀림 (Bearish Volume Spike)
-    # 시가보다 종가가 낮고(음봉 or 하락마감), 거래량이 평소보다 2배 이상 터짐 -> 물량 넘기기(설거지) 의심
-    is_bearish_candle = curr_close < curr_open * 0.98 # 시가 대비 2% 이상 밀림
+    # C. 거래량 실린 음봉/밀림
+    is_bearish_candle = curr_close < curr_open * 0.98
     if is_bearish_candle and vol_ratio > 2.0:
-        penalty += 30  # 강력한 감점
+        penalty += 30
     
-    # D. 고점 피로감 (High Volatility but No Gain)
-    # 거래량은 엄청 터졌는데(3배), 주가 상승률(전일대비)이 2% 미만 -> 손바뀜 혹은 천장 징후
+    # D. 고점 피로감 (거래량 폭발했으나 주가 제자리)
     price_change_pct = ((curr_close - prev_close) / prev_close) * 100
     if vol_ratio > 3.0 and price_change_pct < 2.0:
         penalty += 15
 
-    # ---------------------------------------------------------
-    # 4. Final Calculation
-    # ---------------------------------------------------------
     final_trigger = base_score - penalty
-    
-    # 0점 미만 방지
     return max(0.0, float(final_trigger))
 
 def analyze_ticker(
@@ -2495,6 +2476,22 @@ def analyze_ticker(
     # --- [지표 계산] ---
     ma20 = c.rolling(BB_PERIOD).mean()
     ma60 = c.rolling(60).mean()
+    # 👇👇 [P2 최적화] 여기에 이 코드를 삽입하세요 👇👇
+    # -----------------------------------------------------------
+    # [Vectorization] 추후 연산을 위한 컬럼 미리 계산
+    # -----------------------------------------------------------
+    # 1. 갭 상승률 (시가 / 어제종가 - 1)
+    ohlcv['gap_pct'] = (o / c.shift(1) - 1) * 100
+    
+    # 2. 캔들 모양 벡터 (윗꼬리 비율)
+    ohlcv['candle_rng'] = h - l
+    ohlcv['upper_shadow_ratio'] = (h - c) / ohlcv['candle_rng'].replace(0, 1)
+    
+    # 3. 거래량 급증 여부 (5일 평균 대비)
+    ohlcv['vol_ma_5'] = v.rolling(window=5).mean()
+    ohlcv['vol_ratio'] = v / ohlcv['vol_ma_5'].replace(0, 1)
+    # -----------------------------------------------------------
+    # 👆👆 여기까지 삽입 👆👆
     
     # 🔥 [v14.1] 1. 구조적 상태 변화 (Structural State)
     # (1) Low Trend: 저점 상승 여부 (Trend Check)
