@@ -1843,10 +1843,10 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     except:
         df["생존일"] = 1
 
-    # 2. [수정] CSV의 ROUTE 값(영어 코드)을 UI 라벨(한글)로 매핑
-    # collector가 저장한 "ATTACK", "ARMED" 등을 직접 확인
+    # 2. [핵심 수정] CSV의 텍스트 값("ATTACK")을 직접 확인하여 매핑
+    # schema.py 의존성을 제거하여 매칭 오류 방지
     def map_route_to_ui(route_val):
-        r = str(route_val).strip() # 공백 제거 필수
+        r = str(route_val).strip()
         
         # 1. 집중 공략 (ATTACK)
         if r == "ATTACK": 
@@ -1875,14 +1875,13 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
         df["상태"] = "⚪ 일반 관망 (Neutral)"
         df["_STATE_SORT"] = 60
 
-    # 3. [핵심 수정] Active 플래그 기준 (명시적 코드 매칭)
-    # 기존 코드 대신 ROUTE 값을 직접 확인하여 Active 여부 결정
+    # 3. [중요] Active 플래그 기준 (명시적 텍스트 매칭)
     if "ROUTE" in df.columns:
-        # ATTACK 또는 ARMED 이면 Active
+        # ATTACK(공략)과 ARMED(임박) 두 가지만 Active로 분류
         df["IS_ACTIVE"] = df["ROUTE"].isin(["ATTACK", "ARMED"])
     else:
-        # ROUTE 컬럼 없으면 상태 텍스트로 추정
-        df["IS_ACTIVE"] = df["상태"].str.contains(r"🚀|🔫", na=False)
+        # 컬럼 없을 경우 대비
+        df["IS_ACTIVE"] = df["_STATE_SORT"] <= 20
 
     # 4. 제외 사유 매핑 (UI용)
     df["제외사유"] = np.where(
@@ -1905,7 +1904,6 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
         df["추세"] = "-"
         
     return df
-
 # ---------------------------
 # 데이터 로딩
 # ---------------------------
