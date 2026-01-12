@@ -3439,38 +3439,46 @@ with tab2:
                             help=f"현재가: {row.get('종가','-')} / 상태: {row.get('ROUTE','-')}"
                         )
 
-            # 2. 기회 포착 산점도 (Bubble Chart)
-            # active_view(집중공략) + passive_view 일부를 섞어서 보여주면 비교하기 좋음
+            # 2. 기회 포착 산점도 (Bubble Chart) - 강력 수정 버전
             chart_data = active_view.copy()
             if not passive_view.empty:
-                 # 비교군으로 상위 20개만 추가
                  chart_data = pd.concat([chart_data, passive_view.head(20)])
             
-            # [수정된 코드] 강제 실행 및 데이터 형변환
+            # -------------------------------------------------------
+            # 🛠️ [데이터 강제 보정] 차트가 안 뜨는 문제 해결
+            # -------------------------------------------------------
             try:
-                # 1. 차트용 데이터 안전 변환 (문자열 -> 숫자)
-                chart_data["TOTAL_SCORE"] = pd.to_numeric(chart_data["TOTAL_SCORE"], errors='coerce').fillna(0)
-                chart_data["TRIGGER_SCORE"] = pd.to_numeric(chart_data["TRIGGER_SCORE"], errors='coerce').fillna(0)
-                chart_data["거래대금(억원)"] = pd.to_numeric(chart_data["거래대금(억원)"], errors='coerce').fillna(0)
+                # 1. TRIGGER_SCORE 컬럼이 없으면 LDY_SCORE나 0으로 채움
+                if "TRIGGER_SCORE" not in chart_data.columns:
+                    chart_data["TRIGGER_SCORE"] = chart_data.get("LDY_SCORE", 0)
+                
+                # 2. TOTAL_SCORE 컬럼이 없으면 LDY_SCORE나 0으로 채움
+                if "TOTAL_SCORE" not in chart_data.columns:
+                    chart_data["TOTAL_SCORE"] = chart_data.get("LDY_SCORE", 0)
 
-                # 2. 함수 직접 호출 (globals 체크 제거 -> 무조건 실행)
-                # (만약 여기서 NameError가 나면 작업 1을 제대로 안 한 것임)
+                # 3. 문자열을 숫자로 강제 변환 (에러 방지)
+                cols_to_fix = ["TOTAL_SCORE", "TRIGGER_SCORE", "거래대금(억원)"]
+                for c in cols_to_fix:
+                    if c in chart_data.columns:
+                        chart_data[c] = pd.to_numeric(chart_data[c], errors='coerce').fillna(0)
+
+                # 4. 함수 호출 (함수가 없으면 NameError 발생 -> except로 잡음)
                 fig_map = plot_opportunity_map(chart_data)
                 
-                # 3. 차트 그리기
                 if fig_map:
                     st.plotly_chart(fig_map, use_container_width=True)
-                    st.caption("💡 **Tip:** 점의 크기는 `거래대금`입니다. **우상단(↗️)에 있는 붉은 점**이 오늘의 주도주입니다.")
+                    st.caption("💡 **Tip:** 우상단(↗️) 붉은 점 = **대장주** / 점 크기 = **거래대금**")
                 else:
-                    st.warning("⚠️ 차트 생성 실패 (데이터 없음)")
-                    
+                    st.warning("⚠️ 차트 데이터 매핑 실패 (ROUTE 컬럼 확인 필요)")
+
             except NameError:
-                st.error("🚫 'plot_opportunity_map' 함수를 찾을 수 없습니다. (작업 1: 함수 정의를 파일 상단으로 옮겨주세요!)")
+                # plot_opportunity_map 함수가 정의되지 않았을 때
+                st.error("🚫 코드 상단에 'def plot_opportunity_map(df):' 함수가 없습니다. 파일 위쪽에 함수 정의를 추가해주세요.")
             except Exception as e:
-                st.error(f"🚫 차트 그리기 오류: {e}")
+                # 기타 데이터 에러 발생 시
+                st.error(f"🚫 차트 생성 중 오류 발생: {e}")
             
             st.divider()
-        # 👆👆 [여기까지 삽입] 👆👆
     
         # Active
         if not active_view.empty:
