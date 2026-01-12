@@ -1793,71 +1793,83 @@ def plot_ai_consensus(df):
 
 def plot_opportunity_map(df):
     """
-    [New] 기회 포착 산점도 (Opportunity Map)
-    X축: TOTAL_SCORE (구조적 점수)
-    Y축: TRIGGER_SCORE (타이밍 점수)
-    색상: ROUTE (ATTACK=Red, ARMED=Orange)
-    크기: 거래대금
+    [New] 기회 포착 산점도 (Opportunity Map) - 디버깅 강화 버전
     """
-    if df.empty: return None
+    if df is None or df.empty:
+        st.warning("⚠️ 차트 그릴 데이터가 없습니다 (Empty DataFrame)")
+        return None
     
-    # 시각화용 데이터 준비
+    # 시각화용 데이터 복사
     plot_df = df.copy()
-    
-    # 색상 매핑
+
+    # 1. 필수 컬럼 확인 및 기본값 채우기
+    required_cols = ["TOTAL_SCORE", "TRIGGER_SCORE", "거래대금(억원)", "종목명", "ROUTE"]
+    for c in required_cols:
+        if c not in plot_df.columns:
+            st.error(f"❌ 차트 데이터에 필수 컬럼 '{c}'가 없습니다.")
+            return None
+
+    # 2. 데이터 타입 강제 변환 (문자열 -> 숫자)
+    try:
+        plot_df["TOTAL_SCORE"] = pd.to_numeric(plot_df["TOTAL_SCORE"], errors='coerce').fillna(0)
+        plot_df["TRIGGER_SCORE"] = pd.to_numeric(plot_df["TRIGGER_SCORE"], errors='coerce').fillna(0)
+        plot_df["거래대금(억원)"] = pd.to_numeric(plot_df["거래대금(억원)"], errors='coerce').fillna(0)
+    except Exception as e:
+        st.error(f"❌ 데이터 형변환 오류: {e}")
+        return None
+
+    # 3. 색상 매핑 (안전하게 처리)
     color_map = {
-        "ATTACK": "#FF4B4B",  # 빨강 (강렬)
-        "ARMED": "#FFA726",   # 주황 (대기)
+        "ATTACK": "#FF4B4B",  # 빨강
+        "ARMED": "#FFA726",   # 주황
         "OVERHEAT": "#9E9E9E",# 회색
         "WAIT": "#90CAF9",    # 연파랑
         "NEUTRAL": "#E0E0E0"  # 연회색
     }
+
+    # 공백 제거 및 대문자 변환 후 매핑 (못 찾으면 NEUTRAL)
+    plot_df["Color_Key"] = plot_df["ROUTE"].astype(str).str.strip().str.upper()
     
-    # ROUTE가 매핑 키에 없으면 기타 처리
-    if "ROUTE" in plot_df.columns:
-        # 문자열로 변환하고 공백 제거 후 매핑
-        plot_df["Color_Key"] = plot_df["ROUTE"].astype(str).str.strip()
-        # 매핑에 없는 값은 NEUTRAL로 처리하기 위해 fillna 대신 map 활용
-        plot_df["Color"] = plot_df["Color_Key"].map(color_map).fillna("#E0E0E0")
-    else:
+    # 만약 매핑 키에 없는 값이면 그냥 'NEUTRAL'로 통일 (에러 방지)
+    # 직접 color 컬럼을 만들기보다, plotly의 color 인자에 원본 컬럼을 넣고 discrete_map을 쓰는 게 안전함.
+    
+    try:
+        fig = px.scatter(
+            plot_df,
+            x="TOTAL_SCORE",
+            y="TRIGGER_SCORE",
+            size="거래대금(억원)",
+            color="ROUTE",  # 원본 컬럼 사용
+            color_discrete_map=color_map,
+            hover_name="종목명",
+            hover_data=["종목코드", "종가", "업종"],
+            text="종목명",
+            title="<b>🚀 기회 포착 지도 (우상단 = 1군 주도주)</b>"
+        )
+
+        # 기준선 및 강조 박스
+        fig.add_hline(y=60, line_dash="dot", line_color="gray", annotation_text="급등 임박선")
+        fig.add_vline(x=70, line_dash="dot", line_color="gray", annotation_text="구조 우량선")
+        
+        fig.add_shape(type="rect",
+            x0=70, y0=60, x1=100, y1=100,
+            line=dict(color="red", width=2, dash="dot"),
+            fillcolor="rgba(255, 0, 0, 0.05)"
+        )
+
+        fig.update_traces(textposition='top center', marker=dict(opacity=0.8, line=dict(width=1, color='DarkSlateGrey')))
+        fig.update_layout(
+            height=500,
+            xaxis_title="⚙️ 구조 점수 (Total Score)",
+            yaxis_title="🔥 타이밍 점수 (Trigger Score)",
+            margin=dict(l=20, r=20, t=40, b=20),
+            legend=dict(orientation="h", y=1.05)
+        )
+        return fig
+
+    except Exception as e:
+        st.error(f"❌ Plotly 차트 생성 중 오류: {e}")
         return None
-    
-    # 산점도 그리기
-    fig = px.scatter(
-        plot_df,
-        x="TOTAL_SCORE",
-        y="TRIGGER_SCORE",
-        size="거래대금(억원)",
-        color="ROUTE",
-        color_discrete_map=color_map,
-        hover_name="종목명",
-        hover_data=["종목코드", "종가", "업종"],
-        text="종목명", # 점 옆에 이름 표시
-        title="<b>🚀 기회 포착 지도 (우상단 = 1군 주도주)</b>"
-    )
-    
-    # 기준선 (십자선)
-    fig.add_hline(y=60, line_dash="dot", line_color="gray", annotation_text="급등 임박선")
-    fig.add_vline(x=70, line_dash="dot", line_color="gray", annotation_text="구조 우량선")
-    
-    # 우상단 강조 박스
-    fig.add_shape(type="rect",
-        x0=70, y0=60, x1=100, y1=100,
-        line=dict(color="red", width=2, dash="dot"),
-        fillcolor="rgba(255, 0, 0, 0.05)"
-    )
-
-    fig.update_traces(textposition='top center', marker=dict(opacity=0.8, line=dict(width=1, color='DarkSlateGrey')))
-    fig.update_layout(
-        height=500,
-        xaxis_title="⚙️ 구조 점수 (Total Score)",
-        yaxis_title="🔥 타이밍 점수 (Trigger Score)",
-        margin=dict(l=20, r=20, t=40, b=20),
-        legend=dict(orientation="h", y=1.05)
-    )
-    
-    return fig
-
 
 # -------------------------------------------------------------
 # 🔥 [v14.2 Dashboard Engine] Time-Aware State Machine
