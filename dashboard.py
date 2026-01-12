@@ -1843,42 +1843,45 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # 2. [핵심 수정] 실제 데이터 라벨(BRK, Watch, SQZ)을 UI 상태로 매핑
     def map_route_to_ui(route_val):
-        r = str(route_val)
-        # 1. 강력 돌파 (BRK) - 데이터의 '🔼 BRK'와 매칭
-        if "BRK" in r or "강력 돌파" in r: 
+        # collector.py에서 생성한 RouteState 값(ATTACK, ARMED...)과 정확히 매칭
+        r = str(route_val).strip()
+        
+        # 1. 집중 공략 (ATTACK): 가장 강력한 신호 (Active 1순위)
+        if r == "ATTACK": 
             return "🚀 집중 공략 (Active)", 0
         
-        # 2. 응축/폭발대기 (SQZ) - 데이터의 '🔥 SQZ'와 매칭
-        if "SQZ" in r or "폭발대기" in r: 
-            return "🌪️ 응축중 (Squeeze)", 10
+        # 2. 트리거 임박 (ARMED): 기존의 SQZ/Watch 개념 (Active 2순위)
+        if r == "ARMED": 
+            return "🔫 트리거 임박 (Ready)", 10
         
-        # 3. 관찰/돌파예상 (Watch) - 데이터의 '🔺 Watch'와 매칭
-        if "Watch" in r or "상승 준비" in r or "돌파예상" in r: 
-            # 💡 중요: 'Watch' 종목들도 Active(20점)로 분류하여 상단에 노출
-            return "👀 관찰 (Watch)", 20
-        
-        # 4. 과열/위험 - 데이터의 '🚫 과열/위험'과 매칭
-        if "과열" in r or "위험" in r: 
-            return "⛔ 과열/위험 (Caution)", 90
-        
-        # 5. 기본값: 관망
-        return "⚪ 관망 (Neutral)", 50
+        # 3. 과열 (OVERHEAT): 이익 실현 주의 (Passive, 최하단)
+        if r == "OVERHEAT": 
+            return "⛔ 과열/주의 (Caution)", 90
+            
+        # 4. 관찰 대기 (WAIT): 추세는 살아있으나 타점 대기 (Passive)
+        if r == "WAIT":
+            return "👀 추세 관찰 (Wait)", 50
+            
+        # 5. 기본값: 중립
+        return "⚪ 일반 관망 (Neutral)", 60
 
     if "ROUTE" in df.columns:
         mapped = df["ROUTE"].apply(map_route_to_ui)
         df["상태"] = mapped.apply(lambda x: x[0])
         df["_STATE_SORT"] = mapped.apply(lambda x: x[1])
     else:
-        df["상태"] = "⚪ 관망 (Neutral)"
-        df["_STATE_SORT"] = 50
+        df["상태"] = "⚪ 일반 관망 (Neutral)"
+        df["_STATE_SORT"] = 60
 
-    # 3. [중요] Active 플래그 기준: 30점 이하(공략, 응축, 관찰)는 모두 활성 상태로 표시
-    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 30
+    # 3. [중요] Active 플래그 기준 수정
+    # 기존 점수 체계에 맞춰 20점 이하(공략, 임박)만 Active 탭에 노출
+    # (WAIT/관찰 단계는 아직 쏘지 않았으므로 Passive 탭에 두는 것이 깔끔함)
+    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 20
 
-    # 4. 제외 사유 매핑
+    # 4. 제외 사유 매핑 (UI용)
     df["제외사유"] = np.where(
         df["_STATE_SORT"] == 90, "⚠️ 과열/급등주의",
-        np.where(df["_STATE_SORT"] == 50, "⏳ 모멘텀 부족", "-")
+        np.where(df["_STATE_SORT"] >= 50, "⏳ 모멘텀 부족", "-")
     )
 
     # 5. 추세 데코레이션
