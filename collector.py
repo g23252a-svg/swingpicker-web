@@ -35,18 +35,10 @@ import dart_analyzer  # ✅ [2단계] DART 분석기 추가
 
 from time_utils import now_kst, now_utc, KST
 from concurrent.futures import ThreadPoolExecutor, as_completed
+# 👇👇 [수정] 클래스 정의를 지우고, schema.py에서 가져오도록 변경 👇👇
+from schema import RouteState
 
-# ---------------------------------------------------------
-# [SCHEMA] 공통 상태 상수 정의 (Enum 대체)
-# ---------------------------------------------------------
-class RouteState:
-    OVERHEAT = "OVERHEAT"   # 과열 (Passive)
-    WAIT = "WAIT"           # 대기 (Passive/Watch)
-    ARMED = "ARMED"         # 발사 준비/임박 (Active)
-    ATTACK = "ATTACK"       # 공격/집중 (Active)
-    NEUTRAL = "NEUTRAL"     # 중립 (Passive)
 
-# ---------------------------------------------------------
 
 # [v9.0 추가] LLM 및 뉴스 크롤링용 라이브러리
 try:
