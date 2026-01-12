@@ -1741,6 +1741,8 @@ def plot_risk_reward_bar(buy, stop, target1, target2):
         yaxis=dict(visible=False),
     )
     return fig
+
+
     
 def plot_ai_consensus(df):
     """
@@ -1785,6 +1787,9 @@ def plot_ai_consensus(df):
         yaxis=dict(range=[40, 105])
     )
     return fig
+
+
+# 👇👇👇 [여기서부터 아래 코드를 복사해서 붙여넣으세요] 👇👇👇
 
 def plot_opportunity_map(df):
     """
@@ -1852,7 +1857,6 @@ def plot_opportunity_map(df):
     )
     
     return fig
-
 
 
 # -------------------------------------------------------------
@@ -3343,6 +3347,8 @@ with tab2:
         # 최종 표시용 view (개수 제한 적용)
         active_view = active_df.head(limit).copy()
         passive_view = passive_df.copy() # Passive는 Expander 안에 있어서 제한 굳이 안 해도 됨 (데이터프레임 자체 스크롤)
+
+        
         
         # 4. 종목명 복구 & 포맷팅 (공통 함수화)
         try:
@@ -3402,9 +3408,7 @@ with tab2:
 
         
 
-        # --------------------------------------------------------
-        # 🔥 [Visual Cockpit] 시각화 차트 및 Top 3 카드 (테이블보다 먼저 출력)
-        # --------------------------------------------------------
+  
         if not active_view.empty:
             st.markdown("### 🔭 한눈에 보는 시장 지도")
             
