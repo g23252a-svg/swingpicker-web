@@ -36,6 +36,18 @@ import dart_analyzer  # ✅ [2단계] DART 분석기 추가
 from time_utils import now_kst, now_utc, KST
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ---------------------------------------------------------
+# [SCHEMA] 공통 상태 상수 정의 (Enum 대체)
+# ---------------------------------------------------------
+class RouteState:
+    OVERHEAT = "OVERHEAT"   # 과열 (Passive)
+    WAIT = "WAIT"           # 대기 (Passive/Watch)
+    ARMED = "ARMED"         # 발사 준비/임박 (Active)
+    ATTACK = "ATTACK"       # 공격/집중 (Active)
+    NEUTRAL = "NEUTRAL"     # 중립 (Passive)
+
+# ---------------------------------------------------------
+
 # [v9.0 추가] LLM 및 뉴스 크롤링용 라이브러리
 try:
     from bs4 import BeautifulSoup
@@ -1912,27 +1924,37 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
 # --- [새로 추가 2] 상태 머신 기반 ROUTE 결정 함수 (기존 route_tag 대체) ---
 def determine_state(row):
     """
-    [v15.0] 상태 머신 기반 ROUTE 결정 (AI_COMMENT 의존)
+    [P0] AI 의존성 제거 및 수치 기반 상태 결정
     """
-    why_text = str(row.get('AI_COMMENT', ''))
+    try:
+        # 1. 과열 (OVERHEAT): 차익 실현 주의 구간
+        # 예: RSI가 72 이상이거나, 5일 수익률이 25% 이상 급등한 경우
+        if row.get('rsi_14', 50) >= 72 or row.get('ret_5d', 0) >= 0.25:
+            return RouteState.OVERHEAT
 
-    # 1) 과열/위험 (진입 금지)
-    if "단기 급등 조정 주의" in why_text or row.get('RSI14', 50) >= 72:
-        return "🚫 과열/위험"
+        # 2. 집중 공략 (ATTACK): 상승 추세 + 트리거 발동 조건 충족
+        # 조건: 20일선 위에 있고, MACD 기울기가 양수이며, Trigger Score가 높음
+        if (row.get('close', 0) > row.get('ma_20', 0) and 
+            row.get('macd_hist_slope', 0) > 0 and 
+            row.get('TRIGGER_SCORE', 0) >= 2): # 기준점 조정 가능
+            return RouteState.ATTACK
 
-    # 2) 트리거 대기(응축) - 관찰
-    if row.get('TTM_SQUEEZE', 0) == 1 and row.get('BB_Expanding', 0) == 0:
-        return "👀 트리거 대기"
+        # 3. 발사 임박 (ARMED): 에너지가 모이고 발산 직전
+        # 조건: TTM Squeeze 상태이거나, 볼린저 밴드 확장 시작 + 거래량 수급
+        is_squeeze = row.get('ttm_squeeze_on', False)
+        vol_spike = row.get('vol_ma_ratio', 0) > 1.2  # 거래량이 평소보다 20% 이상
+        if is_squeeze or (not is_squeeze and vol_spike):
+            return RouteState.ARMED
 
-    # 3) 트리거 임박(Armed) - 곧 발사
-    if row.get('TTM_SQUEEZE_CNT', 0) >= 3 and row.get('BB_Expanding', 0) == 1:
-        return "🔫 트리거 임박"
+        # 4. 관망/대기 (WAIT): 추세는 살아있으나 힘이 부족
+        if row.get('close', 0) > row.get('ma_60', 0):
+            return RouteState.WAIT
 
-    # 4) 추세 진입(Trend) - 집중 공략
-    if row.get('MACD_Slope_PCT', 0) > 0 and row.get('Above_MA20', 0) == 1:
-        return "🚀 집중 공략"
+        return RouteState.NEUTRAL
 
-    return "⚪ 관망"
+    except Exception as e:
+        print(f"State Error: {e}")
+        return RouteState.NEUTRAL
 
 def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
     """
@@ -2308,31 +2330,46 @@ def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
 
 def calculate_trigger_score(df: pd.DataFrame) -> float:
     """
-    [New] 단기 급등 타이밍 포착을 위한 Trigger Score 계산
+    [Updated] 단기 급등 타이밍 포착 + 가짜 돌파(Fakeout) 필터링
     df: 일봉 데이터 (OHLCV) - 컬럼명: 시가, 고가, 저가, 종가, 거래량
     """
     if df is None or df.empty or len(df) < 30:
         return 0.0
 
-    # 데이터 타입 안전 변환
+    # ---------------------------------------------------------
+    # 0. 데이터 준비 (Data Preparation)
+    # ---------------------------------------------------------
     try:
+        # 기존: 거래량, 종가, 고가만 변환 -> 수정: 시가, 저가도 필요
         vol = pd.to_numeric(df['거래량'], errors='coerce').fillna(0)
         close = pd.to_numeric(df['종가'], errors='coerce').fillna(0)
         high = pd.to_numeric(df['고가'], errors='coerce').fillna(0)
+        open_p = pd.to_numeric(df['시가'], errors='coerce').fillna(0)
+        low = pd.to_numeric(df['저가'], errors='coerce').fillna(0)
         
+        # 현재 값 (Today)
         curr_vol = float(vol.iloc[-1])
         curr_close = float(close.iloc[-1])
         curr_high = float(high.iloc[-1])
+        curr_open = float(open_p.iloc[-1])
+        curr_low = float(low.iloc[-1])
+        
+        # 전일 값 (Yesterday)
+        prev_close = float(close.iloc[-2])
         prev_high = float(high.iloc[-2])
-    except:
+
+    except Exception as e:
+        # 데이터 오류 시 안전하게 0 반환
         return 0.0
 
+    # ---------------------------------------------------------
+    # [Positive Factors] 상승 동력 점수 계산 (기존 로직 유지)
+    # ---------------------------------------------------------
+
     # 1. Volume Accel (거래량 가속도) - 비중 30%
-    # 최근 3일(어제 기준) 평균 거래량 대비 오늘 거래량
     vol_ma3 = vol.iloc[-4:-1].mean()
     if vol_ma3 == 0: vol_ma3 = 1
     vol_ratio = curr_vol / vol_ma3
-    # 2배 이상 터지면 만점(100)
     score_vol = min(vol_ratio * 50, 100) 
 
     # 2. Breakout Potential (돌파 임박/시도) - 비중 40%
@@ -2344,12 +2381,11 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
     if bb_upper > 0:
         bb_pos = curr_close / bb_upper
     
-    # 당일 고가 갱신 여부
     high_break = 1 if curr_high > prev_high else 0
     
     score_breakout = 0
-    if bb_pos > 0.95: score_breakout += 70 # 상단 근접
-    if bb_pos > 1.0: score_breakout += 30  # 돌파 시 추가 가산점
+    if bb_pos > 0.95: score_breakout += 70
+    if bb_pos > 1.0: score_breakout += 30 
     if high_break: score_breakout = min(score_breakout + 20, 100)
 
     # 3. Momentum Accel (에너지 가속) - 비중 30%
@@ -2364,17 +2400,61 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
     
     score_mom = 0
     if hist_curr > 0 and hist_curr > hist_prev:
-        # 가속 강도 (변화율)
         denom = abs(hist_prev) if abs(hist_prev) > 0 else 0.0001
         change = (hist_curr - hist_prev) / denom
         score_mom = min(50 + (change * 100), 100) 
     elif hist_curr > 0:
-        score_mom = 30 # 양수지만 가속은 아님
+        score_mom = 30 
         
-    final_trigger = (score_vol * 0.3) + (score_breakout * 0.4) + (score_mom * 0.3)
-    return float(final_trigger)
+    # 기본 점수 합산
+    base_score = (score_vol * 0.3) + (score_breakout * 0.4) + (score_mom * 0.3)
 
-# [수정 대상] analyze_ticker 함수 전체를 아래 코드로 교체하세요.
+    # ---------------------------------------------------------
+    # [Negative Factors] 리스크 감점 (Penalty Logic) - 신규 추가
+    # ---------------------------------------------------------
+    penalty = 0.0
+
+    # A. 갭상승 과다 (Excessive Gap Up)
+    # 시가가 전일 종가 대비 15% 이상 떴다면 추격 매수 위험 (차익실현 매물 폭탄 가능성)
+    if prev_close > 0:
+        gap_pct = ((curr_open - prev_close) / prev_close) * 100
+        if gap_pct >= 15.0:
+            penalty += 30  # 강력한 감점
+        elif gap_pct >= 10.0:
+            penalty += 15
+
+    # B. 윗꼬리 비율 (Upper Shadow Ratio)
+    # 고가 대비 종가가 많이 밀렸다면 매도세가 강하다는 뜻
+    candle_range = curr_high - curr_low
+    upper_shadow = curr_high - curr_close
+    
+    # 변동성이 좀 있는 상태에서(range > 0), 윗꼬리가 전체 길이의 50%를 넘으면 위험
+    if candle_range > 0:
+        shadow_ratio = upper_shadow / candle_range
+        if shadow_ratio > 0.6: # 윗꼬리가 몸통+아래꼬리보다 훨씬 김
+            penalty += 20
+        elif shadow_ratio > 0.5:
+            penalty += 10
+
+    # C. 거래량 실린 음봉/밀림 (Bearish Volume Spike)
+    # 시가보다 종가가 낮고(음봉 or 하락마감), 거래량이 평소보다 2배 이상 터짐 -> 물량 넘기기(설거지) 의심
+    is_bearish_candle = curr_close < curr_open * 0.98 # 시가 대비 2% 이상 밀림
+    if is_bearish_candle and vol_ratio > 2.0:
+        penalty += 30  # 강력한 감점
+    
+    # D. 고점 피로감 (High Volatility but No Gain)
+    # 거래량은 엄청 터졌는데(3배), 주가 상승률(전일대비)이 2% 미만 -> 손바뀜 혹은 천장 징후
+    price_change_pct = ((curr_close - prev_close) / prev_close) * 100
+    if vol_ratio > 3.0 and price_change_pct < 2.0:
+        penalty += 15
+
+    # ---------------------------------------------------------
+    # 4. Final Calculation
+    # ---------------------------------------------------------
+    final_trigger = base_score - penalty
+    
+    # 0점 미만 방지
+    return max(0.0, float(final_trigger))
 
 def analyze_ticker(
     t: str, ohlcv_df: pd.DataFrame, top_df: pd.DataFrame, mcap_map: Dict[str, float],
