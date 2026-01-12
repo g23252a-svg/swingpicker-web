@@ -3086,7 +3086,7 @@ with tab2:
         min_score = st.slider(
             "최소 퀀트(LDY) 점수",
             min_value=0, max_value=100, 
-            value=50,  # 70 -> 50으로 변경
+            value=0,  # 🔥 [수정] 기본값을 0으로 낮춤 (Active 종목이 점수 필터에 안 잘리게)
             step=1,
             key="min_score",
         )
@@ -3094,11 +3094,11 @@ with tab2:
     with col_f2:
         def _route_order(r: str):
             s = str(r)
-            if "SQZ" in s: return (0, s)
-            if "BRK" in s: return (1, s)
-            if "Watch" in s or "관찰" in s or "상승" in s: return (2, s)
-            if "MR" in s: return (3, s)
-            if "PULL" in s: return (4, s)
+            if "ATTACK" in s or "공략" in s: return (0, s) # ATTACK 우선
+            if "ARMED" in s or "임박" in s: return (1, s)
+            if "SQZ" in s: return (2, s)
+            if "BRK" in s: return (3, s)
+            if "Watch" in s or "관찰" in s or "상승" in s: return (4, s)
             return (5, s)
 
         all_routes = sorted(
@@ -3107,11 +3107,12 @@ with tab2:
         ) if "ROUTE" in scored.columns else []
 
         if all_routes:
-            default_routes = [r for r in all_routes if "PULL" not in r] or all_routes
+            # 기본값: 전체 선택
             sel_routes = st.multiselect(
                 "전략 유형 (ROUTE)",
                 options=all_routes,
-                default=default_routes,
+                default=[], # 기본은 전체 보기
+                placeholder="전체 보기 (선택 시 필터링)",
                 key="route_filter",
             )
         else:
@@ -3123,7 +3124,8 @@ with tab2:
             sel_regimes = st.multiselect(
                 "추세 구분 (REGIME)",
                 options=all_regimes,
-                default=all_regimes,
+                default=[],
+                placeholder="전체 보기 (선택 시 필터링)",
                 key="regime_filter",
             )
         else:
@@ -3134,6 +3136,7 @@ with tab2:
     # ---------------------------
     # 데이터 필터링 로직
     # ---------------------------
+    # 1. 대상 데이터셋 선정
     if use_only_gate:
         if auth_status in ["prime", "admin"]:
             base_view = base.head(300).copy()
@@ -3146,23 +3149,25 @@ with tab2:
             base_view = scored.head(50).copy()
 
     filtered = base_view.copy()
-    filter_col = "FINAL_SCORE" if "FINAL_SCORE" in filtered.columns else (
-        "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else (
-            "RANK_SCORE" if "RANK_SCORE" in filtered.columns else "LDY_SCORE"
+
+    # 2. 점수 필터링 (사용자가 0보다 크게 설정했을 때만 적용)
+    if min_score > 0:
+        filter_col = "FINAL_SCORE" if "FINAL_SCORE" in filtered.columns else (
+            "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else (
+                "RANK_SCORE" if "RANK_SCORE" in filtered.columns else "LDY_SCORE"
+            )
         )
-    )
+        if filter_col in filtered.columns:
+            filtered[filter_col] = pd.to_numeric(filtered[filter_col], errors='coerce').fillna(0)
+            filtered = filtered[filtered[filter_col] >= min_score]
 
-    if filter_col in filtered.columns:
-        filtered[filter_col] = pd.to_numeric(filtered[filter_col], errors='coerce').fillna(0)
-
-    filtered = filtered[filtered[filter_col] >= min_score]
-
+    # 3. 라우트/리짐 필터링
     if sel_routes and "ROUTE" in filtered.columns:
         filtered = filtered[filtered["ROUTE"].isin(sel_routes)]
     if sel_regimes and "REGIME" in filtered.columns:
         filtered = filtered[filtered["REGIME"].isin(sel_regimes)]
 
-    # 추가 필터 (Squeeze, SuperTrend, OBV, HMA)
+    # 4. 추가 체크박스 필터
     c_sub1, c_sub2 = st.columns(2)
     with c_sub1:
         show_only_squeeze = st.checkbox("🌪️ TTM Squeeze (폭발 대기)", key="chk_sqz_only")
@@ -3180,18 +3185,10 @@ with tab2:
     if show_hma_up and "HMA_Trend" in filtered.columns:
         filtered = filtered[filtered["HMA_Trend"] == "▲"]
 
-    sort_col = "TOTAL_SCORE" if "TOTAL_SCORE" in filtered.columns else "LDY_SCORE"
-    if sort_col in filtered.columns:
-        filtered[sort_col] = pd.to_numeric(filtered[sort_col], errors='coerce').fillna(0)
-    if "거래대금(억원)" in filtered.columns:
-        filtered["거래대금(억원)"] = pd.to_numeric(filtered["거래대금(억원)"], errors='coerce').fillna(0)
+    # 5. 정렬 (Active 우선 로직 적용을 위해 여기서 미리 정렬하지 않음, 데이터 준비만)
+    # (나중에 active/passive 나눌 때 정렬함)
 
-    if "거래대금(억원)" in filtered.columns:
-        filtered = filtered.sort_values([sort_col, "거래대금(억원)"], ascending=[False, False])
-    else:
-        filtered = filtered.sort_values([sort_col], ascending=[False])
-
-    # 권한별 노출 개수 제한
+    # 권한별 노출 개수 제한 메시지
     if auth_status in ["pro", "prime", "admin"]:
         limit = 20 if auth_status == "pro" else 100
         st.success(f"🥇 {auth_status.upper()} 회원: AI 종합 랭킹 Top {limit} 열람 중")
@@ -3201,7 +3198,6 @@ with tab2:
         st.info(f"✅ {user_type} 회원: 상위 {limit}개 열람 중 (Pro/Prime 업그레이드 시 더 많은 종목 확인 가능)")
     
     # --- 2. 데이터 상태 해석 (Augment) ---
-    # 여기서 '상태', 'IS_ACTIVE' 등의 컬럼이 생성됩니다.
     full_df = augment_display_data(filtered.copy())
     
     # NameError 방지를 위한 초기화
@@ -3210,16 +3206,22 @@ with tab2:
     
     # 데이터가 있을 때만 분류 작업 수행
     if not full_df.empty:
+        # 🔥 [핵심 수정] Active/Passive 분리 시 점수 필터 영향 최소화
+        # IS_ACTIVE가 True인 종목은 min_score와 상관없이 Active 탭에 보여주는 것이 좋음
+        # (하지만 위에서 이미 filtered 변수에 min_score가 적용됨. 
+        #  Active 종목도 점수가 너무 낮으면 걸러지는게 맞다면 유지, 아니면 원본 full_df에서 다시 가져와야 함)
+        #  -> 여기서는 사용자가 min_score를 조절할 수 있게 했으므로 filtered 결과 사용.
+        
         if "IS_ACTIVE" in full_df.columns:
             active_df  = full_df[full_df["IS_ACTIVE"]].copy()
             passive_df = full_df[~full_df["IS_ACTIVE"]].copy()
         else:
-            # IS_ACTIVE 컬럼이 없을 경우를 대비한 하이브리드 필터링
+            # Fallback
             active_mask = full_df["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
             active_df  = full_df[active_mask].copy()
             passive_df = full_df[~active_mask].copy()
 
-    # --- 3. 화면 출력 로직 (여기가 중요: 데이터 없으면 아래 실행 안 함) ---
+    # --- 3. 화면 출력 로직 ---
     if full_df.empty:
         st.warning("조건에 맞는 종목이 없습니다. 필터를 조정해 보세요.")
     else:
@@ -3232,23 +3234,33 @@ with tab2:
             key="tab2_sort_mode"
         )
         
-        # 정렬 실행 (active_df가 있을 때만)
-        if not active_df.empty:
-            if sort_mode == "🚦 상태 우선 (행동순)":
-                sort_cols = ["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
-                sort_cols = [c for c in sort_cols if c in active_df.columns]
-                if sort_cols:
-                    ascending_list = [True] + [False] * (len(sort_cols) - 1)
-                    active_df = active_df.sort_values(by=sort_cols, ascending=ascending_list)
+        # 정렬 실행
+        def _apply_sort(df_target):
+            if df_target.empty: return df_target
+            
+            # 정렬 컬럼 후보
+            cols = ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
+            cols = [c for c in cols if c in df_target.columns]
+            
+            if sort_mode == "🚦 상태 우선 (행동순)" and "_STATE_SORT" in df_target.columns:
+                # 상태 코드(0,10...) 오름차순 -> 점수 내림차순
+                sort_keys = ["_STATE_SORT"] + cols
+                asc_flags = [True] + [False] * len(cols)
+                return df_target.sort_values(by=sort_keys, ascending=asc_flags)
             else:
-                sort_cols = ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
-                sort_cols = [c for c in sort_cols if c in active_df.columns]
-                if sort_cols:
-                    active_df = active_df.sort_values(by=sort_cols, ascending=[False]*len(sort_cols))
+                # 점수 내림차순
+                return df_target.sort_values(by=cols, ascending=[False]*len(cols))
+
+        active_df = _apply_sort(active_df)
+        # Passive는 점수순 정렬이 기본
+        passive_cols = ["FINAL_SCORE", "TOTAL_SCORE", "RANK_SCORE", "거래대금(억원)"]
+        passive_cols = [c for c in passive_cols if c in passive_df.columns]
+        if passive_cols:
+            passive_df = passive_df.sort_values(by=passive_cols, ascending=[False]*len(passive_cols))
 
         # 최종 표시용 view (개수 제한 적용)
         active_view = active_df.head(limit).copy()
-        passive_view = passive_df.copy()
+        passive_view = passive_df.copy() # Passive는 Expander 안에 있어서 제한 굳이 안 해도 됨 (데이터프레임 자체 스크롤)
         
         # 4. 종목명 복구 & 포맷팅 (공통 함수화)
         try:
@@ -3271,8 +3283,8 @@ with tab2:
                         df_target[c] = pd.to_numeric(df_target[c], errors="coerce").fillna(0).apply(lambda x: f"{int(x):,}")
                 return df_target
     
-            active_view = _process_display_df(active_df)
-            passive_view = _process_display_df(passive_df)
+            active_view = _process_display_df(active_view)
+            passive_view = _process_display_df(passive_view)
         except Exception:
             active_view = active_df
             passive_view = passive_df
@@ -3280,9 +3292,7 @@ with tab2:
         # 5. 컬럼 설정 (상태 컬럼 강조)
         cols = [
             "상태", "종목명", "생존일",
-            # [Step 6] 점수 3대장 (최종점수, 트리거, 기본점수) 추가
             "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE",
-            # 기존 컬럼들 유지
             "추세", "Low_Trend_PCT",
             "종가", "추천매수가", "손절가", "추천매도가1",
             "ROUTE", "업종"
@@ -3295,7 +3305,6 @@ with tab2:
             "생존일": st.column_config.ProgressColumn("Time", format="%d일", min_value=0, max_value=12,
                                                     help="3~8일차: 골든타임 / 10일 이상: 상한 음식"),
             
-            # [Step 6] 점수 컬럼 시각화 설정 (Progress Bar & Number)
             "FINAL_SCORE": st.column_config.ProgressColumn("🏆종합강도", format="%.1f", min_value=0, max_value=100, width="small"),
             "TRIGGER_SCORE": st.column_config.NumberColumn("🔥타이밍", format="%.0f", width="small", help="높을수록 단기 급등 임박 (감점 반영됨)"),
             "TOTAL_SCORE": st.column_config.NumberColumn("⚙️구조점수", format="%.0f", width="small", help="기본적인 차트/수급 우량도"),
@@ -3323,7 +3332,7 @@ with tab2:
         else:
             st.info("현재 '집중 공략' 기준을 만족하는 종목이 없습니다. 관망하세요.")
     
-        # Passive (딱 1번)
+        # Passive
         if not passive_view.empty:
             st.write("")
             with st.expander(f"💤 보류/제외 종목 보기 ({len(passive_view)}개) - 좀비, 붕괴, 단순관망"):
@@ -3337,9 +3346,6 @@ with tab2:
                     column_config=cfg,
                     hide_index=True
                 )
-
-            
-          
 
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
