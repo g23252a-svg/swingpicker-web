@@ -1916,61 +1916,45 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
 # --- [새로 추가 2] 상태 머신 기반 ROUTE 결정 함수 (기존 route_tag 대체) ---
 def determine_state(row):
     """
-    [Fixed] 실제 데이터프레임 컬럼명과 매칭되도록 수정된 상태 결정 로직
+    [Strict] 유망 종목 선별을 위한 강화된 상태 결정 로직
     """
     try:
-        # 0. 데이터 안전하게 가져오기 (대소문자/키 이름 주의)
-        # analyze_ticker에서 생성하는 실제 키값들을 사용해야 함
-        
+        # 0. 데이터 가져오기
         rsi = float(row.get('RSI14', 50))
         r5 = float(row.get('ret_5d_%', 0))
-        
-        # 주가 > 20일선 여부 (1 or 0)
         above_ma20 = int(row.get('Above_MA20', 0))
-        
-        # MACD 기울기 (양수면 상승 가속)
         slope = float(row.get('MACD_Slope_PCT', 0))
-        
-        # 트리거 점수 (0~100)
         t_score = float(row.get('TRIGGER_SCORE', 0))
-        
-        # 스퀴즈 여부 (1 or 0)
         is_squeeze = int(row.get('TTM_SQUEEZE', 0))
-        
-        # 거래량 퀄리티 (매수세 강도)
         vol_qual = float(row.get('Vol_Quality', 1.0))
 
         # -----------------------------------------------------
-        # 1. 과열 (OVERHEAT): 이익 실현 구간
-        # RSI 75 이상이거나, 5일간 20% 이상 급등 시
+        # 1. 과열 (OVERHEAT): 이익 실현 구간 (유지)
         if rsi >= 75 or r5 >= 20.0:
             return RouteState.OVERHEAT
 
-        # 2. 집중 공략 (ATTACK): 상승 추세 확정 + 트리거 발동
-        # 조건: 20일선 위에 있고 + 모멘텀 양수 + 트리거 점수 40점 이상(기본)
-        # (패널티를 먹고도 40점 이상이면 상당히 좋은 상태임)
-        if above_ma20 == 1 and slope > 0 and t_score >= 40:
+        # 2. 집중 공략 (ATTACK): 진짜 주도주만 선별
+        # [강화] 점수 40 -> 60점 이상 (어설픈 신호 제외)
+        # [추가] Vol_Quality >= 1.3 (매수 우위 수급 필수)
+        if above_ma20 == 1 and slope > 0 and t_score >= 60 and vol_qual >= 1.3:
             return RouteState.ATTACK
 
-        # 3. 발사 임박 (ARMED): 에너지가 모이는 구간
-        # 조건: 스퀴즈 상태이거나, 거래량/수급이 비정상적으로 좋음(세력 개입)
-        if is_squeeze == 1:
+        # 3. 발사 임박 (ARMED): 추세가 살아있는 응축
+        # [강화] 스퀴즈 상태라도 20일선 아래(역배열)면 제외 (떨어지는 칼날 방지)
+        if is_squeeze == 1 and above_ma20 == 1:
             return RouteState.ARMED
         
-        if vol_qual >= 1.5: # 매수세가 매도세보다 1.5배 강함
+        # [강화] 거래량 깡패 조건: 1.5 -> 2.0 (압도적 매수세만 인정)
+        if vol_qual >= 2.0:
             return RouteState.ARMED
 
-        # 4. 추세 대기 (WAIT): 추세는 살아있으나 힘이 부족
-        # 조건: 저점이 높아지는 중(Low_Trend_PCT > 0) 이면 관망 가치 있음
+        # 4. 추세 대기 (WAIT): 저점이 높아지는 종목
         if float(row.get('Low_Trend_PCT', 0)) > 0:
             return RouteState.WAIT
 
-        # 5. 그 외 (NEUTRAL)
         return RouteState.NEUTRAL
 
     except Exception as e:
-        # 디버깅용: 에러 나면 출력
-        # print(f"State Check Error: {e}")
         return RouteState.NEUTRAL
 
 def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
