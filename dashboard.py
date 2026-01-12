@@ -24,6 +24,8 @@ import plotly.express as px
 import re
 from typing import Optional, Dict, Any, Tuple
 from dart_analyzer import DartAnalyzer
+# 👇👇 [추가] 스키마 임포트 👇👇
+from schema import RouteState
 
 
 
@@ -1843,26 +1845,25 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # 2. [핵심 수정] 실제 데이터 라벨(BRK, Watch, SQZ)을 UI 상태로 매핑
     def map_route_to_ui(route_val):
-        # collector.py에서 생성한 RouteState 값(ATTACK, ARMED...)과 정확히 매칭
         r = str(route_val).strip()
         
-        # 1. 집중 공략 (ATTACK): 가장 강력한 신호 (Active 1순위)
-        if r == "ATTACK": 
+        # 1. 집중 공략 (ATTACK)
+        if r == RouteState.ATTACK: 
             return "🚀 집중 공략 (Active)", 0
         
-        # 2. 트리거 임박 (ARMED): 기존의 SQZ/Watch 개념 (Active 2순위)
-        if r == "ARMED": 
+        # 2. 트리거 임박 (ARMED)
+        if r == RouteState.ARMED: 
             return "🔫 트리거 임박 (Ready)", 10
         
-        # 3. 과열 (OVERHEAT): 이익 실현 주의 (Passive, 최하단)
-        if r == "OVERHEAT": 
+        # 3. 과열 (OVERHEAT)
+        if r == RouteState.OVERHEAT: 
             return "⛔ 과열/주의 (Caution)", 90
             
-        # 4. 관찰 대기 (WAIT): 추세는 살아있으나 타점 대기 (Passive)
-        if r == "WAIT":
+        # 4. 관찰 대기 (WAIT)
+        if r == RouteState.WAIT:
             return "👀 추세 관찰 (Wait)", 50
             
-        # 5. 기본값: 중립
+        # 5. 기본값
         return "⚪ 일반 관망 (Neutral)", 60
 
     if "ROUTE" in df.columns:
