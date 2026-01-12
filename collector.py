@@ -3034,10 +3034,41 @@ def main(
 
     df_out["REGIME_RANK"] = df_out["REGIME"].map(_regime_rank).fillna(999).astype(int)
 
-    df_out = df_out.sort_values(
-        ["FINAL_SCORE", "TRIGGER_SCORE", "RANK_SCORE", "거래대금(억원)"],
-        ascending=[False, False, False, False]
+    # --------------------------------------------------------------------------
+    # [Step 5] 2단계 정렬 로직 (Hybrid Sorting)
+    # 기존의 단순 합산 방식은 "구조만 좋고 무거운 종목"이 상위를 독점함.
+    # 개선: "구조적 우량주(1차)"를 먼저 추린 뒤, 그 안에서는 "타이밍(2차)"으로 줄 세우기
+    # --------------------------------------------------------------------------
+    
+    # 1. 구조적 합격선 (Structure Cutoff)
+    # RANK_SCORE(구조 점수)가 70점 이상이고, 과열(OVERHEAT) 상태가 아닌 종목
+    # (RouteState 클래스는 파일 상단에 정의되어 있어야 함)
+    mask_qualified = (df_out['RANK_SCORE'] >= 70) & (df_out['ROUTE'] != RouteState.OVERHEAT)
+    
+    # 2. 그룹 분리
+    df_prime = df_out[mask_qualified].copy()   # 1군: 구조 튼튼한 후보군
+    df_normal = df_out[~mask_qualified].copy() # 2군: 나머지 (구조 약함 or 과열)
+    
+    # 3. 1군 정렬: "누가 당장 쏠 것인가?" (Timing First)
+    # TRIGGER_SCORE(타이밍) 우선 -> ML_SCORE(AI예측) -> 거래대금 순
+    df_prime = df_prime.sort_values(
+        by=['TRIGGER_SCORE', 'ML_SCORE', '거래대금(억원)'],
+        ascending=[False, False, False]
     )
+    
+    # 4. 2군 정렬: "누가 구조적으로 덜 나쁜가?" (Structure First)
+    # 기존대로 FINAL_SCORE(종합) 기준 정렬
+    df_normal = df_normal.sort_values(
+        by=['FINAL_SCORE', 'RANK_SCORE'],
+        ascending=[False, False]
+    )
+    
+    # 5. 최종 병합 (1군이 무조건 상단 노출)
+    df_out = pd.concat([df_prime, df_normal])
+
+    # --------------------------------------------------------------------------
+
+
 
     df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
     df_out["기준일"] = trade_ymd
