@@ -1916,36 +1916,61 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
 # --- [새로 추가 2] 상태 머신 기반 ROUTE 결정 함수 (기존 route_tag 대체) ---
 def determine_state(row):
     """
-    [P0] AI 의존성 제거 및 수치 기반 상태 결정
+    [Fixed] 실제 데이터프레임 컬럼명과 매칭되도록 수정된 상태 결정 로직
     """
     try:
-        # 1. 과열 (OVERHEAT): 차익 실현 주의 구간
-        # 예: RSI가 72 이상이거나, 5일 수익률이 25% 이상 급등한 경우
-        if row.get('rsi_14', 50) >= 72 or row.get('ret_5d', 0) >= 0.25:
+        # 0. 데이터 안전하게 가져오기 (대소문자/키 이름 주의)
+        # analyze_ticker에서 생성하는 실제 키값들을 사용해야 함
+        
+        rsi = float(row.get('RSI14', 50))
+        r5 = float(row.get('ret_5d_%', 0))
+        
+        # 주가 > 20일선 여부 (1 or 0)
+        above_ma20 = int(row.get('Above_MA20', 0))
+        
+        # MACD 기울기 (양수면 상승 가속)
+        slope = float(row.get('MACD_Slope_PCT', 0))
+        
+        # 트리거 점수 (0~100)
+        t_score = float(row.get('TRIGGER_SCORE', 0))
+        
+        # 스퀴즈 여부 (1 or 0)
+        is_squeeze = int(row.get('TTM_SQUEEZE', 0))
+        
+        # 거래량 퀄리티 (매수세 강도)
+        vol_qual = float(row.get('Vol_Quality', 1.0))
+
+        # -----------------------------------------------------
+        # 1. 과열 (OVERHEAT): 이익 실현 구간
+        # RSI 75 이상이거나, 5일간 20% 이상 급등 시
+        if rsi >= 75 or r5 >= 20.0:
             return RouteState.OVERHEAT
 
-        # 2. 집중 공략 (ATTACK): 상승 추세 + 트리거 발동 조건 충족
-        # 조건: 20일선 위에 있고, MACD 기울기가 양수이며, Trigger Score가 높음
-        if (row.get('close', 0) > row.get('ma_20', 0) and 
-            row.get('macd_hist_slope', 0) > 0 and 
-            row.get('TRIGGER_SCORE', 0) >= 2): # 기준점 조정 가능
+        # 2. 집중 공략 (ATTACK): 상승 추세 확정 + 트리거 발동
+        # 조건: 20일선 위에 있고 + 모멘텀 양수 + 트리거 점수 40점 이상(기본)
+        # (패널티를 먹고도 40점 이상이면 상당히 좋은 상태임)
+        if above_ma20 == 1 and slope > 0 and t_score >= 40:
             return RouteState.ATTACK
 
-        # 3. 발사 임박 (ARMED): 에너지가 모이고 발산 직전
-        # 조건: TTM Squeeze 상태이거나, 볼린저 밴드 확장 시작 + 거래량 수급
-        is_squeeze = row.get('ttm_squeeze_on', False)
-        vol_spike = row.get('vol_ma_ratio', 0) > 1.2  # 거래량이 평소보다 20% 이상
-        if is_squeeze or (not is_squeeze and vol_spike):
+        # 3. 발사 임박 (ARMED): 에너지가 모이는 구간
+        # 조건: 스퀴즈 상태이거나, 거래량/수급이 비정상적으로 좋음(세력 개입)
+        if is_squeeze == 1:
+            return RouteState.ARMED
+        
+        if vol_qual >= 1.5: # 매수세가 매도세보다 1.5배 강함
             return RouteState.ARMED
 
-        # 4. 관망/대기 (WAIT): 추세는 살아있으나 힘이 부족
-        if row.get('close', 0) > row.get('ma_60', 0):
+        # 4. 추세 대기 (WAIT): 추세는 살아있으나 힘이 부족
+        # 조건: 저점이 높아지는 중(Low_Trend_PCT > 0) 이면 관망 가치 있음
+        if float(row.get('Low_Trend_PCT', 0)) > 0:
             return RouteState.WAIT
 
+        # 5. 그 외 (NEUTRAL)
         return RouteState.NEUTRAL
 
     except Exception as e:
-        print(f"State Error: {e}")
+        # 디버깅용: 에러 나면 출력
+        # print(f"State Check Error: {e}")
         return RouteState.NEUTRAL
 
 def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
