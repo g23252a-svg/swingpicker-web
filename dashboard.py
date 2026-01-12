@@ -3279,12 +3279,14 @@ with tab2:
         # 5. 컬럼 설정 (상태 컬럼 강조)
         cols = [
             "상태", "종목명", "생존일",
-            "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", # 👈 핵심 변경
+            # [Step 6] 점수 3대장 (최종점수, 트리거, 기본점수) 추가
+            "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE",
+            # 기존 컬럼들 유지
             "추세", "Low_Trend_PCT",
             "종가", "추천매수가", "손절가", "추천매도가1",
             "ROUTE", "업종"
         ]
-    
+        
         cfg = {
             "상태": st.column_config.TextColumn("Action State", width="medium",
                                                 help="🚀발사(진입) > ⭐️준비(대기) > 🔋축적(관찰)"),
@@ -3292,10 +3294,10 @@ with tab2:
             "생존일": st.column_config.ProgressColumn("Time", format="%d일", min_value=0, max_value=12,
                                                     help="3~8일차: 골든타임 / 10일 이상: 상한 음식"),
             
-            # 👇 새로 추가된 점수 컬럼 설정
-            "FINAL_SCORE": st.column_config.ProgressColumn("종합강도(Final)", format="%.1f", min_value=0, max_value=100, width="small"),
-            "TRIGGER_SCORE": st.column_config.NumberColumn("🔥트리거", format="%.0f", width="small"),
-            "TOTAL_SCORE": st.column_config.NumberColumn("기본점수", format="%.0f", width="small"), # Progress 대신 숫자로 변경하여 공간 확보
+            # [Step 6] 점수 컬럼 시각화 설정 (Progress Bar & Number)
+            "FINAL_SCORE": st.column_config.ProgressColumn("🏆종합강도", format="%.1f", min_value=0, max_value=100, width="small"),
+            "TRIGGER_SCORE": st.column_config.NumberColumn("🔥타이밍", format="%.0f", width="small", help="높을수록 단기 급등 임박 (감점 반영됨)"),
+            "TOTAL_SCORE": st.column_config.NumberColumn("⚙️구조점수", format="%.0f", width="small", help="기본적인 차트/수급 우량도"),
             
             "Low_Trend_PCT": st.column_config.NumberColumn("저점강도", format="%.2f%%"),
             "추세": st.column_config.TextColumn("구조", width="small"),
