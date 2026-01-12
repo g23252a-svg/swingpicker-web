@@ -3149,41 +3149,7 @@ with tab2:
         st.session_state["just_registered"] = False
         st.divider()
 
-    # --------------------------------------------------------
-    # 🎨 [New] 시각적 콕핏 (Visual Cockpit)
-    # 테이블보다 먼저 보여줘서 시각적 임팩트를 줍니다.
-    # --------------------------------------------------------
-    if 'active_view' in locals() and not active_view.empty:
-        st.markdown("### 🔭 한눈에 보는 시장 지도")
-        
-        # 1. Top 3 종목 카드 (Hero Section)
-        top3 = active_view.head(3)
-        c1, c2, c3 = st.columns(3)
-        cols = [c1, c2, c3]
-        
-        for i, (idx, row) in enumerate(top3.iterrows()):
-            if i < 3:
-                with cols[i]:
-                    st.container(border=True).metric(
-                        label=f"🥇 Top {i+1}. {row['종목명']}",
-                        value=f"{row['FINAL_SCORE']}점",
-                        delta=f"Trigger {row['TRIGGER_SCORE']}점",
-                        help=f"현재가: {row.get('종가','-')} / 상태: {row.get('ROUTE','-')}"
-                    )
-
-        # 2. 기회 포착 산점도 (Bubble Chart)
-        # active_view(집중공략) + passive_view 일부를 섞어서 보여주면 비교하기 좋음
-        chart_data = active_view.copy()
-        if 'passive_view' in locals() and not passive_view.empty:
-             # 비교군으로 상위 20개만 추가
-             chart_data = pd.concat([chart_data, passive_view.head(20)])
-        
-        fig_map = plot_opportunity_map(chart_data)
-        if fig_map:
-            st.plotly_chart(fig_map, use_container_width=True)
-            st.caption("💡 **Tip:** 점의 크기는 `거래대금`입니다. **우상단(↗️)에 있으면서 점이 큰 종목**이 대장주입니다.")
-
-    st.divider()
+    
 
     # ---------------------------
     # 필터링 위젯
@@ -3424,6 +3390,42 @@ with tab2:
             "추천매도가1": st.column_config.TextColumn("목표", width="small"),
         }
         cfg["제외사유"] = st.column_config.TextColumn("제외사유", width="small")
+
+        # 👇👇 [여기 삽입] 시각화 차트 및 Top 3 카드 출력 👇👇
+        if not active_view.empty:
+            st.markdown("### 🔭 한눈에 보는 시장 지도")
+            
+            # 1. Top 3 종목 카드 (Hero Section)
+            top3 = active_view.head(3)
+            c1, c2, c3 = st.columns(3)
+            cols_ui = [c1, c2, c3]
+            
+            for i, (idx, row) in enumerate(top3.iterrows()):
+                if i < 3:
+                    with cols_ui[i]:
+                        st.container(border=True).metric(
+                            label=f"🥇 Top {i+1}. {row['종목명']}",
+                            value=f"{row['FINAL_SCORE']}점",
+                            delta=f"Trigger {row['TRIGGER_SCORE']}점",
+                            help=f"현재가: {row.get('종가','-')} / 상태: {row.get('ROUTE','-')}"
+                        )
+
+            # 2. 기회 포착 산점도 (Bubble Chart)
+            # active_view(집중공략) + passive_view 일부를 섞어서 보여주면 비교하기 좋음
+            chart_data = active_view.copy()
+            if not passive_view.empty:
+                 # 비교군으로 상위 20개만 추가
+                 chart_data = pd.concat([chart_data, passive_view.head(20)])
+            
+            # 위에서 정의한 함수 호출
+            if 'plot_opportunity_map' in globals():
+                fig_map = plot_opportunity_map(chart_data)
+                if fig_map:
+                    st.plotly_chart(fig_map, use_container_width=True)
+                    st.caption("💡 **Tip:** 점의 크기는 `거래대금`입니다. **우상단(↗️)에 있으면서 점이 큰 종목**이 대장주입니다.")
+            
+            st.divider()
+        # 👆👆 [여기까지 삽입] 👆👆
     
         # Active
         if not active_view.empty:
