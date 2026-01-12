@@ -2142,12 +2142,7 @@ def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> p
     # 2. REGIME (순서 상관 없음)
     x["REGIME"] = x.apply(detect_regime_row, axis=1)
     
-    # 3. ROUTE 결정 (AI_COMMENT 의존하므로 가장 마지막에!)
-    x["ROUTE"] = x.apply(determine_state, axis=1)
 
-    # ✅ 대시보드 필터용 컬럼 (너가 원한 그 코드 "정확히" 여기)
-    x["상태"] = x["ROUTE"]
-    x["IS_ACTIVE"] = x["상태"].astype(str).str.contains(r"🚀|🔫|👀", na=False)
     
     return x
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
@@ -3015,6 +3010,12 @@ def main(
     df_out['FINAL_SCORE'] = df_out['FINAL_SCORE'].round(1)
     df_out['TRIGGER_SCORE'] = pd.to_numeric(df_out['TRIGGER_SCORE']).round(1)
 
+    # 👇👇 [추가] 점수 계산이 다 끝난 후, 여기서 상태(ROUTE)를 결정해야 정확함! 👇👇
+    log("🚦 종목별 상태(ROUTE) 판정 중...")
+    df_out["ROUTE"] = df_out.apply(determine_state, axis=1)
+    df_out["상태"] = df_out["ROUTE"] # UI 표시용 복사
+    # 👆👆 [여기까지 추가] 👆👆
+
     # --------------------------------------------------------------------------
     # 켈리 베팅 자금 관리 (FINAL_SCORE 기준으로 적용 권장, 여기서는 TOTAL_SCORE 유지 또는 변경 가능)
     # --------------------------------------------------------------------------
@@ -3206,14 +3207,19 @@ def main(
     #    - 너 로직이 🚀/⭐️/🔋를 쓰면 이걸로 해야 활성 종목이 생김
     status_str = df_out["상태"].astype(str)
     
-    # (A) 넓게: 추세/준비/관찰을 전부 ACTIVE로
-    df_out["IS_ACTIVE"] = status_str.str.contains(r"🚀|🔫|👀|⭐️|🔋", na=False)
+    # ---------------------------------------------------------
+    # [Step 9] IS_ACTIVE 플래그 로직 수정 (Emoji Regex -> Code Matching)
+    # 데이터가 'ARMED', 'ATTACK' 등 코드로 바뀌었으므로 이모지 검색은 동작하지 않음.
+    # ---------------------------------------------------------
     
-    # (B) 지금 진입(타이트): 추세/임박만
-    df_out["IS_NOW_ENTRY"] = status_str.str.contains(r"🚀|🔫|⭐️", na=False)
+    # 1. Active 그룹 (ATTACK, ARMED) - 대시보드 상단 노출
+    df_out["IS_ACTIVE"] = df_out["ROUTE"].isin([RouteState.ATTACK, RouteState.ARMED])
     
-    # (C) 관찰(응축)만
-    df_out["IS_WATCH"] = status_str.str.contains(r"👀|🔋", na=False)
+    # 2. 진입(Entry) 그룹 (ATTACK)
+    df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == RouteState.ATTACK
+    
+    # 3. 관찰(Watch) 그룹 (WAIT) - 참고용
+    df_out["IS_WATCH"] = df_out["ROUTE"] == RouteState.WAIT
 
     print("[DEBUG] 상태 상위 10개:\n", df_out["상태"].value_counts().head(10))
     print("[DEBUG] IS_ACTIVE True count:", int(df_out["IS_ACTIVE"].sum()))
