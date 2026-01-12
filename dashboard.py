@@ -1786,65 +1786,7 @@ def plot_ai_consensus(df):
     )
     return fig
 
-def plot_opportunity_map(df):
-    """
-    [New] 기회 포착 산점도 (Opportunity Map)
-    X축: TOTAL_SCORE (구조적 점수)
-    Y축: TRIGGER_SCORE (타이밍 점수)
-    색상: ROUTE (ATTACK=Red, ARMED=Orange)
-    크기: 거래대금
-    """
-    if df.empty: return None
-    
-    # 시각화용 데이터 준비
-    plot_df = df.copy()
-    
-    # 색상 매핑
-    color_map = {
-        "ATTACK": "#FF4B4B",  # 빨강 (강렬)
-        "ARMED": "#FFA726",   # 주황 (대기)
-        "OVERHEAT": "#9E9E9E",# 회색
-        "WAIT": "#90CAF9",    # 연파랑
-        "NEUTRAL": "#E0E0E0"  # 연회색
-    }
-    
-    # ROUTE가 매핑 키에 없으면 기타 처리
-    plot_df["Color"] = plot_df["ROUTE"].map(color_map).fillna("#E0E0E0")
-    
-    fig = px.scatter(
-        plot_df,
-        x="TOTAL_SCORE",
-        y="TRIGGER_SCORE",
-        size="거래대금(억원)",
-        color="ROUTE",
-        color_discrete_map=color_map,
-        hover_name="종목명",
-        hover_data=["종목코드", "현재가", "업종"],
-        text="종목명", # 점 옆에 이름 표시
-        title="<b>🚀 기회 포착 지도 (우상단 = 1군 주도주)</b>"
-    )
-    
-    # 기준선 (십자선)
-    fig.add_hline(y=60, line_dash="dot", line_color="gray", annotation_text="급등 임박선")
-    fig.add_vline(x=70, line_dash="dot", line_color="gray", annotation_text="구조 우량선")
-    
-    # 우상단 강조 박스
-    fig.add_shape(type="rect",
-        x0=70, y0=60, x1=100, y1=100,
-        line=dict(color="red", width=2, dash="dot"),
-        fillcolor="rgba(255, 0, 0, 0.05)"
-    )
 
-    fig.update_traces(textposition='top center', marker=dict(opacity=0.8, line=dict(width=1, color='DarkSlateGrey')))
-    fig.update_layout(
-        height=500,
-        xaxis_title="⚙️ 구조 점수 (Total Score)",
-        yaxis_title="🔥 타이밍 점수 (Trigger Score)",
-        margin=dict(l=20, r=20, t=40, b=20),
-        legend=dict(orientation="h", y=1.05)
-    )
-    
-    return fig
 
 # -------------------------------------------------------------
 # 🔥 [v14.2 Dashboard Engine] Time-Aware State Machine
@@ -3391,7 +3333,11 @@ with tab2:
         }
         cfg["제외사유"] = st.column_config.TextColumn("제외사유", width="small")
 
-        # 👇👇 [여기 삽입] 시각화 차트 및 Top 3 카드 출력 👇👇
+        
+
+        # --------------------------------------------------------
+        # 🔥 [Visual Cockpit] 시각화 차트 및 Top 3 카드 (테이블보다 먼저 출력)
+        # --------------------------------------------------------
         if not active_view.empty:
             st.markdown("### 🔭 한눈에 보는 시장 지도")
             
@@ -3417,7 +3363,7 @@ with tab2:
                  # 비교군으로 상위 20개만 추가
                  chart_data = pd.concat([chart_data, passive_view.head(20)])
             
-            # 위에서 정의한 함수 호출
+            # 위에서 정의한 함수 호출 (함수가 없으면 에러 나지 않게 체크)
             if 'plot_opportunity_map' in globals():
                 fig_map = plot_opportunity_map(chart_data)
                 if fig_map:
