@@ -1843,24 +1843,25 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     except:
         df["생존일"] = 1
 
-    # 2. [핵심 수정] 실제 데이터 라벨(BRK, Watch, SQZ)을 UI 상태로 매핑
+    # 2. [수정] CSV의 ROUTE 값(영어 코드)을 UI 라벨(한글)로 매핑
+    # collector가 저장한 "ATTACK", "ARMED" 등을 직접 확인
     def map_route_to_ui(route_val):
-        r = str(route_val).strip()
+        r = str(route_val).strip() # 공백 제거 필수
         
         # 1. 집중 공략 (ATTACK)
-        if r == RouteState.ATTACK: 
+        if r == "ATTACK": 
             return "🚀 집중 공략 (Active)", 0
         
         # 2. 트리거 임박 (ARMED)
-        if r == RouteState.ARMED: 
+        if r == "ARMED": 
             return "🔫 트리거 임박 (Ready)", 10
         
         # 3. 과열 (OVERHEAT)
-        if r == RouteState.OVERHEAT: 
+        if r == "OVERHEAT": 
             return "⛔ 과열/주의 (Caution)", 90
             
         # 4. 관찰 대기 (WAIT)
-        if r == RouteState.WAIT:
+        if r == "WAIT":
             return "👀 추세 관찰 (Wait)", 50
             
         # 5. 기본값
@@ -1874,10 +1875,14 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
         df["상태"] = "⚪ 일반 관망 (Neutral)"
         df["_STATE_SORT"] = 60
 
-    # 3. [중요] Active 플래그 기준 수정
-    # 기존 점수 체계에 맞춰 20점 이하(공략, 임박)만 Active 탭에 노출
-    # (WAIT/관찰 단계는 아직 쏘지 않았으므로 Passive 탭에 두는 것이 깔끔함)
-    df["IS_ACTIVE"] = df["_STATE_SORT"] <= 20
+    # 3. [핵심 수정] Active 플래그 기준 (명시적 코드 매칭)
+    # 기존 코드 대신 ROUTE 값을 직접 확인하여 Active 여부 결정
+    if "ROUTE" in df.columns:
+        # ATTACK 또는 ARMED 이면 Active
+        df["IS_ACTIVE"] = df["ROUTE"].isin(["ATTACK", "ARMED"])
+    else:
+        # ROUTE 컬럼 없으면 상태 텍스트로 추정
+        df["IS_ACTIVE"] = df["상태"].str.contains(r"🚀|🔫", na=False)
 
     # 4. 제외 사유 매핑 (UI용)
     df["제외사유"] = np.where(
