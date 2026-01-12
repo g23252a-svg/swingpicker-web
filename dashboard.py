@@ -1786,6 +1786,73 @@ def plot_ai_consensus(df):
     )
     return fig
 
+def plot_opportunity_map(df):
+    """
+    [New] 기회 포착 산점도 (Opportunity Map)
+    X축: TOTAL_SCORE (구조적 점수)
+    Y축: TRIGGER_SCORE (타이밍 점수)
+    색상: ROUTE (ATTACK=Red, ARMED=Orange)
+    크기: 거래대금
+    """
+    if df.empty: return None
+    
+    # 시각화용 데이터 준비
+    plot_df = df.copy()
+    
+    # 색상 매핑
+    color_map = {
+        "ATTACK": "#FF4B4B",  # 빨강 (강렬)
+        "ARMED": "#FFA726",   # 주황 (대기)
+        "OVERHEAT": "#9E9E9E",# 회색
+        "WAIT": "#90CAF9",    # 연파랑
+        "NEUTRAL": "#E0E0E0"  # 연회색
+    }
+    
+    # ROUTE가 매핑 키에 없으면 기타 처리
+    if "ROUTE" in plot_df.columns:
+        # 문자열로 변환하고 공백 제거 후 매핑
+        plot_df["Color_Key"] = plot_df["ROUTE"].astype(str).str.strip()
+        # 매핑에 없는 값은 NEUTRAL로 처리하기 위해 fillna 대신 map 활용
+        plot_df["Color"] = plot_df["Color_Key"].map(color_map).fillna("#E0E0E0")
+    else:
+        return None
+    
+    # 산점도 그리기
+    fig = px.scatter(
+        plot_df,
+        x="TOTAL_SCORE",
+        y="TRIGGER_SCORE",
+        size="거래대금(억원)",
+        color="ROUTE",
+        color_discrete_map=color_map,
+        hover_name="종목명",
+        hover_data=["종목코드", "종가", "업종"],
+        text="종목명", # 점 옆에 이름 표시
+        title="<b>🚀 기회 포착 지도 (우상단 = 1군 주도주)</b>"
+    )
+    
+    # 기준선 (십자선)
+    fig.add_hline(y=60, line_dash="dot", line_color="gray", annotation_text="급등 임박선")
+    fig.add_vline(x=70, line_dash="dot", line_color="gray", annotation_text="구조 우량선")
+    
+    # 우상단 강조 박스
+    fig.add_shape(type="rect",
+        x0=70, y0=60, x1=100, y1=100,
+        line=dict(color="red", width=2, dash="dot"),
+        fillcolor="rgba(255, 0, 0, 0.05)"
+    )
+
+    fig.update_traces(textposition='top center', marker=dict(opacity=0.8, line=dict(width=1, color='DarkSlateGrey')))
+    fig.update_layout(
+        height=500,
+        xaxis_title="⚙️ 구조 점수 (Total Score)",
+        yaxis_title="🔥 타이밍 점수 (Trigger Score)",
+        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(orientation="h", y=1.05)
+    )
+    
+    return fig
+
 
 
 # -------------------------------------------------------------
@@ -3363,12 +3430,28 @@ with tab2:
                  # 비교군으로 상위 20개만 추가
                  chart_data = pd.concat([chart_data, passive_view.head(20)])
             
-            # 위에서 정의한 함수 호출 (함수가 없으면 에러 나지 않게 체크)
-            if 'plot_opportunity_map' in globals():
+            # [수정된 코드] 강제 실행 및 데이터 형변환
+            try:
+                # 1. 차트용 데이터 안전 변환 (문자열 -> 숫자)
+                chart_data["TOTAL_SCORE"] = pd.to_numeric(chart_data["TOTAL_SCORE"], errors='coerce').fillna(0)
+                chart_data["TRIGGER_SCORE"] = pd.to_numeric(chart_data["TRIGGER_SCORE"], errors='coerce').fillna(0)
+                chart_data["거래대금(억원)"] = pd.to_numeric(chart_data["거래대금(억원)"], errors='coerce').fillna(0)
+
+                # 2. 함수 직접 호출 (globals 체크 제거 -> 무조건 실행)
+                # (만약 여기서 NameError가 나면 작업 1을 제대로 안 한 것임)
                 fig_map = plot_opportunity_map(chart_data)
+                
+                # 3. 차트 그리기
                 if fig_map:
                     st.plotly_chart(fig_map, use_container_width=True)
-                    st.caption("💡 **Tip:** 점의 크기는 `거래대금`입니다. **우상단(↗️)에 있으면서 점이 큰 종목**이 대장주입니다.")
+                    st.caption("💡 **Tip:** 점의 크기는 `거래대금`입니다. **우상단(↗️)에 있는 붉은 점**이 오늘의 주도주입니다.")
+                else:
+                    st.warning("⚠️ 차트 생성 실패 (데이터 없음)")
+                    
+            except NameError:
+                st.error("🚫 'plot_opportunity_map' 함수를 찾을 수 없습니다. (작업 1: 함수 정의를 파일 상단으로 옮겨주세요!)")
+            except Exception as e:
+                st.error(f"🚫 차트 그리기 오류: {e}")
             
             st.divider()
         # 👆👆 [여기까지 삽입] 👆👆
