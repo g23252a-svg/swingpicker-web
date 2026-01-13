@@ -1461,6 +1461,54 @@ def plot_radar_chart(row):
     )
     return fig
 
+def add_volume_profile(fig, df):
+    """
+    차트 우측에 매물대(Volume Profile)를 가로 막대형으로 추가
+    """
+    if df is None or df.empty: return fig
+    
+    # 1. 가격 구간(Bin) 설정 (50개 구간)
+    price_min = df['Low'].min()
+    price_max = df['High'].max()
+    if price_min == price_max: return fig 
+
+    bins = np.linspace(price_min, price_max, 50)
+    
+    # 2. 구간별 거래량 합산 (Numpy 히스토그램 활용)
+    # 종가(Close)를 기준으로 해당 가격대의 거래량(Volume)을 가중치로 합산
+    hist, bin_edges = np.histogram(df['Close'], bins=bins, weights=df['Volume'])
+    y_vals = bin_edges[:-1]
+    
+    # 3. 최대 거래량 구간 찾기 (차트 비율 설정을 위해)
+    max_vol = hist.max() if len(hist) > 0 else 1
+    
+    # 4. 가로 막대 그래프 추가 (보조 X축 사용)
+    fig.add_trace(go.Bar(
+        y=y_vals, 
+        x=hist,
+        orientation='h',
+        name='매물대',
+        marker=dict(color='rgba(128, 128, 128, 0.2)', line=dict(width=0)), # 연한 회색, 테두리 없음
+        xaxis='x2', # 별도 X축 사용 (시간축과 분리)
+        hoverinfo='none', # 호버링 방해 금지
+        showlegend=False
+    ), row=1, col=1)
+
+    # 5. 레이아웃 업데이트 (오버레이 설정)
+    fig.update_layout(
+        xaxis2=dict(
+            overlaying='x', 
+            side='top',       # 축 위치 (눈에 안 띄게 상단 배치)
+            showgrid=False, 
+            visible=False,    # 축 자체는 숨김
+            # [중요] range를 [max_vol * 4, 0]으로 설정하여 
+            # 막대가 오른쪽 끝에서 왼쪽으로 25%만큼만 나오도록 역방향 배치
+            range=[max_vol * 4, 0] 
+        )
+    )
+    return fig
+
+# 👆👆👆 [1단계 끝] 👆👆👆
 # ---------------------------
 # 차트 시각화 (거래량 추가)
 # ---------------------------
@@ -1472,14 +1520,14 @@ def plot_interactive_chart(
     stop=None,
     target1=None,
     target2=None,
-    vwap=None,          # ✅ [v8.5] VWAP 가격 인자 추가
+    vwap=None,
     show_bb: bool = True,
     show_kc: bool = False,
     show_rsi: bool = False,
-    show_vwap: bool = False, # ✅ [v8.5] VWAP 표시 여부
-    show_hma: bool = False,  # ✅ [v9.0] HMA 표시 옵션 추가
-    show_obv: bool = False,  # 👈 [v9.0] 추가
-    
+    show_vwap: bool = False,
+    show_hma: bool = False,
+    show_obv: bool = False,
+    show_vp: bool = True,   # 👈 [추가됨] 매물대 표시 (기본값 True)
 ):
     if df is None or df.empty:
         return go.Figure()
@@ -1670,6 +1718,10 @@ def plot_interactive_chart(
     # ✅ [v8.5] VWAP 라인 추가
     if show_vwap and vwap_v:
         fig.add_hline(y=vwap_v, line_dash="solid", line_color=COLOR_VWAP, line_width=1.2, annotation_text=f"🟣VWAP: {int(vwap_v):,}", annotation_font_color=COLOR_VWAP, row=1, col=1)
+    # 👇👇👇 [여기 추가] 매물대 함수 호출 👇👇👇
+    if show_vp:
+        fig = add_volume_profile(fig, df)
+    # 👆👆👆 [추가 끝] 👆👆👆
 
     fig.update_layout(
         title=dict(text=f"{name} ({str(code).zfill(6)})", font=dict(size=16), x=0),
