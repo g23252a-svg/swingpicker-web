@@ -1871,6 +1871,73 @@ def plot_opportunity_map(df):
         st.error(f"❌ Plotly 차트 생성 중 오류: {e}")
         return None
 
+# 👇👇👇 [1단계: 여기에 칸반 보드 렌더링 함수 추가] 👇👇👇
+
+def render_kanban_board(df):
+    """
+    Active 종목을 상태별(ATTACK, ARMED, WATCH) 카드 형태로 시각화 (Kanban View)
+    """
+    if df.empty:
+        st.info("표시할 종목이 없습니다.")
+        return
+
+    # 3단 컬럼 구성 (반응형)
+    col_attack, col_armed, col_watch = st.columns(3)
+    
+    # 상태별 필터링 (ROUTE 컬럼 텍스트 매칭)
+    # 텍스트에 ATTACK/공략, ARMED/준비/임박, WATCH/관찰 등이 포함되어 있는지 확인
+    df_attack = df[df['ROUTE'].astype(str).str.contains("ATTACK|공략|발사", case=False, na=False)]
+    df_armed = df[df['ROUTE'].astype(str).str.contains("ARMED|임박|준비|BRK|돌파", case=False, na=False)]
+    # 나머지는 관찰로 분류하되, 이미 Attack/Armed에 들어간건 제외해야 함 (중복 방지)
+    ex_indices = df_attack.index.union(df_armed.index)
+    df_watch = df[~df.index.isin(ex_indices)]
+
+    def _render_card(container, title, sub_df, color_border, icon):
+        with container:
+            # 헤더 스타일링
+            st.markdown(
+                f"<div style='border-bottom: 3px solid {color_border}; margin-bottom: 10px; padding-bottom: 5px; text-align: center; font-weight: bold; font-size: 1.1em;'>"
+                f"{icon} {title} <span style='color:gray; font-size:0.8em;'>({len(sub_df)})</span></div>", 
+                unsafe_allow_html=True
+            )
+            
+            if sub_df.empty:
+                st.caption("비어 있음")
+                
+            for _, row in sub_df.iterrows():
+                # 카드 컨테이너
+                with st.container(border=True):
+                    # 종목명 & 코드
+                    st.markdown(f"**{row['종목명']}** <small style='color:gray'>({row['종목코드']})</small>", unsafe_allow_html=True)
+                    
+                    # 핵심 지표 (종합점수 / 트리거)
+                    c1, c2 = st.columns(2)
+                    final_score = row.get('FINAL_SCORE', 0)
+                    trigger_score = row.get('TRIGGER_SCORE', 0)
+                    
+                    c1.metric("종합점수", f"{final_score:.0f}", label_visibility="collapsed")
+                    c2.metric("트리거", f"{trigger_score:.0f}", label_visibility="collapsed")
+                    
+                    st.caption(f"🏆종합: {final_score:.0f} / 🔥트리거: {trigger_score:.0f}")
+
+                    # 가격 정보 (매수/손절)
+                    buy_p = int(pd.to_numeric(str(row.get('추천매수가', 0)).replace(',', ''), errors='coerce'))
+                    stop_p = int(pd.to_numeric(str(row.get('손절가', 0)).replace(',', ''), errors='coerce'))
+                    
+                    if buy_p > 0:
+                        st.markdown(f"<div style='font-size:0.85em;'>🎯 <b>{buy_p:,}</b> <span style='color:#FF4B4B'>(🛡️{stop_p:,})</span></div>", unsafe_allow_html=True)
+                    
+                    # 손익비(RR) 바 시각화 (데이터가 있다면)
+                    rr_val = row.get('RR1', 0)
+                    if rr_val > 0:
+                        st.progress(min(rr_val, 1.0), text=f"가성비(RR): {rr_val:.2f}")
+
+    # 각 레인(Lane) 렌더링
+    _render_card(col_attack, "진입 (ATTACK)", df_attack, "#FF4B4B", "🚀") # Red
+    _render_card(col_armed, "준비 (ARMED)", df_armed, "#FFA726", "🔫")   # Orange
+    _render_card(col_watch, "관찰 (WATCH)", df_watch, "#29B6F6", "👀")   # Blue
+
+# 👆👆👆 [1단계 끝] 👆👆👆
 # -------------------------------------------------------------
 # 🔥 [v14.2 Dashboard Engine] Time-Aware State Machine
 # -------------------------------------------------------------
@@ -3480,17 +3547,33 @@ with tab2:
             
             st.divider()
     
-        # Active
+        # Active (칸반 보드 기능 추가됨)
         if not active_view.empty:
             st.markdown(f"### 🔥 집중 공략 후보 ({len(active_view)}개)")
-            st.caption("🚀(추세) / 🔫(발사 준비) / 👀(응축 관찰) 상태인 종목만 표시합니다.")
-            st.dataframe(
-                active_view[[c for c in cols if c in active_view.columns]],
-                use_container_width=True,
-                column_config=cfg,
-                height=500,
-                hide_index=True
+            
+            # 👇 [추가] 보기 방식 선택 버튼 (라디오 버튼)
+            view_type = st.radio(
+                "보기 방식", 
+                ["📋 리스트 보기", "🃏 칸반 보드 보기"], 
+                horizontal=True, 
+                label_visibility="collapsed",
+                key="active_view_type"
             )
+
+            if view_type == "📋 리스트 보기":
+                st.caption("🚀(추세) / 🔫(발사 준비) / 👀(응축 관찰) 상태인 종목만 표시합니다.")
+                st.dataframe(
+                    active_view[[c for c in cols if c in active_view.columns]],
+                    use_container_width=True,
+                    column_config=cfg,
+                    height=500,
+                    hide_index=True
+                )
+            else:
+                # 👇 [추가] 새로 만든 칸반 보드 함수 호출
+                st.write("") # 디자인상 간격 띄우기
+                render_kanban_board(active_view)
+
         else:
             st.info("현재 '집중 공략' 기준을 만족하는 종목이 없습니다. 관망하세요.")
     
