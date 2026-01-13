@@ -1466,6 +1466,7 @@ def plot_radar_chart(row):
 def plot_score_waterfall(row):
     """
     종목 점수 구성 요소를 워터폴 차트로 시각화 (기여도 분석)
+    - 수정사항: 텍스트 잘림 방지를 위해 Y축 범위(range)와 여백(margin) 조정
     """
     if row is None: return go.Figure()
     
@@ -1475,9 +1476,6 @@ def plot_score_waterfall(row):
         return default if pd.isna(val) else val
 
     # 1. 팩터별 기여도 계산 (가중치 반영)
-    # 실제 NORM 컬럼이 있으면 사용하고, 없으면 주요 지표로 근사치 계산
-    
-    # 가중치 (설정값 W_RR 등과 동일하게 맞춤)
     w_map = {'RR': 0.25, 'T1': 0.18, 'LIQ': 0.13, 'SL': 0.12, 'NEAR': 0.12, 'MOM': 0.10, 'TEC': 0.10}
     
     contributions = {}
@@ -1523,12 +1521,10 @@ def plot_score_waterfall(row):
     calc_sum = sum(contributions.values())
     adjustment = final_score - calc_sum
     
-    # 보정치가 너무 크면 '기타/감점' 항목으로 추가
     if abs(adjustment) > 0.5:
         contributions["보정/감점"] = adjustment
 
     # 3. 차트 그리기
-    # 값 정렬 (큰 기여도 순)
     sorted_items = sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
     keys = [k for k, v in sorted_items] + ["최종 점수"]
     values = [v for k, v in sorted_items] + [final_score]
@@ -1542,17 +1538,23 @@ def plot_score_waterfall(row):
         text=[f"{v:.1f}" for v in values],
         y=values,
         connector={"line": {"color": "rgb(63, 63, 63)"}},
-        decreasing={"marker": {"color": "#FF3B30"}}, # 감점/음수
-        increasing={"marker": {"color": "#30D158"}}, # 득점/양수
-        totals={"marker": {"color": "#007AFF"}}      # 최종 합계
+        decreasing={"marker": {"color": "#FF3B30"}}, 
+        increasing={"marker": {"color": "#30D158"}}, 
+        totals={"marker": {"color": "#007AFF"}},
+        cliponaxis=False  # 텍스트가 축 밖으로 나가도 잘리지 않게 설정
     ))
 
+    # 🔥 [수정된 부분] 레이아웃 조정
     fig.update_layout(
         title="🧩 점수 기여도 분석 (Why?)",
         showlegend=False,
-        height=320,
-        margin=dict(l=10, r=10, t=40, b=10),
-        yaxis=dict(title="기여 점수 (점)"),
+        height=360,  # 높이를 조금 더 늘림 (320 -> 360)
+        margin=dict(l=10, r=10, t=50, b=10), # 상단 여백(t) 확보
+        yaxis=dict(
+            title="기여 점수 (점)",
+            range=[0, 115], # Y축 범위를 115까지 고정하여 상단 공간 확보
+            fixedrange=True # 사용자가 축을 실수로 움직이지 않게 고정
+        ),
         xaxis=dict(tickfont=dict(size=11))
     )
     return fig
