@@ -1461,6 +1461,161 @@ def plot_radar_chart(row):
     )
     return fig
 
+# 👇👇👇 [1단계: 워터폴 차트 함수 추가] 👇👇👇
+
+def plot_score_waterfall(row):
+    """
+    종목 점수 구성 요소를 워터폴 차트로 시각화 (기여도 분석)
+    """
+    if row is None: return go.Figure()
+    
+    # 0. 데이터 안전하게 가져오기
+    def _safe_get(key, default=0):
+        val = pd.to_numeric(row.get(key), errors='coerce')
+        return default if pd.isna(val) else val
+
+    # 1. 팩터별 기여도 계산 (가중치 반영)
+    # 실제 NORM 컬럼이 있으면 사용하고, 없으면 주요 지표로 근사치 계산
+    
+    # 가중치 (설정값 W_RR 등과 동일하게 맞춤)
+    w_map = {'RR': 0.25, 'T1': 0.18, 'LIQ': 0.13, 'SL': 0.12, 'NEAR': 0.12, 'MOM': 0.10, 'TEC': 0.10}
+    
+    contributions = {}
+    
+    # (1) 가성비 (RR) - 25%
+    if "NORM_RR" in row.index: val = _safe_get("NORM_RR") * 100
+    else: val = min(100, _safe_get("RR1") * 30)
+    contributions["가성비(RR)"] = val * w_map['RR']
+
+    # (2) 수익여력 (T1) - 18%
+    if "NORM_T1" in row.index: val = _safe_get("NORM_T1") * 100
+    else: val = min(100, _safe_get("T1_ROOM%") * 5)
+    contributions["수익여력"] = val * w_map['T1']
+
+    # (3) 수급 (LIQ) - 13%
+    if "NORM_LIQ" in row.index: val = _safe_get("NORM_LIQ") * 100
+    else: val = min(100, _safe_get("거래대금(억원)") / 3)
+    contributions["수급(Liq)"] = val * w_map['LIQ']
+
+    # (4) 안전성/타점 (SL+NEAR) - 24%
+    if "NORM_SL" in row.index: val_sl = _safe_get("NORM_SL") * 100
+    else: val_sl = max(0, 100 - _safe_get("이격도") * 2)
+    contributions["안전성"] = val_sl * w_map['SL']
+    
+    if "NORM_NEAR" in row.index: val_near = _safe_get("NORM_NEAR") * 100
+    else: val_near = max(0, 100 - _safe_get("Now%") * 5)
+    contributions["타점(Near)"] = val_near * w_map['NEAR']
+
+    # (5) 모멘텀 (MOM) - 10%
+    if "NORM_MOM" in row.index: val = _safe_get("NORM_MOM") * 100
+    else: val = min(100, (_safe_get("ret_5d_%") + 5) * 10)
+    contributions["모멘텀"] = val * w_map['MOM']
+
+    # (6) 기술적 (TEC) - 10%
+    if "NORM_TEC" in row.index: val = _safe_get("NORM_TEC") * 100
+    else: val = 50 # 기본값
+    contributions["기술적"] = val * w_map['TEC']
+
+    # 2. 보정치 계산 (최종 점수와 합계의 차이)
+    final_score = _safe_get("FINAL_SCORE")
+    if final_score == 0: final_score = _safe_get("LDY_SCORE")
+    
+    calc_sum = sum(contributions.values())
+    adjustment = final_score - calc_sum
+    
+    # 보정치가 너무 크면 '기타/감점' 항목으로 추가
+    if abs(adjustment) > 0.5:
+        contributions["보정/감점"] = adjustment
+
+    # 3. 차트 그리기
+    # 값 정렬 (큰 기여도 순)
+    sorted_items = sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
+    keys = [k for k, v in sorted_items] + ["최종 점수"]
+    values = [v for k, v in sorted_items] + [final_score]
+    measures = ["relative"] * len(sorted_items) + ["total"]
+
+    fig = go.Figure(go.Waterfall(
+        name="Score", orientation="v",
+        measure=measures,
+        x=keys,
+        textposition="outside",
+        text=[f"{v:.1f}" for v in values],
+        y=values,
+        connector={"line": {"color": "rgb(63, 63, 63)"}},
+        decreasing={"marker": {"color": "#FF3B30"}}, # 감점/음수
+        increasing={"marker": {"color": "#30D158"}}, # 득점/양수
+        totals={"marker": {"color": "#007AFF"}}      # 최종 합계
+    ))
+
+    fig.update_layout(
+        title="🧩 점수 기여도 분석 (Why?)",
+        showlegend=False,
+        height=320,
+        margin=dict(l=10, r=10, t=40, b=10),
+        yaxis=dict(title="기여 점수 (점)"),
+        xaxis=dict(tickfont=dict(size=11))
+    )
+    return fig
+
+
+
+# 👆👆👆 [1단계 끝] 👆👆👆
+
+# 👇👇👇 [1단계: 상관관계 히트맵 함수 추가] 👇👇👇
+
+def plot_correlation_heatmap(df_target):
+    """
+    Top 종목들의 주가 상관관계 히트맵 (최근 60일 기준)
+    """
+    if df_target is None or df_target.empty: return None
+    
+    # 상위 10개만 분석 (속도 및 가독성 고려)
+    targets = df_target.head(10)
+    codes = targets['종목코드'].astype(str).str.zfill(6).tolist()
+    names = targets['종목명'].tolist()
+    
+    price_data = {}
+    
+    # 데이터 수집 (기존 캐시 함수 활용)
+    for code, name in zip(codes, names):
+        try:
+            d = get_stock_chart_data(code)
+            if d is not None and not d.empty:
+                # 최근 60일치 종가만 사용
+                price_data[name] = d['Close'].tail(60)
+        except:
+            continue
+            
+    if not price_data: return None
+    
+    # 데이터프레임 병합 (날짜 인덱스 기준 자동 정렬)
+    df_prices = pd.DataFrame(price_data).dropna()
+    
+    # 비교 대상이 2개 미만이면 차트 불가
+    if df_prices.shape[1] < 2: return None 
+    
+    # 상관계수 행렬 계산
+    df_corr = df_prices.corr()
+    
+    # 히트맵 그리기
+    fig = px.imshow(
+        df_corr,
+        text_auto=".2f",
+        aspect="auto",
+        color_continuous_scale="RdBu_r", # 빨강=양의상관(커플링), 파랑=음의상관(헤지)
+        zmin=-1, zmax=1,
+        title="<b>🔗 Top 10 종목 간 상관관계 (Correlation)</b>"
+    )
+    
+    fig.update_layout(
+        height=400, 
+        margin=dict(t=50, b=10, l=10, r=10),
+        xaxis_side="top" # X축 라벨을 위로 올려서 보기 편하게
+    )
+    return fig
+
+# 👆👆👆 [1단계 끝] 👆👆👆
+
 def add_volume_profile(fig, df):
     """
     차트 우측에 매물대(Volume Profile)를 가로 막대형으로 추가
@@ -3644,6 +3799,93 @@ with tab2:
                     hide_index=True
                 )
 
+    st.divider()
+    st.markdown("### 🔍 상세 정밀 분석 (Deep Dive)")
+    
+    # 분석 대상 종목 선택 (Active 목록 우선)
+    target_list = []
+    if not active_view.empty:
+        target_list = active_view["종목명"].tolist()
+    elif not passive_view.empty:
+        target_list = passive_view["종목명"].tolist()
+    
+    if target_list:
+        selected_name = st.selectbox("분석할 종목을 선택하세요", target_list, key="dd_select")
+        
+        # 선택된 종목의 데이터 행 찾기
+        sel_row = None
+        
+        # 1. Active에서 찾기
+        if not active_view.empty:
+            found = active_view[active_view["종목명"] == selected_name]
+            if not found.empty: sel_row = found.iloc[0]
+        
+        # 2. 없으면 Passive에서 찾기
+        if sel_row is None and not passive_view.empty:
+            found = passive_view[passive_view["종목명"] == selected_name]
+            if not found.empty: sel_row = found.iloc[0]
+            
+        if sel_row is not None:
+            # 3단 컬럼: 차트 | 레이더 | 워터폴
+            d1, d2 = st.columns([1.2, 1])
+            
+            with d1:
+                # 차트 데이터 가져오기
+                code = str(sel_row['종목코드']).zfill(6)
+                df_chart = get_stock_chart_data(code)
+                if df_chart is not None:
+                    # 매물대 차트(show_vp=True) 적용
+                    fig_candle = plot_interactive_chart(
+                        df_chart, code, selected_name,
+                        entry=sel_row.get('추천매수가'),
+                        stop=sel_row.get('손절가'),
+                        target1=sel_row.get('추천매도가1'),
+                        show_vp=True  # 매물대 켜기
+                    )
+                    st.plotly_chart(fig_candle, use_container_width=True)
+                else:
+                    st.error("차트 데이터를 불러올 수 없습니다.")
+
+            with d2:
+                # 상단: 워터폴 차트 (점수 기여도)
+                try:
+                    fig_water = plot_score_waterfall(sel_row)
+                    st.plotly_chart(fig_water, use_container_width=True)
+                except NameError:
+                    st.warning("plot_score_waterfall 함수가 정의되지 않았습니다.")
+
+                # 하단: 레이더 차트 (기존 기능 재활용)
+                fig_radar = plot_radar_chart(sel_row)
+                st.plotly_chart(fig_radar, use_container_width=True)
+
+    else:
+        st.info("분석할 종목 데이터가 없습니다.")
+
+    # 👆👆👆 [여기까지] 👆👆👆
+
+    # 👇👇👇 [2단계: 상관관계 분석 Expander 추가] 👇👇👇
+        
+        st.divider()
+        with st.expander("🧩 Top 종목 상관관계 점검 (분산투자 확인용)"):
+            st.caption("현재 리스트 상위 10개 종목의 **최근 60일 주가 움직임**이 얼마나 비슷한지 분석합니다. (빨갈수록 같이 움직임)")
+            
+            # 분석 대상: Active 목록이 있으면 Active, 없으면 Passive
+            corr_target = active_view if not active_view.empty else passive_view
+            
+            if not corr_target.empty:
+                if st.button("🚀 상관관계 분석 실행", key="btn_run_corr"):
+                    with st.spinner("주가 데이터 수집 및 분석 중..."):
+                        fig_corr = plot_correlation_heatmap(corr_target)
+                        if fig_corr:
+                            st.plotly_chart(fig_corr, use_container_width=True)
+                            st.info("💡 **Tip:** 1.0(빨강)에 가까울수록 같이 움직이는 종목입니다. 포트폴리오 구성 시 서로 색이 다른(파란색) 종목을 섞는 것이 안전합니다.")
+                        else:
+                            st.warning("분석할 데이터가 충분하지 않습니다.")
+            else:
+                st.info("표시할 종목이 없습니다.")
+
+        # 👆👆👆 [2단계 끝] 👆👆👆
+    
     if auth_status in ["prime", "admin"]:
         csv = scored.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 전체 다운로드", csv, "ldy_rank.csv", "text/csv")
