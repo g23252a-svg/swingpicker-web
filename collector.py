@@ -1916,10 +1916,10 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
 # --- [새로 추가 2] 상태 머신 기반 ROUTE 결정 함수 (기존 route_tag 대체) ---
 def determine_state(row):
     """
-    [Strict] 유망 종목 선별을 위한 강화된 상태 결정 로직
+    [Strict] ATTACK 조건에 '가격 위치(고점 근접)' 추가
     """
     try:
-        # 0. 데이터 가져오기
+        # 데이터 추출
         rsi = float(row.get('RSI14', 50))
         r5 = float(row.get('ret_5d_%', 0))
         above_ma20 = int(row.get('Above_MA20', 0))
@@ -1927,28 +1927,30 @@ def determine_state(row):
         t_score = float(row.get('TRIGGER_SCORE', 0))
         is_squeeze = int(row.get('TTM_SQUEEZE', 0))
         vol_qual = float(row.get('Vol_Quality', 1.0))
+        
+        # ✅ [New] Range Position (20일 고가 대비 현재가 위치) 확인
+        # range_pos >= 0.85 (상위 15% 구간) 이어야 진짜 돌파 임박
+        range_pos = float(row.get('Range_Pos', 0)) 
 
-        # -----------------------------------------------------
-        # 1. 과열 (OVERHEAT): 이익 실현 구간 (유지)
+        # 1. 과열 (OVERHEAT)
         if rsi >= 75 or r5 >= 20.0:
             return RouteState.OVERHEAT
 
-        # 2. 집중 공략 (ATTACK): 진짜 주도주만 선별
-        # [강화] 점수 40 -> 60점 이상 (어설픈 신호 제외)
-        # [추가] Vol_Quality >= 1.3 (매수 우위 수급 필수)
+        # 2. 집중 공략 (ATTACK): 조건 강화
+        # - 20일선 위 & 모멘텀 양수 & 트리거 60점 이상
+        # - 수급 질(Vol_Qual) 1.3 이상
+        # - [추가] 박스권 상단(Range_Pos >= 0.8)에 있어야 함 (바닥에서 기는 종목 제외)
         if above_ma20 == 1 and slope > 0 and t_score >= 60 and vol_qual >= 1.3:
-            return RouteState.ATTACK
+            if range_pos >= 0.8:  # 👈 추가된 조건: 신고가 영역 근접
+                return RouteState.ATTACK
 
-        # 3. 발사 임박 (ARMED): 추세가 살아있는 응축
-        # [강화] 스퀴즈 상태라도 20일선 아래(역배열)면 제외 (떨어지는 칼날 방지)
+        # 3. 발사 임박 (ARMED)
         if is_squeeze == 1 and above_ma20 == 1:
             return RouteState.ARMED
-        
-        # [강화] 거래량 깡패 조건: 1.5 -> 2.0 (압도적 매수세만 인정)
         if vol_qual >= 2.0:
             return RouteState.ARMED
 
-        # 4. 추세 대기 (WAIT): 저점이 높아지는 종목
+        # 4. 추세 대기 (WAIT)
         if float(row.get('Low_Trend_PCT', 0)) > 0:
             return RouteState.WAIT
 
@@ -2326,112 +2328,94 @@ def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
 
 def calculate_trigger_score(df: pd.DataFrame) -> float:
     """
-    [Updated] 단기 급등 타이밍 포착 + 가짜 돌파(Fakeout) 필터링
-    df: 일봉 데이터 (OHLCV) - 컬럼명: 시가, 고가, 저가, 종가, 거래량
+    [Updated] 노이즈 제거를 위한 EMA 스무딩 적용 (오늘 0.6 + 어제 0.4)
     """
     if df is None or df.empty or len(df) < 30:
         return 0.0
 
-    # ---------------------------------------------------------
-    # 0. 데이터 준비 (Data Preparation)
-    # ---------------------------------------------------------
-    try:
-        vol = pd.to_numeric(df['거래량'], errors='coerce').fillna(0)
-        close = pd.to_numeric(df['종가'], errors='coerce').fillna(0)
-        high = pd.to_numeric(df['고가'], errors='coerce').fillna(0)
-        open_p = pd.to_numeric(df['시가'], errors='coerce').fillna(0)
-        low = pd.to_numeric(df['저가'], errors='coerce').fillna(0)
-        
-        # 현재 값
-        curr_vol = float(vol.iloc[-1])
-        curr_close = float(close.iloc[-1])
-        curr_high = float(high.iloc[-1])
-        curr_open = float(open_p.iloc[-1])
-        curr_low = float(low.iloc[-1])
-        
-        # 전일 값
-        prev_close = float(close.iloc[-2])
-        prev_high = float(high.iloc[-2])
+    # 내부 함수: 특정 시점(idx) 기준 점수 계산
+    def _calc_raw_trigger(idx):
+        if idx < 5: return 0.0 # 데이터 부족
+        try:
+            # 슬라이싱으로 해당 시점 데이터 확보
+            subset = df.iloc[:idx+1]
+            vol = pd.to_numeric(subset['거래량'], errors='coerce').fillna(0)
+            close = pd.to_numeric(subset['종가'], errors='coerce').fillna(0)
+            high = pd.to_numeric(subset['고가'], errors='coerce').fillna(0)
+            open_p = pd.to_numeric(subset['시가'], errors='coerce').fillna(0)
+            low = pd.to_numeric(subset['저가'], errors='coerce').fillna(0)
 
-    except Exception as e:
-        return 0.0
+            curr_vol = float(vol.iloc[-1])
+            curr_close = float(close.iloc[-1])
+            curr_high = float(high.iloc[-1])
+            curr_open = float(open_p.iloc[-1])
+            curr_low = float(low.iloc[-1])
+            prev_close = float(close.iloc[-2])
+            prev_high = float(high.iloc[-2])
 
-    # ---------------------------------------------------------
-    # [Positive Factors] 상승 동력 (기존 로직)
-    # ---------------------------------------------------------
-    # 1. Volume Accel
-    vol_ma3 = vol.iloc[-4:-1].mean()
-    if vol_ma3 == 0: vol_ma3 = 1
-    vol_ratio = curr_vol / vol_ma3
-    score_vol = min(vol_ratio * 50, 100) 
+            # 1. Volume Score
+            vol_ma3 = vol.iloc[-4:-1].mean()
+            if vol_ma3 == 0: vol_ma3 = 1
+            vol_ratio = curr_vol / vol_ma3
+            score_vol = min(vol_ratio * 50, 100)
 
-    # 2. Breakout Potential
-    sma20 = close.rolling(window=20).mean().iloc[-1]
-    std20 = close.rolling(window=20).std().iloc[-1]
-    bb_upper = sma20 + (2 * std20)
+            # 2. Breakout Score
+            sma20 = close.rolling(window=20).mean().iloc[-1]
+            std20 = close.rolling(window=20).std().iloc[-1]
+            bb_upper = sma20 + (2 * std20)
+            bb_pos = (curr_close / bb_upper) if bb_upper > 0 else 0
+            
+            high_break = 1 if curr_high > prev_high else 0
+            score_breakout = 0
+            if bb_pos > 0.95: score_breakout += 70
+            if bb_pos > 1.0: score_breakout += 30
+            if high_break: score_breakout = min(score_breakout + 20, 100)
+
+            # 3. Momentum Score
+            ema12 = close.ewm(span=12, adjust=False).mean()
+            ema26 = close.ewm(span=26, adjust=False).mean()
+            macd = ema12 - ema26
+            signal = macd.ewm(span=9, adjust=False).mean()
+            hist = macd - signal
+            hist_curr = float(hist.iloc[-1])
+            hist_prev = float(hist.iloc[-2])
+
+            score_mom = 0
+            if hist_curr > 0 and hist_curr > hist_prev:
+                change = (hist_curr - hist_prev) / (abs(hist_prev) + 0.0001)
+                score_mom = min(50 + (change * 100), 100)
+            elif hist_curr > 0:
+                score_mom = 30
+
+            base = (score_vol * 0.3) + (score_breakout * 0.4) + (score_mom * 0.3)
+
+            # Penalty Logic
+            penalty = 0.0
+            if prev_close > 0:
+                gap_pct = ((curr_open - prev_close) / prev_close) * 100
+                if gap_pct >= 15.0: penalty += 30
+            
+            candle_range = curr_high - curr_low
+            if candle_range > 0:
+                upper_shadow = curr_high - curr_close
+                if (upper_shadow / candle_range) > 0.6: penalty += 20
+            
+            # 거래량 터졌는데 음봉
+            if curr_close < curr_open * 0.98 and vol_ratio > 2.0: penalty += 30
+
+            return max(0.0, base - penalty)
+        except:
+            return 0.0
+
+    # ✅ [핵심] 오늘과 어제 점수 스무딩
+    last_idx = len(df) - 1
+    score_today = _calc_raw_trigger(last_idx)
+    score_yesterday = _calc_raw_trigger(last_idx - 1)
+
+    # 0.6 * 오늘 + 0.4 * 어제 (하루 반짝 신호 필터링)
+    final_score = (score_today * 0.6) + (score_yesterday * 0.4)
     
-    bb_pos = 0.0
-    if bb_upper > 0:
-        bb_pos = curr_close / bb_upper
-    
-    high_break = 1 if curr_high > prev_high else 0
-    
-    score_breakout = 0
-    if bb_pos > 0.95: score_breakout += 70
-    if bb_pos > 1.0: score_breakout += 30 
-    if high_break: score_breakout = min(score_breakout + 20, 100)
-
-    # 3. Momentum Accel
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    macd = ema12 - ema26
-    signal = macd.ewm(span=9, adjust=False).mean()
-    hist = macd - signal
-    
-    hist_curr = float(hist.iloc[-1])
-    hist_prev = float(hist.iloc[-2])
-    
-    score_mom = 0
-    if hist_curr > 0 and hist_curr > hist_prev:
-        denom = abs(hist_prev) if abs(hist_prev) > 0 else 0.0001
-        change = (hist_curr - hist_prev) / denom
-        score_mom = min(50 + (change * 100), 100) 
-    elif hist_curr > 0:
-        score_mom = 30 
-        
-    base_score = (score_vol * 0.3) + (score_breakout * 0.4) + (score_mom * 0.3)
-
-    # ---------------------------------------------------------
-    # [Negative Factors] 리스크 감점 (Penalty Logic)
-    # ---------------------------------------------------------
-    penalty = 0.0
-
-    # A. 갭상승 과다 (15% 이상)
-    if prev_close > 0:
-        gap_pct = ((curr_open - prev_close) / prev_close) * 100
-        if gap_pct >= 15.0: penalty += 30
-        elif gap_pct >= 10.0: penalty += 15
-
-    # B. 윗꼬리 비율 (몸통보다 긴 윗꼬리 위험)
-    candle_range = curr_high - curr_low
-    upper_shadow = curr_high - curr_close
-    if candle_range > 0:
-        shadow_ratio = upper_shadow / candle_range
-        if shadow_ratio > 0.6: penalty += 20
-        elif shadow_ratio > 0.5: penalty += 10
-
-    # C. 거래량 실린 음봉/밀림
-    is_bearish_candle = curr_close < curr_open * 0.98
-    if is_bearish_candle and vol_ratio > 2.0:
-        penalty += 30
-    
-    # D. 고점 피로감 (거래량 폭발했으나 주가 제자리)
-    price_change_pct = ((curr_close - prev_close) / prev_close) * 100
-    if vol_ratio > 3.0 and price_change_pct < 2.0:
-        penalty += 15
-
-    final_trigger = base_score - penalty
-    return max(0.0, float(final_trigger))
+    return float(final_score)
 
 def analyze_ticker(
     t: str, ohlcv_df: pd.DataFrame, top_df: pd.DataFrame, mcap_map: Dict[str, float],
@@ -2977,21 +2961,44 @@ def main(
         trigger_list.append(ts)
     
     df_out['TRIGGER_SCORE'] = trigger_list
-    # ✅ 2. 시장 상황에 따른 동적 가중치 적용 (Bear Regime 대응)
-    # macro_risk는 main 함수 초반에 check_macro_env()로 계산됨
-    if macro_risk in ["CRITICAL", "HIGH"]:
-        log(f"🐻 시장 위험({macro_risk}) 감지: 구조(Total) 비중 확대")
-        w_structure = 0.8
-        w_timing = 0.2
+    
+    # ✅ 2. [수정] 시장 온도 세분화 & 점수 체계 고정 (Priority 1 & 4)
+    # macro_risk: CRITICAL, HIGH, NORMAL (매크로 환경)
+    # current_breadth: 시장 전체 20일선 상회 비율 (내부 에너지)
+    current_breadth = breadth.get("ALL", 50.0)
+    
+    # 기본 가중치 (Normal)
+    w_struct, w_timing = 0.6, 0.4
+    market_mode_log = "🌤️ 시장 양호(Normal)"
+
+    # (1) 시장이 매우 위험함 (Risk=CRITICAL or Breadth < 30%) -> 구조 80% / 타이밍 20%
+    if macro_risk == "CRITICAL" or current_breadth < 30:
+        market_mode_log = f"🐻 시장 위험/침체(Risk={macro_risk}, Breadth={current_breadth}%)"
+        w_struct, w_timing = 0.8, 0.2
+        
+    # (2) 시장이 다소 약세임 (Risk=HIGH or Breadth < 50%) -> 구조 70% / 타이밍 30%
+    elif macro_risk == "HIGH" or current_breadth < 50:
+        market_mode_log = f"☁️ 시장 약세(Risk={macro_risk}, Breadth={current_breadth}%)"
+        w_struct, w_timing = 0.7, 0.3
+        
+    log(f"⚖️ 가중치 적용: {market_mode_log} → 구조 {int(w_struct*100)}% : 타이밍 {int(w_timing*100)}%")
+
+    # 3. 점수 확정 및 FINAL_SCORE 산출
+    # LDY_SCORE: 순수 구조 점수 (이미 계산됨)
+    # ML_SCORE: AI 점수 (이미 계산됨)
+    # TOTAL_SCORE: 구조 + AI (체력) -> ML 없을 경우 LDY_SCORE 사용
+    if "TOTAL_SCORE" not in df_out.columns:
+        df_out['TOTAL_SCORE'] = df_out['LDY_SCORE']
     else:
-        # Normal
-        w_structure = 0.6
-        w_timing = 0.4
+        df_out['TOTAL_SCORE'] = df_out['TOTAL_SCORE'].fillna(df_out['LDY_SCORE'])
+
+    # 🌟 FINAL_SCORE = (체력 * w1) + (맥점 * w2)
+    df_out['FINAL_SCORE'] = (
+        (df_out['TOTAL_SCORE'] * w_struct) + 
+        (df_out['TRIGGER_SCORE'] * w_timing)
+    ).round(1)
     
-    # 🌟 FINAL_SCORE 계산 (동적 가중치 사용)
-    df_out['FINAL_SCORE'] = (df_out['TOTAL_SCORE'] * w_structure) + (df_out['TRIGGER_SCORE'] * w_timing)
-    
-    df_out['FINAL_SCORE'] = df_out['FINAL_SCORE'].round(1)
+    df_out['TOTAL_SCORE'] = df_out['TOTAL_SCORE'].round(1)
     df_out['TRIGGER_SCORE'] = pd.to_numeric(df_out['TRIGGER_SCORE']).round(1)
 
     # 👇👇 [추가] 점수 계산이 다 끝난 후, 여기서 상태(ROUTE)를 결정해야 정확함! 👇👇
