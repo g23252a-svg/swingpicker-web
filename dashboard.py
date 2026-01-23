@@ -3624,22 +3624,26 @@ with tab2:
         def _apply_sort(df_target):
             if df_target.empty: return df_target
             
-            # 정렬 컬럼 후보
-            cols = ["FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", "거래대금(억원)"]
-            cols = [c for c in cols if c in df_target.columns]
-            
+            # 1. 상태 우선 (행동순): Action State -> 최종점수 -> 타이밍 -> 거래대금
+            # _STATE_SORT: 0(ATTACK), 10(ARMED)... 오름차순 정렬
             if sort_mode == "🚦 상태 우선 (행동순)" and "_STATE_SORT" in df_target.columns:
-                # 상태 코드(0,10...) 오름차순 -> 점수 내림차순
-                sort_keys = ["_STATE_SORT"] + cols
-                asc_flags = [True] + [False] * len(cols)
-                return df_target.sort_values(by=sort_keys, ascending=asc_flags)
+                return df_target.sort_values(
+                    by=["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "거래대금(억원)"], 
+                    ascending=[True, False, False, False]
+                )
+            
+            # 2. 점수 우선 (능력순): 최종점수(Absolute) -> 거래대금
+            # 복잡한 다중 정렬 대신, FINAL_SCORE 하나로 줄 세우기
             else:
-                # 점수 내림차순
-                return df_target.sort_values(by=cols, ascending=[False]*len(cols))
+                return df_target.sort_values(
+                    by=["FINAL_SCORE", "거래대금(억원)"], 
+                    ascending=[False, False]
+                )
 
         active_df = _apply_sort(active_df)
-        # Passive는 점수순 정렬이 기본
-        passive_cols = ["FINAL_SCORE", "TOTAL_SCORE", "RANK_SCORE", "거래대금(억원)"]
+        
+        # Passive(보류) 종목은 무조건 점수순 정렬
+        passive_cols = ["FINAL_SCORE", "거래대금(억원)"]
         passive_cols = [c for c in passive_cols if c in passive_df.columns]
         if passive_cols:
             passive_df = passive_df.sort_values(by=passive_cols, ascending=[False]*len(passive_cols))
@@ -3680,25 +3684,36 @@ with tab2:
         # 5. 컬럼 설정 (상태 컬럼 강조)
         cols = [
             "상태", "종목명", "생존일",
-            "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE",
-            "추세", "Low_Trend_PCT",
-            "종가", "추천매수가", "손절가", "추천매도가1",
-            "ROUTE", "업종"
+            "FINAL_SCORE",   # [1] 최종 판단
+            "TOTAL_SCORE",   # [2] 기초 체력 (구조)
+            "TRIGGER_SCORE", # [3] 단기 맥점 (타이밍)
+            "추세", "종가", "추천매수가", "손절가", "추천매도가1",
+            "업종"
         ]
         
         cfg = {
-            "상태": st.column_config.TextColumn("Action State", width="medium",
-                                                help="🚀발사(진입) > ⭐️준비(대기) > 🔋축적(관찰)"),
+            "상태": st.column_config.TextColumn("Action", width="medium"),
             "종목명": st.column_config.TextColumn("종목명", width="medium", pinned=True),
-            "생존일": st.column_config.ProgressColumn("Time", format="%d일", min_value=0, max_value=12,
-                                                    help="3~8일차: 골든타임 / 10일 이상: 상한 음식"),
+            "생존일": st.column_config.ProgressColumn("Time", format="%d일", min_value=0, max_value=12),
             
-            "FINAL_SCORE": st.column_config.ProgressColumn("🏆종합강도", format="%.1f", min_value=0, max_value=100, width="small"),
-            "TRIGGER_SCORE": st.column_config.NumberColumn("🔥타이밍", format="%.0f", width="small", help="높을수록 단기 급등 임박 (감점 반영됨)"),
-            "TOTAL_SCORE": st.column_config.NumberColumn("⚙️구조점수", format="%.0f", width="small", help="기본적인 차트/수급 우량도"),
+            # ✅ [핵심] 점수 역할 명확화 (툴팁 설명 추가)
+            "FINAL_SCORE": st.column_config.ProgressColumn(
+                "🥇최종순위", 
+                format="%.1f", min_value=0, max_value=100, width="small",
+                help="구조(체력)와 타이밍(맥점)을 시장상황에 맞춰 가중 합산한 최종 점수"
+            ),
+            "TOTAL_SCORE": st.column_config.NumberColumn(
+                "⚙️구조(체력)", 
+                format="%.0f", width="small", 
+                help="차트/수급/AI가 판단한 종목의 기초 체력 (높을수록 튼튼함)"
+            ),
+            "TRIGGER_SCORE": st.column_config.NumberColumn(
+                "🔥타이밍(맥)", 
+                format="%.0f", width="small", 
+                help="단기 급등 임박 신호 (높을수록 당장 쏠 확률 높음)"
+            ),
             
-            "Low_Trend_PCT": st.column_config.NumberColumn("저점강도", format="%.2f%%"),
-            "추세": st.column_config.TextColumn("구조", width="small"),
+            "추세": st.column_config.TextColumn("Trend", width="small"),
             "종가": st.column_config.TextColumn("현재가", width="small"),
             "추천매수가": st.column_config.TextColumn("매수", width="small"),
             "손절가": st.column_config.TextColumn("손절", width="small"),
