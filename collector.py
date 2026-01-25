@@ -1806,9 +1806,7 @@ def generate_ai_comment(
     if score >= 90: 
         comment += " (강력 매수)"
     elif score >= 80: 
-        comment += " (매수 유효)"
-
-    return comment if comment else "특이사항 없음."
+        comment += " (매수 유효)"   
 
     # ✅ [v7.4 수정] 스퀴즈 일수 포함 코멘트
     if int(ttm_squeeze) >= 1:
