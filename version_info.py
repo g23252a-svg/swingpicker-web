@@ -1,4 +1,4 @@
-# version_info.py (v12.0 Enhanced)
+# version_info.py (v12.1 Smart Defense)
 # -*- coding: utf-8 -*-
 
 import os
@@ -24,8 +24,8 @@ def _get_conf(key: str, default_val: str) -> str:
     # 2. OS 환경 변수 확인
     return os.getenv(key, default_val)
 
-# 현재 앱 버전 설정
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "12.0.0") 
+# 현재 앱 버전 설정 (업데이트됨)
+_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "12.1.0") 
 APP_VERSION = _RAW_APP_VERSION
 
 # 텔레그램 채널
@@ -36,9 +36,21 @@ PRIME_TG_JOIN_URL = _get_conf("LDY_PRIME_JOIN_URL", "https://t.me/+DovDEluWnEJhO
 # --------------------------------------------------------------------
 CHANGELOG: List[Dict] = [
     {
+        "version": "12.1.0",
+        "date": "2026-01-25",
+        "type": "minor", 
+        "title": "Smart Defense & Logic Polish",
+        "items": [
+            "🛡️ **Adaptive Stop-loss (Method A):** 변동성(ATR)이 큰 날은 숨 쉴 공간을 주고, 작은 날은 칼손절을 지키는 **조건부 스마트 손절** 로직을 적용했습니다.",
+            "📉 **Anti-FOMO Entry:** 당일 급등(7%↑) 종목은 추격 매수를 원천 차단하고, 캔들 중심값이나 지지선에서만 진입하도록 **타점을 보수화**했습니다.",
+            "🎯 **Trigger Score Smoothing:** 거래량 점수 산정 시 계단식 점프를 제거(선형 보간)하고, **초대형 호재 종목(대장주)**이 과열 패널티를 덜 받도록 조정했습니다.",
+            "🔧 **Logic Safety Clamp:** 데이터 이상치로 인해 점수가 튀는 현상을 막는 안전장치(Safety Clamp)를 모든 채점 로직에 적용했습니다.",
+        ],
+    },
+    {
         "version": "12.0.0",
         "date": "2026-01-07",
-        "type": "major",  # major, minor, patch, hotfix
+        "type": "major",
         "title": "Quantum Leap: AI Trust & Money Management",
         "items": [
             "💰 **Kelly Betting System:** '얼마를 걸어야 할까?'에 대한 수학적 해답. 승률과 손익비를 계산하여 **최적의 자금 관리 비중**을 제안합니다.",
