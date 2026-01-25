@@ -2328,93 +2328,133 @@ def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
 
 def calculate_trigger_score(df: pd.DataFrame) -> float:
     """
-    [Updated] 노이즈 제거를 위한 EMA 스무딩 적용 (오늘 0.6 + 어제 0.4)
+    [Updated v9.0] Safety Clamp 추가 + 최종 완성
+    - Vol Score 계산 후 안전 범위(0~40) 강제 (이상치 방지)
+    - Vol > 4.0 구간 점수 상향(20점) 및 선형 보간 유지
     """
     if df is None or df.empty or len(df) < 30:
         return 0.0
 
-    # 내부 함수: 특정 시점(idx) 기준 점수 계산
     def _calc_raw_trigger(idx):
-        if idx < 5: return 0.0 # 데이터 부족
+        if idx < 25: return 0.0
+
         try:
-            # 슬라이싱으로 해당 시점 데이터 확보
             subset = df.iloc[:idx+1]
-            vol = pd.to_numeric(subset['거래량'], errors='coerce').fillna(0)
+            
+            # 1. 데이터 안전 추출
             close = pd.to_numeric(subset['종가'], errors='coerce').fillna(0)
             high = pd.to_numeric(subset['고가'], errors='coerce').fillna(0)
-            open_p = pd.to_numeric(subset['시가'], errors='coerce').fillna(0)
             low = pd.to_numeric(subset['저가'], errors='coerce').fillna(0)
+            open_p = pd.to_numeric(subset['시가'], errors='coerce').fillna(0)
+            vol = pd.to_numeric(subset['거래량'], errors='coerce').fillna(0)
 
-            curr_vol = float(vol.iloc[-1])
-            curr_close = float(close.iloc[-1])
-            curr_high = float(high.iloc[-1])
-            curr_open = float(open_p.iloc[-1])
-            curr_low = float(low.iloc[-1])
-            prev_close = float(close.iloc[-2])
-            prev_high = float(high.iloc[-2])
+            c_curr = float(close.iloc[-1])
+            h_curr = float(high.iloc[-1])
+            l_curr = float(low.iloc[-1])
+            o_curr = float(open_p.iloc[-1])
+            v_curr = float(vol.iloc[-1])
+            c_prev = float(close.iloc[-2])
 
-            # 1. Volume Score
-            vol_ma3 = vol.iloc[-4:-1].mean()
-            if vol_ma3 == 0: vol_ma3 = 1
-            vol_ratio = curr_vol / vol_ma3
-            score_vol = min(vol_ratio * 50, 100)
+            if c_prev == 0: return 0.0
 
-            # 2. Breakout Score
-            sma20 = close.rolling(window=20).mean().iloc[-1]
-            std20 = close.rolling(window=20).std().iloc[-1]
-            bb_upper = sma20 + (2 * std20)
-            bb_pos = (curr_close / bb_upper) if bb_upper > 0 else 0
+            # 2. 기초 지표 계산
+            ret_pct = (c_curr / c_prev - 1) * 100
+            candle_len = h_curr - l_curr
             
-            high_break = 1 if curr_high > prev_high else 0
-            score_breakout = 0
-            if bb_pos > 0.95: score_breakout += 70
-            if bb_pos > 1.0: score_breakout += 30
-            if high_break: score_breakout = min(score_breakout + 20, 100)
+            # 윗꼬리 비율 & 종가 위치
+            upper_wick = (h_curr - max(o_curr, c_curr))
+            wick_ratio = upper_wick / candle_len if candle_len > 0 else 0.0
+            range_pos = (c_curr - l_curr) / candle_len if candle_len > 0 else 0.5
+            
+            # 거래량 비율
+            vol_ma20_series = vol.rolling(window=20).mean().shift(1)
+            vol_ma20 = float(vol_ma20_series.iloc[-1])
+            if pd.isna(vol_ma20) or vol_ma20 == 0: vol_ma20 = v_curr 
+            
+            vol_ratio = v_curr / vol_ma20
 
-            # 3. Momentum Score
+            # ---------------------------------------------------------
+            # [Base Score] 기본 점수 (Max 90)
+            # ---------------------------------------------------------
+            
+            # (1) 거래량 점수 (Linear Interpolation)
+            if vol_ratio < 0.5:
+                score_vol = 5.0
+            elif 0.5 <= vol_ratio < 1.2:
+                score_vol = 5.0 + (vol_ratio - 0.5) * 50.0
+            elif 1.2 <= vol_ratio <= 3.0:
+                score_vol = 40.0
+            elif 3.0 < vol_ratio <= 4.0:
+                score_vol = 40.0 - (vol_ratio - 3.0) * 20.0
+            else:
+                score_vol = 20.0 # 대장주 보호
+
+            # [New] Safety Clamp: 혹시 모를 수치 튐 방지
+            score_vol = max(0.0, min(40.0, score_vol))
+
+            # (2) 돌파/추세 점수 (std20 0 방어)
+            sma20 = close.rolling(20).mean().iloc[-1]
+            std20 = close.rolling(20).std().iloc[-1]
+            
+            score_breakout = 0.0
+            if not (pd.isna(sma20) or pd.isna(std20) or std20 == 0):
+                bb_upper = sma20 + (2 * std20)
+                if c_curr >= bb_upper: score_breakout = 40.0
+                elif c_curr >= sma20: score_breakout = 20.0
+            
+            # (3) 모멘텀 가속
             ema12 = close.ewm(span=12, adjust=False).mean()
             ema26 = close.ewm(span=26, adjust=False).mean()
             macd = ema12 - ema26
-            signal = macd.ewm(span=9, adjust=False).mean()
-            hist = macd - signal
-            hist_curr = float(hist.iloc[-1])
-            hist_prev = float(hist.iloc[-2])
+            sig = macd.ewm(span=9, adjust=False).mean()
+            hist = macd - sig
+            
+            score_mom = 0.0
+            if hist.iloc[-1] > hist.iloc[-2]:
+                score_mom = 10.0
 
-            score_mom = 0
-            if hist_curr > 0 and hist_curr > hist_prev:
-                change = (hist_curr - hist_prev) / (abs(hist_prev) + 0.0001)
-                score_mom = min(50 + (change * 100), 100)
-            elif hist_curr > 0:
-                score_mom = 30
+            base = score_vol + score_breakout + score_mom 
 
-            base = (score_vol * 0.3) + (score_breakout * 0.4) + (score_mom * 0.3)
-
-            # Penalty Logic
+            # ---------------------------------------------------------
+            # [Penalty] 감점 로직 (Cap: 60)
+            # ---------------------------------------------------------
             penalty = 0.0
-            if prev_close > 0:
-                gap_pct = ((curr_open - prev_close) / prev_close) * 100
-                if gap_pct >= 15.0: penalty += 30
-            
-            candle_range = curr_high - curr_low
-            if candle_range > 0:
-                upper_shadow = curr_high - curr_close
-                if (upper_shadow / candle_range) > 0.6: penalty += 20
-            
-            # 거래량 터졌는데 음봉
-            if curr_close < curr_open * 0.98 and vol_ratio > 2.0: penalty += 30
+
+            # 1. 분배봉
+            if ret_pct >= 5.0:
+                if wick_ratio >= 0.35: penalty += 25.0 
+                elif wick_ratio >= 0.25: penalty += 15.0
+
+            # 2. 약한 종가
+            if ret_pct >= 3.0 and range_pos < 0.6:
+                penalty += 15.0
+
+            # 3. 거래량 폭발 설거지
+            if vol_ratio >= 3.0:
+                if c_curr < o_curr: penalty += 25.0 
+                elif wick_ratio > 0.3 or range_pos < 0.5: penalty += 20.0
+
+            # 4. 외인 이탈 결합
+            if '외인순매수' in subset.columns:
+                try:
+                    frg_net = float(subset['외인순매수'].iloc[-1])
+                    if ret_pct >= 5.0 and frg_net < 0 and vol_ratio > 1.5:
+                        if range_pos < 0.6 or wick_ratio > 0.25:
+                            penalty += 20.0
+                except: pass
+
+            penalty = min(penalty, 60.0)
 
             return max(0.0, base - penalty)
-        except:
+            
+        except Exception:
             return 0.0
 
-    # ✅ [핵심] 오늘과 어제 점수 스무딩
     last_idx = len(df) - 1
     score_today = _calc_raw_trigger(last_idx)
     score_yesterday = _calc_raw_trigger(last_idx - 1)
 
-    # 0.6 * 오늘 + 0.4 * 어제 (하루 반짝 신호 필터링)
-    final_score = (score_today * 0.6) + (score_yesterday * 0.4)
-    
+    final_score = (score_today * 0.7) + (score_yesterday * 0.3)
     return float(final_score)
 
 def analyze_ticker(
@@ -2573,15 +2613,66 @@ def analyze_ticker(
     dist_to_swing = (last_c - swing_low_10) / last_c * 100
     is_swing_support = (dist_to_swing < 5.0) and (last_c > swing_low_10)
 
-    # 매매가 산정
-    buy = last_c
-    atr_val = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
-    stop = buy - (2.0 * atr_val)
-    if (dist_to_swing < 10.0) and (swing_low_10 > 0): stop = max(stop, swing_low_10 * 0.98) 
-    if st_trend == 1 and st_val < buy: stop = max(stop, st_val)
-    target = buy + (buy - stop) * 2.0
+    # 🔥 [Fix A 준비: 1일 등락률 계산]
+    prev_c = float(c.iloc[-2]) if len(c) > 1 else last_c
+    ret_1d = (last_c / prev_c - 1.0) * 100
 
+    # 👇👇 [여기부터 교체] 기존 '# 매매가 산정' 및 '# Fix B' 로직 제거 후 붙여넣기 👇👇
+    # -------------------------------------------------------------
+    # [Fix v9.0] 진입가 보수화 + 조건부 손절 바닥(Method A)
+    # -------------------------------------------------------------
+    buy = last_c
+    
+    # 이격도(disp)가 아직 정의 안됐을 경우를 대비해 안전 계산
+    # (보통 위쪽 trigger logic에서 계산되지만, 안전하게 한 번 더 확인)
+    if 'disp' not in locals():
+        disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100
+
+    # 1. 과열 이격도 (20일선 괴리율 15% 이상) -> 5일선/20일선 지지 대기
+    if disp >= 15.0:
+        buy = float(ma20.iloc[-1]) * 1.05 
+        
+    # 2. [핵심] 당일 급등주(7%↑) 추격 방지
+    elif ret_1d >= 7.0:
+        mid_body = (float(o.iloc[-1]) + float(c.iloc[-1])) / 2
+        support_level = float(l.iloc[-1]) + (float(h.iloc[-1]) - float(l.iloc[-1])) * 0.3
+        buy = max(mid_body, support_level)
+    
+    # 3. 적당한 상승
+    elif ret_1d >= 3.0:
+        buy = last_c * 0.985
+
+    # 손절가/목표가 재계산
+    atr_val = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
+    
+    # 기본 손절: ATR 2.0배
+    stop = buy - (2.0 * atr_val) 
+    
+    # [New] 급등주 2차 방어선 (Method A: ATR 비율 기반 선택)
+    if ret_1d >= 7.0:
+        today_low = float(l.iloc[-1])
+        atr_pct = atr_val / today_low if today_low > 0 else 0.0
+
+        # 변동성 크면(3.5% 이상) 숨 쉴 공간(0.8 ATR)을 주고,
+        # 변동성 작으면 3% 룰을 적용해 칼손절 유도
+        if atr_pct >= 0.035: 
+            smart_floor = today_low - (0.8 * atr_val)
+        else:
+            smart_floor = today_low * 0.97
+
+        # 기본 ATR 스탑이 바닥선보다 너무 깊게 내려가면(=손실이 너무 크면),
+        # 스마트 바닥선으로 끌어올려 강제 청산
+        if buy > smart_floor:
+            stop = max(stop, smart_floor)
+
+    # 구조적 지지선 보정 (Swing Low)
+    if (dist_to_swing < 8.0) and (swing_low_10 > 0): 
+        stop = max(stop, swing_low_10 * 0.97)
+        
+    target = buy + (buy - stop) * 2.5
+    
     buy = round_to_tick(buy); stop = floor_to_tick(stop); target = ceil_to_tick(target)
+    # 👆👆 [여기까지 교체] 👆👆
 
     # 메타 정보 (기존 유지)
     sector = sector_map.get(code6, "기타")
@@ -2632,9 +2723,7 @@ def analyze_ticker(
     # Tick 단위 보정
     buy = round_to_tick(buy); stop = floor_to_tick(stop); target = ceil_to_tick(target)
 
-    # 🔥 [Fix A 준비: 1일 등락률 계산]
-    prev_c = float(c.iloc[-2]) if len(c) > 1 else last_c
-    ret_1d = (last_c / prev_c - 1.0) * 100
+
 
     return {
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
