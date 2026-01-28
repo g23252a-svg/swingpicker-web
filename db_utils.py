@@ -170,12 +170,22 @@ class LDYDBManager:
         try:
             check = self.conn.execute("SELECT id FROM users WHERE id = ?", [email]).fetchone()
             if check: return False, "이미 존재하는 이메일입니다."
+            
             now = datetime.now()
-            expire = now + timedelta(days=7) # 7일 무료
+            
+            # [핵심 수정] 7일 무료 자동 지급 로직 제거! 
+            # 이제 가입하면 무조건 'free' 등급이고 만료일은 없습니다.
+            role = 'free'       # 기존 'prime' -> 'free'로 변경
+            expire = None       # 기존 'now + 7일' -> None으로 변경
+            
             self.conn.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                              [email, pw_hash, salt, nickname, 'prime', now, now, False, q_idx, a_hash, "token", expire])
+                              [email, pw_hash, salt, nickname, role, now, now, False, q_idx, a_hash, "token", expire])
+            
             self._sync_table_to_gist("users", USER_DB_FILE)
-            return True, "가입 완료! 🎁 7일간 프라임 혜택 적용"
+            
+            # 메시지도 변경
+            return True, "가입 완료! (체험권이 필요하시면 '문의 게시판'에 신청해주세요)"
+            
         except Exception as e: return False, f"DB Error: {e}"
 
     def get_user_by_id(self, email):
