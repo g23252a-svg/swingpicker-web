@@ -4559,67 +4559,109 @@ with tab7:
                     st.dataframe(disp_df.sort_values('Date', ascending=False), use_container_width=True)
 
 with tab8:
-    st.subheader("👑 회원 관리 (시스템 진단 모드)")
+    st.subheader("👑 회원 관리 (Admin)")
     
-    # 1. Secrets 로드 상태 확인 (내용은 가리고 로드 여부만 체크)
-    gist_id = st.secrets.get("LDY_GIST_ID")
-    gist_token = st.secrets.get("LDY_GIST_TOKEN")
-    
-    st.markdown("### 1. 환경변수(Secrets) 점검")
-    if gist_id:
-        st.success(f"✅ GIST_ID 로드됨 (길이: {len(gist_id)})")
-        st.text(f"ID 값 확인: {gist_id}") # ID는 공개되도 괜찮으니 확인차 출력
-    else:
-        st.error("❌ GIST_ID가 없습니다! Streamlit Secrets 설정을 확인하세요.")
-
-    if gist_token:
-        st.success(f"✅ GIST_TOKEN 로드됨 (길이: {len(gist_token)})")
-        # 토큰은 앞 4자리만 보여줌
-        safe_token = gist_token[:4] + "*" * 10
-        st.text(f"Token 값 확인: {safe_token}") 
-    else:
-        st.error("❌ GIST_TOKEN이 없습니다! Streamlit Secrets 설정을 확인하세요.")
-
-    st.divider()
-
-    # 2. 실제 접속 테스트 버튼
-    st.markdown("### 2. Gist 서버 연결 테스트")
-    if st.button("🚀 연결 테스트 시작", type="primary"):
-        if not gist_id or not gist_token:
-            st.error("설정값이 없어 테스트를 진행할 수 없습니다.")
+    # 1. 권한 체크 (보안 필수)
+    if auth_status == "admin":
+        users = list_users()
+        
+        # --- 상단 요약 통계 ---
+        if users:
+            total_users = len(users)
+            
+            # 간단한 가입자 통계 표시
+            st.markdown(f"""
+            <div style="background-color:rgba(0,0,0,0.05); padding:10px; border-radius:5px; margin-bottom:15px;">
+                👥 <b>총 가입자:</b> {total_users}명
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # --- 메인 리스트 ---
+        if not users:
+            st.info("등록된 회원이 없습니다.")
         else:
-            import requests
-            try:
-                url = f"https://api.github.com/gists/{gist_id}"
-                headers = {
-                    "Authorization": f"token {gist_token}",
-                    "Accept": "application/vnd.github.v3+json"
+            # 표시할 데이터 가공
+            rows = []
+            for u in users:
+                # 상태 메시지 꾸미기
+                is_banned = u.get("is_banned", False)
+                role = u.get("role", "free")
+                
+                status_icon = "✅"
+                if is_banned: status_icon = "🚫차단"
+                
+                rows.append({
+                    "Email": u.get("login_id"),
+                    "닉네임": u.get("nickname"),
+                    "권한": role.upper(),
+                    "상태": status_icon,
+                    "가입일": to_kst_str(u.get("join_date")),
+                    "최근접속": to_kst_str(u.get("last_login")),
+                    "만료일": to_kst_str(u.get("prime_expire_date")).split(" ")[0] if u.get("prime_expire_date") else "-"
+                })
+            
+            df_users = pd.DataFrame(rows)
+            
+            # 최신 접속순 정렬
+            if "최근접속" in df_users.columns:
+                df_users = df_users.sort_values("최근접속", ascending=False)
+
+            # 테이블 출력
+            st.dataframe(
+                df_users, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Email": st.column_config.TextColumn("이메일", width="medium"),
+                    "최근접속": st.column_config.TextColumn("최근접속", width="small"),
                 }
+            )
+            
+            st.divider()
+            
+            # --- [관리자 액션 패널] ---
+            c_left, c_right = st.columns([1, 1])
+            
+            with c_left:
+                st.markdown("### 🛠️ 개별 회원 제어")
+                target_email = st.selectbox("회원 선택", df_users["Email"], key="adm_usr_sel")
                 
-                with st.spinner("GitHub Gist에 접속 중..."):
-                    resp = requests.get(url, headers=headers, timeout=10)
+                c_act1, c_act2 = st.columns(2)
+                with c_act1:
+                    new_role = st.selectbox("등급 변경", ["free", "pro", "prime", "admin"], key="adm_role_sel")
+                    if st.button("등급 적용", use_container_width=True):
+                        if update_user_role(target_email, new_role):
+                            st.toast(f"✅ {target_email} -> {new_role} 변경 완료")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("변경 실패")
+                            
+                with c_act2:
+                    st.write("") # 간격
+                    st.write("") 
+                    if st.button("🚫 차단/해제", type="primary", use_container_width=True):
+                        ok, msg = toggle_user_ban(target_email)
+                        if ok:
+                            st.toast(msg)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+            with c_right:
+                st.markdown("### 🎉 전체 이벤트")
+                st.caption("관리자를 제외한 모든 회원에게 체험권을 일괄 지급합니다.")
                 
-                st.write(f"📡 응답 코드: **{resp.status_code}**")
-                
-                if resp.status_code == 200:
-                    st.success("✅ 연결 성공! Gist를 찾았습니다.")
-                    data = resp.json()
-                    files = list(data.get("files", {}).keys())
-                    st.write(f"📂 발견된 파일 목록: {files}")
-                    
-                    if "users_db.json" in files:
-                        st.info("🙆‍♂️ users_db.json 파일이 있습니다. (정상)")
-                        content = data["files"]["users_db.json"]["content"]
-                        st.text_area("파일 내용 미리보기", content[:500])
+                if st.button("🎁 전원 7일 Prime 무료 지급", type="primary", use_container_width=True):
+                    ok, msg = grant_all_users_trial(days=7)
+                    if ok:
+                        st.balloons()
+                        st.success(msg)
+                        time.sleep(2)
+                        st.rerun()
                     else:
-                        st.error("❌ 'users_db.json' 파일이 없습니다! 파일명을 확인하세요.")
-                        
-                elif resp.status_code == 404:
-                    st.error("❌ 404 Not Found: GIST_ID가 틀렸습니다. 주소를 다시 확인하세요.")
-                elif resp.status_code == 401:
-                    st.error("❌ 401 Unauthorized: 토큰(Token)이 틀렸거나 만료되었습니다.")
-                else:
-                    st.error(f"⚠️ 기타 오류: {resp.text}")
-                    
-            except Exception as e:
-                st.error(f"💥 프로그램 에러 발생: {e}")
+                        st.error(msg)
+
+    else:
+        st.error("🚫 관리자 권한이 필요합니다.")
