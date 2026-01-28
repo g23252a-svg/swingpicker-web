@@ -4559,28 +4559,42 @@ with tab7:
                     st.dataframe(disp_df.sort_values('Date', ascending=False), use_container_width=True)
 
 with tab8:
-    st.subheader("👑 회원 관리")
+    st.subheader("👑 회원 관리 (디버깅 모드)")
     
-    # 관리자 권한 체크 (보안을 위해 필수)
-    if auth_status == "admin":
-        users = list_users()
-        if not users:
-            st.info("등록된 회원이 없습니다.")
-        else:
-            # 회원 목록 및 관리 UI 표시 (기존 사이드바 코드를 활용)
-            st.write(f"총 가입자: {len(users)}명")
+    # 1. 시크릿 값 로드 확인
+    gid = st.secrets.get("LDY_GIST_ID")
+    gtok = st.secrets.get("LDY_GIST_TOKEN")
+    
+    st.write(f"🔑 GIST ID 확인: `{gid}`")
+    st.write(f"🔑 TOKEN 앞자리 확인: `{gtok[:4] if gtok else 'None'}...`")
+
+    if st.button("🚀 Gist 연결 테스트"):
+        import requests
+        try:
+            url = f"https://api.github.com/gists/{gid}"
+            headers = {"Authorization": f"token {gtok}"}
+            res = requests.get(url, headers=headers, timeout=5)
             
-            rows = []
-            for u in users:
-                rows.append({
-                    "Email": u.get("login_id"),
-                    "닉네임": u.get("nickname"),
-                    "권한": u.get("role", "free"),
-                    "최근접속": to_kst_str(u.get("last_login"))
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            st.write(f"📡 상태 코드: **{res.status_code}**")
             
-            # (선택) 여기에 등급 변경, 차단 등 관리 기능 추가
+            if res.status_code == 200:
+                st.success("✅ 연결 성공! Gist 내용을 가져왔습니다.")
+                files = res.json().get("files", {}).keys()
+                st.write("파일 목록:", list(files))
+                
+                if "users_db.json" in files:
+                    st.info("users_db.json 파일이 존재합니다. 내용 로드 시도...")
+                    content = res.json()["files"]["users_db.json"]["content"]
+                    st.text(content[:200]) # 앞부분만 출력
+                else:
+                    st.error("❌ users_db.json 파일이 없습니다!")
             
-    else:
-        st.error("🚫 관리자 전용 메뉴입니다. 접근 권한이 없습니다.")
+            elif res.status_code == 404:
+                st.error("❌ 404 Not Found: GIST ID가 틀렸습니다.")
+            elif res.status_code == 401:
+                st.error("❌ 401 Unauthorized: 토큰(Token)이 틀렸거나 권한이 없습니다.")
+            else:
+                st.error(f"❌ 연결 실패: {res.text}")
+                
+        except Exception as e:
+            st.error(f"⚠️ 에러 발생: {e}")
