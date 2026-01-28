@@ -18,3 +18,4 @@ aiohttp
 torch
 opendartreader
 xmltodict
+extra-streamlit-components
