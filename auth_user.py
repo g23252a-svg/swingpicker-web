@@ -18,9 +18,6 @@ CURRENT_USER_KEY = "ldy_current_user"
 MASTER_ADMIN_ID = "admin"
 
 # [핵심 수정 1] 비밀번호 로드 로직 강화 (문자열 변환 + 공백 제거)
-# 1. 대문자 키(MASTER_ADMIN_PW) 확인
-# 2. 소문자 키(auth.master_admin_pw) 확인
-# 3. 없으면 빈 문자열
 raw_pw = st.secrets.get("MASTER_ADMIN_PW") or st.secrets.get("auth", {}).get("master_admin_pw", "")
 MASTER_ADMIN_PW = str(raw_pw).strip() if raw_pw else ""
 
@@ -28,6 +25,13 @@ SECURITY_QUESTIONS = [
     "선택하세요...", "가장 기억에 남는 여행지는?", "어릴 적 살던 동네 이름은?",
     "가장 좋아하는 보물 1호는?", "초등학교 담임 선생님 성함은?",
     "나의 좌우명은?", "부모님의 고향은 어디인가요?",
+]
+
+# ### [수정] 허용할 이메일 도메인 리스트 (화이트리스트)
+ALLOWED_DOMAINS = [
+    "naver.com", "gmail.com", "daum.net", "hanmail.net", 
+    "kakao.com", "nate.com", "icloud.com", "outlook.com", "hotmail.com",
+    "yahoo.com", "taiyoinkproducts.co.kr" # 회사 메일 등 필요시 추가
 ]
 
 # ----------------- 1. DB 지연 연결 (순환 참조 방지) -----------------
@@ -129,6 +133,24 @@ def _create_salt(): return secrets.token_hex(16)
 def _hash_password(pw, salt): return hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
 def _hash_answer(ans, salt): return _hash_password(ans.strip().lower(), salt)
 
+# ### [수정] 이메일 정규화 함수 추가 (Gmail 점/플러스 무시)
+def normalize_email(email):
+    email = email.strip().lower()
+    if "@" not in email:
+        return email
+    
+    local, domain = email.split("@", 1)
+    
+    # 1. Gmail의 경우 점(.) 제거 (google.mail = googlemail)
+    if "gmail.com" in domain:
+        local = local.replace(".", "")
+    
+    # 2. 플러스(+) 태그 제거 (myname+test@ -> myname@)
+    if "+" in local:
+        local = local.split("+")[0]
+        
+    return f"{local}@{domain}"
+
 def check_rate_limit(email, limit=5, window_sec=300, lock_sec=600):
     if "login_rl" not in st.session_state:
         st.session_state.login_rl = {}
@@ -175,7 +197,6 @@ def render_auth_box(show_debug=False):
     user = get_user()
 
     if user:
-        # ... (로그인 상태 UI는 기존과 동일) ...
         user_id = user['id']
         role = user.get('role', 'free')
         nickname = user.get('nickname', user_id)
@@ -213,50 +234,50 @@ def render_auth_box(show_debug=False):
             lpw = st.text_input("비밀번호", type="password")
             
             if st.form_submit_button("로그인", type="primary"):
-                # [핵심 수정 2] 관리자 로그인 로직 강화 및 디버깅
                 input_pw_str = str(lpw).strip()
                 
                 # 1. 관리자 체크
                 if lid == MASTER_ADMIN_ID:
                     if not MASTER_ADMIN_PW:
-                        st.error("⚠️ 시스템 오류: 관리자 비밀번호가 설정되지 않았습니다 (secrets.toml 확인)")
+                        st.error("⚠️ 시스템 오류: 관리자 비밀번호가 설정되지 않았습니다")
                     elif input_pw_str == MASTER_ADMIN_PW:
                         reset_login_failures(lid)
                         st.session_state[CURRENT_USER_KEY] = MASTER_ADMIN_ID
                         st.rerun()
                     else:
                         st.error("비밀번호가 일치하지 않습니다.")
-                        # 주석(#)을 지워서 화면에 값을 출력합니다.
-                        st.warning(f"DEBUG: 입력='{input_pw_str}', 설정='{MASTER_ADMIN_PW}'")
                 
-                # 2. 일반 유저 체크 (관리자가 아닐 경우)
+                # 2. 일반 유저 체크
                 else:
-                    ok, msg = check_rate_limit(lid, limit=5, window_sec=300, lock_sec=600)
+                    # 로그인 시에도 이메일 정규화하여 체크 (가입할 때 정규화했으므로)
+                    clean_lid = normalize_email(lid)
+                    ok, msg = check_rate_limit(clean_lid, limit=5, window_sec=300, lock_sec=600)
+                    
                     if not ok:
                         st.error(msg)
                     else:
-                        u = db.get_user_by_id(lid)
+                        # 정규화된 이메일로 조회
+                        u = db.get_user_by_id(clean_lid)
                         if not u:
-                            record_login_failure(lid)
+                            record_login_failure(clean_lid)
                             st.error("존재하지 않는 계정입니다.")
                         else:
-                            # Ban 체크 및 패스워드 검증
                             banned = str(u.get("is_banned", "")).upper() in ["Y", "TRUE", "1", "TRUE"]
                             if banned:
                                 st.error("⛔ 이용 제한 계정입니다.")
                             elif _hash_password(lpw, u["salt"]) == u["password"]:
-                                reset_login_failures(lid)
-                                st.session_state[CURRENT_USER_KEY] = lid
+                                reset_login_failures(clean_lid)
+                                st.session_state[CURRENT_USER_KEY] = clean_lid
                                 st.success("로그인 성공")
                                 time.sleep(0.5)
                                 st.rerun()
                             else:
-                                record_login_failure(lid)
+                                record_login_failure(clean_lid)
                                 st.error("비밀번호가 일치하지 않습니다.")
 
     with tab2:
-        # ... (회원가입 로직 기존 동일) ...
-        st.info("🎁 가입 시 7일 무료!")
+        # ### [수정] 문구 변경 (7일 무료 삭제 -> 가입 환영)
+        st.info("👋 가입을 환영합니다! (주요 메일 주소만 사용 가능)")
         with st.form("join"):
             em = st.text_input("이메일")
             nk = st.text_input("닉네임")
@@ -264,25 +285,39 @@ def render_auth_box(show_debug=False):
             p2 = st.text_input("비밀번호 확인", type="password")
             q = st.selectbox("질문", range(len(SECURITY_QUESTIONS)), format_func=lambda x: SECURITY_QUESTIONS[x])
             ans = st.text_input("답변")
+            
             if st.form_submit_button("가입"):
-                if p1 != p2: st.error("불일치")
-                elif len(p1) < 6: st.error("짧음")
+                # 1. 도메인 체크
+                domain = em.split("@")[-1].strip().lower()
+                if domain not in ALLOWED_DOMAINS:
+                    st.error(f"🚫 스팸 방지를 위해 주요 메일({', '.join(ALLOWED_DOMAINS)})로만 가입 가능합니다.")
+                elif p1 != p2: 
+                    st.error("비밀번호가 일치하지 않습니다.")
+                elif len(p1) < 6: 
+                    st.error("비밀번호는 6자 이상이어야 합니다.")
                 else:
+                    # 2. 이메일 정규화 (Gmail 점/플러스 제거)
+                    clean_em = normalize_email(em)
+                    
                     salt = _create_salt()
-                    ok, msg = db.register_user(em, _hash_password(p1, salt), salt, nk, q, _hash_answer(ans, salt))
+                    # 정규화된 이메일로 가입 요청
+                    ok, msg = db.register_user(clean_em, _hash_password(p1, salt), salt, nk, q, _hash_answer(ans, salt))
+                    
                     if ok:
                         st.balloons()
-                        st.success(msg)
-                        st.session_state[CURRENT_USER_KEY] = em
+                        # 문구는 db_utils.py에서 반환하므로 거기서도 수정되었는지 확인 필요
+                        st.success(msg) 
+                        st.session_state[CURRENT_USER_KEY] = clean_em
                         time.sleep(1)
                         st.rerun()
                     else: st.error(msg)
     
     with tab3:
-        # ... (비번찾기 로직 기존 동일) ...
         fid = st.text_input("아이디 (비번 찾기)")
         if st.button("확인"):
-            u = db.get_user_by_id(fid)
+            # 비번 찾기 시에도 정규화된 이메일로 검색
+            clean_fid = normalize_email(fid)
+            u = db.get_user_by_id(clean_fid)
             if u: st.success(f"질문: {SECURITY_QUESTIONS[u['security_q_idx']]}")
             else: st.error("없음")
             
