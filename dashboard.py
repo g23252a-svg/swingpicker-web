@@ -4559,42 +4559,67 @@ with tab7:
                     st.dataframe(disp_df.sort_values('Date', ascending=False), use_container_width=True)
 
 with tab8:
-    st.subheader("👑 회원 관리 (디버깅 모드)")
+    st.subheader("👑 회원 관리 (시스템 진단 모드)")
     
-    # 1. 시크릿 값 로드 확인
-    gid = st.secrets.get("LDY_GIST_ID")
-    gtok = st.secrets.get("LDY_GIST_TOKEN")
+    # 1. Secrets 로드 상태 확인 (내용은 가리고 로드 여부만 체크)
+    gist_id = st.secrets.get("LDY_GIST_ID")
+    gist_token = st.secrets.get("LDY_GIST_TOKEN")
     
-    st.write(f"🔑 GIST ID 확인: `{gid}`")
-    st.write(f"🔑 TOKEN 앞자리 확인: `{gtok[:4] if gtok else 'None'}...`")
+    st.markdown("### 1. 환경변수(Secrets) 점검")
+    if gist_id:
+        st.success(f"✅ GIST_ID 로드됨 (길이: {len(gist_id)})")
+        st.text(f"ID 값 확인: {gist_id}") # ID는 공개되도 괜찮으니 확인차 출력
+    else:
+        st.error("❌ GIST_ID가 없습니다! Streamlit Secrets 설정을 확인하세요.")
 
-    if st.button("🚀 Gist 연결 테스트"):
-        import requests
-        try:
-            url = f"https://api.github.com/gists/{gid}"
-            headers = {"Authorization": f"token {gtok}"}
-            res = requests.get(url, headers=headers, timeout=5)
-            
-            st.write(f"📡 상태 코드: **{res.status_code}**")
-            
-            if res.status_code == 200:
-                st.success("✅ 연결 성공! Gist 내용을 가져왔습니다.")
-                files = res.json().get("files", {}).keys()
-                st.write("파일 목록:", list(files))
+    if gist_token:
+        st.success(f"✅ GIST_TOKEN 로드됨 (길이: {len(gist_token)})")
+        # 토큰은 앞 4자리만 보여줌
+        safe_token = gist_token[:4] + "*" * 10
+        st.text(f"Token 값 확인: {safe_token}") 
+    else:
+        st.error("❌ GIST_TOKEN이 없습니다! Streamlit Secrets 설정을 확인하세요.")
+
+    st.divider()
+
+    # 2. 실제 접속 테스트 버튼
+    st.markdown("### 2. Gist 서버 연결 테스트")
+    if st.button("🚀 연결 테스트 시작", type="primary"):
+        if not gist_id or not gist_token:
+            st.error("설정값이 없어 테스트를 진행할 수 없습니다.")
+        else:
+            import requests
+            try:
+                url = f"https://api.github.com/gists/{gist_id}"
+                headers = {
+                    "Authorization": f"token {gist_token}",
+                    "Accept": "application/vnd.github.v3+json"
+                }
                 
-                if "users_db.json" in files:
-                    st.info("users_db.json 파일이 존재합니다. 내용 로드 시도...")
-                    content = res.json()["files"]["users_db.json"]["content"]
-                    st.text(content[:200]) # 앞부분만 출력
+                with st.spinner("GitHub Gist에 접속 중..."):
+                    resp = requests.get(url, headers=headers, timeout=10)
+                
+                st.write(f"📡 응답 코드: **{resp.status_code}**")
+                
+                if resp.status_code == 200:
+                    st.success("✅ 연결 성공! Gist를 찾았습니다.")
+                    data = resp.json()
+                    files = list(data.get("files", {}).keys())
+                    st.write(f"📂 발견된 파일 목록: {files}")
+                    
+                    if "users_db.json" in files:
+                        st.info("🙆‍♂️ users_db.json 파일이 있습니다. (정상)")
+                        content = data["files"]["users_db.json"]["content"]
+                        st.text_area("파일 내용 미리보기", content[:500])
+                    else:
+                        st.error("❌ 'users_db.json' 파일이 없습니다! 파일명을 확인하세요.")
+                        
+                elif resp.status_code == 404:
+                    st.error("❌ 404 Not Found: GIST_ID가 틀렸습니다. 주소를 다시 확인하세요.")
+                elif resp.status_code == 401:
+                    st.error("❌ 401 Unauthorized: 토큰(Token)이 틀렸거나 만료되었습니다.")
                 else:
-                    st.error("❌ users_db.json 파일이 없습니다!")
-            
-            elif res.status_code == 404:
-                st.error("❌ 404 Not Found: GIST ID가 틀렸습니다.")
-            elif res.status_code == 401:
-                st.error("❌ 401 Unauthorized: 토큰(Token)이 틀렸거나 권한이 없습니다.")
-            else:
-                st.error(f"❌ 연결 실패: {res.text}")
-                
-        except Exception as e:
-            st.error(f"⚠️ 에러 발생: {e}")
+                    st.error(f"⚠️ 기타 오류: {resp.text}")
+                    
+            except Exception as e:
+                st.error(f"💥 프로그램 에러 발생: {e}")
