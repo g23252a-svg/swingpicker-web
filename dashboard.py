@@ -2729,16 +2729,19 @@ def reality_check_top(df_top: pd.DataFrame, data_ts, n: int = 5):
 @st.cache_data(ttl=600, show_spinner=False)
 def prepare_scored_data(raw_url, local_raw, pass_ebs):
     """
-    [Updated] 1. 로컬 파일 우선 로드 (방금 수집한 데이터 즉시 반영)
-              2. ROUTE 상태 덮어쓰기 방지 (ATTACK/ARMED 유지)
+    [Updated v14.4]
+    1. 데이터 로드 (로컬/원격)
+    2. v8 스코어 체계 정밀 판정 (Prescored)
+    3. 점수 컬럼 강제 숫자 변환 (Normalize 부작용 방지) - Fix 1
+    4. 점수 0점 판정 로직 강화 (abs sum) - Fix 2
+    5. ROUTE 유효성 체크 및 TH 용도 분리 - Fix 3
     """
     df_raw = None
     src_type = "unknown"
 
     # -----------------------------------------------------------
-    # 1. 데이터 로드 (Local First Strategy)
+    # 1. 데이터 로드
     # -----------------------------------------------------------
-    # 로컬(수집기 실행 위치)에 파일이 있으면 무조건 우선 사용
     if local_raw and os.path.exists(local_raw):
         try:
             df_raw = load_csv_path(local_raw)
@@ -2749,7 +2752,6 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
         except Exception as e:
             logger.warning(f"Local load failed: {e}")
 
-    # 로컬이 없을 때만 원격(GitHub) 시도
     if df_raw is None or df_raw.empty:
         try:
             df_raw = load_csv_url(raw_url)
@@ -2763,36 +2765,74 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
         raise RuntimeError("데이터를 로컬/원격 어디서도 불러오지 못했습니다.")
 
     # -----------------------------------------------------------
-    # 2. 데이터 전처리 (순서 및 랭크 안정화)
+    # 2. 데이터 전처리
     # -----------------------------------------------------------
     df_raw = df_raw.copy().reset_index(drop=True)
 
-    rank_col = None
-    for c in ["LDY_RANK", "RANK", "rank", "순위", "랭크"]:
-        if c in df_raw.columns:
-            rank_col = c
-            break
-
+    # 랭크 정보 백업
+    rank_col = next((c for c in ["LDY_RANK", "RANK", "rank", "순위"] if c in df_raw.columns), None)
     if rank_col:
-        df_raw["_CSV_RANK"] = pd.to_numeric(df_raw[rank_col], errors="coerce")
+        # 안전한 정렬을 위해 결측치는 아주 큰 수로 대체
+        df_raw["_CSV_RANK"] = pd.to_numeric(df_raw[rank_col], errors="coerce").fillna(999999)
     else:
         df_raw["_CSV_RANK"] = np.arange(1, len(df_raw) + 1)
-
+    
     df_raw["_CSV_ROW"] = np.arange(len(df_raw))
-
-    # 기준 시점 추출
+    
     data_ts = infer_data_timestamp(df_raw)
+    
+    # v8 스코어 체계 판정 (FINAL이 있거나, TOTAL+TRIGGER 조합 등)
+    is_v8_scored = (
+        ("FINAL_SCORE" in df_raw.columns) or
+        (("TOTAL_SCORE" in df_raw.columns) and ("TRIGGER_SCORE" in df_raw.columns)) or
+        (("RANK_SCORE" in df_raw.columns) and ("TRIGGER_SCORE" in df_raw.columns))
+    )
+    
+    scored = None
+    
+    if is_v8_scored:
+        # ✅ CASE 1: Prescored (Collector v8.0+)
+        scored = normalize_cols(df_raw) 
+        
+        # ✅ [Fix 1] 점수 컬럼 변질 방지 (강제 Numeric 캐스팅)
+        # normalize_cols 내부에서 어떤 처리를 했든, 점수는 무조건 float여야 함
+        score_cols = ["FINAL_SCORE", "TOTAL_SCORE", "TRIGGER_SCORE", "LDY_SCORE", "RANK_SCORE", "EBS", "RR1"]
+        for c in score_cols:
+            if c in scored.columns:
+                scored[c] = pd.to_numeric(scored[c], errors="coerce").fillna(0.0)
+        
+        # 필수 컬럼 결측 방지 (UI 깨짐 방지용 기본값)
+        if "EBS" not in scored.columns: scored["EBS"] = 0.0
+        if "거래대금(억원)" not in scored.columns: scored["거래대금(억원)"] = 0.0
+        if "TOTAL_SCORE" not in scored.columns: scored["TOTAL_SCORE"] = 0.0
+        if "TRIGGER_SCORE" not in scored.columns: scored["TRIGGER_SCORE"] = 0.0
+        if "FINAL_SCORE" not in scored.columns: scored["FINAL_SCORE"] = 0.0
 
-    # 스코어링 (기존 점수 유지)
-    df = normalize_cols(df_raw)
-    scored = build_global_score(df, keep_order=True).reset_index(drop=True)
+        # ✅ [Fix 2] 점수 0점 판정 로직 강화 (절대값 합계 확인)
+        # 단순 sum()은 음수/양수 상쇄나 NaN 문제 가능성 있음
+        fs = scored["FINAL_SCORE"]
+        if fs.abs().sum() == 0:
+            # FINAL이 비었으면 TOTAL이나 LDY로 대체
+            ts_sum = scored["TOTAL_SCORE"].abs().sum()
+            scored["FINAL_SCORE"] = scored["TOTAL_SCORE"] if ts_sum > 0 else scored.get("LDY_SCORE", 0.0)
+
+    else:
+        # ⚠️ CASE 2: Legacy (Score Missing) -> Dashboard Scoring
+        df = normalize_cols(df_raw)
+        scored = build_global_score(df, keep_order=True).reset_index(drop=True)
+        
+        # UI 호환성 매핑
+        scored["FINAL_SCORE"] = scored["LDY_SCORE"]
+        scored["TOTAL_SCORE"] = scored["LDY_SCORE"]
+        scored["TRIGGER_SCORE"] = 0.0
 
     # 랭크 정보 복원
-    scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
-    scored["_CSV_ROW"]  = df_raw["_CSV_ROW"].values
+    if "_CSV_RANK" in df_raw.columns:
+        scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
+    scored["_CSV_ROW"] = df_raw["_CSV_ROW"].values
 
     # -----------------------------------------------------------
-    # 3. DART 필터 (옵션)
+    # 3. DART 필터
     # -----------------------------------------------------------
     try:
         dart_key = get_conf("DART_API_KEY", "")
@@ -2800,38 +2840,67 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
         analyzer = DartAnalyzer(dart_api_key=dart_key, gemini_api_key=gemini_key)
         scored = analyzer.apply_dart_filter(scored)
         
-        if "TOTAL_SCORE" not in scored.columns:
-             scored["TOTAL_SCORE"] = scored["LDY_SCORE"] 
-             bad_mask = scored.get('DART_SCORE', pd.Series(0, index=scored.index)) <= -4
-             scored.loc[bad_mask, "TOTAL_SCORE"] = 0
-             scored.loc[bad_mask, "LDY_SCORE"] = 0
+        # DART 악재 반영
+        if "DART_SCORE" in scored.columns:
+            bad_mask = scored["DART_SCORE"] <= -4
+            if bad_mask.any():
+                scored.loc[bad_mask, ["FINAL_SCORE", "LDY_SCORE", "TOTAL_SCORE"]] = 0
     except Exception as e:
         logger.warning(f"DART Filter Failed: {e}")
 
     # -----------------------------------------------------------
-    # 4. ROUTE 상태 결정 (핵심 수정: 덮어쓰기 방지)
+    # 4. ROUTE 상태 결정 (Fix 3: Valid Check & TH Usage)
     # -----------------------------------------------------------
-    # CSV에 이미 ROUTE 값이 있다면(ATTACK 등), 재계산하지 않고 그대로 씀!
-    if "ROUTE" in scored.columns and not scored["ROUTE"].isnull().all():
-        scored["ROUTE"] = scored["ROUTE"].astype(str).str.strip()
-        # 분포 계산용 TH만 별도 산출 (상태 결정엔 안 씀)
-        TH = compute_dynamic_thresholds(scored)
-    else:
-        # ROUTE가 없으면 구버전 로직으로 계산 (Fallback)
-        TH = compute_dynamic_thresholds(scored)
+    has_valid_route = False
+    
+    if "ROUTE" in scored.columns:
+        # 문자열 정리 ("nan", None 등 제거)
+        route_clean = scored["ROUTE"].astype(str).str.strip()
+        route_clean = route_clean.replace({"nan": "", "None": "", "NaN": "", "<NA>": ""})
+        scored["ROUTE"] = route_clean
+        
+        # 유효한 라우트가 하나라도 있는지 확인
+        has_valid_route = scored["ROUTE"].ne("").any()
+
+    # 분포 통계(TH) 계산
+    # 주: Prescored 데이터라도 '차트 시각화(분포선)' 등을 위해 대시보드 기준 TH 계산은 필요함
+    TH = compute_dynamic_thresholds(scored)
+
+    if not has_valid_route:
+        # 라우트가 없으면 대시보드 로직으로 생성
         scored["ROUTE"] = scored.apply(lambda r: route_tag_dynamic(r, TH), axis=1).fillna("—")
 
-    # 정렬 및 랭크 부여
+    # -----------------------------------------------------------
+    # 5. 정렬 및 필터링
+    # -----------------------------------------------------------
+    # 원본 CSV 순서 최우선 존중
     scored = scored.sort_values(["_CSV_RANK", "_CSV_ROW"], ascending=[True, True]).reset_index(drop=True)
-    scored["LDY_RANK"] = pd.to_numeric(scored["_CSV_RANK"], errors="coerce")
+    
+    if "LDY_RANK" not in scored.columns or scored["LDY_RANK"].isnull().all():
+        scored["LDY_RANK"] = range(1, len(scored) + 1)
 
-    # Base / Top20 생성
-    base = scored[(pd.to_numeric(scored["EBS"], errors="coerce") >= pass_ebs) & (scored["_GATE_OK"])].copy()
+    # Base 필터링
+    ebs_s = pd.to_numeric(scored["EBS"], errors="coerce").fillna(0)
+    cond_ebs = (ebs_s >= pass_ebs)
+    
+    if "_GATE_OK" not in scored.columns:
+        scored["_GATE_OK"] = liquidity_gate(
+            scored["거래대금(억원)"],
+            scored.get("시장", pd.Series(np.nan, index=scored.index))
+        ).fillna(False)
+        
+    base = scored[cond_ebs & scored["_GATE_OK"]].copy()
+    
     if len(base) < 20:
         base = scored.head(20).copy()
 
     top20 = base.head(20).copy()
-    top20["P_hit"] = (top20["LDY_SCORE"] / 100.0 * 0.8).clip(0, 1) * 100
+    
+    # P_hit (UI용)
+    if "P_hit" not in top20.columns:
+        # 안전하게 숫자 변환 후 계산
+        score_val = pd.to_numeric(top20["FINAL_SCORE"], errors='coerce').fillna(0)
+        top20["P_hit"] = (score_val / 100.0 * 0.8).clip(0, 1) * 100
 
     return scored, base, top20, TH, data_ts, src_type
 
