@@ -1398,35 +1398,33 @@ def plot_radar_chart(row):
         val = pd.to_numeric(row.get(key), errors='coerce')
         return val * 100 if pd.notna(val) else 0
 
-    # 7-Factor 데이터 준비
     keys = ["모멘텀", "가성비(RR)", "상승여력", "안전마진", "타이밍", "유동성", "세력강도"]
-    # 데이터 매핑 (기존 컬럼명에 맞춰 조정)
     values = [
         _safe_get("NORM_MOM"), _safe_get("NORM_RR"), _safe_get("NORM_T1"), 
         _safe_get("NORM_SL"), _safe_get("NORM_NEAR"), _safe_get("NORM_LIQ"), 
         _safe_get("NORM_TEC")
     ]
     
-    # 폐곡선 만들기
+    # 폐곡선 처리
     values += values[:1]
     keys += keys[:1]
 
     fig = go.Figure()
 
-    # 1. 배경 가이드라인 (80점 우수선)
+    # 가이드라인
     fig.add_trace(go.Scatterpolar(
         r=[80]*len(keys), theta=keys,
         mode='lines', line=dict(color='rgba(0, 255, 0, 0.3)', width=1, dash='dot'),
         hoverinfo='skip', showlegend=False
     ))
 
-    # 2. 메인 데이터 (네온 스타일)
+    # 메인 데이터
     fig.add_trace(go.Scatterpolar(
         r=values, theta=keys,
         fill='toself',
         name=stock_name, 
         line=dict(color='#00E5FF', width=3),
-        fillcolor='rgba(0, 229, 255, 0.3)', # 반투명 네온 블루
+        fillcolor='rgba(0, 229, 255, 0.3)', 
         marker=dict(size=6, color='white')
     ))
     
@@ -1638,7 +1636,7 @@ def plot_interactive_chart(
     col_map = {"시가":"Open", "고가":"High", "저가":"Low", "종가":"Close", "거래량":"Volume"}
     df.rename(columns={k:v for k,v in col_map.items() if k in df.columns}, inplace=True)
 
-    # 행 높이 설정 (RSI, OBV 유무에 따라)
+    # 행 높이 설정
     rows = 2
     if show_rsi: rows += 1
     if show_obv: rows += 1
@@ -1657,7 +1655,6 @@ def plot_interactive_chart(
     C_DOWN = '#F23645' # 모던 레드
     C_MA20 = '#FFD700' # 골드
     C_BB_FILL = 'rgba(33, 150, 243, 0.07)' # 아주 연한 파랑
-    C_BB_LINE = 'rgba(33, 150, 243, 0.0)'  # 선은 투명하게
     
     # 1. 캔들 차트
     fig.add_trace(go.Candlestick(
@@ -1668,7 +1665,7 @@ def plot_interactive_chart(
         showlegend=False
     ), row=1, col=1)
 
-    # 2. 이동평균선 (부드러운 곡선)
+    # 2. 이동평균선
     if "MA20" in df.columns:
         fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="MA 20", line=dict(color=C_MA20, width=1.5)), row=1, col=1)
     
@@ -1686,29 +1683,27 @@ def plot_interactive_chart(
             line=dict(width=0), name="Bollinger", hoverinfo='skip'
         ), row=1, col=1)
 
-    # 4. Keltner Channel (점선으로 은은하게)
+    # 4. Keltner Channel
     if show_kc and "KC_UPPER" in df.columns:
         fig.add_trace(go.Scatter(x=df.index, y=df["KC_UPPER"], line=dict(width=1, dash='dot', color='rgba(224, 64, 251, 0.5)'), name="KC High"), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df["KC_LOWER"], line=dict(width=1, dash='dot', color='rgba(224, 64, 251, 0.5)'), name="KC Low"), row=1, col=1)
 
-    # 5. SuperTrend (추세 전환 시각화)
+    # 5. SuperTrend
     if "Trend" in df.columns and "SuperTrend" in df.columns:
-        # 상승구간 (초록)
         up = df[df["Trend"] == 1]["SuperTrend"]
         if not up.empty:
             fig.add_trace(go.Scatter(x=up.index, y=up, mode='lines', line=dict(color=C_UP, width=2), name='SuperTrend'), row=1, col=1)
-        # 하락구간 (빨강)
         down = df[df["Trend"] == -1]["SuperTrend"]
         if not down.empty:
             fig.add_trace(go.Scatter(x=down.index, y=down, mode='lines', line=dict(color=C_DOWN, width=2), showlegend=False), row=1, col=1)
 
-    # 6. 중요 가격 라인 (우측 라벨 스타일)
+    # 6. 중요 가격 라인
     def _add_line(val, color, label, style="dash"):
         if val and val > 0:
             fig.add_hline(y=val, line_dash=style, line_color=color, line_width=1, 
                           annotation_text=label, annotation_position="top right", annotation_font_color=color)
 
-    _add_line(float(entry) if entry else 0, "#2962FF", "Entry", "solid") # 진입가는 실선
+    _add_line(float(entry) if entry else 0, "#2962FF", "Entry", "solid")
     _add_line(float(stop) if stop else 0, "#FF3B30", "Stop Loss")
     _add_line(float(target1) if target1 else 0, "#00E676", "Target 1")
 
@@ -1719,42 +1714,38 @@ def plot_interactive_chart(
         fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="Vol", marker_color=colors, marker_line_width=0, opacity=0.6), row=current_row, col=1)
         current_row += 1
 
-    # 8. RSI (옵션)
+    # 8. RSI
     if show_rsi and "RSI14_CHART" in df.columns:
         fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI", line=dict(color='#E040FB', width=1.5)), row=current_row, col=1)
-        # 과매수/과매도 배경 칠하기
         fig.add_hrect(y0=70, y1=100, fillcolor="red", opacity=0.1, layer="below", row=current_row, col=1)
         fig.add_hrect(y0=0, y1=30, fillcolor="blue", opacity=0.1, layer="below", row=current_row, col=1)
         fig.add_hline(y=50, line_dash="dot", line_color="gray", row=current_row, col=1)
         current_row += 1
 
-    # 9. OBV (옵션)
+    # 9. OBV
     if show_obv and "OBV" in df.columns:
         fig.add_trace(go.Scatter(x=df.index, y=df["OBV"], name="OBV", line=dict(color='#29B6F6', width=1.5), fill='tozeroy', fillcolor='rgba(41, 182, 246, 0.1)'), row=current_row, col=1)
 
-    # 10. 매물대 (Volume Profile) - 배경처럼 은은하게
+    # 10. 매물대
     if show_vp:
-        fig = add_volume_profile(fig, df) # 기존 함수 사용하되 투명도는 add_volume_profile 내부에서 0.15 정도로 낮추세요.
+        fig = add_volume_profile(fig, df)
 
-    # 11. 최종 레이아웃 다듬기
+    # 11. 최종 레이아웃
     fig.update_layout(
         title=dict(text=f"<b>{name}</b> <span style='font-size:12px;color:gray;'>({code})</span>", x=0.02, y=0.98),
-        plot_bgcolor='rgba(0,0,0,0)', # 배경 투명
+        plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         xaxis_rangeslider_visible=False,
         height=600 if show_rsi else 500,
-        margin=dict(l=10, r=50, t=50, b=10), # 우측 여백 확보 (가격 라벨용)
+        margin=dict(l=10, r=50, t=50, b=10),
         hovermode="x unified",
-        showlegend=False, # 차트 안이 복잡하므로 범례 숨김 (툴팁으로 확인)
+        showlegend=False,
         xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.1)', side='right'), # Y축 우측 배치 (전문 트레이딩 스타일)
+        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.1)', side='right'), # Y축 우측 배치
     )
-    
-    # 보조 차트 그리드 설정
     fig.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.1)', side='right')
 
     return fig
-
 
     
 def plot_ai_consensus(df):
@@ -1807,58 +1798,55 @@ def plot_ai_consensus(df):
 def plot_opportunity_map(df):
     if df is None or df.empty: return None
     
-    plot_df = df.copy()
-    
-    # 데이터 정제
-    for c in ["TOTAL_SCORE", "TRIGGER_SCORE", "거래대금(억원)"]:
-        if c in plot_df.columns:
-            plot_df[c] = pd.to_numeric(plot_df[c], errors='coerce').fillna(0)
+    # 👇 try 구문 추가
+    try:
+        plot_df = df.copy()
+        
+        for c in ["TOTAL_SCORE", "TRIGGER_SCORE", "거래대금(억원)"]:
+            if c in plot_df.columns:
+                plot_df[c] = pd.to_numeric(plot_df[c], errors='coerce').fillna(0)
 
-    # 버블 사이즈 정규화 (너무 크거나 작지 않게)
-    plot_df['size_scaled'] = np.log1p(plot_df['거래대금(억원)']) * 2
+        # 버블 사이즈
+        plot_df['size_scaled'] = np.log1p(plot_df['거래대금(억원)']) * 2
 
-    fig = px.scatter(
-        plot_df,
-        x="TOTAL_SCORE",
-        y="TRIGGER_SCORE",
-        size="size_scaled",
-        color="FINAL_SCORE", # 색상은 최종 점수 기준
-        color_continuous_scale="RdYlGn_r", # 녹색(고득점) -> 빨강(저득점) 반전 or Turbo
-        hover_name="종목명",
-        hover_data=["종목코드", "종가", "ROUTE"],
-        text="종목명",
-        title="<b>🚀 Opportunity Map (우상단 = 주도주)</b>"
-    )
+        fig = px.scatter(
+            plot_df,
+            x="TOTAL_SCORE",
+            y="TRIGGER_SCORE",
+            size="size_scaled",
+            color="FINAL_SCORE", 
+            color_continuous_scale="RdYlGn_r",
+            hover_name="종목명",
+            hover_data=["종목코드", "종가", "ROUTE"],
+            text="종목명",
+            title="<b>🚀 Opportunity Map (우상단 = 주도주)</b>"
+        )
 
-    # 배경 구역 나누기 (핵심)
-    # 1. 강력 매수 구간 (우상단)
-    fig.add_shape(type="rect", x0=80, y0=70, x1=100, y1=100, 
-                  fillcolor="rgba(0, 255, 0, 0.05)", line_width=0, layer="below")
-    fig.add_annotation(x=90, y=85, text="🔥 주도주 영역", showarrow=False, 
-                       font=dict(size=20, color="rgba(0,255,0,0.3)"))
+        # 배경 구역 (주도주 영역)
+        fig.add_shape(type="rect", x0=80, y0=70, x1=100, y1=100, 
+                      fillcolor="rgba(0, 255, 0, 0.05)", line_width=0, layer="below")
+        fig.add_annotation(x=90, y=85, text="🔥 주도주 영역", showarrow=False, 
+                           font=dict(size=20, color="rgba(0,255,0,0.3)"))
 
-    # 2. 관망/준비 구간 (좌하단)
-    fig.add_shape(type="rect", x0=0, y0=0, x1=60, y1=50, 
-                  fillcolor="rgba(255, 0, 0, 0.05)", line_width=0, layer="below")
+        # 기준선
+        fig.add_vline(x=70, line_dash="dot", line_color="gray", annotation_text="구조 우수")
+        fig.add_hline(y=60, line_dash="dot", line_color="gray", annotation_text="타이밍 포착")
 
-    # 기준선
-    fig.add_vline(x=70, line_dash="dot", line_color="gray", annotation_text="구조 우수")
-    fig.add_hline(y=60, line_dash="dot", line_color="gray", annotation_text="타이밍 포착")
+        fig.update_traces(
+            textposition='top center', 
+            marker=dict(line=dict(width=1, color='DarkSlateGrey'), opacity=0.85)
+        )
+        
+        fig.update_layout(
+            height=550,
+            xaxis=dict(title="⚙️ 구조 점수 (Foundation)", range=[30, 105], showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
+            yaxis=dict(title="⚡ 타이밍 점수 (Momentum)", range=[20, 105], showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
+            margin=dict(l=20, r=20, t=50, b=20),
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        return fig
 
-    fig.update_traces(
-        textposition='top center', 
-        marker=dict(line=dict(width=1, color='DarkSlateGrey'), opacity=0.85)
-    )
-    
-    fig.update_layout(
-        height=550,
-        xaxis=dict(title="⚙️ 구조 점수 (Foundation)", range=[30, 105], showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
-        yaxis=dict(title="⚡ 타이밍 점수 (Momentum)", range=[20, 105], showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
-        margin=dict(l=20, r=20, t=50, b=20),
-        plot_bgcolor='rgba(0,0,0,0)'
-    )
-    return fig
-
+    # 👇 짝이 맞는 except 구문
     except Exception as e:
         st.error(f"❌ Plotly 차트 생성 중 오류: {e}")
         return None
