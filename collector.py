@@ -2028,38 +2028,69 @@ def calculate_timing_score(row) -> float:
 
 def determine_state_dynamic(row, thresholds: dict):
     """
-    [v15.1] 동적 임계값 기반 상태 머신
-    ✅ Fix: 문자열("ATTACK") 반환, Vol_Quality 필터 추가
+    [v16.1] 수급 필터(설거지 방지)가 적용된 상태 머신
+    ✅ Update: '좋은사람들' 패턴(폭탄 돌리기) 감지 시 WAIT 강등
     """
     try:
+        # 1. 기본 팩터
         rsi = float(row.get('RSI14', 50))
+        r1 = float(row.get('ret_1d_%', 0))   # 당일 등락률
         r5 = float(row.get('ret_5d_%', 0))
         slope = float(row.get('MACD_Slope_PCT', 0))
         range_pos = float(row.get('Range_Pos', 0))
         vol_qual = float(row.get('Vol_Quality', 0))
         t_score = float(row.get('TIMING_SCORE', 0))
         
-        # 1. 과열 (Absolute Cut)
-        if rsi >= 75 or r5 >= 25.0:
-            return "OVERHEAT" # 문자열 반환
+        # 2. [New] 수급 팩터 (2단계에서 매핑한 데이터 사용)
+        major_net = float(row.get('메이저순매수', 0))  # 외인 + 기관
+        ant_net = float(row.get('개인순매수', 0))
+        vol_z = float(row.get('거래강도', 0))          # 평소 거래량 대비 배수
 
-        # 2. 집중 공략 (Dynamic Threshold)
-        # ✅ Fix: Vol_Quality 체크 추가 (거래량 없는 가짜 돌파 방지)
+        # -------------------------------------------------------
+        # 🚨 [TOXIC Filter] 폭탄 돌리기(설거지) 감지
+        # -------------------------------------------------------
+        # 시나리오: 주가는 급등했는데, 메이저는 대량 매도하고 개인이 다 받음
+        # 기준: 7% 이상 급등 & 거래량 3배 폭발 & 메이저 10억 매도 & 개인 10억 매수
+        
+        EXIT_THRESHOLD = 1_000_000_000  # 10억 원
+        
+        is_toxic_supply = False
+        if r1 >= 7.0 and vol_z >= 3.0:
+            if major_net < -EXIT_THRESHOLD and ant_net > EXIT_THRESHOLD:
+                is_toxic_supply = True
+        
+        # 🛑 수급 이탈 시 ATTACK 절대 불가 -> 관망(WAIT) 처리
+        if is_toxic_supply:
+            return "WAIT" 
+
+        # -------------------------------------------------------
+
+        # 3. 과열 (Absolute Cut)
+        if rsi >= 75 or r5 >= 25.0:
+            return "OVERHEAT"
+
+        # 4. 집중 공략 (ATTACK)
         vol_cut = thresholds.get('vol_q75', 1.2)
         range_cut = thresholds.get('range_q75', 0.8)
         
         if (slope > 0 
             and range_pos >= range_cut
-            and vol_qual >= vol_cut  # 👈 핵심 추가: 수급 동반 확인
+            and vol_qual >= vol_cut
             and t_score >= 60):
-            return "ATTACK" # 문자열 반환
+            
+            # ✅ [안전장치 2] TOXIC까지는 아니어도, 오르면서 메이저가 팔면 찝찝함
+            # 주가 5% 이상 상승했는데 메이저가 5억 이상 팔고 있으면 거름
+            if r1 > 5.0 and major_net < -500_000_000:
+                return "WAIT" 
 
-        # 3. 발사 임박
+            return "ATTACK"
+
+        # 5. 발사 임박 (ARMED)
         is_squeeze = int(row.get('TTM_SQUEEZE', 0))
         if is_squeeze == 1 and row.get('Above_MA20', 0) == 1:
             return "ARMED"
         
-        # 4. 추세 대기
+        # 6. 추세 대기
         if row.get('Low_Trend_PCT', 0) > 0:
             return "WAIT"
 
@@ -2310,6 +2341,45 @@ def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
         pass # 뉴스 수집 실패는 조용히 넘김
         
     return list(set(headlines))[:10] # 중복 제거 후 최대 10개
+
+# [v16.1 Patch] 투자자별 순매수 데이터 수집 함수 추가
+def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
+    """
+    해당 일자의 외국인, 기관, 개인 순매수금액(원)을 가져옵니다.
+    Returns: (외인_맵, 기관_맵, 개인_맵)
+    """
+    if (not PYKRX_OK) or (stock is None):
+        return {}, {}, {}
+
+    frg, inst, ant = {}, {}, {}
+    
+    try:
+        log(f"💰 수급 데이터(투자자별 매매동향) 수집 중... ({ymd})")
+        
+        # 1. 외국인
+        df_f = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "외국인")
+        if df_f is not None:
+            for code, row in df_f.iterrows():
+                frg[str(code).zfill(6)] = int(row['순매수거래대금'])
+        time.sleep(0.3) 
+
+        # 2. 기관
+        df_i = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "기관합계")
+        if df_i is not None:
+            for code, row in df_i.iterrows():
+                inst[str(code).zfill(6)] = int(row['순매수거래대금'])
+        time.sleep(0.3)
+
+        # 3. 개인
+        df_a = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "개인")
+        if df_a is not None:
+            for code, row in df_a.iterrows():
+                ant[str(code).zfill(6)] = int(row['순매수거래대금'])
+                
+    except Exception as e:
+        log(f"⚠️ 수급 데이터 수집 실패: {e}")
+    
+    return frg, inst, ant
 
 # ------------------------------- Trigger Score Calculation -------------------------------
 
@@ -2975,6 +3045,19 @@ def main(
         return
 
     df_raw = pd.DataFrame(rows)
+
+    # 👇👇 [여기 삽입] 수급 데이터 매핑 👇👇
+    if not df_raw.empty:
+        # 1. 수급 데이터 가져오기
+        map_frg, map_inst, map_ant = fetch_investor_net_buying(trade_ymd)
+        
+        # 2. DataFrame에 매핑 (단위: 원)
+        df_raw["외인순매수"] = df_raw["종목코드"].map(map_frg).fillna(0)
+        df_raw["기관순매수"] = df_raw["종목코드"].map(map_inst).fillna(0)
+        df_raw["개인순매수"] = df_raw["종목코드"].map(map_ant).fillna(0)
+        
+        # 3. 메이저(외인+기관) 합계 컬럼 생성
+        df_raw["메이저순매수"] = df_raw["외인순매수"] + df_raw["기관순매수"]
 
     # 🔹 업종 대분류 컬럼 생성
     if "업종" in df_raw.columns:
