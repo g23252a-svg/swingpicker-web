@@ -145,8 +145,10 @@ class TradingAttnLSTM(nn.Module):
         )
 
     def forward(self, x):
-        h0 = torch.zeros(2, x.size(0), 64).to(x.device)
-        c0 = torch.zeros(2, x.size(0), 64).to(x.device)
+        # ✅ [Fix] 하드코딩된 '2' 제거 -> self.num_layers 사용
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
+        
         lstm_out, _ = self.lstm(x, (h0, c0))
         context, _ = self.attention(lstm_out)
         out = self.fc(context)
@@ -274,17 +276,20 @@ def train_model():
     print("✅ [ML] 모델 업데이트 완료")
 
 def apply_ml_score(current_df, full_ohlcv_map):
+    # ✅ [Fix] 시작 시 무조건 0으로 초기화 (잔존 데이터 방지)
+    current_df["ML_SCORE"] = 0.0
+
     if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
-        current_df["ML_SCORE"] = 0
         return current_df
 
     try:
+        # CPU 강제 (서버 부하 방지)
         device = torch.device('cpu')
         scaler = joblib.load(SCALER_PATH)
         
-        # 모델 입력 차원 자동 감지 (scaler mean shape 이용)
         input_dim = scaler.mean_.shape[0]
         
+        # 모델 로드 시 파라미터 일치 확인
         model = TradingAttnLSTM(input_dim=input_dim, hidden_dim=64, num_layers=2, output_dim=1)
         model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
         model.to(device)
@@ -293,12 +298,14 @@ def apply_ml_score(current_df, full_ohlcv_map):
         scores = []
         indices = []
         
+        # 배치 처리를 위한 리스트업
         for idx, row in current_df.iterrows():
             code = str(row['종목코드']).zfill(6)
             if code not in full_ohlcv_map: continue
             df = full_ohlcv_map[code]
             if len(df) < SEQ_LENGTH + 30: continue
             
+            # Feature Engineering은 collector와 공유하거나 여기서 재수행
             df = df.rename(columns={"시가":"Open", "고가":"High", "저가":"Low", "종가":"Close", "거래량":"Volume"})
             df_feat = add_technical_features(df)
             if df_feat.empty: continue
@@ -311,17 +318,28 @@ def apply_ml_score(current_df, full_ohlcv_map):
         if scores:
             X_arr = np.array(scores)
             N, L, D = X_arr.shape
+            
+            # 입력 차원 안전 장치
+            if D != input_dim:
+                print(f"⚠️ [ML] 차원 불일치 (Model: {input_dim}, Data: {D}) -> Skip")
+                return current_df
+
             X_scaled = scaler.transform(X_arr.reshape(-1, D)).reshape(N, L, D)
             X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(device)
             
             with torch.no_grad():
                 outputs = model(X_tensor).cpu().numpy().flatten()
             
-            current_df.loc[indices, "ML_SCORE"] = (outputs * 100).round(1)
-            print(f"🤖 [ML] AI 점수 산출 완료 (Avg: {np.mean(outputs)*100:.1f})")
+            # ✅ [Fix] 점수 스케일링 및 클리핑 (0~100)
+            final_scores = (outputs * 100).round(1)
+            final_scores = np.clip(final_scores, 0, 100)
+            
+            current_df.loc[indices, "ML_SCORE"] = final_scores
+            
+            print(f"🤖 [ML] AI 점수 산출 완료 (Avg: {np.mean(final_scores):.1f}점, Count: {len(final_scores)})")
             
     except Exception as e:
         print(f"⚠️ [ML] 점수 반영 실패: {e}")
-        current_df["ML_SCORE"] = 0
+        # 실패 시 0점 유지
 
     return current_df
