@@ -1673,7 +1673,7 @@ def plot_interactive_chart(
         fig.add_trace(go.Scatter(x=df.index, y=df["WEEKLY_MA20"], name="주봉 20선", 
                                  line=dict(color='rgba(255, 255, 255, 0.4)', width=2, dash='dot')), row=1, col=1)
 
-    # 3. 볼린저 밴드 (배경처럼 깔끔하게)
+    # 3. 볼린저 밴드
     if show_bb and "BB_UPPER" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["BB_UPPER"], line=dict(width=0), showlegend=False, hoverinfo='skip'
@@ -1697,15 +1697,26 @@ def plot_interactive_chart(
         if not down.empty:
             fig.add_trace(go.Scatter(x=down.index, y=down, mode='lines', line=dict(color=C_DOWN, width=2), showlegend=False), row=1, col=1)
 
-    # 6. 중요 가격 라인
+    # 6. 중요 가격 라인 (에러 수정됨: 문자열 콤마 처리 추가)
     def _add_line(val, color, label, style="dash"):
-        if val and val > 0:
-            fig.add_hline(y=val, line_dash=style, line_color=color, line_width=1, 
+        if val is None: return
+        
+        # 문자열인 경우 콤마 제거 후 변환
+        if isinstance(val, str):
+            val = val.replace(',', '').strip()
+            
+        try:
+            val_float = float(val)
+        except (ValueError, TypeError):
+            return # 변환 실패 시 라인 안 그림
+
+        if val_float > 0:
+            fig.add_hline(y=val_float, line_dash=style, line_color=color, line_width=1, 
                           annotation_text=label, annotation_position="top right", annotation_font_color=color)
 
-    _add_line(float(entry) if entry else 0, "#2962FF", "Entry", "solid")
-    _add_line(float(stop) if stop else 0, "#FF3B30", "Stop Loss")
-    _add_line(float(target1) if target1 else 0, "#00E676", "Target 1")
+    _add_line(entry, "#2962FF", "Entry", "solid")
+    _add_line(stop, "#FF3B30", "Stop Loss")
+    _add_line(target1, "#00E676", "Target 1")
 
     # 7. 거래량 (Volume)
     current_row = 2
@@ -1741,7 +1752,7 @@ def plot_interactive_chart(
         hovermode="x unified",
         showlegend=False,
         xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.1)', side='right'), # Y축 우측 배치
+        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.1)', side='right'),
     )
     fig.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.1)', side='right')
 
