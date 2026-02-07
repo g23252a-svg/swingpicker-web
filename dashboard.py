@@ -1697,23 +1697,33 @@ def plot_interactive_chart(
         if not down.empty:
             fig.add_trace(go.Scatter(x=down.index, y=down, mode='lines', line=dict(color=C_DOWN, width=2), showlegend=False), row=1, col=1)
 
-    # 6. 중요 가격 라인 (🔥 강력 수정된 부분)
+    # 6. 중요 가격 라인 (🔥 강력 수정됨: Series/List 에러 방어)
     def _add_line(val, color, label, style="dash"):
-        # 값이 없거나 NaN이면 중단
-        if val is None or pd.isna(val): return
+        # 1. 값이 없으면 패스
+        if val is None: return
         
-        try:
-            # 1. 무조건 문자열로 변환 -> 콤마 제거 -> 공백 제거
-            s_val = str(val).replace(',', '').strip()
-            # 2. 실수형(float)으로 변환
-            val_float = float(s_val)
-        except (ValueError, TypeError):
-            # 변환 실패(예: "N/A", "Unknown")시 조용히 리턴
-            return
+        # 2. 값이 리스트나 시리즈(Series)인 경우 첫 번째 값만 추출 (에러 원천 차단)
+        if hasattr(val, '__len__') and not isinstance(val, str):
+            try:
+                if len(val) > 0:
+                    val = val[0] # 첫번째 요소 선택
+                else:
+                    return # 빈 리스트면 패스
+            except:
+                pass # len()이 없거나 인덱싱 안되면 그냥 진행
 
-        if val_float > 0:
-            fig.add_hline(y=val_float, line_dash=style, line_color=color, line_width=1, 
-                          annotation_text=label, annotation_position="top right", annotation_font_color=color)
+        try:
+            # 3. 문자열 변환 및 콤마 제거
+            s_val = str(val).replace(',', '').strip()
+            # 4. 실수 변환
+            val_float = float(s_val)
+            
+            # 5. 유효한 양수일 때만 그리기
+            if val_float > 0 and not math.isnan(val_float):
+                fig.add_hline(y=val_float, line_dash=style, line_color=color, line_width=1, 
+                              annotation_text=label, annotation_position="top right", annotation_font_color=color)
+        except:
+            return # 변환 실패 시 조용히 무시
 
     _add_line(entry, "#2962FF", "Entry", "solid")
     _add_line(stop, "#FF3B30", "Stop Loss")
