@@ -1697,23 +1697,24 @@ def plot_interactive_chart(
         if not down.empty:
             fig.add_trace(go.Scatter(x=down.index, y=down, mode='lines', line=dict(color=C_DOWN, width=2), showlegend=False), row=1, col=1)
 
-    # 6. 중요 가격 라인 (🔥 강력 수정됨: Series/List 에러 방어)
+    # 6. 중요 가격 라인 (🔥 완벽 수정: Series/List/String 전부 처리)
     def _add_line(val, color, label, style="dash"):
         # 1. 값이 없으면 패스
         if val is None: return
         
-        # 2. 값이 리스트나 시리즈(Series)인 경우 첫 번째 값만 추출 (에러 원천 차단)
-        if hasattr(val, '__len__') and not isinstance(val, str):
+        # 2. Series나 List인 경우 첫 번째 값만 추출 (안전장치)
+        # 문자열이 아닌데 길이가 있다면(리스트 등) 첫 요소만 쓴다.
+        if not isinstance(val, (str, float, int)) and hasattr(val, '__len__'):
             try:
                 if len(val) > 0:
-                    val = val[0] # 첫번째 요소 선택
+                    val = val.iloc[0] if hasattr(val, 'iloc') else val[0]
                 else:
-                    return # 빈 리스트면 패스
+                    return
             except:
-                pass # len()이 없거나 인덱싱 안되면 그냥 진행
+                pass
 
         try:
-            # 3. 문자열 변환 및 콤마 제거
+            # 3. 무조건 문자열로 변환 -> 콤마 제거 -> 공백 제거
             s_val = str(val).replace(',', '').strip()
             # 4. 실수 변환
             val_float = float(s_val)
@@ -1723,7 +1724,7 @@ def plot_interactive_chart(
                 fig.add_hline(y=val_float, line_dash=style, line_color=color, line_width=1, 
                               annotation_text=label, annotation_position="top right", annotation_font_color=color)
         except:
-            return # 변환 실패 시 조용히 무시
+            return # 변환 실패 시 조용히 무시 (앱 안 죽음)
 
     _add_line(entry, "#2962FF", "Entry", "solid")
     _add_line(stop, "#FF3B30", "Stop Loss")
