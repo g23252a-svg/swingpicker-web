@@ -1967,166 +1967,155 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
     # (초과분 ^ power) * 가중치
     return ((val - threshold) ** power) * weight
 
-def build_global_score(lat: pd.DataFrame, market_temp: str = "🌤 중립") -> pd.DataFrame:
-    x = lat.copy()
+# -----------------------------------------------------------
+# [New] Scoring Engine v15.1 (Safety Patched)
+# -----------------------------------------------------------
+
+def calculate_ebs_independent(row) -> int:
+    """[독립형 EBS] 5가지 펀더멘털 체크리스트 (0~10점)"""
+    score = 0
+    if row.get('Low_Trend_PCT', 0) > 0: score += 2
+    if row.get('Vol_Quality', 0) >= 1.1: score += 2
+    if row.get('MACD_Slope_PCT', 0) > 0: score += 2
+    rsi = row.get('RSI14', 50)
+    if 45 <= rsi <= 70: score += 2
+    if row.get('TTM_SQUEEZE', 0) == 1 or row.get('BB_Expanding', 0) == 1: score += 2
+    return score
+
+def calculate_structural_score(row) -> float:
+    """[STRUCT_SCORE] 종목의 기초 체력 (0~100)"""
+    def _norm(val, max_val): return min(max(val / max_val, 0), 1)
     
-    # 🔥 [수정] 가중치 딕셔너리에 "TEC" 추가 및 비율 재조정
-    w = {
-        "ENG": 0.25,  # 에너지 (0.30 -> 0.25)
-        "MOM": 0.20,  # 모멘텀 (유지)
-        "TEC": 0.15,  # 🔥 [New] 기술적 완성도 (이격도+매수세) - 15% 할당
-        "RR":  0.10,  # 손익비 (0.15 -> 0.10)
-        "LIQ": 0.10,  # 유동성 (0.15 -> 0.10)
-        "T1":  0.10,  # 기대수익 (유지)
-        "NEAR": 0.05, # 타점 (유지)
-        "SL":  0.05   # 손절폭 (유지)
-    }
+    trend_score = _norm(row.get('Low_Trend_PCT', 0), 3.0) * 40
+    mfi_score = _norm(row.get('MFI14', 50) - 30, 40) * 15 
+    vq_score = _norm(row.get('Vol_Quality', 0) - 0.8, 1.2) * 15
+    range_score = _norm(row.get('Range_Pos', 0), 1.0) * 15
+    
+    disp = row.get('이격도', 0)
+    if 0 <= disp <= 5: disp_score = 15
+    elif disp < 0: disp_score = 5
+    else: disp_score = max(15 - (disp - 5), 0)
+    
+    base = trend_score + mfi_score + vq_score + range_score + disp_score
+    penalty = 0
+    if row.get('Above_MA20', 0) == 0: penalty += 20
+    
+    return max(0.0, base - penalty) # 하한 0점 고정
+
+def calculate_timing_score(row) -> float:
+    """
+    [TIMING_SCORE] 당장 쏠 확률 (0~100 표준화)
+    ✅ Fix: RAW_TRIGGER(0~90)를 0~100으로 변환 + Clamp 적용
+    """
+    # main에서 보존한 RAW_TRIGGER_SCORE 사용 (없으면 0)
+    raw = float(row.get('RAW_TRIGGER_SCORE', row.get('TRIGGER_SCORE', 0)))
+    
+    # 1. 스케일링 (90점 만점 기준 -> 100점 환산)
+    std_trigger = min(raw / 90.0 * 100.0, 100.0)
+    
+    # 2. 보너스
+    bonus = 0
+    if row.get('TTM_SQUEEZE', 0) == 1: bonus += 10
+    if row.get('SUPERTREND_DIR', 0) == 1: bonus += 5
+    
+    # 3. 패널티
+    penalty = 0
+    if row.get('RSI14', 50) > 75: penalty += 20
+    if row.get('gap_pct', 0) > 5.0: penalty += 10 # 갭이 너무 크면 감점
+    
+    # ✅ Fix: 최종 점수 0~100 안전 Clamp (음수 방지)
+    return max(0.0, min(std_trigger + bonus - penalty, 100.0))
+
+def determine_state_dynamic(row, thresholds: dict):
+    """
+    [v15.1] 동적 임계값 기반 상태 머신
+    ✅ Fix: 문자열("ATTACK") 반환, Vol_Quality 필터 추가
+    """
+    try:
+        rsi = float(row.get('RSI14', 50))
+        r5 = float(row.get('ret_5d_%', 0))
+        slope = float(row.get('MACD_Slope_PCT', 0))
+        range_pos = float(row.get('Range_Pos', 0))
+        vol_qual = float(row.get('Vol_Quality', 0))
+        t_score = float(row.get('TIMING_SCORE', 0))
+        
+        # 1. 과열 (Absolute Cut)
+        if rsi >= 75 or r5 >= 25.0:
+            return "OVERHEAT" # 문자열 반환
+
+        # 2. 집중 공략 (Dynamic Threshold)
+        # ✅ Fix: Vol_Quality 체크 추가 (거래량 없는 가짜 돌파 방지)
+        vol_cut = thresholds.get('vol_q75', 1.2)
+        range_cut = thresholds.get('range_q75', 0.8)
+        
+        if (slope > 0 
+            and range_pos >= range_cut
+            and vol_qual >= vol_cut  # 👈 핵심 추가: 수급 동반 확인
+            and t_score >= 60):
+            return "ATTACK" # 문자열 반환
+
+        # 3. 발사 임박
+        is_squeeze = int(row.get('TTM_SQUEEZE', 0))
+        if is_squeeze == 1 and row.get('Above_MA20', 0) == 1:
+            return "ARMED"
+        
+        # 4. 추세 대기
+        if row.get('Low_Trend_PCT', 0) > 0:
+            return "WAIT"
+
+        return "NEUTRAL"
+
+    except Exception:
+        return "NEUTRAL"
 
 
-    # Helper functions
-    def nz_num(s): return pd.to_numeric(s, errors='coerce').fillna(0)
-    def col_or_zero(df, col): return nz_num(df[col]) if col in df.columns else pd.Series(0.0, index=df.index)
-    def pct_norm_pos(s, q=90, floor=1.0):
-        s = nz_num(s).clip(lower=0)
-        top = np.nanpercentile(s, q)
-        return np.clip(s / max(top, floor), 0, 1)
 
-    # 데이터 로드
-    low_trend = col_or_zero(x, "Low_Trend_PCT")
-    vol_qual = col_or_zero(x, "Vol_Quality")
-    range_pos = col_or_zero(x, "Range_Pos")
-    rsi_rising = col_or_zero(x, "RSI_Rising")
-    bb_expand = col_or_zero(x, "BB_Expanding")
-    r1d = col_or_zero(x, "ret_1d_%")
-    
-    # --- 1. 에너지 점수 (ENG) ---
-    # 구조(Structure): 저점이 올라가는가?
-    struct_norm = pct_norm_pos(low_trend, q=90, floor=0.5)
-    # 상태변화(State Change): RSI 저점이 오르거나 BB가 확장 중인가?
-    state_change = np.clip(0.6 * rsi_rising + 0.4 * bb_expand, 0, 1)
-    # 위치(Readiness): 상단 대기
-    ready_norm = np.exp(-((range_pos - 0.85) ** 2) / 0.1)
-    
-    # 에너지 종합 (구조 40%, 상태변화 30%, 위치 30%)
-    eng_score = (0.4 * struct_norm + 0.3 * state_change + 0.3 * ready_norm)
 
-    # --- 2. 모멘텀 점수 (MOM) ---
-    r10 = nz_num(x["ret_10d_%"])
-    slope = nz_num(x["MACD_Slope_PCT"]) if "MACD_Slope_PCT" in x.columns else pd.Series(0, index=x.index)
+def build_global_score(df: pd.DataFrame, macro_risk: str) -> pd.DataFrame:
+    """
+    개선된 스코어링 파이프라인 (v15.1)
+    - 점수 3원화(STRUCT/TIMING/AI) 및 리스크 기반 가중치 적용
+    - TRIGGER_SCORE 원본 보존
+    """
+    x = df.copy()
     
-    slope_norm = pct_norm_pos(slope, q=90, floor=0.01)
-    ret_norm = pct_norm_pos(r10, q=90, floor=1.0)
+    # 1. 독립적 EBS 계산 (0~10점 척도)
+    x["EBS"] = x.apply(calculate_ebs_independent, axis=1)
     
-    mom_score = (0.6 * slope_norm + 0.4 * ret_norm)
-
-    # --- 3. 기타 점수 (RR, LIQ, NEAR 등) ---
-    close = nz_num(x["종가"]); entry = nz_num(x["추천매수가"]); stop = nz_num(x["손절가"]); t1 = nz_num(x["추천매도가1"])
-    turn = nz_num(x["거래대금(억원)"])
+    # 2. 점수 3원화 계산
+    # ✅ STRUCT_SCORE: 기초 체력 (추세, 수급, 이격도 등)
+    x["STRUCT_SCORE"] = x.apply(calculate_structural_score, axis=1).round(1)
     
-    risk = (entry - stop).replace(0, 1)
-    rr_norm = pct_norm_pos((t1 - entry)/risk, q=90, floor=1.0)
-    liq_norm = pct_norm_pos(turn, q=90, floor=10.0)
+    # ✅ TIMING_SCORE: 진입 타이밍 (표준화된 Trigger + 보너스 - 패널티)
+    # 내부적으로 RAW_TRIGGER_SCORE를 참조하여 계산
+    x["TIMING_SCORE"] = x.apply(calculate_timing_score, axis=1).round(1)
     
-    disp = nz_num(x["이격도"])
-    disp_score = np.exp(-((disp - 3.0) ** 2) / 50.0)
-    now_gap = ((close - entry).abs() / entry * 100).fillna(0)
-    near_norm = np.clip(1 - (now_gap / 5.0), 0, 1)
+    # ✅ AI_SCORE: 예측 점수 (ML 엔진 결과)
+    if "ML_SCORE" not in x.columns: x["ML_SCORE"] = 0.0
+    x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
     
-    sl_pct = ((entry - stop) / entry * 100)
-    sl_norm = np.exp(-((sl_pct - 5.0) ** 2) / 20.0)
-    t1_norm = np.clip(((t1 - entry) / entry * 100) / 20.0, 0, 1)
-    
-    # v7.5 팩터 호환성
-    v_power = col_or_zero(x, "V_POWER")
-    v_score = pct_norm_pos(v_power)
-    volz = col_or_zero(x, "거래강도")
-    vol_score = pct_norm_pos(volz)
-    tec_norm = np.clip(0.4 * vol_score + 0.4 * disp_score + 0.2 * v_score, 0, 1)
-
-    # --- 4. Base Score ---
-    base_score = (
-        100 * w["ENG"] * eng_score + 100 * w["MOM"] * mom_score +
-        100 * w["RR"] * rr_norm + 100 * w["LIQ"] * liq_norm +
-        100 * w["NEAR"] * near_norm + 100 * w["SL"] * sl_norm +
-        100 * w["T1"] * t1_norm +
-        100 * w["TEC"] * tec_norm  # 👈 수정된 TEC 적용
-    )
-
-    # 👇👇 [여기부터 수정/교체] 👇👇
-    
-    # --- 🔥 [Step 1: 고점 추격 방지 (Curved Penalty)] ---
-    # 벡터 연산을 위해 apply 사용
-    
-    # (1) RSI 과열 (70점 넘으면 급격히 감점)
-    # ex) 75점 -> (5^2)*0.5 = 12.5점 감점
-    rsi_s = nz_num(x["RSI14"])
-    pen_rsi = rsi_s.apply(lambda v: apply_curve_penalty(v, threshold=70, power=2.0, weight=0.5))
-
-    # (2) 이격도 과열 (10% 넘으면 급격히 감점)
-    disp_s = nz_num(x["이격도"])
-    pen_disp = disp_s.apply(lambda v: apply_curve_penalty(v, threshold=10, power=2.0, weight=1.0))
-
-    # (3) 단기 급등 피로감 (5일 수익률 20% 초과 시)
-    r5_s = nz_num(x["ret_5d_%"])
-    pen_ret = r5_s.apply(lambda v: apply_curve_penalty(v, threshold=20, power=1.5, weight=0.5))
-
-    # (4~6) 기존 무효화 로직
-    pen_struct = 20.0 * (low_trend < 0).astype(float)
-    is_zombie = (col_or_zero(x, "TTM_SQUEEZE") == 1) & (low_trend <= 0.1) & (vol_qual < 0.8)
-    pen_zombie = 15.0 * is_zombie.astype(float)
-    pen_reverse = 10.0 * (col_or_zero(x, "Above_MA20") == 0).astype(float)
-
-    # 패널티 합산
-    total_pen = pen_rsi + pen_disp + pen_ret + pen_struct + pen_zombie + pen_reverse
-
-    # ------------------------------------------------------------------
-    # [최종 점수 반영]
-    # ------------------------------------------------------------------
-    final_score = np.clip(base_score - total_pen, 0, 100)
-
-    # --- 6. 보너스 (Trigger는 별도) ---
-    has_trigger = x["TRIGGER"].fillna("").astype(str) != ""
-    final_score = np.clip(final_score + (5.0 * has_trigger.astype(float)), 0, 100)
-    
-    st_dir = col_or_zero(x, "SUPERTREND_DIR")
-    final_score = np.clip(final_score + (3.0 * (st_dir == 1).astype(float)), 0, 100)
-    
-    # --- 저장 ---
-    if "ML_SCORE" not in x.columns: x["ML_SCORE"] = 0
-    x["RANK_SCORE"] = final_score.round(1)
-    
-    x["ENTRY_SCORE"] = np.clip(
-        40 * eng_score + 30 * near_norm + 20 * mom_score + 10 * has_trigger.astype(float), 0, 100
+    # 3. FINAL_SCORE (가중 합산) - 시장 리스크(Macro)에 따라 비중 조절
+    if macro_risk == "CRITICAL":
+        w_s, w_t, w_a = 0.6, 0.2, 0.2 # 위험 시 구조(방어력) 중시
+    elif macro_risk == "HIGH":
+        w_s, w_t, w_a = 0.5, 0.3, 0.2
+    else: # NORMAL
+        w_s, w_t, w_a = 0.4, 0.4, 0.2 # 평시 밸런스형
+        
+    x["FINAL_SCORE"] = (
+        (x["STRUCT_SCORE"] * w_s) + 
+        (x["TIMING_SCORE"] * w_t) + 
+        (x["AI_SCORE"] * w_a)
     ).round(1)
     
-    x["LDY_SCORE"] = x["RANK_SCORE"] 
-    x["EBS"] = (final_score / 10).astype(int)
+    # 4. 호환성 및 편의를 위한 컬럼 매핑
+    # 기존 대시보드나 로직이 깨지지 않도록 주요 컬럼 연결
+    x["RANK_SCORE"] = x["STRUCT_SCORE"] # 구조 점수를 랭크 점수로
+    x["TOTAL_SCORE"] = x["FINAL_SCORE"] # 최종 점수를 토탈 점수로
+    x["LDY_SCORE"] = x["STRUCT_SCORE"]  # LDY 점수도 구조 점수로 통일
     
-    # 디버깅용 및 호환성 팩터 저장
-    x["ENG_SCORE"] = (eng_score * 100).round(1)
-    x["MOM_SCORE"] = (mom_score * 100).round(1)
-    x["NORM_RR"] = rr_norm.round(2); x["NORM_T1"] = t1_norm.round(2); x["NORM_SL"] = sl_norm.round(2)
-    x["NORM_NEAR"] = near_norm.round(2); x["NORM_MOM"] = pct_norm_pos(mom_score).round(2); x["NORM_LIQ"] = liq_norm.round(2)
-    x["NORM_TEC"] = tec_norm.round(2)
-    x["RR1"] = (t1 - close) / (close - stop).replace(0, 1)
-    x["Now%"] = now_gap
-
-    # ------------------------------------------------------------------
-    # 🔥 [순서 중요] AI 코멘트 생성 -> ROUTE 결정
-    # ------------------------------------------------------------------
-    
-    # 1. AI 코멘트 생성 (먼저!)
-    x["AI_COMMENT"] = x.apply(lambda row: generate_ai_comment(
-        row.get("MFI14", 50), row.get("RSI14", 50), row.get("MACD_Slope_PCT", 0),
-        row.get("이격도", 0), row.get("LDY_SCORE", 0), row.get("TTM_SQUEEZE", 0), 
-        row.get("BB_SQUEEZE_BW", 0), row.get("BB_BW", np.nan), row.get("TTM_SQUEEZE_CNT", 0),
-        row.get("IS_SWING_SUPPORT", False), row.get("V_POWER", 0.0)
-    ), axis=1)
-    
-    # 2. REGIME (순서 상관 없음)
-    x["REGIME"] = x.apply(detect_regime_row, axis=1)
-    
-
+    # 주의: TRIGGER_SCORE는 덮어쓰지 않고 원본(Raw Trigger)을 유지함!
+    # 필요하다면 TIMING_SCORE를 별도 컬럼으로 활용
     
     return x
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
@@ -3048,119 +3037,78 @@ def main(
         trigger_list.append(ts)
     
     df_out['TRIGGER_SCORE'] = trigger_list
-    
-    # ✅ 2. [수정] 시장 온도 세분화 & 점수 체계 고정 (Priority 1 & 4)
-    # macro_risk: CRITICAL, HIGH, NORMAL (매크로 환경)
-    # current_breadth: 시장 전체 20일선 상회 비율 (내부 에너지)
-    current_breadth = breadth.get("ALL", 50.0)
-    
-    # 기본 가중치 (Normal)
-    w_struct, w_timing = 0.6, 0.4
-    market_mode_log = "🌤️ 시장 양호(Normal)"
 
-    # (1) 시장이 매우 위험함 (Risk=CRITICAL or Breadth < 30%) -> 구조 80% / 타이밍 20%
-    if macro_risk == "CRITICAL" or current_breadth < 30:
-        market_mode_log = f"🐻 시장 위험/침체(Risk={macro_risk}, Breadth={current_breadth}%)"
-        w_struct, w_timing = 0.8, 0.2
+    df_out['RAW_TRIGGER_SCORE'] = df_out['TRIGGER_SCORE']
+
+    # 2) 통합 스코어링 (v15.1 엔진: STRUCT, TIMING, AI, FINAL 계산)
+    df_out = build_global_score(df_out, macro_risk) 
+
+    # --- [내부 안전 유틸 함수 정의] ---
+    def safe_quantile(s, q, fallback=0.0):
+        if s is None or s.empty: return fallback
+        v = s.quantile(q)
+        return fallback if pd.isna(v) else float(v)
+
+    def safe_sort(df, cols, ascending):
+        # 존재하는 컬럼만 남기고 정렬 (KeyError 방지)
+        use_cols = [c for c in cols if c in df.columns]
+        if not use_cols: return df
         
-    # (2) 시장이 다소 약세임 (Risk=HIGH or Breadth < 50%) -> 구조 70% / 타이밍 30%
-    elif macro_risk == "HIGH" or current_breadth < 50:
-        market_mode_log = f"☁️ 시장 약세(Risk={macro_risk}, Breadth={current_breadth}%)"
-        w_struct, w_timing = 0.7, 0.3
-        
-    log(f"⚖️ 가중치 적용: {market_mode_log} → 구조 {int(w_struct*100)}% : 타이밍 {int(w_timing*100)}%")
-
-    # 3. 점수 확정 및 FINAL_SCORE 산출
-    # LDY_SCORE: 순수 구조 점수 (이미 계산됨)
-    # ML_SCORE: AI 점수 (이미 계산됨)
-    # TOTAL_SCORE: 구조 + AI (체력) -> ML 없을 경우 LDY_SCORE 사용
-    if "TOTAL_SCORE" not in df_out.columns:
-        df_out['TOTAL_SCORE'] = df_out['LDY_SCORE']
-    else:
-        df_out['TOTAL_SCORE'] = df_out['TOTAL_SCORE'].fillna(df_out['LDY_SCORE'])
-
-    # 🌟 FINAL_SCORE = (체력 * w1) + (맥점 * w2)
-    df_out['FINAL_SCORE'] = (
-        (df_out['TOTAL_SCORE'] * w_struct) + 
-        (df_out['TRIGGER_SCORE'] * w_timing)
-    ).round(1)
-    
-    df_out['TOTAL_SCORE'] = df_out['TOTAL_SCORE'].round(1)
-    df_out['TRIGGER_SCORE'] = pd.to_numeric(df_out['TRIGGER_SCORE']).round(1)
-
-    # 👇👇 [추가] 점수 계산이 다 끝난 후, 여기서 상태(ROUTE)를 결정해야 정확함! 👇👇
-    log("🚦 종목별 상태(ROUTE) 판정 중...")
-    df_out["ROUTE"] = df_out.apply(determine_state, axis=1)
-    df_out["상태"] = df_out["ROUTE"] # UI 표시용 복사
-    # 👆👆 [여기까지 추가] 👆👆
+        # ascending 리스트 길이 맞추기
+        if isinstance(ascending, (list, tuple)):
+            use_asc = ascending[:len(use_cols)]
+            if len(use_asc) < len(use_cols):
+                use_asc = list(use_asc) + [use_asc[-1]] * (len(use_cols) - len(use_asc))
+        else:
+            use_asc = ascending
+        return df.sort_values(by=use_cols, ascending=use_asc)
 
     # --------------------------------------------------------------------------
-    # 켈리 베팅 자금 관리 (FINAL_SCORE 기준으로 적용 권장, 여기서는 TOTAL_SCORE 유지 또는 변경 가능)
+    # [Step 2] 동적 임계값 및 상태 결정 (NaN 방어)
     # --------------------------------------------------------------------------
-    try:
-        # 기존 함수 유지 (TOTAL_SCORE 기준)
-        df_out = apply_kelly_betting(df_out, total_capital=10_000_000)
-    except Exception as e:
-        log(f"⚠️ 켈리 베팅 적용 실패: {e}")
-    # --------------------------------------------------------------------------
-    # 👆👆 [여기까지 추가] 👆👆
+    # 3) 동적 임계값 계산
+    range_q75 = safe_quantile(df_out.get("Range_Pos", pd.Series(dtype=float)), 0.75, fallback=0.8)
+    vol_q75   = safe_quantile(df_out.get("Vol_Quality", pd.Series(dtype=float)), 0.75, fallback=1.2)
 
-    df_out["MKT_BREADTH_ALL_%"] = breadth.get("ALL", np.nan)
-    df_out["MKT_BREADTH_KOSPI_%"] = breadth.get("KOSPI", np.nan)
-    df_out["MKT_BREADTH_KOSDAQ_%"] = breadth.get("KOSDAQ", np.nan)
-    df_out["MKT_TEMP"] = mkt_temp
+    thresholds = {"range_q75": range_q75, "vol_q75": vol_q75}
+    log(f"📊 Dynamic Thresholds: Range(Top25%)={range_q75:.2f}, Vol(Top25%)={vol_q75:.2f}")
 
-    # 섹터 랭킹 상위 5개
-    try:
-        top_secs = sector_rank.head(5)
-        df_out["TOP_SECTORS_5D"] = " / ".join(
-            [f"{i+1}.{k}({v:+.1f}%)" for i, (k, v) in enumerate(top_secs.items())]
-        )
-    except Exception:
-        df_out["TOP_SECTORS_5D"] = ""
-
-    def _regime_rank(val: str) -> int:
-        s = str(val)
-        if s.startswith("①"): return 1
-        if s.startswith("②"): return 2
-        if s.startswith("③"): return 3
-        if s.startswith("④"): return 4
-        if s.startswith("⑤"): return 5
-        return 999
-
-    df_out["REGIME_RANK"] = df_out["REGIME"].map(_regime_rank).fillna(999).astype(int)
+    # 4) 상태(ROUTE) 결정
+    df_out["ROUTE"] = df_out.apply(lambda r: determine_state_dynamic(r, thresholds), axis=1)
+    df_out["상태"] = df_out["ROUTE"]
 
     # --------------------------------------------------------------------------
-    # [Step 5] 2단계 정렬 로직 (Hybrid Sorting)
-    # 기존의 단순 합산 방식은 "구조만 좋고 무거운 종목"이 상위를 독점함.
-    # 개선: "구조적 우량주(1차)"를 먼저 추린 뒤, 그 안에서는 "타이밍(2차)"으로 줄 세우기
+    # [Step 3] 2단계 하이브리드 정렬 (Hybrid Sorting with Top K Limit)
     # --------------------------------------------------------------------------
     
-    # 1. 구조적 합격선 (Structure Cutoff)
-    # RANK_SCORE(구조 점수)가 70점 이상이고, 과열(OVERHEAT) 상태가 아닌 종목
-    # (RouteState 클래스는 파일 상단에 정의되어 있어야 함)
-    mask_qualified = (df_out['RANK_SCORE'] >= 70) & (df_out['ROUTE'] != RouteState.OVERHEAT)
+    # NaN 비교는 False 처리되므로 안전하게 fillna
+    ebs = df_out.get("EBS", pd.Series([0]*len(df_out), index=df_out.index)).fillna(0)
+    struct = df_out.get("STRUCT_SCORE", pd.Series([0]*len(df_out), index=df_out.index)).fillna(0)
+
+    # 1차 컷오프: 구조가 튼튼한가? (EBS 6점 이상 & 구조점수 60점 이상)
+    mask_qual = (ebs >= 6) & (struct >= 60)
+
+    df_prime = df_out[mask_qual].copy()
+    df_normal = df_out[~mask_qual].copy()
+
+    # [1군 정렬] 타이밍 -> AI -> 거래대금
+    df_prime = safe_sort(df_prime, ["TIMING_SCORE", "AI_SCORE", "거래대금(억원)"], [False, False, False])
+
+    # [2군 정렬] 종합점수 -> 구조점수
+    df_normal = safe_sort(df_normal, ["FINAL_SCORE", "STRUCT_SCORE"], [False, False])
+
+    # ✅ [옵션] 상단군 Top K만 최상단 고정 (나머지는 2군 뒤에 붙이기)
+    TOP_K_FIXED = 120  
     
-    # 2. 그룹 분리
-    df_prime = df_out[mask_qualified].copy()   # 1군: 구조 튼튼한 후보군
-    df_normal = df_out[~mask_qualified].copy() # 2군: 나머지 (구조 약함 or 과열)
+    df_out = pd.concat(
+        [df_prime.head(TOP_K_FIXED), df_normal, df_prime.iloc[TOP_K_FIXED:]],
+        ignore_index=True
+    ).reset_index(drop=True)
+
+    # [디버그 로그]
+    log(f"✅ Sorting Stat: Qual_Pass={int(mask_qual.sum())} / Total={len(df_out)} / Top_Fixed={TOP_K_FIXED}")
     
-    # 3. 1군 정렬: "누가 당장 쏠 것인가?" (Timing First)
-    # TRIGGER_SCORE(타이밍) 우선 -> ML_SCORE(AI예측) -> 거래대금 순
-    df_prime = df_prime.sort_values(
-        by=['TRIGGER_SCORE', 'ML_SCORE', '거래대금(억원)'],
-        ascending=[False, False, False]
-    )
-    
-    # 4. 2군 정렬: "누가 구조적으로 덜 나쁜가?" (Structure First)
-    # 기존대로 FINAL_SCORE(종합) 기준 정렬
-    df_normal = df_normal.sort_values(
-        by=['FINAL_SCORE', 'RANK_SCORE'],
-        ascending=[False, False]
-    )
-    
-    # 5. 최종 병합 (1군이 무조건 상단 노출)
-    df_out = pd.concat([df_prime, df_normal])
+   
 
     # --------------------------------------------------------------------------
 
