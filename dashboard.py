@@ -1697,14 +1697,14 @@ def plot_interactive_chart(
         if not down.empty:
             fig.add_trace(go.Scatter(x=down.index, y=down, mode='lines', line=dict(color=C_DOWN, width=2), showlegend=False), row=1, col=1)
 
-    # 6. 중요 가격 라인 (🔥 완벽 수정: Series/List/String 전부 처리)
+    # 6. 중요 가격 라인 (🔥 호출 방식 변경됨: 내부에서 변환)
     def _add_line(val, color, label, style="dash"):
-        # 1. 값이 없으면 패스
+        # 값이 없으면 패스
         if val is None: return
-        
-        # 2. Series나 List인 경우 첫 번째 값만 추출 (안전장치)
-        # 문자열이 아닌데 길이가 있다면(리스트 등) 첫 요소만 쓴다.
-        if not isinstance(val, (str, float, int)) and hasattr(val, '__len__'):
+        if isinstance(val, float) and math.isnan(val): return
+
+        # 리스트/시리즈 처리 (안전장치)
+        if hasattr(val, '__len__') and not isinstance(val, str):
             try:
                 if len(val) > 0:
                     val = val.iloc[0] if hasattr(val, 'iloc') else val[0]
@@ -1713,24 +1713,23 @@ def plot_interactive_chart(
             except:
                 pass
 
+        # 문자열 변환 및 콤마 제거
         try:
-            # 3. 무조건 문자열로 변환 -> 콤마 제거 -> 공백 제거
             s_val = str(val).replace(',', '').strip()
-            # 4. 실수 변환
             val_float = float(s_val)
             
-            # 5. 유효한 양수일 때만 그리기
-            if val_float > 0 and not math.isnan(val_float):
+            if val_float > 0:
                 fig.add_hline(y=val_float, line_dash=style, line_color=color, line_width=1, 
                               annotation_text=label, annotation_position="top right", annotation_font_color=color)
         except:
-            return # 변환 실패 시 조용히 무시 (앱 안 죽음)
+            return 
 
+    # 🔥 [중요] 여기서 float()를 쓰지 말고 변수(entry, stop 등)를 그대로 넘겨야 합니다!
     _add_line(entry, "#2962FF", "Entry", "solid")
     _add_line(stop, "#FF3B30", "Stop Loss")
     _add_line(target1, "#00E676", "Target 1")
 
-    # 7. 거래량 (Volume)
+    # 7. 거래량
     current_row = 2
     if "Volume" in df.columns:
         colors = [C_UP if c >= o else C_DOWN for c, o in zip(df["Close"], df["Open"])]
