@@ -3003,25 +3003,16 @@ def main(
     # 🔥 [1단계 업그레이드] 여기서 ML 점수 주입 (full_ohlcv_map 전달)
     # --------------------------------------------------------------------------
     try:
+        # AI 점수 계산 (ML_SCORE 컬럼 생성)
         df_out = ml_engine.apply_ml_score(df_out, full_ohlcv_map)
         
-        # 기본 TOTAL_SCORE 계산 (ML 없으면 RANK_SCORE 사용)
+        # 컬럼 누락 방지
         if "ML_SCORE" not in df_out.columns:
-            df_out["ML_SCORE"] = 0
-        
-        # TOTAL_SCORE 초기화
-        df_out["TOTAL_SCORE"] = df_out["RANK_SCORE"] # 기본값
-        
-        mask = df_out["ML_SCORE"] > 0
-        if mask.any():
-            df_out.loc[mask, "TOTAL_SCORE"] = (df_out.loc[mask, "RANK_SCORE"] * 0.7) + (df_out.loc[mask, "ML_SCORE"] * 0.3)
-        
-        df_out["TOTAL_SCORE"] = df_out["TOTAL_SCORE"].round(1)
+            df_out["ML_SCORE"] = 0.0
 
     except Exception as e:
         log(f"⚠️ ML 점수 반영 중 에러 (main): {e}")
-        if "TOTAL_SCORE" not in df_out.columns:
-             df_out["TOTAL_SCORE"] = df_out["RANK_SCORE"]
+        df_out["ML_SCORE"] = 0.0
 
     # 🔥 [수정] Trigger Score 계산 및 FINAL_SCORE 반영
     log("🔥 Trigger Score (타이밍) 계산 및 최종 점수 산출 중...")
