@@ -1697,18 +1697,19 @@ def plot_interactive_chart(
         if not down.empty:
             fig.add_trace(go.Scatter(x=down.index, y=down, mode='lines', line=dict(color=C_DOWN, width=2), showlegend=False), row=1, col=1)
 
-    # 6. 중요 가격 라인 (에러 수정됨: 문자열 콤마 처리 추가)
+    # 6. 중요 가격 라인 (🔥 강력 수정된 부분)
     def _add_line(val, color, label, style="dash"):
-        if val is None: return
+        # 값이 없거나 NaN이면 중단
+        if val is None or pd.isna(val): return
         
-        # 문자열인 경우 콤마 제거 후 변환
-        if isinstance(val, str):
-            val = val.replace(',', '').strip()
-            
         try:
-            val_float = float(val)
+            # 1. 무조건 문자열로 변환 -> 콤마 제거 -> 공백 제거
+            s_val = str(val).replace(',', '').strip()
+            # 2. 실수형(float)으로 변환
+            val_float = float(s_val)
         except (ValueError, TypeError):
-            return # 변환 실패 시 라인 안 그림
+            # 변환 실패(예: "N/A", "Unknown")시 조용히 리턴
+            return
 
         if val_float > 0:
             fig.add_hline(y=val_float, line_dash=style, line_color=color, line_width=1, 
