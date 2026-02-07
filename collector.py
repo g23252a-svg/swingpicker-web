@@ -2996,7 +2996,7 @@ def main(
     log(f"🌡 시장 온도: {mkt_temp} (Breadth: {breadth.get('ALL', 0)}%) -> 동적 가중치 적용")
 
     # [수정] 스코어링 (mkt_temp 전달)
-    df_out = build_global_score(df_raw, market_temp=mkt_temp)
+    df_out = df_raw.copy()
 
     # 👇👇 [여기부터 추가하세요] 👇👇
     # --------------------------------------------------------------------------
