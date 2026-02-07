@@ -2028,48 +2028,50 @@ def calculate_timing_score(row) -> float:
 
 def determine_state_dynamic(row, thresholds: dict):
     """
-    [v16.1] 수급 필터(설거지 방지)가 적용된 상태 머신
-    ✅ Update: '좋은사람들' 패턴(폭탄 돌리기) 감지 시 WAIT 강등
+    [v16.1] 수급 데이터 누락 시에도 거래강도/추세로 방어하도록 로직 강화
     """
     try:
-        # 1. 기본 팩터
-        rsi = float(row.get('RSI14', 50))
-        r1 = float(row.get('ret_1d_%', 0))   # 당일 등락률
-        r5 = float(row.get('ret_5d_%', 0))
-        slope = float(row.get('MACD_Slope_PCT', 0))
-        range_pos = float(row.get('Range_Pos', 0))
-        vol_qual = float(row.get('Vol_Quality', 0))
-        t_score = float(row.get('TIMING_SCORE', 0))
-        
-        # 2. [New] 수급 팩터 (2단계에서 매핑한 데이터 사용)
-        major_net = float(row.get('메이저순매수', 0))  # 외인 + 기관
-        ant_net = float(row.get('개인순매수', 0))
-        vol_z = float(row.get('거래강도', 0))          # 평소 거래량 대비 배수
+        # 데이터 추출 (안전한 float 변환)
+        def _get(k, default=0.0):
+            return float(row.get(k, default))
 
-        # -------------------------------------------------------
-        # 🚨 [TOXIC Filter] 폭탄 돌리기(설거지) 감지
-        # -------------------------------------------------------
-        # 시나리오: 주가는 급등했는데, 메이저는 대량 매도하고 개인이 다 받음
-        # 기준: 7% 이상 급등 & 거래량 3배 폭발 & 메이저 10억 매도 & 개인 10억 매수
+        rsi = _get('RSI14', 50)
+        r1 = _get('ret_1d_%', 0)
+        r5 = _get('ret_5d_%', 0)
+        slope = _get('MACD_Slope_PCT', 0)
+        range_pos = _get('Range_Pos', 0)
+        vol_qual = _get('Vol_Quality', 0)
+        t_score = _get('TIMING_SCORE', 0)
+        vol_z = _get('거래강도', 0)
+        low_trend = _get('Low_Trend_PCT', 0)
         
-        EXIT_THRESHOLD = 1_000_000_000  # 10억 원
-        
-        is_toxic_supply = False
-        if r1 >= 7.0 and vol_z >= 3.0:
-            if major_net < -EXIT_THRESHOLD and ant_net > EXIT_THRESHOLD:
-                is_toxic_supply = True
-        
-        # 🛑 수급 이탈 시 ATTACK 절대 불가 -> 관망(WAIT) 처리
-        if is_toxic_supply:
-            return "WAIT" 
+        # 수급 데이터 (없으면 0)
+        frg_net = _get('외인순매수', 0)
+        ind_net = _get('개인순매수', 0)
 
-        # -------------------------------------------------------
+        # -----------------------------------------------------------
+        # 🚨 [TOXIC Filter] 폭탄 돌리기 감지
+        # -----------------------------------------------------------
+        is_toxic = False
+        
+        # 1. 수급 데이터가 있는 경우: 외인 매도 폭탄 감지
+        if frg_net < -1_000_000_000 and ind_net > 1_000_000_000 and r1 > 5.0:
+            is_toxic = True
+            
+        # 2. 수급 데이터가 없더라도(0일 때): 거래량이 미친듯이 터지면(10배↑) 위험
+        if vol_z >= 10.0 and r1 >= 10.0:
+             # 좋은사람들(13배) 같은 케이스는 여기서 걸러짐
+            is_toxic = True
 
-        # 3. 과열 (Absolute Cut)
+        if is_toxic:
+            return "EXIT_WARNING" # ☠️ 절대 진입 금지
+
+        # -----------------------------------------------------------
+        # 1. 과열 (Absolute Cut)
         if rsi >= 75 or r5 >= 25.0:
             return "OVERHEAT"
 
-        # 4. 집중 공략 (ATTACK)
+        # 2. 집중 공략 (ATTACK) 조건
         vol_cut = thresholds.get('vol_q75', 1.2)
         range_cut = thresholds.get('range_q75', 0.8)
         
@@ -2078,20 +2080,21 @@ def determine_state_dynamic(row, thresholds: dict):
             and vol_qual >= vol_cut
             and t_score >= 60):
             
-            # ✅ [안전장치 2] TOXIC까지는 아니어도, 오르면서 메이저가 팔면 찝찝함
-            # 주가 5% 이상 상승했는데 메이저가 5억 이상 팔고 있으면 거름
-            if r1 > 5.0 and major_net < -500_000_000:
+            # [필수 필터] 추세가 꺾인 종목은 절대 ATTACK 주지 않음
+            # 좋은사람들(-7.5)은 여기서 무조건 걸러져야 함
+            if low_trend < -3.0: 
                 return "WAIT" 
-
+            
             return "ATTACK"
 
-        # 5. 발사 임박 (ARMED)
+        # 3. 발사 임박
         is_squeeze = int(row.get('TTM_SQUEEZE', 0))
-        if is_squeeze == 1 and row.get('Above_MA20', 0) == 1:
-            return "ARMED"
+        if is_squeeze == 1 and int(row.get('Above_MA20', 0)) == 1:
+            if low_trend >= -3.0:
+                return "ARMED"
         
-        # 6. 추세 대기
-        if row.get('Low_Trend_PCT', 0) > 0:
+        # 4. 추세 대기
+        if low_trend > 0:
             return "WAIT"
 
         return "NEUTRAL"
