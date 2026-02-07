@@ -24,8 +24,6 @@ import plotly.express as px
 import re
 from typing import Optional, Dict, Any, Tuple
 from dart_analyzer import DartAnalyzer
-# 👇👇 [추가] 스키마 임포트 👇👇
-from schema import RouteState
 
 
 
@@ -639,23 +637,32 @@ def normalize_cols(df):
     return ensure_turnover(df)
 
 def make_preview(df, n=5):
-    if df is None or df.empty:
-        return df
+    """ _CSV_RANK 숫자 변환 후 정렬 (우선순위: CSV순 > LDY순 > 점수순) """
+    if df is None or df.empty: return df
 
-    # 1순위: collector가 박아준 최종 랭크
+    # 1순위: CSV가 준 랭크(_CSV_RANK) - 파일 저장 순서 존중
+    if "_CSV_RANK" in df.columns:
+        tmp = df.copy()
+        tmp["_CSV_RANK"] = pd.to_numeric(tmp["_CSV_RANK"], errors="coerce")
+        cols = ["_CSV_RANK"]
+        if "_CSV_ROW" in tmp.columns: cols.append("_CSV_ROW")
+        return tmp.sort_values(cols, ascending=True).head(n).copy()
+
+    # 2순위: LDY_RANK
     if "LDY_RANK" in df.columns:
         return df.sort_values("LDY_RANK", ascending=True).head(n).copy()
 
-    # 2순위: CSV 원본 순서 랭크
-    if "_CSV_RANK" in df.columns:
-        return df.sort_values("_CSV_RANK", ascending=True).head(n).copy()
+    # 3순위: 점수 기반 (v15: Timing -> AI -> Money)
+    sort_keys = []
+    asc_opts = []
+    for k in ["TIMING_SCORE", "AI_SCORE", "RANK_SCORE", "FINAL_SCORE", "거래대금(억원)"]:
+        if k in df.columns:
+            sort_keys.append(k)
+            asc_opts.append(False)
+            
+    if sort_keys:
+        return df.sort_values(sort_keys, ascending=asc_opts).head(n).copy()
 
-    # 3순위: 점수 기반(오를만함을 RANK_SCORE로 본다면 이게 핵심)
-    keys = [c for c in ["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE", "거래대금(억원)"] if c in df.columns]
-    if keys:
-        return df.sort_values(keys, ascending=[False]*len(keys)).head(n).copy()
-
-    # fallback
     return df.head(n).copy()
 
 # ---------------------------
@@ -1465,97 +1472,47 @@ def plot_radar_chart(row):
 
 def plot_score_waterfall(row):
     """
-    종목 점수 구성 요소를 워터폴 차트로 시각화 (기여도 분석)
-    - 수정사항: 텍스트 잘림 방지를 위해 Y축 범위(range)와 여백(margin) 조정
+    [v15.0] 점수 기여도 시각화 (Waterfall)
+    STRUCT(구조) + TIMING(타이밍) + AI(예측) -> FINAL
     """
     if row is None: return go.Figure()
     
-    # 0. 데이터 안전하게 가져오기
-    def _safe_get(key, default=0):
-        val = pd.to_numeric(row.get(key), errors='coerce')
-        return default if pd.isna(val) else val
-
-    # 1. 팩터별 기여도 계산 (가중치 반영)
-    w_map = {'RR': 0.25, 'T1': 0.18, 'LIQ': 0.13, 'SL': 0.12, 'NEAR': 0.12, 'MOM': 0.10, 'TEC': 0.10}
+    def _get(k): return float(row.get(k, 0))
     
-    contributions = {}
+    # v15.1 점수 체계
+    struct = _get('STRUCT_SCORE')
+    timing = _get('TIMING_SCORE')
+    ai = _get('AI_SCORE')
+    final = _get('FINAL_SCORE')
     
-    # (1) 가성비 (RR) - 25%
-    if "NORM_RR" in row.index: val = _safe_get("NORM_RR") * 100
-    else: val = min(100, _safe_get("RR1") * 30)
-    contributions["가성비(RR)"] = val * w_map['RR']
-
-    # (2) 수익여력 (T1) - 18%
-    if "NORM_T1" in row.index: val = _safe_get("NORM_T1") * 100
-    else: val = min(100, _safe_get("T1_ROOM%") * 5)
-    contributions["수익여력"] = val * w_map['T1']
-
-    # (3) 수급 (LIQ) - 13%
-    if "NORM_LIQ" in row.index: val = _safe_get("NORM_LIQ") * 100
-    else: val = min(100, _safe_get("거래대금(억원)") / 3)
-    contributions["수급(Liq)"] = val * w_map['LIQ']
-
-    # (4) 안전성/타점 (SL+NEAR) - 24%
-    if "NORM_SL" in row.index: val_sl = _safe_get("NORM_SL") * 100
-    else: val_sl = max(0, 100 - _safe_get("이격도") * 2)
-    contributions["안전성"] = val_sl * w_map['SL']
+    # 가중치 (근사치, Normal 기준 4:4:2)
+    # 실제 가중치는 collector.py의 macro_risk에 따라 다르지만 시각화용으로는 고정
+    val_s = struct * 0.4
+    val_t = timing * 0.4
+    val_a = ai * 0.2
     
-    if "NORM_NEAR" in row.index: val_near = _safe_get("NORM_NEAR") * 100
-    else: val_near = max(0, 100 - _safe_get("Now%") * 5)
-    contributions["타점(Near)"] = val_near * w_map['NEAR']
-
-    # (5) 모멘텀 (MOM) - 10%
-    if "NORM_MOM" in row.index: val = _safe_get("NORM_MOM") * 100
-    else: val = min(100, (_safe_get("ret_5d_%") + 5) * 10)
-    contributions["모멘텀"] = val * w_map['MOM']
-
-    # (6) 기술적 (TEC) - 10%
-    if "NORM_TEC" in row.index: val = _safe_get("NORM_TEC") * 100
-    else: val = 50 # 기본값
-    contributions["기술적"] = val * w_map['TEC']
-
-    # 2. 보정치 계산 (최종 점수와 합계의 차이)
-    final_score = _safe_get("FINAL_SCORE")
-    if final_score == 0: final_score = _safe_get("LDY_SCORE")
+    calc_sum = val_s + val_t + val_a
+    adj = final - calc_sum # 반올림 오차 등 보정값
     
-    calc_sum = sum(contributions.values())
-    adjustment = final_score - calc_sum
+    keys = ["구조(체력)", "타이밍(맥)", "AI(예측)", "보정", "최종점수"]
+    values = [val_s, val_t, val_a, adj, final]
+    measures = ["relative", "relative", "relative", "relative", "total"]
     
-    if abs(adjustment) > 0.5:
-        contributions["보정/감점"] = adjustment
-
-    # 3. 차트 그리기
-    sorted_items = sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
-    keys = [k for k, v in sorted_items] + ["최종 점수"]
-    values = [v for k, v in sorted_items] + [final_score]
-    measures = ["relative"] * len(sorted_items) + ["total"]
-
     fig = go.Figure(go.Waterfall(
-        name="Score", orientation="v",
-        measure=measures,
-        x=keys,
-        textposition="outside",
+        name="Score Breakdown", orientation="v",
+        measure=measures, x=keys, y=values,
         text=[f"{v:.1f}" for v in values],
-        y=values,
         connector={"line": {"color": "rgb(63, 63, 63)"}},
-        decreasing={"marker": {"color": "#FF3B30"}}, 
-        increasing={"marker": {"color": "#30D158"}}, 
-        totals={"marker": {"color": "#007AFF"}},
-        cliponaxis=False  # 텍스트가 축 밖으로 나가도 잘리지 않게 설정
+        decreasing={"marker":{"color":"#FF5252"}},
+        increasing={"marker":{"color":"#4CAF50"}},
+        totals={"marker":{"color":"#2196F3"}}
     ))
-
-    # 🔥 [수정된 부분] 레이아웃 조정
+    
     fig.update_layout(
-        title="🧩 점수 기여도 분석 (Why?)",
-        showlegend=False,
-        height=360,  # 높이를 조금 더 늘림 (320 -> 360)
-        margin=dict(l=10, r=10, t=50, b=10), # 상단 여백(t) 확보
-        yaxis=dict(
-            title="기여 점수 (점)",
-            range=[0, 115], # Y축 범위를 115까지 고정하여 상단 공간 확보
-            fixedrange=True # 사용자가 축을 실수로 움직이지 않게 고정
-        ),
-        xaxis=dict(tickfont=dict(size=11))
+        title="🧩 점수 구성 (Struct + Timing + AI)",
+        height=320,
+        margin=dict(l=10, r=10, t=50, b=10),
+        yaxis=dict(title="점수", range=[0, 110], fixedrange=True)
     )
     return fig
 
@@ -1696,12 +1653,38 @@ def plot_interactive_chart(
     show_vwap: bool = False,
     show_hma: bool = False,
     show_obv: bool = False,
-    show_vp: bool = True,   # 👈 [추가됨] 매물대 표시 (기본값 True)
+    show_vp: bool = True,
 ):
+    """
+    [Fix 1] current_row 초기화 문제 해결 + 원본 데이터 보호
+    """
     if df is None or df.empty:
+        st.warning("차트 데이터 없음")
         return go.Figure()
 
-    # OBV가 켜지면 행을 하나 더 늘림 (총 3개 or 4개)
+    # ✅ 1) 원본 보호 (inplace 연산 방지)
+    df = df.copy()
+
+    # ✅ 2) 컬럼명 영문 표준화 (한글 데이터 호환)
+    col_map = {"시가":"Open", "고가":"High", "저가":"Low", "종가":"Close", "거래량":"Volume"}
+    df.rename(columns={k:v for k,v in col_map.items() if k in df.columns}, inplace=True)
+
+    # ✅ 3) 필수 컬럼 체크
+    needed = {"Open", "High", "Low", "Close", "Volume"}
+    if not needed.issubset(df.columns):
+        st.warning(f"차트 데이터 부족 (Missing: {needed - set(df.columns)})")
+        return go.Figure()
+
+    # 날짜 인덱스 처리
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if "Date" in df.columns:
+            df["Date"] = pd.to_datetime(df["Date"])
+            df.set_index("Date", inplace=True)
+        elif "일자" in df.columns:
+            df["일자"] = pd.to_datetime(df["일자"])
+            df.set_index("일자", inplace=True)
+
+    # 행 개수 계산
     rows = 2
     if show_rsi: rows += 1
     if show_obv: rows += 1
@@ -1709,188 +1692,92 @@ def plot_interactive_chart(
     # 높이 비율 동적 할당
     if rows == 2: row_heights = [0.7, 0.3]
     elif rows == 3: row_heights = [0.6, 0.2, 0.2]
-    else: row_heights = [0.5, 0.15, 0.15, 0.2] # 4행일 때
+    else: row_heights = [0.5, 0.15, 0.15, 0.2] 
 
     fig = make_subplots(
-        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=row_heights
+        rows=rows, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.03, 
+        row_heights=row_heights
     )
 
-    # --- 🎨 색상 팔레트 정의 ---
-    COLOR_UP = '#FF3B30'      # 밝은 빨강 (상승)
-    COLOR_DOWN = '#007AFF'    # 밝은 파랑 (하락)
-    COLOR_MA20 = '#FFD700'    # 황금색 (20일선)
-    COLOR_BB = 'rgba(189, 195, 199, 0.5)'      # 은은한 회색 선 (BB)
-    COLOR_BB_FILL = 'rgba(189, 195, 199, 0.1)' # 아주 연한 회색 채우기 (BB)
-    COLOR_KC = '#E040FB'      # 형광 보라 (KC)
-    COLOR_ENTRY = '#FF9F0A'   # 형광 오렌지 (진입가)
-    COLOR_STOP = '#30D158'    # 형광 초록 (목표가 - 상승이라 초록 계열 사용)
-    COLOR_LOSS = '#00B0FF'    # 형광 하늘 (손절가 - 파랑 캔들과 구분되는 하늘색)
-    COLOR_VWAP = '#FF00FF'    # ✅ 형광 마젠타 (VWAP)
+    # ✅ [핵심 수정] current_row를 조건문 밖에서 무조건 초기화
+    current_row = 2 
 
-    # 1) 캔들 차트
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,
-            open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-            name="주가",
-            increasing={'line': {'color': COLOR_UP, 'width': 1.5}, 'fillcolor': COLOR_UP},
-            decreasing={'line': {'color': COLOR_DOWN, 'width': 1.5}, 'fillcolor': COLOR_DOWN},
-            hovertemplate="<b>%{x|%y/%m/%d}</b><br>시가: %{open:,.0f}<br>고가: %{high:,.0f}<br>저가: %{low:,.0f}<br>종가: %{close:,.0f}원<extra></extra>",
-            showlegend=False,
-        ),
-        row=1, col=1
-    )
+    # 색상 팔레트
+    COLOR_UP = '#FF3B30'; COLOR_DOWN = '#007AFF'; COLOR_MA20 = '#FFD700'
+    COLOR_BB = 'rgba(189, 195, 199, 0.5)'; COLOR_BB_FILL = 'rgba(189, 195, 199, 0.1)'
+    COLOR_KC = '#E040FB'; COLOR_ENTRY = '#FF9F0A'; COLOR_STOP = '#30D158'
+    COLOR_LOSS = '#00B0FF'; COLOR_VWAP = '#FF00FF'
 
-    # 2) MA20 (황금색 실선)
+    # 1) 메인 캔들 차트
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+        name="주가",
+        increasing={'line': {'color': COLOR_UP, 'width': 1.5}, 'fillcolor': COLOR_UP},
+        decreasing={'line': {'color': COLOR_DOWN, 'width': 1.5}, 'fillcolor': COLOR_DOWN},
+        showlegend=False,
+    ), row=1, col=1)
+
+    # 2) 보조지표 (MA, BB, KC, SuperTrend)
     if "MA20" in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df.index, y=df["MA20"], 
-                name="20일선", 
-                line=dict(color=COLOR_MA20, width=2)
-            ), 
-            row=1, col=1
-        )
+        fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="20일선", line=dict(color=COLOR_MA20, width=2)), row=1, col=1)
 
-    # -------------------- [v9.0 HMA 라인 추가] --------------------
     if show_hma and "HMA20" in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df.index, y=df["HMA20"],
-                name="HMA(20)",
-                line=dict(color='#00BCD4', width=2.5), # 밝은 Cyan 색상
-            ),
-            row=1, col=1
-        )
-    # -------------------------------------------------------------
+        fig.add_trace(go.Scatter(x=df.index, y=df["HMA20"], name="HMA(20)", line=dict(color='#00BCD4', width=2.5)), row=1, col=1)
 
-    # 3) 볼린저 밴드 (은은한 회색 영역)
-    if show_bb:
-        if "BB_UPPER" in df.columns and "BB_LOWER" in df.columns:
-            # 상단
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["BB_UPPER"], 
-                name="BB 상단", 
-                line=dict(width=1, color=COLOR_BB),
-                showlegend=False
-            ), row=1, col=1)
-            # 하단 (채우기 포함)
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["BB_LOWER"], 
-                name="BB 밴드", 
-                line=dict(width=1, color=COLOR_BB), 
-                fill='tonexty', 
-                fillcolor=COLOR_BB_FILL,
-                showlegend=True
-            ), row=1, col=1)
+    if show_bb and "BB_UPPER" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_UPPER"], name="BB상단", line=dict(width=1, color=COLOR_BB), showlegend=False), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["BB_LOWER"], name="BB밴드", line=dict(width=1, color=COLOR_BB), fill='tonexty', fillcolor=COLOR_BB_FILL, showlegend=True), row=1, col=1)
 
-    # 4) 켈트너 채널 (보라색 점선) - 볼린저 밴드와 확연히 구분
-    if show_kc:
-        if "KC_UPPER" in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["KC_UPPER"], 
-                name="KC 상단", 
-                line=dict(width=1.5, dash='dot', color=COLOR_KC)
-            ), row=1, col=1)
-        if "KC_LOWER" in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df["KC_LOWER"], 
-                name="KC 하단", 
-                line=dict(width=1.5, dash='dot', color=COLOR_KC)
-            ), row=1, col=1)
+    if show_kc and "KC_UPPER" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["KC_UPPER"], name="KC상단", line=dict(width=1.5, dash='dot', color=COLOR_KC)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["KC_LOWER"], name="KC하단", line=dict(width=1.5, dash='dot', color=COLOR_KC)), row=1, col=1)
 
-    # 5) SuperTrend (Trailing Stop Line) - v8.0 개선 (선 차트로 변경)
     if "Trend" in df.columns and "SuperTrend" in df.columns:
-        # 상승 추세 (초록색 실선 - 지지선 역할)
-        st_up = df[df["Trend"] == 1]["SuperTrend"]
-        if not st_up.empty:
-            fig.add_trace(go.Scatter(
-                x=st_up.index, y=st_up,
-                mode='lines',
-                line=dict(color='#00E676', width=2), # Solid Green Line
-                name='SuperTrend (Support)'
-            ), row=1, col=1)
+        up = df[df["Trend"] == 1]["SuperTrend"]
+        if not up.empty:
+            fig.add_trace(go.Scatter(x=up.index, y=up, mode='lines', line=dict(color='#00E676', width=2), name='SuperTrend(지지)'), row=1, col=1)
+        down = df[df["Trend"] == -1]["SuperTrend"]
+        if not down.empty:
+            fig.add_trace(go.Scatter(x=down.index, y=down, mode='lines', line=dict(color='#FF4081', width=2, dash='dot'), name='SuperTrend(저항)'), row=1, col=1)
 
-        # 하락 추세 (빨간색 점선 - 저항선 역할)
-        st_down = df[df["Trend"] == -1]["SuperTrend"]
-        if not st_down.empty:
-            fig.add_trace(go.Scatter(
-                x=st_down.index, y=st_down,
-                mode='lines',
-                line=dict(color='#FF4081', width=2, dash='dot'),
-                name='SuperTrend (Resist)'
-            ), row=1, col=1)
+    if "WEEKLY_MA20" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["WEEKLY_MA20"], name="주봉20선", line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dashdot')), row=1, col=1)
 
-        # -------------------- [v10.0 추가] 주봉 20선 렌더링 --------------------
-        # 굵은 주봉 20선 추가 (회색 점선으로 '심리적 지지선' 표시)
-        if "WEEKLY_MA20" in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index, 
-                y=df["WEEKLY_MA20"],
-                name="주봉 20선",
-                line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dashdot'),
-                hovertemplate="주봉20선: %{y:,.0f}원<extra></extra>"
-            ), row=1, col=1)  # <--- 여기서 괄호를 닫아주어야 에러가 나지 않습니다.
-        # ---------------------------------------------------------------------
-
-        current_row = 2
-
-    # 6) 거래량 (항상 표시)
+    # 3) 거래량 (항상 2행, 안전한 current_row 사용)
     if "Volume" in df.columns:
         colors = [COLOR_UP if c >= o else COLOR_DOWN for c, o in zip(df["Close"], df["Open"])]
-        fig.add_trace(go.Bar(
-            x=df.index, y=df["Volume"], name="거래량", marker_color=colors, opacity=0.8, showlegend=False
-        ), row=current_row, col=1)
+        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량", marker_color=colors, opacity=0.8, showlegend=False), row=current_row, col=1)
         current_row += 1
 
-    # 7) RSI
+    # 4) RSI (옵션)
     if show_rsi and "RSI14_CHART" in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["RSI14_CHART"], name="RSI(14)", line=dict(color='#AB47BC', width=1.5)
-        ), row=current_row, col=1)
-        # 기준선 30/70
+        fig.add_trace(go.Scatter(x=df.index, y=df["RSI14_CHART"], name="RSI(14)", line=dict(color='#AB47BC', width=1.5)), row=current_row, col=1)
         fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=70, y1=70, line=dict(color="red", width=1, dash="dot"), row=current_row, col=1)
         fig.add_shape(type="line", x0=df.index[0], x1=df.index[-1], y0=30, y1=30, line=dict(color="blue", width=1, dash="dot"), row=current_row, col=1)
         current_row += 1
 
-    # 8) [v9.0] OBV 차트 (새로 추가됨)
+    # 5) OBV (옵션)
     if show_obv and "OBV" in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df["OBV"], name="💰OBV", 
-            line=dict(color='#2962FF', width=1.5), fill='tozeroy', fillcolor='rgba(41, 98, 255, 0.1)'
-        ), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["OBV"], name="💰OBV", line=dict(color='#2962FF', width=1.5), fill='tozeroy', fillcolor='rgba(41, 98, 255, 0.1)'), row=current_row, col=1)
         current_row += 1
 
-    # 8) 가격 라인 (가시성 높은 형광색 사용)
+    # 가격 라인 표시
     def _safe_float(v):
-        try:
-            vv = float(pd.to_numeric(v, errors="coerce"))
-            return vv if np.isfinite(vv) and vv > 0 else None
-        except Exception:
-            return None
+        try: return float(pd.to_numeric(v)) if pd.notna(v) else None
+        except: return None
 
-    entry_v = _safe_float(entry)
-    stop_v = _safe_float(stop)
-    t1_v = _safe_float(target1)
-    vwap_v = _safe_float(vwap) # ✅
+    entry_v, stop_v, t1_v, vwap_v = _safe_float(entry), _safe_float(stop), _safe_float(target1), _safe_float(vwap)
 
-    if entry_v is not None:
-        fig.add_hline(y=entry_v, line_dash="dash", line_color=COLOR_ENTRY, line_width=1.5, 
-                      annotation_text=f"🚀진입: {int(entry_v):,}", annotation_font_color=COLOR_ENTRY, row=1, col=1)
-    if stop_v is not None:
-        fig.add_hline(y=stop_v, line_dash="dot", line_color=COLOR_LOSS, line_width=1.5,
-                      annotation_text=f"🛡️손절: {int(stop_v):,}", annotation_font_color=COLOR_LOSS, row=1, col=1)
-    if t1_v is not None:
-        fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, line_width=1.5,
-                      annotation_text=f"💰목표: {int(t1_v):,}", annotation_font_color=COLOR_STOP, row=1, col=1)
+    if entry_v: fig.add_hline(y=entry_v, line_dash="dash", line_color=COLOR_ENTRY, annotation_text=f"🚀진입: {int(entry_v):,}", row=1, col=1)
+    if stop_v: fig.add_hline(y=stop_v, line_dash="dot", line_color=COLOR_LOSS, annotation_text=f"🛡️손절: {int(stop_v):,}", row=1, col=1)
+    if t1_v: fig.add_hline(y=t1_v, line_dash="dot", line_color=COLOR_STOP, annotation_text=f"💰목표: {int(t1_v):,}", row=1, col=1)
+    if show_vwap and vwap_v: fig.add_hline(y=vwap_v, line_dash="solid", line_color=COLOR_VWAP, annotation_text=f"🟣VWAP: {int(vwap_v):,}", row=1, col=1)
 
-    # ✅ [v8.5] VWAP 라인 추가
-    if show_vwap and vwap_v:
-        fig.add_hline(y=vwap_v, line_dash="solid", line_color=COLOR_VWAP, line_width=1.2, annotation_text=f"🟣VWAP: {int(vwap_v):,}", annotation_font_color=COLOR_VWAP, row=1, col=1)
-    # 👇👇👇 [여기 추가] 매물대 함수 호출 👇👇👇
+    # 매물대
     if show_vp:
         fig = add_volume_profile(fig, df)
-    # 👆👆👆 [추가 끝] 👆👆👆
 
     fig.update_layout(
         title=dict(text=f"{name} ({str(code).zfill(6)})", font=dict(size=16), x=0),
@@ -1900,66 +1787,6 @@ def plot_interactive_chart(
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         dragmode="pan",
-    )
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-
-    return fig
-    
-def plot_risk_reward_bar(buy, stop, target1, target2):
-    fig = go.Figure()
-    try:
-        loss_pct = int(((buy - stop) / buy) * 100)
-    except Exception:
-        loss_pct = 0
-    fig.add_trace(
-        go.Bar(
-            y=["Price"],
-            x=[max(buy - stop, 0)],
-            orientation='h',
-            name='Risk',
-            marker=dict(color='red'),
-            text=f"손절: {int(stop):,}원 (-{loss_pct}%)",
-            textposition='auto',
-        )
-    )
-    try:
-        p1_pct = int(((target1 - buy) / buy) * 100)
-    except Exception:
-        p1_pct = 0
-    fig.add_trace(
-        go.Bar(
-            y=["Price"],
-            x=[max(target1 - buy, 0)],
-            orientation='h',
-            name='Reward 1',
-            marker=dict(color='lightgreen'),
-            text=f"1차: {int(target1):,}원 (+{p1_pct}%)",
-            textposition='auto',
-        )
-    )
-    try:
-        p2_pct = int(((target2 - buy) / buy) * 100)
-    except Exception:
-        p2_pct = 0
-    fig.add_trace(
-        go.Bar(
-            y=["Price"],
-            x=[max(target2 - target1, 0)],
-            orientation='h',
-            name='Reward 2',
-            marker=dict(color='green'),
-            text=f"2차: {int(target2):,}원 (+{p2_pct}%)",
-            textposition='auto',
-        )
-    )
-    fig.update_layout(
-        barmode='stack',
-        showlegend=False,
-        height=80,
-        margin=dict(l=10, r=10, t=10, b=10),
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
     )
     return fig
 
@@ -2281,13 +2108,48 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
 # 데이터 로딩
 # ---------------------------
 def normalize_github_raw(url: str) -> str:
+    """GitHub URL을 Raw 포맷으로 통일 (/blob/, /raw/ 모두 대응)"""
     if not isinstance(url, str):
-        return url
-    if "github.com/" in url and "/blob/" in url:
-        url = url.replace("https://github.com/", "https://raw.githubusercontent.com/")
-        url = url.replace("/blob/", "/")
-    return url
+        return ""
+    u = url.strip()
+    if not u:
+        return ""
 
+    u = u.replace("http://", "https://")
+
+    # 이미 raw 도메인이면 그대로
+    if "raw.githubusercontent.com/" in u:
+        return u
+
+    # github.com/user/repo/blob/branch/file -> raw 변환
+    if "github.com/" in u and "/blob/" in u:
+        u = u.replace("https://github.com/", "https://raw.githubusercontent.com/")
+        u = u.replace("/blob/", "/")
+        return u
+
+    # github.com/user/repo/raw/branch/file -> raw 변환
+    if "github.com/" in u and "/raw/" in u:
+        u = u.replace("https://github.com/", "https://raw.githubusercontent.com/")
+        u = u.replace("/raw/", "/")
+        return u
+
+    return u
+
+def _download_bytes(url: str, timeout: int = 30) -> bytes:
+    u = normalize_github_raw(url)
+    if not u:
+        raise ValueError("REMOTE url is empty")
+    
+    # [Fix] User-Agent 추가로 403 차단 방지
+    headers = {
+        "Cache-Control": "no-cache", 
+        "Pragma": "no-cache",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    r = requests.get(u, timeout=timeout, headers=headers)
+    r.raise_for_status()
+    return r.content
 
 
 @st.cache_data(ttl=600)
@@ -2376,14 +2238,31 @@ def save_portfolio_file(text_data):
 # 스코어링 함수 (v6.4 스타일)
 # ---------------------------
 def liquidity_gate(x_turn, market):
-    min_map = {
-        "KOSPI": MIN_TURN_KOSPI,
-        "KOSDAQ": MIN_TURN_KOSDAQ,
-    }
-    try:
-        return nz_num(x_turn) >= market.map(min_map).fillna(MIN_TURN_DEFAULT)
-    except Exception:
-        return pd.Series(False, index=x_turn.index)
+    min_map = {"KOSPI": MIN_TURN_KOSPI, "KOSDAQ": MIN_TURN_KOSDAQ}
+    turn = nz_num(x_turn)
+
+    # 1) turn이 스칼라면 Series로 승격
+    if isinstance(turn, pd.Series):
+        turn_s = turn
+    else:
+        turn_s = pd.Series([turn], dtype="float64")
+
+    # 2) market 처리 (Series vs Scalar)
+    if isinstance(market, pd.Series):
+        m = market.astype(str)
+        if not m.index.equals(turn_s.index):
+            fill_val = str(market.iloc[0]) if not market.empty else ""
+            m = m.reindex(turn_s.index).fillna(fill_val)
+    else:
+        m = pd.Series([str(market)] * len(turn_s), index=turn_s.index, dtype="object")
+
+    m = m.astype(str).str.strip().str.upper()
+    th = m.map(min_map).fillna(MIN_TURN_DEFAULT)
+    return turn_s >= th
+
+# ---------------------------
+# [Fix 3] Preview Sort Logic (숫자 정렬 + 순서 보장)
+# ---------------------------
 
 def build_global_score(lat, keep_order: bool = False):
     x = lat.copy()
