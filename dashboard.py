@@ -3812,24 +3812,29 @@ with tab2:
             st.markdown("---")
             st.subheader("🧱 매물대 및 저항 데이터 분석 (Volume Profile)")
 
-            # collector.py에서 계산되어 DB/CSV에 저장된 값들을 가져옵니다.
-            # 데이터가 없을 경우를 대비해 기본값(0.0)을 설정합니다.
-            res_all = sel_row.get("RES_RATIO", 0.0)
-            res_near = sel_row.get("RES_RATIO_NEAR", 0.0)
-            poc_gap = sel_row.get("POC_GAP", 0.0)
-            near_thres = sel_row.get("NEAR_THRES", 8.0)
-            is_above_poc = sel_row.get("IS_ABOVE_POC", 0)
+            # 데이터 로드 및 안전한 실수 변환
+            def _get_val(k):
+                val = sel_row.get(k, 0.0)
+                try: return float(val)
+                except: return 0.0
+
+            res_all = _get_val("RES_RATIO")
+            res_near = _get_val("RES_RATIO_NEAR")
+            poc_gap = _get_val("POC_GAP")
+            near_thres = _get_val("NEAR_THRES")
+            is_above_poc = int(sel_row.get("IS_ABOVE_POC", 0))
 
             # 3단 지표 카드 (Metric)
             m1, m2, m3 = st.columns(3)
 
             with m1:
                 res_label = "🔴 저항 매우 강함" if res_all > 0.4 else "🟡 보통" if res_all > 0.2 else "🟢 매물 진공"
-                st.metric("상단 전체 매물 비중", f"{res_all*100:.1;f}%", res_label)
+                # ✅ 오타 수정됨: :.1;f -> :.1f
+                st.metric("상단 전체 매물 비중", f"{res_all*100:.1f}%", res_label)
 
             with m2:
                 near_label = "⚠️ 벽이 두꺼움" if res_near > 0.2 else "🚀 돌파 기대"
-                st.metric(f"근접 저항 (위 {near_thres}%)", f"{res_near*100:.1f}%", near_label, delta_color="inverse")
+                st.metric(f"근접 저항 (위 {near_thres:.1f}%)", f"{res_near*100:.1f}%", near_label, delta_color="inverse")
 
             with m3:
                 poc_status = "안착 성공" if is_above_poc == 1 else "돌파 대기"
@@ -3839,7 +3844,7 @@ with tab2:
             if res_all < 0.15 and is_above_poc == 1:
                 st.success(f"🎯 **[전략]** 현재 주요 매물대(POC) 위에 안착했으며, 상단 매물이 **{res_all*100:.1f}%**로 매우 희박합니다. 가벼운 수급만으로도 큰 시세가 나올 수 있는 '매물 진공' 구간입니다.")
             elif res_near > 0.30:
-                st.warning(f"⚠️ **[전략]** 현재가 바로 위({near_thres}%)에 전체 매물의 **30% 이상**이 몰려있습니다. 이 구간을 강력한 거래량으로 뚫어주는지 확인 후 진입하는 것이 안전합니다.")
+                st.warning(f"⚠️ **[전략]** 현재가 바로 위({near_thres:.1f}%)에 전체 매물의 **30% 이상**이 몰려있습니다. 이 구간을 강력한 거래량으로 뚫어주는지 확인 후 진입하는 것이 안전합니다.")
             elif is_above_poc == 0 and poc_gap > -3:
                  st.info(f"💡 **[전략]** 현재 가장 강력한 매물대인 POC({poc_gap:.1f}%) 돌파 직전입니다. 돌파 안착 시 새로운 시세 분출이 기대됩니다.")
 
