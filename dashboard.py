@@ -3829,15 +3829,17 @@ with tab2:
 
             with m1:
                 res_label = "🔴 저항 매우 강함" if res_all > 0.4 else "🟡 보통" if res_all > 0.2 else "🟢 매물 진공"
-                # ✅ 오타 수정됨: :.1;f -> :.1f
+                # ✅ 수정됨: :.1;f (오타) -> :.1f (정상)
                 st.metric("상단 전체 매물 비중", f"{res_all*100:.1f}%", res_label)
 
             with m2:
                 near_label = "⚠️ 벽이 두꺼움" if res_near > 0.2 else "🚀 돌파 기대"
+                # ✅ 수정됨: :.1;f (오타) -> :.1f (정상)
                 st.metric(f"근접 저항 (위 {near_thres:.1f}%)", f"{res_near*100:.1f}%", near_label, delta_color="inverse")
 
             with m3:
                 poc_status = "안착 성공" if is_above_poc == 1 else "돌파 대기"
+                # ✅ 소수점 1자리 포맷팅 확인
                 st.metric("POC 대비 위치", f"{poc_gap:+.1f}%", poc_status)
 
             # --- [전략 가이드 자동 생성] ---
