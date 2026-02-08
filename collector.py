@@ -2004,26 +2004,58 @@ def calculate_structural_score(row) -> float:
 
 def calculate_timing_score(row) -> float:
     """
-    [TIMING_SCORE] 당장 쏠 확률 (0~100 표준화)
-    ✅ Fix: RAW_TRIGGER(0~90)를 0~100으로 변환 + Clamp 적용
+    [v8.7 최종 정밀 버전] TIMING_SCORE 계산
+    - 매물대(Volume Profile) 지표 반영 (연속 스케일 방식)
+    - NaN 전염 방지용 Safety Float 적용
+    - 과열 및 갭 패널티 유지
     """
-    # main에서 보존한 RAW_TRIGGER_SCORE 사용 (없으면 0)
-    raw = float(row.get('RAW_TRIGGER_SCORE', row.get('TRIGGER_SCORE', 0)))
-    
-    # 1. 스케일링 (90점 만점 기준 -> 100점 환산)
+    # --- [내부 방어용 헬퍼 함수] ---
+    def _safe_float(x, default=0.0):
+        try:
+            if x is None: return default
+            val = float(x)
+            return default if np.isnan(val) else val
+        except: return default
+
+    # 1. 기초 데이터 로드 (Main에서 보존한 Raw Score 사용)
+    raw = _safe_float(row.get('RAW_TRIGGER_SCORE', row.get('TRIGGER_SCORE', 0)))
     std_trigger = min(raw / 90.0 * 100.0, 100.0)
     
-    # 2. 보너스
     bonus = 0
-    if row.get('TTM_SQUEEZE', 0) == 1: bonus += 10
-    if row.get('SUPERTREND_DIR', 0) == 1: bonus += 5
-    
-    # 3. 패널티
     penalty = 0
-    if row.get('RSI14', 50) > 75: penalty += 20
-    if row.get('gap_pct', 0) > 5.0: penalty += 10 # 갭이 너무 크면 감점
+
+    # 2. 매물대(Volume Profile) 보정 로직
+    res_all = _safe_float(row.get('RES_RATIO', 0))
+    res_near = _safe_float(row.get('RES_RATIO_NEAR', 0))
+    poc_gap = _safe_float(row.get('POC_GAP', 0))
+    is_above = int(_safe_float(row.get('IS_ABOVE_POC', 0)))
+
+    if is_above == 1:
+        # [보너스] 상단 전체 매물이 적을수록 최대 +12점
+        bonus += max(0, 12 * (1 - min(res_all, 0.30) / 0.30))
+        # [보너스] 근접 저항이 5% 미만으로 매우 얇으면 추가 +3점
+        if res_near < 0.05: bonus += 3
+        # [과열 차감] POC 대비 너무 멀면(12% 초과) 보너스 일부 회수 (음수 방지)
+        if poc_gap > 12: 
+            bonus = max(0, bonus - 4)
+    else:
+        # [패널티] 상단 매물(저항)이 두꺼울수록 최대 -15점
+        penalty += min(15, 15 * (min(res_all, 0.45) / 0.45))
+        # [패널티] 당장 머리 위(Near) 저항이 20%를 넘으면 추가 -5점
+        if res_near > 0.20: penalty += 5
+
+    # 3. 기존 기술적 보너스 (TTM Squeeze, Supertrend)
+    if int(_safe_float(row.get('TTM_SQUEEZE', 0))) == 1: bonus += 10
+    if int(_safe_float(row.get('SUPERTREND_DIR', 0))) == 1: bonus += 5
     
-    # ✅ Fix: 최종 점수 0~100 안전 Clamp (음수 방지)
+    # 4. 기존 기술적 패널티 (RSI 과열, 갭 상승)
+    rsi = _safe_float(row.get('RSI14', 50))
+    gap_pct = _safe_float(row.get('gap_pct', 0))
+    
+    if rsi > 75: penalty += 20
+    if gap_pct > 5.0: penalty += 10 # 갭이 너무 크면 추격 리스크 감점
+    
+    # ✅ 최종 점수 0~100 안전 Clamp (음수 방지 및 상한 고정)
     return max(0.0, min(std_trigger + bonus - penalty, 100.0))
 
 def determine_state_dynamic(row, thresholds: dict):
@@ -2517,6 +2549,61 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
     final_score = (score_today * 0.7) + (score_yesterday * 0.3)
     return float(final_score)
 
+
+def calc_volume_profile_v2(df_120: pd.DataFrame):
+    """
+    [v8.7 최종 정밀 버전] 매물대 분석 로직
+    - Typical Price 사용 + 2~98% Percentile 컷
+    - 데이터 길이에 따른 가변 Bins (15~20) 반영
+    - 변동성(ATR%) 연동형 Near Resistance 범위 설정
+    """
+    if df_120.empty or len(df_120) < 15:
+        return None, 0.0, 0.0, 0.0
+
+    # 1. 기초 데이터 확보 (Typical Price)
+    typ_price = (df_120['고가'] + df_120['저가'] + df_120['종가']) / 3
+    curr_c = float(df_120['종가'].iloc[-1])
+    
+    # 2. 변동성(ATR%) 기반 근접 저항 범위 결정 (6% ~ 12% 가변)
+    tr = pd.concat([(df_120['고가'] - df_120['저가']), 
+                    (df_120['고가'] - df_120['종가'].shift(1)).abs(), 
+                    (df_120['저가'] - df_120['종가'].shift(1)).abs()], axis=1).max(axis=1)
+    atr_pct = (tr.rolling(14).mean().iloc[-1] / curr_c) if curr_c > 0 else 0.03
+    near_threshold = max(1.06, min(1.12, 1.0 + atr_pct * 2.0))
+
+    # 3. 범위 설정 및 안전장치 (Percentile + Safety Clamp)
+    l_min = typ_price.quantile(0.02)
+    h_max = typ_price.quantile(0.98)
+    l_min = min(l_min, curr_c * 0.97) # 현재가를 범위 안에 포함
+    h_max = max(h_max, curr_c * 1.03)
+    
+    if h_max <= l_min: return None, 0.0, 0.0, 0.0
+
+    # 4. 가변 Bins 설정 (해상도 조절)
+    bins = 20 if len(df_120) >= 100 else 15
+    bin_size = (h_max - l_min) / bins
+    bins_edges = [l_min + i * bin_size for i in range(bins + 1)]
+    
+    # 5. Histogram 생성
+    volume_hist, _ = np.histogram(typ_price, bins=bins_edges, weights=df_120['거래량'])
+    
+    # 6. POC 및 매물 비중 산출
+    max_bin_idx = np.argmax(volume_hist)
+    poc_p = (bins_edges[max_bin_idx] + bins_edges[max_bin_idx + 1]) / 2
+    
+    total_vol = volume_hist.sum() if volume_hist.sum() > 0 else 1
+    res_all_vol = 0.0
+    res_near_vol = 0.0
+    
+    for i in range(bins):
+        bin_center = (bins_edges[i] + bins_edges[i+1]) / 2
+        if bin_center > curr_c:
+            res_all_vol += volume_hist[i]
+            if bin_center <= curr_c * near_threshold:
+                res_near_vol += volume_hist[i]
+                
+    return poc_p, (res_all_vol / total_vol), (res_near_vol / total_vol), (near_threshold - 1.0) * 100
+
 def analyze_ticker(
     t: str, ohlcv_df: pd.DataFrame, top_df: pd.DataFrame, mcap_map: Dict[str, float],
     kospi_set: set, kosdaq_set: set, name_map: Dict[str, str], sector_map: Dict[str, str],
@@ -2795,6 +2882,14 @@ def analyze_ticker(
         "ret_5d_%": round(ret_5, 2), "ret_10d_%": round(ret_10, 2), "ret_20d_%": round(ret_20, 2),
         "ret_60d_%": round(ret_60, 2), "ret_120d_%": round(ret_120, 2),
         "rel_20d_%": round(rel_20, 2), "rel_60d_%": round(rel_60, 2), "rel_120d_%": round(rel_120, 2),
+
+        "RES_RATIO": round(res_all, 3),        # 상단 전체 매물 비중
+        "RES_RATIO_NEAR": round(res_near, 3),   # 상단 근접(8%) 매물 비중
+        "IS_ABOVE_POC": is_above_poc,          # 매물대(POC) 돌파 여부
+        "POC_GAP": poc_gap,                    # POC와의 이격도 (%)
+        "NEAR_THRES": round(near_pct, 1),       # 가변 NEAR 범위 (%)
+        
+        
         # 🔥 [Step 1 & 2 핵심 지표]
         "Low_Trend_PCT": round(low_trend_pct, 2), # 무효화 체크용 (음수면 아웃)
         "RSI_Rising": int(rsi_rising),            # 상태 개선 체크용
