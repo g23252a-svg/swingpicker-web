@@ -3499,32 +3499,16 @@ with tab2:
         user_type = "Free" if user else "Guest"
         st.info(f"✅ {user_type} 회원: 상위 {limit}개 열람 중 (Pro/Prime 업그레이드 시 더 많은 종목 확인 가능)")
     
-    # --- 2. 데이터 상태 해석 (Augment) ---
-    심사숙고하여 사용자님의 기존 디자인(cfg, cols, 프로그레스 바 등)을 100% 보존하면서, 필터링 결과가 0개일 때 발생하는 NameError를 완벽하게 해결하고, 매물대 분석 지표와 상관관계 차트까지 통합된 최종 코드를 구성했습니다.
 
-이 코드는 사용자님의 dashboard.py 파일 중 약 3618라인부터 3828라인(CSV 다운로드 버튼 직전)까지를 대체합니다.
-
-📍 교체 방법 (가장 중요)
-시작점 찾기: full_df = augment_display_data(filtered.copy()) 줄을 찾으세요.
-
-끝점 찾기: if auth_status in ["prime", "admin"]: (CSV 다운로드 버튼 코드) 바로 윗줄까지 드래그하세요.
-
-붙여넣기: 아래의 긴 코드 블록을 복사해서 그 자리에 덮어쓰기 하세요.
-
-💎 [v9.9 최종 통합본] 디자인 보존 + 에러 완벽 방어
-Python
-    # ---------------------------------------------------------
-    # [v9.9] 데이터 해석, 에러 방어, 매물대 및 상관관계 통합 블록
-    # ---------------------------------------------------------
     full_df = augment_display_data(filtered.copy())
     
-    # 🔥 [핵심 1] 모든 상황에서 NameError를 방지하기 위해 변수를 최상단에서 초기화
+    # 변수 사전 초기화 (필터링 결과가 0개일 때 NameError 방지)
     active_df = pd.DataFrame()
     passive_df = pd.DataFrame()
     active_view = pd.DataFrame()
     passive_view = pd.DataFrame()
 
-    # 🔥 [핵심 2] 사용자님의 기존 표 설정(cols) 및 디자인(cfg) 그대로 유지
+    # 사용자 정의 컬럼 리스트 및 디자인 설정 (cfg)
     cols = [
         "상태", "종목명", "생존일",
         "FINAL_SCORE",   # [1] 최종 판단
@@ -3557,7 +3541,6 @@ Python
         "제외사유": st.column_config.TextColumn("제외사유", width="small")
     }
 
-    # 1. 데이터가 있을 때만 분류 및 정렬 수행
     if not full_df.empty:
         if "IS_ACTIVE" in full_df.columns:
             active_df  = full_df[full_df["IS_ACTIVE"] == True].copy()
@@ -3567,7 +3550,6 @@ Python
             active_df  = full_df[active_mask].copy()
             passive_df = full_df[~active_mask].copy()
 
-        # 정렬 모드 선택
         sort_mode = st.radio("정렬 기준", ["🚦 상태 우선 (행동순)", "🔢 점수 우선 (능력순)"], horizontal=True, label_visibility="collapsed", key="tab2_sort_mode")
         
         def _apply_sort(df_target):
@@ -3583,7 +3565,6 @@ Python
         active_view = active_df.head(limit).copy()
         passive_view = passive_df.copy()
 
-        # [데이터 포맷팅: 종목명 복구 및 숫자 콤마 표시]
         try:
             name_map = get_code_map(); code_to_name = {v: k for k, v in name_map.items()}
             def _fmt_display(df_target):
@@ -3600,12 +3581,10 @@ Python
             passive_view = _fmt_display(passive_view)
         except: pass
 
-    # --- 2. 화면 출력 로직 (시장 지도 & 차트) ---
     if full_df.empty:
         st.warning("🧐 현재 모든 필터 조건을 만족하는 종목이 없습니다. 필터를 한두 개 해제해 보세요.")
     else:
         st.markdown("### 🔭 한눈에 보는 시장 지도")
-        # Top 3 메트릭 카드
         top3 = active_df.head(3)
         if not top3.empty:
             c_h = st.columns(3)
@@ -3613,7 +3592,6 @@ Python
                 with c_h[i]:
                     st.container(border=True).metric(f"🥇 Top {i+1}. {row['종목명']}", f"{row['FINAL_SCORE']}점", f"Trigger {row['TRIGGER_SCORE']}점")
 
-        # 기회 포착 산점도 (Opportunity Map)
         try:
             chart_data = pd.concat([active_df, passive_df.head(20)])
             if not chart_data.empty:
@@ -3634,11 +3612,9 @@ Python
             with st.expander(f"💤 보류/제외 종목 ({len(passive_view)}개)"):
                 st.dataframe(passive_view[[c for c in (cols+["제외사유"]) if c in passive_view.columns]], use_container_width=True, column_config=cfg, hide_index=True)
 
-    # --- 3. 🔍 상세 정밀 분석 (Deep Dive) ---
     st.divider()
     st.markdown("### 🔍 상세 정밀 분석 (Deep Dive)")
     
-    # NameError 방지용 안전 리스트 생성
     target_list = []
     if not active_view.empty:
         target_list = active_view["종목명"].tolist()
@@ -3650,7 +3626,6 @@ Python
     else:
         selected_name = st.selectbox("분석할 종목을 선택하세요", target_list, key="dd_select_final")
         sel_row = None
-        # 데이터프레임에서 원본 행 찾기
         if not active_df.empty:
             found = active_df[active_df["종목명"] == selected_name]
             if not found.empty: sel_row = found.iloc[0]
@@ -3659,7 +3634,6 @@ Python
             if not found.empty: sel_row = found.iloc[0]
 
         if sel_row is not None:
-            # [차트 및 레이더 출력]
             d1, d2 = st.columns([1.2, 1])
             with d1:
                 code = str(sel_row['종목코드']).zfill(6)
@@ -3674,44 +3648,32 @@ Python
                 except: pass
                 st.plotly_chart(plot_radar_chart(sel_row), use_container_width=True)
 
-            # 🔥 매물대 분석 지표 (Volume Profile) 섹션
             st.markdown("---")
             st.subheader("🧱 매물대 및 저항 데이터 분석 (Volume Profile)")
             def _gv(k):
                 v = sel_row.get(k, 0.0)
                 try: return float(v)
                 except: return 0.0
-
             res_all, res_near, poc_gap, near_thres = _gv("RES_RATIO"), _gv("RES_RATIO_NEAR"), _gv("POC_GAP"), _gv("NEAR_THRES")
             is_above_poc = int(sel_row.get("IS_ABOVE_POC", 0) or 0)
-
             m1, m2, m3 = st.columns(3)
-            with m1:
-                rl = "🔴 저항강함" if res_all > 0.4 else "🟡 보통" if res_all > 0.2 else "🟢 매물진공"
-                st.metric("상단 전체 매물 비중", f"{res_all*100:.1f}%", rl)
-            with m2:
-                nl = "⚠️ 벽 두꺼움" if res_near > 0.2 else "🚀 돌파기대"
-                st.metric(f"근접 저항 (위 {near_thres:.1f}%)", f"{res_near*100:.1f}%", nl, delta_color="inverse")
-            with m3:
-                ps = "안착성공" if is_above_poc == 1 else "돌파필요"
-                st.metric("POC 대비 위치", f"{poc_gap:+.1f}%", ps)
+            m1.metric("상단 전체 매물 비중", f"{res_all*100:.1f}%", "🔴 저항강함" if res_all > 0.4 else "🟡 보통" if res_all > 0.2 else "🟢 매물진공")
+            m2.metric(f"근접 저항 (위 {near_thres:.1f}%)", f"{res_near*100:.1f}%", "⚠️ 저항" if res_near > 0.2 else "🚀 돌파기대", delta_color="inverse")
+            m3.metric("POC 대비 위치", f"{poc_gap:+.1f}%", "안착성공" if is_above_poc == 1 else "돌파필요")
 
             if res_all < 0.15 and is_above_poc == 1:
                 st.success(f"🎯 **[전략]** 현재 주요 매물대 위에 안착했으며, 상단 매물이 매우 희박한 '매물 진공' 구간입니다. 탄력적인 시세가 기대됩니다.")
             elif res_near > 0.30:
-                st.warning(f"⚠️ **[전략]** 현재가 바로 위에 매물 벽이 두껍습니다. 거래량을 동반한 돌파 확인이 필요합니다.")
+                st.warning(f"⚠️ **[전략]** 현재가 바로 위에 매물 벽이 두꺼움(30%+). 거래량을 동반한 돌파 확인이 필요합니다.")
 
-    # 상관관계 분석 섹션
     st.divider()
     with st.expander("🧩 Top 종목 상관관계 점검 (분산투자 확인용)"):
-        st.caption("상위 종목 간의 주가 동조화를 분석합니다.")
         corr_target = active_df if not active_df.empty else passive_df
         if not corr_target.empty:
             if st.button("🚀 상관관계 분석 실행", key="btn_run_corr_final"):
                 with st.spinner("분석 중..."):
                     fig_corr = plot_correlation_heatmap(corr_target)
                     if fig_corr: st.plotly_chart(fig_corr, use_container_width=True)
-                    else: st.warning("데이터가 부족합니다.")
         else: st.info("표시할 종목이 없습니다.")
     
     if auth_status in ["prime", "admin"]:
