@@ -2613,12 +2613,17 @@ def analyze_ticker(
     if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
     
-    # 데이터 타입 안전 변환
-    c = pd.to_numeric(ohlcv["종가"], errors='coerce')
-    h = pd.to_numeric(ohlcv["고가"], errors='coerce')
-    l = pd.to_numeric(ohlcv["저가"], errors='coerce')
-    v = pd.to_numeric(ohlcv["거래량"], errors='coerce')
-    o = pd.to_numeric(ohlcv["시가"], errors='coerce')
+    # --- [데이터 타입 강제 변환: 여기서부터 교체] ---
+    # 데이터프레임의 컬럼 자체를 숫자로 변환해야 매물대 함수가 작동합니다.
+    for col in ["종가", "고가", "저가", "거래량", "시가"]:
+        ohlcv[col] = pd.to_numeric(ohlcv[col], errors='coerce').fillna(0)
+    
+    # 변수 할당 (기존 로직 호환용)
+    c = ohlcv["종가"]
+    h = ohlcv["고가"]
+    l = ohlcv["저가"]
+    v = ohlcv["거래량"]
+    o = ohlcv["시가"]
     
     last_c = float(c.iloc[-1])
 
@@ -2869,6 +2874,14 @@ def analyze_ticker(
     
     # Tick 단위 보정
     buy = round_to_tick(buy); stop = floor_to_tick(stop); target = ceil_to_tick(target)
+
+    # --- [이 코드가 빠져있으면 분석 결과에 반영되지 않습니다] ---
+    # 매물대 분석 실행 (최근 120일 데이터 사용)
+    poc_p, res_all, res_near, near_pct = calc_volume_profile_v2(ohlcv.tail(120))
+    
+    # POC 위치 버그 방지 및 이격도 계산
+    is_above_poc = 1 if (poc_p is not None and last_c > poc_p) else 0
+    poc_gap = round((last_c - poc_p) / poc_p * 100, 2) if poc_p else 0
 
 
 
