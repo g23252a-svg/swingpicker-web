@@ -1550,33 +1550,40 @@ def plot_correlation_heatmap(df_target):
 
 def add_volume_profile(fig, df):
     """
-    차트 우측에 매물대(Volume Profile)를 가로 막대형으로 추가
-    - 수정사항: 막대 투명도 조절 및 레이어 순서 변경 (캔들 뒤로 보내기)
+    [v8.7 정밀형] 차트 우측에 매물대(Volume Profile) 및 POC 강조 라인 추가
     """
     if df is None or df.empty: return fig
     
-    # 1. 가격 구간(Bin) 설정
+    # 1. 기초 데이터 확보 (Typical Price 사용: 고+저+종 / 3)
+    typ_price = (df['High'] + df['Low'] + df['Close']) / 3
     price_min = df['Low'].min()
     price_max = df['High'].max()
+    
     if price_min == price_max: return fig 
 
-    bins = np.linspace(price_min, price_max, 50)
+    # 2. 가격 구간(Bins) 설정 (데이터 길이에 따라 해상도 조절)
+    num_bins = 50 if len(df) > 100 else 30
+    bins = np.linspace(price_min, price_max, num_bins)
     
-    # 2. 구간별 거래량 합산
-    hist, bin_edges = np.histogram(df['Close'], bins=bins, weights=df['Volume'])
-    y_vals = bin_edges[:-1]
+    # 3. 구간별 거래량 합산 (Histogram)
+    hist, bin_edges = np.histogram(typ_price, bins=bins, weights=df['Volume'])
+    y_vals = (bin_edges[:-1] + bin_edges[1:]) / 2 # 각 bin의 중앙값
     
-    # 3. 최대 거래량 구간 찾기
+    # 4. POC(Point of Control: 최대 매물 구간) 산출
     max_vol = hist.max() if len(hist) > 0 else 1
+    max_vol_idx = np.argmax(hist)
+    poc_price = y_vals[max_vol_idx]
     
-    # 4. 가로 막대 그래프 추가
-    # 🔥 [수정] 투명도를 0.2 -> 0.15로 더 연하게 조정
+    # 5. 매물대 가로 막대 그래프 설정
+    # 일반 매물은 연한 회색, POC 구간은 오렌지색으로 강조
+    colors = ['rgba(128, 128, 128, 0.15)'] * len(hist)
+    colors[max_vol_idx] = 'rgba(255, 165, 0, 0.4)' 
+    
     bar_trace = go.Bar(
-        y=y_vals, 
-        x=hist,
+        y=y_vals, x=hist,
         orientation='h',
         name='매물대',
-        marker=dict(color='rgba(128, 128, 128, 0.15)', line=dict(width=0)), 
+        marker=dict(color=colors, line=dict(width=0)), 
         xaxis='x2', 
         hoverinfo='none', 
         showlegend=False
@@ -1584,25 +1591,32 @@ def add_volume_profile(fig, df):
     
     fig.add_trace(bar_trace, row=1, col=1)
 
-    # ---------------------------------------------------------
-    # 🔥 [핵심 수정] 트레이스 순서 변경 (맨 뒤 -> 맨 앞)
-    # 방금 추가한 매물대(마지막 요소)를 0번 인덱스로 옮겨서
-    # 가장 먼저 그려지게(배경처럼) 만듭니다.
-    # ---------------------------------------------------------
+    # 6. POC 수평 점선 추가 (강력한 지지/저항벽 표시)
+    fig.add_hline(
+        y=poc_price, 
+        line_dash="dot", 
+        line_color="rgba(255, 165, 0, 0.8)", 
+        line_width=1.5,
+        annotation_text=f" POC ({int(poc_price):,})", 
+        annotation_position="bottom right",
+        annotation_font=dict(size=10, color="orange")
+    )
+
+    # 7. 트레이스 순서 조정 (매물대를 캔들 뒤로 보냄)
     data_list = list(fig.data)
     if data_list:
-        new_trace = data_list.pop() # 방금 추가한 막대 꺼내기
-        data_list.insert(0, new_trace) # 맨 앞으로 이동
+        new_trace = data_list.pop() 
+        data_list.insert(0, new_trace) 
         fig.data = tuple(data_list)
 
-    # 5. 레이아웃 업데이트
+    # 8. 레이아웃 업데이트 (우측 25% 영역만 점유하도록 범위 설정)
     fig.update_layout(
         xaxis2=dict(
             overlaying='x', 
             side='top',       
             showgrid=False, 
             visible=False,    
-            range=[max_vol * 4, 0] 
+            range=[max_vol * 4, 0] # 차트 가로폭의 약 1/4 수준 유지
         )
     )
     return fig
@@ -3774,6 +3788,9 @@ with tab2:
                         show_vp=True  # 매물대 켜기
                     )
                     st.plotly_chart(fig_candle, use_container_width=True)
+                    
+
+                
                 else:
                     st.error("차트 데이터를 불러올 수 없습니다.")
 
@@ -3788,6 +3805,43 @@ with tab2:
                 # 하단: 레이더 차트 (기존 기능 재활용)
                 fig_radar = plot_radar_chart(sel_row)
                 st.plotly_chart(fig_radar, use_container_width=True)
+
+            # ---------------------------------------------------------
+            # 🔥 [신규 삽입] 매물대 및 저항 데이터 분석 섹션
+            # ---------------------------------------------------------
+            st.markdown("---")
+            st.subheader("🧱 매물대 및 저항 데이터 분석 (Volume Profile)")
+
+            # collector.py에서 계산되어 DB/CSV에 저장된 값들을 가져옵니다.
+            # 데이터가 없을 경우를 대비해 기본값(0.0)을 설정합니다.
+            res_all = sel_row.get("RES_RATIO", 0.0)
+            res_near = sel_row.get("RES_RATIO_NEAR", 0.0)
+            poc_gap = sel_row.get("POC_GAP", 0.0)
+            near_thres = sel_row.get("NEAR_THRES", 8.0)
+            is_above_poc = sel_row.get("IS_ABOVE_POC", 0)
+
+            # 3단 지표 카드 (Metric)
+            m1, m2, m3 = st.columns(3)
+
+            with m1:
+                res_label = "🔴 저항 매우 강함" if res_all > 0.4 else "🟡 보통" if res_all > 0.2 else "🟢 매물 진공"
+                st.metric("상단 전체 매물 비중", f"{res_all*100:.1;f}%", res_label)
+
+            with m2:
+                near_label = "⚠️ 벽이 두꺼움" if res_near > 0.2 else "🚀 돌파 기대"
+                st.metric(f"근접 저항 (위 {near_thres}%)", f"{res_near*100:.1f}%", near_label, delta_color="inverse")
+
+            with m3:
+                poc_status = "안착 성공" if is_above_poc == 1 else "돌파 대기"
+                st.metric("POC 대비 위치", f"{poc_gap:+.1f}%", poc_status)
+
+            # --- [전략 가이드 자동 생성] ---
+            if res_all < 0.15 and is_above_poc == 1:
+                st.success(f"🎯 **[전략]** 현재 주요 매물대(POC) 위에 안착했으며, 상단 매물이 **{res_all*100:.1f}%**로 매우 희박합니다. 가벼운 수급만으로도 큰 시세가 나올 수 있는 '매물 진공' 구간입니다.")
+            elif res_near > 0.30:
+                st.warning(f"⚠️ **[전략]** 현재가 바로 위({near_thres}%)에 전체 매물의 **30% 이상**이 몰려있습니다. 이 구간을 강력한 거래량으로 뚫어주는지 확인 후 진입하는 것이 안전합니다.")
+            elif is_above_poc == 0 and poc_gap > -3:
+                 st.info(f"💡 **[전략]** 현재 가장 강력한 매물대인 POC({poc_gap:.1f}%) 돌파 직전입니다. 돌파 안착 시 새로운 시세 분출이 기대됩니다.")
 
     else:
         st.info("분석할 종목 데이터가 없습니다.")
