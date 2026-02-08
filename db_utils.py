@@ -264,27 +264,23 @@ class LDYDBManager:
 
     def save_recommendations(self, df, trade_ymd=None):
         """
-        [v11.1 Fix] 일일 추천 종목 결과 저장 (스키마 충돌 자동 해결 포함)
+        [v11.2 Fix] 일일 추천 종목 결과 저장
+        - 'str' object has no attribute 'astype' 오류 해결
+        - 컬럼 존재 여부 체크 강화 및 안전한 데이터 타입 변환
         """
         if df is None or df.empty:
             return
             
         try:
-            # -------------------------------------------------------
-            # 🚨 [Schema Fix] 기존 테이블과 컬럼 수가 다르면 재생성
-            # -------------------------------------------------------
+            # 1. 테이블 스키마 체크 및 자동 보정
             try:
-                # 현재 DB에 있는 테이블 정보 조회
                 table_info = self.conn.execute("PRAGMA table_info(daily_recommend)").fetchall()
-                # 테이블이 존재하고(len>0), 컬럼 수가 7개가 아니면(스키마 변경됨) -> 삭제
                 if len(table_info) > 0 and len(table_info) != 7:
-                    print(f"⚠️ 스키마 불일치 감지 (기존 {len(table_info)}컬럼 vs 현재 7컬럼). 테이블을 재생성합니다.")
+                    print(f"⚠️ 스키마 불일치 감지. 테이블을 재생성합니다.")
                     self.conn.execute("DROP TABLE daily_recommend")
-            except Exception:
-                pass # 테이블이 없으면 무시
-            # -------------------------------------------------------
+            except:
+                pass
 
-            # 1. 테이블 생성 (7개 컬럼)
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS daily_recommend (
                     trade_date VARCHAR,
@@ -297,48 +293,41 @@ class LDYDBManager:
                 )
             """)
 
-            # 2. 데이터 전처리
+            # 2. 데이터 전처리 (안전한 방식)
             save_df = df.copy()
             
-            # 날짜 설정
+            # [날짜 처리]
             if trade_ymd:
                 s_ymd = str(trade_ymd)
-                if len(s_ymd) == 8 and s_ymd.isdigit():
-                    formatted_date = f"{s_ymd[:4]}-{s_ymd[4:6]}-{s_ymd[6:]}"
-                else:
-                    formatted_date = s_ymd
+                formatted_date = f"{s_ymd[:4]}-{s_ymd[4:6]}-{s_ymd[6:]}" if (len(s_ymd) == 8 and s_ymd.isdigit()) else s_ymd
                 save_df['trade_date'] = formatted_date
             elif '기준일' in save_df.columns:
                 save_df['trade_date'] = save_df['기준일'].astype(str)
             else:
                 save_df['trade_date'] = datetime.now().strftime("%Y-%m-%d")
                 
-            # 컬럼 매핑
+            # [필수 컬럼 변환]
             save_df['code'] = save_df['종목코드'].astype(str).str.zfill(6)
             save_df['name'] = save_df['종목명']
             save_df['close_price'] = pd.to_numeric(save_df['종가'], errors='coerce').fillna(0)
             
-            if 'LDY_SCORE' in save_df.columns:
-                save_df['ldy_score'] = pd.to_numeric(save_df['LDY_SCORE'], errors='coerce').fillna(0)
+            # [점수 및 코멘트 처리 - 에러 방어]
+            save_df['ldy_score'] = pd.to_numeric(save_df.get('LDY_SCORE', 0), errors='coerce').fillna(0)
+            save_df['rank_score'] = pd.to_numeric(save_df.get('RANK_SCORE', 0), errors='coerce').fillna(0)
+            
+            # ✅ 문제의 구간 수정: 컬럼이 있으면 변환, 없으면 빈 문자열 할당
+            if 'AI_COMMENT' in save_df.columns:
+                save_df['ai_comment'] = save_df['AI_COMMENT'].astype(str).fillna("")
             else:
-                save_df['ldy_score'] = 0.0
-                
-            if 'RANK_SCORE' in save_df.columns:
-                save_df['rank_score'] = pd.to_numeric(save_df['RANK_SCORE'], errors='coerce').fillna(0)
-            else:
-                save_df['rank_score'] = 0.0
-                
-            save_df['ai_comment'] = save_df.get('AI_COMMENT', '').astype(str)
+                save_df['ai_comment'] = ""
 
-            # 3. Insert
+            # 3. DB 삽입 (7개 컬럼 명시)
             target_cols = ['trade_date', 'code', 'name', 'close_price', 'ldy_score', 'rank_score', 'ai_comment']
-            final_cols = [c for c in target_cols if c in save_df.columns]
-            target_df = save_df[final_cols]
+            target_df = save_df[target_cols]
 
             if target_df.empty:
                 return
 
-            # 해당 날짜 중복 데이터 삭제 후 삽입
             date_val = target_df['trade_date'].iloc[0]
             self.conn.execute(f"DELETE FROM daily_recommend WHERE trade_date = '{date_val}'")
             self.conn.execute("INSERT INTO daily_recommend SELECT * FROM target_df")
