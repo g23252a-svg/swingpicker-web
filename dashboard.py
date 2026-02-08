@@ -3503,25 +3503,86 @@ with tab2:
     full_df = augment_display_data(filtered.copy())
     
     # NameError 방지를 위한 초기화
+    네, 맞습니다! 방금 에러가 났던 지점(3752라인)을 포함하여, 그 윗부분의 로직 전체를 한 번에 안전하게 바꾸는 것이 가장 확실한 방법입니다.
+
+사용자님께서 올려주신 코드에서 # NameError 방지를 위한 초기화 부분부터 # 최종 표시용 view 부분까지를 아래의 **[v8.8 에러 완전 방어 버전]**으로 통째로 덮어쓰기 하세요.
+
+✅ dashboard.py 교체용 코드 블록
+이 코드는 필터 결과가 0개일 때도 변수를 미리 생성해두어 시스템이 중단되는 것을 원천 차단합니다.
+
+Python
+    # ---------------------------------------------------------
+    # 🔥 [v8.8 최종 수정] NameError 방지 및 정렬 로직 통합
+    # ---------------------------------------------------------
+    
+    # 1. 변수 사전 초기화 (NameError 방지 핵심 포인트)
     active_df = pd.DataFrame()
     passive_df = pd.DataFrame()
-    
-    # 데이터가 있을 때만 분류 작업 수행
+    active_view = pd.DataFrame()
+    passive_view = pd.DataFrame()
+
+    # 2. 데이터가 있을 때만 분류 및 정렬 작업 수행
     if not full_df.empty:
-        # 🔥 [핵심 수정] Active/Passive 분리 시 점수 필터 영향 최소화
-        # IS_ACTIVE가 True인 종목은 min_score와 상관없이 Active 탭에 보여주는 것이 좋음
-        # (하지만 위에서 이미 filtered 변수에 min_score가 적용됨. 
-        #  Active 종목도 점수가 너무 낮으면 걸러지는게 맞다면 유지, 아니면 원본 full_df에서 다시 가져와야 함)
-        #  -> 여기서는 사용자가 min_score를 조절할 수 있게 했으므로 filtered 결과 사용.
-        
+        # [분류] Active/Passive 분리
         if "IS_ACTIVE" in full_df.columns:
-            active_df  = full_df[full_df["IS_ACTIVE"]].copy()
-            passive_df = full_df[~full_df["IS_ACTIVE"]].copy()
+            active_df  = full_df[full_df["IS_ACTIVE"] == True].copy()
+            passive_df = full_df[full_df["IS_ACTIVE"] == False].copy()
         else:
-            # Fallback
             active_mask = full_df["상태"].astype(str).str.contains(r"🚀|🔫|👀|⭐️|🔋|🆕", na=False)
             active_df  = full_df[active_mask].copy()
             passive_df = full_df[~active_mask].copy()
+
+        # [정렬 설정] 정렬 기준 라디오 버튼
+        sort_mode = st.radio(
+            "정렬 기준",
+            ["🚦 상태 우선 (행동순)", "🔢 점수 우선 (능력순)"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="tab2_sort_mode"
+        )
+        
+        # [정렬 실행 함수]
+        def _apply_sort(df_target):
+            if df_target.empty: return df_target
+            # 상태 우선: Action -> 최종점수 -> 타이밍 -> 거래대금
+            if sort_mode == "🚦 상태 우선 (행동순)" and "_STATE_SORT" in df_target.columns:
+                return df_target.sort_values(
+                    by=["_STATE_SORT", "FINAL_SCORE", "TRIGGER_SCORE", "거래대금(억원)"], 
+                    ascending=[True, False, False, False]
+                )
+            # 점수 우선: 최종점수 -> 거래대금
+            else:
+                s_col = "FINAL_SCORE" if "FINAL_SCORE" in df_target.columns else "TOTAL_SCORE"
+                return df_target.sort_values(by=[s_col, "거래대금(억원)"], ascending=[False, False])
+
+        # 정렬 적용
+        active_df = _apply_sort(active_df)
+        passive_df = _apply_sort(passive_df)
+
+        # [View 생성] 권한별 개수 제한 적용 (limit는 위에서 정의됨)
+        active_view = active_df.head(limit).copy()
+        passive_view = passive_df.copy()
+
+        # [데이터 포맷팅] 종목명 복구 및 숫자 콤마 표시
+        try:
+            name_map = get_code_map()
+            code_to_name = {v: k for k, v in name_map.items()}
+            
+            def _fmt_display(df_target):
+                if df_target.empty: return df_target
+                if "종목명" in df_target.columns:
+                    df_target["종목명"] = df_target.apply(
+                        lambda r: code_to_name.get(str(r.get("종목코드", "")).zfill(6), r.get("종목명")), axis=1
+                    )
+                for c in ["종가", "추천매수가", "손절가", "추천매도가1"]:
+                    if c in df_target.columns:
+                        df_target[c] = pd.to_numeric(df_target[c], errors="coerce").fillna(0).apply(lambda x: f"{int(x):,}")
+                return df_target
+
+            active_view = _fmt_display(active_view)
+            passive_view = _fmt_display(passive_view)
+        except:
+            pass
 
     # --- 3. 화면 출력 로직 ---
     if full_df.empty:
@@ -3747,27 +3808,34 @@ with tab2:
     st.divider()
     st.markdown("### 🔍 상세 정밀 분석 (Deep Dive)")
     
-    # 분석 대상 종목 선택 (Active 목록 우선)
+    # 🔥 [수정 포인트] 변수가 정의되지 않았을 경우를 대비해 안전하게 빈 데이터프레임으로 연결합니다.
+    _av = active_view if 'active_view' in locals() else pd.DataFrame()
+    _pv = passive_view if 'passive_view' in locals() else pd.DataFrame()
+
+    # 분석 대상 리스트 구성
     target_list = []
-    if not active_view.empty:
-        target_list = active_view["종목명"].tolist()
-    elif not passive_view.empty:
-        target_list = passive_view["종목명"].tolist()
-    
-    if target_list:
+    if not _av.empty:
+        target_list = _av["종목명"].tolist()
+    elif not _pv.empty:
+        target_list = _pv["종목명"].tolist()
+
+    # 필터로 인해 종목이 0개인 경우에 대한 예외 처리
+    if not target_list:
+        st.info("💡 현재 필터 조건(EBS, Squeeze, OBV 등)을 모두 만족하는 종목이 없습니다. 필터를 한두 개 해제하시면 상세 분석이 활성화됩니다.")
+    else:
         selected_name = st.selectbox("분석할 종목을 선택하세요", target_list, key="dd_select")
         
         # 선택된 종목의 데이터 행 찾기
         sel_row = None
         
         # 1. Active에서 찾기
-        if not active_view.empty:
-            found = active_view[active_view["종목명"] == selected_name]
+        if not _av.empty:
+            found = _av[_av["종목명"] == selected_name]
             if not found.empty: sel_row = found.iloc[0]
         
-        # 2. 없으면 Passive에서 찾기
-        if sel_row is None and not passive_view.empty:
-            found = passive_view[passive_view["종목명"] == selected_name]
+        # 2. 없으면 Passive에서 찾기 (Active가 비었거나 못 찾았을 때)
+        if sel_row is None and not _pv.empty:
+            found = _pv[_pv["종목명"] == selected_name]
             if not found.empty: sel_row = found.iloc[0]
             
         if sel_row is not None:
