@@ -3016,13 +3016,12 @@ def main(
 ) -> None:
     log("🚀 LDY Collector v10.0 (AI Powered) 시작...")
 
-    # 👇 [수정] 모델이 있어도 강제로 다시 학습하도록 변경 (에러 해결용)
-    # if not os.path.exists(ml_engine.MODEL_PATH):
-    log("🤖 AI 모델 최적화(재학습) 진행 중...")
+    # [수정 후] 이제 ml_engine에 train_model을 추가했으므로 이름만 맞추면 됩니다.
+    log("🤖 AI 모델 최적화(v15.6 Master) 진행 중...")
     try:
-        ml_engine.train_model()
+        ml_engine.train_model() 
     except Exception as e:
-        log(f"⚠️ 모델 학습 실패 (기존 모델 사용 또는 AI 점수 0점 처리): {e}")
+        log(f"⚠️ 모델 학습 실패: {e}")
     
     # ✅ 여기에 넣기 (resolve_trade_date() 호출 전에!)
     if not PYKRX_OK:
@@ -3213,17 +3212,13 @@ def main(
     log("🧠 AI 엔진 동기화 및 통합 스코어링 시작...")
 
     try:
-        # 1. AI 점수 및 특징량 주입 (v15.6 Master-Grade 연동)
-        # AI가 학습할 때 사용한 동일 로직으로 전체 종목을 재분석하여 점수를 매깁니다.
+        # 1. AI 예측 점수 주입 (v15.6 Master-Grade 연동)
         df_out = ml_engine.apply_ml_score(df_out, full_ohlcv_map)
         
-        # ML_SCORE 컬럼 누락 방지 및 0점 클램프
-        if "ML_SCORE" not in df_out.columns:
-            df_out["ML_SCORE"] = 0.0
-        df_out["ML_SCORE"] = df_out["ML_SCORE"].fillna(0.0)
+        # AI 점수 안전장치: 숫자형 변환 및 0~100 제한
+        df_out["ML_SCORE"] = pd.to_numeric(df_out.get("ML_SCORE", 0.0), errors='coerce').fillna(0.0).clip(0, 100)
         
-        # 2. [핵심] Trigger Score(타이밍) 계산 및 RAW 보존
-        # AI 점수와 시너지를 내기 위해 '실시간 차트 신호' 점수를 산출합니다.
+        # 2. 실시간 차트 신호(Raw Trigger) 산출 및 보존
         trigger_list = []  
         for idx, row in df_out.iterrows():
             code = str(row['종목코드']).zfill(6)
@@ -3235,91 +3230,77 @@ def main(
         df_out['TRIGGER_SCORE'] = trigger_list
         df_out['RAW_TRIGGER_SCORE'] = df_out['TRIGGER_SCORE'] # 검증용 원본 박제
 
-        # 3. 최종 통합 스코어링 실행 (STRUCT, TIMING, AI 3원화)
-        # 시장의 매크로 위험도(macro_risk)에 따라 공격/방어 점수 비중을 자동 조절합니다.
+        # 3. 최종 통합 스코어링 실행 (STRUCT, TIMING, AI 3원화 합산)
+        # 이 함수 내부에서 RAW_TRIGGER_SCORE가 TIMING_SCORE로 정규화됩니다.
         df_out = build_global_score(df_out, macro_risk) 
 
-        log(f"✅ 통합 파이프라인 완료 (AI 유효 점수 반영 종목: {len(df_out[df_out['ML_SCORE'] > 0])}개)")
+        log(f"✅ 점수 산출 완료 (AI 유효 점수 반영: {len(df_out[df_out['ML_SCORE'] > 0])}개)")
 
     except Exception as e:
         log(f"⚠️ 스코어링 파이프라인 치명적 오류: {e}")
-        # 오류 발생 시 시스템 중단 방지를 위해 기존 점수를 FINAL_SCORE로 임시 복사
+        # 오류 발생 시 시스템 중단을 막기 위한 최소한의 방어
         if "FINAL_SCORE" not in df_out.columns:
             df_out["FINAL_SCORE"] = df_out.get("LDY_SCORE", 0.0)
 
     # --------------------------------------------------------------------------
-    # [Internal Helpers] 데이터 안전 처리 함수 (개선됨)
+    # [Step 2] 동적 임계값(Threshold) 및 전략 상태(ROUTE) 결정
     # --------------------------------------------------------------------------
     def safe_quantile(s, q, fallback=0.0):
-        """NaN 및 비어있는 시리즈 대응 퀀타일 계산기"""
         if s is None or s.empty: return fallback
         try:
-            val = s.quantile(q)
-            return fallback if pd.isna(val) else float(val)
+            v = s.quantile(q)
+            return fallback if pd.isna(v) else float(v)
         except: return fallback
 
-    def safe_sort(df, cols, ascending):
-        """KeyError를 방지하고 리스트 길이를 자동 매칭하는 안전 정렬기"""
-        # 1. 실제로 존재하는 컬럼만 선별
-        use_cols = [c for c in cols if c in df.columns]
-        if not use_cols: 
-            return df
-        
-        # 2. 정렬 방향(ascending) 리스트 길이 동기화
-        if isinstance(ascending, (list, tuple)):
-            use_asc = list(ascending[:len(use_cols)])
-            # 방향 리스트가 컬럼보다 짧으면 마지막 방향으로 채움
-            if len(use_asc) < len(use_cols):
-                use_asc += [use_asc[-1]] * (len(use_cols) - len(use_asc))
-        else:
-            use_asc = ascending
-            
-        return df.sort_values(by=use_cols, ascending=use_asc)
-
-    # --------------------------------------------------------------------------
-    # [Step 2] 동적 임계값 및 상태 결정 (NaN 방어)
-    # --------------------------------------------------------------------------
-    # 3) 동적 임계값 계산
-    range_q75 = safe_quantile(df_out.get("Range_Pos", pd.Series(dtype=float)), 0.75, fallback=0.8)
-    vol_q75   = safe_quantile(df_out.get("Vol_Quality", pd.Series(dtype=float)), 0.75, fallback=1.2)
+    # 시장 상위 25% 지점을 실시간 감지하여 진입 문턱값 자동 설정
+    range_q75 = safe_quantile(df_out.get("Range_Pos"), 0.75, fallback=0.8)
+    vol_q75   = safe_quantile(df_out.get("Vol_Quality"), 0.75, fallback=1.2)
 
     thresholds = {"range_q75": range_q75, "vol_q75": vol_q75}
-    log(f"📊 Dynamic Thresholds: Range(Top25%)={range_q75:.2f}, Vol(Top25%)={vol_q75:.2f}")
+    log(f"📊 동적 임계값 확정: Range(Top25%)={range_q75:.2f}, Vol(Top25%)={vol_q75:.2f}")
 
-    # 4) 상태(ROUTE) 결정
+    # 개별 종목별 전략 상태(ATTACK, ARMED, WAIT 등) 결정 및 표시용 상태값 복사
     df_out["ROUTE"] = df_out.apply(lambda r: determine_state_dynamic(r, thresholds), axis=1)
     df_out["상태"] = df_out["ROUTE"]
 
     # --------------------------------------------------------------------------
-    # [Step 3] 2단계 하이브리드 정렬 (Hybrid Sorting with Top K Limit)
+    # [Step 3] 2단계 하이브리드 정렬 및 전술 배치 (Elite Sorting)
     # --------------------------------------------------------------------------
     
-    # NaN 비교는 False 처리되므로 안전하게 fillna
-    ebs = df_out.get("EBS", pd.Series([0]*len(df_out), index=df_out.index)).fillna(0)
-    struct = df_out.get("STRUCT_SCORE", pd.Series([0]*len(df_out), index=df_out.index)).fillna(0)
+    def safe_sort(df, cols, ascending):
+        """KeyError 방지 및 정렬 방향 자동 동기화"""
+        use_cols = [c for c in cols if c in df.columns]
+        if not use_cols: return df
+        if isinstance(ascending, list):
+            use_asc = ascending[:len(use_cols)]
+            if len(use_asc) < len(use_cols):
+                use_asc += [use_asc[-1]] * (len(use_cols) - len(use_asc))
+        else:
+            use_asc = ascending
+        return df.sort_values(by=use_cols, ascending=use_asc)
 
-    # 1차 컷오프: 구조가 튼튼한가? (EBS 6점 이상 & 구조점수 60점 이상)
-    mask_qual = (ebs >= 6) & (struct >= 60)
-
+    # 1차 컷오프: 기초 체력 검증 (EBS 6점 이상 & 구조점수 60점 이상만 '정예군' 편성)
+    ebs_val = pd.to_numeric(df_out.get("EBS", 0), errors='coerce').fillna(0)
+    struct_val = pd.to_numeric(df_out.get("STRUCT_SCORE", 0), errors='coerce').fillna(0)
+    mask_qual = (ebs_val >= 6) & (struct_val >= 60)
+    
     df_prime = df_out[mask_qual].copy()
     df_normal = df_out[~mask_qual].copy()
 
-    # [1군 정렬] 타이밍 -> AI -> 거래대금
+    # 1군(Prime): 타이밍과 AI 예측치가 높은 순으로 정렬 (공격형 배치)
     df_prime = safe_sort(df_prime, ["TIMING_SCORE", "AI_SCORE", "거래대금(억원)"], [False, False, False])
-
-    # [2군 정렬] 종합점수 -> 구조점수
+    # 2군(Normal): 종합 점수와 안정성이 높은 순으로 정렬 (수비형 배치)
     df_normal = safe_sort(df_normal, ["FINAL_SCORE", "STRUCT_SCORE"], [False, False])
 
-    # ✅ [옵션] 상단군 Top K만 최상단 고정 (나머지는 2군 뒤에 붙이기)
-    TOP_K_FIXED = 120  
+    # 최종 결과 합치기: 정예군 상위 120개를 대시보드 최상단에 박제
+    TOP_K_FIXED = 120
+    df_out = pd.concat([
+        df_prime.head(TOP_K_FIXED), 
+        df_normal, 
+        df_prime.iloc[TOP_K_FIXED:]
+    ], ignore_index=True).reset_index(drop=True)
     
-    df_out = pd.concat(
-        [df_prime.head(TOP_K_FIXED), df_normal, df_prime.iloc[TOP_K_FIXED:]],
-        ignore_index=True
-    ).reset_index(drop=True)
-
-    # [디버그 로그]
-    log(f"✅ Sorting Stat: Qual_Pass={int(mask_qual.sum())} / Total={len(df_out)} / Top_Fixed={TOP_K_FIXED}")
+    log(f"✅ 정예군({len(df_prime)}개) 배치 완료. (최종 분석 종목: {len(df_out)}개)")
     
    
 
@@ -3467,21 +3448,39 @@ def main(
     
     # [수정 대상] main 함수 하단 must_cols 리스트 업데이트
     must_cols = [
-        "종목코드","종목명","시장","업종","업종_상세","업종_대분류",
-        "종가","거래대금(억원)","시가총액(억원)",
-        "상태", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
-        "추천매수가","손절가","추천매도가1","추천매도가2",
-        "FINAL_SCORE", "TRIGGER_SCORE", "TOTAL_SCORE", # 👈 여기 추가됨
-        "RANK_SCORE","LDY_SCORE","ENTRY_SCORE", "ML_SCORE",
-        "NEWS_SCORE", "NEWS_REASON",  # 👈 여기에 추가하면 보기 좋습니다
-        "TRIGGER",  # ✅ [New] CSV 저장 컬럼 추가
-        "ROUTE","REGIME",
-        "ret_20d_%", "ret_120d_%", 
-        "rel_20d_%", "rel_60d_%", "rel_120d_%",
-        "TTM_SQUEEZE_CNT",
-        # ✅ [v7.4 추가] 팩터 컬럼 추가
-        "NORM_RR", "NORM_T1", "NORM_SL", "NORM_NEAR", 
-        "NORM_MOM", "NORM_LIQ", "NORM_TEC"
+        # 1. 기본 정보 및 시장 상태
+        "종목코드", "종목명", "시장", "업종_대분류", "종가", "거래대금(억원)", "시가총액(억원)",
+        
+        # 2. 핵심 전략 상태 (가장 중요)
+        "상태", "ROUTE", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
+        
+        # 3. 4대 통합 점수 시스템 (실전 분석의 핵심)
+        "FINAL_SCORE",   # 최종 가중치 합산 점수
+        "STRUCT_SCORE",  # 기초 체력 (추세/수급/이격)
+        "TIMING_SCORE",  # 진입 타이밍 (차트 신호/매물대)
+        "AI_SCORE",      # AI 예측 점수 (ML 결과값)
+        
+        # 4. 보조 및 하위 호환 점수
+        "ML_SCORE", "EBS", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE", "NEWS_SCORE",
+        
+        # 5. 매매 실행 가이드
+        "추천매수가", "손절가", "추천매도가1", "추천매도가2",
+        
+        # 6. 실시간 수급 및 차트 신호 지표
+        "TRIGGER",       # 감지된 신호 명칭 (🚀급등시동 등)
+        "V_POWER",       # 매수세의 응집 강도
+        "거래강도",      # 평소 대비 거래 폭발력
+        "VWAP",          # 시장 평균 단가 (성벽)
+        "POC_GAP",       # 주요 매물대와의 거리
+        
+        # 7. 뉴스 및 재료 분석 (LLM)
+        "NEWS_REASON",   # AI가 분석한 핵심 호재/악재 이유
+        
+        # 8. 추세 및 변동성 지표
+        "REGIME", "TTM_SQUEEZE_CNT", "Low_Trend_PCT", "RSI14", "이격도",
+        
+        # 9. 과거 수익률 데이터
+        "ret_20d_%", "ret_120d_%", "rel_20d_%", "rel_60d_%", "rel_120d_%"
     ]
     for c in must_cols:
         if c not in df_out.columns:
