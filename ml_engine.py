@@ -123,3 +123,84 @@ def build_master_dataset(data_dir="data"):
     pos_weight = torch.tensor([min((len(y_train)-pos_count)/pos_count, 20.0)], dtype=torch.float32)
     
     return X_train_s, y_train, X_val_s, y_val, val_df[['date', 'code']], pos_weight, X_train.shape[2]
+
+# -----------------------------------------------------------
+# 3. Training & Inference (Collector 연동용 함수)
+# -----------------------------------------------------------
+
+class StockDataset(Dataset):
+    def __init__(self, X, y=None):
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32) if y is not None else None
+    def __len__(self): return len(self.X)
+    def __getitem__(self, idx): return (self.X[idx], self.y[idx]) if self.y is not None else self.X[idx]
+
+def train_model():
+    """collector.py에서 호출하는 훈련 시작 함수"""
+    data = build_master_dataset()
+    if data is None: return
+    X_tr, y_tr, X_val, y_val, meta_val, p_weight, in_dim = data
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # TradingAttnLSTM 클래스가 상단에 정의되어 있어야 합니다.
+    model = TradingAttnLSTM(in_dim, 64, 2, 1).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=p_weight.to(device))
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    
+    best_prec = 0
+    for epoch in range(15): # 빠른 동기화를 위해 epoch 조정
+        model.train()
+        for b_X, b_y in DataLoader(StockDataset(X_tr, y_tr), batch_size=128, shuffle=True):
+            b_X, b_y = b_X.to(device), b_y.float().to(device).unsqueeze(1)
+            optimizer.zero_grad()
+            loss = criterion(model(b_X), b_y)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+    
+    torch.save(model.state_dict(), MODEL_PATH)
+    print(f"✅ [ML] v15.6 Master 모델 학습 및 저장 완료")
+
+def apply_ml_score(current_df, full_ohlcv_map):
+    """collector.py의 main 함수에서 호출하여 AI 점수를 주입하는 함수"""
+    current_df["ML_SCORE"] = 0.0
+    if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
+        return current_df
+
+    try:
+        device = torch.device('cpu')
+        scaler = joblib.load(SCALER_PATH)
+        # 훈련 시 사용한 input_dim 확인
+        input_dim = scaler.mean_.shape[0]
+        model = TradingAttnLSTM(input_dim, 64, 2, 1)
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+        model.eval()
+
+        scores, indices = [], []
+        for idx, row in current_df.iterrows():
+            code = str(row['종목코드']).zfill(6)
+            if code not in full_ohlcv_map: continue
+            
+            df = clean_ohlcv(full_ohlcv_map[code])
+            if len(df) < SEQ_LENGTH: continue
+            
+            df_feat = add_technical_features(df)
+            if df_feat.empty: continue
+            
+            seq_data = df_feat.iloc[-SEQ_LENGTH:].values
+            if len(seq_data) == SEQ_LENGTH:
+                indices.append(idx)
+                scores.append(seq_data)
+
+        if scores:
+            X_arr = np.array(scores)
+            N, L, D = X_arr.shape
+            X_scaled = scaler.transform(X_arr.reshape(-1, D)).reshape(N, L, D)
+            with torch.no_grad():
+                logits = model(torch.tensor(X_scaled, dtype=torch.float32))
+                probs = torch.sigmoid(logits).numpy().flatten()
+                current_df.loc[indices, "ML_SCORE"] = (probs * 100).round(1)
+                
+    except Exception as e:
+        print(f"⚠️ AI 점수 산출 실패: {e}")
+    return current_df
