@@ -16,6 +16,22 @@ SEQ_LENGTH = 20
 TARGET_RET = 3.0  
 BASIC_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
+
+# --- [여기 추가] 당일 학습 여부 판독기 ---
+from datetime import datetime
+
+def is_trained_today(force=False):
+    """오늘 날짜에 이미 모델과 스케일러가 생성되었는지 확인"""
+    if force: return False
+    if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
+        return False
+    
+    # 모델 파일의 마지막 수정 시간 체크
+    mtime = os.path.getmtime(MODEL_PATH)
+    last_date = datetime.fromtimestamp(mtime).date()
+    return last_date == datetime.now().date()
+# --------------------------------------
+
 # -----------------------------------------------------------
 # 1. 모델 클래스 정의 (Attention + LSTM)
 # -----------------------------------------------------------
@@ -154,10 +170,24 @@ class StockDataset(Dataset):
     def __len__(self): return len(self.X)
     def __getitem__(self, idx): return (self.X[idx], self.y[idx]) if self.y is not None else self.X[idx]
 
-def train_model():
-    """collector.py 호출용: 모델 훈련 및 저장"""
+# -----------------------------------------------------------
+# 4. 학습 및 추론 인터페이스 (Collector 연동)
+# -----------------------------------------------------------
+def train_model(force=False):
+    """collector.py 호출용: 모델 훈련 및 저장 (스마트 스킵 적용)"""
+    
+    # [수정된 부분] 당일 훈련 여부 체크
+    if is_trained_today(force):
+        print(f"✅ [SKIP] 오늘 이미 v15.6 Master 모델 학습이 완료되었습니다. (Force={force})")
+        return
+
+    print(f"🤖 AI 모델 최적화(v15.6 Master) 진행 중... (약 30분 소요)")
+    
     data = build_master_dataset()
-    if data is None: return
+    if data is None: 
+        print("⚠️ [ML] 학습할 데이터가 부족하여 중단합니다.")
+        return
+        
     X_tr, y_tr, X_val, y_val, meta_val, p_weight, in_dim = data
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -165,6 +195,7 @@ def train_model():
     criterion = nn.BCEWithLogitsLoss(pos_weight=p_weight.to(device))
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
+    # 학습 루프
     for epoch in range(15):
         model.train()
         for b_X, b_y in DataLoader(StockDataset(X_tr, y_tr), batch_size=128, shuffle=True):
@@ -175,8 +206,12 @@ def train_model():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
     
+    # 모델 저장
     torch.save(model.state_dict(), MODEL_PATH)
-    print(f"✅ [ML] v15.6 Master 모델 학습 완료")
+    print(f"✅ [ML] v15.6 Master 모델 학습 완료 및 저장 성공")
+
+
+
 
 def apply_ml_score(current_df, full_ohlcv_map):
     """collector.py 호출용: 실전 AI 점수 주입"""
