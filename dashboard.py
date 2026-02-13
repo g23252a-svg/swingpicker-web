@@ -2638,42 +2638,55 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
     scored = None
     
     if is_v8_scored:
-        # ✅ CASE 1: Prescored (Collector v8.0+)
+        # ✅ CASE 1: Prescored (v15.6 Master-Grade / v8.0+ Collector)
         scored = normalize_cols(df_raw) 
         
-        # ✅ [Fix 1] 점수 컬럼 변질 방지 (강제 Numeric 캐스팅)
-        # normalize_cols 내부에서 어떤 처리를 했든, 점수는 무조건 float여야 함
-        score_cols = ["FINAL_SCORE", "TOTAL_SCORE", "TRIGGER_SCORE", "LDY_SCORE", "RANK_SCORE", "EBS", "RR1"]
+        # 1. [Fix 1] 모든 점수 체계 강제 Numeric 캐스팅 (v15.6 신규 컬럼 포함)
+        # 데이터 정합성을 위해 AI_SCORE, STRUCT_SCORE 등 신규 규격을 리스트에 추가합니다.
+        score_cols = [
+            "FINAL_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", 
+            "ML_SCORE", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE", "EBS", "RR1"
+        ]
         for c in score_cols:
             if c in scored.columns:
                 scored[c] = pd.to_numeric(scored[c], errors="coerce").fillna(0.0)
         
-        # 필수 컬럼 결측 방지 (UI 깨짐 방지용 기본값)
-        if "EBS" not in scored.columns: scored["EBS"] = 0.0
-        if "거래대금(억원)" not in scored.columns: scored["거래대금(억원)"] = 0.0
-        if "TOTAL_SCORE" not in scored.columns: scored["TOTAL_SCORE"] = 0.0
-        if "TRIGGER_SCORE" not in scored.columns: scored["TRIGGER_SCORE"] = 0.0
-        if "FINAL_SCORE" not in scored.columns: scored["FINAL_SCORE"] = 0.0
+        # 2. [Face-lifting] 전술적 점수 통합 (Ranking Alignment)
+        # AI의 통찰이 담긴 FINAL_SCORE를 시스템 전체의 '대표 점수'로 강제 동기화합니다.
+        if "FINAL_SCORE" in scored.columns:
+            # [Fix 2] 점수 0점 판정 및 보조 점수 복구 로직
+            # 만약 FINAL_SCORE가 통째로 0이라면, 백업 점수(TOTAL/LDY)를 탐색합니다.
+            if scored["FINAL_SCORE"].abs().sum() == 0:
+                backup_col = "TOTAL_SCORE" if scored["TOTAL_SCORE"].abs().sum() > 0 else "LDY_SCORE"
+                scored["FINAL_SCORE"] = scored.get(backup_col, 0.0)
 
-        # ✅ [Fix 2] 점수 0점 판정 로직 강화 (절대값 합계 확인)
-        # 단순 sum()은 음수/양수 상쇄나 NaN 문제 가능성 있음
-        fs = scored["FINAL_SCORE"]
-        if fs.abs().sum() == 0:
-            # FINAL이 비었으면 TOTAL이나 LDY로 대체
-            ts_sum = scored["TOTAL_SCORE"].abs().sum()
-            scored["FINAL_SCORE"] = scored["TOTAL_SCORE"] if ts_sum > 0 else scored.get("LDY_SCORE", 0.0)
+            # 🚨 핵심: 모든 랭킹용 점수 컬럼을 FINAL_SCORE로 통일하여 
+            # 텔레그램, 대시보드 리스트, 필터링이 모두 AI 예측치를 따르게 합니다.
+            scored["TOTAL_SCORE"] = scored["FINAL_SCORE"]
+            scored["LDY_SCORE"]   = scored["FINAL_SCORE"]
+            scored["RANK_SCORE"]  = scored["FINAL_SCORE"]
+
+        # 3. 필수 컬럼 UI 결측 방어 (v15.1 호환용)
+        # 구형 데이터에서도 UI가 깨지지 않도록 기본값을 배정합니다.
+        if "STRUCT_SCORE" not in scored.columns: scored["STRUCT_SCORE"] = scored.get("TOTAL_SCORE", 0.0)
+        if "TIMING_SCORE" not in scored.columns: scored["TIMING_SCORE"] = scored.get("TRIGGER_SCORE", 0.0)
+        if "AI_SCORE" not in scored.columns:     scored["AI_SCORE"]     = scored.get("ML_SCORE", 0.0)
+        if "EBS" not in scored.columns:          scored["EBS"]          = 0.0
+        if "거래대금(억원)" not in scored.columns: scored["거래대금(억원)"] = 0.0
 
     else:
-        # ⚠️ CASE 2: Legacy (Score Missing) -> Dashboard Scoring
+        # ⚠️ CASE 2: Legacy (점수 부재 시) -> 대시보드 자체 스코어링 엔진 가동
         df = normalize_cols(df_raw)
         scored = build_global_score(df, keep_order=True).reset_index(drop=True)
         
-        # UI 호환성 매핑
-        scored["FINAL_SCORE"] = scored["LDY_SCORE"]
-        scored["TOTAL_SCORE"] = scored["LDY_SCORE"]
-        scored["TRIGGER_SCORE"] = 0.0
+        # UI 호환성을 위해 대시보드 점수를 FINAL_SCORE 규격으로 매핑
+        scored["FINAL_SCORE"]  = scored["LDY_SCORE"]
+        scored["STRUCT_SCORE"] = scored["LDY_SCORE"]
+        scored["TIMING_SCORE"] = 0.0
+        scored["AI_SCORE"]     = 0.0
 
-    # 랭크 정보 복원
+    # 4. [Rank Restoration] 원본 파일의 순서와 랭크 정보 복원
+    # CSV에 기록된 랭킹을 최우선으로 존중하되, 없을 경우 행 순서를 랭킹으로 삼습니다.
     if "_CSV_RANK" in df_raw.columns:
         scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
     scored["_CSV_ROW"] = df_raw["_CSV_ROW"].values
