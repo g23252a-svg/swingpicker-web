@@ -2060,78 +2060,93 @@ def calculate_timing_score(row) -> float:
 
 def determine_state_dynamic(row, thresholds: dict):
     """
-    [v16.1] 수급 데이터 누락 시에도 거래강도/추세로 방어하도록 로직 강화
+    [v8.5 Elite Patch] 수급 상대 비중 기반 Toxic Filter 및 동적 상태 결정 로직
+    - 기존 고정 수치(10억) 필터를 '거래대금 대비 비중(%)'으로 전면 개편
+    - 지표 불일치 및 급락 추세 방어 로직 강화
     """
     try:
-        # 데이터 추출 (안전한 float 변환)
+        # 1. 기초 데이터 추출 (안전한 float 변환)
         def _get(k, default=0.0):
-            return float(row.get(k, default))
+            val = row.get(k, default)
+            try: return float(val) if not pd.isna(val) else default
+            except: return default
 
+        # 기술적 지표
         rsi = _get('RSI14', 50)
         r1 = _get('ret_1d_%', 0)
         r5 = _get('ret_5d_%', 0)
         slope = _get('MACD_Slope_PCT', 0)
         range_pos = _get('Range_Pos', 0)
-        vol_qual = _get('Vol_Quality', 0)
+        vol_qual = _get('Vol_Quality', 1.0)
         t_score = _get('TIMING_SCORE', 0)
         vol_z = _get('거래강도', 0)
         low_trend = _get('Low_Trend_PCT', 0)
-        
-        # 수급 데이터 (없으면 0)
+        above_ma20 = int(_get('Above_MA20', 0))
+
+        # 수급 데이터 및 거래대금
+        turnover = _get('거래대금(원)', 1.0) # ZeroDivision 방지 위해 기본값 1.0
         frg_net = _get('외인순매수', 0)
         ind_net = _get('개인순매수', 0)
 
+        # 2. [Elite] 상대적 수급 비중 계산
+        # 전체 거래대금 중 외인/개인이 차지하는 순매수 비중 (%)
+        frg_ratio = (frg_net / turnover) * 100 if turnover > 0 else 0
+        ant_ratio = (ind_net / turnover) * 100 if turnover > 0 else 0
+
         # -----------------------------------------------------------
-        # 🚨 [TOXIC Filter] 폭탄 돌리기 감지
+        # 🚨 [Elite TOXIC Filter] 설거지 및 폭탄 돌리기 정밀 감지
         # -----------------------------------------------------------
         is_toxic = False
         
-        # 1. 수급 데이터가 있는 경우: 외인 매도 폭탄 감지
-        if frg_net < -1_000_000_000 and ind_net > 1_000_000_000 and r1 > 5.0:
+        # [Case 1] 전형적인 설거지: 주가는 오르는데 외인은 거래의 20%를 던지고 개인이 다 받음
+        if r1 > 5.0 and frg_ratio < -20.0 and ant_ratio > 20.0:
             is_toxic = True
             
-        # 2. 수급 데이터가 없더라도(0일 때): 거래량이 미친듯이 터지면(10배↑) 위험
-        if vol_z >= 10.0 and r1 >= 10.0:
-             # 좋은사람들(13배) 같은 케이스는 여기서 걸러짐
+        # [Case 2] 수급 불명확 + 광기: 거래량이 평소의 10배 이상 터지며 10% 급등 (단기 고점 징후)
+        elif vol_z >= 10.0 and r1 >= 10.0:
             is_toxic = True
 
         if is_toxic:
-            return "EXIT_WARNING" # ☠️ 절대 진입 금지
+            return "EXIT_WARNING" # ☠️ 절대 진입 금지 (폭탄 돌리기)
 
         # -----------------------------------------------------------
-        # 1. 과열 (Absolute Cut)
+        # 3. 상태 결정 파이프라인 (Tiered Logic)
+        # -----------------------------------------------------------
+        
+        # (1) 과열 (Absolute Cut)
         if rsi >= 75 or r5 >= 25.0:
             return "OVERHEAT"
 
-        # 2. 집중 공략 (ATTACK) 조건
+        # (2) 집중 공략 (ATTACK) 조건: 추세+수급+타이밍 삼박자
         vol_cut = thresholds.get('vol_q75', 1.2)
         range_cut = thresholds.get('range_q75', 0.8)
         
         if (slope > 0 
             and range_pos >= range_cut
             and vol_qual >= vol_cut
-            and t_score >= 60):
+            and t_score >= 60
+            and above_ma20 == 1):
             
-            # [필수 필터] 추세가 꺾인 종목은 절대 ATTACK 주지 않음
-            # 좋은사람들(-7.5)은 여기서 무조건 걸러져야 함
+            # [추세 붕괴 방어] 저점이 -3% 이상 깨진 종목은 ATTACK 금지
             if low_trend < -3.0: 
                 return "WAIT" 
-            
             return "ATTACK"
 
-        # 3. 발사 임박
+        # (3) 발사 임박 (ARMED): 변동성 응축 및 돌파 대기
         is_squeeze = int(row.get('TTM_SQUEEZE', 0))
-        if is_squeeze == 1 and int(row.get('Above_MA20', 0)) == 1:
-            if low_trend >= -3.0:
+        if (is_squeeze == 1 or vol_qual >= 2.0) and above_ma20 == 1:
+            if low_trend >= -3.0: # 추세가 살아있을 때만
                 return "ARMED"
         
-        # 4. 추세 대기
-        if low_trend > 0:
+        # (4) 추세 대기 (WAIT): 저점이 높아지거나 반등 시도
+        if low_trend > 0 or r1 > 0:
             return "WAIT"
 
+        # (5) 중립 (NEUTRAL)
         return "NEUTRAL"
 
-    except Exception:
+    except Exception as e:
+        # 에러 발생 시 안전하게 중립 반환
         return "NEUTRAL"
 
 
@@ -3192,60 +3207,73 @@ def main(
     # [수정] 스코어링 (mkt_temp 전달)
     df_out = df_raw.copy()
 
-    # 👇👇 [여기부터 추가하세요] 👇👇
     # --------------------------------------------------------------------------
-    # 🔥 [1단계 업그레이드] 여기서 ML 점수 주입 (full_ohlcv_map 전달)
+    # 🔥 [v8.5 Elite] 통합 스코어링 & AI 동기화 파이프라인
     # --------------------------------------------------------------------------
+    log("🧠 AI 엔진 동기화 및 통합 스코어링 시작...")
+
     try:
-        # AI 점수 계산 (ML_SCORE 컬럼 생성)
+        # 1. AI 점수 및 특징량 주입 (v15.6 Master-Grade 연동)
+        # AI가 학습할 때 사용한 동일 로직으로 전체 종목을 재분석하여 점수를 매깁니다.
         df_out = ml_engine.apply_ml_score(df_out, full_ohlcv_map)
         
-        # 컬럼 누락 방지
+        # ML_SCORE 컬럼 누락 방지 및 0점 클램프
         if "ML_SCORE" not in df_out.columns:
             df_out["ML_SCORE"] = 0.0
+        df_out["ML_SCORE"] = df_out["ML_SCORE"].fillna(0.0)
+        
+        # 2. [핵심] Trigger Score(타이밍) 계산 및 RAW 보존
+        # AI 점수와 시너지를 내기 위해 '실시간 차트 신호' 점수를 산출합니다.
+        trigger_list = []  
+        for idx, row in df_out.iterrows():
+            code = str(row['종목코드']).zfill(6)
+            ohlcv_df = full_ohlcv_map.get(code)
+            # 데이터 부재 시 0점 처리하여 연쇄 오류 방지
+            ts = calculate_trigger_score(ohlcv_df) if ohlcv_df is not None and not ohlcv_df.empty else 0.0
+            trigger_list.append(ts)
+        
+        df_out['TRIGGER_SCORE'] = trigger_list
+        df_out['RAW_TRIGGER_SCORE'] = df_out['TRIGGER_SCORE'] # 검증용 원본 박제
+
+        # 3. 최종 통합 스코어링 실행 (STRUCT, TIMING, AI 3원화)
+        # 시장의 매크로 위험도(macro_risk)에 따라 공격/방어 점수 비중을 자동 조절합니다.
+        df_out = build_global_score(df_out, macro_risk) 
+
+        log(f"✅ 통합 파이프라인 완료 (AI 유효 점수 반영 종목: {len(df_out[df_out['ML_SCORE'] > 0])}개)")
 
     except Exception as e:
-        log(f"⚠️ ML 점수 반영 중 에러 (main): {e}")
-        df_out["ML_SCORE"] = 0.0
+        log(f"⚠️ 스코어링 파이프라인 치명적 오류: {e}")
+        # 오류 발생 시 시스템 중단 방지를 위해 기존 점수를 FINAL_SCORE로 임시 복사
+        if "FINAL_SCORE" not in df_out.columns:
+            df_out["FINAL_SCORE"] = df_out.get("LDY_SCORE", 0.0)
 
-    # 🔥 [수정] Trigger Score 계산 및 FINAL_SCORE 반영
-    log("🔥 Trigger Score (타이밍) 계산 및 최종 점수 산출 중...")
-    trigger_list = []  
-    for idx, row in df_out.iterrows():
-        code = str(row['종목코드']).zfill(6)
-        ohlcv_df = full_ohlcv_map.get(code)
-        
-        if ohlcv_df is not None and not ohlcv_df.empty:
-            ts = calculate_trigger_score(ohlcv_df)
-        else:
-            ts = 0.0
-        trigger_list.append(ts)
-    
-    df_out['TRIGGER_SCORE'] = trigger_list
-
-    df_out['RAW_TRIGGER_SCORE'] = df_out['TRIGGER_SCORE']
-
-    # 2) 통합 스코어링 (v15.1 엔진: STRUCT, TIMING, AI, FINAL 계산)
-    df_out = build_global_score(df_out, macro_risk) 
-
-    # --- [내부 안전 유틸 함수 정의] ---
+    # --------------------------------------------------------------------------
+    # [Internal Helpers] 데이터 안전 처리 함수 (개선됨)
+    # --------------------------------------------------------------------------
     def safe_quantile(s, q, fallback=0.0):
+        """NaN 및 비어있는 시리즈 대응 퀀타일 계산기"""
         if s is None or s.empty: return fallback
-        v = s.quantile(q)
-        return fallback if pd.isna(v) else float(v)
+        try:
+            val = s.quantile(q)
+            return fallback if pd.isna(val) else float(val)
+        except: return fallback
 
     def safe_sort(df, cols, ascending):
-        # 존재하는 컬럼만 남기고 정렬 (KeyError 방지)
+        """KeyError를 방지하고 리스트 길이를 자동 매칭하는 안전 정렬기"""
+        # 1. 실제로 존재하는 컬럼만 선별
         use_cols = [c for c in cols if c in df.columns]
-        if not use_cols: return df
+        if not use_cols: 
+            return df
         
-        # ascending 리스트 길이 맞추기
+        # 2. 정렬 방향(ascending) 리스트 길이 동기화
         if isinstance(ascending, (list, tuple)):
-            use_asc = ascending[:len(use_cols)]
+            use_asc = list(ascending[:len(use_cols)])
+            # 방향 리스트가 컬럼보다 짧으면 마지막 방향으로 채움
             if len(use_asc) < len(use_cols):
-                use_asc = list(use_asc) + [use_asc[-1]] * (len(use_cols) - len(use_asc))
+                use_asc += [use_asc[-1]] * (len(use_cols) - len(use_asc))
         else:
             use_asc = ascending
+            
         return df.sort_values(by=use_cols, ascending=use_asc)
 
     # --------------------------------------------------------------------------
