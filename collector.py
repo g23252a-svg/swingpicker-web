@@ -2191,9 +2191,10 @@ def build_global_score(df: pd.DataFrame, macro_risk: str) -> pd.DataFrame:
     
     # 4. 호환성 및 편의를 위한 컬럼 매핑
     # 기존 대시보드나 로직이 깨지지 않도록 주요 컬럼 연결
-    x["RANK_SCORE"] = x["STRUCT_SCORE"] # 구조 점수를 랭크 점수로
-    x["TOTAL_SCORE"] = x["FINAL_SCORE"] # 최종 점수를 토탈 점수로
-    x["LDY_SCORE"] = x["STRUCT_SCORE"]  # LDY 점수도 구조 점수로 통일
+    # 모든 외부 표기용 점수를 최종 가중 합산 점수(FINAL_SCORE)로 통일
+    x["TOTAL_SCORE"] = x["FINAL_SCORE"]
+    x["LDY_SCORE"] = x["FINAL_SCORE"] 
+    x["RANK_SCORE"] = x["FINAL_SCORE"]
     
     # 주의: TRIGGER_SCORE는 덮어쓰지 않고 원본(Raw Trigger)을 유지함!
     # 필요하다면 TIMING_SCORE를 별도 컬럼으로 활용
@@ -3016,12 +3017,17 @@ def main(
 ) -> None:
     log("🚀 LDY Collector v10.0 (AI Powered) 시작...")
 
-    # [수정 후] 이제 ml_engine에 train_model을 추가했으므로 이름만 맞추면 됩니다.
-    log("🤖 AI 모델 최적화(v15.6 Master) 진행 중...")
-    try:
-        ml_engine.train_model() 
-    except Exception as e:
-        log(f"⚠️ 모델 학습 실패: {e}")
+    # ----------------------------------------------------------------------
+    # 🔥 [v15.6] 스마트 훈련 스킵 (당일 이미 학습했다면 30분 절약)
+    # ----------------------------------------------------------------------
+    if ml_engine.is_trained_today():
+        log("✅ [SKIP] 오늘 이미 v15.6 Master 모델 학습이 완료되었습니다.")
+    else:
+        log("🤖 AI 모델 최적화(v15.6 Master) 진행 중... (약 30분 소요)")
+        try:
+            ml_engine.train_model() 
+        except Exception as e:
+            log(f"⚠️ 모델 학습 실패: {e}")
     
     # ✅ 여기에 넣기 (resolve_trade_date() 호출 전에!)
     if not PYKRX_OK:
