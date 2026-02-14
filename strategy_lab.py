@@ -1,201 +1,149 @@
-# strategy_lab.py (v1.0) - LDY 퀀트 전략 시뮬레이터
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
-import glob
-import pickle
+import os, glob, pickle
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import timedelta
+from datetime import datetime
 
-# 페이지 설정
-st.set_page_config(page_title="🧪 LDY 전략 실험실", layout="wide", page_icon="🧪")
+# [📍혈자리 1] 틱 유틸리티 & 폴백
+try:
+    from utils.price_utils import round_to_tick, add_tick
+except Exception:
+    def round_to_tick(p, method="nearest"): return int(round(float(p)))
+    def add_tick(p, ticks=1): return int(float(p) + ticks)
 
-# -------------------------- 데이터 로딩 함수 --------------------------
+st.set_page_config(page_title="🧪 LDY 전략 실험실 v3.6", layout="wide")
+
+# -------------------------- 데이터 로딩 (기존 유지) --------------------------
 @st.cache_data
 def load_all_data():
-    """
-    1. data/recommend_*.csv 파일을 모두 읽어서 하나의 DataFrame으로 합칩니다.
-    2. data/ohlcv_cache_*.pkl 중 가장 최신 파일을 읽어서 가격 데이터로 사용합니다.
-    """
-    # 1. 추천 이력 로드
     rec_files = sorted(glob.glob(os.path.join("data", "recommend_*.csv")))
     dfs = []
     for f in rec_files:
         try:
-            # 파일명에서 날짜 추출 (recommend_20240101.csv)
-            base = os.path.basename(f)
-            date_str = base.split("_")[1].split(".")[0]
-            if len(date_str) >= 8 and date_str.isdigit():
-                df = pd.read_csv(f, dtype={'종목코드': str})
-                df['추천일'] = pd.to_datetime(date_str[:8], format="%Y%m%d")
-                
-                # 필수 컬럼 확인 (없으면 생성)
-                for col in ['RANK_SCORE', 'TOTAL_SCORE', 'RSI14', 'MFI14', '추천매수가', '종가']:
-                    if col not in df.columns:
-                        df[col] = 0
-                
-                dfs.append(df)
-        except Exception as e:
-            continue
-            
-    if not dfs:
-        return pd.DataFrame(), {}
+            date_str = os.path.basename(f).split("_")[1].split(".")[0]
+            df = pd.read_csv(f, dtype={'종목코드': str})
+            df['추천일'] = pd.to_datetime(date_str[:8], format="%Y%m%d")
+            dfs.append(df)
+        except: continue
     
-    full_recs = pd.concat(dfs, ignore_index=True)
-    full_recs['종목코드'] = full_recs['종목코드'].str.zfill(6)
-    
-    # 2. 최신 가격 데이터 로드 (OHLCV 캐시)
     cache_files = sorted(glob.glob(os.path.join("data", "ohlcv_cache_*.pkl")), reverse=True)
     price_map = {}
-    
     if cache_files:
-        latest_cache = cache_files[0]
-        # print(f"Loading price data from {latest_cache}...")
-        try:
-            with open(latest_cache, 'rb') as f:
-                price_map = pickle.load(f)
-        except Exception:
-            st.error("가격 데이터 로드 실패")
+        with open(cache_files[0], 'rb') as f: price_map = pickle.load(f)
             
-    return full_recs, price_map
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(), price_map
 
-# -------------------------- 시뮬레이션 함수 --------------------------
-def run_simulation(df, price_map, hold_days, target_pct, stop_pct):
-    """
-    필터링된 추천 종목들에 대해 N일 보유 시뮬레이션을 수행합니다.
-    """
+# -------------------------- [📍혈자리 3] v3.6 Sovereign-Ultimate 엔진 --------------------------
+def run_simulation(df, price_map, hold_days, target_pct, stop_pct,
+                   entry_slip_ticks=1, exit_slip_ticks=1, 
+                   commission_pct=0.015, sell_tax_pct=0.18,
+                   ambiguity_mode='conservative', fill_mode='execution'):
     results = []
+    hold_days = max(1, int(hold_days))
+    stop_pct, target_pct = max(0.1, float(stop_pct)), max(0.1, float(target_pct))
     
-    # 진행 상황바
     progress_bar = st.progress(0)
     total = len(df)
-    
-    for i, row in df.iterrows():
-        if i % 100 == 0:
-            progress_bar.progress(min(i / total, 1.0))
-            
-        code = row['종목코드']
-        entry_date = row['추천일']
-        entry_price = float(row['추천매수가']) if row['추천매수가'] > 0 else float(row['종가'])
-        
-        if entry_price <= 0: continue
+    if total == 0: return pd.DataFrame()
+
+    entry_fee_rate = commission_pct / 100.0
+    exit_fee_rate  = (commission_pct + sell_tax_pct) / 100.0
+    colmap = {"Open": "시가", "High": "고가", "Low": "저가", "Close": "종가"}
+
+    for idx, (_, row) in enumerate(df.iterrows()):
+        if idx % 100 == 0: progress_bar.progress(min(idx / total, 1.0))
+        code, signal_date = row["종목코드"], row["추천일"]
         if code not in price_map: continue
+
+        ohlcv = price_map[code].sort_index()
+        for en, ko in colmap.items():
+            if ko not in ohlcv.columns and en in ohlcv.columns: ohlcv[ko] = ohlcv[en]
         
-        # 해당 종목의 전체 차트 데이터
-        ohlcv = price_map[code]
-        
-        # 추천일 이후의 데이터만 필터링
-        # (추천일 다음날 시가 진입 가정, 혹은 추천일 종가 진입 가정. 여기선 추천일 종가 진입으로 단순화)
-        future_data = ohlcv[ohlcv.index > entry_date].head(hold_days)
-        
-        if future_data.empty:
-            continue
+        start_idx = ohlcv.index.searchsorted(signal_date, side='right')
+        future_data = ohlcv.iloc[start_idx : start_idx + hold_days + 1]
+        if future_data.empty: continue
+
+        raw_entry_p = float(future_data.iloc[0]["시가"])
+        actual_entry_p = add_tick(raw_entry_p, entry_slip_ticks)
+        total_entry_cost = actual_entry_p * (1 + entry_fee_rate)
+
+        # Clamping
+        if fill_mode == 'execution':
+            stop_p, target_p = round_to_tick(actual_entry_p * (1 - stop_pct/100), "up"), round_to_tick(actual_entry_p * (1 + target_pct/100), "down")
+        else:
+            stop_p, target_p = round_to_tick(actual_entry_p * (1 - stop_pct/100), "nearest"), round_to_tick(actual_entry_p * (1 + target_pct/100), "nearest")
+
+        if stop_p >= actual_entry_p: stop_p = add_tick(actual_entry_p, -1)
+        if target_p <= actual_entry_p: target_p = add_tick(actual_entry_p, 1)
+
+        opens, highs, lows, closes, dates = future_data["시가"].values.astype(np.float64), future_data["고가"].values.astype(np.float64), future_data["저가"].values.astype(np.float64), future_data["종가"].values.astype(np.float64), future_data.index
+        exit_price, exit_date, status = closes[-1], dates[-1], "HOLD"
+
+        for i in range(len(future_data)):
+            o, h, l, curr_dt = opens[i], highs[i], lows[i], dates[i]
+            if i > 0:
+                o_t = round_to_tick(o, "nearest")
+                if o_t <= stop_p: exit_price, exit_date, status = o_t, curr_dt, "GAP_STOP"; break
+                if o_t >= target_p: exit_price, exit_date, status = o_t, curr_dt, "GAP_WIN"; break
             
-        # 시뮬레이션 로직
-        exit_price = future_data.iloc[-1]['종가'] # 기본: 만기 청산
-        exit_date = future_data.index[-1]
-        status = "HOLD"
-        
-        # 고가/저가 확인하여 익절/손절 체크
-        max_h = future_data['고가'].max()
-        min_l = future_data['저가'].min()
-        
-        target_price = entry_price * (1 + target_pct/100)
-        stop_price = entry_price * (1 - stop_pct/100)
-        
-        # 1. 손절 체크 (보수적 관점: 저가가 손절가 터치하면 즉시 청산)
-        if min_l <= stop_price:
-            exit_price = stop_price
-            status = "STOP"
-        # 2. 익절 체크 (손절 안 당하고 고가가 목표가 터치)
-        elif max_h >= target_price:
-            exit_price = target_price
-            status = "WIN"
-            
-        # 수익률 계산 (수수료 0.25% 반영)
-        ret = (exit_price - entry_price) / entry_price * 100 - 0.25
-        
-        results.append({
-            '추천일': entry_date,
-            '종목명': row['종목명'],
-            '점수': row.get('TOTAL_SCORE', row.get('RANK_SCORE', 0)),
-            '진입가': entry_price,
-            '청산가': int(exit_price),
-            '수익률': ret,
-            '상태': status
-        })
-        
+            hit_stop, hit_win = l <= stop_p, h >= target_p
+            if hit_stop and hit_win:
+                exit_date = curr_dt
+                if ambiguity_mode == 'conservative': exit_price, status = stop_p, "STOP"; break
+                elif ambiguity_mode == 'optimistic': exit_price, status = target_p, "WIN"; break
+                else: exit_price, status = round_to_tick((stop_p*0.6 + target_p*0.4), "nearest"), "NEUTRAL_TOUCH"; break
+            elif hit_stop: exit_price, exit_date, status = stop_p, curr_dt, "STOP"; break
+            elif hit_win: exit_price, exit_date, status = target_p, curr_dt, "WIN"; break
+
+        actual_exit_p = add_tick(exit_price, -exit_slip_ticks)
+        ret = (actual_exit_p * (1 - exit_fee_rate) - total_entry_cost) / total_entry_cost * 100.0
+
+        results.append({"진입일": dates[0], "청산일": exit_date, "종목명": row.get("종목명", code), "수익률": ret, "상태": status, "진입가": int(actual_entry_p), "청산가": int(actual_exit_p)})
+
     progress_bar.empty()
     return pd.DataFrame(results)
 
 # -------------------------- UI 구성 --------------------------
-st.title("🧪 LDY 퀀트 전략 실험실 (Backtest Lab)")
-st.markdown("과거 추천 종목에 대해 **파라미터(점수, RSI 등)**를 조정하여 가상 매매 수익률을 검증해보세요.")
-
-# 1. 데이터 로드
+st.title("🧪 LDY 전략 실험실 Sovereign v3.6")
 all_recs, price_map = load_all_data()
 
-if all_recs.empty:
-    st.warning("⚠️ 데이터가 없습니다. `collector.py`를 먼저 실행하여 추천 데이터를 생성하세요.")
-    st.stop()
+# [📍혈자리 2] 사이드바 정밀 제어판
+with st.sidebar:
+    st.header("🛠️ 전략 & 필터")
+    min_score = st.slider("최소 점수", 0, 100, 80)
+    st.markdown("---")
+    st.header("💰 매매 규칙")
+    hold_days = st.number_input("보유 기간", 1, 60, 10)
+    target_pct = st.number_input("익절 (%)", 1.0, 50.0, 10.0)
+    stop_pct = st.number_input("손절 (%)", 1.0, 30.0, 5.0)
+    st.markdown("---")
+    st.header("🛡️ 실전 비용")
+    slip_ticks = st.slider("슬리피지(틱)", 0, 5, 1)
+    tax_rate = st.number_input("세율(%)", 0.0, 0.5, 0.18)
+    ambiguity = st.selectbox("동시터치", ["conservative", "optimistic", "neutral"])
 
-st.sidebar.header("🛠️ 전략 설정")
+# 데이터 필터링
+filtered_df = all_recs[all_recs['TOTAL_SCORE'] >= min_score].copy()
 
-# 2. 필터링 조건 입력
-min_score = st.sidebar.slider("최소 점수 (TOTAL_SCORE)", 0, 100, 80, step=5)
-min_rsi = st.sidebar.slider("최소 RSI", 0, 100, 30)
-max_rsi = st.sidebar.slider("최대 RSI", 0, 100, 70)
-min_mfi = st.sidebar.slider("최소 MFI (수급)", 0, 100, 50)
-
-st.sidebar.markdown("---")
-st.sidebar.header("💰 매매 규칙")
-hold_days = st.sidebar.number_input("최대 보유 기간 (일)", 1, 60, 10)
-target_pct = st.sidebar.number_input("목표 수익률 (%)", 1.0, 50.0, 10.0)
-stop_pct = st.sidebar.number_input("손절 제한 (%)", 1.0, 30.0, 5.0)
-
-# 3. 데이터 필터링
-filtered_df = all_recs[
-    (all_recs['TOTAL_SCORE'] >= min_score) &
-    (all_recs['RSI14'] >= min_rsi) &
-    (all_recs['RSI14'] <= max_rsi) &
-    (all_recs['MFI14'] >= min_mfi)
-].copy()
-
-st.metric("검증 대상 종목 수", f"{len(filtered_df)}개", f"전체 {len(all_recs)}개 중")
-
-# 4. 시뮬레이션 실행 버튼
 if st.button("🚀 시뮬레이션 시작", type="primary"):
-    if filtered_df.empty:
-        st.error("조건에 맞는 종목이 없습니다.")
-    else:
-        with st.spinner("과거 데이터로 매매 시뮬레이션 중..."):
-            res_df = run_simulation(filtered_df, price_map, hold_days, target_pct, stop_pct)
-            
-        if not res_df.empty:
-            # 결과 집계
-            win_rate = len(res_df[res_df['수익률'] > 0]) / len(res_df) * 100
-            avg_ret = res_df['수익률'].mean()
-            total_ret = res_df['수익률'].sum() # 단리 합산 (참고용)
-            
-            # --- 결과 대시보드 ---
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("승률 (Win Rate)", f"{win_rate:.1f}%")
-            c2.metric("평균 수익률", f"{avg_ret:.2f}%")
-            c3.metric("총 거래 횟수", f"{len(res_df)}회")
-            c4.metric("누적 수익 (단리)", f"{total_ret:.1f}%")
-            
-            # 누적 수익 곡선 (Equity Curve)
-            res_df = res_df.sort_values('추천일')
-            res_df['누적수익률'] = res_df['수익률'].cumsum()
-            
-            fig = px.line(res_df, x='추천일', y='누적수익률', title='📈 누적 수익률 곡선 (Equity Curve)')
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # 상세 거래 내역
-            st.subheader("📝 상세 거래 내역")
-            st.dataframe(res_df.style.format({'수익률': '{:.2f}%', '진입가': '{:,.0f}', '청산가': '{:,.0f}'}))
-            
-        else:
-            st.warning("시뮬레이션 결과가 없습니다. (가격 데이터 부족 등)")
+    res_df = run_simulation(filtered_df, price_map, hold_days, target_pct, stop_pct, 
+                            entry_slip_ticks=slip_ticks, exit_slip_ticks=slip_ticks, sell_tax_pct=tax_rate, ambiguity_mode=ambiguity)
+    
+    if not res_df.empty:
+        # [📍혈자리 4] 복리 & MDD 리포팅
+        res_df = res_df.sort_values('진입일')
+        res_df['cum_ret'] = (1 + res_df['수익률']/100).cumprod()
+        res_df['drawdown'] = (res_df['cum_ret'] / res_df['cum_ret'].cummax() - 1) * 100
+        
+        win_rate = (res_df['수익률'] > 0).mean() * 100
+        mdd = res_df['drawdown'].min()
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("승률", f"{win_rate:.1f}%")
+        c2.metric("최종 수익률", f"{(res_df['cum_ret'].iloc[-1]-1)*100:.2f}%")
+        c3.metric("최대 낙폭(MDD)", f"{mdd:.2f}%")
+        c4.metric("거래 횟수", f"{len(res_df)}회")
+
+        st.plotly_chart(px.line(res_df, x='진입일', y='cum_ret', title='📈 자산 성장 곡선 (복리)'))
+        st.dataframe(res_df.style.format({'수익률': '{:.2f}%', 'drawdown': '{:.2f}%'}))
