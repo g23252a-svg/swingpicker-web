@@ -207,13 +207,22 @@ def reset_login_failures(email):
     if "login_rl" in st.session_state and email in st.session_state.login_rl:
         st.session_state.login_rl.pop(email, None)
 
-def render_auth_box():
+def render_auth_box(show_debug: bool = False):
+    """
+    [v12.3 Sovereign-Auth]
+    - show_debug 인자를 추가하여 호출부와의 인터페이스 일치
+    - 기본값을 False로 설정하여 인자 없이 호출해도 에러 방지
+    """
     db = get_db()
     if not db:
         st.error("🚨 시스템 보안 엔진 연결 실패")
         return None
 
     user = get_user()
+    
+    # 디버깅 모드가 활성화되었을 때만 로그 출력 (필요 시 활용)
+    if show_debug:
+        logger.info(f"Auth Box Rendered. Current User: {user.get('nickname') if user else 'Guest'}")
 
     # [1] 로그인 완료 상태 UI
     if user:
