@@ -13,6 +13,21 @@ from sklearn.metrics import roc_auc_score, precision_score
 MODEL_PATH = "data/trading_model_v15_6_master.pth"
 SCALER_PATH = "data/trading_scaler_v15_6_master.pkl"
 SEQ_LENGTH = 20
+FEATURE_CACHE_PATH = "data/feature_cache_v16.pkl" 
+
+def get_feature_cache():
+    """피처 보급창에서 데이터를 로드"""
+    if os.path.exists(FEATURE_CACHE_PATH):
+        try:
+            with open(FEATURE_CACHE_PATH, 'rb') as f:
+                return pickle.load(f)
+        except: return {}
+    return {}
+
+def save_feature_cache(cache_data):
+    """최신 피처 데이터를 보급창에 저장"""
+    with open(FEATURE_CACHE_PATH, 'wb') as f:
+        pickle.dump(cache_data, f)
 TARGET_RET = 3.0  
 BASIC_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
@@ -195,8 +210,11 @@ def train_model(force=False):
     criterion = nn.BCEWithLogitsLoss(pos_weight=p_weight.to(device))
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
-    # 학습 루프
-    for epoch in range(15):
+    # --- [v16.1 혈자리 3번: 실전 KPI 기반 학습 관리] ---
+    best_kpi = 0.0
+    val_loader = DataLoader(StockDataset(X_val, y_val), batch_size=128)
+
+    for epoch in range(30): # 지능 최적화를 위해 epoch을 30으로 상향 권장
         model.train()
         for b_X, b_y in DataLoader(StockDataset(X_tr, y_tr), batch_size=128, shuffle=True):
             b_X, b_y = b_X.to(device), b_y.float().to(device).unsqueeze(1)
@@ -205,51 +223,80 @@ def train_model(force=False):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+
+        # 🎯 [사령관의 눈] 매 Epoch 마다 실전 성능 검증
+        model.eval()
+        all_probs = []
+        with torch.no_grad():
+            for v_X, _ in val_loader:
+                out = torch.sigmoid(model(v_X.to(device)))
+                all_probs.extend(out.cpu().numpy().flatten())
+        
+        all_probs = np.array(all_probs)
+        auc = roc_auc_score(y_val, all_probs)
+        
+        # 🎖️ 다중 구간 적중률 (Top 20/50/100) 평균 산출
+        val_res = pd.DataFrame({'prob': all_probs, 'target': y_val})
+        avg_precision = np.mean([
+            val_res.sort_values('prob', ascending=False).head(k)['target'].mean() 
+            for k in [20, 50, 100]
+        ])
+        
+        # [Tactical KPI] 6:4 황금 비율 판정 (분별력 60% + 상위권 적중률 40%)
+        commander_kpi = (0.6 * auc) + (0.4 * avg_precision)
+        
+        print(f"🎖️ Epoch {epoch} | Tactical KPI: {commander_kpi:.4f} (AUC: {auc:.3f}, Hit_Avg: {avg_precision:.2f})")
+        
+        # 최적의 지능을 발견했을 때만 모델 봉인(저장)
+        if commander_kpi > best_kpi:
+            best_kpi = commander_kpi
+            torch.save(model.state_dict(), MODEL_PATH)
+            print(f"✨ 전설적 지능 발견! v16.1 Sovereign 모델 업데이트 완료")
     
-    # 모델 저장
-    torch.save(model.state_dict(), MODEL_PATH)
-    print(f"✅ [ML] v15.6 Master 모델 학습 완료 및 저장 성공")
+    print(f"✅ [ML] 최종 최적화 완료 (Best KPI: {best_kpi:.4f})")
 
 
 
 
 def apply_ml_score(current_df, full_ohlcv_map):
-    """collector.py 호출용: 실전 AI 점수 주입"""
-    current_df["ML_SCORE"] = 0.0
-    if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
-        return current_df
+    """[v16.1 패치] 0.1초 광속 추론 엔진"""
+    if not os.path.exists(MODEL_PATH): return current_df
 
-    try:
-        device = torch.device('cpu')
-        scaler = joblib.load(SCALER_PATH)
-        input_dim = scaler.mean_.shape[0]
-        model = TradingAttnLSTM(input_dim, 64, 2, 1)
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-        model.eval()
+    cache = get_feature_cache()
+    target_codes = current_df["종목코드"].unique()
+    valid_inputs, codes = [], []
+    new_cache_count = 0
 
-        scores, indices = [], []
-        for idx, row in current_df.iterrows():
-            code = str(row['종목코드']).zfill(6)
-            if code not in full_ohlcv_map: continue
-            
-            df = clean_ohlcv(full_ohlcv_map[code])
+    for code in target_codes:
+        if code not in full_ohlcv_map: continue
+        
+        raw_df = full_ohlcv_map[code]
+        last_date = str(raw_df.index[-1])
+        
+        # 🛡️ 캐시 히트: 이미 정찰된 데이터는 즉시 통과
+        if code in cache and cache[code]['date'] == last_date:
+            valid_inputs.append(cache[code]['seq'])
+            codes.append(code)
+        else:
+            # 🔨 캐시 미스: 신규 데이터 정밀 정찰
+            df = clean_ohlcv(raw_df)
             df_feat = add_technical_features(df)
-            if len(df_feat) < SEQ_LENGTH: continue
-            
-            seq_data = df_feat.iloc[-SEQ_LENGTH:].values
-            if len(seq_data) == SEQ_LENGTH:
-                indices.append(idx)
-                scores.append(seq_data)
+            if len(df_feat) >= SEQ_LENGTH:
+                seq = df_feat.iloc[-SEQ_LENGTH:].values
+                valid_inputs.append(seq)
+                codes.append(code)
+                cache[code] = {'date': last_date, 'seq': seq}
+                new_cache_count += 1
 
-        if scores:
-            X_arr = np.array(scores)
-            X_scaled = scaler.transform(X_arr.reshape(-1, X_arr.shape[2])).reshape(-1, SEQ_LENGTH, X_arr.shape[2])
-            with torch.no_grad():
-                logits = model(torch.tensor(X_scaled, dtype=torch.float32))
-                # Logits을 Sigmoid로 변환하여 0~100점 산출
-                probs = torch.sigmoid(logits).numpy().flatten()
-                current_df.loc[indices, "ML_SCORE"] = (probs * 100).round(1)
-                
-    except Exception as e:
-        print(f"⚠️ [ML] 점수 반영 실패: {e}")
+    if new_cache_count > 0: save_feature_cache(cache)
+    if not valid_inputs: return current_df
+    
+    # [Tensor Flow] 하드웨어 가속 추론
+    X_batch = torch.tensor(np.array(valid_inputs), dtype=torch.float32)
+    model.eval()
+    with torch.no_grad():
+        probs = torch.sigmoid(model(X_batch)).cpu().numpy().flatten()
+    
+    score_map = dict(zip(codes, (probs * 100).round(1)))
+    current_df["ML_SCORE"] = current_df["종목코드"].map(score_map).fillna(0.0)
     return current_df
