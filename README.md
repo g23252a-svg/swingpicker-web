@@ -36,21 +36,6 @@
 
 
 
-## 🛠️ 실행 방법 (Usage)
-
-```bash
-# 1. 환경변수 설정 (.streamlit/secrets.toml)
-GEMINI_API_KEY = "your_key"
-DART_API_KEY = "your_key"
-
-# 2. 데이터 분석 및 AI 모델 훈련
-python collector.py
-
-# 3. 전술 지휘소(대시보드) 기동
-streamlit run dashboard.py
-
-
-
 
 ⚠️ 면책 조항 (Disclaimer)
 본 소프트웨어는 투자를 보조하는 데이터 분석 도구입니다. 모든 투자 결정의 최종 책임은 지휘관 본인에게 있으며, 과거의 수익률이 미래의 결과를 보장하지 않습니다.
