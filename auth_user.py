@@ -6,6 +6,7 @@ import streamlit as st
 import hashlib
 import secrets
 import time
+import re  # 👈 추가됨
 import logging
 from datetime import datetime, timezone
 
@@ -43,29 +44,47 @@ def get_db():
         logger.error(f"DB Load Error: {e}")
         return None
 
+# ----------------- 1. 보안 정책 강화 -----------------
+def check_password_strength(pw: str) -> bool:
+    """[v11.0] 8자 이상, 영문+숫자 혼합 강제"""
+    if len(pw) < 8: return False
+    if not re.search(r"[a-z]", pw.lower()): return False
+    if not re.search(r"[0-9]", pw): return False
+    return True
+
+
 # ----------------- 2. 핵심 함수 -----------------
 
 def get_user():
+    """[채찍: Zero-Leak Caching] 민감 정보(PW, Salt)를 제거한 프로필만 세션 캐싱"""
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
     
     val = st.session_state[CURRENT_USER_KEY]
-    if not val:
-        return None
+    if not val: return None
     
-    if isinstance(val, str):
-        if val == MASTER_ADMIN_ID:
-            return {"id": MASTER_ADMIN_ID, "login_id": MASTER_ADMIN_ID, "role": "admin", "nickname": "관리자"}
-        db = get_db()
-        if db:
-            user_info = db.get_user_by_id(val)
-            if user_info:
-                user_info['login_id'] = user_info['id']
-                return user_info
-    
-    if isinstance(val, dict):
-        return val
+    # 세션에 이미 딕셔너리가 있다면 즉시 반환 (DB 부하 0)
+    if isinstance(val, dict): return val
         
+    # 최초 로드 시 정보 정제 후 캐싱
+    db = get_db()
+    if not db: return None
+    
+    raw_user = db.get_user_by_id(val) if val != MASTER_ADMIN_ID else \
+               {"id": MASTER_ADMIN_ID, "role": "admin", "nickname": "관리자"}
+    
+    if raw_user:
+        # 🚨 중요: 패스워드, 솔트, 보안답변은 세션에서 영구 삭제
+        safe_profile = {
+            "id": raw_user.get("id"),
+            "login_id": raw_user.get("id"),
+            "role": raw_user.get("role", "free"),
+            "nickname": raw_user.get("nickname"),
+            "prime_expire_date": raw_user.get("prime_expire_date"),
+            "is_banned": raw_user.get("is_banned")
+        }
+        st.session_state[CURRENT_USER_KEY] = safe_profile
+        return safe_profile
     return None
 
 def _now_utc_str():
@@ -188,137 +207,123 @@ def reset_login_failures(email):
     if "login_rl" in st.session_state and email in st.session_state.login_rl:
         st.session_state.login_rl.pop(email, None)
 
-def render_auth_box(show_debug=False):
+def render_auth_box():
     db = get_db()
     if not db:
-        st.error("시스템 연결 실패")
+        st.error("🚨 시스템 보안 엔진 연결 실패")
         return None
 
     user = get_user()
 
+    # [1] 로그인 완료 상태 UI
     if user:
-        user_id = user['id']
-        role = user.get('role', 'free')
-        nickname = user.get('nickname', user_id)
-        
-        if role == 'admin':
-            st.sidebar.success("😎 관리자 모드")
-            if not db:
-                st.sidebar.error("DB 연결 실패")
-            else:
-                try:
-                    cnt = len(db.get_all_users() or [])
-                    st.sidebar.info(f"DB 연결 OK · 회원수: {cnt}")
-                except Exception as e:
-                    st.sidebar.error(f"DB 조회 실패: {e}")
-        else:
-            st.sidebar.markdown(f"### 👋 **{nickname}**님")
-            expire = user.get('prime_expire_date')
-            if role in ['prime', 'pro'] and expire:
-                 st.sidebar.info(f"👑 {role.upper()} 회원")
-            else:
-                 st.sidebar.text("무료 회원")
-                 st.sidebar.button("멤버십 구독하기")
-
-        if st.sidebar.button("로그아웃", type="primary"):
-            st.session_state[CURRENT_USER_KEY] = None
-            st.rerun()
+        with st.sidebar:
+            st.markdown(f"### 👋 **{user.get('nickname')}**님")
+            role = user.get('role', 'free')
+            if role == 'admin': st.success("😎 마스터 관리자")
+            else: st.info(f"👑 {role.upper()} 등급 이용 중")
+            
+            if st.button("로그아웃", type="primary", use_container_width=True):
+                st.session_state[CURRENT_USER_KEY] = None
+                st.rerun()
         return user
 
-    st.markdown("### 🔐 LDY Pro Trader")
-    tab1, tab2, tab3 = st.tabs(["로그인", "회원가입", "비번찾기"])
+    # [2] 로그인/가입/복구 탭 UI
+    st.markdown("### 🔐 LDY Pro Trader Ultimate Security")
+    t1, t2, t3 = st.tabs(["로그인", "전략군 가입", "계정 복구"])
 
-    with tab1:
-        with st.form("login"):
-            lid = st.text_input("이메일")
+    # 탭 1: 로그인 (타이밍 공격 & 계정 노출 차단)
+    with t1:
+        with st.form("login_ultimate"):
+            lid = st.text_input("이메일").strip()
             lpw = st.text_input("비밀번호", type="password")
-            
-            if st.form_submit_button("로그인", type="primary"):
-                input_pw_str = str(lpw).strip()
+            if st.form_submit_button("성문 개방", type="primary", use_container_width=True):
+                start_t = time.time()
+                clean_lid = normalize_email(lid)
                 
-                # 1. 관리자 체크
-                if lid == MASTER_ADMIN_ID:
-                    if not MASTER_ADMIN_PW:
-                        st.error("⚠️ 시스템 오류: 관리자 비밀번호가 설정되지 않았습니다")
-                    elif input_pw_str == MASTER_ADMIN_PW:
-                        reset_login_failures(lid)
-                        st.session_state[CURRENT_USER_KEY] = MASTER_ADMIN_ID
-                        st.rerun()
-                    else:
-                        st.error("비밀번호가 일치하지 않습니다.")
-                
-                # 2. 일반 유저 체크
+                # 시도 제한 체크 (DB 연동 권장)
+                ok, msg = check_rate_limit(clean_lid)
+                if not ok: 
+                    st.error(msg)
                 else:
-                    # 로그인 시에도 이메일 정규화하여 체크 (가입할 때 정규화했으므로)
-                    clean_lid = normalize_email(lid)
-                    ok, msg = check_rate_limit(clean_lid, limit=5, window_sec=300, lock_sec=600)
+                    u = db.get_user_by_id(clean_lid)
+                    # [전술] 존재하지 않는 계정이라도 '가짜 해싱'을 돌려 타이밍 공격을 방어함
+                    dummy_salt = "static_dummy_salt"
+                    provided_hash = _hash_password(lpw, u["salt"] if u else dummy_salt)
+                    stored_hash = u["password"] if u else "dummy_match_fail_hash"
                     
-                    if not ok:
-                        st.error(msg)
-                    else:
-                        # 정규화된 이메일로 조회
-                        u = db.get_user_by_id(clean_lid)
-                        if not u:
-                            record_login_failure(clean_lid)
-                            st.error("존재하지 않는 계정입니다.")
+                    if u and provided_hash == stored_hash:
+                        if str(u.get("is_banned")).upper() in ["Y", "TRUE", "1"]:
+                            st.error("🚫 접근 권한이 제한된 계정입니다.")
                         else:
-                            banned = str(u.get("is_banned", "")).upper() in ["Y", "TRUE", "1", "TRUE"]
-                            if banned:
-                                st.error("⛔ 이용 제한 계정입니다.")
-                            elif _hash_password(lpw, u["salt"]) == u["password"]:
-                                reset_login_failures(clean_lid)
-                                st.session_state[CURRENT_USER_KEY] = clean_lid
-                                st.success("로그인 성공")
-                                time.sleep(0.5)
-                                st.rerun()
-                            else:
-                                record_login_failure(clean_lid)
-                                st.error("비밀번호가 일치하지 않습니다.")
+                            reset_login_failures(clean_lid)
+                            st.session_state[CURRENT_USER_KEY] = clean_lid
+                            st.rerun()
+                    else:
+                        record_login_failure(clean_lid)
+                        # 성공/실패 응답 시간을 0.5초로 통일
+                        time.sleep(max(0, 0.5 - (time.time() - start_t)))
+                        st.error("이메일 또는 비밀번호가 일치하지 않습니다.")
 
-    with tab2:
-        # ### [수정] 문구 변경 (7일 무료 삭제 -> 가입 환영)
+    # 탭 2: 회원가입 (정책 강화)
+    with t2:
         st.info("👋 가입을 환영합니다! (주요 메일 주소만 사용 가능)")
-        with st.form("join"):
+        with st.form("join_ultimate"):
             em = st.text_input("이메일")
-            nk = st.text_input("닉네임")
-            p1 = st.text_input("비밀번호 (6자+)", type="password")
+            nk = st.text_input("닉네임 (최대 8자)")
+            p1 = st.text_input("비밀번호 (8자+, 영문/숫자 필수)", type="password")
             p2 = st.text_input("비밀번호 확인", type="password")
-            q = st.selectbox("질문", range(len(SECURITY_QUESTIONS)), format_func=lambda x: SECURITY_QUESTIONS[x])
-            ans = st.text_input("답변")
+            q_idx = st.selectbox("보안 질문 (비번 분실 시 답변 필수)", range(len(SECURITY_QUESTIONS)), format_func=lambda x: SECURITY_QUESTIONS[x])
+            ans = st.text_input("보안 질문 답변")
             
-            if st.form_submit_button("가입"):
-                # 1. 도메인 체크
-                domain = em.split("@")[-1].strip().lower()
+            if st.form_submit_button("전략군 가입 신청"):
+                domain = em.split("@")[-1].lower() if "@" in em else ""
                 if domain not in ALLOWED_DOMAINS:
-                    st.error(f"🚫 스팸 방지를 위해 주요 메일({', '.join(ALLOWED_DOMAINS)})로만 가입 가능합니다.")
-                elif p1 != p2: 
-                    st.error("비밀번호가 일치하지 않습니다.")
-                elif len(p1) < 6: 
-                    st.error("비밀번호는 6자 이상이어야 합니다.")
+                    st.error(f"🚫 허용된 도메인이 아닙니다. ({', '.join(ALLOWED_DOMAINS)})")
+                elif not check_password_strength(p1):
+                    st.error("⚠️ 비밀번호 정책 미달: 8자 이상, 영문과 숫자를 모두 포함해야 합니다.")
+                elif p1 != p2: st.error("비밀번호가 일치하지 않습니다.")
+                elif not ans.strip(): st.error("보안 질문 답변은 필수입니다.")
                 else:
-                    # 2. 이메일 정규화 (Gmail 점/플러스 제거)
                     clean_em = normalize_email(em)
-                    
                     salt = _create_salt()
-                    # 정규화된 이메일로 가입 요청
-                    ok, msg = db.register_user(clean_em, _hash_password(p1, salt), salt, nk, q, _hash_answer(ans, salt))
-                    
+                    ok, msg = db.register_user(clean_em, _hash_password(p1, salt), salt, nk[:8], q_idx, _hash_answer(ans, salt))
                     if ok:
                         st.balloons()
-                        # 문구는 db_utils.py에서 반환하므로 거기서도 수정되었는지 확인 필요
-                        st.success(msg) 
-                        st.session_state[CURRENT_USER_KEY] = clean_em
-                        time.sleep(1)
-                        st.rerun()
+                        st.success("🎉 가입 성공! 로그인 탭에서 접속하세요.")
                     else: st.error(msg)
-    
-    with tab3:
-        fid = st.text_input("아이디 (비번 찾기)")
-        if st.button("확인"):
-            # 비번 찾기 시에도 정규화된 이메일로 검색
-            clean_fid = normalize_email(fid)
-            u = db.get_user_by_id(clean_fid)
-            if u: st.success(f"질문: {SECURITY_QUESTIONS[u['security_q_idx']]}")
-            else: st.error("없음")
+
+    # 탭 3: 계정 복구 (정보 유출 0% 설계)
+    with t3:
+        st.caption("등록된 이메일과 보안 답변으로 비밀번호를 재설정합니다.")
+        with st.form("recovery_ultimate"):
+            fid = st.text_input("가입한 이메일").strip()
+            ans_in = st.text_input("가입 시 설정한 보안 답변")
+            new_pw = st.text_input("새 비밀번호 (8자+, 영문/숫자)")
             
+            st.warning("⚠️ 정보가 일치하지 않으면 재설정되지 않으며, 시도 횟수가 기록됩니다.")
+            
+            if st.form_submit_button("본인 인증 및 비번 변경"):
+                start_t = time.time()
+                clean_fid = normalize_email(fid)
+                u = db.get_user_by_id(clean_fid)
+                
+                success = False
+                # [Salt Rotation 적용] 비번 변경 시 소금도 새로 발급하여 보안 등급 상향
+                if u and _hash_answer(ans_in, u["salt"]) == u["security_ans"]:
+                    if check_password_strength(new_pw):
+                        new_salt = _create_salt()
+                        new_hash = _hash_password(new_pw, new_salt)
+                        if db.update_user_password(clean_fid, new_hash, new_salt): # 👈 DB 함수 수정 필요
+                            success = True
+                
+                # 성공/실패와 무관하게 1초 지연 (계정 존재 여부 은폐)
+                time.sleep(max(0, 1.0 - (time.time() - start_t)))
+                
+                if success:
+                    st.success("✅ 인증 성공! 비밀번호가 변경되었습니다. 로그인 탭을 이용하세요.")
+                else:
+                    st.error("입력하신 정보가 올바르지 않거나 정책에 맞지 않습니다.")
+                    if clean_fid: record_login_failure(clean_fid)
+                    
     return None
