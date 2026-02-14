@@ -208,11 +208,6 @@ def reset_login_failures(email):
         st.session_state.login_rl.pop(email, None)
 
 def render_auth_box(show_debug: bool = False):
-    """
-    [v12.3 Sovereign-Auth]
-    - show_debug 인자를 추가하여 호출부와의 인터페이스 일치
-    - 기본값을 False로 설정하여 인자 없이 호출해도 에러 방지
-    """
     db = get_db()
     if not db:
         st.error("🚨 시스템 보안 엔진 연결 실패")
@@ -220,9 +215,10 @@ def render_auth_box(show_debug: bool = False):
 
     user = get_user()
     
-    # 디버깅 모드가 활성화되었을 때만 로그 출력 (필요 시 활용)
     if show_debug:
-        logger.info(f"Auth Box Rendered. Current User: {user.get('nickname') if user else 'Guest'}")
+        import logging
+        logger = logging.getLogger("auth")
+        logger.info(f"Auth Rendered. Status: {'Logged-in' if user else 'Guest'}")
 
     # [1] 로그인 완료 상태 UI
     if user:
@@ -235,7 +231,7 @@ def render_auth_box(show_debug: bool = False):
             if st.button("로그아웃", type="primary", use_container_width=True):
                 st.session_state[CURRENT_USER_KEY] = None
                 st.rerun()
-        return user
+        return user # 👈 로그인 상태일 때 객체 반환
 
     # [2] 로그인/가입/복구 탭 UI
     st.markdown("### 🔐 LDY Pro Trader Ultimate Security")
@@ -335,4 +331,4 @@ def render_auth_box(show_debug: bool = False):
                     st.error("입력하신 정보가 올바르지 않거나 정책에 맞지 않습니다.")
                     if clean_fid: record_login_failure(clean_fid)
                     
-    return None
+    return None # 👈 미로그인 상태일 때 명시적 None 반환
