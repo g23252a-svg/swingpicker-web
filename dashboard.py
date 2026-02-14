@@ -183,13 +183,22 @@ from auth_user import (
     toggle_user_ban, grant_all_users_trial
 )
 
-from version_info import (
-    PRIME_TG_JOIN_URL,
-    APP_VERSION,
-    CHANGELOG,
-    get_version_label,
-    get_latest_log,
-)
+try:
+    from version_info import (
+        PRIME_TG_JOIN_URL,
+        APP_VERSION,
+        CHANGELOG,
+        get_version_label,
+        get_latest_log,
+    )
+except ImportError as e:
+    # 보급로가 끊겼을 때를 대비한 최소한의 비상 식량(Fallback)
+    st.error(f"🚨 시스템 버전 정보 로드 실패: {e}")
+    APP_VERSION = "12.3.0"
+    PRIME_TG_JOIN_URL = "https://t.me/+DovDEluWnEJhOTY1"
+    CHANGELOG = []
+    def get_version_label(*args, **kwargs): return APP_VERSION
+    def get_latest_log(): return None
 
 
 # ---------------------------
