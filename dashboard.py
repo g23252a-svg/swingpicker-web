@@ -45,13 +45,12 @@ def get_stock_history_from_db(code: str):
         return pd.DataFrame()
 
     try:
-        # 읽기 전용으로 연결
         conn = duckdb.connect(db_path, read_only=True)
         code_str = str(code).zfill(6)
         
-        # 날짜순 정렬하여 데이터 가져오기
+        # 🚨 [교정] display_score를 주 지표로 가져오도록 변경
         query = f"""
-            SELECT trade_date, close_price, ldy_score, rank_score, ai_comment
+            SELECT trade_date, close_price, display_score as ldy_score, final_score, ai_comment
             FROM daily_recommend
             WHERE code = '{code_str}'
             ORDER BY trade_date ASC
@@ -124,6 +123,21 @@ def plot_score_history_chart(history_df, stock_name):
     fig.update_yaxes(title_text="주가", showgrid=False, secondary_y=True)
 
     return fig
+
+def get_route_color(route):
+    """전략 상태(ROUTE)에 따른 시각적 배지 색상 반환 (v11.0 표준)"""
+    colors = {
+        "ATTACK": "#FF4B4B",  # 🚀 강력 레드
+        "ARMED": "#FFA726",   # 🔫 오렌지
+        "WAIT": "#29B6F6",    # 🧱 블루
+        "OVERHEAT": "#757575", # ⚠️ 그레이
+        "NEUTRAL": "#BDBDBD"  # ⚪️ 연그레이
+    }
+    r = str(route).upper()
+    for key, color in colors.items():
+        if key in r:
+            return color
+    return "#BDBDBD"
 
 def normalize_code(x) -> str:
     if x is None or (isinstance(x, float) and pd.isna(x)) or pd.isna(x):
@@ -2641,52 +2655,81 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
         # ✅ CASE 1: Prescored (v15.6 Master-Grade / v8.0+ Collector)
         scored = normalize_cols(df_raw) 
         
-        # 1. [Fix 1] 모든 점수 체계 강제 Numeric 캐스팅 (v15.6 신규 컬럼 포함)
-        # 데이터 정합성을 위해 AI_SCORE, STRUCT_SCORE 등 신규 규격을 리스트에 추가합니다.
+        # 1. [Fix 1] 지표 데이터 정합성 강화 (Numeric 캐스팅 & 단위 보정)
+        # 모든 기술적 지표와 점수 컬럼을 숫자형으로 강제 변환합니다.
         score_cols = [
-            "FINAL_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", 
-            "ML_SCORE", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE", "EBS", "RR1"
+            "FINAL_SCORE", "DISPLAY_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", 
+            "ML_SCORE", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE", "NEWS_SCORE", "EBS", "RR1",
+            "V_POWER", "거래강도", "거래대금(억원)", "Low_Trend_PCT", "Range_Pos", "Vol_Quality"
         ]
         for c in score_cols:
             if c in scored.columns:
                 scored[c] = pd.to_numeric(scored[c], errors="coerce").fillna(0.0)
+
+        # 🚨 [수급 무결성] 수급 비중 계산용 '원' 단위 컬럼 부재 시 자동 생성
+        # determine_state_dynamic의 분모가 깨지는 것을 원천 차단합니다.
+        if "거래대금(원)" not in scored.columns:
+            scored["거래대금(원)"] = (scored["거래대금(억원)"] * 100_000_000).astype(float)
         
-        # 2. [Face-lifting] 전술적 점수 통합 (Ranking Alignment)
-        # AI의 통찰이 담긴 FINAL_SCORE를 시스템 전체의 '대표 점수'로 강제 동기화합니다.
-        if "FINAL_SCORE" in scored.columns:
-            # [Fix 2] 점수 0점 판정 및 보조 점수 복구 로직
-            # 만약 FINAL_SCORE가 통째로 0이라면, 백업 점수(TOTAL/LDY)를 탐색합니다.
-            if scored["FINAL_SCORE"].abs().sum() == 0:
-                backup_col = "TOTAL_SCORE" if scored["TOTAL_SCORE"].abs().sum() > 0 else "LDY_SCORE"
-                scored["FINAL_SCORE"] = scored.get(backup_col, 0.0)
+        # 2. [Face-lifting] 전술적 점수 통합 (v11.0 UI-Elite 규격)
+        # 🚨 핵심: 모든 랭킹 및 UI 지표를 '실전 점수(DISPLAY_SCORE)'로 통일합니다.
+        # 뉴스/공시가 반영된 DISPLAY_SCORE가 없다면 엔진 점수인 FINAL_SCORE를 주 지표로 삼습니다.
+        
+        primary_metric = "DISPLAY_SCORE" if "DISPLAY_SCORE" in scored.columns else "FINAL_SCORE"
 
-            # 🚨 핵심: 모든 랭킹용 점수 컬럼을 FINAL_SCORE로 통일하여 
-            # 텔레그램, 대시보드 리스트, 필터링이 모두 AI 예측치를 따르게 합니다.
-            scored["TOTAL_SCORE"] = scored["FINAL_SCORE"]
-            scored["LDY_SCORE"]   = scored["FINAL_SCORE"]
-            scored["RANK_SCORE"]  = scored["FINAL_SCORE"]
+        if primary_metric in scored.columns:
+            # [Fix 2] 점수 0점 판정 및 백업 복구 로직 (데이터 유실 방어)
+            # 만약 주 지표가 통째로 0이라면, 백업 점수(TOTAL -> LDY -> RANK) 순으로 탐색합니다.
+            if scored[primary_metric].abs().sum() == 0:
+                for backup_col in ["TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE"]:
+                    if backup_col in scored.columns and scored[backup_col].abs().sum() > 0:
+                        scored[primary_metric] = scored[backup_col]
+                        logger.info(f"🔄 {primary_metric} 복구 완료 (Source: {backup_col})")
+                        break
 
-        # 3. 필수 컬럼 UI 결측 방어 (v15.1 호환용)
-        # 구형 데이터에서도 UI가 깨지지 않도록 기본값을 배정합니다.
-        if "STRUCT_SCORE" not in scored.columns: scored["STRUCT_SCORE"] = scored.get("TOTAL_SCORE", 0.0)
-        if "TIMING_SCORE" not in scored.columns: scored["TIMING_SCORE"] = scored.get("TRIGGER_SCORE", 0.0)
-        if "AI_SCORE" not in scored.columns:     scored["AI_SCORE"]     = scored.get("ML_SCORE", 0.0)
-        if "EBS" not in scored.columns:          scored["EBS"]          = 0.0
-        if "거래대금(억원)" not in scored.columns: scored["거래대금(억원)"] = 0.0
+            # 🚨 [UI Unity] 모든 가시성 점수 컬럼을 주 지표로 강제 동기화
+            # 이를 통해 텔레그램, 리스트, 상세 분석의 숫자가 100% 일치하게 됩니다.
+            scored["TOTAL_SCORE"] = scored[primary_metric]
+            scored["LDY_SCORE"]   = scored[primary_metric]
+            scored["RANK_SCORE"]  = scored[primary_metric]
+            
+            # 구형 파일 대응: DISPLAY_SCORE 컬럼이 없었다면 생성
+            if "DISPLAY_SCORE" not in scored.columns:
+                scored["DISPLAY_SCORE"] = scored[primary_metric]
+
+        # 3. 필수 컬럼 UI 결측 방어 (v15.1 호환용 Fallback)
+        # 분석 엔진 버전에 관계없이 대시보드 UI가 깨지는 것을 방지하기 위해 기본값을 배정합니다.
+        fallback_map = {
+            "STRUCT_SCORE": "TOTAL_SCORE",   # 기초 체력
+            "TIMING_SCORE": "TRIGGER_SCORE", # 진입 타점
+            "AI_SCORE":     "ML_SCORE",      # AI 예측치
+            "NEWS_SCORE":   0.0,             # 뉴스 가점
+            "EBS":          0.0,             # 독립 체크리스트 (정예군 편성 핵심)
+            "V_POWER":      0.0,             # 매수세 강도
+            "Low_Trend_PCT": 0.0             # 저점 추세
+        }
+
+        for target_col, fallback in fallback_map.items():
+            if target_col not in scored.columns:
+                if isinstance(fallback, str):
+                    scored[target_col] = scored.get(fallback, 0.0)
+                else:
+                    scored[target_col] = fallback
 
     else:
         # ⚠️ CASE 2: Legacy (점수 부재 시) -> 대시보드 자체 스코어링 엔진 가동
         df = normalize_cols(df_raw)
         scored = build_global_score(df, keep_order=True).reset_index(drop=True)
         
-        # UI 호환성을 위해 대시보드 점수를 FINAL_SCORE 규격으로 매핑
-        scored["FINAL_SCORE"]  = scored["LDY_SCORE"]
-        scored["STRUCT_SCORE"] = scored["LDY_SCORE"]
-        scored["TIMING_SCORE"] = 0.0
-        scored["AI_SCORE"]     = 0.0
+        # UI 호환성을 위해 대시보드 점수를 최신 규격(FINAL/DISPLAY)으로 매핑
+        scored["FINAL_SCORE"]   = scored["LDY_SCORE"]
+        scored["DISPLAY_SCORE"] = scored["LDY_SCORE"]
+        scored["STRUCT_SCORE"]  = scored["LDY_SCORE"]
+        scored["TIMING_SCORE"]  = 0.0
+        scored["AI_SCORE"]      = 0.0
 
-    # 4. [Rank Restoration] 원본 파일의 순서와 랭크 정보 복원
-    # CSV에 기록된 랭킹을 최우선으로 존중하되, 없을 경우 행 순서를 랭킹으로 삼습니다.
+    # 4. [Rank Restoration] 원본 파일의 배치 순서(Placement) 보존
+    # CSV에 기록된 정예군(Top 120 등)의 전술적 순서를 최우선으로 존중합니다.
     if "_CSV_RANK" in df_raw.columns:
         scored["_CSV_RANK"] = df_raw["_CSV_RANK"].values
     scored["_CSV_ROW"] = df_raw["_CSV_ROW"].values
@@ -3660,6 +3703,15 @@ with tab2:
                     st.plotly_chart(fig_water, use_container_width=True)
                 except: pass
                 st.plotly_chart(plot_radar_chart(sel_row), use_container_width=True)
+
+            route_val = sel_row.get("ROUTE", "NEUTRAL")
+            badge_color = get_route_color(route_val)
+            st.markdown(f"""
+                <div style="background-color:{badge_color}; padding:12px; border-radius:8px; color:white; text-align:center; margin-bottom:20px;">
+                    <span style="font-size:14px; opacity:0.9;">현재 작전 상태</span><br>
+                    <b style="font-size:24px; letter-spacing:2px;">{route_val}</b>
+                </div>
+            """, unsafe_allow_html=True)
 
             st.markdown("---")
             st.subheader("🧱 매물대 및 저항 데이터 분석 (Volume Profile)")
