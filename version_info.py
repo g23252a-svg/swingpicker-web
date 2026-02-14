@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-version_info.py (v12.3.1 Sovereign-Core: Absolute Defense)
+version_info.py (v12.3.1 Sovereign-Core)
 - 100/100: dashboard.py 호환성 완벽 복구 버전
 """
 
@@ -18,9 +18,9 @@ CHANGELOG: List[Dict[str, Any]] = [
         "type": "major", 
         "title": "Absolute Defense: Environment Separation",
         "items": [
-            "🛡️ **Logic Isolation:** Import 시점의 UI 의존성 제거",
-            "⚙️ **Robust Config:** Env -> Secrets -> Default 체계 확립",
-            "🚦 **Integrity Gate:** 무결성 검증 로직 함수화",
+            "🛡️ Logic Isolation: Import 시점의 UI 의존성 제거",
+            "⚙️ Robust Config: Env -> Secrets -> Default 체계 확립",
+            "🚦 Integrity Gate: 무결성 검증 로직 함수화",
         ],
         "schema_min": 5
     }
@@ -29,7 +29,6 @@ CHANGELOG: List[Dict[str, Any]] = [
 # ----------------- 2. 핵심 로직 (Core) -----------------
 
 def _get_conf(key: str, default: str = "") -> str:
-    """환경변수 -> Secrets -> Default 순으로 설정 로드"""
     val = os.getenv(key)
     if val: return str(val)
     try:
@@ -43,21 +42,19 @@ def _parse_version(v_str: str) -> Tuple[int, ...]:
     try: return tuple(map(int, (v_str.split('.'))))
     except: return (0, 0, 0)
 
-# [📍 필수 보급 물자 1] 앱 버전 추출
+# [📍 필수 보급 1] 앱 버전
 APP_VERSION = CHANGELOG[0]["version"] if CHANGELOG else "0.0.0"
 VERSION_TUPLE = _parse_version(APP_VERSION)
 
-# [📍 필수 보급 물자 2] 텔레그램 조인 URL (누락되었던 부분)
+# [📍 필수 보급 2] 텔레그램 URL (누락되었던 부분)
 PRIME_TG_JOIN_URL = _get_conf("LDY_PRIME_JOIN_URL", "https://t.me/+DovDEluWnEJhOTY1")
 
 def get_latest_log() -> Optional[Dict]:
     return CHANGELOG[0] if CHANGELOG else None
 
-# [📍 필수 보급 물자 3] 버전 라벨 생성 함수 (누락되었던 부분)
+# [📍 필수 보급 3] 버전 라벨 (누락되었던 부분)
 def get_version_label(include_build: bool = True) -> str:
-    """dashboard.py에서 호출하는 버전 표시 헬퍼"""
-    if include_build:
-        return APP_VERSION
+    if include_build: return APP_VERSION
     return f"{VERSION_TUPLE[0]}.{VERSION_TUPLE[1]}"
 
 def validate_integrity() -> bool:
@@ -67,7 +64,7 @@ def validate_integrity() -> bool:
         return False
     return True
 
-# ----------------- 3. UI 렌더링 (Streamlit 기반) -----------------
+# ----------------- 3. UI 렌더링 -----------------
 
 def show_toast_notification():
     import streamlit as st
