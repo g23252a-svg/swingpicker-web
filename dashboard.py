@@ -176,11 +176,17 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
 # -----------------------------------------------------------
 
 from auth_user import (
-    # render_auth_box를 여기서 지워야 dashboard.py에 정의한 함수가 작동합니다!
-    get_user, list_users, update_user_role,
-    load_inquiry_items, save_inquiry_items, _now_utc_str,
-    load_subscriptions_db, save_subscriptions_db,
-    toggle_user_ban, grant_all_users_trial
+    render_auth_box,  # 👈 이 녀석이 반드시 명단에 있어야 합니다!
+    get_user, 
+    list_users, 
+    update_user_role,
+    load_inquiry_items, 
+    save_inquiry_items, 
+    _now_utc_str,
+    load_subscriptions_db, 
+    save_subscriptions_db,
+    toggle_user_ban, 
+    grant_all_users_trial
 )
 
 try:
