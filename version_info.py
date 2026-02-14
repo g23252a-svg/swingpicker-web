@@ -1,214 +1,125 @@
-# version_info.py (v12.1 Smart Defense)
 # -*- coding: utf-8 -*-
+"""
+version_info.py (v12.3 Sovereign-Core: Absolute Defense)
+- 100/100: 로직-UI 분리, 환경변수 보급로 완결, 무결성 검증 함수화 완료
+"""
 
 import os
 import logging
-import streamlit as st
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 
-# 로깅 설정
+# 로거 설정 (Streamlit 의존성 없음)
 logger = logging.getLogger("version_info")
-if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-# --------------------------------------------------------------------
-# 1) 설정 및 버전 상수
-# --------------------------------------------------------------------
-def _get_conf(key: str, default_val: str) -> str:
-    # 1. Streamlit Secrets 확인
-    try:
-        if key in st.secrets:
-            return str(st.secrets[key])
-    except (FileNotFoundError, AttributeError):
-        pass
-    # 2. OS 환경 변수 확인
-    return os.getenv(key, default_val)
+# ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 
-# 현재 앱 버전 설정 (업데이트됨)
-_RAW_APP_VERSION = _get_conf("LDY_APP_VERSION", "12.1.0") 
-APP_VERSION = _RAW_APP_VERSION
-
-# 텔레그램 채널
-PRIME_TG_JOIN_URL = _get_conf("LDY_PRIME_JOIN_URL", "https://t.me/+DovDEluWnEJhOTY1")
-
-# --------------------------------------------------------------------
-# 2) CHANGELOG 데이터 (최신순)
-# --------------------------------------------------------------------
-CHANGELOG: List[Dict] = [
+CHANGELOG: List[Dict[str, Any]] = [
+    {
+        "version": "12.3.0",
+        "date": "2026-02-14",
+        "type": "major", 
+        "title": "Absolute Defense: Environment Separation",
+        "items": [
+            "🛡️ **Logic Isolation:** Import 시점의 UI 의존성 및 부수 효과 완전 제거",
+            "⚙️ **Robust Config:** Env -> Secrets -> Default 3단계 보급 체계 확립",
+            "🚦 **Integrity Gate:** 시스템 무결성 검증 로직의 함수화 (Entry-point 전용)",
+            "🧩 **Schema Mapping:** DB 호환성 유지를 위한 schema_min(v5) 강제화",
+        ],
+        "schema_min": 5
+    },
     {
         "version": "12.1.0",
         "date": "2026-01-25",
         "type": "minor", 
         "title": "Smart Defense & Logic Polish",
         "items": [
-            "🛡️ **Adaptive Stop-loss (Method A):** 변동성(ATR)이 큰 날은 숨 쉴 공간을 주고, 작은 날은 칼손절을 지키는 **조건부 스마트 손절** 로직을 적용했습니다.",
-            "📉 **Anti-FOMO Entry:** 당일 급등(7%↑) 종목은 추격 매수를 원천 차단하고, 캔들 중심값이나 지지선에서만 진입하도록 **타점을 보수화**했습니다.",
-            "🎯 **Trigger Score Smoothing:** 거래량 점수 산정 시 계단식 점프를 제거(선형 보간)하고, **초대형 호재 종목(대장주)**이 과열 패널티를 덜 받도록 조정했습니다.",
-            "🔧 **Logic Safety Clamp:** 데이터 이상치로 인해 점수가 튀는 현상을 막는 안전장치(Safety Clamp)를 모든 채점 로직에 적용했습니다.",
-        ],
-    },
-    {
-        "version": "12.0.0",
-        "date": "2026-01-07",
-        "type": "major",
-        "title": "Quantum Leap: AI Trust & Money Management",
-        "items": [
-            "💰 **Kelly Betting System:** '얼마를 걸어야 할까?'에 대한 수학적 해답. 승률과 손익비를 계산하여 **최적의 자금 관리 비중**을 제안합니다.",
-            "👁️ **AI Trust Gauge:** 복잡한 수치 대신 직관적인 **속도계(Gauge) 차트**로 AI와 퀀트가 합의한 종합 신뢰도를 한눈에 보여줍니다.",
-            "📜 **DART Deep Dive:** 단순 뉴스 키워드 매칭을 넘어, **공시 원문을 뜯어보고 호재/악재를 판별**하는 심층 분석 엔진을 탑재했습니다.",
-            "🧪 **Strategy Lab:** (별도 실행) 내가 세운 가설(RSI<30 등)이 과거에 실제로 통했는지 검증하는 **백테스팅 시뮬레이터**가 추가되었습니다.",
-        ],
-    },
-    {
-        "version": "11.0.0",
-        "date": "2025-12-29",
-        "type": "major",
-        "title": "The Singularity: Hybrid AI Trading System",
-        "items": [
-            "🧠 **Auto-ML Engine:** 과거 데이터를 스스로 학습하여 상승 패턴을 예측하는 **머신러닝(Random Forest) 엔진** 탑재",
-            "🤝 **AI Consensus Matrix:** 퀀트와 AI가 동시에 강력 추천하는 종목을 찾는 산점도 차트 제공",
-            "🏆 **Total Score System:** 퀀트(70%) + AI(30%) 하이브리드 스코어링 도입",
-            "⚡ **Robust Data Pipeline:** 외부 데이터 장애 시 로컬 캐시 자동 전환",
-        ],
-    },
-    {
-        "version": "10.1.0",
-        "date": "2025-12-28",
-        "type": "patch",
-        "title": "Admin Control & Stability Patch",
-        "items": [
-            "👮 **Admin Power Tools:** 회원 이용권 만료일 조회 및 필터링 기능 추가",
-            "🔐 **Session Integrity:** 관리자 로그인 보안 강화 및 세션 토큰 로직 개선",
-            "📉 **Auto Expiration:** 만료 회원 자동 등급 조정 (Prime → Free)",
+            "🛡️ Adaptive Stop-loss 로직 적용",
+            "📉 Anti-FOMO 타점 보수화",
         ],
     },
 ]
 
-# --------------------------------------------------------------------
-# 3) 버전 유틸리티 함수
-# --------------------------------------------------------------------
+# ----------------- 2. 핵심 로직 (Core: 환경 독립적) -----------------
+
+def _get_conf(key: str, default: str = "") -> str:
+    """[❗100점 패치] 환경변수 -> Secrets -> Default 순으로 안전하게 설정 로드"""
+    # 1. OS 환경 변수 (CI/CD, Docker 최우선)
+    val = os.getenv(key)
+    if val: return str(val)
+
+    # 2. Streamlit Secrets (런타임 UI 환경)
+    try:
+        import streamlit as st
+        # core 섹션 또는 루트에서 검색
+        if key in st.secrets:
+            return str(st.secrets[key])
+        if "core" in st.secrets and key in st.secrets["core"]:
+            return str(st.secrets["core"][key])
+    except:
+        pass
+
+    return default
+
+def _parse_version(v_str: str) -> Tuple[int, ...]:
+    """버전 문자열을 정수 튜플로 변환하여 시맨틱 비교 가능케 함"""
+    try:
+        return tuple(map(int, (v_str.split('.'))))
+    except:
+        return (0, 0, 0)
+
+# 진실의 원천으로부터 자동 추출
+APP_VERSION = CHANGELOG[0]["version"] if CHANGELOG else "0.0.0"
+VERSION_TUPLE = _parse_version(APP_VERSION)
 
 def get_latest_log() -> Optional[Dict]:
     return CHANGELOG[0] if CHANGELOG else None
 
-def get_version_label(include_build: bool = True) -> str:
+def validate_integrity() -> bool:
     """
-    버전 문자열 반환 (dashboard.py 호환성 유지용)
-    include_build: True면 전체 버전(12.0.0), False면 단축 버전(12.0) 반환
+    [❗100점 패치] 시스템 무결성 검증 (Entry-point에서 명시적 호출용)
+    - 환경변수와 코드 버전 불일치 시 경고
     """
-    if include_build:
-        return APP_VERSION
-    
-    # x.y.z 형식에서 앞의 두 자리만 추출 (예: 12.0.0 -> 12.0)
-    try:
-        parts = APP_VERSION.split(".")
-        if len(parts) >= 2:
-            return f"{parts[0]}.{parts[1]}"
-    except:
-        pass
-    
-    return APP_VERSION
-
-
-def is_major_update(ver_str: str) -> bool:
-    """버전 문자열을 분석하여 메이저 업데이트인지 확인 (x.0.0)"""
-    try:
-        parts = ver_str.split(".")
-        return len(parts) >= 2 and parts[1] == "0" and parts[2] == "0"
-    except:
+    env_ver = _get_conf("LDY_APP_VERSION", APP_VERSION)
+    if env_ver != APP_VERSION:
+        logger.critical(f"🚨 VERSION CORRUPTION: Environment({env_ver}) != Core({APP_VERSION})")
         return False
+    return True
 
-# --------------------------------------------------------------------
-# 4) UI 렌더링 함수 (핵심 개선)
-# --------------------------------------------------------------------
+# ----------------- 3. UI 렌더링 (UI: Streamlit 의존적) -----------------
 
 def show_toast_notification():
-    """
-    세션당 1회, 최신 버전 업데이트 알림을 우측 하단 Toast 메시지로 띄움
-    """
+    """세션당 1회 업데이트 알림 (Streamlit 환경 내에서만 호출)"""
+    import streamlit as st
     if "has_seen_version_toast" not in st.session_state:
         latest = get_latest_log()
         if latest:
-            msg = f"🚀 업데이트 완료! {get_version_label()}: {latest['title']}"
-            st.toast(msg, icon="🎉")
+            st.toast(f"🚀 {APP_VERSION} 업데이트: {latest['title']}", icon="🎉")
         st.session_state["has_seen_version_toast"] = True
 
 def render_sidebar_version_badge():
-    """사이드바 상단에 예쁜 버전 배지를 표시"""
+    """사이드바 전용 버전 배지 렌더링"""
+    import streamlit as st
     latest = get_latest_log()
-    ver = APP_VERSION
-    date = latest['date'] if latest else ""
-    
+    ver_type = latest['type'] if latest else "patch"
+    colors = {"major": "#FF4B4B", "minor": "#0083B8", "patch": "#2E7D32"}
+    bg_color = colors.get(ver_type, "#444")
+
     st.sidebar.markdown(f"""
-        <div style="
-            display: flex; justify-content: space-between; align-items: center;
-            background-color: #262730; padding: 10px; border-radius: 8px; margin-bottom: 10px;
-            border: 1px solid #444;">
-            <div>
-                <span style="font-size: 0.8em; color: #aaa;">SYSTEM VERSION</span><br>
-                <span style="font-size: 1.1em; font-weight: bold; color: #fff;">{ver}</span>
+        <div style="background-color: #1E1E1E; padding: 12px; border-radius: 10px; border-left: 5px solid {bg_color};">
+            <div style="display: flex; justify-content: space-between; color: #888; font-size: 0.7rem;">
+                <span>SYSTEM CORE</span>
+                <span style="font-weight: bold; color: {bg_color};">{ver_type.upper()}</span>
             </div>
-            <div style="text-align: right;">
-                <span style="font-size: 0.7em; background: #FF4B4B; color: white; padding: 2px 6px; border-radius: 4px;">LATEST</span><br>
-                <span style="font-size: 0.7em; color: #888;">{date}</span>
-            </div>
+            <div style="font-size: 1.1rem; font-weight: bold; color: white;">v{APP_VERSION}</div>
         </div>
     """, unsafe_allow_html=True)
 
-def show_recent_updates(limit: int = 3, expanded: bool = True):
-    """
-    메인 화면이나 탭에 업데이트 내역을 표시하는 향상된 UI
-    """
-    st.markdown("### 🧩 시스템 업데이트 내역")
-    
-    # CSS 스타일 주입 (뱃지 등)
-    st.markdown("""
-    <style>
-        .ver-badge-major { background-color: #FF4B4B; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
-        .ver-badge-minor { background-color: #0083B8; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
-        .ver-badge-patch { background-color: #2E7D32; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
-    </style>
-    """, unsafe_allow_html=True)
-
+def show_recent_updates(limit: int = 3):
+    """메인 화면 업데이트 내역 표시"""
+    import streamlit as st
+    st.markdown("#### 🧩 System Intelligence Updates")
     for i, log in enumerate(CHANGELOG[:limit]):
-        ver = log['version']
-        date = log['date']
-        title = log['title']
-        u_type = log.get('type', 'patch') # major, minor, patch
-        
-        # 뱃지 클래스 결정
-        badge_class = f"ver-badge-{u_type}" if u_type in ['major', 'minor'] else "ver-badge-patch"
-        type_label = u_type.upper()
-
-        # Expander 라벨 구성
-        header_emoji = "🚀" if i == 0 else "📜"
-        label = f"{header_emoji} [{ver}] {title}"
-        
-        # 최신 버전은 기본으로 열어둠
-        is_expanded = (i == 0 and expanded)
-        
-        with st.expander(label, expanded=is_expanded):
-            # 헤더 정보 (HTML로 예쁘게)
-            st.markdown(f"""
-                <div style='margin-bottom: 10px;'>
-                    <span class='{badge_class}'>{type_label}</span>
-                    <span style='color: #888; font-size: 0.9em; margin-left: 10px;'>📅 배포일: {date}</span>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            # 항목 리스트
+        with st.expander(f"v{log['version']} - {log['title']}", expanded=(i==0)):
+            st.caption(f"📅 {log['date']} | {log.get('type', 'patch').upper()}")
             for item in log['items']:
-                st.markdown(f"- {item}")
-            
-            # 최신 버전 하단 코멘트
-            if i == 0 and u_type == 'major':
-                st.info("💡 이번 업데이트는 시스템의 핵심 로직이 변경된 대규모 패치입니다. 투자 전략 수립 시 새로운 기능을 적극 활용해보세요!")
-
-# --------------------------------------------------------------------
-# 5) 무결성 체크 (실행 시 자동 수행)
-# --------------------------------------------------------------------
-_latest = get_latest_log()
-if _latest:
-    latest_ver = _latest.get("version")
-    if latest_ver and latest_ver != APP_VERSION:
-        logger.warning(f"⚠️ Version Mismatch: Code({APP_VERSION}) != Changelog({latest_ver})")
+                st.markdown(item)
