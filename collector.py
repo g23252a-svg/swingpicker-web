@@ -1854,6 +1854,24 @@ def pct_norm_pos(s: pd.Series, q: int = 90, floor: float = 1.0) -> pd.Series:
     s = nz_num(s).clip(lower=0)
     return np.clip(s / cap_q(s, q, floor), 0, 1)
 
+def safe_quantile(s, q, fallback=0.0):
+    """
+    Pandas Series에서 안전하게 분위수를 계산합니다.
+    데이터가 없거나 에러 발생 시 fallback(기본값)을 반환하여 시스템 정지를 막습니다.
+    """
+    if s is None:
+        return fallback
+    try:
+        # 데이터가 Series 형태이고 비어있지 않은지 확인
+        if hasattr(s, 'empty') and s.empty:
+            return fallback
+        
+        v = s.quantile(q)
+        # 결과가 NaN이면 fallback 반환, 아니면 float로 변환
+        return fallback if pd.isna(v) else float(v)
+    except:
+        return fallback
+
 def inv_dist_norm(dist: pd.Series, cap: float) -> pd.Series:
     return np.clip(1 - (nz_num(dist) / cap), 0, 1)
 
