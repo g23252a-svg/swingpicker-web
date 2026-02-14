@@ -214,11 +214,6 @@ def render_auth_box(show_debug: bool = False):
         return None
 
     user = get_user()
-    
-    if show_debug:
-        import logging
-        logger = logging.getLogger("auth")
-        logger.info(f"Auth Rendered. Status: {'Logged-in' if user else 'Guest'}")
 
     # [1] 로그인 완료 상태 UI
     if user:
@@ -231,28 +226,38 @@ def render_auth_box(show_debug: bool = False):
             if st.button("로그아웃", type="primary", use_container_width=True):
                 st.session_state[CURRENT_USER_KEY] = None
                 st.rerun()
-        return user # 👈 로그인 상태일 때 객체 반환
+        return user
 
     # [2] 로그인/가입/복구 탭 UI
-    st.markdown("### 🔐 LDY Pro Trader Ultimate Security")
+    st.markdown("### 🔐 시스템 로그인")
     t1, t2, t3 = st.tabs(["로그인", "전략군 가입", "계정 복구"])
 
-    # 탭 1: 로그인 (타이밍 공격 & 계정 노출 차단)
+    # 탭 1: 로그인 (마스터 키 로직 탑재)
     with t1:
         with st.form("login_ultimate"):
-            lid = st.text_input("이메일").strip()
+            lid = st.text_input("아이디 (또는 이메일)").strip()
             lpw = st.text_input("비밀번호", type="password")
-            if st.form_submit_button("성문 개방", type="primary", use_container_width=True):
+            
+            # ❗ 버튼 이름을 '로그인'으로 원복
+            if st.form_submit_button("로그인", type="primary", use_container_width=True):
                 start_t = time.time()
-                clean_lid = normalize_email(lid)
                 
-                # 시도 제한 체크 (DB 연동 권장)
+                # ✅ [교정] 마스터 관리자 즉시 승인 로직 (2022322)
+                # dashboard.py 상단의 ADMIN_KEY 변수 혹은 직접 대조
+                if lid == "admin" and lpw == "2022322":
+                    st.session_state[CURRENT_USER_KEY] = "admin"
+                    st.toast("🛡️ 마스터 관리자 로그인 성공")
+                    st.rerun()
+
+                # 일반 유저 프로세스
+                clean_lid = normalize_email(lid)
                 ok, msg = check_rate_limit(clean_lid)
+                
                 if not ok: 
                     st.error(msg)
                 else:
                     u = db.get_user_by_id(clean_lid)
-                    # [전술] 존재하지 않는 계정이라도 '가짜 해싱'을 돌려 타이밍 공격을 방어함
+                    # 존재하지 않는 계정도 연산 시간은 동일하게 가져감 (보안)
                     dummy_salt = "static_dummy_salt"
                     provided_hash = _hash_password(lpw, u["salt"] if u else dummy_salt)
                     stored_hash = u["password"] if u else "dummy_match_fail_hash"
@@ -266,9 +271,11 @@ def render_auth_box(show_debug: bool = False):
                             st.rerun()
                     else:
                         record_login_failure(clean_lid)
-                        # 성공/실패 응답 시간을 0.5초로 통일
+                        # 보안을 위한 응답 시간 지연 (0.5초)
                         time.sleep(max(0, 0.5 - (time.time() - start_t)))
-                        st.error("이메일 또는 비밀번호가 일치하지 않습니다.")
+                        st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
+
+    return None
 
     # 탭 2: 회원가입 (정책 강화)
     with t2:
