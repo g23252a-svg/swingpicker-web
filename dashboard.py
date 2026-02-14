@@ -176,10 +176,11 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
 # -----------------------------------------------------------
 
 from auth_user import (
-    render_auth_box, get_user, list_users, update_user_role,
+    # render_auth_box를 여기서 지워야 dashboard.py에 정의한 함수가 작동합니다!
+    get_user, list_users, update_user_role,
     load_inquiry_items, save_inquiry_items, _now_utc_str,
-    load_subscriptions_db, save_subscriptions_db,  # 👈 여기에 쉼표(,)가 꼭 있어야 합니다!
-    toggle_user_ban, grant_all_users_trial         # 👈 새로 추가된 함수들
+    load_subscriptions_db, save_subscriptions_db,
+    toggle_user_ban, grant_all_users_trial
 )
 
 from version_info import (
@@ -2845,7 +2846,7 @@ just_registered = st.session_state.pop("just_registered", False)
 
 
 with st.sidebar:
-    user = render_auth_box(show_debug=False)
+    user = render_auth_box()
 
     if user is None:
         auth_status = "guest"
