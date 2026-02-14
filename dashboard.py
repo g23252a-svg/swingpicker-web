@@ -4066,34 +4066,58 @@ with tab4:
         submitted = st.form_submit_button("💌 문의 등록")
 
     if submitted:
+        # 1. 필수 입력값 검사
         if not title.strip() or not content.strip():
             st.error("제목과 내용을 모두 입력해 주세요.")
         else:
-            # ✅ [수정됨] Gist에서 기존 목록을 불러옵니다.
-            current_items = load_inquiry_items()
-
-            # 새 문의 데이터 생성
-            new_item = {
-                "title": title.strip(),
-                "content": content.strip(),
-                "nickname": nickname.strip() or "익명",
-                "email": email.strip(),
-                "created_at": _now_utc_str(), # auth_user의 시간 함수 사용
-            }
-
-            # 리스트에 추가하고 Gist에 저장
-            current_items.append(new_item)
-            ok = save_inquiry_items(current_items)
-
-            if ok:
-                st.success("문의가 등록되었습니다. Gist에 저장 완료! 🙌")
-                # 화면 갱신을 위해 rerun (Streamlit 버전에 따라 다름)
-                try:
-                    st.rerun()
-                except:
-                    pass
+            # 2. [방어막 1] 시간 기반 도배 방지 (30초 쿨타임)
+            now_t = time.time()
+            last_t = st.session_state.get("last_inquiry_time", 0)
+            wait_time = 30  # 재등록까지 필요한 시간(초)
+            
+            if now_t - last_t < wait_time:
+                st.error(f"⚠️ 너무 빨리 전령을 보내고 계십니다. {int(wait_time - (now_t - last_t))}초 후에 다시 시도하십시오.")
             else:
-                st.error("저장 실패! (Gist 연동 오류 - 로그 확인 필요)")
+                # Gist에서 기존 목록 로드
+                with st.spinner("📜 기존 서신 목록을 확인 중..."):
+                    current_items = load_inquiry_items()
+
+                # 3. [방어막 2] 동일 내용 중복 등록 방지
+                is_duplicate = False
+                if current_items:
+                    last_item = current_items[-1] # 가장 최근 글
+                    if (last_item.get('title') == title.strip() and 
+                        last_item.get('content') == content.strip() and
+                        last_item.get('nickname') == nickname.strip()):
+                        is_duplicate = True
+                
+                if is_duplicate:
+                    st.warning("⚠️ 이미 방금 전에 같은 내용의 서신을 보내셨습니다. (중복 등록 차단)")
+                else:
+                    # 4. 새 문의 데이터 생성
+                    new_item = {
+                        "title": title.strip(),
+                        "content": content.strip(),
+                        "nickname": nickname.strip() or "익명",
+                        "email": email.strip(),
+                        "created_at": _now_utc_str(),
+                    }
+
+                    # 5. Gist 저장 시도
+                    with st.spinner("💌 문의를 성벽에 게시 중..."):
+                        current_items.append(new_item)
+                        ok = save_inquiry_items(current_items)
+
+                    if ok:
+                        # 성공 시 세션 상태에 마지막 등록 시간 기록
+                        st.session_state["last_inquiry_time"] = time.time()
+                        st.success("문의가 성공적으로 등록되었습니다! 🙌")
+                        st.balloons()
+                        # UI 갱신을 위한 짧은 대기 후 새로고침
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("저장 실패! 시스템 통신망(Gist) 연결 상태를 확인하세요.")
 
     st.markdown("#### 📂 최근 문의 내역")
 
