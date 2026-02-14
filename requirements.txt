@@ -1,21 +1,39 @@
-streamlit>=1.34
-pandas>=2.2
-numpy>=1.26
-requests>=2.31
+# --- pip options (Safe for Streamlit Cloud & CI/CD) ---
+# CPU 전용 환경에서 torch 설치 실패를 방지하는 최상단 선언
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# --- [Core UI & UX] ---
+streamlit>=1.34.0
+extra-streamlit-components>=0.1.71
 plotly>=5.20.0
+
+# --- [Data Science & ML] ---
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+joblib>=1.4.0
+xgboost>=2.0.0
+shap>=0.45.0
+torch>=2.2.0
+
+# --- [Database & Async] ---
+duckdb>=0.10.0
+aiohttp>=3.9.0
+requests>=2.31.0
+tqdm>=4.66.0
+
+# --- [Finance Data & DART] ---
 finance-datareader>=0.9.6
-pykrx==1.0.51
-tqdm>=4.66
+pykrx==1.0.51            # 👈 [검증됨] 실전에서 가장 안정적인 Harbor 버전
+opendartreader           # 👈 설치 호환성 중심의 유연한 선언
+xmltodict>=0.13.0
+
+# --- [Web Scraping & AI] ---
+google-generativeai>=0.5.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0              # 👈 크롤러 파싱 속도/정확도 핵심 유닛
+
+# --- [Infrastructure & Utils] ---
+python-dotenv>=1.0.1     # 👈 환경 변수(API KEY) 보안 게이트
+pytz>=2024.1             # 👈 KST 시간 동기화 정찰병
 setuptools
-google-generativeai
-beautifulsoup4
-scikit-learn
-joblib
-xgboost
-shap
-duckdb
-aiohttp
-torch
-opendartreader
-xmltodict
-extra-streamlit-components
