@@ -24,7 +24,7 @@ class LDYDBManager:
         self._load_inquiries_from_gist()
 
     def _init_tables(self):
-        # 1. 사용자 테이블
+        # 1. 사용자 테이블 (로그인 실패 및 잠금 컬럼 추가)
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id VARCHAR PRIMARY KEY,
@@ -38,7 +38,9 @@ class LDYDBManager:
                 security_q_idx INTEGER DEFAULT 0,
                 security_a_hash VARCHAR,
                 session_token VARCHAR,
-                prime_expire_date TIMESTAMP
+                prime_expire_date TIMESTAMP,
+                login_fail_count INTEGER DEFAULT 0,  -- 👈 추가: 실패 횟수
+                lock_until TIMESTAMP                 -- 👈 추가: 잠금 해제 시간
             )
         """)
         # 2. 문의 게시판 테이블
@@ -199,8 +201,50 @@ class LDYDBManager:
         self.conn.execute("UPDATE users SET last_login = ? WHERE id = ?", [datetime.now(), email])
         self._sync_table_to_gist("users", USER_DB_FILE)
 
-    def update_password(self, email, pw, salt):
-        self.conn.execute("UPDATE users SET password = ?, salt = ? WHERE id = ?", [pw, salt, email])
+    def update_user_password(self, email, pw_hash, salt):
+        """[v11.0 패치] 비밀번호 변경 시 Salt Rotation 필수 적용"""
+        try:
+            self.conn.execute("UPDATE users SET password = ?, salt = ?, login_fail_count = 0, lock_until = NULL WHERE id = ?", 
+                             [pw_hash, salt, email])
+            self._sync_table_to_gist("users", USER_DB_FILE)
+            return True
+        except Exception as e:
+            print(f"❌ 비밀번호 업데이트 실패: {e}")
+            return False
+
+    # --- [v11.0 보안 패치: Rate Limit 로직] ---
+    def record_login_failure(self, email):
+        """실패 횟수 누적 및 5회 초과 시 10분 잠금"""
+        try:
+            curr = self.conn.execute("SELECT login_fail_count FROM users WHERE id = ?", [email]).fetchone()
+            if not curr: return
+            
+            new_count = curr[0] + 1
+            lock_time = None
+            if new_count >= 5:
+                lock_time = datetime.now() + timedelta(minutes=10)
+                print(f"🔒 {email} 계정 10분 잠금 발동")
+                
+            self.conn.execute("UPDATE users SET login_fail_count = ?, lock_until = ? WHERE id = ?", 
+                             [new_count, lock_time, email])
+            self._sync_table_to_gist("users", USER_DB_FILE)
+        except Exception as e:
+            print(f"⚠️ 실패 기록 오류: {e}")
+
+    def get_login_failures(self, email):
+        """현재 실패 횟수와 잠금 시간 조회"""
+        try:
+            res = self.conn.execute("SELECT login_fail_count, lock_until FROM users WHERE id = ?", [email]).fetchone()
+            if res:
+                # 0: count, 1: lock_until (aware datetime 처리를 위해 timezone 주입 권장)
+                return res[0], res[1].replace(tzinfo=timezone.utc) if res[1] else None
+            return 0, None
+        except:
+            return 0, None
+
+    def reset_login_failures(self, email):
+        """로그인 성공 시 실패 기록 초기화"""
+        self.conn.execute("UPDATE users SET login_fail_count = 0, lock_until = NULL WHERE id = ?", [email])
         self._sync_table_to_gist("users", USER_DB_FILE)
 
     # --- Admin Support Methods ---
@@ -287,8 +331,8 @@ class LDYDBManager:
                     code VARCHAR,
                     name VARCHAR,
                     close_price DOUBLE,
-                    ldy_score DOUBLE,
-                    rank_score DOUBLE,
+                    display_score DOUBLE,  -- 👈 ldy_score에서 명칭 변경 또는 추가
+                    final_score DOUBLE,    -- 👈 rank_score에서 명칭 변경 또는 추가
                     ai_comment VARCHAR
                 )
             """)
@@ -312,8 +356,8 @@ class LDYDBManager:
             save_df['close_price'] = pd.to_numeric(save_df['종가'], errors='coerce').fillna(0)
             
             # [점수 및 코멘트 처리 - 에러 방어]
-            save_df['ldy_score'] = pd.to_numeric(save_df.get('LDY_SCORE', 0), errors='coerce').fillna(0)
-            save_df['rank_score'] = pd.to_numeric(save_df.get('RANK_SCORE', 0), errors='coerce').fillna(0)
+            save_df['display_score'] = pd.to_numeric(save_df.get('DISPLAY_SCORE', save_df.get('LDY_SCORE', 0)), errors='coerce').fillna(0)
+            save_df['final_score'] = pd.to_numeric(save_df.get('FINAL_SCORE', 0), errors='coerce').fillna(0)
             
             # ✅ 문제의 구간 수정: 컬럼이 있으면 변환, 없으면 빈 문자열 할당
             if 'AI_COMMENT' in save_df.columns:
@@ -322,7 +366,7 @@ class LDYDBManager:
                 save_df['ai_comment'] = ""
 
             # 3. DB 삽입 (7개 컬럼 명시)
-            target_cols = ['trade_date', 'code', 'name', 'close_price', 'ldy_score', 'rank_score', 'ai_comment']
+            target_cols = ['trade_date', 'code', 'name', 'close_price', 'display_score', 'final_score', 'ai_comment']
             target_df = save_df[target_cols]
 
             if target_df.empty:
