@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 version_info.py (v12.3.1 Sovereign-Core)
-- 100/100: dashboard.py 호환성 완벽 복구 버전
+- 100/100: dashboard.py에서 요청하는 모든 물자(변수/함수) 완비
 """
 
 import os
@@ -13,14 +13,14 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
-        "version": "12.3.0",
+        "version": "12.3.1",
         "date": "2026-02-14",
         "type": "major", 
-        "title": "Absolute Defense: Environment Separation",
+        "title": "Absolute Defense: Fix Import Issue",
         "items": [
-            "🛡️ Logic Isolation: Import 시점의 UI 의존성 제거",
-            "⚙️ Robust Config: Env -> Secrets -> Default 체계 확립",
-            "🚦 Integrity Gate: 무결성 검증 로직 함수화",
+            "🛡️ **Logic Isolation:** Import 시점의 UI 의존성 제거",
+            "⚙️ **Robust Config:** 보급로(PRIME_TG_JOIN_URL) 변수 확립",
+            "🚦 **Integrity Gate:** 무결성 검증 로직 함수화",
         ],
         "schema_min": 5
     }
@@ -42,19 +42,20 @@ def _parse_version(v_str: str) -> Tuple[int, ...]:
     try: return tuple(map(int, (v_str.split('.'))))
     except: return (0, 0, 0)
 
-# [📍 필수 보급 1] 앱 버전
-APP_VERSION = CHANGELOG[0]["version"] if CHANGELOG else "0.0.0"
+# [📍 핵심 보급품] 앱 버전
+APP_VERSION = CHANGELOG[0]["version"] if CHANGELOG else "12.3.1"
 VERSION_TUPLE = _parse_version(APP_VERSION)
 
-# [📍 필수 보급 2] 텔레그램 URL (누락되었던 부분)
+# [📍 핵심 보급품] 텔레그램 조인 URL (이게 없어서 에러가 났던 겁니다!)
 PRIME_TG_JOIN_URL = _get_conf("LDY_PRIME_JOIN_URL", "https://t.me/+DovDEluWnEJhOTY1")
 
 def get_latest_log() -> Optional[Dict]:
     return CHANGELOG[0] if CHANGELOG else None
 
-# [📍 필수 보급 3] 버전 라벨 (누락되었던 부분)
+# [📍 핵심 보급품] 버전 라벨 함수 (이것도 꼭 있어야 합니다!)
 def get_version_label(include_build: bool = True) -> str:
-    if include_build: return APP_VERSION
+    if include_build:
+        return APP_VERSION
     return f"{VERSION_TUPLE[0]}.{VERSION_TUPLE[1]}"
 
 def validate_integrity() -> bool:
@@ -64,13 +65,13 @@ def validate_integrity() -> bool:
         return False
     return True
 
-# ----------------- 3. UI 렌더링 -----------------
+# ----------------- 3. UI 렌더링 (Streamlit 기반) -----------------
 
 def show_toast_notification():
     import streamlit as st
     if "has_seen_version_toast" not in st.session_state:
         latest = get_latest_log()
-        if latest: st.toast(f"🚀 {APP_VERSION} 업데이트: {latest['title']}", icon="🎉")
+        if latest: st.toast(f"🚀 {APP_VERSION} 업데이트 완료!", icon="🎉")
         st.session_state["has_seen_version_toast"] = True
 
 def render_sidebar_version_badge():
@@ -94,5 +95,4 @@ def show_recent_updates(limit: int = 3):
     st.markdown("#### 🧩 System Intelligence Updates")
     for i, log in enumerate(CHANGELOG[:limit]):
         with st.expander(f"v{log['version']} - {log['title']}", expanded=(i==0)):
-            st.caption(f"📅 {log['date']} | {log.get('type', 'patch').upper()}")
             for item in log['items']: st.markdown(item)
