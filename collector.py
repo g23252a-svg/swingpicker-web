@@ -2153,51 +2153,29 @@ def determine_state_dynamic(row, thresholds: dict):
 
 
 def build_global_score(df: pd.DataFrame, macro_risk: str) -> pd.DataFrame:
-    """
-    개선된 스코어링 파이프라인 (v15.1)
-    - 점수 3원화(STRUCT/TIMING/AI) 및 리스크 기반 가중치 적용
-    - TRIGGER_SCORE 원본 보존
-    """
     x = df.copy()
     
-    # 1. 독립적 EBS 계산 (0~10점 척도)
+    # [핵심] EBS 독립 체크리스트 계산 (정예군 편성의 기준점)
     x["EBS"] = x.apply(calculate_ebs_independent, axis=1)
     
-    # 2. 점수 3원화 계산
-    # ✅ STRUCT_SCORE: 기초 체력 (추세, 수급, 이격도 등)
+    # 기초 체력 및 타이밍 계산
     x["STRUCT_SCORE"] = x.apply(calculate_structural_score, axis=1).round(1)
-    
-    # ✅ TIMING_SCORE: 진입 타이밍 (표준화된 Trigger + 보너스 - 패널티)
-    # 내부적으로 RAW_TRIGGER_SCORE를 참조하여 계산
     x["TIMING_SCORE"] = x.apply(calculate_timing_score, axis=1).round(1)
     
-    # ✅ AI_SCORE: 예측 점수 (ML 엔진 결과)
     if "ML_SCORE" not in x.columns: x["ML_SCORE"] = 0.0
     x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
     
-    # 3. FINAL_SCORE (가중 합산) - 시장 리스크(Macro)에 따라 비중 조절
-    if macro_risk == "CRITICAL":
-        w_s, w_t, w_a = 0.6, 0.2, 0.2 # 위험 시 구조(방어력) 중시
-    elif macro_risk == "HIGH":
-        w_s, w_t, w_a = 0.5, 0.3, 0.2
-    else: # NORMAL
-        w_s, w_t, w_a = 0.4, 0.4, 0.2 # 평시 밸런스형
+    # 매크로 가중치 적용 (순수 엔진 실력)
+    if macro_risk == "CRITICAL": w_s, w_t, w_a = 0.6, 0.2, 0.2
+    elif macro_risk == "HIGH": w_s, w_t, w_a = 0.5, 0.3, 0.2
+    else: w_s, w_t, w_a = 0.4, 0.4, 0.2
         
-    x["FINAL_SCORE"] = (
-        (x["STRUCT_SCORE"] * w_s) + 
-        (x["TIMING_SCORE"] * w_t) + 
-        (x["AI_SCORE"] * w_a)
-    ).round(1)
+    x["FINAL_SCORE"] = ((x["STRUCT_SCORE"] * w_s) + 
+                        (x["TIMING_SCORE"] * w_t) + 
+                        (x["AI_SCORE"] * w_a)).round(1)
     
-    # 4. 호환성 및 편의를 위한 컬럼 매핑
-    # 기존 대시보드나 로직이 깨지지 않도록 주요 컬럼 연결
-    # 모든 외부 표기용 점수를 최종 가중 합산 점수(FINAL_SCORE)로 통일
-    x["TOTAL_SCORE"] = x["FINAL_SCORE"]
-    x["LDY_SCORE"] = x["FINAL_SCORE"] 
-    x["RANK_SCORE"] = x["FINAL_SCORE"]
-    
-    # 주의: TRIGGER_SCORE는 덮어쓰지 않고 원본(Raw Trigger)을 유지함!
-    # 필요하다면 TIMING_SCORE를 별도 컬럼으로 활용
+    # 실전용 점수 초기화
+    x["DISPLAY_SCORE"] = x["FINAL_SCORE"]
     
     return x
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
@@ -3177,146 +3155,86 @@ def main(
 
     df_raw = pd.DataFrame(rows)
 
-    # 👇👇 [여기 삽입] 수급 데이터 매핑 👇👇
     if not df_raw.empty:
-        # 1. 수급 데이터 가져오기
+        # -----------------------------------------------------------
+        # 1. [데이터 무결성] 수급 데이터 매핑 및 단위 보정 (TOXIC 오탐 방지)
+        # -----------------------------------------------------------
         map_frg, map_inst, map_ant = fetch_investor_net_buying(trade_ymd)
-        
-        # 2. DataFrame에 매핑 (단위: 원)
         df_raw["외인순매수"] = df_raw["종목코드"].map(map_frg).fillna(0)
         df_raw["기관순매수"] = df_raw["종목코드"].map(map_inst).fillna(0)
         df_raw["개인순매수"] = df_raw["종목코드"].map(map_ant).fillna(0)
-        
-        # 3. 메이저(외인+기관) 합계 컬럼 생성
         df_raw["메이저순매수"] = df_raw["외인순매수"] + df_raw["기관순매수"]
 
-    # 🔹 업종 대분류 컬럼 생성
-    if "업종" in df_raw.columns:
-        df_raw["업종_상세"] = df_raw["업종"]
-        df_raw["업종_대분류"] = df_raw.apply(
-            lambda r: classify_big_sector(
-                str(r.get("종목명", "")),
-                str(r.get("업종", "")),
-            ),
-            axis=1,
-        )
+        # 🚨 [100점 포인트] '원' 단위 컬럼 강제 생성
+        # determine_state_dynamic의 분모를 채워 EXIT_WARNING 오작동을 원천 차단합니다.
+        if "거래대금(원)" not in df_raw.columns:
+            tv_eok = pd.to_numeric(df_raw.get("거래대금(억원)", 0), errors="coerce").fillna(0.0)
+            df_raw["거래대금(원)"] = (tv_eok * 100_000_000).astype(float)
 
-    # ✅ v6.8 섹터 모멘텀 + 시장 브레드스
-    df_raw, sector_rank = add_sector_momentum(df_raw, "업종_대분류")
-    breadth = compute_market_breadth(df_raw)
-    mkt_temp = label_market_temp(breadth.get("ALL", np.nan))
+        # -----------------------------------------------------------
+        # 2. [전략 보강] 업종 분류 및 시장 온도 측정
+        # -----------------------------------------------------------
+        if "업종" in df_raw.columns:
+            df_raw["업종_상세"] = df_raw["업종"]
+            df_raw["업종_대분류"] = df_raw.apply(lambda r: classify_big_sector(str(r.get("종목명", "")), str(r.get("업종", ""))), axis=1)
 
-    # [로그 추가] 시장 온도 확인
-    log(f"🌡 시장 온도: {mkt_temp} (Breadth: {breadth.get('ALL', 0)}%) -> 동적 가중치 적용")
+        df_raw, _ = add_sector_momentum(df_raw, "업종_대분류")
+        breadth = compute_market_breadth(df_raw)
+        mkt_temp = label_market_temp(breadth.get("ALL", np.nan))
+        log(f"🌡 시장 온도: {mkt_temp} (Breadth: {breadth.get('ALL', 0)}%) -> 동적 가중치 적용")
 
-    # [수정] 스코어링 (mkt_temp 전달)
-    df_out = df_raw.copy()
-
-    # --------------------------------------------------------------------------
-    # 🔥 [v8.5 Elite] 통합 스코어링 & AI 동기화 파이프라인
-    # --------------------------------------------------------------------------
-    log("🧠 AI 엔진 동기화 및 통합 스코어링 시작...")
-
-    try:
-        # 1. AI 예측 점수 주입 (v15.6 Master-Grade 연동)
-        df_out = ml_engine.apply_ml_score(df_out, full_ohlcv_map)
+        # -----------------------------------------------------------
+        # 3. [통합 엔진] AI 엔진 동기화 및 3원화 스코어링 빌드
+        # -----------------------------------------------------------
+        log("🧠 AI 엔진 동기화 및 통합 스코어링 시작...")
         
-        # AI 점수 안전장치: 숫자형 변환 및 0~100 제한
+        # AI 점수 주입
+        df_out = ml_engine.apply_ml_score(df_raw, full_ohlcv_map)
         df_out["ML_SCORE"] = pd.to_numeric(df_out.get("ML_SCORE", 0.0), errors='coerce').fillna(0.0).clip(0, 100)
-        
-        # 2. 실시간 차트 신호(Raw Trigger) 산출 및 보존
-        trigger_list = []  
+
+        # 실시간 차트 신호(Raw Trigger) 산출
+        trigger_list = []
         for idx, row in df_out.iterrows():
             code = str(row['종목코드']).zfill(6)
             ohlcv_df = full_ohlcv_map.get(code)
-            # 데이터 부재 시 0점 처리하여 연쇄 오류 방지
             ts = calculate_trigger_score(ohlcv_df) if ohlcv_df is not None and not ohlcv_df.empty else 0.0
             trigger_list.append(ts)
         
         df_out['TRIGGER_SCORE'] = trigger_list
-        df_out['RAW_TRIGGER_SCORE'] = df_out['TRIGGER_SCORE'] # 검증용 원본 박제
+        df_out['RAW_TRIGGER_SCORE'] = df_out['TRIGGER_SCORE'] 
 
-        # 3. 최종 통합 스코어링 실행 (STRUCT, TIMING, AI 3원화 합산)
-        # 이 함수 내부에서 RAW_TRIGGER_SCORE가 TIMING_SCORE로 정규화됩니다.
-        df_out = build_global_score(df_out, macro_risk) 
+        # 최종 통합 스코어링 실행 (v15.1 엔진: EBS/STRUCT/TIMING/FINAL 일괄 산출)
+        df_out = build_global_score(df_out, macro_risk)
 
-        log(f"✅ 점수 산출 완료 (AI 유효 점수 반영: {len(df_out[df_out['ML_SCORE'] > 0])}개)")
+        # -----------------------------------------------------------
+        # 4. [전술 상태] 동적 임계값 기반 ROUTE 결정
+        # -----------------------------------------------------------
+        thresholds = {
+            "range_q75": safe_quantile(df_out.get("Range_Pos"), 0.75, 0.8),
+            "vol_q75": safe_quantile(df_out.get("Vol_Quality"), 0.75, 1.2)
+        }
+        df_out["ROUTE"] = df_out.apply(lambda r: determine_state_dynamic(r, thresholds), axis=1)
+        df_out["상태"] = df_out["ROUTE"]
 
-    except Exception as e:
-        log(f"⚠️ 스코어링 파이프라인 치명적 오류: {e}")
-        # 오류 발생 시 시스템 중단을 막기 위한 최소한의 방어
-        if "FINAL_SCORE" not in df_out.columns:
-            df_out["FINAL_SCORE"] = df_out.get("LDY_SCORE", 0.0)
-
-    # --------------------------------------------------------------------------
-    # [Step 2] 동적 임계값(Threshold) 및 전략 상태(ROUTE) 결정
-    # --------------------------------------------------------------------------
-    def safe_quantile(s, q, fallback=0.0):
-        if s is None or s.empty: return fallback
-        try:
-            v = s.quantile(q)
-            return fallback if pd.isna(v) else float(v)
-        except: return fallback
-
-    # 시장 상위 25% 지점을 실시간 감지하여 진입 문턱값 자동 설정
-    range_q75 = safe_quantile(df_out.get("Range_Pos"), 0.75, fallback=0.8)
-    vol_q75   = safe_quantile(df_out.get("Vol_Quality"), 0.75, fallback=1.2)
-
-    thresholds = {"range_q75": range_q75, "vol_q75": vol_q75}
-    log(f"📊 동적 임계값 확정: Range(Top25%)={range_q75:.2f}, Vol(Top25%)={vol_q75:.2f}")
-
-    # 개별 종목별 전략 상태(ATTACK, ARMED, WAIT 등) 결정 및 표시용 상태값 복사
-    df_out["ROUTE"] = df_out.apply(lambda r: determine_state_dynamic(r, thresholds), axis=1)
-    df_out["상태"] = df_out["ROUTE"]
-
-    # --------------------------------------------------------------------------
-    # [Step 3] 2단계 하이브리드 정렬 및 전술 배치 (Elite Sorting)
-    # --------------------------------------------------------------------------
-    
-    def safe_sort(df, cols, ascending):
-        """KeyError 방지 및 정렬 방향 자동 동기화"""
-        use_cols = [c for c in cols if c in df.columns]
-        if not use_cols: return df
-        if isinstance(ascending, list):
-            use_asc = ascending[:len(use_cols)]
-            if len(use_asc) < len(use_cols):
-                use_asc += [use_asc[-1]] * (len(use_cols) - len(use_asc))
-        else:
-            use_asc = ascending
-        return df.sort_values(by=use_cols, ascending=use_asc)
-
-    # 1차 컷오프: 기초 체력 검증 (EBS 6점 이상 & 구조점수 60점 이상만 '정예군' 편성)
-    ebs_val = pd.to_numeric(df_out.get("EBS", 0), errors='coerce').fillna(0)
-    struct_val = pd.to_numeric(df_out.get("STRUCT_SCORE", 0), errors='coerce').fillna(0)
-    mask_qual = (ebs_val >= 6) & (struct_val >= 60)
-    
-    df_prime = df_out[mask_qual].copy()
-    df_normal = df_out[~mask_qual].copy()
-
-    # 1군(Prime): 타이밍과 AI 예측치가 높은 순으로 정렬 (공격형 배치)
-    df_prime = safe_sort(df_prime, ["TIMING_SCORE", "AI_SCORE", "거래대금(억원)"], [False, False, False])
-    # 2군(Normal): 종합 점수와 안정성이 높은 순으로 정렬 (수비형 배치)
-    df_normal = safe_sort(df_normal, ["FINAL_SCORE", "STRUCT_SCORE"], [False, False])
-
-    # 최종 결과 합치기: 정예군 상위 120개를 대시보드 최상단에 박제
-    TOP_K_FIXED = 120
-    df_out = pd.concat([
-        df_prime.head(TOP_K_FIXED), 
-        df_normal, 
-        df_prime.iloc[TOP_K_FIXED:]
-    ], ignore_index=True).reset_index(drop=True)
-    
-    log(f"✅ 정예군({len(df_prime)}개) 배치 완료. (최종 분석 종목: {len(df_out)}개)")
-    
-   
-
-    # --------------------------------------------------------------------------
-
-
-
-    df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
-    df_out["기준일"] = trade_ymd
-    df_out["시총기준일"] = mcap_ymd
+        # -----------------------------------------------------------
+        # 5. [정예군 편성] Elite 120 대형 박제 (Placement Logic)
+        # -----------------------------------------------------------
+        ebs_val = pd.to_numeric(df_out.get("EBS", 0), errors='coerce').fillna(0)
+        struct_val = pd.to_numeric(df_out.get("STRUCT_SCORE", 0), errors='coerce').fillna(0)
+        mask_qual = (ebs_val >= 6) & (struct_val >= 60)
+        
+        df_prime = df_out[mask_qual].copy().sort_values(["TIMING_SCORE", "AI_SCORE"], ascending=False)
+        df_normal = df_out[~mask_qual].copy().sort_values("FINAL_SCORE", ascending=False)
+        
+        # 정예군 상위 120개를 최상단에 고정 배치 (전술 대형 완성)
+        df_out = pd.concat([df_prime.head(120), df_normal, df_prime.iloc[120:]], ignore_index=True)
+        
+        # -----------------------------------------------------------
+        # 6. [최종 확정] 랭크 부여 및 날짜 메타데이터
+        # -----------------------------------------------------------
+        df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+        df_out["기준일"] = trade_ymd
+        df_out["시총기준일"] = mcap_ymd
 
     # -------------------------------------------------------------
     # 🔥 [v11.0 수정] 비동기 뉴스 수집 & LLM 분석 & DB 저장 통합
