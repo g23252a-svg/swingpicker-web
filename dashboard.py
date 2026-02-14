@@ -176,7 +176,7 @@ def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
 # -----------------------------------------------------------
 
 from auth_user import (
-    render_auth_box,  # 👈 이 녀석이 반드시 명단에 있어야 합니다!
+    render_auth_box,  
     get_user, 
     list_users, 
     update_user_role,
@@ -190,6 +190,7 @@ from auth_user import (
 )
 
 try:
+    # 들여쓰기와 괄호 위치를 정밀하게 맞췄습니다.
     from version_info import (
         PRIME_TG_JOIN_URL,
         APP_VERSION,
@@ -198,12 +199,13 @@ try:
         get_latest_log,
     )
 except ImportError as e:
-    # 보급로가 끊겼을 때를 대비한 최소한의 비상 식량(Fallback)
-    st.error(f"🚨 시스템 버전 정보 로드 실패: {e}")
+    # 보급로가 끊겼을 때를 대비한 비상 식량(Fallback)
+    # st.error는 앱 시작 시점에 호출되면 사이드바 이전에 나타나므로 경고 로그로 대체하거나 유지
+    st.warning(f"⚠️ 시스템 버전 정보 로드 실패 (기본값 가동): {e}")
     APP_VERSION = "12.3.0"
     PRIME_TG_JOIN_URL = "https://t.me/+DovDEluWnEJhOTY1"
     CHANGELOG = []
-    def get_version_label(*args, **kwargs): return APP_VERSION
+    def get_version_label(include_build=True): return "12.3.0"
     def get_latest_log(): return None
 
 
