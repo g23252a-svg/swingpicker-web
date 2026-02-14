@@ -3260,263 +3260,126 @@ def main(
     if LLM_AVAILABLE:
         log("🧠 상위 10개 종목 심층 분석 중 (뉴스 + DART 공시)...")
         
-        # 1. DART 분석기 초기화 (API Key 환경변수 확인)
         dart_key = os.environ.get("DART_API_KEY")
         dart_engine = dart_analyzer.DartAnalyzer(dart_api_key=dart_key)
-        
-        if not dart_key:
-            log("⚠️ DART_API_KEY가 없습니다. 공시 분석은 건너뜁니다.")
+        if not dart_key: log("⚠️ DART_API_KEY 미설정. 공시 분석 스킵.")
 
-        # 2. 분석 대상 선정 (상위 10개)
         target_indices = df_out.index[:10]
         target_codes = [str(df_out.loc[i, "종목코드"]).zfill(6) for i in target_indices]
         
-        # 3. 비동기 뉴스 수집 (기존 유지)
         news_map = {}
         try:
             fetcher = AsyncNewsFetcher(max_concurrent=5)
-            if os.name == 'nt': 
-                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            if os.name == 'nt': asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
             news_map = asyncio.run(fetcher.fetch_all(target_codes))
         except Exception as e:
             log(f"⚠️ 뉴스 수집 중 오류: {e}")
 
-        # 4. 통합 분석 및 점수 반영
         df_out["NEWS_SCORE"] = 0.0
-        df_out["NEWS_REASON"] = ""
-        
+        df_out["NEWS_REASON"] = "특이사항 없음"
         
         for idx in target_indices:
-            code = str(df_out.loc[idx, "종목코드"]).zfill(6)
-            name = df_out.loc[idx, "종목명"]
+            code, name = str(df_out.loc[idx, "종목코드"]).zfill(6), df_out.loc[idx, "종목명"]
             
-            # (A) 뉴스 분석
+            # (A) 뉴스 감성 분석
             headlines = news_map.get(code, [])
-            l_score, l_reason = 0.0, ""
-            if headlines:
-                l_score, l_reason = analyze_sentiment_llm(name, headlines)
+            l_score, l_reason = analyze_sentiment_llm(name, headlines) if headlines else (0.0, "")
             
-            # (B) DART 공시 분석 (여기가 핵심!)
+            # (B) DART 공시 분석
             d_score, d_reason = 0.0, ""
-            if dart_engine.dart: # DART 객체가 정상 초기화되었을 때만 실행
+            if dart_engine.dart:
                 disclosures = dart_engine.get_major_disclosures(code, days=3)
                 if disclosures:
-                    # 가장 최근 중요 공시 1개만 정밀 분석
                     recent = disclosures[0]
                     d_score, d_reason = dart_engine.analyze_report(recent['rcept_no'], recent['report_nm'])
                     log(f"   📄 {name} DART 분석: {recent['report_nm']} -> {d_score}점")
 
-            # (C) 점수 및 코멘트 합산
-            final_event_score = np.clip(l_score + d_score, -10, 10)
+            # (C) 점수 통합 (순수 FINAL은 보존, DISPLAY만 업데이트)
+            event_val = np.clip(l_score + d_score, -10, 10)
+            df_out.at[idx, "NEWS_SCORE"] = event_val
             
-            old_score = df_out.at[idx, "LDY_SCORE"]
-            # 점수 반영 (기존 점수 + 이벤트 점수)
-            new_score = np.clip(old_score + final_event_score, 0, 100)
+            # 🚨 핵심: 실전용 점수 산출
+            old_final = df_out.at[idx, "FINAL_SCORE"]
+            df_out.at[idx, "DISPLAY_SCORE"] = np.clip(old_final + event_val, 0, 100)
             
-            df_out.at[idx, "LDY_SCORE"] = new_score
-            df_out.at[idx, "NEWS_SCORE"] = final_event_score
-            
-            # 이유 병합
-            reasons = []
-            if d_reason: reasons.append(f"[공시]{d_reason}")
-            if l_reason and l_reason != "뉴스없음": reasons.append(f"[뉴스]{l_reason}")
-            
+            # 이유 및 코멘트 업데이트
+            reasons = [f"[공시]{d_reason}" for d_reason in [d_reason] if d_reason] + \
+                      [f"[뉴스]{l_reason}" for l_reason in [l_reason] if l_reason and l_reason != "뉴스없음"]
             final_reason = " / ".join(reasons) if reasons else "특이사항 없음"
             df_out.at[idx, "NEWS_REASON"] = final_reason
             
             if reasons:
-                old_comment = str(df_out.at[idx, "AI_COMMENT"])
-                if old_comment == "nan": old_comment = ""
-                df_out.at[idx, "AI_COMMENT"] = f"{old_comment} 📢재료: {final_reason}"
-                
+                cur_comment = str(df_out.at[idx, "AI_COMMENT"])
+                df_out.at[idx, "AI_COMMENT"] = (cur_comment if cur_comment != "nan" else "") + f" 📢재료: {final_reason}"
     else:
         log("ℹ️ LLM 설정(API Key)이 없어 심층 분석을 건너뜁니다.")
         df_out["NEWS_SCORE"] = 0.0
-        df_out["NEWS_REASON"] = ""
+        df_out["NEWS_REASON"] = "N/A"
 
-    # 🚨 [수정 완료] bench_ret_60 -> bench_map 사용으로 변경
-    # bench_map 구조: {'KOSPI': {20: 1.1, 60: 2.2, ...}, ...}
+    # -----------------------------------------------------------
+    # [Step 7] UI 호환성 동기화 및 상태 플래그 확정
+    # -----------------------------------------------------------
+    # 1. 모든 가시성 점수를 DISPLAY_SCORE로 수렴
+    df_out["LDY_SCORE"]   = df_out["DISPLAY_SCORE"]
+    df_out["TOTAL_SCORE"] = df_out["DISPLAY_SCORE"]
+    df_out["RANK_SCORE"]  = df_out["DISPLAY_SCORE"]
+
+    # 2. 벤치마크 데이터 매핑
     df_out["벤치_60d_KOSPI_%"] = bench_map.get("KOSPI", {}).get(60, np.nan)
     df_out["벤치_60d_KOSDAQ_%"] = bench_map.get("KOSDAQ", {}).get(60, np.nan)
 
-    if "ret_60d_%" in df_out.columns:
-        df_out["60일_종목수익률_%"] = df_out["ret_60d_%"]
-    if "idx_60d_%" in df_out.columns:
-        df_out["60일_지수수익률_%"] = df_out["idx_60d_%"]
-    if "rel_60d_%" in df_out.columns:
-        df_out["60일_초과수익(α)_%"] = df_out["rel_60d_%"]
+    # 3. 전략 활성 상태 플래그 (Code Matching 방식)
+    df_out["IS_ACTIVE"]    = df_out["ROUTE"].isin(["ATTACK", "ARMED"])
+    df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == "ATTACK"
+    df_out["IS_WATCH"]     = df_out["ROUTE"] == "WAIT"
 
-    # 👉 메타 요약 로그
-    try:
-        avg_score = float(df_out["LDY_SCORE"].mean())
-        top10_avg = float(df_out["LDY_SCORE"].head(10).mean())
-        log(f"📌 전체 종목 수: {len(df_out)}개")
-        log(f"📌 평균 점수: {avg_score:.1f}, 상위 10개 평균: {top10_avg:.1f}")
-
-        # 간단 통계
-        route_counts = df_out["ROUTE"].value_counts()
-        route_str = ", ".join([f"{k}: {v}개" for k, v in route_counts.items()])
-        log(f"📌 전략별 분포: {route_str}")
-
-    except Exception as e:
-        log(f"⚠️ 메타 요약 계산 실패: {e}")
-
-    # 1) ROUTE → 상태(표시용) 복사
-    if "상태" not in df_out.columns:
-        df_out["상태"] = df_out.get("ROUTE", "").astype(str)
-    
-    # 2) 이모지 불일치 대비: ROUTE에 ⭐️/🔋를 쓰는 버전까지 같이 허용
-    #    - 너 로직이 🚀/⭐️/🔋를 쓰면 이걸로 해야 활성 종목이 생김
-    status_str = df_out["상태"].astype(str)
-    
-    # ---------------------------------------------------------
-    # [Step 9] IS_ACTIVE 플래그 로직 수정 (Emoji Regex -> Code Matching)
-    # 데이터가 'ARMED', 'ATTACK' 등 코드로 바뀌었으므로 이모지 검색은 동작하지 않음.
-    # ---------------------------------------------------------
-    
-    # 1. Active 그룹 (ATTACK, ARMED) - 대시보드 상단 노출
-    df_out["IS_ACTIVE"] = df_out["ROUTE"].isin([RouteState.ATTACK, RouteState.ARMED])
-    
-    # 2. 진입(Entry) 그룹 (ATTACK)
-    df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == RouteState.ATTACK
-    
-    # 3. 관찰(Watch) 그룹 (WAIT) - 참고용
-    df_out["IS_WATCH"] = df_out["ROUTE"] == RouteState.WAIT
-
-    print("[DEBUG] 상태 상위 10개:\n", df_out["상태"].value_counts().head(10))
-    print("[DEBUG] IS_ACTIVE True count:", int(df_out["IS_ACTIVE"].sum()))
-    print("[DEBUG] IS_NOW_ENTRY True count:", int(df_out["IS_NOW_ENTRY"].sum()))
-    print("[DEBUG] IS_WATCH True count:", int(df_out["IS_WATCH"].sum()))
-    
-    # [수정 대상] main 함수 하단 must_cols 리스트 업데이트
+    # -----------------------------------------------------------
+    # [Step 8] 데이터 저장 및 정합성 체크
+    # -----------------------------------------------------------
     must_cols = [
-        # 1. 기본 정보 및 시장 상태
         "종목코드", "종목명", "시장", "업종_대분류", "종가", "거래대금(억원)", "시가총액(억원)",
-        
-        # 2. 핵심 전략 상태 (가장 중요)
         "상태", "ROUTE", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
-        
-        # 3. 4대 통합 점수 시스템 (실전 분석의 핵심)
-        "FINAL_SCORE",   # 최종 가중치 합산 점수
-        "STRUCT_SCORE",  # 기초 체력 (추세/수급/이격)
-        "TIMING_SCORE",  # 진입 타이밍 (차트 신호/매물대)
-        "AI_SCORE",      # AI 예측 점수 (ML 결과값)
-        
-        # 4. 보조 및 하위 호환 점수
-        "ML_SCORE", "EBS", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE", "NEWS_SCORE",
-        
-        # 5. 매매 실행 가이드
-        "추천매수가", "손절가", "추천매도가1", "추천매도가2",
-        
-        # 6. 실시간 수급 및 차트 신호 지표
-        "TRIGGER",       # 감지된 신호 명칭 (🚀급등시동 등)
-        "V_POWER",       # 매수세의 응집 강도
-        "거래강도",      # 평소 대비 거래 폭발력
-        "VWAP",          # 시장 평균 단가 (성벽)
-        "POC_GAP",       # 주요 매물대와의 거리
-        
-        # 7. 뉴스 및 재료 분석 (LLM)
-        "NEWS_REASON",   # AI가 분석한 핵심 호재/악재 이유
-        
-        # 8. 추세 및 변동성 지표
-        "REGIME", "TTM_SQUEEZE_CNT", "Low_Trend_PCT", "RSI14", "이격도",
-        
-        # 9. 과거 수익률 데이터
-        "ret_20d_%", "ret_120d_%", "rel_20d_%", "rel_60d_%", "rel_120d_%"
+        "DISPLAY_SCORE", "FINAL_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", "NEWS_SCORE",
+        "추천매수가", "손절가", "추천매도가1", "추천매도가2", "TRIGGER", "V_POWER", "거래강도", 
+        "VWAP", "POC_GAP", "NEWS_REASON", "TTM_SQUEEZE_CNT", "Low_Trend_PCT", "RSI14", "이격도"
     ]
+    # 누락 컬럼 방어
     for c in must_cols:
-        if c not in df_out.columns:
-            df_out[c] = np.nan
+        if c not in df_out.columns: df_out[c] = np.nan
 
-    df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]    
-
+    df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]
+    
     ensure_dir(OUT_DIR)
-    date_tag = trade_ymd
-    suffix = f"_{tag}" if tag else ""
-    out_path_dated = os.path.join(OUT_DIR, f"recommend_{date_tag}{suffix}.csv")
+    out_path_dated = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{tag}' if tag else ''}.csv")
     out_path_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
 
     df_out.to_csv(out_path_dated, index=False, encoding=UTF8)
     df_out.to_csv(out_path_latest, index=False, encoding=UTF8)
-
     log(f"💾 저장 완료 ({len(df_out)}건) → {out_path_dated}")
-    log(f"💾 최신 파일 업데이트 → {out_path_latest}")
 
-    # 🔥 [DuckDB에 추천 결과 저장] --------------------------
+    # DuckDB 저장
     try:
         db = LDYDBManager()
         db.save_recommendations(df_out, trade_ymd)
         db.close()
-    except Exception as e:
-        log(f"⚠️ 추천 결과 DB 저장 실패: {e}")
-    # -----------------------------------------------------
+    except Exception as e: log(f"⚠️ DB 저장 실패: {e}")
 
     run_reality_check(OUT_DIR, trade_ymd)
-    
-    # 🔥 [수정] AI 점수(ML_SCORE)와 종합 점수(TOTAL_SCORE)도 검증 대상에 포함
-    make_rank_validation_report(
-        OUT_DIR, 
-        asof_ymd=trade_ymd, 
-        methods=["RANK_SCORE", "ENTRY_SCORE", "LDY_SCORE", "ML_SCORE", "TOTAL_SCORE"]
-    )
+    make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd, 
+                                methods=["DISPLAY_SCORE", "FINAL_SCORE", "AI_SCORE"])
 
-    # main 함수 마지막 부분
+    # -----------------------------------------------------------
+    # [Step 9] 텔레그램 리포트 발송
+    # -----------------------------------------------------------
     if enable_telegram:
-        # 시장 요약 문구 생성
         summary_text = f"🌡 {mkt_temp} (Breadth: {breadth.get('ALL', 0)}%)"
-
-        # ✅ 매크로 메시지 추가
-        if macro_msg:
-            summary_text += f"\n{macro_msg}"
-
-        if "TOP_SECTORS_5D" in df_out.columns:
-            # 상위 2개 섹터만 간략히
-            try:
-                top_sec_str = df_out.iloc[0]["TOP_SECTORS_5D"].split(" / ")[:2]
-                summary_text += f"\n🚀 주도: {' '.join(top_sec_str)}"
-            except: pass
+        if macro_msg: summary_text += f"\n{macro_msg}"
+        
+        # 주도 섹터 정보 추가
+        if "SECTOR_RANK" in df_out.columns:
+            top_sectors = df_out.sort_values("SECTOR_RS", ascending=False)["업종_대분류"].unique()[:2]
+            summary_text += f"\n🚀 주도: {' '.join(top_sectors)}"
 
         send_telegram_auto(df_out, trade_ymd, market_summary=summary_text, limit_count=rec_limit_cnt)
     else:
-        log("✉️ --no-telegram 옵션으로 인해 텔레그램 발송 생략")
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="LDY Pro Trader Collector v7.5")
-    parser.add_argument(
-        "--date",
-        type=str,
-        help="거래 기준일 (YYYYMMDD). 미지정 시 자동 탐색",
-        default=None,
-    )
-    parser.add_argument(
-        "--top",
-        type=int,
-        help=f"거래대금 상위 N개 종목 (기본 {TOP_N})",
-        default=None,
-    )
-    parser.add_argument(
-        "--no-telegram",
-        action="store_true",
-        help="텔레그램 발송 비활성화",
-    )
-    parser.add_argument(
-        "--tag",
-        type=str,
-        help="출력 파일 이름 뒤에 붙일 태그",
-        default=None,
-    )
-
-    args = parser.parse_args()
-
-    try:
-        main(
-            trade_date=args.date,
-            top_n=args.top,
-            enable_telegram=not args.no_telegram,
-            tag=args.tag,
-        )
-    except Exception as e:
-        log(f"❌ Collector 실행 중 치명적 오류: {e}")
-        raise
+        log("✉️ 텔레그램 발송 생략 (옵션 설정)")
