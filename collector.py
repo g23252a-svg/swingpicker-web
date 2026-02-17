@@ -2333,51 +2333,8 @@ def ceil_to_tick(price: float) -> int:
     tk = tick_size(float(price))
     return ceil_to_tick_by(float(price), tk)
 
-def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
-    """
-    [v9.0] 네이버 금융 종목별 뉴스/공시 제목 크롤링
-    - 최근 'days'일 이내의 뉴스만 수집
-    """
-    if not BS4_OK: return []
-    
-    headlines = []
-    try:
-        # 네이버 금융 뉴스 리스트 URL
-        url = f"https://finance.naver.com/item/news_news.naver?code={code}&page=1"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=3)
-        
-        # 인코딩 처리 (EUC-KR -> UTF-8)
-        soup = BeautifulSoup(resp.content.decode('euc-kr', 'replace'), "html.parser")
-        
-        # 뉴스 테이블 파싱
-        # 구조: <tr> <td class="title"> <a ...>제목</a> </td> <td class="date">...</td> </tr>
-        titles = soup.select("td.title > a")
-        dates = soup.select("td.date")
-        
-        cutoff_date = datetime.now() - timedelta(days=days)
-        
-        for t, d in zip(titles, dates):
-            article_date_str = d.text.strip() # 예: '2024.05.21 14:00'
-            try:
-                # 날짜 파싱 (시간 포맷이 다양할 수 있어 예외처리)
-                if len(article_date_str) > 10:
-                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d %H:%M")
-                else:
-                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d")
-                
-                if a_date >= cutoff_date:
-                    subject = t.text.strip()
-                    # 중복/광고성 필터링 (간단 예시)
-                    if "특징주" in subject or "공시" in subject or "체결" in subject or "계약" in subject:
-                        headlines.append(subject)
-            except:
-                continue
-                
-    except Exception as e:
-        pass # 뉴스 수집 실패는 조용히 넘김
-        
-    return list(set(headlines))[:10] # 중복 제거 후 최대 10개
+# [v18.1] fetch_naver_news_headlines 중복 정의 제거 (1676줄에 원본 유지)
+# 현재 메인 흐름은 AsyncNewsFetcher(async_crawler.py)를 사용함
 
 # [v16.1 Patch] 투자자별 순매수 데이터 수집 함수 추가
 def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
