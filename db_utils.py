@@ -1,3 +1,4 @@
+# db_utils.py (Admin Event Feature Added)
 
 import duckdb
 import pandas as pd
@@ -10,6 +11,18 @@ from datetime import datetime, timedelta
 # Gist 설정
 GIST_ID = st.secrets.get("LDY_GIST_ID") or os.environ.get("LDY_GIST_ID")
 GIST_TOKEN = st.secrets.get("LDY_GIST_TOKEN") or os.environ.get("LDY_GIST_TOKEN")
+
+# [진단 로그] Gist 연동 상태 확인
+if GIST_ID and GIST_TOKEN:
+    print(f"✅ [Gist] 연동 준비 완료 (ID: {GIST_ID[:8]}...)")
+else:
+    _missing = []
+    if not GIST_ID: _missing.append("LDY_GIST_ID")
+    if not GIST_TOKEN: _missing.append("LDY_GIST_TOKEN")
+    print(f"⚠️ [Gist] 연동 불가 — 누락된 키: {', '.join(_missing)}")
+    print(f"   st.secrets 키 목록: {list(st.secrets.keys()) if hasattr(st, 'secrets') else 'N/A'}")
+    print(f"   os.environ 확인: LDY_GIST_ID={'있음' if os.environ.get('LDY_GIST_ID') else '없음'}, "
+          f"LDY_GIST_TOKEN={'있음' if os.environ.get('LDY_GIST_TOKEN') else '없음'}")
 
 USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json" 
@@ -61,103 +74,117 @@ class LDYDBManager:
         self._load_gist_to_table(INQUIRY_DB_FILE, "inquiries", 5)
 
     def _load_gist_to_table(self, filename, tablename, col_count):
-        if not GIST_ID or not GIST_TOKEN: return
+        if not GIST_ID or not GIST_TOKEN:
+            print(f"⚠️ [Gist] {tablename} 로드 스킵 — Gist 인증 키 없음")
+            return
         try:
             url = f"https://api.github.com/gists/{GIST_ID}"
             headers = {"Authorization": f"token {GIST_TOKEN}"}
             resp = requests.get(url, headers=headers, timeout=5)
-            
-            if resp.status_code == 200:
-                files = resp.json().get("files", {})
-                if filename in files:
-                    content = files[filename]["content"]
-                    data = json.loads(content)
-                    if not data: return
-                    
-                    # 1. Users 테이블
-                    if tablename == 'users':
-                        if isinstance(data, dict) and "users" in data:
-                            user_dict = data["users"]
-                            for u in user_dict.values():
-                                join_dt_str = u.get('created_at', u.get('join_date'))
-                                join_dt = None
-                                try:
-                                    if join_dt_str:
-                                        clean_str = str(join_dt_str)[:19].replace("T", " ")
-                                        join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
-                                except: pass
 
-                                # 만료일 없으면 가입일 + 7일로 자동 설정 (복구 로직)
-                                expire_val = u.get('prime_expire_date')
-                                role = u.get('role', 'free')
-                                
-                                if not expire_val and role in ['prime', 'pro'] and join_dt:
-                                    expire_val = join_dt + timedelta(days=7)
-                                
-                                vals = [
-                                    u.get('login_id', u.get('id')),
-                                    u.get('password_hash', u.get('password')),
-                                    u.get('salt'),
-                                    u.get('nickname'),
-                                    role,
-                                    join_dt_str,
-                                    u.get('last_login'),
-                                    u.get('is_banned', False),
-                                    u.get('security_q_idx', 0),
-                                    u.get('security_a_hash'),
-                                    u.get('session_token'),
-                                    expire_val
-                                ]
-                                self.conn.execute("""
-                                    INSERT OR IGNORE INTO users 
-                                    (id, password, salt, nickname, role, join_date, last_login, 
-                                     is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date) 
-                                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                                """, vals)
-                            print(f"✅ {tablename} 복원 완료 (Dict Format)")
-                            return
+            if resp.status_code != 200:
+                print(f"❌ [Gist] API 응답 실패: {resp.status_code} — {resp.text[:200]}")
+                return
 
-                        elif isinstance(data, list):
-                            for item in data:
-                                join_dt_str = item.get('join_date')
-                                expire_val = item.get('prime_expire_date')
-                                role = item.get('role', 'free')
-                                
-                                if not expire_val and role in ['prime', 'pro'] and join_dt_str:
-                                    try:
-                                        clean_str = str(join_dt_str)[:19].replace("T", " ")
-                                        join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
-                                        expire_val = join_dt + timedelta(days=7)
-                                    except: pass
+            files = resp.json().get("files", {})
+            if filename not in files:
+                print(f"⚠️ [Gist] '{filename}' 파일이 Gist에 없음. 존재하는 파일: {list(files.keys())}")
+                return
 
-                                vals = [
-                                    item.get('id'), item.get('password'), item.get('salt'), item.get('nickname'),
-                                    role, join_dt_str, item.get('last_login'), item.get('is_banned'),
-                                    item.get('security_q_idx'), item.get('security_a_hash'), item.get('session_token'),
-                                    expire_val
-                                ]
-                                self.conn.execute("""
-                                    INSERT OR IGNORE INTO users 
-                                    (id, password, salt, nickname, role, join_date, last_login, 
-                                     is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date) 
-                                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                                """, vals)
-                            print(f"✅ {tablename} 로드 완료 (List Format)")
-                            return
+            content = files[filename]["content"]
+            data = json.loads(content)
+            if not data:
+                print(f"⚠️ [Gist] '{filename}' 데이터가 비어있음")
+                return
 
-                    # 2. Inquiries 테이블
-                    elif tablename == 'inquiries':
-                        if isinstance(data, list):
-                            for item in data:
-                                vals = [
-                                    item.get('id'), item.get('nickname'), item.get('title'),
-                                    item.get('content'), item.get('created_at')
-                                ]
-                                self.conn.execute("INSERT INTO inquiries VALUES (?,?,?,?,?)", vals)
-                            print(f"✅ {tablename} 로드 완료")
+            # 1. Users 테이블
+            if tablename == 'users':
+                if isinstance(data, dict) and "users" in data:
+                    user_dict = data["users"]
+                    for u in user_dict.values():
+                        join_dt_str = u.get('created_at', u.get('join_date'))
+                        join_dt = None
+                        try:
+                            if join_dt_str:
+                                clean_str = str(join_dt_str)[:19].replace("T", " ")
+                                join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+                        except: pass
+
+                        expire_val = u.get('prime_expire_date')
+                        role = u.get('role', 'free')
+
+                        if not expire_val and role in ['prime', 'pro'] and join_dt:
+                            expire_val = join_dt + timedelta(days=7)
+
+                        vals = [
+                            u.get('login_id', u.get('id')),
+                            u.get('password_hash', u.get('password')),
+                            u.get('salt'),
+                            u.get('nickname'),
+                            role,
+                            join_dt_str,
+                            u.get('last_login'),
+                            u.get('is_banned', False),
+                            u.get('security_q_idx', 0),
+                            u.get('security_a_hash'),
+                            u.get('session_token'),
+                            expire_val
+                        ]
+                        self.conn.execute("""
+                            INSERT OR IGNORE INTO users 
+                            (id, password, salt, nickname, role, join_date, last_login, 
+                             is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date) 
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                        """, vals)
+                    print(f"✅ {tablename} 복원 완료 (Dict Format, {len(user_dict)}명)")
+                    return
+
+                elif isinstance(data, list):
+                    loaded = 0
+                    for item in data:
+                        join_dt_str = item.get('join_date')
+                        expire_val = item.get('prime_expire_date')
+                        role = item.get('role', 'free')
+
+                        if not expire_val and role in ['prime', 'pro'] and join_dt_str:
+                            try:
+                                clean_str = str(join_dt_str)[:19].replace("T", " ")
+                                join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+                                expire_val = join_dt + timedelta(days=7)
+                            except: pass
+
+                        vals = [
+                            item.get('id'), item.get('password'), item.get('salt'), item.get('nickname'),
+                            role, join_dt_str, item.get('last_login'), item.get('is_banned'),
+                            item.get('security_q_idx'), item.get('security_a_hash'), item.get('session_token'),
+                            expire_val
+                        ]
+                        self.conn.execute("""
+                            INSERT OR IGNORE INTO users 
+                            (id, password, salt, nickname, role, join_date, last_login, 
+                             is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date) 
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                        """, vals)
+                        loaded += 1
+                    print(f"✅ {tablename} 로드 완료 (List Format, {loaded}명)")
+                    return
+
+                else:
+                    print(f"⚠️ [Gist] {filename} 데이터 형식 미지원: {type(data).__name__}")
+
+            # 2. Inquiries 테이블
+            elif tablename == 'inquiries':
+                if isinstance(data, list):
+                    for item in data:
+                        vals = [
+                            item.get('id'), item.get('nickname'), item.get('title'),
+                            item.get('content'), item.get('created_at')
+                        ]
+                        self.conn.execute("INSERT INTO inquiries VALUES (?,?,?,?,?)", vals)
+                    print(f"✅ {tablename} 로드 완료 ({len(data)}건)")
 
         except Exception as e:
-            print(f"⚠️ {tablename} 로드 실패: {e}")
+            print(f"❌ [Gist] {tablename} 로드 실패: {e}")
 
     def _sync_table_to_gist(self, tablename, filename):
         if not GIST_ID or not GIST_TOKEN: return
@@ -411,4 +438,3 @@ class LDYDBManager:
             self.conn.close()
         except Exception as e:
             print(f"⚠️ DB Close Error: {e}")
-
