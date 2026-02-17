@@ -571,6 +571,317 @@ st.set_page_config(
     page_icon="💎",
 )
 
+# =====================================================================
+# 🎨 [v18.0] Global UI Theme — Premium Dark Finance Dashboard
+# =====================================================================
+st.markdown("""
+<style>
+/* ─── Import Fonts ─── */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ─── Root Variables ─── */
+:root {
+    --accent-blue: #3B82F6;
+    --accent-cyan: #06B6D4;
+    --accent-green: #10B981;
+    --accent-red: #EF4444;
+    --accent-amber: #F59E0B;
+    --accent-purple: #8B5CF6;
+    --card-bg: rgba(255,255,255,0.03);
+    --card-border: rgba(255,255,255,0.08);
+    --card-hover: rgba(255,255,255,0.06);
+    --glass-bg: rgba(255,255,255,0.05);
+    --glass-border: rgba(255,255,255,0.1);
+    --text-primary: #F1F5F9;
+    --text-secondary: #94A3B8;
+    --text-muted: #64748B;
+    --gradient-blue: linear-gradient(135deg, #3B82F6, #06B6D4);
+    --gradient-green: linear-gradient(135deg, #10B981, #34D399);
+    --gradient-red: linear-gradient(135deg, #EF4444, #F97316);
+    --gradient-purple: linear-gradient(135deg, #8B5CF6, #EC4899);
+}
+
+/* ─── General Typography ─── */
+html, body, [class*="css"] {
+    font-family: 'Outfit', -apple-system, sans-serif !important;
+}
+code, pre, .stCodeBlock {
+    font-family: 'JetBrains Mono', monospace !important;
+}
+h1, h2, h3 { font-weight: 600 !important; letter-spacing: -0.02em; }
+
+/* ─── Metric Cards ─── */
+[data-testid="stMetric"] {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    transition: all 0.2s ease;
+}
+[data-testid="stMetric"]:hover {
+    background: var(--card-hover);
+    border-color: var(--accent-blue);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px rgba(59,130,246,0.15);
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.78rem !important;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.7;
+}
+[data-testid="stMetricValue"] {
+    font-weight: 700 !important;
+    font-size: 1.4rem !important;
+}
+
+/* ─── Tabs ─── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 4px;
+    border: 1px solid var(--card-border);
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 0.85rem;
+    padding: 8px 16px;
+    transition: all 0.2s ease;
+}
+.stTabs [aria-selected="true"] {
+    background: var(--gradient-blue) !important;
+    color: white !important;
+    font-weight: 600;
+}
+
+/* ─── Containers & Cards ─── */
+[data-testid="stExpander"] {
+    border: 1px solid var(--card-border) !important;
+    border-radius: 12px !important;
+    overflow: hidden;
+}
+div.stContainer, div[data-testid="stVerticalBlock"] > div[style*="border"] {
+    border-radius: 12px !important;
+    border-color: var(--card-border) !important;
+}
+
+/* ─── Buttons ─── */
+.stButton > button {
+    border-radius: 8px;
+    font-weight: 500;
+    font-family: 'Outfit', sans-serif;
+    transition: all 0.2s ease;
+    border: 1px solid var(--card-border);
+}
+.stButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59,130,246,0.25);
+}
+.stButton > button[kind="primary"] {
+    background: var(--gradient-blue);
+    border: none;
+}
+
+/* ─── DataFrames ─── */
+[data-testid="stDataFrame"] {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--card-border);
+}
+
+/* ─── Progress bars ─── */
+.stProgress > div > div > div {
+    background: var(--gradient-blue);
+    border-radius: 8px;
+}
+
+/* ─── Sidebar ─── */
+section[data-testid="stSidebar"] {
+    border-right: 1px solid var(--card-border);
+}
+
+/* ─── Hero Banner ─── */
+.hero-banner {
+    background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(6,182,212,0.08), rgba(139,92,246,0.06));
+    border: 1px solid rgba(59,130,246,0.2);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+}
+.hero-banner::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(59,130,246,0.08), transparent 70%);
+    pointer-events: none;
+}
+.hero-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: 0;
+    background: linear-gradient(135deg, #3B82F6, #06B6D4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero-subtitle {
+    font-size: 0.9rem;
+    opacity: 0.6;
+    margin-top: 6px;
+    font-weight: 400;
+}
+.hero-badge {
+    display: inline-block;
+    background: rgba(59,130,246,0.15);
+    border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--accent-blue);
+    margin-top: 10px;
+}
+
+/* ─── Kanban Cards ─── */
+.kanban-header {
+    padding: 10px 0;
+    margin-bottom: 12px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 1rem;
+    letter-spacing: 0.02em;
+    border-bottom: 3px solid;
+    position: relative;
+}
+.kanban-header .count {
+    font-weight: 400;
+    opacity: 0.5;
+    font-size: 0.85rem;
+}
+.kanban-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    transition: all 0.2s ease;
+}
+.kanban-card:hover {
+    background: var(--card-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    border-color: rgba(255,255,255,0.15);
+}
+.kanban-stock-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+}
+.kanban-stock-code {
+    font-size: 0.75rem;
+    opacity: 0.5;
+    font-family: 'JetBrains Mono', monospace;
+}
+.kanban-scores {
+    display: flex;
+    gap: 12px;
+    margin: 8px 0;
+}
+.kanban-score-item {
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.05);
+}
+.kanban-score-item b { font-size: 1rem; }
+.kanban-price {
+    font-size: 0.78rem;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+.kanban-rr-bar {
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.08);
+    margin-top: 8px;
+    overflow: hidden;
+}
+.kanban-rr-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+/* ─── Route Badge ─── */
+.route-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 16px;
+    border-radius: 12px;
+    color: white;
+    text-align: center;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+}
+.route-badge::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05));
+    pointer-events: none;
+}
+.route-badge .label {
+    font-size: 0.8rem;
+    opacity: 0.8;
+    display: block;
+    margin-bottom: 4px;
+}
+.route-badge .value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+}
+
+/* ─── Disclaimer Banner ─── */
+.disclaimer-bar {
+    background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.2);
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+.disclaimer-bar strong { color: var(--accent-amber); }
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+</style>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     # 기존 버전 표시 코드 대신 아래 함수 사용
     version_info.render_sidebar_version_badge()
@@ -581,16 +892,23 @@ with st.sidebar:
         else:
             st.experimental_rerun()
 
-st.title(f"🏆 LDY Pro Trader v{APP_VERSION} (Prime Top 100 + Role-based Daily Top)")
-st.caption("AI Quant Analysis & Portfolio Manager — Scoring / Subscription / Portfolio")
+st.markdown(f"""
+<div class="hero-banner">
+    <p class="hero-title">💎 LDY Pro Trader v{APP_VERSION}</p>
+    <p class="hero-subtitle">AI Quant Analysis & Portfolio Manager — Scoring · Subscription · Portfolio</p>
+    <span class="hero-badge">🤖 LSTM + XGBoost Ensemble · 16-Feature AI Engine</span>
+</div>
+""", unsafe_allow_html=True)
 
-st.warning(
-    "⚠️ 투자 관련 유의사항\n\n"
-    "LDY Pro Trader는 주식 투자 의사결정을 돕기 위한 **데이터·알고리즘 기반 분석 도구**입니다.\n"
-    "제공되는 모든 정보는 일반적인 참고용 자료일 뿐이며, 특정 종목의 매수·매도, 수익 창출 또는 손실 회피를 보장하지 않습니다.\n\n"
-    "실제 투자에 대한 최종 판단과 그에 따른 결과(수익·손실 포함)는 **전적으로 이용자 본인에게 귀속**되며,\n"
-    "본 서비스 및 개발자는 어떠한 법적 책임도 부담하지 않습니다."
-)
+with st.expander("⚠️ 투자 유의사항 (클릭하여 펼치기)", expanded=False):
+    st.markdown("""
+    <div class="disclaimer-bar">
+        LDY Pro Trader는 <strong>데이터·알고리즘 기반 분석 도구</strong>입니다. 
+        제공되는 정보는 참고용이며, 매수·매도 및 수익 보장을 하지 않습니다. 
+        투자 판단과 결과는 <strong>전적으로 이용자 본인</strong>에게 귀속되며, 
+        본 서비스 및 개발자는 법적 책임을 부담하지 않습니다.
+    </div>
+    """, unsafe_allow_html=True)
 
 # 🔔 상단 업데이트 공지 (version_info 헬퍼 함수 사용)
 log = get_latest_log()
@@ -1377,28 +1695,37 @@ def get_stock_chart_data(code):
 # [v12.0 New] AI 게이지 & 켈리 자금관리 차트
 # -----------------------------------------------------------
 def plot_ai_gauge_chart(score):
-    """종합 점수(AI+Quant) 게이지 차트"""
+    """[v18.0] 종합 점수(AI+Quant) 프리미엄 게이지 차트"""
     fig = go.Figure(go.Indicator(
         mode = "gauge+number+delta",
         value = score,
         domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': "🏆 AI 종합 신뢰도", 'font': {'size': 18}},
-        delta = {'reference': 80, 'increasing': {'color': "green"}},
+        title = {'text': "🏆 AI 종합 신뢰도", 'font': {'size': 16, 'family': 'Outfit'}},
+        delta = {'reference': 80, 'increasing': {'color': "#10B981"}, 'decreasing': {'color': "#EF4444"}},
+        number = {'font': {'size': 42, 'family': 'Outfit', 'color': '#F1F5F9'}},
         gauge = {
-            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
-            'bar': {'color': "#2979FF"},
-            'bgcolor': "white",
-            'borderwidth': 2,
-            'bordercolor': "gray",
+            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "rgba(255,255,255,0.2)", 
+                     'tickfont': {'color': 'rgba(255,255,255,0.5)', 'size': 10}},
+            'bar': {'color': "#3B82F6", 'thickness': 0.8},
+            'bgcolor': "rgba(255,255,255,0.03)",
+            'borderwidth': 1,
+            'bordercolor': "rgba(255,255,255,0.1)",
             'steps': [
-                {'range': [0, 60], 'color': '#FFEBEE'},
-                {'range': [60, 80], 'color': '#E3F2FD'},
-                {'range': [80, 100], 'color': '#E8F5E9'}],
+                {'range': [0, 40], 'color': 'rgba(239,68,68,0.12)'},
+                {'range': [40, 60], 'color': 'rgba(245,158,11,0.10)'},
+                {'range': [60, 80], 'color': 'rgba(59,130,246,0.10)'},
+                {'range': [80, 100], 'color': 'rgba(16,185,129,0.12)'}],
             'threshold': {
-                'line': {'color': "red", 'width': 4},
+                'line': {'color': "#F59E0B", 'width': 3},
                 'thickness': 0.75,
                 'value': score}}))
-    fig.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=20))
+    fig.update_layout(
+        height=250, 
+        margin=dict(l=20, r=20, t=30, b=20),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font={'family': 'Outfit'}
+    )
     return fig
 
 def plot_kelly_visual(win_rate_est, reward_risk, kelly_pct):
@@ -1923,29 +2250,24 @@ def plot_opportunity_map(df):
 
 def render_kanban_board(df):
     """
-    Active 종목을 상태별(ATTACK, ARMED, WATCH) 카드 형태로 시각화 (Kanban View)
+    [v18.0] Active 종목을 상태별 글래스모피즘 카드로 시각화 (Kanban View)
     """
     if df.empty:
         st.info("표시할 종목이 없습니다.")
         return
 
-    # 3단 컬럼 구성 (반응형)
     col_attack, col_armed, col_watch = st.columns(3)
     
-    # 상태별 필터링 (ROUTE 컬럼 텍스트 매칭)
-    # 텍스트에 ATTACK/공략, ARMED/준비/임박, WATCH/관찰 등이 포함되어 있는지 확인
     df_attack = df[df['ROUTE'].astype(str).str.contains("ATTACK|공략|발사", case=False, na=False)]
     df_armed = df[df['ROUTE'].astype(str).str.contains("ARMED|임박|준비|BRK|돌파", case=False, na=False)]
-    # 나머지는 관찰로 분류하되, 이미 Attack/Armed에 들어간건 제외해야 함 (중복 방지)
     ex_indices = df_attack.index.union(df_armed.index)
     df_watch = df[~df.index.isin(ex_indices)]
 
-    def _render_card(container, title, sub_df, color_border, icon):
+    def _render_card(container, title, sub_df, color, icon, gradient):
         with container:
-            # 헤더 스타일링
             st.markdown(
-                f"<div style='border-bottom: 3px solid {color_border}; margin-bottom: 10px; padding-bottom: 5px; text-align: center; font-weight: bold; font-size: 1.1em;'>"
-                f"{icon} {title} <span style='color:gray; font-size:0.8em;'>({len(sub_df)})</span></div>", 
+                f"<div class='kanban-header' style='border-color:{color};'>"
+                f"{icon} {title} <span class='count'>({len(sub_df)})</span></div>", 
                 unsafe_allow_html=True
             )
             
@@ -1953,37 +2275,53 @@ def render_kanban_board(df):
                 st.caption("비어 있음")
                 
             for _, row in sub_df.iterrows():
-                # 카드 컨테이너
-                with st.container(border=True):
-                    # 종목명 & 코드
-                    st.markdown(f"**{row['종목명']}** <small style='color:gray'>({row['종목코드']})</small>", unsafe_allow_html=True)
-                    
-                    # 핵심 지표 (종합점수 / 트리거)
-                    c1, c2 = st.columns(2)
-                    final_score = row.get('FINAL_SCORE', 0)
-                    trigger_score = row.get('TRIGGER_SCORE', 0)
-                    
-                    c1.metric("종합점수", f"{final_score:.0f}", label_visibility="collapsed")
-                    c2.metric("트리거", f"{trigger_score:.0f}", label_visibility="collapsed")
-                    
-                    st.caption(f"🏆종합: {final_score:.0f} / 🔥트리거: {trigger_score:.0f}")
+                final_score = row.get('FINAL_SCORE', 0)
+                trigger_score = row.get('TRIGGER_SCORE', 0)
+                buy_p = int(pd.to_numeric(str(row.get('추천매수가', 0)).replace(',', ''), errors='coerce') or 0)
+                stop_p = int(pd.to_numeric(str(row.get('손절가', 0)).replace(',', ''), errors='coerce') or 0)
+                rr_val = row.get('RR1', 0) or 0
+                rr_width = min(float(rr_val) / 3.0 * 100, 100)
+                
+                # 점수에 따른 뱃지 색상
+                score_color = "#10B981" if final_score >= 80 else "#3B82F6" if final_score >= 60 else "#94A3B8"
+                
+                price_html = ""
+                if buy_p > 0:
+                    price_html = f"""
+                    <div class='kanban-price'>
+                        🎯 <b>{buy_p:,}</b> 
+                        <span style='color:#EF4444;opacity:0.8;'>🛡️ {stop_p:,}</span>
+                    </div>"""
+                
+                rr_html = ""
+                if rr_val and float(rr_val) > 0:
+                    rr_color = "#10B981" if float(rr_val) >= 2.0 else "#F59E0B" if float(rr_val) >= 1.0 else "#EF4444"
+                    rr_html = f"""
+                    <div style='display:flex;align-items:center;gap:8px;margin-top:6px;font-size:0.75rem;'>
+                        <span style='opacity:0.5;'>R:R</span>
+                        <div class='kanban-rr-bar' style='flex:1;'>
+                            <div class='kanban-rr-fill' style='width:{rr_width}%;background:{rr_color};'></div>
+                        </div>
+                        <span style='color:{rr_color};font-weight:600;'>{float(rr_val):.1f}</span>
+                    </div>"""
+                
+                st.markdown(f"""
+                <div class='kanban-card'>
+                    <div class='kanban-stock-name'>
+                        {row['종목명']} <span class='kanban-stock-code'>{row['종목코드']}</span>
+                    </div>
+                    <div class='kanban-scores'>
+                        <div class='kanban-score-item'>🏆 <b style='color:{score_color};'>{final_score:.0f}</b></div>
+                        <div class='kanban-score-item'>🔥 <b>{trigger_score:.0f}</b></div>
+                    </div>
+                    {price_html}
+                    {rr_html}
+                </div>
+                """, unsafe_allow_html=True)
 
-                    # 가격 정보 (매수/손절)
-                    buy_p = int(pd.to_numeric(str(row.get('추천매수가', 0)).replace(',', ''), errors='coerce'))
-                    stop_p = int(pd.to_numeric(str(row.get('손절가', 0)).replace(',', ''), errors='coerce'))
-                    
-                    if buy_p > 0:
-                        st.markdown(f"<div style='font-size:0.85em;'>🎯 <b>{buy_p:,}</b> <span style='color:#FF4B4B'>(🛡️{stop_p:,})</span></div>", unsafe_allow_html=True)
-                    
-                    # 손익비(RR) 바 시각화 (데이터가 있다면)
-                    rr_val = row.get('RR1', 0)
-                    if rr_val > 0:
-                        st.progress(min(rr_val, 1.0), text=f"가성비(RR): {rr_val:.2f}")
-
-    # 각 레인(Lane) 렌더링
-    _render_card(col_attack, "진입 (ATTACK)", df_attack, "#FF4B4B", "🚀") # Red
-    _render_card(col_armed, "준비 (ARMED)", df_armed, "#FFA726", "🔫")   # Orange
-    _render_card(col_watch, "관찰 (WATCH)", df_watch, "#29B6F6", "👀")   # Blue
+    _render_card(col_attack, "진입 ATTACK", df_attack, "#EF4444", "🚀", "var(--gradient-red)")
+    _render_card(col_armed, "준비 ARMED", df_armed, "#F59E0B", "🔫", "var(--gradient-purple)")
+    _render_card(col_watch, "관찰 WATCH", df_watch, "#3B82F6", "👀", "var(--gradient-blue)")
 
 # 👆👆👆 [1단계 끝] 👆👆👆
 # -------------------------------------------------------------
@@ -3083,10 +3421,21 @@ with st.sidebar:
             wau_pct = f"{wau_count/total_users*100:.1f}%"
             
             st.markdown(f"""
-            <div style="background:rgba(128,128,128,0.1); padding:10px; border-radius:5px; margin-bottom:15px; font-size:0.9em;">
-                <div>👥 <b>총 가입자:</b> {total_users}명</div>
-                <div>🔥 <b>DAU (24h):</b> {dau_count}명 ({dau_pct})</div>
-                <div>📅 <b>WAU (7일):</b> {wau_count}명 ({wau_pct})</div>
+            <div style="display:flex; gap:12px; margin-bottom:16px;">
+                <div style="flex:1; background:linear-gradient(135deg, rgba(59,130,246,0.12), rgba(59,130,246,0.04)); border:1px solid rgba(59,130,246,0.2); border-radius:12px; padding:16px; text-align:center;">
+                    <div style="font-size:0.75rem; opacity:0.6; text-transform:uppercase; letter-spacing:0.05em;">총 가입자</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:#3B82F6;">{total_users}</div>
+                </div>
+                <div style="flex:1; background:linear-gradient(135deg, rgba(239,68,68,0.12), rgba(239,68,68,0.04)); border:1px solid rgba(239,68,68,0.2); border-radius:12px; padding:16px; text-align:center;">
+                    <div style="font-size:0.75rem; opacity:0.6; text-transform:uppercase; letter-spacing:0.05em;">DAU (24h)</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:#EF4444;">{dau_count}</div>
+                    <div style="font-size:0.7rem; opacity:0.5;">{dau_pct}</div>
+                </div>
+                <div style="flex:1; background:linear-gradient(135deg, rgba(16,185,129,0.12), rgba(16,185,129,0.04)); border:1px solid rgba(16,185,129,0.2); border-radius:12px; padding:16px; text-align:center;">
+                    <div style="font-size:0.75rem; opacity:0.6; text-transform:uppercase; letter-spacing:0.05em;">WAU (7일)</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:#10B981;">{wau_count}</div>
+                    <div style="font-size:0.7rem; opacity:0.5;">{wau_pct}</div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -3779,9 +4128,11 @@ with tab2:
             route_val = sel_row.get("ROUTE", "NEUTRAL")
             badge_color = get_route_color(route_val)
             st.markdown(f"""
-                <div style="background-color:{badge_color}; padding:12px; border-radius:8px; color:white; text-align:center; margin-bottom:20px;">
-                    <span style="font-size:14px; opacity:0.9;">현재 작전 상태</span><br>
-                    <b style="font-size:24px; letter-spacing:2px;">{route_val}</b>
+                <div class="route-badge" style="background:{badge_color};">
+                    <div>
+                        <span class="label">현재 작전 상태</span>
+                        <span class="value">{route_val}</span>
+                    </div>
                 </div>
             """, unsafe_allow_html=True)
 
