@@ -1975,16 +1975,6 @@ def determine_state(row):
     except Exception as e:
         return RouteState.NEUTRAL
 
-def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
-    """
-    [v15.0] 곡선형 패널티 (Curved Penalty)
-    임계치(threshold)를 넘어가면 감점 폭이 제곱(power)으로 커짐
-    """
-    if val <= threshold:
-        return 0.0
-    # (초과분 ^ power) * 가중치
-    return ((val - threshold) ** power) * weight
-
 # -----------------------------------------------------------
 # [New] Scoring Engine v15.1 (Safety Patched)
 # -----------------------------------------------------------
@@ -2867,25 +2857,9 @@ def analyze_ticker(
     # MACD Slope
     slope = float(np.polyfit(np.arange(len(hist.tail(5))), hist.tail(5).values.astype(float), 1)[0]) if len(hist) >= 5 else 0.0
     slope_pct = (slope / last_c) * 100.0 if last_c > 0 else 0.0
-    # 🔥 [Fix B: Smart Entry Price]
-    # 이격도가 15% 이상 벌어졌으면, 현재가가 아니라 '눌림목 가격'을 진입가로 설정
-    # 결과: Entry < Close 상태가 되어 Now% Gap이 커짐 -> 점수 패널티 발동
-    disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100
-    if disp >= 15.0: 
-        # 과열 상태: 20일선 + 5% 지점까지 기다려라
-        buy = float(ma20.iloc[-1]) * 1.05 
-    else:
-        # 정상 상태: 현재가 진입 (돌파/추세추종)
-        buy = last_c
 
-    # 손절가/목표가 재계산 (변경된 buy 기준)
-    atr_val = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
-    stop = buy - (2.0 * atr_val)
-    if (dist_to_swing < 10.0) and (swing_low_10 > 0): stop = max(stop, swing_low_10 * 0.98) 
-    target = buy + (buy - stop) * 2.0
-    
-    # Tick 단위 보정
-    buy = round_to_tick(buy); stop = floor_to_tick(stop); target = ceil_to_tick(target)
+    # [BugFix] 이전에 존재하던 두 번째 buy/stop/target 계산 블록 제거
+    # 첫 번째 블록(Fix v9.0: 급등주 추격방지 + 스마트 손절 + R:R 2.5)만 사용
 
     # --- [이 코드가 빠져있으면 분석 결과에 반영되지 않습니다] ---
     # 매물대 분석 실행 (최근 120일 데이터 사용)
@@ -3239,7 +3213,10 @@ def main(
         # -----------------------------------------------------------
         ebs_val = pd.to_numeric(df_out.get("EBS", 0), errors='coerce').fillna(0)
         struct_val = pd.to_numeric(df_out.get("STRUCT_SCORE", 0), errors='coerce').fillna(0)
-        mask_qual = (ebs_val >= 6) & (struct_val >= 60)
+        
+        # [BugFix] OVERHEAT/EXIT_WARNING 종목은 정예군에서 제외
+        mask_safe = ~df_out["ROUTE"].isin(["OVERHEAT", "EXIT_WARNING"])
+        mask_qual = (ebs_val >= 6) & (struct_val >= 60) & mask_safe
         
         df_prime = df_out[mask_qual].copy().sort_values(["TIMING_SCORE", "AI_SCORE"], ascending=False)
         df_normal = df_out[~mask_qual].copy().sort_values("FINAL_SCORE", ascending=False)
