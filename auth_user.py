@@ -7,6 +7,7 @@ import hashlib
 import secrets
 import time
 import re  # 👈 추가됨
+import os
 import logging
 from datetime import datetime, timezone
 
@@ -18,8 +19,11 @@ logger = logging.getLogger("auth_user")
 CURRENT_USER_KEY = "ldy_current_user"
 MASTER_ADMIN_ID = "admin"
 
-# [핵심 수정 1] 비밀번호 로드 로직 강화 (문자열 변환 + 공백 제거)
-raw_pw = st.secrets.get("MASTER_ADMIN_PW") or st.secrets.get("auth", {}).get("master_admin_pw", "")
+# [핵심 수정 1] 비밀번호 로드 로직 강화 (secrets.toml 없는 환경에서도 안전)
+try:
+    raw_pw = st.secrets.get("MASTER_ADMIN_PW") or st.secrets.get("auth", {}).get("master_admin_pw", "")
+except Exception:
+    raw_pw = os.environ.get("MASTER_ADMIN_PW", "")
 MASTER_ADMIN_PW = str(raw_pw).strip() if raw_pw else ""
 
 SECURITY_QUESTIONS = [
