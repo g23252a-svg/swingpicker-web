@@ -53,8 +53,9 @@ jobs:
 
       - name: Run Collector
         run: |
-          # 🚨 [긴급] 2월 13일 데이터를 강제로 생성하는 1회성 명령
-          python -c "import collector; collector.main(trade_date='20260213')"
+          echo ">>> TG_TOKEN set? $([[ -n \"$TG_TOKEN\" ]] && echo yes || echo no)"
+          echo ">>> TG_ID    = $TG_ID"
+          python collector.py
           echo ">>> TG_TOKEN set? $([[ -n \"$TG_TOKEN\" ]] && echo yes || echo no)"
           echo ">>> TG_ID    = $TG_ID"
           python collector.py
