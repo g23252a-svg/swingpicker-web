@@ -8,9 +8,18 @@ import os
 import streamlit as st
 from datetime import datetime, timedelta
 
-# Gist 설정
-GIST_ID = st.secrets.get("LDY_GIST_ID") or os.environ.get("LDY_GIST_ID")
-GIST_TOKEN = st.secrets.get("LDY_GIST_TOKEN") or os.environ.get("LDY_GIST_TOKEN")
+# Gist 설정 — os.environ 우선, st.secrets는 안전하게 폴백
+def _safe_secret(key: str) -> str:
+    """환경변수 → st.secrets 순으로 조회. secrets.toml 없어도 크래시 안 남."""
+    val = os.environ.get(key)
+    if val: return val
+    try:
+        return st.secrets.get(key) or ""
+    except Exception:
+        return ""
+
+GIST_ID = _safe_secret("LDY_GIST_ID") or None
+GIST_TOKEN = _safe_secret("LDY_GIST_TOKEN") or None
 
 # [진단 로그] Gist 연동 상태 확인
 if GIST_ID and GIST_TOKEN:
@@ -20,9 +29,6 @@ else:
     if not GIST_ID: _missing.append("LDY_GIST_ID")
     if not GIST_TOKEN: _missing.append("LDY_GIST_TOKEN")
     print(f"⚠️ [Gist] 연동 불가 — 누락된 키: {', '.join(_missing)}")
-    print(f"   st.secrets 키 목록: {list(st.secrets.keys()) if hasattr(st, 'secrets') else 'N/A'}")
-    print(f"   os.environ 확인: LDY_GIST_ID={'있음' if os.environ.get('LDY_GIST_ID') else '없음'}, "
-          f"LDY_GIST_TOKEN={'있음' if os.environ.get('LDY_GIST_TOKEN') else '없음'}")
 
 USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json" 
