@@ -279,8 +279,6 @@ def render_auth_box(show_debug: bool = False):
                         time.sleep(max(0, 0.5 - (time.time() - start_t)))
                         st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
 
-    return None
-
     # 탭 2: 회원가입 (정책 강화)
     with t2:
         st.info("👋 가입을 환영합니다! (주요 메일 주소만 사용 가능)")
