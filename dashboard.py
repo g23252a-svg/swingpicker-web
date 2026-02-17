@@ -2993,20 +2993,74 @@ with st.sidebar:
         st.divider()
         st.subheader("👑 회원 관리 (Admin)")
 
-        # 1. 회원 목록 불러오기 및 디버깅
+        # 1. 회원 목록 불러오기
         users = list_users()
         
-        # --- [디버깅 코드 시작] ---
-        st.write(f"DEBUG: users count = {len(users) if users else 0}")
+        # --- [진단 모드] Gist 연동 문제 추적 ---
         if not users:
-            st.warning("⚠️ 회원 목록이 비어 있습니다. Gist 연동 상태를 확인하세요.")
-            # db_utils 인스턴스를 직접 확인 (가능한 경우)
-            # from db_utils import LDYDBManager
-            # db_manager = LDYDBManager()
-            # st.write("DEBUG: DB Conn Status:", db_manager.conn)
-        # --- [디버깅 코드 끝] ---
-
-        users = list_users()
+            st.warning("⚠️ 회원 목록이 비어 있습니다.")
+            with st.expander("🔍 Gist 연동 진단 (클릭하여 펼치기)", expanded=True):
+                import db_utils as _dbm
+                
+                # Step 1: 시크릿 키 확인
+                gist_id = _dbm.GIST_ID
+                gist_token = _dbm.GIST_TOKEN
+                st.write(f"**1. GIST_ID:** `{gist_id[:12]}...`" if gist_id else "**1. GIST_ID:** ❌ 없음")
+                st.write(f"**2. GIST_TOKEN:** `{gist_token[:8]}...`" if gist_token else "**2. GIST_TOKEN:** ❌ 없음")
+                
+                if not gist_id or not gist_token:
+                    st.error("🚫 Gist 인증 키가 없습니다. Streamlit Cloud Settings → Secrets에 LDY_GIST_ID, LDY_GIST_TOKEN을 확인하세요.")
+                    st.code("st.secrets 키 목록: " + str(list(st.secrets.keys())))
+                else:
+                    # Step 2: Gist API 직접 호출
+                    import requests as _req
+                    try:
+                        _url = f"https://api.github.com/gists/{gist_id}"
+                        _resp = _req.get(_url, headers={"Authorization": f"token {gist_token}"}, timeout=10)
+                        st.write(f"**3. Gist API 응답:** {_resp.status_code}")
+                        
+                        if _resp.status_code == 200:
+                            _files = _resp.json().get("files", {})
+                            st.write(f"**4. Gist 파일 목록:** {list(_files.keys())}")
+                            
+                            if "users_db.json" in _files:
+                                _content = _files["users_db.json"]["content"]
+                                st.write(f"**5. users_db.json 크기:** {len(_content)} bytes")
+                                st.write(f"**6. 데이터 미리보기:** `{_content[:300]}...`")
+                                
+                                import json as _json
+                                _data = _json.loads(_content)
+                                st.write(f"**7. 데이터 타입:** `{type(_data).__name__}`, 항목 수: {len(_data) if isinstance(_data, (list, dict)) else 'N/A'}")
+                                
+                                if isinstance(_data, dict) and "users" in _data:
+                                    st.write(f"**8. Dict 형식 (users 키 안에 {len(_data['users'])}명)**")
+                                elif isinstance(_data, list) and len(_data) > 0:
+                                    st.write(f"**8. List 형식 ({len(_data)}명), 첫 항목 키:** {list(_data[0].keys())}")
+                                else:
+                                    st.error(f"**8. ❌ 예상치 못한 데이터 형식**")
+                                    
+                                # Step 3: DB INSERT 직접 테스트
+                                try:
+                                    _db = _dbm.LDYDBManager()
+                                    _count = _db.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+                                    st.write(f"**9. DB users 테이블 행 수:** {_count}")
+                                    if _count > 0:
+                                        _sample = _db.conn.execute("SELECT id, nickname, role FROM users LIMIT 3").fetchall()
+                                        st.write(f"**10. 샘플 데이터:** {_sample}")
+                                    _db.close()
+                                except Exception as _e:
+                                    st.error(f"**9. DB 오류:** {_e}")
+                            else:
+                                st.error(f"❌ 'users_db.json' 파일이 Gist에 없습니다.")
+                        elif _resp.status_code == 401:
+                            st.error("🚫 Gist 토큰이 만료되었거나 권한이 없습니다.")
+                        elif _resp.status_code == 404:
+                            st.error("🚫 Gist ID가 잘못되었습니다.")
+                        else:
+                            st.error(f"❌ API 오류: {_resp.text[:300]}")
+                    except Exception as _e:
+                        st.error(f"❌ 네트워크 오류: {_e}")
+        # --- [진단 모드 끝] ---
         
         # 1. 관리자 대시보드 통계 (DAU/WAU)
         if users:
