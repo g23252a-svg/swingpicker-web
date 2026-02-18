@@ -4,7 +4,6 @@ import re
 import time
 import logging
 from datetime import datetime, timedelta
-import google.generativeai as genai
 
 # 로깅 설정
 logger = logging.getLogger("DartAnalyzer")
@@ -16,92 +15,126 @@ except ImportError:
     DART_OK = False
     logger.error("⚠️ OpenDartReader 미설치")
 
+try:
+    import google.generativeai as genai
+    GEMINI_OK = True
+except ImportError:
+    GEMINI_OK = False
+    logger.error("⚠️ google-generativeai 미설치")
+
+
 class DartAnalyzer:
+    """DART 공시 분석 + Gemini LLM 점수 산출 엔진"""
+
+    # ──────────────────────────────────────────────
+    # 초기화
+    # ──────────────────────────────────────────────
     def __init__(self, dart_api_key=None, gemini_api_key=None):
         self.dart_api_key = dart_api_key or os.environ.get("DART_API_KEY")
         self.gemini_api_key = gemini_api_key or os.environ.get("GEMINI_API_KEY")
         self.dart = None
         self.model = None
 
+        # --- DART 초기화 (타임아웃 방어) ---
         if DART_OK and self.dart_api_key:
             try:
+                # OpenDartReader 내부에서 corpCode.xml 을 다운로드하므로
+                # requests 의 기본 timeout 을 환경변수로 제한
+                _prev_timeout = os.environ.get("OPENDART_TIMEOUT")
+                os.environ["OPENDART_TIMEOUT"] = "10"        # 10초 제한
                 self.dart = OpenDartReader(self.dart_api_key)
-            except Exception as e: logger.error(f"DART 초기화 실패: {e}")
+                # 환경변수 원복
+                if _prev_timeout is None:
+                    os.environ.pop("OPENDART_TIMEOUT", None)
+                else:
+                    os.environ["OPENDART_TIMEOUT"] = _prev_timeout
+            except Exception as e:
+                logger.error(f"DART 초기화 실패: {e}")
+                self.dart = None
 
-        if self.gemini_api_key:
+        # --- Gemini 초기화 ---
+        if GEMINI_OK and self.gemini_api_key:
             try:
                 genai.configure(api_key=self.gemini_api_key)
-                # [보강] 최신 모델 설정 및 JSON 출력 강제
                 self.model = genai.GenerativeModel(
                     model_name='gemini-1.5-flash',
-                    generation_config={"response_mime_type": "application/json"}
+                    generation_config={"response_mime_type": "application/json"},
                 )
-            except Exception as e: logger.error(f"Gemini 초기화 실패: {e}")
+            except Exception as e:
+                logger.error(f"Gemini 초기화 실패: {e}")
 
+    # ──────────────────────────────────────────────
+    # 유틸리티
+    # ──────────────────────────────────────────────
     def _extract_key_facts(self, text: str) -> str:
-        """[채찍 3 반영] 텍스트 정제 전 핵심 수치(금액, 비중 등)만 별도 추출"""
+        """텍스트에서 핵심 수치(금액, 비중, 날짜)만 별도 추출"""
         facts = []
-        # 매출액 대비 비중 (%)
         pcts = re.findall(r'(\d+(?:\.\d+)?\s*%)', text)
-        if pcts: facts.append(f"비중: {', '.join(pcts[:3])}")
-        
-        # 금액 단위 (억원/백만원)
+        if pcts:
+            facts.append(f"비중: {', '.join(pcts[:3])}")
         money = re.findall(r'(\d+(?:,\d+)?\s*(?:억원|백만원))', text)
-        if money: facts.append(f"금액: {', '.join(money[:3])}")
-        
-        # 기간/날짜 관련
+        if money:
+            facts.append(f"금액: {', '.join(money[:3])}")
         dates = re.findall(r'(\d{4}-\d{2}-\d{2})', text)
-        if dates: facts.append(f"주요날짜: {', '.join(dates[:2])}")
-        
+        if dates:
+            facts.append(f"주요날짜: {', '.join(dates[:2])}")
         return " | ".join(facts)
 
     def _clean_text(self, text: str) -> str:
-        """[채찍 1] XML/HTML 태그 제거 및 공백 압축"""
-        if not text: return ""
+        """XML/HTML 태그 제거 및 공백 압축"""
+        if not text:
+            return ""
         clean = re.sub(r'<[^>]*>', ' ', text)
         clean = re.sub(r'\s+', ' ', clean).strip()
         return clean[:12000]
 
-    def get_major_disclosures(self, code, days=3):
-        if not self.dart: return []
+    # ──────────────────────────────────────────────
+    # 공시 목록 조회
+    # ──────────────────────────────────────────────
+    def get_major_disclosures(self, code: str, days: int = 3) -> list:
+        """최근 N일 이내 주요 공시(투자 판단 관련) 목록 반환"""
+        if not self.dart:
+            return []
+
         end_d = datetime.now().strftime("%Y%m%d")
         start_d = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        
+
         try:
             df = self.dart.list(code, start=start_d, end=end_d, kind='I')
-            if df is None or df.empty: return []
-            
-            # [채측 1 반영] str.contains() 결측치 방어(na=False)
+            if df is None or df.empty:
+                return []
+
             keywords = [
-                '공급계약', '수주', '유상증자', '무상증자', '전환사채', '신주인수권', 
-                '교환사채', '자사주', '취득', '처분', '최대주주', '변경'
+                '공급계약', '수주', '유상증자', '무상증자', '전환사채', '신주인수권',
+                '교환사채', '자사주', '취득', '처분', '최대주주', '변경',
             ]
             mask = df['report_nm'].str.contains('|'.join(keywords), na=False)
             targets = df[mask].copy()
-            
+
             return targets[['rcept_no', 'report_nm', 'rcept_dt']].to_dict('records')
         except Exception as e:
             logger.error(f"공시 목록 조회 실패 ({code}): {e}")
             return []
 
-    def analyze_report(self, rcept_no, report_nm):
-        """[채측 2,4 반영] 팩트 기반 정밀 분석 및 재시도 로직"""
-        if not self.dart or not self.model: return 0.0, ""
+    # ──────────────────────────────────────────────
+    # 개별 보고서 LLM 분석
+    # ──────────────────────────────────────────────
+    def analyze_report(self, rcept_no: str, report_nm: str) -> tuple:
+        """공시 원문을 Gemini로 분석 → (score, reason)"""
+        if not self.dart or not self.model:
+            return 0.0, ""
 
-        # [채찍 4 반영] 네트워크/서버 재시도 로직 (최대 2회)
         for attempt in range(2):
             try:
-                # 1. 공시 원문 획득
                 raw_xml = self.dart.document(rcept_no)
-                if not raw_xml: continue
-                
-                # 2. 핵심 팩트 선추출 후 텍스트 정제
+                if not raw_xml:
+                    continue
+
                 key_facts = self._extract_key_facts(raw_xml)
                 content = self._clean_text(raw_xml)
 
-                # 3. 프롬프트 강화 (수치 데이터 강조)
                 prompt = f"""
-                당신은 대한민국 금융감독원 공시 전문 분석관입니다. 
+                당신은 대한민국 금융감독원 공시 전문 분석관입니다.
                 제공된 [핵심 수치]를 바탕으로 [본문]의 맥락을 분석하여 주가 영향력을 평가하세요.
 
                 [제목] {report_nm}
@@ -109,11 +142,11 @@ class DartAnalyzer:
                 [본문 내용 요약] {content}
 
                 [평가 가이드라인 (스케일: -10 ~ +10)]
-                - (+8~10): 무상증자, 매출액 30% 이상의 대규모 공급계약, 경영권 분쟁 없는 최대주주 매수.
+                - (+8~10): 무상증자, 매출액 30% 이상 대규모 공급계약, 경영권 분쟁 없는 최대주주 매수.
                 - (+3~7): 시설투자용 3자배정 증자, 매출액 10% 이상 계약, 자사주 소각.
                 - (0): 단순 정정, 통상적인 분기보고서.
-                - (-3~7): 운영자금/채무상환용 유상증자, 전환사채(CB) 대량 발행, 공급계약 해지.
-                - (-8~10): 횡령/배임, 회계처리 위반, 최대주주의 대량 지분 매도.
+                - (-3~-7): 운영자금/채무상환용 유상증자, 전환사채(CB) 대량 발행, 공급계약 해지.
+                - (-8~-10): 횡령/배임, 회계처리 위반, 최대주주의 대량 지분 매도.
 
                 반드시 JSON 형식으로만 응답하십시오.
                 {{"score": 0.0, "reason": "이유 요약"}}
@@ -121,20 +154,119 @@ class DartAnalyzer:
 
                 response = self.model.generate_content(prompt)
                 res_text = response.text.strip()
-                
-                # [채찍 2 반영] Non-greedy JSON 추출 및 유효성 검사
+
                 json_match = re.search(r'\{.*?\}', res_text, re.DOTALL)
                 if json_match:
                     data = json.loads(json_match.group())
                     if "score" in data and "reason" in data:
-                        # 점수 최종 보정 및 클램프
                         final_score = max(-10.0, min(10.0, float(data["score"])))
-                        return final_score, data["reason"]
-                
+                        return final_score, str(data["reason"])
+
                 logger.warning(f"⚠️ 형식 오류 재시도 중... ({report_nm})")
-                
+
             except Exception as e:
-                logger.error(f"❌ 분석 시도 {attempt+1} 실패 ({report_nm}): {e}")
-                time.sleep(1) # 지연 후 재시도
-        
+                logger.error(f"❌ 분석 시도 {attempt + 1} 실패 ({report_nm}): {e}")
+                time.sleep(1)
+
         return 0.0, "분석 불가(서버 응답 오류)"
+
+    # ──────────────────────────────────────────────
+    # ★ apply_dart_filter  — DataFrame 일괄 처리
+    # ──────────────────────────────────────────────
+    def apply_dart_filter(self, df, code_col: str = "종목코드",
+                          name_col: str = "종목명",
+                          days: int = 3, top_n: int = 50) -> "pd.DataFrame":
+        """
+        scored DataFrame 을 받아 DART 공시 점수를 추가하여 반환한다.
+
+        처리 흐름
+        ─────────
+        1) 상위 top_n 종목에 대해 최근 days 일 주요 공시를 조회
+        2) 각 공시를 Gemini 로 분석 → 종목별 최저(최악) 점수 채택
+        3) DART_SCORE / DART_REASON 컬럼 추가
+        4) 원본 DataFrame 을 그대로 반환 (컬럼만 추가)
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            종목코드·종목명 컬럼을 포함한 scored DataFrame
+        code_col : str
+            종목코드 컬럼명 (기본 '종목코드')
+        name_col : str
+            종목명 컬럼명 (기본 '종목명')
+        days : int
+            최근 며칠 이내 공시를 조회할지 (기본 3)
+        top_n : int
+            상위 몇 종목까지 분석할지 (API 부하 방지, 기본 50)
+
+        Returns
+        -------
+        pd.DataFrame
+            DART_SCORE, DART_REASON 컬럼이 추가된 DataFrame
+        """
+        import pandas as pd
+
+        # 기본 컬럼 세팅 (모든 종목 0점 / 특이사항 없음)
+        df = df.copy()
+        df["DART_SCORE"] = 0.0
+        df["DART_REASON"] = "특이사항 없음"
+
+        # DART 또는 Gemini 사용 불가 → 즉시 반환
+        if not self.dart:
+            logger.info("DART 미연결 — 공시 필터 스킵")
+            return df
+        if not self.model:
+            logger.info("Gemini 미연결 — 공시 분석 스킵 (목록만 조회)")
+
+        if code_col not in df.columns:
+            logger.warning(f"'{code_col}' 컬럼 없음 — DART 필터 스킵")
+            return df
+
+        # 분석 대상 (상위 top_n 행)
+        targets = df.head(top_n)
+        analyzed = 0
+
+        for idx in targets.index:
+            code = str(df.at[idx, code_col]).strip().zfill(6)
+            name = str(df.at[idx, name_col]) if name_col in df.columns else code
+
+            try:
+                disclosures = self.get_major_disclosures(code, days=days)
+                if not disclosures:
+                    continue
+
+                worst_score = 0.0
+                worst_reason = ""
+
+                for disc in disclosures:
+                    rcept_no = disc.get("rcept_no", "")
+                    report_nm = disc.get("report_nm", "")
+
+                    if self.model:
+                        score, reason = self.analyze_report(rcept_no, report_nm)
+                    else:
+                        # Gemini 없으면 공시 제목만 기록 (점수 0)
+                        score, reason = 0.0, f"[공시감지] {report_nm}"
+
+                    # 가장 부정적인(최악) 점수를 채택
+                    if score < worst_score:
+                        worst_score = score
+                        worst_reason = reason
+                    # 긍정 공시도 기록 (기존 0점이면 갱신)
+                    elif worst_score == 0.0 and score > 0.0:
+                        worst_score = score
+                        worst_reason = reason
+
+                df.at[idx, "DART_SCORE"] = worst_score
+                df.at[idx, "DART_REASON"] = worst_reason or "특이사항 없음"
+                analyzed += 1
+
+                # API 과부하 방지 (종목 간 0.3초 쿨다운)
+                time.sleep(0.3)
+
+            except Exception as e:
+                logger.error(f"DART 필터 처리 오류 ({name}/{code}): {e}")
+                continue
+
+        logger.info(f"DART 필터 완료: {analyzed}/{len(targets)}건 분석")
+        return df
