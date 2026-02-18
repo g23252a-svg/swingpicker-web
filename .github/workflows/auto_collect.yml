@@ -18,19 +18,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # 👉 여기서 한 번에 환경변수 세팅 (모든 step 공통)
     env:
       PYTHONUNBUFFERED: "1"
       TZ: Asia/Seoul
-      TG_TOKEN: ${{ secrets.TG_TOKEN }}
-      TG_ID: ${{ secrets.TG_ID }}
-      # ▼▼▼ [여기 추가] GitHub Secret에 저장된 Gemini 키를 환경변수로 연결 ▼▼▼
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-
-      # ▼▼▼ [필수 추가] 아래 3줄을 넣어주세요 ▼▼▼
-      DART_API_KEY: ${{ secrets.DART_API_KEY }}
-      LDY_GIST_ID: ${{ secrets.LDY_GIST_ID }}
-      LDY_GIST_TOKEN: ${{ secrets.LDY_GIST_TOKEN }}
+      TG_TOKEN:          ${{ secrets.TG_TOKEN }}
+      TG_ID:             ${{ secrets.TG_ID }}
+      GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
+      DART_API_KEY:      ${{ secrets.DART_API_KEY }}
+      LDY_GIST_ID:      ${{ secrets.LDY_GIST_ID }}
+      LDY_GIST_TOKEN:   ${{ secrets.LDY_GIST_TOKEN }}
+      LDY_GIST_SUBS_ID: ${{ secrets.LDY_GIST_SUBS_ID }}
+      LDY_GIST_INQ_ID:  ${{ secrets.LDY_GIST_INQ_ID }}
+      LDY_KEY_PRO:       ${{ secrets.LDY_KEY_PRO }}
+      LDY_KEY_PRIME:     ${{ secrets.LDY_KEY_PRIME }}
+      LDY_ADMIN_KEY:     ${{ secrets.LDY_ADMIN_KEY }}
+      MASTER_ADMIN_PW:   ${{ secrets.MASTER_ADMIN_PW }}
 
     steps:
       - name: Checkout Repository
@@ -51,14 +53,26 @@ jobs:
           pip install -r requirements.txt
           python -c "import pykrx, pandas; print('pykrx', pykrx.__version__); print('pandas', pandas.__version__)"
 
+      - name: Debug Secrets (길이만 확인 — 값 노출 없음)
+        run: |
+          echo "TG_TOKEN        length: ${#TG_TOKEN}"
+          echo "TG_ID           length: ${#TG_ID}"
+          echo "GEMINI_API_KEY  length: ${#GEMINI_API_KEY}"
+          echo "DART_API_KEY    length: ${#DART_API_KEY}"
+          echo "LDY_GIST_ID    length: ${#LDY_GIST_ID}"
+          echo "LDY_GIST_TOKEN length: ${#LDY_GIST_TOKEN}"
+          echo "LDY_GIST_SUBS_ID length: ${#LDY_GIST_SUBS_ID}"
+          echo "LDY_GIST_INQ_ID  length: ${#LDY_GIST_INQ_ID}"
+          echo "LDY_KEY_PRO    length: ${#LDY_KEY_PRO}"
+          echo "LDY_KEY_PRIME  length: ${#LDY_KEY_PRIME}"
+          echo "LDY_ADMIN_KEY  length: ${#LDY_ADMIN_KEY}"
+          echo "MASTER_ADMIN_PW length: ${#MASTER_ADMIN_PW}"
+
       - name: Run Collector
         run: |
-          echo ">>> TG_TOKEN set? $([[ -n \"$TG_TOKEN\" ]] && echo yes || echo no)"
-          echo ">>> TG_ID    = $TG_ID"
+          echo ">>> Collector 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python collector.py
-          echo ">>> TG_TOKEN set? $([[ -n \"$TG_TOKEN\" ]] && echo yes || echo no)"
-          echo ">>> TG_ID    = $TG_ID"
-          python collector.py
+          echo ">>> Collector 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Show outputs
         run: |
@@ -69,7 +83,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # 변경사항이 있을 때만 커밋/푸시
           if git status --porcelain | grep -q .; then
             git add -A
             git commit -m "chore: add CSV $(date +'%Y-%m-%d %H:%M:%S %Z')"
