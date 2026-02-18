@@ -174,6 +174,34 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+# ── 자동 정리: 오래된 일별 CSV 삭제 ──────────────────────────
+def cleanup_old_files(out_dir: str, prefix: str, keep_days: int = 30) -> int:
+    """keep_days 이상 지난 일별 CSV 자동 삭제. 삭제 건수 반환."""
+    cutoff = datetime.now() - timedelta(days=keep_days)
+    removed = 0
+    for f in glob.glob(os.path.join(out_dir, f"{prefix}_2*.csv")):
+        basename = os.path.basename(f)
+        # prefix_YYYYMMDD.csv 에서 날짜 추출
+        date_part = basename.replace(f"{prefix}_", "").replace(".csv", "").split("_")[0]
+        try:
+            if datetime.strptime(date_part, "%Y%m%d") < cutoff:
+                os.remove(f)
+                removed += 1
+        except (ValueError, OSError):
+            continue
+    return removed
+
+
+# ── 실행 시간 측정 컨텍스트 매니저 ────────────────────────────
+from contextlib import contextmanager
+
+@contextmanager
+def timed(label: str):
+    """with timed("Step"): ... → ⏱ Step: 3.2s"""
+    t0 = time.perf_counter()
+    yield
+    elapsed = time.perf_counter() - t0
+    log(f"⏱ {label}: {elapsed:.1f}s")
 
 
 
@@ -1070,8 +1098,8 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
                     else:
                         name_map[code] = code # 이름 없으면 코드라도 사용
                     time.sleep(0.001) 
-            except:
-                pass
+            except Exception as e:
+                log(f"⚠️ name_map 로딩 중 오류: {e}")
 
     # 4. 결과 저장 및 반환
     if name_map:
@@ -1175,7 +1203,7 @@ def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
                     subject = t.text.strip()
                     if "특징주" in subject or "공시" in subject or "체결" in subject or "계약" in subject:
                         headlines.append(subject)
-            except:
+            except (ValueError, AttributeError):
                 continue
     except Exception as e:
         pass
@@ -1375,7 +1403,7 @@ def send_telegram_auto(
         try:
             if pd.isna(x): return "N/A"                 
             return f"{int(float(x)):,}"
-        except: return "N/A"            
+        except (ValueError, TypeError): return "N/A"            
 
     try:
         # 상위 종목 자르기
@@ -1635,7 +1663,7 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
                     if ret_pct >= 5.0 and frg_net < 0 and vol_ratio > 1.5:
                         if range_pos < 0.6 or wick_ratio > 0.25:
                             penalty += 20.0
-                except: pass
+                except (KeyError, IndexError, TypeError): pass
 
             penalty = min(penalty, 60.0)
 
@@ -1738,10 +1766,10 @@ def analyze_ticker(
     if tv_eok <= 0:
         if "거래대금" in ohlcv.columns:
             try: tv_eok = float(pd.to_numeric(ohlcv["거래대금"].iloc[-1], errors='coerce')) / 1e8
-            except: pass
+            except (ValueError, TypeError, IndexError): pass
         if tv_eok <= 0:
             try: tv_eok = (last_c * float(v.iloc[-1])) / 1e8
-            except: pass
+            except (ValueError, TypeError, IndexError): pass
 
     mcap = get_mcap_eok_from_map(mcap_map, code6)
     if mcap_map and mcap > 0 and mcap < MIN_MCAP_EOK: return None
@@ -1952,7 +1980,7 @@ def analyze_ticker(
         w_ma = w_res['종가'].rolling(20).mean()
         is_above_w20 = w_res['종가'].iloc[-1] > w_ma.iloc[-1]
         is_w20_up = w_ma.iloc[-1] > w_ma.iloc[-2]
-    except: pass
+    except (KeyError, IndexError, TypeError): pass
 
     # MACD Slope
     slope = float(np.polyfit(np.arange(len(hist.tail(5))), hist.tail(5).values.astype(float), 1)[0]) if len(hist) >= 5 else 0.0
@@ -2086,6 +2114,7 @@ def main(
     tag: Optional[str] = None,
 ) -> None:
     log("🚀 LDY Collector v10.0 (AI Powered) 시작...")
+    _t_main_start = time.perf_counter()
 
     # ----------------------------------------------------------------------
     # 🔥 [v15.6] 스마트 훈련 스킵 (당일 이미 학습했다면 30분 절약)
@@ -2094,10 +2123,11 @@ def main(
         log("✅ [SKIP] 오늘 이미 v15.6 Master 모델 학습이 완료되었습니다.")
     else:
         log("🤖 AI 모델 최적화(v15.6 Master) 진행 중... (약 30분 소요)")
-        try:
-            ml_engine.train_model() 
-        except Exception as e:
-            log(f"⚠️ 모델 학습 실패: {e}")
+        with timed("ML 모델 학습"):
+            try:
+                ml_engine.train_model() 
+            except Exception as e:
+                log(f"⚠️ 모델 학습 실패: {e}")
     
     # ✅ 여기에 넣기 (resolve_trade_date() 호출 전에!)
     if not PYKRX_OK:
@@ -2179,7 +2209,8 @@ def main(
 
     # 🔥 [v7.0 핵심] 데이터 일괄 수집 및 캐싱 (여기가 바뀌었습니다!)
     # 분석 전에 모든 데이터를 미리 준비합니다.
-    full_ohlcv_map = prepare_ohlcv_data(tickers, start_s, end_s, trade_ymd)
+    with timed(f"OHLCV 수집 ({len(tickers)}종목)"):
+        full_ohlcv_map = prepare_ohlcv_data(tickers, start_s, end_s, trade_ymd)
 
     rows: List[Dict[str, Any]] = []
     err_cnt = 0
@@ -2279,7 +2310,7 @@ def main(
         # 3. [통합 엔진] AI 엔진 동기화 및 3원화 스코어링 빌드
         # -----------------------------------------------------------
         log("🧠 AI 엔진 동기화 및 통합 스코어링 시작...")
-        
+        _t_score = time.perf_counter()
         # AI 점수 주입
         df_out = ml_engine.apply_ml_score(df_raw, full_ohlcv_map)
         df_out["ML_SCORE"] = pd.to_numeric(df_out.get("ML_SCORE", 0.0), errors='coerce').fillna(0.0).clip(0, 100)
@@ -2393,6 +2424,8 @@ def main(
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = "N/A"
 
+    log(f"⏱ AI 스코어링 + 상태 결정: {time.perf_counter() - _t_score:.1f}s")
+
     # -----------------------------------------------------------
     # [Step 7] UI 호환성 동기화 및 상태 플래그 확정
     # -----------------------------------------------------------
@@ -2460,3 +2493,15 @@ def main(
         send_telegram_auto(df_out, trade_ymd, market_summary=summary_text, limit_count=rec_limit_cnt)
     else:
         log("✉️ 텔레그램 발송 생략 (옵션 설정)")
+
+    # -----------------------------------------------------------
+    # [Step 10] 오래된 파일 자동 정리 (30일 이상)
+    # -----------------------------------------------------------
+    total_cleaned = 0
+    for prefix in ("recommend", "krx_codes", "rank_validation", "rank_validation_summary", "price_snapshot"):
+        total_cleaned += cleanup_old_files(OUT_DIR, prefix, keep_days=30)
+    if total_cleaned:
+        log(f"🧹 오래된 CSV {total_cleaned}건 자동 삭제 (30일 기준)")
+
+    # 전체 소요 시간
+    log(f"✅ 전체 파이프라인 완료: {time.perf_counter() - _t_main_start:.1f}s")
