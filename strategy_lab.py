@@ -7,10 +7,52 @@ from datetime import datetime
 
 # [📍혈자리 1] 틱 유틸리티 & 폴백
 try:
-    from utils.price_utils import round_to_tick, add_tick
+    from price_utils import round_to_tick, add_tick
 except Exception:
-    def round_to_tick(p, method="nearest"): return int(round(float(p)))
-    def add_tick(p, ticks=1): return int(float(p) + ticks)
+    import math as _math
+    
+    def _krx_tick_size(price):
+        """KRX 호가단위 (fallback)"""
+        if price < 2000: return 1
+        if price < 5000: return 5
+        if price < 20000: return 10
+        if price < 50000: return 50
+        if price < 200000: return 100
+        if price < 500000: return 500
+        return 1000
+
+    def round_to_tick(price, method="nearest"):
+        """호가 단위에 맞춘 가격 반올림 (fallback)"""
+        if price is None or (isinstance(price, float) and _math.isnan(price)):
+            return None
+        p = float(price)
+        if method == "down":
+            p = int(_math.floor(p))
+        elif method == "up":
+            p = int(_math.ceil(p))
+        else:
+            p = int(round(p))
+        t = _krx_tick_size(p)
+        remainder = p % t
+        if remainder == 0:
+            return p
+        if method == "down":
+            return p - remainder
+        elif method == "up":
+            return p + (t - remainder)
+        return p + (t - remainder) if remainder >= (t / 2) else p - remainder
+
+    def add_tick(price, ticks=1):
+        """틱 단위 이동 (fallback)"""
+        if price is None or (isinstance(price, float) and _math.isnan(price)):
+            return 0
+        curr = float(round_to_tick(price, "nearest"))
+        direction = 1 if ticks > 0 else -1
+        for _ in range(abs(ticks)):
+            lookup_p = curr if direction > 0 else curr - 1
+            t = _krx_tick_size(max(0, lookup_p))
+            curr += t * direction
+        return int(curr)
 
 st.set_page_config(page_title="🧪 LDY 전략 실험실 v3.6", layout="wide")
 
@@ -123,27 +165,100 @@ with st.sidebar:
     tax_rate = st.number_input("세율(%)", 0.0, 0.5, 0.18)
     ambiguity = st.selectbox("동시터치", ["conservative", "optimistic", "neutral"])
 
-# 데이터 필터링
-filtered_df = all_recs[all_recs['TOTAL_SCORE'] >= min_score].copy()
+# 데이터 필터링 — TOTAL_SCORE / FINAL_SCORE / LDY_SCORE 순으로 탐색
+_score_col = None
+for _c in ["TOTAL_SCORE", "FINAL_SCORE", "LDY_SCORE", "RANK_SCORE"]:
+    if _c in all_recs.columns:
+        _score_col = _c
+        break
+
+if _score_col:
+    all_recs[_score_col] = pd.to_numeric(all_recs[_score_col], errors='coerce').fillna(0)
+    filtered_df = all_recs[all_recs[_score_col] >= min_score].copy()
+else:
+    st.warning("⚠️ 점수 컬럼(TOTAL_SCORE 등)이 없어 전체 데이터를 사용합니다.")
+    filtered_df = all_recs.copy()
 
 if st.button("🚀 시뮬레이션 시작", type="primary"):
     res_df = run_simulation(filtered_df, price_map, hold_days, target_pct, stop_pct, 
                             entry_slip_ticks=slip_ticks, exit_slip_ticks=slip_ticks, sell_tax_pct=tax_rate, ambiguity_mode=ambiguity)
     
     if not res_df.empty:
-        # [📍혈자리 4] 복리 & MDD 리포팅
+        # [📍혈자리 4] 복리 & 일별 MDD 리포팅
         res_df = res_df.sort_values('진입일')
         res_df['cum_ret'] = (1 + res_df['수익률']/100).cumprod()
-        res_df['drawdown'] = (res_df['cum_ret'] / res_df['cum_ret'].cummax() - 1) * 100
+        
+        # ── 일별 MDD 계산 (트레이드 단위가 아닌 포트폴리오 일간 가치 기준) ──
+        daily_equity = {}
+        capital = 1.0  # 정규화된 시작 자본
+        trades = res_df.to_dict('records')
+        
+        for t in trades:
+            entry_dt = pd.Timestamp(t['진입일'])
+            exit_dt = pd.Timestamp(t['청산일'])
+            trade_ret = t['수익률'] / 100.0
+            code = None
+            
+            # price_map에서 일간 종가 추적 (가능한 경우)
+            matched_name = t.get('종목명', '')
+            code_match = None
+            for c, ohlcv in price_map.items():
+                if ohlcv.index.min() <= entry_dt:
+                    mask = (ohlcv.index >= entry_dt) & (ohlcv.index <= exit_dt)
+                    if mask.any():
+                        code_match = c
+                        break
+            
+            if code_match and code_match in price_map:
+                ohlcv = price_map[code_match]
+                close_col = '종가' if '종가' in ohlcv.columns else 'Close'
+                if close_col in ohlcv.columns:
+                    mask = (ohlcv.index >= entry_dt) & (ohlcv.index <= exit_dt)
+                    daily_prices = ohlcv.loc[mask, close_col]
+                    if len(daily_prices) > 1:
+                        entry_p = float(daily_prices.iloc[0])
+                        if entry_p > 0:
+                            for dt, px in daily_prices.items():
+                                intra_ret = (float(px) - entry_p) / entry_p
+                                day_key = pd.Timestamp(dt).normalize()
+                                daily_equity[day_key] = daily_equity.get(day_key, capital) * (1 + intra_ret / max(len(daily_prices), 1))
+            
+            # 트레이드 완료 → 자본 갱신
+            capital *= (1 + trade_ret)
+            day_key = exit_dt.normalize()
+            daily_equity[day_key] = capital
+        
+        # 일별 MDD 계산
+        if daily_equity:
+            eq_series = pd.Series(daily_equity).sort_index()
+            eq_peak = eq_series.cummax()
+            daily_dd = ((eq_series - eq_peak) / eq_peak * 100)
+            mdd = daily_dd.min()
+        else:
+            # fallback: 트레이드 기준 MDD
+            res_df['drawdown'] = (res_df['cum_ret'] / res_df['cum_ret'].cummax() - 1) * 100
+            mdd = res_df['drawdown'].min()
         
         win_rate = (res_df['수익률'] > 0).mean() * 100
-        mdd = res_df['drawdown'].min()
+        avg_win = res_df.loc[res_df['수익률'] > 0, '수익률'].mean() if (res_df['수익률'] > 0).any() else 0
+        avg_loss = res_df.loc[res_df['수익률'] <= 0, '수익률'].mean() if (res_df['수익률'] <= 0).any() else 0
+        profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else float('inf')
         
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("승률", f"{win_rate:.1f}%")
         c2.metric("최종 수익률", f"{(res_df['cum_ret'].iloc[-1]-1)*100:.2f}%")
         c3.metric("최대 낙폭(MDD)", f"{mdd:.2f}%")
-        c4.metric("거래 횟수", f"{len(res_df)}회")
+        c4.metric("손익비", f"{profit_factor:.2f}")
+        c5.metric("거래 횟수", f"{len(res_df)}회")
 
-        st.plotly_chart(px.line(res_df, x='진입일', y='cum_ret', title='📈 자산 성장 곡선 (복리)'))
-        st.dataframe(res_df.style.format({'수익률': '{:.2f}%', 'drawdown': '{:.2f}%'}))
+        # 자산 성장 곡선
+        st.plotly_chart(px.line(res_df, x='진입일', y='cum_ret', title='📈 자산 성장 곡선 (복리)'), use_container_width=True)
+        
+        # 일별 낙폭 차트
+        if daily_equity:
+            dd_df = pd.DataFrame({'날짜': daily_dd.index, '낙폭(%)': daily_dd.values})
+            fig_dd = px.area(dd_df, x='날짜', y='낙폭(%)', title='📉 일별 Drawdown')
+            fig_dd.update_traces(fillcolor='rgba(255,0,0,0.15)', line_color='red')
+            st.plotly_chart(fig_dd, use_container_width=True)
+        
+        st.dataframe(res_df.style.format({'수익률': '{:.2f}%'}), use_container_width=True)
