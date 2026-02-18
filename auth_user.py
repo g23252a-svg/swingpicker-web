@@ -25,6 +25,8 @@ try:
 except Exception:
     raw_pw = os.environ.get("MASTER_ADMIN_PW", "")
 MASTER_ADMIN_PW = str(raw_pw).strip() if raw_pw else ""
+if not MASTER_ADMIN_PW:
+    logger.warning("⚠️ MASTER_ADMIN_PW 미설정 — 관리자 로그인 비활성화됨 (Streamlit Secrets 또는 환경변수에 설정 필요)")
 
 SECURITY_QUESTIONS = [
     "선택하세요...", "가장 기억에 남는 여행지는?", "어릴 적 살던 동네 이름은?",
@@ -246,9 +248,8 @@ def render_auth_box(show_debug: bool = False):
             if st.form_submit_button("로그인", type="primary", use_container_width=True):
                 start_t = time.time()
                 
-                # ✅ [교정] 마스터 관리자 즉시 승인 로직 (2022322)
-                # dashboard.py 상단의 ADMIN_KEY 변수 혹은 직접 대조
-                if lid == "admin" and lpw == "2022322":
+                # ✅ [v18.1 보안 패치] 마스터 관리자 — secrets/환경변수에서 로드된 PW 사용
+                if lid == MASTER_ADMIN_ID and MASTER_ADMIN_PW and lpw == MASTER_ADMIN_PW:
                     st.session_state[CURRENT_USER_KEY] = "admin"
                     st.toast("🛡️ 마스터 관리자 로그인 성공")
                     st.rerun()
