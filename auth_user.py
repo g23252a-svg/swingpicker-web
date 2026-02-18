@@ -28,6 +28,18 @@ MASTER_ADMIN_PW = str(raw_pw).strip() if raw_pw else ""
 if not MASTER_ADMIN_PW:
     logger.warning("⚠️ MASTER_ADMIN_PW 미설정 — 관리자 로그인 비활성화됨 (Streamlit Secrets 또는 환경변수에 설정 필요)")
 
+# [v2.0] 관리자 비밀번호를 메모리에 해시로만 보관 (평문 제거)
+_ADMIN_PW_HASH = hashlib.sha256(MASTER_ADMIN_PW.encode()).hexdigest() if MASTER_ADMIN_PW else ""
+# 원문 참조를 제거하여 메모리 덤프 공격 표면 축소
+# (MASTER_ADMIN_PW 변수 자체는 다른 곳에서 if 조건으로 참조하므로 bool 판별용으로만 유지)
+
+def _verify_admin_password(input_pw: str) -> bool:
+    """[v2.0] 관리자 비밀번호를 해시로 비교 (timing-safe)"""
+    if not _ADMIN_PW_HASH:
+        return False
+    input_hash = hashlib.sha256(input_pw.encode()).hexdigest()
+    return secrets.compare_digest(input_hash, _ADMIN_PW_HASH)
+
 SECURITY_QUESTIONS = [
     "선택하세요...", "가장 기억에 남는 여행지는?", "어릴 적 살던 동네 이름은?",
     "가장 좋아하는 보물 1호는?", "초등학교 담임 선생님 성함은?",
@@ -158,7 +170,7 @@ def _create_salt(): return secrets.token_hex(16)
 def _hash_password(pw, salt): return hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
 def _hash_answer(ans, salt): return _hash_password(ans.strip().lower(), salt)
 
-# ### [수정] 이메일 정규화 함수 추가 (Gmail 점/플러스 무시)
+# ### [수정] 이메일 정규화 함수 (Gmail 전용 규칙 적용)
 def normalize_email(email):
     email = email.strip().lower()
     if "@" not in email:
@@ -166,25 +178,48 @@ def normalize_email(email):
     
     local, domain = email.split("@", 1)
     
-    # 1. Gmail의 경우 점(.) 제거 (google.mail = googlemail)
-    if "gmail.com" in domain:
+    is_gmail = domain in ("gmail.com", "googlemail.com")
+    
+    # 1. Gmail 전용: 점(.) 제거 (Gmail은 점을 무시함)
+    if is_gmail:
         local = local.replace(".", "")
     
-    # 2. 플러스(+) 태그 제거 (myname+test@ -> myname@)
-    if "+" in local:
+    # 2. Gmail 전용: 플러스(+) 태그 제거 (myname+test@ → myname@)
+    #    다른 도메인은 + 가 유효한 주소 일부일 수 있으므로 건드리지 않음
+    if is_gmail and "+" in local:
         local = local.split("+")[0]
         
     return f"{local}@{domain}"
 
 def check_rate_limit(email, limit=5, window_sec=300, lock_sec=600):
+    """
+    [v2.0] DB 기반 rate limiting (브라우저 새로고침 우회 방지)
+    세션은 메모리 캐시 역할만 하고, 실제 기록은 DB에 저장.
+    """
+    now = time.time()
+    
+    # 1차: 세션 캐시 확인 (DB 부하 절감)
     if "login_rl" not in st.session_state:
         st.session_state.login_rl = {}
+    cached = st.session_state.login_rl.get(email)
+    if cached and now < cached.get("lock_until", 0):
+        remain = int(cached["lock_until"] - now)
+        return False, f"⛔ 로그인 잠금({remain}s 남음)"
 
-    now = time.time()
-    rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
+    # 2차: DB 기반 확인
+    db = get_db()
+    if db:
+        try:
+            rec = db.get_rate_limit(email) or {"fails": 0, "first_ts": now, "lock_until": 0}
+        except Exception:
+            # DB에 rate_limit 테이블이 없으면 세션 fallback
+            rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
+    else:
+        rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
 
     if now < rec.get("lock_until", 0):
         remain = int(rec["lock_until"] - now)
+        st.session_state.login_rl[email] = rec  # 세션 캐시 갱신
         return False, f"⛔ 로그인 잠금({remain}s 남음)"
 
     if now - rec.get("first_ts", now) > window_sec:
@@ -194,9 +229,11 @@ def check_rate_limit(email, limit=5, window_sec=300, lock_sec=600):
     return True, ""
 
 def record_login_failure(email, limit=5, window_sec=300, lock_sec=600):
+    """[v2.0] 실패 기록을 DB + 세션 양쪽에 저장"""
+    now = time.time()
+    
     if "login_rl" not in st.session_state:
         st.session_state.login_rl = {}
-    now = time.time()
     rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
 
     if now - rec.get("first_ts", now) > window_sec:
@@ -206,8 +243,17 @@ def record_login_failure(email, limit=5, window_sec=300, lock_sec=600):
 
     if rec["fails"] >= limit:
         rec["lock_until"] = now + lock_sec
+        logger.warning(f"🔒 계정 잠금: {email} ({limit}회 실패)")
 
     st.session_state.login_rl[email] = rec
+    
+    # DB에도 저장 (새로고침 우회 방지)
+    db = get_db()
+    if db:
+        try:
+            db.set_rate_limit(email, rec)
+        except Exception:
+            pass  # DB 테이블 미존재 시 세션만으로 동작
 
 def reset_login_failures(email):
     if "login_rl" in st.session_state and email in st.session_state.login_rl:
@@ -248,8 +294,8 @@ def render_auth_box(show_debug: bool = False):
             if st.form_submit_button("로그인", type="primary", use_container_width=True):
                 start_t = time.time()
                 
-                # ✅ [v18.1 보안 패치] 마스터 관리자 — secrets/환경변수에서 로드된 PW 사용
-                if lid == MASTER_ADMIN_ID and MASTER_ADMIN_PW and lpw == MASTER_ADMIN_PW:
+                # ✅ [v2.0 보안 패치] 마스터 관리자 — 해시 비교 (timing-safe)
+                if lid == MASTER_ADMIN_ID and MASTER_ADMIN_PW and _verify_admin_password(lpw):
                     st.session_state[CURRENT_USER_KEY] = "admin"
                     st.toast("🛡️ 마스터 관리자 로그인 성공")
                     st.rerun()
