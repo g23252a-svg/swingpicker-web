@@ -61,7 +61,7 @@ def round_to_tick(price: Number, method: str = "nearest") -> Optional[int]:
         return p + (t - remainder) if remainder >= (t / 2) else p - remainder
 
 def add_tick(price: Number, ticks: int = 1) -> int:
-    """[❗100점 패치] 경계선 돌파를 인지하는 정밀 틱 이동 연산"""
+    """[❗v2.3 패치] 경계선 돌파를 인지하는 정밀 틱 이동 연산"""
     if price is None or (isinstance(price, float) and math.isnan(price)): return 0
     
     # 시작가를 먼저 가장 가까운 틱 그리드에 정렬
@@ -69,9 +69,10 @@ def add_tick(price: Number, ticks: int = 1) -> int:
     direction = 1 if ticks > 0 else -1
     
     for _ in range(abs(ticks)):
-        # 하향 이동 시 경계값(예: 2000원)에서 아래 틱 사이즈를 찾기 위해 미세 차감
-        lookup_p = curr if direction > 0 else curr - 0.1
-        t = krx_tick_size(max(0, lookup_p))
+        # 하향 이동 시: 경계값(2000, 5000 등)에서 아래 틱존을 참조하기 위해
+        # -1 로 탐색 (기존 -0.1 은 tick=1 구간에서 부정확할 수 있음)
+        lookup_p = curr if direction > 0 else curr - 1
+        t = krx_tick_size(max(1, lookup_p))
         curr += t * direction
         
     return int(curr)
