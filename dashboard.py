@@ -25,6 +25,18 @@ import re
 from typing import Optional, Dict, Any, Tuple
 from dart_analyzer import DartAnalyzer
 
+# ─── 모듈 분리 import (v2.0) ───
+from shared_utils import nz_num, wma, safe_float
+from shared_utils import calc_hma as calc_hma_series  # 기존 호출 호환
+from chart_components import (
+    plot_ai_gauge_chart, plot_fear_greed_gauge, plot_kelly_visual,
+    plot_radar_chart, plot_score_waterfall,
+    plot_sector_treemap, plot_sector_momentum_bar,
+    plot_ai_consensus, plot_opportunity_map,
+    add_volume_profile,
+)
+
+
 
 
 # 1. 앱 시작 부분 (상단)에 알림 추가
@@ -148,23 +160,7 @@ def normalize_code(x) -> str:
     return s.zfill(6) if s else ""  # 6자리로
 
 # -------------------- [v9.0 유틸리티 추가] --------------------
-def wma(s: pd.Series, period: int) -> pd.Series:
-    weights = np.arange(1, period + 1)
-    def _calc(x):
-        return np.dot(x, weights) / weights.sum()
-    return s.rolling(period).apply(_calc, raw=True)
 
-def calc_hma_series(s: pd.Series, period: int) -> pd.Series:
-    """차트용 HMA 시리즈 계산"""
-    if len(s) < period:
-        return pd.Series(np.nan, index=s.index)
-    half_length = int(period / 2)
-    sqrt_length = int(math.sqrt(period))
-    wma_half = wma(s, half_length)
-    wma_full = wma(s, period)
-    raw_hma = 2 * wma_half - wma_full
-    return wma(raw_hma, sqrt_length)
-# -----------------------------------------------------------
 
 def postprocess_codes(df: pd.DataFrame) -> pd.DataFrame:
     if "종목코드" in df.columns:
@@ -975,8 +971,6 @@ RSI_LOW, RSI_HIGH = 45, 65
 def z6(x):
     return str(x).zfill(6) if str(x).isdigit() else str(x)
 
-def nz_num(s):
-    return pd.to_numeric(s, errors="coerce")
 
 def ensure_turnover(df):
     if "거래대금(억원)" not in df.columns and "거래대금(원)" in df.columns:
@@ -1412,127 +1406,8 @@ def get_fear_greed_index(scored_df: pd.DataFrame):
         return 50.0, "중립 (지표 계산 오류)"
 
 
-def plot_fear_greed_gauge(score):
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
-        value=score,
-        domain={'x': [0, 1], 'y': [0, 1]},
-        title={'text': "시장 공포/탐욕 지수", 'font': {'size': 20}},
-        delta={
-            'reference': 50,
-            'increasing': {'color': "red"},
-            'decreasing': {'color': "blue"}
-        },
-        gauge={
-            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "white"},
-            'bar': {'color': "rgba(0,0,0,0)"},
-            'steps': [
-                {'range': [0, 25], 'color': '#4D96FF'},
-                {'range': [25, 45], 'color': '#87CEEB'},
-                {'range': [45, 55], 'color': '#D3D3D3'},
-                {'range': [55, 75], 'color': '#FFB347'},
-                {'range': [75, 100], 'color': '#FF6B6B'},
-            ],
-            'threshold': {
-                'line': {'color': "black", 'width': 4},
-                'thickness': 0.75,
-                'value': score
-            }
-        }
-    ))
-    fig.update_layout(height=200, margin=dict(l=20, r=20, t=40, b=20))
-    return fig
 
-def plot_sector_treemap(df_map):
-    """
-    섹터 트리맵:
-    - '업종_대분류' 컬럼이 있으면 대분류 기준으로 묶고
-    - 없으면 기존 '업종' 컬럼을 사용
-    """
-    if df_map is None or df_map.empty:
-        return go.Figure()
 
-    # 1) 섹터 키 선택 (대분류 우선)
-    sector_key = "업종_대분류" if "업종_대분류" in df_map.columns else "업종"
-
-    if sector_key not in df_map.columns:
-        # 업종 정보 자체가 없으면 빈 figure 반환
-        return go.Figure()
-
-    # 2) 트리맵 생성
-    fig = px.treemap(
-        df_map,
-        path=[sector_key, "종목명"],   # ✅ 최상단을 대분류로
-        values="거래대금(억원)",
-        color="LDY_SCORE",
-        color_continuous_scale="RdYlGn",
-        title="<b>🔥 시장 주도 섹터 지도</b>",
-        custom_data=["LDY_SCORE", sector_key],
-    )
-
-    # 3) hover 텍스트
-    fig.update_traces(
-        hovertemplate=(
-            "<b>%{label}</b>"                # 종목명
-            "<br>섹터: %{customdata[1]}"     # 업종_대분류
-            "<br>점수: %{customdata[0]:.1f}"
-            "<br>대금: %{value}억"
-            "<extra></extra>"
-        )
-    )
-
-    fig.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=350)
-    return fig
-
-def plot_sector_momentum_bar(scored_df: pd.DataFrame):
-    """
-    섹터별 최근 모멘텀 (ret_5d_% or LDY_SCORE 평균) Top 10 바 차트
-    """
-    if scored_df is None or scored_df.empty:
-        return go.Figure()
-
-    # 섹터 컬럼
-    if "업종_대분류" in scored_df.columns:
-        sector_col = "업종_대분류"
-    elif "업종" in scored_df.columns:
-        sector_col = "업종"
-    else:
-        return go.Figure()
-
-    metric = "ret_5d_%" if "ret_5d_%" in scored_df.columns else "LDY_SCORE"
-
-    grp = (
-        scored_df
-        .dropna(subset=[sector_col, metric])
-        .groupby(sector_col)[metric]
-        .mean()
-        .sort_values(ascending=False)
-        .head(10)
-    )
-    if grp.empty:
-        return go.Figure()
-
-    values = grp.values
-    labels = grp.index
-
-    fig = go.Figure(
-        data=[
-            go.Bar(
-                x=values,
-                y=labels,
-                orientation="h",
-                text=[f"{v:.2f}%" if metric == "ret_5d_%" else f"{v:.2f}" for v in values],
-                textposition="auto",
-            )
-        ]
-    )
-    title_metric = "5일 평균 수익률" if metric == "ret_5d_%" else "LDY 평균 점수"
-    fig.update_layout(
-        title=f"🚀 섹터 모멘텀 Top 10 ({title_metric})",
-        height=320,
-        margin=dict(l=10, r=10, t=40, b=10),
-    )
-    return fig
 
 def plot_regime_summary(scored_df: pd.DataFrame):
     """
@@ -1694,296 +1569,49 @@ def get_stock_chart_data(code):
 # -----------------------------------------------------------
 # [v12.0 New] AI 게이지 & 켈리 자금관리 차트
 # -----------------------------------------------------------
-def plot_ai_gauge_chart(score):
-    """[v18.0] 종합 점수(AI+Quant) 프리미엄 게이지 차트"""
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = score,
-        domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': "🏆 AI 종합 신뢰도", 'font': {'size': 16, 'family': 'Outfit'}},
-        delta = {'reference': 80, 'increasing': {'color': "#10B981"}, 'decreasing': {'color': "#EF4444"}},
-        number = {'font': {'size': 42, 'family': 'Outfit', 'color': '#F1F5F9'}},
-        gauge = {
-            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "rgba(255,255,255,0.2)", 
-                     'tickfont': {'color': 'rgba(255,255,255,0.5)', 'size': 10}},
-            'bar': {'color': "#3B82F6", 'thickness': 0.8},
-            'bgcolor': "rgba(255,255,255,0.03)",
-            'borderwidth': 1,
-            'bordercolor': "rgba(255,255,255,0.1)",
-            'steps': [
-                {'range': [0, 40], 'color': 'rgba(239,68,68,0.12)'},
-                {'range': [40, 60], 'color': 'rgba(245,158,11,0.10)'},
-                {'range': [60, 80], 'color': 'rgba(59,130,246,0.10)'},
-                {'range': [80, 100], 'color': 'rgba(16,185,129,0.12)'}],
-            'threshold': {
-                'line': {'color': "#F59E0B", 'width': 3},
-                'thickness': 0.75,
-                'value': score}}))
-    fig.update_layout(
-        height=250, 
-        margin=dict(l=20, r=20, t=30, b=20),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font={'family': 'Outfit'}
-    )
-    return fig
-
-def plot_kelly_visual(win_rate_est, reward_risk, kelly_pct):
-    """켈리 베팅 비중 시각화"""
-    metrics = ['승률(Win Rate)', '손익비(Reward/Risk)', '켈리 권장 비중']
-    # 시각화를 위해 스케일 조정 (손익비 x10, 비중 x100)
-    values = [win_rate_est * 100, reward_risk * 10, kelly_pct * 100] 
-    colors = ['#FF7043', '#42A5F5', '#66BB6A']
-    text_vals = [f"{win_rate_est*100:.1f}%", f"{reward_risk:.2f}배", f"{kelly_pct*100:.1f}%"]
-
-    fig = go.Figure(go.Bar(
-        x=values, y=metrics, orientation='h',
-        marker_color=colors, text=text_vals, textposition='auto'
-    ))
-    fig.update_layout(
-        title="💰 켈리 자금 관리 (승률 vs 손익비)",
-        height=200, margin=dict(l=10, r=10, t=40, b=10),
-        xaxis=dict(range=[0, 100], visible=False),
-        yaxis=dict(autorange="reversed")
-    )
-    return fig
-
-
-def plot_radar_chart(row):
-    raw_name = row.get('종목명')
-    stock_name = str(raw_name) if pd.notna(raw_name) else "종목"
-
-    def _safe_get(key):
-        val = pd.to_numeric(row.get(key), errors='coerce')
-        return val * 100 if pd.notna(val) else 0
-
-    keys = ["모멘텀", "가성비(RR)", "상승여력", "안전마진", "타이밍", "유동성", "세력강도"]
-    values = [
-        _safe_get("NORM_MOM"), _safe_get("NORM_RR"), _safe_get("NORM_T1"), 
-        _safe_get("NORM_SL"), _safe_get("NORM_NEAR"), _safe_get("NORM_LIQ"), 
-        _safe_get("NORM_TEC")
-    ]
-    
-    # 폐곡선 처리
-    values += values[:1]
-    keys += keys[:1]
-
-    fig = go.Figure()
-
-    # 가이드라인
-    fig.add_trace(go.Scatterpolar(
-        r=[80]*len(keys), theta=keys,
-        mode='lines', line=dict(color='rgba(0, 255, 0, 0.3)', width=1, dash='dot'),
-        hoverinfo='skip', showlegend=False
-    ))
-
-    # 메인 데이터
-    fig.add_trace(go.Scatterpolar(
-        r=values, theta=keys,
-        fill='toself',
-        name=stock_name, 
-        line=dict(color='#00E5FF', width=3),
-        fillcolor='rgba(0, 229, 255, 0.3)', 
-        marker=dict(size=6, color='white')
-    ))
-    
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(size=9, color='gray'), gridcolor='rgba(255,255,255,0.1)'),
-            angularaxis=dict(tickfont=dict(size=12, weight='bold'), gridcolor='rgba(255,255,255,0.1)'),
-            bgcolor='rgba(0,0,0,0)'
-        ),
-        showlegend=False,
-        height=320,
-        margin=dict(l=40, r=40, t=40, b=20),
-        title=dict(text=f"💎 <b>{stock_name}</b> 7-Factor", x=0.5, font=dict(size=16))
-    )
-    return fig
-
-# 👇👇👇 [1단계: 워터폴 차트 함수 추가] 👇👇👇
-
-def plot_score_waterfall(row):
-    """
-    [v15.0] 점수 기여도 시각화 (Waterfall)
-    STRUCT(구조) + TIMING(타이밍) + AI(예측) -> FINAL
-    """
-    if row is None: return go.Figure()
-    
-    def _get(k): return float(row.get(k, 0))
-    
-    # v15.1 점수 체계
-    struct = _get('STRUCT_SCORE')
-    timing = _get('TIMING_SCORE')
-    ai = _get('AI_SCORE')
-    final = _get('FINAL_SCORE')
-    
-    # 가중치 (근사치, Normal 기준 4:4:2)
-    # 실제 가중치는 collector.py의 macro_risk에 따라 다르지만 시각화용으로는 고정
-    val_s = struct * 0.4
-    val_t = timing * 0.4
-    val_a = ai * 0.2
-    
-    calc_sum = val_s + val_t + val_a
-    adj = final - calc_sum # 반올림 오차 등 보정값
-    
-    keys = ["구조(체력)", "타이밍(맥)", "AI(예측)", "보정", "최종점수"]
-    values = [val_s, val_t, val_a, adj, final]
-    measures = ["relative", "relative", "relative", "relative", "total"]
-    
-    fig = go.Figure(go.Waterfall(
-        name="Score Breakdown", orientation="v",
-        measure=measures, x=keys, y=values,
-        text=[f"{v:.1f}" for v in values],
-        connector={"line": {"color": "rgb(63, 63, 63)"}},
-        decreasing={"marker":{"color":"#FF5252"}},
-        increasing={"marker":{"color":"#4CAF50"}},
-        totals={"marker":{"color":"#2196F3"}}
-    ))
-    
-    fig.update_layout(
-        title="🧩 점수 구성 (Struct + Timing + AI)",
-        height=320,
-        margin=dict(l=10, r=10, t=50, b=10),
-        yaxis=dict(title="점수", range=[0, 110], fixedrange=True)
-    )
-    return fig
 
 
 
-# 👆👆👆 [1단계 끝] 👆👆👆
 
-# 👇👇👇 [1단계: 상관관계 히트맵 함수 추가] 👇👇👇
+
 
 def plot_correlation_heatmap(df_target):
-    """
-    Top 종목들의 주가 상관관계 히트맵 (최근 60일 기준)
-    """
+    """Top 종목들의 주가 상관관계 히트맵 (최근 60일 기준)"""
     if df_target is None or df_target.empty: return None
     
-    # 상위 10개만 분석 (속도 및 가독성 고려)
     targets = df_target.head(10)
     codes = targets['종목코드'].astype(str).str.zfill(6).tolist()
     names = targets['종목명'].tolist()
     
     price_data = {}
-    
-    # 데이터 수집 (기존 캐시 함수 활용)
     for code, name in zip(codes, names):
         try:
             d = get_stock_chart_data(code)
             if d is not None and not d.empty:
-                # 최근 60일치 종가만 사용
                 price_data[name] = d['Close'].tail(60)
         except:
             continue
             
     if not price_data: return None
     
-    # 데이터프레임 병합 (날짜 인덱스 기준 자동 정렬)
     df_prices = pd.DataFrame(price_data).dropna()
-    
-    # 비교 대상이 2개 미만이면 차트 불가
     if df_prices.shape[1] < 2: return None 
     
-    # 상관계수 행렬 계산
     df_corr = df_prices.corr()
     
-    # 히트맵 그리기
     fig = px.imshow(
-        df_corr,
-        text_auto=".2f",
-        aspect="auto",
-        color_continuous_scale="RdBu_r", # 빨강=양의상관(커플링), 파랑=음의상관(헤지)
+        df_corr, text_auto=".2f", aspect="auto",
+        color_continuous_scale="RdBu_r",
         zmin=-1, zmax=1,
         title="<b>🔗 Top 10 종목 간 상관관계 (Correlation)</b>"
     )
-    
     fig.update_layout(
-        height=400, 
-        margin=dict(t=50, b=10, l=10, r=10),
-        xaxis_side="top" # X축 라벨을 위로 올려서 보기 편하게
+        height=400, margin=dict(t=50, b=10, l=10, r=10),
+        xaxis_side="top"
     )
     return fig
 
-# 👆👆👆 [1단계 끝] 👆👆👆
 
-def add_volume_profile(fig, df):
-    """
-    [v8.7 정밀형] 차트 우측에 매물대(Volume Profile) 및 POC 강조 라인 추가
-    """
-    if df is None or df.empty: return fig
-    
-    # 1. 기초 데이터 확보 (Typical Price 사용: 고+저+종 / 3)
-    typ_price = (df['High'] + df['Low'] + df['Close']) / 3
-    price_min = df['Low'].min()
-    price_max = df['High'].max()
-    
-    if price_min == price_max: return fig 
-
-    # 2. 가격 구간(Bins) 설정 (데이터 길이에 따라 해상도 조절)
-    num_bins = 50 if len(df) > 100 else 30
-    bins = np.linspace(price_min, price_max, num_bins)
-    
-    # 3. 구간별 거래량 합산 (Histogram)
-    hist, bin_edges = np.histogram(typ_price, bins=bins, weights=df['Volume'])
-    y_vals = (bin_edges[:-1] + bin_edges[1:]) / 2 # 각 bin의 중앙값
-    
-    # 4. POC(Point of Control: 최대 매물 구간) 산출
-    max_vol = hist.max() if len(hist) > 0 else 1
-    max_vol_idx = np.argmax(hist)
-    poc_price = y_vals[max_vol_idx]
-    
-    # 5. 매물대 가로 막대 그래프 설정
-    # 일반 매물은 연한 회색, POC 구간은 오렌지색으로 강조
-    colors = ['rgba(128, 128, 128, 0.15)'] * len(hist)
-    colors[max_vol_idx] = 'rgba(255, 165, 0, 0.4)' 
-    
-    bar_trace = go.Bar(
-        y=y_vals, x=hist,
-        orientation='h',
-        name='매물대',
-        marker=dict(color=colors, line=dict(width=0)), 
-        xaxis='x2', 
-        hoverinfo='none', 
-        showlegend=False
-    )
-    
-    fig.add_trace(bar_trace, row=1, col=1)
-
-    # 6. POC 수평 점선 추가 (강력한 지지/저항벽 표시)
-    fig.add_hline(
-        y=poc_price, 
-        line_dash="dot", 
-        line_color="rgba(255, 165, 0, 0.8)", 
-        line_width=1.5,
-        annotation_text=f" POC ({int(poc_price):,})", 
-        annotation_position="bottom right",
-        annotation_font=dict(size=10, color="orange")
-    )
-
-    # 7. 트레이스 순서 조정 (매물대를 캔들 뒤로 보냄)
-    data_list = list(fig.data)
-    if data_list:
-        new_trace = data_list.pop() 
-        data_list.insert(0, new_trace) 
-        fig.data = tuple(data_list)
-
-    # 8. 레이아웃 업데이트 (우측 25% 영역만 점유하도록 범위 설정)
-    fig.update_layout(
-        xaxis2=dict(
-            overlaying='x', 
-            side='top',       
-            showgrid=False, 
-            visible=False,    
-            range=[max_vol * 4, 0] # 차트 가로폭의 약 1/4 수준 유지
-        )
-    )
-    return fig
-
-# 👆👆👆 [1단계 끝] 👆👆👆
-# ---------------------------
-# 차트 시각화 (거래량 추가)
-# ---------------------------
 def plot_interactive_chart(
     df: pd.DataFrame,
     code: str,
@@ -2143,110 +1771,7 @@ def plot_interactive_chart(
     return fig
 
     
-def plot_ai_consensus(df):
-    """
-    [v10.0] AI Score vs Rule Score 산점도
-    - 우상단일수록 AI와 퀀트 모두가 추천하는 종목
-    """
-    if df is None or df.empty or "ML_SCORE" not in df.columns:
-        return None
 
-    # 데이터 전처리 (0점 제외)
-    plot_df = df[(df["RANK_SCORE"] > 0) & (df["ML_SCORE"] > 0)].copy()
-    if plot_df.empty: return None
-
-    fig = px.scatter(
-        plot_df,
-        x="RANK_SCORE",
-        y="ML_SCORE",
-        color="TOTAL_SCORE",
-        size="거래대금(억원)",
-        hover_name="종목명",
-        hover_data=["종목코드", "업종", "ROUTE"],
-        color_continuous_scale="RdYlGn",
-        title="<b>🧠 AI(세로) vs 퀀트(가로) 합의 지점</b>",
-        labels={"RANK_SCORE": "퀀트(Rule) 점수", "ML_SCORE": "AI(ML) 예측 점수"}
-    )
-
-    # 기준선 (80점)
-    fig.add_hline(y=80, line_dash="dot", line_color="gray", annotation_text="AI 강력매수")
-    fig.add_vline(x=80, line_dash="dot", line_color="gray", annotation_text="퀀트 강력매수")
-
-    # 우상단 강조 박스 (Hot Zone)
-    fig.add_shape(type="rect",
-        x0=80, y0=80, x1=100, y1=100,
-        line=dict(color="red", width=2),
-        fillcolor="rgba(255, 0, 0, 0.1)"
-    )
-
-    fig.update_layout(
-        height=400,
-        margin=dict(l=20, r=20, t=40, b=20),
-        xaxis=dict(range=[40, 105]),
-        yaxis=dict(range=[40, 105])
-    )
-    return fig
-
-
-# 👇👇👇 [여기서부터 아래 코드를 복사해서 붙여넣으세요] 👇👇👇
-
-def plot_opportunity_map(df):
-    if df is None or df.empty: return None
-    
-    # 👇 try 구문 추가
-    try:
-        plot_df = df.copy()
-        
-        for c in ["TOTAL_SCORE", "TRIGGER_SCORE", "거래대금(억원)"]:
-            if c in plot_df.columns:
-                plot_df[c] = pd.to_numeric(plot_df[c], errors='coerce').fillna(0)
-
-        # 버블 사이즈
-        plot_df['size_scaled'] = np.log1p(plot_df['거래대금(억원)']) * 2
-
-        fig = px.scatter(
-            plot_df,
-            x="TOTAL_SCORE",
-            y="TRIGGER_SCORE",
-            size="size_scaled",
-            color="FINAL_SCORE", 
-            color_continuous_scale="RdYlGn_r",
-            hover_name="종목명",
-            hover_data=["종목코드", "종가", "ROUTE"],
-            text="종목명",
-            title="<b>🚀 Opportunity Map (우상단 = 주도주)</b>"
-        )
-
-        # 배경 구역 (주도주 영역)
-        fig.add_shape(type="rect", x0=80, y0=70, x1=100, y1=100, 
-                      fillcolor="rgba(0, 255, 0, 0.05)", line_width=0, layer="below")
-        fig.add_annotation(x=90, y=85, text="🔥 주도주 영역", showarrow=False, 
-                           font=dict(size=20, color="rgba(0,255,0,0.3)"))
-
-        # 기준선
-        fig.add_vline(x=70, line_dash="dot", line_color="gray", annotation_text="구조 우수")
-        fig.add_hline(y=60, line_dash="dot", line_color="gray", annotation_text="타이밍 포착")
-
-        fig.update_traces(
-            textposition='top center', 
-            marker=dict(line=dict(width=1, color='DarkSlateGrey'), opacity=0.85)
-        )
-        
-        fig.update_layout(
-            height=550,
-            xaxis=dict(title="⚙️ 구조 점수 (Foundation)", range=[30, 105], showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
-            yaxis=dict(title="⚡ 타이밍 점수 (Momentum)", range=[20, 105], showgrid=True, gridcolor='rgba(128,128,128,0.1)'),
-            margin=dict(l=20, r=20, t=50, b=20),
-            plot_bgcolor='rgba(0,0,0,0)'
-        )
-        return fig
-
-    # 👇 짝이 맞는 except 구문
-    except Exception as e:
-        st.error(f"❌ Plotly 차트 생성 중 오류: {e}")
-        return None
-
-# 👇👇👇 [1단계: 여기에 칸반 보드 렌더링 함수 추가] 👇👇👇
 
 def render_kanban_board(df):
     """
@@ -2323,7 +1848,6 @@ def render_kanban_board(df):
     _render_card(col_armed, "준비 ARMED", df_armed, "#F59E0B", "🔫", "var(--gradient-purple)")
     _render_card(col_watch, "관찰 WATCH", df_watch, "#3B82F6", "👀", "var(--gradient-blue)")
 
-# 👆👆👆 [1단계 끝] 👆👆👆
 # -------------------------------------------------------------
 # 🔥 [v14.2 Dashboard Engine] Time-Aware State Machine
 # -------------------------------------------------------------
@@ -2473,24 +1997,6 @@ def normalize_github_raw(url: str) -> str:
 
     return u
 
-def _download_bytes(url: str, timeout: int = 30) -> bytes:
-    u = normalize_github_raw(url)
-    if not u:
-        raise ValueError("REMOTE url is empty")
-    
-    # [Fix] User-Agent 추가로 403 차단 방지
-    headers = {
-        "Cache-Control": "no-cache", 
-        "Pragma": "no-cache",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    
-    r = requests.get(u, timeout=timeout, headers=headers)
-    r.raise_for_status()
-    return r.content
-
-
-@st.cache_data(ttl=600)
 def load_csv_path(path: str, enc: str = "utf-8-sig") -> pd.DataFrame:
     try:
         return pd.read_csv(path, encoding=enc)
