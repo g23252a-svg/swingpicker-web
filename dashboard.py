@@ -944,10 +944,10 @@ RAW_SRC = get_conf(
 LOCAL_RAW = get_conf("LDY_LOCAL_RAW", "data/recommend_latest.csv")
 PORTFOLIO_FILE = get_conf("LDY_PORTFOLIO_FILE", "my_portfolio.json")
 
-# 🔐 보안키
-KEY_PRO   = get_conf("LDY_KEY_PRO",   "220577")
-KEY_PRIME = get_conf("LDY_KEY_PRIME", "577220")
-ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "2022322")
+# 🔐 보안키 — 반드시 Streamlit Secrets 또는 환경변수에서 설정할 것
+KEY_PRO   = get_conf("LDY_KEY_PRO",   "")
+KEY_PRIME = get_conf("LDY_KEY_PRIME", "")
+ADMIN_KEY = get_conf("LDY_ADMIN_KEY", "")
 
 # 💳 결제 계좌 정보
 BANK_ACCOUNT = get_conf("LDY_BANK_ACCOUNT", "카카오뱅크 3333-22-2658701")
