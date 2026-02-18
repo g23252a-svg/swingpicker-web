@@ -15,16 +15,32 @@ except ImportError:
     DART_OK = False
     logger.error("⚠️ OpenDartReader 미설치")
 
+# ── google-genai SDK (신규 통합 SDK, 2025~) ──
+# 기존 google.generativeai 는 2025-11-30 EOL
+_USE_NEW_SDK = False
+_USE_LEGACY_SDK = False
+
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types as genai_types
+    _USE_NEW_SDK = True
     GEMINI_OK = True
 except ImportError:
-    GEMINI_OK = False
-    logger.error("⚠️ google-generativeai 미설치")
+    genai = None
+    genai_types = None
+    # fallback: 레거시 SDK (FutureWarning 발생하지만 동작은 함)
+    try:
+        import google.generativeai as genai_legacy
+        _USE_LEGACY_SDK = True
+        GEMINI_OK = True
+    except ImportError:
+        genai_legacy = None
+        GEMINI_OK = False
+        logger.error("⚠️ google-genai 미설치 (pip install google-genai)")
 
 
 class DartAnalyzer:
-    """DART 공시 분석 + Gemini LLM 점수 산출 엔진"""
+    """DART 공시 분석 + Gemini LLM 점수 산출 엔진 (v3.0)"""
 
     # ──────────────────────────────────────────────
     # 초기화
@@ -33,35 +49,81 @@ class DartAnalyzer:
         self.dart_api_key = dart_api_key or os.environ.get("DART_API_KEY")
         self.gemini_api_key = gemini_api_key or os.environ.get("GEMINI_API_KEY")
         self.dart = None
-        self.model = None
+        self._gemini_client = None   # 신규 SDK Client
+        self._gemini_model = None    # 레거시 SDK GenerativeModel
+        self._model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
-        # --- DART 초기화 (타임아웃 방어) ---
+        # --- DART 초기화 (실제 timeout 적용) ---
         if DART_OK and self.dart_api_key:
-            try:
-                # OpenDartReader 내부에서 corpCode.xml 을 다운로드하므로
-                # requests 의 기본 timeout 을 환경변수로 제한
-                _prev_timeout = os.environ.get("OPENDART_TIMEOUT")
-                os.environ["OPENDART_TIMEOUT"] = "10"        # 10초 제한
-                self.dart = OpenDartReader(self.dart_api_key)
-                # 환경변수 원복
-                if _prev_timeout is None:
-                    os.environ.pop("OPENDART_TIMEOUT", None)
-                else:
-                    os.environ["OPENDART_TIMEOUT"] = _prev_timeout
-            except Exception as e:
-                logger.error(f"DART 초기화 실패: {e}")
-                self.dart = None
+            self._init_dart()
 
         # --- Gemini 초기화 ---
         if GEMINI_OK and self.gemini_api_key:
-            try:
-                genai.configure(api_key=self.gemini_api_key)
-                self.model = genai.GenerativeModel(
-                    model_name='gemini-1.5-flash',
+            self._init_gemini()
+
+    # ────── DART 초기화: requests.Session 에 timeout 주입 ──────
+    def _init_dart(self):
+        """OpenDartReader 초기화 + 실제 HTTP timeout 적용
+
+        OpenDartReader 는 OPENDART_TIMEOUT 환경변수를 읽지 않으므로
+        내부 requests.Session 의 HTTPAdapter 를 교체하여 강제 적용.
+        """
+        try:
+            from requests.adapters import HTTPAdapter
+            import requests
+
+            timeout_sec = int(os.environ.get("DART_TIMEOUT", "10"))
+
+            self.dart = OpenDartReader(self.dart_api_key)
+
+            class _TimeoutAdapter(HTTPAdapter):
+                """모든 요청에 기본 timeout 을 강제하는 어댑터"""
+                def __init__(self, default_timeout=10, **kw):
+                    self._default_timeout = default_timeout
+                    super().__init__(**kw)
+
+                def send(self, request, **kw):
+                    kw.setdefault('timeout', self._default_timeout)
+                    return super().send(request, **kw)
+
+            adapter = _TimeoutAdapter(default_timeout=timeout_sec)
+
+            # OpenDartReader 내부 session 패치
+            if hasattr(self.dart, 'session') and isinstance(self.dart.session, requests.Session):
+                self.dart.session.mount('http://', adapter)
+                self.dart.session.mount('https://', adapter)
+                logger.info(f"DART session timeout = {timeout_sec}s (adapter 주입)")
+            else:
+                logger.info("DART 초기화 완료 (timeout adapter 미적용, try/except 방어)")
+
+        except Exception as e:
+            logger.error(f"DART 초기화 실패: {e}")
+            self.dart = None
+
+    # ────── Gemini 초기화: 신규 SDK 우선, 레거시 fallback ──────
+    def _init_gemini(self):
+        """google-genai 신규 SDK 우선 사용, 실패 시 레거시 fallback"""
+        try:
+            if _USE_NEW_SDK:
+                # ✅ 신규 SDK: google.genai.Client
+                self._gemini_client = genai.Client(api_key=self.gemini_api_key)
+                logger.info(f"Gemini 신규 SDK 초기화 (model={self._model_name})")
+            elif _USE_LEGACY_SDK:
+                # ⚠️ 레거시 fallback
+                genai_legacy.configure(api_key=self.gemini_api_key)
+                self._gemini_model = genai_legacy.GenerativeModel(
+                    model_name=self._model_name,
                     generation_config={"response_mime_type": "application/json"},
                 )
-            except Exception as e:
-                logger.error(f"Gemini 초기화 실패: {e}")
+                logger.warning("Gemini 레거시 SDK 사용 중 — google-genai 로 마이그레이션 권장")
+            else:
+                logger.error("Gemini SDK 없음")
+        except Exception as e:
+            logger.error(f"Gemini 초기화 실패: {e}")
+
+    @property
+    def _has_gemini(self) -> bool:
+        return self._gemini_client is not None or self._gemini_model is not None
 
     # ──────────────────────────────────────────────
     # 유틸리티
@@ -117,11 +179,33 @@ class DartAnalyzer:
             return []
 
     # ──────────────────────────────────────────────
+    # Gemini LLM 호출 (신규/레거시 분기)
+    # ──────────────────────────────────────────────
+    def _call_gemini(self, prompt: str) -> str:
+        """Gemini 호출 → 응답 텍스트 반환 (SDK 버전에 따라 분기)"""
+        if self._gemini_client is not None:
+            # ✅ 신규 SDK (google-genai)
+            response = self._gemini_client.models.generate_content(
+                model=self._model_name,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    max_output_tokens=512,
+                ),
+            )
+            return response.text.strip() if response.text else ""
+        elif self._gemini_model is not None:
+            # ⚠️ 레거시 SDK (google-generativeai)
+            response = self._gemini_model.generate_content(prompt)
+            return response.text.strip() if response.text else ""
+        return ""
+
+    # ──────────────────────────────────────────────
     # 개별 보고서 LLM 분석
     # ──────────────────────────────────────────────
     def analyze_report(self, rcept_no: str, report_nm: str) -> tuple:
         """공시 원문을 Gemini로 분석 → (score, reason)"""
-        if not self.dart or not self.model:
+        if not self.dart or not self._has_gemini:
             return 0.0, ""
 
         for attempt in range(2):
@@ -152,8 +236,7 @@ class DartAnalyzer:
                 {{"score": 0.0, "reason": "이유 요약"}}
                 """
 
-                response = self.model.generate_content(prompt)
-                res_text = response.text.strip()
+                res_text = self._call_gemini(prompt)
 
                 json_match = re.search(r'\{.*?\}', res_text, re.DOTALL)
                 if json_match:
@@ -215,7 +298,7 @@ class DartAnalyzer:
         if not self.dart:
             logger.info("DART 미연결 — 공시 필터 스킵")
             return df
-        if not self.model:
+        if not self._has_gemini:
             logger.info("Gemini 미연결 — 공시 분석 스킵 (목록만 조회)")
 
         if code_col not in df.columns:
@@ -242,7 +325,7 @@ class DartAnalyzer:
                     rcept_no = disc.get("rcept_no", "")
                     report_nm = disc.get("report_nm", "")
 
-                    if self.model:
+                    if self._has_gemini:
                         score, reason = self.analyze_report(rcept_no, report_nm)
                     else:
                         # Gemini 없으면 공시 제목만 기록 (점수 0)
