@@ -1082,7 +1082,7 @@ def get_code_map():
                     if stock.get_market_ticker_list(ymd, market="KOSPI"):
                         today = ymd
                         break
-                except: pass
+                except (ValueError, AttributeError): pass
             
             if today:
                 for mkt in ["KOSPI", "KOSDAQ"]:
@@ -1589,7 +1589,7 @@ def plot_correlation_heatmap(df_target):
             d = get_stock_chart_data(code)
             if d is not None and not d.empty:
                 price_data[name] = d['Close'].tail(60)
-        except:
+        except Exception:
             continue
             
     if not price_data: return None
@@ -1711,7 +1711,7 @@ def plot_interactive_chart(
                     val = val.iloc[0] if hasattr(val, 'iloc') else val[0]
                 else:
                     return
-            except:
+            except Exception:
                 pass
 
         # 문자열 변환 및 콤마 제거
@@ -1722,7 +1722,7 @@ def plot_interactive_chart(
             if val_float > 0:
                 fig.add_hline(y=val_float, line_dash=style, line_color=color, line_width=1, 
                               annotation_text=label, annotation_position="top right", annotation_font_color=color)
-        except:
+        except Exception:
             return 
 
     # 🔥 [중요] 여기서 float()를 쓰지 말고 변수(entry, stop 등)를 그대로 넘겨야 합니다!
@@ -1886,7 +1886,7 @@ def get_survival_days(current_codes: list, lookback: int = 15) -> dict:
             survivors = next_survivors
             if not survivors: break # 더 이상 생존자가 없으면 중단
             
-        except:
+        except Exception:
             continue
             
     return days_map
@@ -1902,7 +1902,7 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
         codes = df["종목코드"].astype(str).str.zfill(6).tolist()
         survival_map = get_survival_days(codes, lookback=20)
         df["생존일"] = df["종목코드"].apply(lambda x: survival_map.get(str(x).zfill(6), 1))
-    except:
+    except Exception:
         df["생존일"] = 1
 
     # 2. [핵심 수정] CSV의 텍스트 값("ATTACK")을 직접 확인하여 매핑
@@ -1954,7 +1954,7 @@ def augment_display_data(df: pd.DataFrame) -> pd.DataFrame:
     # 5. 추세 데코레이션
     def _deco_trend(val):
         try: v = float(val)
-        except: return "-"
+        except (ValueError, TypeError): return "-"
         if v > 1.0: return "📈 급상승"
         if v > 0.0: return "↗️ 우상향"
         if v == 0.0: return "➡️ 횡보"
@@ -2300,7 +2300,7 @@ def route_tag_dynamic(row, th):
             return default
         try:
             return float(val)
-        except:
+        except (ValueError, TypeError):
             return default
 
     r5 = _get_val("ret_5d_%", 0.0)
@@ -2921,7 +2921,7 @@ with st.sidebar:
                         diff = now_utc_dt - last_dt
                         if diff < timedelta(days=1): dau_count += 1
                         if diff < timedelta(days=7): wau_count += 1
-                    except: pass
+                    except (ValueError, TypeError): pass
             
             dau_pct = f"{dau_count/total_users*100:.1f}%"
             wau_pct = f"{wau_count/total_users*100:.1f}%"
@@ -2972,7 +2972,7 @@ with st.sidebar:
                         exp_date = datetime.strptime(expire_at_str, "%Y-%m-%d").date()
                         if exp_date < today:
                             is_expired = True
-                    except:
+                    except (ValueError, TypeError):
                         pass
                 
                 if is_banned:
@@ -3562,7 +3562,7 @@ with tab2:
                 return df_target
             active_view = _fmt_display(active_view)
             passive_view = _fmt_display(passive_view)
-        except: pass
+        except Exception: pass
 
     if full_df.empty:
         st.warning("🧐 현재 모든 필터 조건을 만족하는 종목이 없습니다. 필터를 한두 개 해제해 보세요.")
@@ -3580,7 +3580,7 @@ with tab2:
             if not chart_data.empty:
                 fig_map = plot_opportunity_map(chart_data)
                 if fig_map: st.plotly_chart(fig_map, use_container_width=True)
-        except: pass
+        except Exception: pass
 
         st.divider()
         st.markdown(f"### 🔥 집중 공략 후보 ({len(active_view)}개)")
@@ -3628,7 +3628,7 @@ with tab2:
                 try:
                     fig_water = plot_score_waterfall(sel_row)
                     st.plotly_chart(fig_water, use_container_width=True)
-                except: pass
+                except Exception: pass
                 st.plotly_chart(plot_radar_chart(sel_row), use_container_width=True)
 
             route_val = sel_row.get("ROUTE", "NEUTRAL")
@@ -3647,7 +3647,7 @@ with tab2:
             def _gv(k):
                 v = sel_row.get(k, 0.0)
                 try: return float(v)
-                except: return 0.0
+                except (ValueError, TypeError): return 0.0
             res_all, res_near, poc_gap, near_thres = _gv("RES_RATIO"), _gv("RES_RATIO_NEAR"), _gv("POC_GAP"), _gv("NEAR_THRES")
             is_above_poc = int(sel_row.get("IS_ABOVE_POC", 0) or 0)
             m1, m2, m3 = st.columns(3)
@@ -3740,8 +3740,8 @@ with tab3:
                                 p_val = int(float(parts[1].replace(",","").strip()))
                                 q_val = int(float(parts[2].replace(",","").strip()))
                                 default_data.append({"종목명": nm, "평단가": p_val, "수량": q_val, "비고": ""})
-                            except: pass
-            except: pass
+                            except (ValueError, TypeError, IndexError): pass
+            except Exception: pass
         
         if not default_data:
             default_data = [{"종목명": "", "평단가": 0, "수량": 0, "비고": ""}]
@@ -3773,7 +3773,7 @@ with tab3:
                 try:
                     price = float(row.get("평단가", 0))
                     qty = int(row.get("수량", 0))
-                except: continue
+                except (ValueError, TypeError): continue
 
                 save_lines.append(f"{nm}:{int(price)}:{int(qty)}")
 
@@ -3816,7 +3816,7 @@ with tab3:
                     try:
                         kn = stock.get_market_ticker_name(code)
                         if kn: real_name = kn
-                    except: pass
+                    except Exception: pass
 
                 eval_amt = curr * qty
                 buy_amt = avg * qty
@@ -3871,8 +3871,13 @@ with tab3:
 
                 pf_rows.append({
                     "종목명": real_name,
-                    "수익률": pct,
+                    "현재가": curr,
+                    "평단가": avg,
+                    "수량": qty,
+                    "매입금": buy_amt,
                     "평가금": eval_amt,
+                    "평가손익": eval_amt - buy_amt,
+                    "수익률": pct,
                     "점수": final_s,
                     "AI조언": advice,
                     "Color": advice_color,
@@ -3886,11 +3891,51 @@ with tab3:
             total_asset = total_eval + cash_amt
             total_invest = total_buy + cash_amt
             total_rate = (total_asset - total_invest) / total_invest * 100 if total_invest > 0 else 0
+            total_pnl = total_asset - total_invest
             
-            m1, m2, m3 = st.columns(3)
-            m1.metric("총 자산 (현금포함)", f"{int(total_asset):,}원")
-            m2.metric("총 수익금", f"{int(total_asset - total_invest):,}원", delta_color="normal")
-            m3.metric("총 수익률", f"{total_rate:+.2f}%", delta_color="normal" if total_rate >= 0 else "inverse")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("총 평가금액", f"{int(total_asset):,}원")
+            m2.metric("총 매입금액", f"{int(total_invest):,}원")
+            pnl_delta = f"{int(total_pnl):+,}원"
+            m3.metric("총 평가손익", pnl_delta, delta=f"{total_rate:+.2f}%",
+                       delta_color="normal" if total_pnl >= 0 else "inverse")
+            if cash_amt > 0:
+                cash_pct = cash_amt / total_asset * 100 if total_asset > 0 else 0
+                m4.metric("현금 비중", f"{cash_pct:.1f}%", delta=f"{int(cash_amt):,}원")
+            else:
+                m4.metric("종목 수", f"{len(pf_rows)}개")
+
+            # ── 종목별 손익 요약 테이블 ──
+            if pf_rows:
+                summary_df = pd.DataFrame(pf_rows)
+                # 비중 계산
+                summary_df["비중(%)"] = (summary_df["평가금"] / total_asset * 100).round(1) if total_asset > 0 else 0.0
+
+                display_cols = ["종목명", "현재가", "평단가", "수량", "매입금", "평가금", "평가손익", "수익률", "비중(%)", "점수", "AI조언"]
+                show_df = summary_df[[c for c in display_cols if c in summary_df.columns]].copy()
+                
+                # 포맷팅
+                for c in ["현재가", "평단가", "매입금", "평가금", "평가손익"]:
+                    if c in show_df.columns:
+                        show_df[c] = show_df[c].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "-")
+                if "수익률" in show_df.columns:
+                    show_df["수익률"] = show_df["수익률"].apply(lambda x: f"{x:+.2f}%")
+
+                with st.expander("📋 종목별 손익 상세", expanded=True):
+                    st.dataframe(show_df, use_container_width=True, hide_index=True)
+                
+                # ── 집중도 리스크 경고 ──
+                if total_asset > 0:
+                    max_weight = summary_df["비중(%)"].max()
+                    max_stock = summary_df.loc[summary_df["비중(%)"].idxmax(), "종목명"]
+                    if max_weight >= 40:
+                        st.warning(f"⚠️ **집중 리스크**: {max_stock}이(가) 포트폴리오의 {max_weight:.1f}%를 차지합니다. 분산 투자를 권장합니다.")
+                    
+                    # 손실 종목 경고
+                    loss_stocks = summary_df[summary_df["수익률"] < -10]
+                    if not loss_stocks.empty:
+                        loss_names = ", ".join(loss_stocks["종목명"].tolist())
+                        st.error(f"🔴 **손절 점검 필요**: {loss_names} (수익률 -10% 이하)")
 
             st.markdown("##### 🩺 AI 포트폴리오 진단 결과")
             
@@ -4175,7 +4220,7 @@ with tab7:
                 try:
                     dt = pd.to_datetime(date_str, format="%Y%m%d")
                     df['Date'] = dt
-                except:
+                except (ValueError, TypeError):
                     df['Date'] = date_str
 
                 dfs.append(df)
