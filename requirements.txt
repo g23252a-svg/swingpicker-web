@@ -5,19 +5,16 @@
 # --- [Bootstrap: 반드시 최상단] ---
 setuptools                # 👈 pykrx 가 pkg_resources 에 의존 → 선설치 필수
 
-# --- [Core UI & UX] ---
+# --- [Core UI] ---
 streamlit>=1.34.0
-extra-streamlit-components>=0.1.71
 plotly>=5.20.0
 
 # --- [Data Science & ML] ---
 pandas>=2.2.0
 numpy>=1.26.0
 scikit-learn>=1.4.0
-joblib>=1.4.0
 xgboost>=2.0.0
-shap>=0.45.0
-torch>=2.2.0
+torch>=2.2.0              # 👈 CPU-only (~200MB via extra-index-url)
 
 # --- [Database & Async] ---
 duckdb>=0.10.0
@@ -27,15 +24,21 @@ tqdm>=4.66.0
 
 # --- [Finance Data & DART] ---
 finance-datareader>=0.9.6
-pykrx==1.0.51            # 👈 [검증됨] 실전에서 가장 안정적인 Harbor 버전
-opendartreader           # 👈 설치 호환성 중심의 유연한 선언
-xmltodict>=0.13.0
+pykrx==1.0.51             # 👈 [검증됨] 안정적인 Harbor 버전
+opendartreader            # 👈 설치 호환성 중심의 유연한 선언
 
 # --- [Web Scraping & AI] ---
-google-generativeai>=0.5.0
+google-genai>=1.0.0       # 👈 신규 통합 SDK (구 google-generativeai EOL 2025-11-30)
 beautifulsoup4>=4.12.0
-lxml>=5.2.0              # 👈 크롤러 파싱 속도/정확도 핵심 유닛
+lxml>=5.2.0               # 👈 크롤러 파싱 속도/정확도 핵심
 
 # --- [Infrastructure & Utils] ---
-python-dotenv>=1.0.1     # 👈 환경 변수(API KEY) 보안 게이트
-pytz>=2024.1             # 👈 KST 시간 동기화 정찰병
+python-dotenv>=1.0.1      # 👈 환경 변수(API KEY) 보안 게이트
+pytz>=2024.1              # 👈 KST 시간 동기화
+
+# --- [제거된 패키지 (미사용 확인 완료)] ---
+# shap                    ❌ 코드베이스 어디에서도 import 없음 (~400MB 절감)
+# joblib                  ❌ 직접 import 없음 (scikit-learn 내부 의존으로 자동 설치됨)
+# extra-streamlit-components  ❌ import/사용처 없음
+# xmltodict               ❌ import/사용처 없음
+# google-generativeai     ❌ 2025-11-30 EOL → google-genai 로 교체
