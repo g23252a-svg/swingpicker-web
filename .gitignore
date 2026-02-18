@@ -1,1 +1,45 @@
+# ─── Secrets & Config ───
 .streamlit/secrets.toml
+.env
+*.env
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ─── Data: 일별 스냅샷 (latest/기준 파일만 Git 추적) ───
+data/recommend_2*.csv
+data/recommend_*_v*.csv
+data/recommend_latest_cp949.csv
+data/krx_codes_2*.csv
+data/rank_validation_2*.csv
+data/rank_validation_summary_2*.csv
+data/price_snapshot_2*.csv
+
+# ─── Data: 레거시 모델 (v17 + v15.6 폴백만 유지) ───
+data/trading_model_lstm.pth
+data/trading_model_lstm_attn.pth
+data/trading_model_lstm_attn_v14.pth
+data/trading_model_lstm_attn_v15.pth
+data/trading_scaler.pkl
+data/trading_scaler_v2.pkl
+data/trading_scaler_v14.pkl
+data/trading_scaler_v15.pkl
+data/trading_model_xgb.pkl
+
+# ─── Cache & DB (런타임 생성) ───
+docs_cache/
+*.db
+*.db-journal
+*.db-wal
+
+# ─── IDE & OS ───
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
