@@ -179,7 +179,7 @@ def cleanup_old_files(out_dir: str, prefix: str, keep_days: int = 30) -> int:
     """keep_days 이상 지난 일별 CSV 자동 삭제. 삭제 건수 반환."""
     cutoff = datetime.now() - timedelta(days=keep_days)
     removed = 0
-    for f in glob(os.path.join(out_dir, f"{prefix}_2*.csv")):
+    for f in glob.glob(os.path.join(out_dir, f"{prefix}_2*.csv")):
         basename = os.path.basename(f)
         # prefix_YYYYMMDD.csv 에서 날짜 추출
         date_part = basename.replace(f"{prefix}_", "").replace(".csv", "").split("_")[0]
@@ -2120,9 +2120,9 @@ def main(
     # 🔥 [v15.6] 스마트 훈련 스킵 (당일 이미 학습했다면 30분 절약)
     # ----------------------------------------------------------------------
     if ml_engine.is_trained_today():
-        log("✅ [SKIP] 오늘 이미 v15.6 Master 모델 학습이 완료되었습니다.")
+        log("✅ [SKIP] 오늘 이미 v17.0 모델 학습이 완료되었습니다.")
     else:
-        log("🤖 AI 모델 최적화(v15.6 Master) 진행 중... (약 30분 소요)")
+        log("🤖 AI 모델 v17.0 학습 진행 중... (LSTM+Attention + XGBoost)")
         with timed("ML 모델 학습"):
             try:
                 ml_engine.train_model() 
@@ -2505,7 +2505,3 @@ def main(
 
     # 전체 소요 시간
     log(f"✅ 전체 파이프라인 완료: {time.perf_counter() - _t_main_start:.1f}s")
-
-
-if __name__ == "__main__":
-    main()
