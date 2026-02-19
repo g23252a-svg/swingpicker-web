@@ -179,7 +179,7 @@ def cleanup_old_files(out_dir: str, prefix: str, keep_days: int = 30) -> int:
     """keep_days 이상 지난 일별 CSV 자동 삭제. 삭제 건수 반환."""
     cutoff = datetime.now() - timedelta(days=keep_days)
     removed = 0
-    for f in glob.glob(os.path.join(out_dir, f"{prefix}_2*.csv")):
+    for f in glob(os.path.join(out_dir, f"{prefix}_2*.csv")):
         basename = os.path.basename(f)
         # prefix_YYYYMMDD.csv 에서 날짜 추출
         date_part = basename.replace(f"{prefix}_", "").replace(".csv", "").split("_")[0]
