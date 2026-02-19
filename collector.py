@@ -1460,7 +1460,8 @@ def send_telegram_auto(
             msg += f"   🔵매수: {_fmt_int(buy)}\n"
             msg += (
                 f"   🔴손절: {_fmt_int(row.get('손절가'))} / "
-                f"🟢목표: {_fmt_int(row.get('추천매도가1'))}\n\n"
+                f"🟢T1: {_fmt_int(row.get('추천매도가1'))} / "
+                f"🟡T2: {_fmt_int(row.get('추천매도가2'))}\n\n"
             )
 
         # 메시지 길이 제한 (텔레그램 4096자 제한 대비)
@@ -1734,6 +1735,137 @@ def calc_volume_profile_v2(df_120: pd.DataFrame):
                 
     return poc_p, (res_all_vol / total_vol), (res_near_vol / total_vol), (near_threshold - 1.0) * 100
 
+# ─────────────────────────────────────────────────────────────
+# [v12.0] 과학적 목표가 산출 (Multi-Method Cluster Target)
+# ─────────────────────────────────────────────────────────────
+def calc_scientific_targets(
+    buy: float, stop: float, last_c: float,
+    bb_upper_val: float, vwap_val: float, st_val: float,
+    h_series: pd.Series, l_series: pd.Series, c_series: pd.Series,
+    bb_bw_val: float,
+) -> Tuple[int, int, int]:
+    """
+    7가지 독립적 방법으로 목표가를 산출하고, 클러스터 분석으로
+    가장 신뢰도 높은 1차/2차 목표가를 반환합니다.
+
+    Returns: (target_t1, target_t2, target_atr)
+        target_t1: 보수적 1차 목표 (다수 지표 수렴 구간)
+        target_t2: 공격적 2차 목표 (상위 클러스터)
+        target_atr: 기존 ATR 2.5R 목표 (참고용)
+    """
+    risk = buy - stop
+    if risk <= 0:
+        fallback = int(last_c * 1.15)
+        return fallback, int(fallback * 1.1), fallback
+
+    # ── Method 1: ATR 2.5R (기존 시스템) ──
+    t_atr = buy + risk * 2.5
+
+    # ── Method 2: 볼린저 밴드 상단 (+2σ) ──
+    t_bb = float(bb_upper_val) if bb_upper_val > last_c else last_c * 1.05
+
+    # ── Method 3: SuperTrend 대칭 (미러링) ──
+    if st_val > 0 and last_c > st_val:
+        t_st = last_c + (last_c - st_val)
+    else:
+        t_st = last_c * 1.10
+
+    # ── Method 4~6: 피보나치 (120일 데이터 기반) ──
+    try:
+        h_120 = float(h_series.tail(120).max())
+        l_120 = float(l_series.tail(120).min())
+    except (IndexError, ValueError):
+        h_120 = last_c * 1.3
+        l_120 = last_c * 0.7
+
+    fib_range_hl = h_120 - l_120
+    if fib_range_hl > 0:
+        # Method 4: 고점-저점 61.8% 되돌림
+        t_fib618 = l_120 + fib_range_hl * 0.618
+        # Method 5: 고점-저점 78.6% 되돌림
+        t_fib786 = l_120 + fib_range_hl * 0.786
+    else:
+        t_fib618 = last_c * 1.15
+        t_fib786 = last_c * 1.25
+
+    # Method 6: 피보나치 1.618 확장 (저점→현재 상승폭의 61.8% 추가)
+    rise = last_c - l_120
+    if rise > 0:
+        t_fib_ext = last_c + rise * 0.618
+    else:
+        t_fib_ext = last_c * 1.10
+
+    # ── Method 7: VWAP 기반 목표 (VWAP 이격의 2배) ──
+    if vwap_val > 0 and last_c > vwap_val:
+        t_vwap = last_c + (last_c - vwap_val) * 2
+    else:
+        t_vwap = last_c * 1.08
+
+    # ── 클러스터 분석 ──
+    # 현재가보다 높은 목표가만 유효
+    all_targets = {
+        "ATR_2.5R": t_atr,
+        "BB_Upper": t_bb,
+        "ST_Mirror": t_st,
+        "Fib_61.8": t_fib618,
+        "Fib_78.6": t_fib786,
+        "Fib_1.618": t_fib_ext,
+        "VWAP_Ext": t_vwap,
+    }
+    valid = {k: v for k, v in all_targets.items() if v > last_c * 1.02}
+
+    if not valid:
+        fallback = int(last_c * 1.15)
+        return fallback, int(fallback * 1.1), int(t_atr)
+
+    prices = sorted(valid.values())
+
+    # 클러스터링: 서로 8% 이내에 있는 목표가끼리 그룹핑
+    clusters = []
+    current_cluster = [prices[0]]
+    for p in prices[1:]:
+        if (p - current_cluster[0]) / current_cluster[0] <= 0.08:
+            current_cluster.append(p)
+        else:
+            clusters.append(current_cluster)
+            current_cluster = [p]
+    clusters.append(current_cluster)
+
+    # 클러스터를 (평균가격, 멤버수) 기준으로 정렬
+    cluster_info = [(np.mean(cl), len(cl), cl) for cl in clusters]
+
+    # 1차 목표: 최소 +10% 이상 & 손익비 1.5:1 이상인 클러스터만 유효
+    # 2차 목표: 최소 +20% 이상인 클러스터
+    min_t1_price = max(last_c * 1.10, buy + risk * 1.5)  # 10% 또는 손익비 1.5배
+    min_t2_price = max(last_c * 1.20, buy + risk * 2.0)  # 20% 또는 손익비 2.0배
+
+    t1_candidates = [ci for ci in cluster_info if ci[0] >= min_t1_price]
+    t2_candidates = [ci for ci in cluster_info if ci[0] >= min_t2_price]
+
+    # T1: 수렴도 최고 → 같으면 보수적(낮은 가격) 우선
+    if t1_candidates:
+        t1_candidates.sort(key=lambda x: (-x[1], x[0]))
+        target_t1 = int(t1_candidates[0][0])
+    else:
+        # 최소 기준 미달 시, ATR의 60% 지점 (보수적 ATR)
+        target_t1 = int(buy + risk * 1.5)
+
+    # T2: T1보다 5% 이상 위 & 수렴도 높은 것
+    upper_t2 = [ci for ci in t2_candidates if ci[0] > target_t1 * 1.05]
+    if upper_t2:
+        upper_t2.sort(key=lambda x: (-x[1], x[0]))
+        target_t2 = int(upper_t2[0][0])
+    else:
+        # T2 후보 없으면 T1의 +15% 또는 ATR 목표 중 작은 값
+        target_t2 = int(min(target_t1 * 1.15, t_atr))
+
+    # 안전장치: t1이 t2보다 높으면 스왑
+    if target_t1 > target_t2:
+        target_t1, target_t2 = target_t2, target_t1
+
+    return target_t1, target_t2, int(t_atr)
+
+
 def analyze_ticker(
     t: str, ohlcv_df: pd.DataFrame, top_df: pd.DataFrame, mcap_map: Dict[str, float],
     kospi_set: set, kosdaq_set: set, name_map: Dict[str, str], sector_map: Dict[str, str],
@@ -1951,9 +2083,21 @@ def analyze_ticker(
     if (dist_to_swing < 8.0) and (swing_low_10 > 0): 
         stop = max(stop, swing_low_10 * 0.97)
         
-    target = buy + (buy - stop) * 2.5
+    target_atr_raw = buy + (buy - stop) * 2.5
     
-    buy = round_to_tick(buy); stop = floor_to_tick(stop); target = ceil_to_tick(target)
+    buy = round_to_tick(buy); stop = floor_to_tick(stop)
+    
+    # [v12.0] 과학적 목표가 산출 (Multi-Method Cluster)
+    bb_upper_now = float(bb_upper.iloc[-1]) if len(bb_upper) > 0 else last_c * 1.10
+    sci_t1, sci_t2, sci_atr = calc_scientific_targets(
+        buy=buy, stop=stop, last_c=last_c,
+        bb_upper_val=bb_upper_now, vwap_val=vwap_val, st_val=st_val,
+        h_series=h, l_series=l, c_series=c,
+        bb_bw_val=bb_bw_val,
+    )
+    target = ceil_to_tick(sci_t1)      # 1차: 클러스터 수렴 목표
+    target_t2 = ceil_to_tick(sci_t2)   # 2차: 상위 클러스터 목표
+    target_atr = ceil_to_tick(target_atr_raw)  # 참고: 기존 ATR 2.5R
     # 👆👆 [여기까지 교체] 👆👆
 
     # 메타 정보 (기존 유지)
@@ -2023,7 +2167,8 @@ def analyze_ticker(
         "BB_Expanding": int(bb_expanding),        # 상태 개선 체크용
         "Vol_Quality": round(vol_quality, 2),
         "Range_Pos": round(range_pos, 2),
-        "추천매수가": buy, "손절가": stop, "추천매도가1": target, "추천매도가2": target * 1.1,
+        "추천매수가": buy, "손절가": stop, "추천매도가1": target, "추천매도가2": target_t2,
+        "TARGET_ATR": target_atr,  # [v12.0] 기존 ATR 2.5R 참고용
         "TRIGGER": trigger_str, # Entry Engine 분리
         "Above_MA20": 1 if disp > 0 else 0,
         "SUPERTREND_DIR": st_trend, "SUPERTREND_VAL": st_val,
@@ -2450,7 +2595,7 @@ def main(
         "종목코드", "종목명", "시장", "업종_대분류", "종가", "거래대금(억원)", "시가총액(억원)",
         "상태", "ROUTE", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
         "DISPLAY_SCORE", "FINAL_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", "NEWS_SCORE",
-        "추천매수가", "손절가", "추천매도가1", "추천매도가2", "TRIGGER", "V_POWER", "거래강도", 
+        "추천매수가", "손절가", "추천매도가1", "추천매도가2", "TARGET_ATR", "TRIGGER", "V_POWER", "거래강도", 
         "VWAP", "POC_GAP", "NEWS_REASON", "TTM_SQUEEZE_CNT", "Low_Trend_PCT", "RSI14", "이격도"
     ]
     # 누락 컬럼 방어
