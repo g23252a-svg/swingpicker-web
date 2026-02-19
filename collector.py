@@ -2505,3 +2505,7 @@ def main(
 
     # 전체 소요 시간
     log(f"✅ 전체 파이프라인 완료: {time.perf_counter() - _t_main_start:.1f}s")
+
+
+if __name__ == "__main__":
+    main()
