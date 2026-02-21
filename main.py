@@ -233,28 +233,46 @@ def get_code_map(df):
 def _recent_trade_date() -> str:
     """최근 거래일 (주말/공휴일 보정) — YYYYMMDD 형식"""
     dt = now_kst()
-    # 토요일(5) → 금요일, 일요일(6) → 금요일
     wd = dt.weekday()
     if wd == 5: dt -= timedelta(days=1)
     elif wd == 6: dt -= timedelta(days=2)
     return dt.strftime("%Y%m%d")
 
 
+# KRX 전체 종목 캐시 (앱 시작 시 1번만 로드)
+_KRX_NAME_MAP = {}
+
+def _ensure_krx_map():
+    """FDR로 전체 종목 목록 로드 (pykrx 대신 — Railway 해외 IP에서도 동작)"""
+    global _KRX_NAME_MAP
+    if _KRX_NAME_MAP:
+        return
+    if not FDR_OK:
+        return
+    try:
+        listing = fdr.StockListing("KRX")
+        if listing is not None and not listing.empty:
+            code_col = "Code" if "Code" in listing.columns else "Symbol"
+            name_col = "Name" if "Name" in listing.columns else "종목명"
+            if code_col in listing.columns and name_col in listing.columns:
+                _KRX_NAME_MAP = dict(zip(listing[name_col], listing[code_col].astype(str).str.zfill(6)))
+                logger.info(f"✅ KRX 전체 종목 캐시 로드: {len(_KRX_NAME_MAP)}개")
+    except Exception as e:
+        logger.warning(f"KRX 종목 목록 로드 실패: {e}")
+
+
 def find_code_by_name(name, code_map):
-    """종목명 → 코드 검색 (scored DataFrame + pykrx 전체 종목 검색)"""
+    """종목명 → 코드 검색 (scored → KRX 전체 캐시 순, pykrx 미사용)"""
     if name in code_map: return code_map[name]
     for k, v in code_map.items():
         if name in k or k in name: return v
-    # scored에 없으면 pykrx로 전체 종목 검색 (최근 거래일 기준)
-    if PYKRX_OK:
-        try:
-            trade_dt = _recent_trade_date()
-            tickers = stock.get_market_ticker_list(trade_dt)
-            for t in tickers:
-                if stock.get_market_ticker_name(t) == name:
-                    return t
-        except Exception as e:
-            logger.warning(f"pykrx 종목 검색 실패 ({name}): {e}")
+    # scored에 없으면 FDR 기반 전체 종목 캐시에서 검색
+    _ensure_krx_map()
+    if name in _KRX_NAME_MAP:
+        return _KRX_NAME_MAP[name]
+    for k, v in _KRX_NAME_MAP.items():
+        if name in k or k in name:
+            return v
     return name
 
 def get_stock_chart_data(code):
@@ -395,34 +413,37 @@ def plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, targe
 
 
 def fetch_current_price(code, name):
-    """현재가 조회 — 주말/공휴일 자동 보정, 코드 미확인 종목도 처리"""
+    """현재가 조회 — FDR 전용 (Railway 해외 서버에서 pykrx/KRX 불가)"""
     code_str = str(code).zfill(6) if str(code).isdigit() else ""
-    trade_dt = _recent_trade_date()
-    try:
-        # 1차: pykrx (최근 거래일 기준)
-        if PYKRX_OK and code_str:
-            p = stock.get_market_ohlcv(trade_dt, trade_dt, code_str)
-            if not p.empty:
-                return code, name, int(p.iloc[-1]["종가"])
-        # 2차: FDR (최근 30일 데이터 → 마지막 종가)
-        if FDR_OK and code_str:
+
+    # 1차: 코드가 있으면 FDR로 최근 30일 조회
+    if FDR_OK and code_str:
+        try:
             start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
             d = fdr.DataReader(code_str, start)
             if d is not None and not d.empty:
                 return code, name, int(d.iloc[-1]["Close"])
-        # 3차: 종목명으로 코드 찾아서 조회 (비츠로셀 등 시스템 외 종목)
-        if PYKRX_OK and not code_str:
-            tickers = stock.get_market_ticker_list(trade_dt)
-            for t in tickers:
-                try:
-                    if stock.get_market_ticker_name(t) == name:
-                        p = stock.get_market_ohlcv(trade_dt, trade_dt, t)
-                        if not p.empty:
-                            return t, name, int(p.iloc[-1]["종가"])
-                except Exception:
-                    continue
-    except Exception as e:
-        logger.warning(f"현재가 조회 실패 ({name}/{code}): {e}")
+        except Exception:
+            pass
+
+    # 2차: 코드 없으면 (종목명만) → KRX 캐시에서 코드 찾아서 재시도
+    if FDR_OK and not code_str:
+        _ensure_krx_map()
+        found = _KRX_NAME_MAP.get(name)
+        if not found:
+            for k, v in _KRX_NAME_MAP.items():
+                if name in k or k in name:
+                    found = v
+                    break
+        if found:
+            try:
+                start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+                d = fdr.DataReader(found, start)
+                if d is not None and not d.empty:
+                    return found, name, int(d.iloc[-1]["Close"])
+            except Exception:
+                pass
+
     return code, name, 0
 
 
