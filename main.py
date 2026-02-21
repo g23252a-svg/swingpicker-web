@@ -508,6 +508,19 @@ DARK_CSS = """
     .kanban-card:hover { transform: translateY(-2px); background: rgba(255,255,255,0.08); }
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+<!-- PWA -->
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#1a1a2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LDY Trader">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/sw.js').then(r => console.log('SW registered'));
+}
+</script>
 """
 
 
@@ -1378,6 +1391,11 @@ def render_tab8_admin():
 # ═══════════════════════════════════════════
 #  앱 실행
 # ═══════════════════════════════════════════
+# PWA 정적 파일 서빙
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(STATIC_DIR):
+    app.add_static_files("/static", STATIC_DIR)
+
 if __name__ in {"__main__", "__mp_main__"}:
     store.refresh()
     ui.run(
