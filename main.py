@@ -1297,15 +1297,21 @@ def render_tab8_admin():
 
             async def apply_role():
                 if sel_email.value:
-                    from auth_user import update_user_role
-                    ok = update_user_role(sel_email.value, sel_role.value)
-                    ui.notify(f"{'✅ 변경 완료' if ok else '❌ 실패'}")
+                    db = _get_db()
+                    if db:
+                        ok = db.update_user_role(sel_email.value, sel_role.value)
+                        ui.notify(f"{'✅ 변경 완료' if ok else '❌ 실패'}")
+                    else:
+                        ui.notify("DB 연결 실패", type="negative")
 
             async def toggle_ban():
                 if sel_email.value:
-                    from auth_user import toggle_user_ban
-                    ok, msg = toggle_user_ban(sel_email.value)
-                    ui.notify(msg)
+                    db = _get_db()
+                    if db:
+                        ok, msg = db.toggle_user_ban(sel_email.value)
+                        ui.notify(msg)
+                    else:
+                        ui.notify("DB 연결 실패", type="negative")
 
             with ui.row().classes("gap-2 mt-2"):
                 ui.button("등급 적용", on_click=apply_role).props("color=primary")
@@ -1316,9 +1322,12 @@ def render_tab8_admin():
             ui.label("전 회원에게 체험권을 지급합니다.").classes("text-gray-400 text-sm mb-2")
 
             async def grant_trial():
-                from auth_user import grant_all_users_trial
-                ok, msg = grant_all_users_trial(7)
-                ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
+                db = _get_db()
+                if db:
+                    ok, msg = db.grant_all_users_trial(7)
+                    ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
+                else:
+                    ui.notify("DB 연결 실패", type="negative")
 
             ui.button("🎁 전원 7일 Prime 지급", on_click=grant_trial).props("color=positive")
 
