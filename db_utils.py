@@ -5,7 +5,11 @@ import pandas as pd
 import requests
 import json
 import os
-import streamlit as st
+try:
+    import streamlit as st
+    _HAS_ST = True
+except ImportError:
+    _HAS_ST = False
 from datetime import datetime, timedelta
 
 # Gist 설정 — os.environ 우선, st.secrets는 안전하게 폴백
@@ -13,10 +17,12 @@ def _safe_secret(key: str) -> str:
     """환경변수 → st.secrets 순으로 조회. secrets.toml 없어도 크래시 안 남."""
     val = os.environ.get(key)
     if val: return val
-    try:
-        return st.secrets.get(key) or ""
-    except Exception:
-        return ""
+    if _HAS_ST:
+        try:
+            return st.secrets.get(key) or ""
+        except Exception:
+            return ""
+    return ""
 
 GIST_ID = _safe_secret("LDY_GIST_ID") or None
 GIST_TOKEN = _safe_secret("LDY_GIST_TOKEN") or None
