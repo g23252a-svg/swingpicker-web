@@ -610,6 +610,13 @@ def login_page():
                     if u and h == u.get("password"):
                         if str(u.get("is_banned")).upper() in ["Y", "TRUE", "1"]:
                             msg.set_text("🚫 차단된 계정"); msg.classes(replace="text-sm mt-2 text-red-400"); return
+                        # ──────────────────────────────────────────
+                        # [Fix] 최근접속일 갱신
+                        # ──────────────────────────────────────────
+                        try:
+                            db.update_login_timestamp(clean)
+                        except Exception:
+                            pass
                         set_current_user({"id": u["id"], "login_id": u["id"], "role": u.get("role", "free"),
                                           "nickname": u.get("nickname"), "prime_expire_date": u.get("prime_expire_date")})
                         ui.navigate.to("/")
