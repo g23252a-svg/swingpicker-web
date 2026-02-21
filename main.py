@@ -897,20 +897,30 @@ def render_tab3_portfolio(df, auth):
     section_title("💼 내 자산: AI 리밸런싱 & 진단")
     ui.label("👇 보유 종목을 입력하세요 (종목명:평단가:수량)").classes("text-xs text-gray-400 mb-2")
 
-    saved = load_portfolio_file()
-    pf_input = ui.textarea("포트폴리오 입력", value=saved or "에코프로머티:67341:60\nCASH:1000000:1",
-                           placeholder="종목명:평단가:수량 (줄바꿈 구분)").classes("w-full").props("rows=6")
+    # ── 포트폴리오 로드 우선순위: ①브라우저 저장 → ②Gist → ③기본값 ──
+    saved_local = app.storage.user.get("portfolio_text", "")
+    saved_gist = load_portfolio_file() if not saved_local else ""
+    saved = saved_local or saved_gist or ""
+
+    pf_input = ui.textarea("포트폴리오 입력", value=saved,
+                           placeholder="종목명:평단가:수량 (줄바꿈 구분)\n예) 에코프로머티:67341:60").classes("w-full").props("rows=6")
     result_area = ui.column().classes("w-full mt-4")
+
+    def _auto_save():
+        """입력 변경 시 브라우저 스토리지에 자동 저장 (새로고침해도 유지)"""
+        app.storage.user["portfolio_text"] = pf_input.value
+
+    pf_input.on("blur", lambda _: _auto_save())  # 포커스 벗어날 때 자동 저장
 
     async def analyze():
         result_area.clear()
         text = pf_input.value.strip()
         if not text: return
 
-        # 저장
-        if text != saved:
-            save_portfolio_file(text)
-            ui.notify("💾 포트폴리오 저장됨", type="positive")
+        # 브라우저 + Gist 이중 저장
+        app.storage.user["portfolio_text"] = text
+        save_portfolio_file(text)
+        ui.notify("💾 포트폴리오 저장됨", type="positive")
 
         code_map = get_code_map(df)
         targets = []
