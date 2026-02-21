@@ -599,14 +599,22 @@ def apply_ml_score(current_df, full_ohlcv_map):
 
     # 스케일러 적용
     n_feat = X_raw.shape[2]
+    scaler_dim = getattr(_loaded_scaler, 'n_features_in_', n_feat)
+
+    if n_feat != scaler_dim:
+        # [v8.5 Fix] 피처 차원 불일치 → 의미 없는 추론 방지, 안전 폴백
+        print(f"⚠️ [ML] 피처 차원 불일치 (데이터={n_feat}, 모델={scaler_dim}). ML_SCORE=0 폴백.")
+        current_df["ML_SCORE"] = 0.0
+        return current_df
+
     try:
         X_scaled = _loaded_scaler.transform(
             X_raw.reshape(-1, n_feat)
         ).reshape(-1, SEQ_LENGTH, n_feat)
-    except ValueError:
-        # 피처 차원 불일치 (레거시 모델 폴백) → 스케일링 없이 진행
-        print("⚠️ [ML] 피처 차원 불일치. 스케일링 스킵.")
-        X_scaled = X_raw
+    except Exception as e:
+        print(f"⚠️ [ML] 스케일링 실패: {e}. ML_SCORE=0 폴백.")
+        current_df["ML_SCORE"] = 0.0
+        return current_df
 
     # --- LSTM 추론 ---
     X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
