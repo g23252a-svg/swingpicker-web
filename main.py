@@ -231,9 +231,19 @@ def get_code_map(df):
     return dict(zip(df["종목명"], df["종목코드"].astype(str).str.zfill(6)))
 
 def find_code_by_name(name, code_map):
+    """종목명 → 코드 검색 (scored DataFrame + pykrx 전체 종목 검색)"""
     if name in code_map: return code_map[name]
     for k, v in code_map.items():
         if name in k or k in name: return v
+    # scored에 없으면 pykrx로 전체 종목 검색
+    if PYKRX_OK:
+        try:
+            tickers = stock.get_market_ticker_list(now_kst().strftime("%Y%m%d"))
+            for t in tickers:
+                if stock.get_market_ticker_name(t) == name:
+                    return t
+        except Exception:
+            pass
     return name
 
 def get_stock_chart_data(code):
@@ -308,7 +318,8 @@ def plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, targe
 
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.02, row_heights=row_heights)
 
-    C_UP, C_DOWN = '#089981', '#F23645'
+    # 🇰🇷 한국식: 상승=빨강, 하락=파랑
+    C_UP, C_DOWN = '#EF4444', '#3B82F6'
 
     fig.add_trace(go.Candlestick(
         x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
@@ -373,16 +384,32 @@ def plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, targe
 
 
 def fetch_current_price(code, name):
-    """현재가 조회"""
+    """현재가 조회 — 코드가 숫자 6자리가 아닌 경우(종목명)도 처리"""
+    code_str = str(code).zfill(6) if str(code).isdigit() else ""
     try:
-        if PYKRX_OK:
-            p = stock.get_market_ohlcv(now_kst().strftime("%Y%m%d"), now_kst().strftime("%Y%m%d"), code)
+        # 1차: pykrx로 코드 직접 조회
+        if PYKRX_OK and code_str:
+            today = now_kst().strftime("%Y%m%d")
+            p = stock.get_market_ohlcv(today, today, code_str)
             if not p.empty:
                 return code, name, int(p.iloc[-1]["종가"])
-        if FDR_OK:
-            d = fdr.DataReader(str(code).zfill(6))
+        # 2차: FDR
+        if FDR_OK and code_str:
+            d = fdr.DataReader(code_str)
             if d is not None and not d.empty:
                 return code, name, int(d.iloc[-1]["Close"])
+        # 3차: 종목명으로 코드 찾기
+        if PYKRX_OK and not code_str:
+            today = now_kst().strftime("%Y%m%d")
+            tickers = stock.get_market_ticker_list(today)
+            for t in tickers:
+                try:
+                    if stock.get_market_ticker_name(t) == name:
+                        p = stock.get_market_ohlcv(today, today, t)
+                        if not p.empty:
+                            return t, name, int(p.iloc[-1]["종가"])
+                except Exception:
+                    continue
     except Exception:
         pass
     return code, name, 0
@@ -708,11 +735,21 @@ def render_tab1_market(df):
 def render_tab2_stocks(df, auth):
     section_title("🎯 AI & Quant 추천 종목")
 
-    # ── 뷰모드 + 필터 ──
+    # ── 뷰모드 + 필터 + CSV 다운로드 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
         view_mode = ui.toggle(["📋 테이블", "🃏 칸반"], value="📋 테이블")
         route_filter = ui.select(["전체", "ATTACK", "ARMED", "WAIT", "NEUTRAL"], value="전체", label="상태").classes("min-w-[120px]")
         sort_mode = ui.toggle(["🔢 점수순", "🚦 상태순"], value="🔢 점수순")
+
+        # CSV 다운로드 (Prime/Admin만)
+        if auth in ("prime", "admin"):
+            async def download_csv():
+                csv_path = os.path.join(DATA_DIR, "recommend_latest.csv")
+                if os.path.exists(csv_path):
+                    ui.download(csv_path, f"ldy_recommend_{store.data_ts}.csv")
+                else:
+                    ui.notify("CSV 파일 없음", type="warning")
+            ui.button("📥 CSV 다운로드", on_click=download_csv).props("flat dense").classes("text-green-400 ml-auto")
 
     table_area = ui.column().classes("w-full")
     detail_area = ui.column().classes("w-full mt-4")
@@ -969,16 +1006,16 @@ def render_tab3_portfolio(df, auth):
             pct = (curr - avg) / avg * 100 if avg > 0 and curr > 0 else 0
 
             # AI 점수 매핑
-            match = df[df['종목코드'] == str(code).zfill(6)] if not df.empty else pd.DataFrame()
-            if match.empty:
-                match = df[df['종목명'] == name] if not df.empty else pd.DataFrame()
+            match = df[df['종목코드'] == str(code).zfill(6)] if not df.empty and '종목코드' in df.columns else pd.DataFrame()
+            if match.empty and not df.empty and '종목명' in df.columns:
+                match = df[df['종목명'] == name]
             score = float(match.iloc[0].get('DISPLAY_SCORE', 0)) if not match.empty else 0
 
-            if score >= 80: advice, acolor = "💪강력홀딩", "green"
-            elif score >= 60: advice, acolor = "👌보유(양호)", "blue"
-            elif score <= 40 and score > 0: advice, acolor = "⚠️교체권장", "red"
-            elif score == 0: advice, acolor = "❓정보없음", "gray"
-            else: advice, acolor = "👀관망", "orange"
+            if score >= 80: advice, acolor = "💪강력홀딩", "#10B981"
+            elif score >= 60: advice, acolor = "👌보유(양호)", "#3B82F6"
+            elif score <= 40 and score > 0: advice, acolor = "⚠️교체권장", "#EF4444"
+            elif score == 0: advice, acolor = "❓시스템 외 종목", "#9CA3AF"
+            else: advice, acolor = "👀관망", "#F59E0B"
 
             pf_rows.append({"종목명": name, "현재가": curr, "평단가": avg, "수량": qty,
                             "매입금": buy_amt, "평가금": eval_amt, "수익률": pct,
