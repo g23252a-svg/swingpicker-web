@@ -1620,6 +1620,7 @@ def plot_interactive_chart(
     stop=None,
     target1=None,
     target2=None,
+    target_atr=None,
     vwap=None,
     show_bb: bool = True,
     show_kc: bool = False,
@@ -1728,7 +1729,9 @@ def plot_interactive_chart(
     # 🔥 [중요] 여기서 float()를 쓰지 말고 변수(entry, stop 등)를 그대로 넘겨야 합니다!
     _add_line(entry, "#2962FF", "Entry", "solid")
     _add_line(stop, "#FF3B30", "Stop Loss")
-    _add_line(target1, "#00E676", "Target 1")
+    _add_line(target1, "#00E676", "T1 목표")
+    _add_line(target2, "#FFD600", "T2 목표", "dashdot")
+    _add_line(target_atr, "rgba(150,150,150,0.5)", "ATR 참고", "dot")
 
     # 7. 거래량
     current_row = 2
@@ -1812,10 +1815,12 @@ def render_kanban_board(df):
                 
                 price_html = ""
                 if buy_p > 0:
+                    t1_p = int(pd.to_numeric(str(row.get('추천매도가1', 0)).replace(',', ''), errors='coerce') or 0)
+                    t1_html = f" <span style='color:#10B981;opacity:0.8;'>🟢 {t1_p:,}</span>" if t1_p > 0 else ""
                     price_html = f"""
                     <div class='kanban-price'>
                         🎯 <b>{buy_p:,}</b> 
-                        <span style='color:#EF4444;opacity:0.8;'>🛡️ {stop_p:,}</span>
+                        <span style='color:#EF4444;opacity:0.8;'>🛡️ {stop_p:,}</span>{t1_html}
                     </div>"""
                 
                 rr_html = ""
@@ -3520,7 +3525,7 @@ with tab2:
         "종가": st.column_config.TextColumn("현재가", width="small"),
         "추천매수가": st.column_config.TextColumn("매수", width="small"),
         "손절가": st.column_config.TextColumn("손절", width="small"),
-        "추천매도가1": st.column_config.TextColumn("목표", width="small"),
+        "추천매도가1": st.column_config.TextColumn("T1목표", width="small"),
         "제외사유": st.column_config.TextColumn("제외사유", width="small")
     }
 
@@ -3622,7 +3627,7 @@ with tab2:
                 code = str(sel_row['종목코드']).zfill(6)
                 df_chart = get_stock_chart_data(code)
                 if df_chart is not None:
-                    fig_candle = plot_interactive_chart(df_chart, code, selected_name, entry=sel_row.get('추천매수가'), stop=sel_row.get('손절가'), target1=sel_row.get('추천매도가1'), show_vp=True)
+                    fig_candle = plot_interactive_chart(df_chart, code, selected_name, entry=sel_row.get('추천매수가'), stop=sel_row.get('손절가'), target1=sel_row.get('추천매도가1'), target2=sel_row.get('추천매도가2'), target_atr=sel_row.get('TARGET_ATR'), show_vp=True)
                     st.plotly_chart(fig_candle, use_container_width=True)
             with d2:
                 try:
@@ -3641,6 +3646,86 @@ with tab2:
                     </div>
                 </div>
             """, unsafe_allow_html=True)
+
+            # ──────────────────────────────────────────
+            # [v12.0] 과학적 목표가 분석 카드
+            # ──────────────────────────────────────────
+            _close = nz_num(sel_row.get("종가", 0))
+            _entry = nz_num(sel_row.get("추천매수가", 0))
+            _stop  = nz_num(sel_row.get("손절가", 0))
+            _t1    = nz_num(sel_row.get("추천매도가1", 0))
+            _t2    = nz_num(sel_row.get("추천매도가2", 0))
+            _t_atr = nz_num(sel_row.get("TARGET_ATR", 0))
+
+            if _close > 0 and _entry > 0 and _stop > 0 and _t1 > 0:
+                st.markdown("##### 🎯 과학적 목표가 분석 (Multi-Method Cluster)")
+
+                # 손익비 계산
+                risk = _entry - _stop
+                rr_t1 = (_t1 - _entry) / risk if risk > 0 else 0
+                rr_t2 = (_t2 - _entry) / risk if risk > 0 and _t2 > 0 else 0
+
+                tc1, tc2, tc3, tc4 = st.columns(4)
+                tc1.metric("🔴 손절가", f"{int(_stop):,}", 
+                          delta=f"{(_stop/_close - 1)*100:+.1f}%", delta_color="inverse")
+                tc2.metric("🟢 T1 목표 (보수적)", f"{int(_t1):,}", 
+                          delta=f"+{(_t1/_close - 1)*100:.1f}%  (RR {rr_t1:.1f}:1)")
+                if _t2 > 0 and _t2 != _t1:
+                    tc3.metric("🟡 T2 목표 (공격적)", f"{int(_t2):,}", 
+                              delta=f"+{(_t2/_close - 1)*100:.1f}%  (RR {rr_t2:.1f}:1)")
+                else:
+                    tc3.metric("🟡 T2 목표", "—", delta="T1과 동일")
+                if _t_atr > 0 and _t_atr != _t1:
+                    tc4.metric("⚪ ATR 참고", f"{int(_t_atr):,}", 
+                              delta=f"+{(_t_atr/_close - 1)*100:.1f}%")
+                else:
+                    tc4.metric("⚪ ATR 참고", "—")
+
+                # 시각적 가격 바 (손절 ~ ATR 범위를 시각화)
+                bar_prices = [("손절", _stop, "#FF3B30"), ("현재가", _close, "#FFFFFF"), 
+                             ("매수", _entry, "#2962FF")]
+                if _t1 > 0: bar_prices.append(("T1", _t1, "#00E676"))
+                if _t2 > 0 and _t2 != _t1: bar_prices.append(("T2", _t2, "#FFD600"))
+                if _t_atr > 0 and _t_atr != _t1 and _t_atr != _t2: bar_prices.append(("ATR", _t_atr, "#888888"))
+                bar_prices.sort(key=lambda x: x[1])
+
+                price_min = bar_prices[0][1] * 0.98
+                price_max = bar_prices[-1][1] * 1.02
+                price_range = price_max - price_min
+                if price_range > 0:
+                    bar_html = '<div style="position:relative; height:50px; background:linear-gradient(90deg, rgba(255,59,48,0.15) 0%, rgba(255,59,48,0.05) 30%, rgba(0,230,118,0.05) 70%, rgba(0,230,118,0.15) 100%); border-radius:8px; margin:8px 0 16px 0;">'
+                    for label, price, color in bar_prices:
+                        pct = (price - price_min) / price_range * 100
+                        pct = max(2, min(pct, 98))
+                        is_current = label == "현재가"
+                        dot_size = "14px" if is_current else "10px"
+                        z_idx = "10" if is_current else "5"
+                        border = "2px solid #FFF" if is_current else "none"
+                        bar_html += f'''<div style="position:absolute; left:{pct}%; top:50%; transform:translate(-50%,-50%); z-index:{z_idx};">
+                            <div style="width:{dot_size}; height:{dot_size}; background:{color}; border-radius:50%; border:{border}; margin:0 auto;"></div>
+                            <div style="font-size:10px; color:{color}; text-align:center; white-space:nowrap; margin-top:2px; font-weight:{"bold" if is_current else "normal"};">{label}<br>{int(price):,}</div>
+                        </div>'''
+                    bar_html += '</div>'
+                    st.markdown(bar_html, unsafe_allow_html=True)
+
+                # 익절 전략 안내
+                if risk > 0 and _t1 > 0:
+                    with st.expander("📋 단계별 익절 전략 안내", expanded=False):
+                        strategy_md = f"""
+| 단계 | 가격 | 현재가 대비 | 행동 |
+|:---:|:---:|:---:|:---|
+| 🔴 손절 | {int(_stop):,}원 | {(_stop/_close - 1)*100:+.1f}% | 전량 매도 (비협상) |
+| 🟢 **T1 도달** | **{int(_t1):,}원** | **+{(_t1/_close - 1)*100:.1f}%** | **40% 1차 익절** (클러스터 수렴 저항) |"""
+                        if _t2 > 0 and _t2 != _t1:
+                            strategy_md += f"""
+| 🟡 **T2 도달** | **{int(_t2):,}원** | **+{(_t2/_close - 1)*100:.1f}%** | **30% 2차 익절** (상위 클러스터) |"""
+                        strategy_md += f"""
+| ⚪ 잔여 | T2 이상 | — | 나머지 30% 트레일링 스탑 (고점 -8~10%) |
+
+> 💡 T1은 볼린저밴드·SuperTrend·피보나치 등 **다수 지표가 수렴하는 기술적 저항대**입니다.  
+> T2는 피보나치 확장·섹터 상위 성과 등 **더 높은 목표** 클러스터입니다.
+"""
+                        st.markdown(strategy_md)
 
             st.markdown("---")
             st.subheader("🧱 매물대 및 저항 데이터 분석 (Volume Profile)")
