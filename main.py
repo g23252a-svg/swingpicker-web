@@ -1221,25 +1221,26 @@ def render_tab7_performance():
     section_title("📈 시스템 성과 추세")
 
     pattern = os.path.join(DATA_DIR, "rank_validation_summary_*.csv")
-    files = sorted([f for f in glob.glob(pattern) if "latest" not in f])
+    all_files = sorted(glob.glob(pattern))
 
-    if not files:
-        ui.label("축적된 성과 데이터가 부족합니다.").classes("text-gray-400 p-8")
-        return
-
+    # 날짜별 파일 + latest 파일 모두 사용
     dfs = []
-    for f in files:
+    for f in all_files:
         try:
             base = os.path.basename(f)
             ds = base.replace("rank_validation_summary_", "").replace(".csv", "")
             d = pd.read_csv(f)
-            d['Date'] = pd.to_datetime(ds, format="%Y%m%d")
+            if "latest" in ds:
+                # latest 파일은 오늘 날짜로 처리
+                d['Date'] = pd.to_datetime(now_kst().strftime("%Y-%m-%d"))
+            else:
+                d['Date'] = pd.to_datetime(ds, format="%Y%m%d")
             dfs.append(d)
         except Exception:
             pass
 
     if not dfs:
-        ui.label("데이터 파싱 오류").classes("text-gray-400"); return
+        ui.label("축적된 성과 데이터가 부족합니다.").classes("text-gray-400 p-8"); return
 
     history = pd.concat(dfs, ignore_index=True).sort_values('Date')
 
