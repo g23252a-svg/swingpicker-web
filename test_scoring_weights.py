@@ -229,6 +229,44 @@ def run_tests():
     w_s1, w_t1, w_a1 = _calc_ml_weight(ml_one, "NORMAL")
     test("n=1 → 크래시 없음 + 합=1", np.isclose(w_s1 + w_t1 + w_a1, 1.0))
 
+    # ── 17. 섹터 이중 보상 방지 ──
+    print("\n📐 17. 섹터 이중 보상 방지")
+    from scoring_engine import calculate_structural_score, calculate_timing_score
+
+    base_row = {
+        "RSI14": 55, "MFI14": 50, "이격도": 2.0, "BB_BW": 0.1,
+        "ret_5d_%": 3.0, "MACD_Slope_PCT": 0.01, "Range_Pos": 0.7,
+        "Vol_Quality": 1.2, "Above_MA20": 1, "Low_Trend_PCT": 1.0,
+        "RAW_TRIGGER_SCORE": 60, "TTM_SQUEEZE": 0, "SUPERTREND_DIR": 0,
+        "RES_RATIO": 0, "RES_RATIO_NEAR": 0, "POC_GAP": 0, "IS_ABOVE_POC": 1,
+        "gap_pct": 0, "SECTOR_RANK": 99,  # 섹터 하위
+    }
+    top_sector_row = {**base_row, "SECTOR_RANK": 1}  # 섹터 상위
+
+    # STRUCT는 SECTOR_RANK 변경에 무관해야 함
+    struct_base = calculate_structural_score(base_row)
+    struct_top = calculate_structural_score(top_sector_row)
+    test("STRUCT: SECTOR_RANK 변경 무관",
+         np.isclose(struct_base, struct_top),
+         f"base={struct_base:.1f}, top={struct_top:.1f}")
+
+    # TIMING은 SECTOR_RANK에 따라 변해야 함
+    timing_base = calculate_timing_score(base_row)
+    timing_top = calculate_timing_score(top_sector_row)
+    test("TIMING: SECTOR_RANK=1 → 보너스 +8",
+         timing_top > timing_base,
+         f"base={timing_base:.1f}, top={timing_top:.1f}, diff={timing_top-timing_base:.1f}")
+    test("TIMING: 보너스 = 8점",
+         np.isclose(timing_top - timing_base, 8.0, atol=0.5),
+         f"diff={timing_top - timing_base:.1f}")
+
+    # SECTOR_RANK=5 → 보너스 +4
+    mid_sector_row = {**base_row, "SECTOR_RANK": 5}
+    timing_mid = calculate_timing_score(mid_sector_row)
+    test("TIMING: SECTOR_RANK=5 → 보너스 +4",
+         np.isclose(timing_mid - timing_base, 4.0, atol=0.5),
+         f"diff={timing_mid - timing_base:.1f}")
+
     # ── 결과 ──
     print("\n" + "=" * 60)
     total = PASS + FAIL
