@@ -64,6 +64,12 @@ class CollectorConfig:
     # ── 섹터 ──
     w_sector: float = 0.05
 
+    # ── Multi-Timeframe (v15) ──
+    mtf_struct_bonus: float = 10.0     # 주봉+월봉 모두 상승 시 STRUCT 가점
+    mtf_struct_penalty: float = 15.0   # 주봉+월봉 모두 하락 시 STRUCT 감점
+    mtf_min_weekly_bars: int = 26      # 주봉 최소 바 수 (6개월)
+    mtf_min_monthly_bars: int = 12     # 월봉 최소 바 수 (1년)
+
     # ── 매크로 환경 ──
     macro_fx_caution: float = 1400.0
     macro_fx_critical: float = 1420.0
@@ -103,3 +109,8 @@ class CollectorConfig:
 
 # ── 싱글턴 기본 인스턴스 ──
 DEFAULT_CONFIG = CollectorConfig()
+
+# ── BacktestConfig 참조 (auto_backtest.py SSOT) ──
+# from auto_backtest import BacktestConfig, DEFAULT_BT_CONFIG
+# 순환 방지: auto_backtest가 collector_config를 import하므로,
+# 여기서는 참조 주석만 남김. 실제 사용은 auto_backtest에서 직접.
