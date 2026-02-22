@@ -37,6 +37,11 @@ from time_utils import now_kst, now_utc, KST
 from concurrent.futures import ThreadPoolExecutor, as_completed
 # 👇👇 [수정] 클래스 정의를 지우고, schema.py에서 가져오도록 변경 👇👇
 from schema import RouteState
+import stop_logic as SL
+from stop_logic import (
+    calc_stop_price, calc_rr_multiplier, sanitize_ohlcv, adjust_by_flow,
+    check_entry_filter, conservative_exit_price, conservative_tp_price,
+)
 
 
 
@@ -48,34 +53,52 @@ except ImportError:
     BS4_OK = False
     print("⚠️ BeautifulSoup4가 설치되지 않았습니다. (pip install beautifulsoup4)")
 
-# ▼▼▼ [여기] 아래 코드를 삽입하세요 (secrets.toml 강제 로드) ▼▼▼
+# ▼▼▼ [여기] secrets.toml 강제 로드 (TOML 파서 사용) ▼▼▼
 def load_secrets_to_env():
     """
-    Streamlit 없이 실행될 때 .streamlit/secrets.toml 파일을 읽어 
-    환경변수(os.environ)에 로드하는 함수
+    Streamlit 없이 실행될 때 .streamlit/secrets.toml 파일을 읽어
+    환경변수(os.environ)에 로드. [section] 구조도 정상 파싱.
     """
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         secrets_path = os.path.join(base_dir, ".streamlit", "secrets.toml")
-        
-        if os.path.exists(secrets_path):
-            with open(secrets_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    # 주석이나 빈 줄 건너뛰기
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    # [Section] 헤더 건너뛰기
-                    if line.startswith("[") and line.endswith("]"):
-                        continue
-                        
-                    key, val = line.split("=", 1)
-                    key = key.strip()
-                    val = val.strip().strip('"').strip("'")
-                    
-                    if key and val:
-                        os.environ[key] = val
-                        # print(f"🔑 Key Loaded: {key}") 
+
+        if not os.path.exists(secrets_path):
+            return
+
+        # TOML 파서: py3.11+ tomllib, 아니면 tomli 폴백
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib
+            except ImportError:
+                # 폴백: 기존 줄 단위 파서 (최후의 수단)
+                with open(secrets_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#") or line.startswith("[") or "=" not in line:
+                            continue
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip('"').strip("'")
+                        if key and val:
+                            os.environ[key] = val
+                return
+
+        with open(secrets_path, "rb") as f:
+            data = tomllib.load(f)
+
+        # 최상위 키 (예: GEMINI_API_KEY = "...")
+        for key, val in data.items():
+            if isinstance(val, str):
+                os.environ[key] = val
+            elif isinstance(val, dict):
+                # 섹션 내부 키 (예: [telegram] TG_TOKEN = "...")
+                for sub_key, sub_val in val.items():
+                    if isinstance(sub_val, str):
+                        os.environ[sub_key] = sub_val
+
     except Exception as e:
         print(f"⚠️ Secrets 로드 실패: {e}")
 
@@ -360,24 +383,9 @@ def check_candle_pattern(o: pd.Series, h: pd.Series, l: pd.Series, c: pd.Series)
 
     return patterns
 
-def round_to_tick(price: float) -> int:
-    if price < 2000: t = 1
-    elif price < 5000: t = 5
-    elif price < 20000: t = 10
-    elif price < 50000: t = 50
-    elif price < 200000: t = 100
-    elif price < 500000: t = 500
-    else: t = 1000
-    return int(round(price / t) * t)
-
-def tick_size(price: float) -> int:
-    if price < 2000: return 1
-    if price < 5000: return 5
-    if price < 20000: return 10
-    if price < 50000: return 50
-    if price < 200000: return 100
-    if price < 500000: return 500
-    return 1000
+# [v10.5] tick 유틸 — stop_logic.py에서 통합 관리 (중복 제거)
+# collector 내부에서 기존 이름으로 계속 사용 가능
+from stop_logic import tick_size, round_to_tick, floor_to_tick, ceil_to_tick
 
 def add_sector_momentum(df: pd.DataFrame, group_col: str = "업종_대분류") -> Tuple[pd.DataFrame, pd.Series]:
     """
@@ -537,6 +545,10 @@ def safe_ohlcv_by_date(start_ymd: str, end_ymd: str, code: str) -> Optional[pd.D
             df = df.rename(columns={
                 "Open": "시가", "High": "고가", "Low": "저가", "Close": "종가", "Volume": "거래량"
             })
+
+    # [v10.5] 어느 경로로 들어와도 무조건 정화 — -100% 데이터 지뢰 원천 차단
+    if df is not None and not getattr(df, "empty", True):
+        df = sanitize_ohlcv(df)
 
     return df
 
@@ -745,6 +757,7 @@ def _list_snapshot_days(out_dir: str) -> List[str]:
     return sorted(list(set(days)))
 
 def _load_close_map(out_dir: str, ymd: str) -> Dict[str, float]:
+    """하위 호환: 종가 맵만 리턴"""
     path = os.path.join(out_dir, f"price_snapshot_{ymd}.csv")
     if not os.path.exists(path):
         return {}
@@ -752,6 +765,32 @@ def _load_close_map(out_dir: str, ymd: str) -> Dict[str, float]:
     df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
     close = pd.to_numeric(df["종가"], errors="coerce")
     return dict(zip(df["종목코드"], close))
+
+
+def _load_price_maps(out_dir: str, ymd: str) -> Dict[str, Dict[str, float]]:
+    """
+    [v10.2] 종가 + 저가 + 시가 + 고가 맵을 한번에 리턴
+
+    Returns:
+        {"close": {code: val}, "low": {code: val}, "open": {code: val}, "high": {code: val}}
+        저가/시가/고가 컬럼이 없으면 해당 키는 빈 dict
+    """
+    path = os.path.join(out_dir, f"price_snapshot_{ymd}.csv")
+    if not os.path.exists(path):
+        return {"close": {}, "low": {}, "open": {}, "high": {}}
+    df = pd.read_csv(path, dtype={"종목코드": str})
+    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+
+    result = {}
+    col_map = {"close": "종가", "low": "저가", "open": "시가", "high": "고가"}
+    for key, col in col_map.items():
+        if col in df.columns:
+            vals = pd.to_numeric(df[col], errors="coerce")
+            result[key] = dict(zip(df["종목코드"], vals))
+        else:
+            result[key] = {}
+
+    return result
 
 def _next_trade_day(trade_days: List[str], ymd: str, offset: int) -> Optional[str]:
     try:
@@ -831,9 +870,13 @@ def make_rank_validation_report(
             # 필수 숫자
             df["추천매수가"] = pd.to_numeric(df.get("추천매수가", np.nan), errors="coerce")
             df["종가"] = pd.to_numeric(df.get("종가", np.nan), errors="coerce")
+            df["손절가"] = pd.to_numeric(df.get("손절가", np.nan), errors="coerce")
+            df["추천매도가1"] = pd.to_numeric(df.get("추천매도가1", np.nan), errors="coerce")  # [v10.5] 익절 체결용
 
             # 추천매수가가 없으면 종가로 대체(최소한 검증은 되게)
             entry_px = df["추천매수가"].where(df["추천매수가"].notna(), df["종가"])
+            stop_px = df["손절가"]
+            target_px = df["추천매도가1"]  # [v10.5] 목표가 시리즈
 
             for h in horizons:
                 future_ymd = _next_trade_day(trade_days, rec_ymd, h)
@@ -845,13 +888,14 @@ def make_rank_validation_report(
                     continue
 
                 # MDD 계산 위해 중간 스냅샷도 로드(TopK만이니 부담 적음)
+                # [v10.3] _load_price_maps로 종가+저가+시가+고가 전부 로드
                 mid_days = []
                 for k in range(1, h + 1):
                     dd = _next_trade_day(trade_days, rec_ymd, k)
                     if dd:
                         mid_days.append(dd)
 
-                mid_close_maps = [(_d, _load_close_map(out_dir, _d)) for _d in mid_days]
+                mid_price_maps = [(_d, _load_price_maps(out_dir, _d)) for _d in mid_days]
 
                 for method in methods:
                     if method not in df.columns:
@@ -870,37 +914,109 @@ def make_rank_validation_report(
 
                         # epx를 float로 안전하게
                         epx = pd.to_numeric(entry_px.loc[pick.index], errors="coerce").values.astype(float)
+                        spx = pd.to_numeric(stop_px.loc[pick.index], errors="coerce").values.astype(float)
+                        tpx = pd.to_numeric(target_px.loc[pick.index], errors="coerce").values.astype(float)  # [v10.5]
 
                         # H일 후 종가
                         fut_close = np.array([close_map_future.get(c, np.nan) for c in codes], dtype=float)
+                        fut_close[fut_close <= 0] = np.nan
 
-                        # ✅ ret safe-divide (inf 방지)
+                        # 기본 ret (H일 후 종가 기준 — TP/SL 미적용)
                         ret = np.full_like(fut_close, np.nan, dtype=float)
                         ok_ret = np.isfinite(fut_close) & np.isfinite(epx) & (epx > 0)
                         ret[ok_ret] = (fut_close[ok_ret] / epx[ok_ret] - 1.0) * 100.0
 
-                        # MDD(최저 종가 기반, 추천매수가 대비)
+                        # ── [v10.5] TP(익절) + SL(손절) 장중 감지 ──
                         min_close = np.full_like(fut_close, np.nan)
-                        for _d, cmap in mid_close_maps:
-                            arr = np.array([cmap.get(c, np.nan) for c in codes], dtype=float)
+                        stop_hit = np.zeros(len(codes), dtype=bool)
+                        tp_hit = np.zeros(len(codes), dtype=bool)      # [v10.5]
+                        exit_prices = np.full(len(codes), np.nan)
+                        n_extreme = 0
+
+                        for _d, pmaps in mid_price_maps:
+                            arr_close = np.array([pmaps["close"].get(c, np.nan) for c in codes], dtype=float)
+                            arr_low = np.array([pmaps["low"].get(c, np.nan) for c in codes], dtype=float)
+                            arr_open = np.array([pmaps["open"].get(c, np.nan) for c in codes], dtype=float)
+                            arr_high = np.array([pmaps["high"].get(c, np.nan) for c in codes], dtype=float)
+
+                            arr_close[arr_close <= 0] = np.nan
+                            arr_low[arr_low <= 0] = np.nan
+                            arr_open[arr_open <= 0] = np.nan
+                            arr_high[arr_high <= 0] = np.nan
+
+                            from trade_plan import TradePlan, ExecRule, exec_bar as _exec_bar
+                            _exec_rule = ExecRule()
+
+                            for j in range(len(codes)):
+                                if stop_hit[j] or tp_hit[j]:
+                                    continue
+
+                                open_j = float(arr_open[j]) if np.isfinite(arr_open[j]) else 0.0
+                                low_j = float(arr_low[j]) if np.isfinite(arr_low[j]) else float(arr_close[j]) if np.isfinite(arr_close[j]) else 0.0
+                                high_j = float(arr_high[j]) if np.isfinite(arr_high[j]) else 0.0
+                                close_j = float(arr_close[j]) if np.isfinite(arr_close[j]) else 0.0
+
+                                # SSOT 체결: exec_bar 한 줄로 SL/TP 모두 처리
+                                _plan_j = TradePlan(
+                                    entry=float(epx[j]) if np.isfinite(epx[j]) else 0.0,
+                                    stop=float(spx[j]) if np.isfinite(spx[j]) else 0.0,
+                                    tp1=float(tpx[j]) if np.isfinite(tpx[j]) else 0.0,
+                                    exec_rule_id=_exec_rule.rule_id,
+                                )
+                                bar_result = _exec_bar(
+                                    _plan_j,
+                                    bar_open=open_j if open_j > 0 else low_j,
+                                    bar_high=high_j,
+                                    bar_low=low_j,
+                                    bar_close=close_j,
+                                    rule=_exec_rule,
+                                )
+
+                                if bar_result.action == "stop_hit":
+                                    stop_hit[j] = True
+                                    exit_prices[j] = bar_result.fill_price
+                                    if np.isfinite(epx[j]) and epx[j] > 0:
+                                        ret[j] = bar_result.return_pct
+                                elif bar_result.action == "tp_hit":
+                                    tp_hit[j] = True
+                                    exit_prices[j] = bar_result.fill_price
+                                    if np.isfinite(epx[j]) and epx[j] > 0:
+                                        ret[j] = bar_result.return_pct
+
+                            # MDD 트래킹: 청산된 종목은 exit_px로 고정
+                            arr_for_mdd = np.where(np.isfinite(arr_low), arr_low, arr_close)
+                            for j in range(len(codes)):
+                                if (stop_hit[j] or tp_hit[j]) and np.isfinite(exit_prices[j]):
+                                    arr_for_mdd[j] = exit_prices[j]
+
                             if np.isnan(min_close).all():
-                                min_close = arr
+                                min_close = arr_for_mdd
                             else:
-                                min_close = np.nanmin(np.vstack([min_close, arr]), axis=0)
+                                min_close = np.nanmin(np.vstack([min_close, arr_for_mdd]), axis=0)
 
                         # ✅ mdd safe-divide (inf 방지)
                         mdd = np.full_like(fut_close, np.nan, dtype=float)
                         ok_mdd = np.isfinite(min_close) & np.isfinite(epx) & (epx > 0)
                         mdd[ok_mdd] = (min_close[ok_mdd] / epx[ok_mdd] - 1.0) * 100.0
 
+                        # [v10.3] 극단 이벤트 분리: -30% 이하를 NaN으로 덮지 않고 별도 카운트
+                        extreme_mask = mdd < -30.0
+                        n_extreme = int(np.sum(extreme_mask & np.isfinite(mdd)))
+
                         # ✅ (D-2) n 정의 + 샘플 0이면 skip
-                        valid = np.isfinite(ret) & np.isfinite(mdd)
+                        valid_ret = np.isfinite(ret)
+                        valid = valid_ret & np.isfinite(mdd)
                         n = int(valid.sum())
                         if n == 0:
                             continue
 
                         r = ret[valid]
                         md = mdd[valid]
+
+                        # [v10.5] hit rate는 ret 유효 기준 (mdd NaN이어도 체결은 된 경우 포함)
+                        n_ret = int(valid_ret.sum())
+                        stop_hit_rate = float(stop_hit[valid_ret].mean() * 100) if n_ret > 0 else 0.0
+                        tp_hit_rate = float(tp_hit[valid_ret].mean() * 100) if n_ret > 0 else 0.0
 
                         rows.append({
                             "추천일": rec_ymd,
@@ -916,6 +1032,14 @@ def make_rank_validation_report(
                             "HIT_5%_%": round(float((r >= 5).mean() * 100), 1),
                             "AVG_MDD_%": round(float(np.nanmean(md)), 2),
                             "WORST_MDD_%": round(float(np.nanmin(md)), 2),
+                            "STOP_HIT_RATE_%": round(stop_hit_rate, 1),
+                            "TP_HIT_RATE_%": round(tp_hit_rate, 1),
+                            "VAR_95_%": round(float(np.sort(r)[:max(1, int(len(r)*0.05))].mean()), 2),
+                            "PL_RATIO": round(float(r[r>0].mean() / abs(r[r<0].mean())) if (r<0).any() and (r>0).any() else 0.0, 2),
+                            "MAX_CONSEC_LOSS": int(max((sum(1 for _ in g) for k, g in __import__('itertools').groupby(r < 0) if k), default=0)),
+                            # [v10.3] 극단 이벤트 분리 추적 + 경고 플래그
+                            "N_EXTREME": n_extreme,
+                            "RISK_FLAG": "🔴" if (float(np.nanmin(md)) < -10.0 or n_extreme > 0) else ("🟡" if float(np.nanmin(md)) < -6.0 else "🟢"),
                         })
 
         if not rows:
@@ -954,6 +1078,35 @@ def make_rank_validation_report(
 
         log(f"📊 Rank Validation 저장 완료 → {detail_path}")
         log(f"📊 Rank Validation Summary 저장 완료 → {summ_path}")
+
+        # ── [v10.5] 워크포워드 리스크 KPI 자동 리포트 ──
+        try:
+            from stop_logic import rolling_risk_kpi
+            # RANK_SCORE Top5, H=3 기준으로 워크포워드 분석
+            rk_filter = detail[
+                (detail["METHOD"] == "RANK_SCORE") &
+                (detail["TOPK"] == 5) &
+                (detail["H(영업일)"] == 3)
+            ]
+            if len(rk_filter) >= 5:
+                dates_arr = rk_filter["추천일"].values
+                rets_arr = rk_filter["AVG_RET_%"].values
+                roll_df = rolling_risk_kpi(dates_arr, rets_arr, window_days=10)
+                if not roll_df.empty:
+                    roll_path = os.path.join(out_dir, f"risk_kpi_rolling_{asof_ymd}.csv")
+                    roll_latest = os.path.join(out_dir, "risk_kpi_rolling_latest.csv")
+                    roll_df.to_csv(roll_path, index=False, encoding=UTF8)
+                    roll_df.to_csv(roll_latest, index=False, encoding=UTF8)
+                    # 경고 플래그 요약
+                    n_red = (roll_df["stability_flag"] == "🔴").sum()
+                    n_yellow = (roll_df["stability_flag"] == "🟡").sum()
+                    n_green = (roll_df["stability_flag"] == "🟢").sum()
+                    log(f"📊 워크포워드 KPI → {roll_path} "
+                        f"(🟢{n_green} 🟡{n_yellow} 🔴{n_red})")
+                    if n_red > 0:
+                        log(f"⚠️ 🔴 위험 구간 {n_red}개 감지 → 손절 설계 재점검 필요!")
+        except Exception as e:
+            log(f"⚠️ 워크포워드 KPI 생성 실패: {e}")
 
     except Exception as e:
         log(f"⚠️ rank validation 실패: {e}")
@@ -1626,6 +1779,9 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
             if df is None or df.empty:
                 continue
 
+            # ⑥ 스냅샷에도 sanitize 강제 — 0값/이상치 지뢰 방지
+            df = sanitize_ohlcv(df)
+
             df = df.reset_index()
 
             # 코드 컬럼 찾기
@@ -1643,7 +1799,12 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
             df["시장"] = m
             df["종목명"] = df["종목코드"].map(name_map).fillna("")
 
-            frames.append(df[["종목코드", "종목명", "시장", "종가"]])
+            # [v10.2] 시가/저가/고가도 저장 → 백테스트 체결 현실성 확보
+            save_cols = ["종목코드", "종목명", "시장", "종가"]
+            for extra in ["시가", "저가", "고가"]:
+                if extra in df.columns:
+                    save_cols.append(extra)
+            frames.append(df[save_cols])
         except Exception as e:
             log(f"⚠️ 가격 스냅샷({m}) 수집 실패: {e}")
             continue
@@ -2226,7 +2387,7 @@ def send_telegram_auto(
             code = row['종목코드']
             route = row.get('ROUTE', '전략없음')
             buy = row.get('추천매수가', np.nan)
-            score = row.get('LDY_SCORE', 0)
+            score = row.get('DISPLAY_SCORE', row.get('FINAL_SCORE', row.get('LDY_SCORE', 0)))
             comment = row.get('AI_COMMENT', '')
             news_reason = row.get('NEWS_REASON', '') # 추가됨
 
@@ -2284,28 +2445,8 @@ def send_telegram_auto(
 
 # ------------------------------- 티커 분석 -------------------------------
 
-# ---------------- util (analyze_ticker 위로 올리기) ----------------
-def floor_to_tick_by(price: float, tick: int) -> int:
-    if price is None or not np.isfinite(price) or tick <= 0:
-        return 0
-    return int(math.floor(float(price) / tick) * tick)
-
-def ceil_to_tick_by(price: float, tick: int) -> int:
-    if price is None or not np.isfinite(price) or tick <= 0:
-        return 0
-    return int(math.ceil(float(price) / tick) * tick)
-
-def floor_to_tick(price: float) -> int:
-    if price is None or not np.isfinite(price):
-        return 0
-    tk = tick_size(float(price))
-    return floor_to_tick_by(float(price), tk)
-
-def ceil_to_tick(price: float) -> int:
-    if price is None or not np.isfinite(price):
-        return 0
-    tk = tick_size(float(price))
-    return ceil_to_tick_by(float(price), tk)
+# [v10.5] tick 유틸 중복 제거 — stop_logic.py에서 전부 통합 관리
+from stop_logic import floor_to_tick_by, ceil_to_tick_by
 
 # [v18.1] fetch_naver_news_headlines 중복 정의 제거 (1676줄에 원본 유지)
 # 현재 메인 흐름은 AsyncNewsFetcher(async_crawler.py)를 사용함
@@ -2546,11 +2687,25 @@ def analyze_ticker(
     code6 = str(t).zfill(6)
     if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
     ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
+    ohlcv = sanitize_ohlcv(ohlcv)                    # [v10.0] 0값/상폐/거래정지 제거
+    if len(ohlcv) < 60: return None                   # 정제 후 데이터 부족 체크
     
-    # --- [데이터 타입 강제 변환: 여기서부터 교체] ---
-    # 데이터프레임의 컬럼 자체를 숫자로 변환해야 매물대 함수가 작동합니다.
-    for col in ["종가", "고가", "저가", "거래량", "시가"]:
-        ohlcv[col] = pd.to_numeric(ohlcv[col], errors='coerce').fillna(0)
+    # --- [데이터 타입 강제 변환] ---
+    # [v10.1] 가격 컬럼과 거래량 컬럼을 분리 처리
+    #   가격(시가/고가/저가/종가): fillna(0) 하면 "0원 행"이 새로 생겨서
+    #   수익률 계산 시 -100%가 발생 → ffill 후 남은 NaN만 drop
+    #   거래량: 0이 자연스러운 값(거래 없음)이므로 fillna(0) 유지
+    price_cols = ["종가", "고가", "저가", "시가"]
+    for col in price_cols:
+        if col in ohlcv.columns:
+            ohlcv[col] = pd.to_numeric(ohlcv[col], errors='coerce')
+    ohlcv[price_cols] = ohlcv[price_cols].ffill()     # 전일 가격으로 채움
+    ohlcv = ohlcv.dropna(subset=["종가"])              # 종가 NaN은 제거 (최초 행 등)
+
+    if "거래량" in ohlcv.columns:
+        ohlcv["거래량"] = pd.to_numeric(ohlcv["거래량"], errors='coerce').fillna(0)
+
+    if len(ohlcv) < 60: return None                    # ffill/drop 후 재체크
     
     # 변수 할당 (기존 로직 호환용)
     c = ohlcv["종가"]
@@ -2703,62 +2858,35 @@ def analyze_ticker(
     prev_c = float(c.iloc[-2]) if len(c) > 1 else last_c
     ret_1d = (last_c / prev_c - 1.0) * 100
 
-    # 👇👇 [여기부터 교체] 기존 '# 매매가 산정' 및 '# Fix B' 로직 제거 후 붙여넣기 👇👇
-    # -------------------------------------------------------------
-    # [Fix v9.0] 진입가 보수화 + 조건부 손절 바닥(Method A)
-    # -------------------------------------------------------------
+    # ─── [v10.5] 극단 진입 필터 (상한가/VI/갭12%+ 방어) ───
+    gap_pct_val = float(ohlcv['gap_pct'].iloc[-1]) if 'gap_pct' in ohlcv.columns else 0.0
+    entry_filter = check_entry_filter(ret_1d=ret_1d, gap_pct=gap_pct_val)
+
+    # ─── [v10.0] 진입가 보수화 (기존 로직 유지) ───
     buy = last_c
-    
-    # 이격도(disp)가 아직 정의 안됐을 경우를 대비해 안전 계산
-    # (보통 위쪽 trigger logic에서 계산되지만, 안전하게 한 번 더 확인)
+
     if 'disp' not in locals():
         disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100
 
-    # 1. 과열 이격도 (20일선 괴리율 15% 이상) -> 5일선/20일선 지지 대기
     if disp >= 15.0:
-        buy = float(ma20.iloc[-1]) * 1.05 
-        
-    # 2. [핵심] 당일 급등주(7%↑) 추격 방지
+        buy = float(ma20.iloc[-1]) * 1.05
     elif ret_1d >= 7.0:
         mid_body = (float(o.iloc[-1]) + float(c.iloc[-1])) / 2
         support_level = float(l.iloc[-1]) + (float(h.iloc[-1]) - float(l.iloc[-1])) * 0.3
         buy = max(mid_body, support_level)
-    
-    # 3. 적당한 상승
     elif ret_1d >= 3.0:
         buy = last_c * 0.985
 
-    # 손절가/목표가 재계산
+    # ─── [SSOT] trade_plan.build_trade_plan으로 ENTRY/SL/TP 통합 산출 ───
     atr_val = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
-    
-    # 기본 손절: ATR 2.0배
-    stop = buy - (2.0 * atr_val) 
-    
-    # [New] 급등주 2차 방어선 (Method A: ATR 비율 기반 선택)
-    if ret_1d >= 7.0:
-        today_low = float(l.iloc[-1])
-        atr_pct = atr_val / today_low if today_low > 0 else 0.0
+    today_low_val = float(l.iloc[-1])
+    gap_pct_val = float(ohlcv['gap_pct'].iloc[-1]) if 'gap_pct' in ohlcv.columns else 0.0
 
-        # 변동성 크면(3.5% 이상) 숨 쉴 공간(0.8 ATR)을 주고,
-        # 변동성 작으면 3% 룰을 적용해 칼손절 유도
-        if atr_pct >= 0.035: 
-            smart_floor = today_low - (0.8 * atr_val)
-        else:
-            smart_floor = today_low * 0.97
-
-        # 기본 ATR 스탑이 바닥선보다 너무 깊게 내려가면(=손실이 너무 크면),
-        # 스마트 바닥선으로 끌어올려 강제 청산
-        if buy > smart_floor:
-            stop = max(stop, smart_floor)
-
-    # 구조적 지지선 보정 (Swing Low)
-    if (dist_to_swing < 8.0) and (swing_low_10 > 0): 
-        stop = max(stop, swing_low_10 * 0.97)
-
-    # [v8.5] 수급 데이터 조기 반영 — 메이저(외인+기관) 순매수 기반 보정
+    # 수급 데이터 준비
     major_net = 0
     frg_net_val = 0
     inst_net_val = 0
+    major_ratio = 0.0
     if inv_maps:
         frg_net_val = inv_maps.get("frg", {}).get(code6, 0)
         inst_net_val = inv_maps.get("inst", {}).get(code6, 0)
@@ -2766,30 +2894,32 @@ def analyze_ticker(
         tv_won = tv_eok * 1e8
         major_ratio = abs(major_net) / tv_won if tv_won > 0 else 0.0
 
-        if major_net > 0 and major_ratio >= 0.10:
-            # 메이저 순매수 비중 10%+ → 매수가 1% 상향 (적극 진입)
-            buy = min(buy * 1.01, last_c)
-        elif major_net < 0 and major_ratio >= 0.15:
-            # 메이저 순매도 비중 15%+ → 손절 0.5% 타이트하게
-            stop = max(stop, stop * 1.005)
+    from trade_plan import build_trade_plan as _build_plan
+    _plan = _build_plan(
+        buy=buy,
+        atr_val=atr_val,
+        last_c=last_c,
+        mcap=mcap,
+        tv_eok=tv_eok,
+        today_low=today_low_val,
+        gap_up_pct=gap_pct_val,
+        swing_low_10=swing_low_10 if 'swing_low_10' in locals() else None,
+        dist_to_swing=dist_to_swing if 'dist_to_swing' in locals() else None,
+        ret_1d=ret_1d,
+        gap_pct=gap_pct_val,
+        major_net=major_net,
+        major_ratio=major_ratio,
+    )
 
-    # [v8.5 Fix] stop >= buy 안전장치 — 최소 3% R:R 보장
-    if stop >= buy * 0.97:
-        stop = buy * 0.97
-        
-    # [v8.5] ATR% 기반 가변 R:R 배수 — 저가·저변동 종목은 타이트, 고변동 종목은 넓게
-    atr_pct_rr = (atr_val / buy * 100) if buy > 0 else 3.0
-    if atr_pct_rr < 2.0:
-        rr_mult = 2.0    # 저변동: 욕심 줄이고 빠르게 익절
-    elif atr_pct_rr < 4.0:
-        rr_mult = 2.5    # 표준
-    else:
-        rr_mult = 3.0    # 고변동: 충분한 스윙 여유
-
-    target = buy + (buy - stop) * rr_mult
-    
-    buy = round_to_tick(buy); stop = floor_to_tick(stop); target = ceil_to_tick(target)
-    # 👆👆 [여기까지 교체] 👆👆
+    # SSOT 결과를 기존 변수명에 매핑 (하위 호환)
+    buy = _plan.entry
+    stop = _plan.stop
+    target = _plan.tp1
+    actual_stop_pct = _plan.stop_pct
+    max_loss_pct = _plan.max_loss_pct
+    rr_mult = _plan.rr_mult
+    stop_reason = _plan.plan_reason
+    entry_filter = {"action": _plan.entry_action, "position_pct": _plan.position_pct}
 
     # 메타 정보 (기존 유지)
     sector = sector_map.get(code6, "기타")
@@ -2858,7 +2988,16 @@ def analyze_ticker(
         "BB_Expanding": int(bb_expanding),        # 상태 개선 체크용
         "Vol_Quality": round(vol_quality, 2),
         "Range_Pos": round(range_pos, 2),
-        "추천매수가": buy, "손절가": stop, "추천매도가1": target, "추천매도가2": target * 1.1,
+        "추천매수가": buy, "손절가": stop, "추천매도가1": target, "추천매도가2": _plan.tp2 if _plan.tp2 else target * 1.1,
+        "EXEC_RULE_ID": _plan.exec_rule_id,
+        # [v10.4] 손절 디버깅 컬럼 — "왜 이 stop이 나왔는지" 한눈에 확인
+        "STOP_PCT": round(actual_stop_pct, 2),   # 실제 적용된 손절 퍼센트
+        "MAX_LOSS_PCT": round(max_loss_pct, 1),   # 시총 기반 최대 손실 캡
+        "RR_MULT": round(rr_mult, 1),             # R:R 배수
+        "STOP_REASON": stop_reason,                  # NORMAL/GAP/SWING/GAP+SWING
+        # [v10.5] 진입 필터 — 극단 갭/VI 시 보류/분할
+        "ENTRY_ACTION": entry_filter["action"],
+        "POSITION_PCT": entry_filter["position_pct"],
         "TRIGGER": trigger_str, # Entry Engine 분리
         "Above_MA20": 1 if disp > 0 else 0,
         "SUPERTREND_DIR": st_trend, "SUPERTREND_VAL": st_val,
