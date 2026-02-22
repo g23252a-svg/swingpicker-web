@@ -123,49 +123,56 @@ except ImportError:
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 
-# ------------------------------- 설정 -------------------------------
+# ------------------------------- 설정 (collector_config.py SSOT) -------------------------------
+from collector_config import CollectorConfig, DEFAULT_CONFIG as _CFG
 
-LOOKBACK_DAYS = 250          # 과거 데이터 조회 일수
-BENCH_LOOKBACK_DAYS = 60     # 벤치마크 상대강도 기준 일수
-TOP_N = 600                  # 거래대금 상위 N개 종목
-MIN_TURNOVER_EOK = 50        # 최소 거래대금 (억원)
-MIN_MCAP_EOK = 1000          # 최소 시총 (억원)
-RSI_LOW, RSI_HIGH = 45, 65   # RSI 적정 구간
-PASS_EBS = 4                 # EBS (룰 기반 스코어) 통과 기준
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(BASE_DIR, "data")
+LOOKBACK_DAYS = _CFG.lookback_days
+BENCH_LOOKBACK_DAYS = _CFG.bench_lookback_days
+TOP_N = _CFG.top_n
+MIN_TURNOVER_EOK = _CFG.min_turnover_eok
+MIN_MCAP_EOK = _CFG.min_mcap_eok
+RSI_LOW, RSI_HIGH = _CFG.rsi_low, _CFG.rsi_high
+PASS_EBS = _CFG.pass_ebs
+BASE_DIR = _CFG.base_dir
+OUT_DIR = _CFG.out_dir
 UTF8 = "utf-8-sig"
 
-# 병렬 처리 (너무 크게 잡으면 KRX 쿼리/네트워크에 부담)
-MAX_WORKERS = int(os.environ.get("LDY_WORKERS", "4"))  # 8 -> 4
+MAX_WORKERS = int(os.environ.get("LDY_WORKERS", str(_CFG.max_workers)))
 
-# 변동성 축소/스퀴즈 감지
-BB_PERIOD = 20
-BB_STD = 2
+BB_PERIOD = _CFG.bb_period
+BB_STD = _CFG.bb_std
+BB_SQUEEZE_BW = _CFG.bb_squeeze_bw
+KC_PERIOD = _CFG.kc_period
+KC_ATR_PERIOD = _CFG.kc_atr_period
+KC_MULT = _CFG.kc_mult
+BONUS_BB_SQUEEZE_SCORE = _CFG.bonus_bb_squeeze_score
+BONUS_BB_SQUEEZE_ENTRY = _CFG.bonus_bb_squeeze_entry
 
-# (1) 단순 Bandwidth(%) 기준 (정보용/보조)
-BB_SQUEEZE_BW = 10.0  # Bandwidth(%) < 10%면 '협의 스퀴즈'로 표시
+W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (
+    _CFG.w_rr, _CFG.w_t1, _CFG.w_sl, _CFG.w_near, _CFG.w_mom, _CFG.w_liq, _CFG.w_tec)
+P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = _CFG.p_overheat_5d, _CFG.p_overheat_10d, _CFG.p_rsi_out
+P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = (
+    _CFG.p_macd_neg, _CFG.p_near_far, _CFG.p_liq_low, _CFG.p_vol_spike)
+W_SECTOR = _CFG.w_sector
+P_BIG_SL = _CFG.p_big_sl
 
-# (2) John Carter의 TTM Squeeze (진성 스퀴즈)
-#     - Bollinger Band(표준편차)가 Keltner Channel(ATR) 안으로 완전히 들어갈 때
-KC_PERIOD = 20
-KC_ATR_PERIOD = 20
-KC_MULT = 1.5
-
-# 스퀴즈 보너스(가산점) — v6.9부터는 'TTM Squeeze'를 주 신호로 사용
-BONUS_BB_SQUEEZE_SCORE = 3.0
-BONUS_BB_SQUEEZE_ENTRY = 4.0
-# 섹터 모멘텀 보정은 "업종 평균점수"보다 "업종 수익률"이 더 직관적이라 교체
-# (기존 W_SECTOR = 0.05 그대로 사용해도 OK)
-
-# [가중치]
-W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = 0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10
-P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = 6.0, 6.0, 4.0
-P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = 4.0, 4.0, 4.0, 2.0
-
-# 🔹 v6.7 추가: 업종 보너스 + 과도 손절 패널티
-W_SECTOR = 0.05          # (레거시) 섹터 강도 보정 — v8.5: TIMING_SCORE 내부에서 직접 +8/+4점 반영
-P_BIG_SL = 3.0           # 손절 폭이 너무 큰 종목 패널티
+# ── 분할 모듈 import ──
+from data_source import KRXDataSource, OHLCVCache, get_data_source
+from macro_filter import (
+    check_macro_env, compute_market_breadth, label_market_temp, get_benchmark_returns,
+)
+from news_engine import (
+    fetch_naver_news_headlines, analyze_sentiment_llm,
+    generate_ai_comment, get_naver_theme_tags,
+)
+from telegram_sender import send_telegram_auto
+from validation import (
+    list_snapshot_days as _list_snapshot_days,
+    load_close_map as _load_close_map,
+    load_price_maps as _load_price_maps,
+    pick_recommend_file_per_day as _pick_recommend_file_per_day,
+    run_reality_check,
+)
 
 # ------------------------------- 유틸 -------------------------------
 
@@ -421,87 +428,14 @@ def add_sector_momentum(df: pd.DataFrame, group_col: str = "업종_대분류") -
     return df, sector_score
 
 
-def compute_market_breadth(df: pd.DataFrame) -> Dict[str, float]:
-    """
-    20일선 상회 비율(%) = 시장 온도
-    analyze_ticker에서 Above_MA20을 넣는 전제
-    """
-    out = {}
-    if "Above_MA20" not in df.columns:
-        return {"ALL": np.nan, "KOSPI": np.nan, "KOSDAQ": np.nan}
-
-    for m in ["KOSPI", "KOSDAQ"]:
-        sub = df[df["시장"] == m]
-        out[m] = round(float(sub["Above_MA20"].mean() * 100), 1) if len(sub) else np.nan
-
-    out["ALL"] = round(float(df["Above_MA20"].mean() * 100), 1) if len(df) else np.nan
-    return out
+# [v14 REMOVED → compute_market_breadth moved to module] (15 lines deleted)
 
 
-def label_market_temp(breadth_all: float) -> str:
-    if not np.isfinite(breadth_all):
-        return "🌫 N/A"
-    if breadth_all >= 65:
-        return "🔥 과열"
-    if breadth_all <= 35:
-        return "🧊 침체"
-    return "🌤 중립"
+# [v14 REMOVED → label_market_temp moved to module] (8 lines deleted)
 
-def _backoff_sleep(i: int, base: float = 0.35, cap: float = 2.0) -> None:
-    # i=0,1 일 때만 의미 (총 2회 재시도)
-    jitter = random.uniform(0.85, 1.15)
-    time.sleep(min(cap, base * (2 ** i)) * jitter)
+# [v14 REMOVED → _backoff_sleep moved to module] (4 lines deleted)
 
-def run_reality_check(out_dir: str, trade_ymd: str) -> None:
-    """
-    전일(가장 최근) recommend_YYYYMMDD*.csv의 상위 추천들이
-    오늘 종가 스냅샷 기준으로 얼마나 움직였는지 검증 CSV 생성
-    - data/reality_check_YYYYMMDD.csv
-    - data/reality_check_latest.csv
-    """
-    try:
-        # 오늘 종가 스냅샷
-        snap_path = os.path.join(out_dir, f"price_snapshot_{trade_ymd}.csv")
-        if not os.path.exists(snap_path):
-            return
-        snap = pd.read_csv(snap_path, dtype={"종목코드": str})
-        snap["종목코드"] = snap["종목코드"].astype(str).str.zfill(6)
-        close_map = dict(zip(snap["종목코드"], pd.to_numeric(snap["종가"], errors="coerce")))
-
-        # 과거 recommend 파일 중 가장 최근(오늘 제외)
-        files = [f for f in os.listdir(out_dir) if f.startswith("recommend_") and f.endswith(".csv")]
-        cand = []
-        for f in files:
-            # recommend_YYYYMMDD or recommend_YYYYMMDD_tag
-            core = f.replace("recommend_", "").replace(".csv", "")
-            ymd = core.split("_")[0]
-            if len(ymd) == 8 and ymd.isdigit() and ymd != trade_ymd:
-                cand.append((ymd, f))
-        if not cand:
-            return
-        cand.sort(reverse=True)
-        prev_ymd, prev_file = cand[0]
-
-        prev = pd.read_csv(os.path.join(out_dir, prev_file), dtype={"종목코드": str})
-        prev["종목코드"] = prev["종목코드"].astype(str).str.zfill(6)
-
-        # 상위 30개만 체크(너무 커지면 파일만 무거워짐)
-        prev = prev.head(30).copy()
-
-        prev["오늘종가"] = prev["종목코드"].map(close_map)
-        prev["전일추천매수가"] = pd.to_numeric(prev.get("추천매수가", np.nan), errors="coerce")
-        prev["전일→오늘_수익률%"] = (prev["오늘종가"] / prev["전일추천매수가"] - 1.0) * 100
-
-        prev["검증기준일"] = trade_ymd
-        prev["비교대상추천일"] = prev_ymd
-
-        out1 = os.path.join(out_dir, f"reality_check_{trade_ymd}.csv")
-        out2 = os.path.join(out_dir, "reality_check_latest.csv")
-        prev.to_csv(out1, index=False, encoding=UTF8)
-        prev.to_csv(out2, index=False, encoding=UTF8)
-        log(f"🧪 Reality Check 저장 완료 → {out1}")
-    except Exception as e:
-        log(f"⚠️ Reality Check 실패: {e}")
+# [v14 REMOVED → run_reality_check moved to module] (50 lines deleted)
 
 
 def _ymd8_to_dash(s: str) -> str:
@@ -510,177 +444,23 @@ def _ymd8_to_dash(s: str) -> str:
         return f"{s[:4]}-{s[4:6]}-{s[6:]}"
     return s
 
-def _pykrx_df(fn, *args, **kwargs):
-    """PYKRX 호출을 안전하게 감싸고 실패 시 None (+2회 재시도/backoff)"""
-    if (not PYKRX_OK) or (stock is None):
-        return None
+# [v14 REMOVED → _pykrx_df moved to module] (15 lines deleted)
 
-    last_err = None
-    for i in range(3):  # 총 3번 시도 = 최초 1 + 재시도 2
-        try:
-            return fn(*args, **kwargs)
-        except Exception as e:
-            last_err = e
-            if i < 2:
-                _backoff_sleep(i)
-            else:
-                return None
+# [v14 REMOVED → safe_ohlcv_by_date moved to module] (25 lines deleted)
 
-def safe_ohlcv_by_date(start_ymd: str, end_ymd: str, code: str) -> Optional[pd.DataFrame]:
-    df = _pykrx_df(stock.get_market_ohlcv_by_date, start_ymd, end_ymd, code)
+# [v14 REMOVED → safe_ohlcv_by_ticker moved to module] (3 lines deleted)
 
-    if df is None or getattr(df, "empty", True):
-        df = None
-        for i in range(3):  # 1 + 2회 재시도
-            try:
-                df = fdr.DataReader(str(code).zfill(6), _ymd8_to_dash(start_ymd), _ymd8_to_dash(end_ymd))
-                break
-            except Exception:
-                if i < 2:
-                    _backoff_sleep(i)
-                else:
-                    df = None
+# [v14 REMOVED → safe_market_cap_by_ticker moved to module] (2 lines deleted)
 
-        if df is not None and not getattr(df, "empty", True):
-            df = df.rename(columns={
-                "Open": "시가", "High": "고가", "Low": "저가", "Close": "종가", "Volume": "거래량"
-            })
+# [v14 REMOVED → safe_ticker_list moved to module] (3 lines deleted)
 
-    # [v10.5] 어느 경로로 들어와도 무조건 정화 — -100% 데이터 지뢰 원천 차단
-    if df is not None and not getattr(df, "empty", True):
-        df = sanitize_ohlcv(df)
+# [v14 REMOVED → safe_ticker_name moved to module] (10 lines deleted)
 
-    return df
+# [v14 REMOVED → check_macro_env moved to module] (78 lines deleted)
 
-def safe_ohlcv_by_ticker(ymd: str, market: str) -> Optional[pd.DataFrame]:
-    """market 단위(전종목) ohlcv는 FDR로 1:1 대체가 어려워서 pykrx만 안전 호출"""
-    return _pykrx_df(stock.get_market_ohlcv_by_ticker, ymd, market=market)
+# [v14 REMOVED → load_ohlcv_cache moved to module] (15 lines deleted)
 
-def safe_market_cap_by_ticker(ymd: str, market: str) -> Optional[pd.DataFrame]:
-    return _pykrx_df(stock.get_market_cap_by_ticker, ymd, market=market)
-
-def safe_ticker_list(ymd: str, market: str) -> List[str]:
-    out = _pykrx_df(stock.get_market_ticker_list, ymd, market=market)
-    return list(out) if out is not None else []
-
-def safe_ticker_name(ticker: str) -> Optional[str]:
-    if (not PYKRX_OK) or (stock is None):
-        return None
-    try:
-        return stock.get_market_ticker_name(ticker)
-    except Exception:
-        return None
-
-
-# ------------------------------- 매크로(Macro) 필터 -------------------------------
-
-def check_macro_env(trade_ymd: str) -> Tuple[str, str, int, int]:
-    """
-    [v8.0] 환율(USD/KRW) 및 나스닥(IXIC) 매크로 지표 분석
-    
-    Returns:
-        risk_level (str): 'CRITICAL', 'HIGH', 'NORMAL'
-        summary_msg (str): 텔레그램 출력용 요약 메시지
-        adj_ebs (int): 조정된 PASS_EBS (기본값 PASS_EBS)
-        rec_limit (int): 텔레그램 추천 종목 수 (기본 5)
-    """
-    try:
-        # 날짜 설정 (데이터 수신 지연 고려하여 넉넉히 10일 전부터 조회)
-        end_dt = datetime.strptime(trade_ymd, "%Y%m%d")
-        start_dt = end_dt - timedelta(days=10)
-        start_s = start_dt.strftime("%Y-%m-%d")
-
-        # 1. USD/KRW 환율 조회
-        df_usd = fdr.DataReader('USD/KRW', start_s)
-        curr_usd = df_usd['Close'].iloc[-1]
-        prev_usd = df_usd['Close'].iloc[-2]
-        usd_chg = (curr_usd - prev_usd) / prev_usd * 100
-
-        # 2. 나스닥(IXIC) 조회
-        df_nas = fdr.DataReader('IXIC', start_s)
-        curr_nas = df_nas['Close'].iloc[-1]
-        prev_nas = df_nas['Close'].iloc[-2]
-        nas_chg = (curr_nas - prev_nas) / prev_nas * 100
-
-        # 기본 설정값 로드
-        adj_ebs = PASS_EBS  # 기본값 4
-        rec_limit = 5       # 기본 Top 5
-        msgs = []
-        risk_score = 0
-
-        # [로직 1] 환율 체크 (1400원 이상 or +0.5% 급등)
-        if curr_usd >= 1400:
-            msgs.append(f"💸 고환율({int(curr_usd)}원)")
-            risk_score += 1
-        elif usd_chg >= 0.5:
-            msgs.append(f"💸 환율급등(+{usd_chg:.2f}%)")
-            risk_score += 1
-
-        # [로직 2] 나스닥 체크 (-2.0% 급락)
-        if nas_chg <= -2.0:
-            msgs.append(f"📉 나스닥급락({nas_chg:.2f}%)")
-            risk_score += 2  # 나스닥 급락은 더 큰 위험으로 간주
-
-        # [결과 판정]
-        risk_level = "NORMAL"
-
-        if risk_score >= 2:
-            # 위험도 높음: 보수적 진입 + 종목 수 축소
-            risk_level = "CRITICAL"
-            adj_ebs = PASS_EBS + 1  # 기준 점수 상향 (예: 4 -> 5점)
-            rec_limit = 3           # 추천 수 축소 (5 -> 3개)
-
-        elif risk_score == 1:
-            # 위험도 중간: 보수적 진입만
-            risk_level = "HIGH"
-            adj_ebs = PASS_EBS + 1
-            rec_limit = 5
-
-        # 요약 메시지 생성
-        summary = f"🌍 매크로: {risk_level}"
-        if msgs:
-            summary += f" ({', '.join(msgs)})"
-            if risk_level != "NORMAL":
-                summary += f"\n   → 🛡️ 보수적 대응 (EBS {adj_ebs}점↑ / Top{rec_limit})"
-
-        log(f"🔍 매크로 분석 완료: {summary}")
-        return risk_level, summary, adj_ebs, rec_limit
-
-    except Exception as e:
-        log(f"⚠️ 매크로 데이터 수집 실패: {e}")
-        return "NORMAL", "🌍 매크로: N/A (데이터 수집 실패)", PASS_EBS, 5
-
-
-# ------------------------------- v7.0 OHLCV Caching System -------------------------------
-
-def load_ohlcv_cache(ymd: str) -> Dict[str, pd.DataFrame]:
-    """
-    해당 날짜의 OHLCV 캐시 파일을 로드합니다.
-    경로: data/ohlcv_cache_YYYYMMDD.pkl
-    """
-    cache_path = os.path.join(OUT_DIR, f"ohlcv_cache_{ymd}.pkl")
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, "rb") as f:
-                data = pickle.load(f)
-            log(f"📂 OHLCV 캐시 로드 완료: {len(data)}개 종목 ({cache_path})")
-            return data
-        except Exception as e:
-            log(f"⚠️ 캐시 파일 로드 실패(재수집 진행): {e}")
-    return {}
-
-def save_ohlcv_cache(ymd: str, data: Dict[str, pd.DataFrame]) -> None:
-    """
-    OHLCV 데이터를 캐시 파일로 저장합니다.
-    """
-    ensure_dir(OUT_DIR)
-    cache_path = os.path.join(OUT_DIR, f"ohlcv_cache_{ymd}.pkl")
-    try:
-        with open(cache_path, "wb") as f:
-            pickle.dump(data, f)
-        log(f"💾 OHLCV 캐시 저장 완료: {len(data)}개 종목")
-    except Exception as e:
-        log(f"⚠️ 캐시 저장 실패: {e}")
+# [v14 REMOVED → save_ohlcv_cache moved to module] (12 lines deleted)
 
 def prepare_ohlcv_data(
     tickers: List[str], 
@@ -746,51 +526,12 @@ def prepare_ohlcv_data(
 
 # ------------------------------- Rank Validation (RANK_SCORE 검증) -------------------------------
 
-def _list_snapshot_days(out_dir: str) -> List[str]:
-    paths = glob(os.path.join(out_dir, "price_snapshot_*.csv"))
-    days = []
-    for p in paths:
-        b = os.path.basename(p)
-        m = re.match(r"price_snapshot_(\d{8})\.csv$", b)
-        if m:
-            days.append(m.group(1))
-    return sorted(list(set(days)))
+# [v14 REMOVED → _list_snapshot_days moved to module] (9 lines deleted)
 
-def _load_close_map(out_dir: str, ymd: str) -> Dict[str, float]:
-    """하위 호환: 종가 맵만 리턴"""
-    path = os.path.join(out_dir, f"price_snapshot_{ymd}.csv")
-    if not os.path.exists(path):
-        return {}
-    df = pd.read_csv(path, dtype={"종목코드": str})
-    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
-    close = pd.to_numeric(df["종가"], errors="coerce")
-    return dict(zip(df["종목코드"], close))
+# [v14 REMOVED → _load_close_map moved to module] (9 lines deleted)
 
 
-def _load_price_maps(out_dir: str, ymd: str) -> Dict[str, Dict[str, float]]:
-    """
-    [v10.2] 종가 + 저가 + 시가 + 고가 맵을 한번에 리턴
-
-    Returns:
-        {"close": {code: val}, "low": {code: val}, "open": {code: val}, "high": {code: val}}
-        저가/시가/고가 컬럼이 없으면 해당 키는 빈 dict
-    """
-    path = os.path.join(out_dir, f"price_snapshot_{ymd}.csv")
-    if not os.path.exists(path):
-        return {"close": {}, "low": {}, "open": {}, "high": {}}
-    df = pd.read_csv(path, dtype={"종목코드": str})
-    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
-
-    result = {}
-    col_map = {"close": "종가", "low": "저가", "open": "시가", "high": "고가"}
-    for key, col in col_map.items():
-        if col in df.columns:
-            vals = pd.to_numeric(df[col], errors="coerce")
-            result[key] = dict(zip(df["종목코드"], vals))
-        else:
-            result[key] = {}
-
-    return result
+# [v14 REMOVED → _load_price_maps moved to module] (24 lines deleted)
 
 def _next_trade_day(trade_days: List[str], ymd: str, offset: int) -> Optional[str]:
     try:
@@ -802,21 +543,7 @@ def _next_trade_day(trade_days: List[str], ymd: str, offset: int) -> Optional[st
         return trade_days[j]
     return None
 
-def _pick_recommend_file_per_day(out_dir: str) -> Dict[str, str]:
-    files = [os.path.basename(p) for p in glob(os.path.join(out_dir, "recommend_*.csv"))]
-    mp: Dict[str, List[str]] = {}
-    for f in files:
-        core = f.replace("recommend_", "").replace(".csv", "")
-        ymd = core.split("_")[0]
-        if len(ymd) == 8 and ymd.isdigit():
-            mp.setdefault(ymd, []).append(f)
-
-    pick: Dict[str, str] = {}
-    for ymd, flist in mp.items():
-        # 태그 없는 recommend_YYYYMMDD.csv 우선
-        plain = [f for f in flist if f == f"recommend_{ymd}.csv"]
-        pick[ymd] = plain[0] if plain else sorted(flist)[0]
-    return pick
+# [v14 REMOVED → _pick_recommend_file_per_day moved to module] (15 lines deleted)
 
 def make_rank_validation_report(
     out_dir: str,
@@ -1606,51 +1333,7 @@ def classify_big_sector(name: str, detailed: str) -> str:
 
 # ------------------------------- 벤치마크 (지수 20/60/120일 수익률) -------------------------------
 
-def get_benchmark_returns(trade_ymd: str) -> Dict[str, Dict[int, float]]:
-    """
-    KOSPI, KOSDAQ 지수의 20일, 60일, 120일 수익률을 한 번에 계산
-    Returns: {'KOSPI': {20: 1.5, 60: -2.0, 120: 5.1}, ...}
-    """
-    try:
-        end = datetime.strptime(trade_ymd, "%Y%m%d").date()
-    except Exception:
-        return {}
-
-    # 120일 영업일 확보를 위해 넉넉히 200일 전부터 조회 (휴장일 고려)
-    start = end - timedelta(days=200 * 2) 
-
-    res: Dict[str, Dict[int, float]] = {"KOSPI": {}, "KOSDAQ": {}}
-    index_map = {"KOSPI": "KS11", "KOSDAQ": "KQ11"}
-    periods = [20, 60, 120]
-
-    for market, symbol in index_map.items():
-        try:
-            df = fdr.DataReader(symbol, start, end)
-            if df is None or df.empty or "Close" not in df.columns:
-                continue
-
-            close = df["Close"].dropna()
-            last = float(close.iloc[-1])
-
-            for p in periods:
-                if len(close) > p:
-                    # p일 전 종가
-                    base = float(close.iloc[-(p + 1)])
-                    if base > 0:
-                        ret = (last / base - 1.0) * 100
-                        res[market][p] = round(ret, 2)
-                    else:
-                        res[market][p] = np.nan
-                else:
-                    res[market][p] = np.nan
-
-        except Exception as e:
-            log(f"⚠️ 벤치마크({market}) 수익률 계산 실패: {e}")
-            continue
-
-    return res
-
-# ------------------------------- 기타 수집 로직 -------------------------------
+# [v14 REMOVED → get_benchmark_returns moved to module] (45 lines deleted)
 
 def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
     """
@@ -1874,145 +1557,12 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
 
 # ------------------------------- AI 코멘트 / 스코어 -------------------------------
 
-def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
-    """
-    [v9.0] 네이버 금융 종목별 뉴스/공시 제목 크롤링
-    """
-    if not BS4_OK: return []
-    
-    headlines = []
-    try:
-        url = f"https://finance.naver.com/item/news_news.naver?code={code}&page=1"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=3)
-        
-        soup = BeautifulSoup(resp.content.decode('euc-kr', 'replace'), "html.parser")
-        titles = soup.select("td.title > a")
-        dates = soup.select("td.date")
-        
-        cutoff_date = datetime.now() - timedelta(days=days)
-        
-        for t, d in zip(titles, dates):
-            article_date_str = d.text.strip()
-            try:
-                if len(article_date_str) > 10:
-                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d %H:%M")
-                else:
-                    a_date = datetime.strptime(article_date_str, "%Y.%m.%d")
-                
-                if a_date >= cutoff_date:
-                    subject = t.text.strip()
-                    if "특징주" in subject or "공시" in subject or "체결" in subject or "계약" in subject:
-                        headlines.append(subject)
-            except:
-                continue
-    except Exception as e:
-        pass
-        
-    return list(set(headlines))[:10]
+# [v14 REMOVED → fetch_naver_news_headlines moved to module] (36 lines deleted)
 
-def analyze_sentiment_llm(stock_name: str, headlines: List[str]) -> Tuple[float, str]:
-    """
-    [v9.0] LLM을 이용해 뉴스 헤드라인의 호재/악재 여부를 판별
-    Returns: (점수 -5 ~ +5, "요약 코멘트")
-    """
-    if not LLM_AVAILABLE or not headlines:
-        return 0.0, ""
-
-    # 프롬프트 엔지니어링
-    news_text = "\n".join(headlines)
-    prompt = f"""
-    당신은 주식 시장 전문가입니다. 아래는 '{stock_name}' 종목의 최근 뉴스입니다.
-    이 뉴스들이 주가에 미칠 영향을 분석하여 점수(-5:매우악재 ~ 0:중립 ~ +5:매우호재)와
-    한 줄 요약을 JSON 형식으로 답하세요.
-    
-    [뉴스 목록]
-    {news_text}
-    
-    [응답 형식]
-    {{"score": 점수, "reason": "핵심재료 요약"}}
-    """
-    
-    try:
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        
-        # JSON 파싱 (간이)
-        import json
-        if "```" in text:
-            text = text.split("```")[1].replace("json", "").strip()
-        
-        data = json.loads(text)
-        score = float(data.get("score", 0))
-        reason = data.get("reason", "")
-        
-        return score, reason
-        
-    except Exception as e:
-        # log(f"⚠️ LLM 분석 실패: {e}")
-        return 0.0, ""
+# [v14 REMOVED → analyze_sentiment_llm moved to module] (41 lines deleted)
 
 
-def generate_ai_comment(
-    mfi: float, rsi: float, slope: float, disp: float, score: float, 
-    ttm_squeeze: int = 0, bw_squeeze: int = 0, bb_bw: float = np.nan, squeeze_cnt: int = 0,
-    is_swing_support: bool = False, v_power: float = 0.0
-) -> str:
-    """[v8.5 Fix] 중복 블록 제거 — v7.4/v7.5 통합 단일 버전"""
-    comment = ""
-
-    # 1. 스퀴즈 상태 (v7.4: Hot Zone 표기)
-    if int(ttm_squeeze) >= 1:
-        if squeeze_cnt >= 5:
-            comment += f"🌪️ {squeeze_cnt}일 연속 응축 중! 폭발 임박 (Hot Zone). "
-        else:
-            comment += f"🌪️ 에너지 응축 시작 ({squeeze_cnt}일차). "
-    elif int(bw_squeeze) >= 1:
-        if np.isfinite(bb_bw):
-            comment += f"🔇 변동성 축소 (BW {float(bb_bw):.1f}%). "
-        else:
-            comment += "🔇 변동성 축소 구간. "
-
-    # 2. 구조적 지지/저항 (v7.5)
-    if is_swing_support:
-        comment += "🧱 구조적 지지선(Swing Low) 근접. "
-
-    # 3. 매수세 강도 (v7.5)
-    if v_power >= 1.5:
-        comment += "💪 매수세 장악(Power Buying). "
-    elif v_power <= 0.6:
-        comment += "📉 매도세 우위. "
-
-    # 4. 수급 (MFI)
-    if mfi >= 70:
-        comment += "💰 외국인/기관 수급 집중. "
-    elif mfi >= 60:
-        comment += "💸 자금 유입 지속. "
-
-    # 5. 모멘텀 (MACD Slope) — v7.4: 약한 플러스 구간 추가
-    if slope > 0.02:
-        comment += "🚀 단기 모멘텀 가속. "
-    elif slope > 0.005:
-        comment += "📈 상승 모멘텀 개선. "
-    elif slope > 0:
-        comment += "↗️ 약한 플러스 모멘텀. "
-
-    # 6. 이격도
-    if -2 <= disp <= 2:
-        comment += "✅ 20일선 눌림목 구간."
-    elif disp > 5:
-        comment += "⚠️ 단기 급등 조정 주의."
-    elif disp < -5:
-        comment += "📉 과매도 기술적 반등 기대."
-
-    # 7. 종합 점수 평가
-    if score >= 90:
-        comment += " (강력 매수)"
-    elif score >= 80:
-        comment += " (매수 유효)"
-
-    return comment if comment else "특이사항 없음."
+# [v14 REMOVED → generate_ai_comment moved to module] (59 lines deleted)
 
 def cap_q(s: pd.Series, q: int = 90, floor: float = 1.0) -> float:
     c = np.nanpercentile(nz_num(s), q)
@@ -2097,429 +1647,36 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
     return ((val - threshold) ** power) * weight
 
 
-# --- [새로 추가 2] 상태 머신 기반 ROUTE 결정 함수 (기존 route_tag 대체) ---
-def determine_state(row):
-    """
-    [Strict] ATTACK 조건에 '가격 위치(고점 근접)' 추가
-    """
-    try:
-        # 데이터 추출
-        rsi = float(row.get('RSI14', 50))
-        r5 = float(row.get('ret_5d_%', 0))
-        above_ma20 = int(row.get('Above_MA20', 0))
-        slope = float(row.get('MACD_Slope_PCT', 0))
-        t_score = float(row.get('TRIGGER_SCORE', 0))
-        is_squeeze = int(row.get('TTM_SQUEEZE', 0))
-        vol_qual = float(row.get('Vol_Quality', 1.0))
-        
-        # ✅ [New] Range Position (20일 고가 대비 현재가 위치) 확인
-        # range_pos >= 0.85 (상위 15% 구간) 이어야 진짜 돌파 임박
-        range_pos = float(row.get('Range_Pos', 0)) 
-
-        # 1. 과열 (OVERHEAT)
-        if rsi >= 75 or r5 >= 20.0:
-            return RouteState.OVERHEAT
-
-        # 2. 집중 공략 (ATTACK): 조건 강화
-        # - 20일선 위 & 모멘텀 양수 & 트리거 60점 이상
-        # - 수급 질(Vol_Qual) 1.3 이상
-        # - [추가] 박스권 상단(Range_Pos >= 0.8)에 있어야 함 (바닥에서 기는 종목 제외)
-        if above_ma20 == 1 and slope > 0 and t_score >= 60 and vol_qual >= 1.3:
-            if range_pos >= 0.8:  # 👈 추가된 조건: 신고가 영역 근접
-                return RouteState.ATTACK
-
-        # 3. 발사 임박 (ARMED)
-        if is_squeeze == 1 and above_ma20 == 1:
-            return RouteState.ARMED
-        if vol_qual >= 2.0:
-            return RouteState.ARMED
-
-        # 4. 추세 대기 (WAIT)
-        if float(row.get('Low_Trend_PCT', 0)) > 0:
-            return RouteState.WAIT
-
-        return RouteState.NEUTRAL
-
-    except Exception as e:
-        return RouteState.NEUTRAL
-
-# -----------------------------------------------------------
-# [New] Scoring Engine v15.1 (Safety Patched)
-# -----------------------------------------------------------
-
-def calculate_ebs_independent(row) -> int:
-    """[독립형 EBS] 5가지 펀더멘털 체크리스트 (0~10점)"""
-    score = 0
-    if row.get('Low_Trend_PCT', 0) > 0: score += 2
-    if row.get('Vol_Quality', 0) >= 1.1: score += 2
-    if row.get('MACD_Slope_PCT', 0) > 0: score += 2
-    rsi = row.get('RSI14', 50)
-    if 45 <= rsi <= 70: score += 2
-    if row.get('TTM_SQUEEZE', 0) == 1 or row.get('BB_Expanding', 0) == 1: score += 2
-    return score
-
-def calculate_structural_score(row) -> float:
-    """[STRUCT_SCORE] 종목의 기초 체력 (0~100)"""
-    def _norm(val, max_val): return min(max(val / max_val, 0), 1)
-    
-    trend_score = _norm(row.get('Low_Trend_PCT', 0), 3.0) * 40
-    mfi_score = _norm(row.get('MFI14', 50) - 30, 40) * 15 
-    vq_score = _norm(row.get('Vol_Quality', 0) - 0.8, 1.2) * 15
-    range_score = _norm(row.get('Range_Pos', 0), 1.0) * 15
-    
-    disp = row.get('이격도', 0)
-    if 0 <= disp <= 5: disp_score = 15
-    elif disp < 0: disp_score = 5
-    else: disp_score = max(15 - (disp - 5), 0)
-    
-    base = trend_score + mfi_score + vq_score + range_score + disp_score
-    penalty = 0
-    if row.get('Above_MA20', 0) == 0: penalty += 20
-    
-    return max(0.0, base - penalty) # 하한 0점 고정
-
-def calculate_timing_score(row) -> float:
-    """
-    [v8.7 최종 정밀 버전] TIMING_SCORE 계산
-    - 매물대(Volume Profile) 지표 반영 (연속 스케일 방식)
-    - NaN 전염 방지용 Safety Float 적용
-    - 과열 및 갭 패널티 유지
-    """
-    # --- [내부 방어용 헬퍼 함수] ---
-    def _safe_float(x, default=0.0):
-        try:
-            if x is None: return default
-            val = float(x)
-            return default if np.isnan(val) else val
-        except: return default
-
-    # 1. 기초 데이터 로드 (Main에서 보존한 Raw Score 사용)
-    raw = _safe_float(row.get('RAW_TRIGGER_SCORE', row.get('TRIGGER_SCORE', 0)))
-    std_trigger = min(raw / 90.0 * 100.0, 100.0)
-    
-    bonus = 0
-    penalty = 0
-
-    # 2. 매물대(Volume Profile) 보정 로직
-    res_all = _safe_float(row.get('RES_RATIO', 0))
-    res_near = _safe_float(row.get('RES_RATIO_NEAR', 0))
-    poc_gap = _safe_float(row.get('POC_GAP', 0))
-    is_above = int(_safe_float(row.get('IS_ABOVE_POC', 0)))
-
-    if is_above == 1:
-        # [보너스] 상단 전체 매물이 적을수록 최대 +12점
-        bonus += max(0, 12 * (1 - min(res_all, 0.30) / 0.30))
-        # [보너스] 근접 저항이 5% 미만으로 매우 얇으면 추가 +3점
-        if res_near < 0.05: bonus += 3
-        # [과열 차감] POC 대비 너무 멀면(12% 초과) 보너스 일부 회수 (음수 방지)
-        if poc_gap > 12: 
-            bonus = max(0, bonus - 4)
-    else:
-        # [패널티] 상단 매물(저항)이 두꺼울수록 최대 -15점
-        penalty += min(15, 15 * (min(res_all, 0.45) / 0.45))
-        # [패널티] 당장 머리 위(Near) 저항이 20%를 넘으면 추가 -5점
-        if res_near > 0.20: penalty += 5
-
-    # 3. 기존 기술적 보너스 (TTM Squeeze, Supertrend)
-    if int(_safe_float(row.get('TTM_SQUEEZE', 0))) == 1: bonus += 10
-    if int(_safe_float(row.get('SUPERTREND_DIR', 0))) == 1: bonus += 5
-
-    # [v8.5] 섹터 RS 가중치 강화 — 주도 섹터 종목 가산
-    sector_rank = _safe_float(row.get('SECTOR_RANK', 99))
-    if sector_rank <= 3:
-        bonus += 8    # 상위 3개 섹터: +8점
-    elif sector_rank <= 6:
-        bonus += 4    # 차상위 섹터: +4점
-    
-    # 4. 기존 기술적 패널티 (RSI 과열, 갭 상승)
-    rsi = _safe_float(row.get('RSI14', 50))
-    gap_pct = _safe_float(row.get('gap_pct', 0))
-    
-    if rsi > 75: penalty += 20
-    if gap_pct > 5.0: penalty += 10 # 갭이 너무 크면 추격 리스크 감점
-    
-    # ✅ 최종 점수 0~100 안전 Clamp (음수 방지 및 상한 고정)
-    return max(0.0, min(std_trigger + bonus - penalty, 100.0))
-
-def determine_state_dynamic(row, thresholds: dict):
-    """
-    [v8.5 Elite Patch] 수급 상대 비중 기반 Toxic Filter 및 동적 상태 결정 로직
-    - 기존 고정 수치(10억) 필터를 '거래대금 대비 비중(%)'으로 전면 개편
-    - 지표 불일치 및 급락 추세 방어 로직 강화
-    """
-    try:
-        # 1. 기초 데이터 추출 (안전한 float 변환)
-        def _get(k, default=0.0):
-            val = row.get(k, default)
-            try: return float(val) if not pd.isna(val) else default
-            except: return default
-
-        # 기술적 지표
-        rsi = _get('RSI14', 50)
-        r1 = _get('ret_1d_%', 0)
-        r5 = _get('ret_5d_%', 0)
-        slope = _get('MACD_Slope_PCT', 0)
-        range_pos = _get('Range_Pos', 0)
-        vol_qual = _get('Vol_Quality', 1.0)
-        t_score = _get('TIMING_SCORE', 0)
-        vol_z = _get('거래강도', 0)
-        low_trend = _get('Low_Trend_PCT', 0)
-        above_ma20 = int(_get('Above_MA20', 0))
-
-        # 수급 데이터 및 거래대금
-        turnover = _get('거래대금(원)', 1.0) # ZeroDivision 방지 위해 기본값 1.0
-        frg_net = _get('외인순매수', 0)
-        ind_net = _get('개인순매수', 0)
-
-        # 2. [Elite] 상대적 수급 비중 계산
-        # 전체 거래대금 중 외인/개인이 차지하는 순매수 비중 (%)
-        frg_ratio = (frg_net / turnover) * 100 if turnover > 0 else 0
-        ant_ratio = (ind_net / turnover) * 100 if turnover > 0 else 0
-
-        # -----------------------------------------------------------
-        # 🚨 [Elite TOXIC Filter] 설거지 및 폭탄 돌리기 정밀 감지
-        # -----------------------------------------------------------
-        is_toxic = False
-        
-        # [Case 1] 전형적인 설거지: 주가는 오르는데 외인은 거래의 20%를 던지고 개인이 다 받음
-        if r1 > 5.0 and frg_ratio < -20.0 and ant_ratio > 20.0:
-            is_toxic = True
-            
-        # [Case 2] 수급 불명확 + 광기: 거래량이 평소의 10배 이상 터지며 10% 급등 (단기 고점 징후)
-        elif vol_z >= 10.0 and r1 >= 10.0:
-            is_toxic = True
-
-        if is_toxic:
-            return "EXIT_WARNING" # ☠️ 절대 진입 금지 (폭탄 돌리기)
-
-        # -----------------------------------------------------------
-        # 3. 상태 결정 파이프라인 (Tiered Logic)
-        # -----------------------------------------------------------
-        
-        # (1) 과열 (Absolute Cut)
-        if rsi >= 75 or r5 >= 25.0:
-            return "OVERHEAT"
-
-        # (2) 집중 공략 (ATTACK) 조건: 추세+수급+타이밍 삼박자
-        vol_cut = thresholds.get('vol_q75', 1.2)
-        range_cut = thresholds.get('range_q75', 0.8)
-        
-        if (slope > 0 
-            and range_pos >= range_cut
-            and vol_qual >= vol_cut
-            and t_score >= 60
-            and above_ma20 == 1):
-            
-            # [추세 붕괴 방어] 저점이 -3% 이상 깨진 종목은 ATTACK 금지
-            if low_trend < -3.0: 
-                return "WAIT" 
-            return "ATTACK"
-
-        # (3) 발사 임박 (ARMED): 변동성 응축 및 돌파 대기
-        is_squeeze = int(row.get('TTM_SQUEEZE', 0))
-        if (is_squeeze == 1 or vol_qual >= 2.0) and above_ma20 == 1:
-            if low_trend >= -3.0: # 추세가 살아있을 때만
-                return "ARMED"
-        
-        # (4) 추세 대기 (WAIT): 저점이 높아지거나 반등 시도
-        if low_trend > 0 or r1 > 0:
-            return "WAIT"
-
-        # (5) 중립 (NEUTRAL)
-        return "NEUTRAL"
-
-    except Exception as e:
-        # 에러 발생 시 안전하게 중립 반환
-        return "NEUTRAL"
+# ═══════════════════════════════════════════════════
+#  스코어링/상태머신 — scoring_engine.py SSOT import
+# ═══════════════════════════════════════════════════
+try:
+    from scoring_engine import (
+        determine_state,
+        determine_state_dynamic,
+        calculate_ebs_independent,
+        calculate_structural_score,
+        calculate_timing_score,
+        build_global_score,
+        _calc_ml_weight,
+        WEIGHT_CONFIG,
+    )
+    log("✅ scoring_engine SSOT import 성공")
+except ImportError as _ie:
+    log(f"⚠️ scoring_engine import 실패: {_ie}")
+    raise ImportError(
+        "scoring_engine.py를 찾을 수 없습니다. "
+        "collector.py와 같은 디렉토리에 scoring_engine.py가 있는지 확인하세요. "
+        f"원본 오류: {_ie}"
+    )
 
 
 
-
-def build_global_score(df: pd.DataFrame, macro_risk: str) -> pd.DataFrame:
-    """
-    STRUCT + TIMING + AI → FINAL_SCORE 산출.
-    EBS는 필터/게이트 역할 → PASS_EBS 컬럼 생성 (점수 합산에는 미포함).
-    ✅ [v14] ML 활성도 기반 동적 가중치 — scoring_engine SSOT 호출
-    """
-    x = df.copy()
-    
-    x["EBS"] = x.apply(calculate_ebs_independent, axis=1)
-    x["PASS_EBS"] = (x["EBS"] >= 3).astype(int)
-    
-    x["STRUCT_SCORE"] = x.apply(calculate_structural_score, axis=1).round(1)
-    x["TIMING_SCORE"] = x.apply(calculate_timing_score, axis=1).round(1)
-    
-    if "ML_SCORE" not in x.columns: x["ML_SCORE"] = 0.0
-    x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
-    
-    # ✅ SSOT: scoring_engine._calc_ml_weight 호출
-    try:
-        from scoring_engine import _calc_ml_weight as _se_calc
-        w_s, w_t, w_a = _se_calc(x["ML_SCORE"], macro_risk)
-    except ImportError:
-        # fallback: 인라인 계산
-        ml = x["ML_SCORE"].fillna(0)
-        ml_cov = float((ml > 0).mean())
-        n = len(ml)
-        if n >= 10:
-            trim_k = max(1, int(n * 0.10))
-            ml_sorted = ml.sort_values().values
-            ml_center = float(ml_sorted[trim_k:-trim_k].mean())
-        else:
-            ml_center = float(ml.mean())
-        LOW, HIGH = 5.0, 25.0
-        if ml_center <= LOW or ml_cov < 0.20: w_a = 0.0
-        elif ml_center >= HIGH: w_a = 0.20
-        else: w_a = 0.20 * (ml_center - LOW) / (HIGH - LOW)
-        macro_w = {"CRITICAL": (0.55, 0.25), "HIGH": (0.50, 0.30)}
-        base_s, base_t = macro_w.get(macro_risk, (0.40, 0.40))
-        rem = 1.0 - w_a
-        st_sum = base_s + base_t
-        w_s = rem * (base_s / st_sum)
-        w_t = rem * (base_t / st_sum)
-        total = w_s + w_t + w_a
-        if total > 0: w_s /= total; w_t /= total; w_a /= total
-
-    log(f"🎯 [v14] 동적 가중치: S={w_s:.4f} T={w_t:.4f} A={w_a:.4f} (macro={macro_risk})")
-        
-    x["FINAL_SCORE"] = ((x["STRUCT_SCORE"] * w_s) + 
-                        (x["TIMING_SCORE"] * w_t) + 
-                        (x["AI_SCORE"] * w_a)).round(1)
-    
-    x["DISPLAY_SCORE"] = x["FINAL_SCORE"]
-    
-    return x
 # ------------------------------- 텔레그램 (업그레이드) -------------------------------
 
-def get_naver_theme_tags(code: str) -> str:
-    """
-    [v8.5] 네이버 금융에서 '동일업종(섹터)' 정보를 크롤링하여 해시태그로 반환
-    """
-    try:
-        url = f"https://finance.naver.com/item/main.naver?code={code}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        # 타임아웃을 짧게 주어 전체 속도 저하 방지
-        resp = requests.get(url, headers=headers, timeout=2)
-        if resp.status_code != 200:
-            return ""
+# [v14 REMOVED → get_naver_theme_tags moved to module] (26 lines deleted)
 
-        # 네이버 금융은 EUC-KR 인코딩 사용 가능성 있음
-        text = resp.content.decode('euc-kr', 'replace')
-
-        # 정규식으로 '동일업종비교' 링크 텍스트 추출 (BeautifulSoup 없이 가볍게 처리)
-        # 패턴: <a href="/sise/sise_group_detail.naver?type=upjong...">업종명</a>
-        match = re.search(r'sise_group_detail\.naver\?type=upjong[^>]*>([^<]+)</a>', text)
-        if match:
-            sector_name = match.group(1).strip()
-            # 공백을 언더바(_)로 치환하여 해시태그화
-            return f"#{sector_name.replace(' ', '_')}"
-
-    except Exception:
-        pass
-    return ""
-
-def send_telegram_auto(
-    df: pd.DataFrame, 
-    trade_ymd: str, 
-    market_summary: str = "", 
-    limit_count: int = 5  # 기본값 5
-) -> None:
-    log(f"📨 텔레그램 발송 시작 (Top {limit_count})...")
-
-    if not TG_TOKEN or not TG_ID:
-        log("⚠️ TG_TOKEN / TG_ID 미설정, 발송 생략")
-        return
-
-    # 숫자 포맷팅 헬퍼
-    def _fmt_int(x):
-        try:
-            if pd.isna(x): return "N/A"                 
-            return f"{int(float(x)):,}"
-        except: return "N/A"            
-
-    try:
-        # 상위 종목 자르기
-        top_picks = df.head(limit_count).reset_index(drop=True)
-        trade_date = datetime.strptime(trade_ymd, "%Y%m%d").strftime('%Y-%m-%d')
-
-        # [v8.5] 타이틀 업데이트
-        msg = f"🔥 [LDY v8.5] 추천 Top {limit_count} ({trade_date})\n"
-
-        if market_summary:
-            msg += f"{market_summary}\n"
-        msg += "-" * 30 + "\n\n"
-
-        for i, row in top_picks.iterrows():
-            rank = i + 1
-            name = row['종목명']
-            code = row['종목코드']
-            route = row.get('ROUTE', '전략없음')
-            buy = row.get('추천매수가', np.nan)
-            score = row.get('DISPLAY_SCORE', row.get('FINAL_SCORE', row.get('LDY_SCORE', 0)))
-            comment = row.get('AI_COMMENT', '')
-            news_reason = row.get('NEWS_REASON', '') # 추가됨
-
-            # ✅ [v8.5 추가] 네이버 금융 실시간 테마/섹터 크롤링
-            theme_tag = get_naver_theme_tags(code)
-
-            # 기존 내부 분류(업종_대분류)가 있다면 함께 표기
-            big_sector = row.get('업종_대분류', '')
-            if big_sector and big_sector != '기타':
-                # 중복 방지: 크롤링한 태그와 대분류가 다를 때만 둘 다 표시
-                if theme_tag and (big_sector not in theme_tag):
-                    theme_tag = f"#{big_sector} {theme_tag}"
-                elif not theme_tag:
-                    theme_tag = f"#{big_sector}"
-
-            # 코멘트 길이 제한
-            if len(comment) > 140:
-                comment = comment[:140] + "…"
-
-            # 메시지 포맷팅 (테마 태그 추가됨)
-            msg += f"{rank}. {name} ({code}) {theme_tag}\n"
-            msg += f"   🌡점수: {float(score):.1f}점\n"
-            msg += f"   🎯전략: {route}\n"
-            if news_reason and news_reason != "뉴스없음":
-                msg += f"   📰재료: {news_reason}\n"
-            msg += f"   💬AI: {comment}\n"
-
-            # ✅ [v8.5 추가] 자금 관리(비중) 정보 표시
-            qty = row.get('추천수량', 0)
-            amt = row.get('추천금액(만원)', 0)
-            if qty > 0:
-                msg += f"   💰비중: {qty}주 (약 {amt}만원)\n"
-
-            msg += f"   🔵매수: {_fmt_int(buy)}\n"
-            msg += (
-                f"   🔴손절: {_fmt_int(row.get('손절가'))} / "
-                f"🟢목표: {_fmt_int(row.get('추천매도가1'))}\n\n"
-            )
-
-        # 메시지 길이 제한 (텔레그램 4096자 제한 대비)
-        MAX_TG_LEN = 3800
-        if len(msg) > MAX_TG_LEN:
-            msg = msg[:MAX_TG_LEN] + "\n...\n(메시지 길이 제한으로 일부 생략)"
-
-        resp = requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            data={"chat_id": TG_ID, "text": msg},
-            timeout=15
-        )
-        resp.raise_for_status()
-        log("🚀 텔레그램 전송 완료")
-
-    except Exception as e:
-        log(f"⚠️ 텔레그램 전송 실패: {e}")
-
-# ------------------------------- 티커 분석 -------------------------------
-
-# [v10.5] tick 유틸 중복 제거 — stop_logic.py에서 전부 통합 관리
-from stop_logic import floor_to_tick_by, ceil_to_tick_by
-
-# [v18.1] fetch_naver_news_headlines 중복 정의 제거 (1676줄에 원본 유지)
-# 현재 메인 흐름은 AsyncNewsFetcher(async_crawler.py)를 사용함
-
-# [v16.1 Patch] 투자자별 순매수 데이터 수집 함수 추가
+# [v14 REMOVED → send_telegram_auto moved to module] (102 lines deleted)
 def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
     """
     해당 일자의 외국인, 기관, 개인 순매수금액(원)을 가져옵니다.
