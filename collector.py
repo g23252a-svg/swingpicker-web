@@ -2729,3 +2729,14 @@ def main(
         send_telegram_auto(df_out, trade_ymd, market_summary=summary_text, limit_count=rec_limit_cnt)
     else:
         log("✉️ 텔레그램 발송 생략 (옵션 설정)")
+
+    # -----------------------------------------------------------
+    # [Step 10] 자동 백테스트 캘리브레이션
+    # -----------------------------------------------------------
+    try:
+        from auto_backtest import auto_calibrate
+        cal_summary = auto_calibrate(OUT_DIR, trade_ymd)
+        log(f"📊 캘리브레이션: {cal_summary.get('n_trades', 0)}건, "
+            f"승률={cal_summary.get('overall_winrate', 0):.1%}")
+    except Exception as e:
+        log(f"⚠️ 자동 캘리브레이션 스킵: {e}")
