@@ -152,7 +152,8 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
 
 def determine_state(row, RouteState=None):
     """
-    [정적 임계치] ATTACK/ARMED/WAIT/NEUTRAL/OVERHEAT 결정
+    [정적 임계치] ATTACK/ARMED/WAIT/NEUTRAL/OVERHEAT 결정.
+    ⚠️ 레거시 함수: 신규 코드는 determine_state_dynamic 사용 권장.
     RouteState: collector 의 schema.RouteState (또는 문자열 반환용 None)
     """
     # RouteState 가 없으면 문자열로 반환
@@ -170,7 +171,8 @@ def determine_state(row, RouteState=None):
         r5 = float(row.get('ret_5d_%', 0))
         above_ma20 = int(row.get('Above_MA20', 0))
         slope = float(row.get('MACD_Slope_PCT', 0))
-        t_score = float(row.get('TRIGGER_SCORE', 0))
+        # ✅ (B) TIMING_SCORE 우선, fallback으로 TRIGGER_SCORE (하위호환)
+        t_score = float(row.get('TIMING_SCORE', row.get('TRIGGER_SCORE', 0)))
         is_squeeze = int(row.get('TTM_SQUEEZE', 0))
         vol_qual = float(row.get('Vol_Quality', 1.0))
         range_pos = float(row.get('Range_Pos', 0))
@@ -266,15 +268,96 @@ def determine_state_dynamic(row, thresholds: dict):
 # ═══════════════════════════════════════════════════
 #  5. 글로벌 스코어 통합 (collector 용)
 # ═══════════════════════════════════════════════════
+#  동적 가중치 설정 (외부 튜닝용)
+# ═══════════════════════════════════════════════════
 
-def build_global_score(df: pd.DataFrame, macro_risk: str) -> pd.DataFrame:
+WEIGHT_CONFIG = {
+    "ml_low": 5.0,           # AI 가중치 시작점 (이하 → w_a=0)
+    "ml_high": 25.0,         # AI 가중치 최대점 (이상 → w_a=max)
+    "ml_max_weight": 0.20,   # AI 최대 가중치
+    "ml_cov_gate": 0.20,     # 커버리지 최소 비율
+    "trim_pct": 0.10,        # 절사평균 상하 제거 비율
+    "ebs_pass_threshold": 3, # EBS ≥ 이 값이면 PASS_EBS=True
+    "macro_weights": {
+        "CRITICAL": (0.55, 0.25),
+        "HIGH":     (0.50, 0.30),
+        "NORMAL":   (0.40, 0.40),
+    },
+}
+
+
+def _calc_ml_weight(ml_series: pd.Series, macro_risk: str,
+                    config: dict = None) -> tuple:
     """
-    EBS + STRUCT + TIMING + AI → FINAL_SCORE 산출
-    (collector.py 의 build_global_score 원본)
+    ML 활성도 기반 동적 가중치 (w_struct, w_timing, w_ai).
+
+    판정 기준:
+      - ML 활성도: 절사평균(trimmed mean) + 커버리지 복합
+      - 선형 보간: LOW~HIGH 구간에서 w_a가 0→max으로 부드럽게 전환
+      - 합=1.0 보장: 마지막에 정규화
     """
+    cfg = config or WEIGHT_CONFIG
+    ml = ml_series.fillna(0)
+    ml_cov = float((ml > 0).mean())
+
+    # 절사평균(상하 trim_pct 제거)
+    trim_pct = cfg.get("trim_pct", 0.10)
+    n = len(ml)
+    if n >= 10:
+        trim_k = max(1, int(n * trim_pct))
+        ml_sorted = ml.sort_values().values
+        ml_center = float(ml_sorted[trim_k:-trim_k].mean())
+    else:
+        ml_center = float(ml.mean())
+
+    # AI 가중치: 선형 보간 + 커버리지 게이트
+    LOW = cfg.get("ml_low", 5.0)
+    HIGH = cfg.get("ml_high", 25.0)
+    MAX_W = cfg.get("ml_max_weight", 0.20)
+    COV_GATE = cfg.get("ml_cov_gate", 0.20)
+
+    if ml_center <= LOW or ml_cov < COV_GATE:
+        w_a = 0.0
+    elif ml_center >= HIGH:
+        w_a = MAX_W
+    else:
+        w_a = MAX_W * (ml_center - LOW) / (HIGH - LOW)
+
+    # 매크로별 기본 S:T 비율 (미지정 macro → NORMAL fallback)
+    macro_weights = cfg.get("macro_weights", WEIGHT_CONFIG["macro_weights"])
+    base_s, base_t = macro_weights.get(macro_risk, macro_weights.get("NORMAL", (0.40, 0.40)))
+
+    # S/T에 비례 재분배
+    rem = 1.0 - w_a
+    st_sum = base_s + base_t
+    w_s = rem * (base_s / st_sum)
+    w_t = rem * (base_t / st_sum)
+
+    # 최종 정규화
+    total = w_s + w_t + w_a
+    if total > 0:
+        w_s /= total
+        w_t /= total
+        w_a /= total
+
+    return round(w_s, 6), round(w_t, 6), round(w_a, 6)
+
+
+def build_global_score(df: pd.DataFrame, macro_risk: str,
+                       config: dict = None) -> pd.DataFrame:
+    """
+    STRUCT + TIMING + AI → FINAL_SCORE 산출.
+    EBS는 필터/게이트 역할 → PASS_EBS 컬럼 생성 (점수 합산에는 미포함).
+    ✅ [v14] ML 활성도 기반 동적 가중치
+    """
+    cfg = config or WEIGHT_CONFIG
     x = df.copy()
 
     x["EBS"] = x.apply(calculate_ebs_independent, axis=1)
+    # ✅ 감점1: PASS_EBS 실제 생성
+    ebs_thresh = cfg.get("ebs_pass_threshold", 3)
+    x["PASS_EBS"] = (x["EBS"] >= ebs_thresh).astype(int)
+
     x["STRUCT_SCORE"] = x.apply(calculate_structural_score, axis=1).round(1)
     x["TIMING_SCORE"] = x.apply(calculate_timing_score, axis=1).round(1)
 
@@ -282,12 +365,7 @@ def build_global_score(df: pd.DataFrame, macro_risk: str) -> pd.DataFrame:
         x["ML_SCORE"] = 0.0
     x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
 
-    if macro_risk == "CRITICAL":
-        w_s, w_t, w_a = 0.6, 0.2, 0.2
-    elif macro_risk == "HIGH":
-        w_s, w_t, w_a = 0.5, 0.3, 0.2
-    else:
-        w_s, w_t, w_a = 0.4, 0.4, 0.2
+    w_s, w_t, w_a = _calc_ml_weight(x["ML_SCORE"], macro_risk, config=cfg)
 
     x["FINAL_SCORE"] = (
         (x["STRUCT_SCORE"] * w_s)
