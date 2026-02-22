@@ -214,15 +214,23 @@ def determine_state_dynamic(row, thresholds: dict):
         low_trend = _get('Low_Trend_PCT', 0)
         above_ma20 = int(_get('Above_MA20', 0))
 
-        turnover = _get('거래대금(원)', 1.0)
-        frg_net = _get('외인순매수', 0)
-        ind_net = _get('개인순매수', 0)
+        turnover = _get('거래대금(원)', 0.0)
+        frg_net = _get('외인순매수금액', _get('외인순매수', 0))
+        ind_net = _get('개인순매수금액', _get('개인순매수', 0))
 
-        frg_ratio = (frg_net / turnover) * 100 if turnover > 0 else 0
-        ant_ratio = (ind_net / turnover) * 100 if turnover > 0 else 0
+        # ✅ [v14] fail-safe: turnover 유효성 검증
+        # thresholds로 최소값 관리 (기본: 5000만원 = 소형주 최소 거래대금 수준)
+        _turnover_min = thresholds.get('turnover_min_valid', 50_000_000)
+        _turnover_valid = turnover >= _turnover_min
+        if _turnover_valid:
+            frg_ratio = (frg_net / turnover) * 100
+            ant_ratio = (ind_net / turnover) * 100
+        else:
+            frg_ratio = 0.0
+            ant_ratio = 0.0
 
-        # Toxic Filter
-        if r1 > 5.0 and frg_ratio < -20.0 and ant_ratio > 20.0:
+        # Toxic Filter (turnover 유효할 때만 수급 기반 판정)
+        if _turnover_valid and r1 > 5.0 and frg_ratio < -20.0 and ant_ratio > 20.0:
             return "EXIT_WARNING"
         if vol_z >= 10.0 and r1 >= 10.0:
             return "EXIT_WARNING"
