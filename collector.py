@@ -1548,9 +1548,10 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
 
     # 🔥 [2. DuckDB 저장 추가] --------------------------
     try:
-        db = LDYDBManager()
+        from db_utils import get_db
+        db = get_db()
         db.save_snapshot(snap, trade_ymd)
-        db.close()
+        # ✅ 싱글톤이므로 close() 하지 않음
     except Exception as e:
         log(f"⚠️ 스냅샷 DB 저장 실패: {e}")
     # --------------------------------------------------
@@ -2705,9 +2706,9 @@ def main(
 
     # DuckDB 저장
     try:
-        db = LDYDBManager()
+        from db_utils import get_db
+        db = get_db()
         db.save_recommendations(df_out, trade_ymd)
-        db.close()
     except Exception as e: log(f"⚠️ DB 저장 실패: {e}")
 
     run_reality_check(OUT_DIR, trade_ymd)
