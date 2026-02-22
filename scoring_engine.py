@@ -32,7 +32,10 @@ def calculate_ebs_independent(row) -> int:
 
 
 def calculate_structural_score(row) -> float:
-    """[STRUCT_SCORE] 종목의 기초 체력 (0~100)"""
+    """
+    [STRUCT_SCORE] 종목의 기초 체력 (0~100)
+    ✅ 섹터 보너스 미포함 (TIMING_SCORE에서만 반영 → 이중 보상 방지)
+    """
     def _norm(val, max_val):
         return min(max(val / max_val, 0), 1)
 
@@ -59,7 +62,8 @@ def calculate_structural_score(row) -> float:
 
 def calculate_timing_score(row) -> float:
     """
-    [v8.7] TIMING_SCORE 계산 — 매물대 + 기술적 보정
+    [v14] TIMING_SCORE 계산 — 매물대 + 기술적 + 섹터 보정
+    ✅ 섹터 보너스는 여기서만 반영 (STRUCT에는 미포함 → 이중 보상 방지)
     """
     _sf = safe_float  # alias
 
@@ -99,6 +103,13 @@ def calculate_timing_score(row) -> float:
         penalty += 20
     if gap_pct > 5.0:
         penalty += 10
+
+    # ✅ [v14] 섹터 모멘텀 보너스 (TIMING 한 곳에서만)
+    sector_rank = _sf(row.get('SECTOR_RANK', 99))
+    if sector_rank <= 3:
+        bonus += 8
+    elif sector_rank <= 6:
+        bonus += 4
 
     return max(0.0, min(std_trigger + bonus - penalty, 100.0))
 
