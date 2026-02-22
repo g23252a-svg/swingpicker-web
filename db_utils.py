@@ -43,9 +43,17 @@ class LDYDBManager:
     def __init__(self):
         # 파일 DB 사용 (없으면 생성됨)
         self.conn = duckdb.connect("ldy_trader.db") 
+        self._conn_lock = __import__('threading').Lock()  # 쿼리 직렬화 락
         self._init_tables()
         self._load_users_from_gist()
         self._load_inquiries_from_gist()
+
+    def execute_safe(self, query, params=None):
+        """Thread-safe 쿼리 실행 (락 기반 직렬화)"""
+        with self._conn_lock:
+            if params:
+                return self.conn.execute(query, params)
+            return self.conn.execute(query)
 
     def _init_tables(self):
         # 1. 사용자 테이블 (로그인 실패 및 잠금 컬럼 추가)
@@ -450,3 +458,70 @@ class LDYDBManager:
             self.conn.close()
         except Exception as e:
             print(f"⚠️ DB Close Error: {e}")
+
+
+# ═══════════════════════════════════════════════════
+#  Thread-Safe 싱글톤 + 연결 락 + TTL 기반 갱신
+# ═══════════════════════════════════════════════════
+import threading
+import time as _time
+
+_db_instance = None
+_db_lock = threading.Lock()
+_db_init_time = 0.0
+_DB_TTL_SECONDS = 600  # gist/users 갱신 주기: 10분
+
+
+def get_db(force_refresh: bool = False) -> LDYDBManager:
+    """
+    Thread-safe 싱글톤 DB 인스턴스.
+    - 최초 호출 시 1회만 connect + gist 로드
+    - TTL(10분) 경과 시 gist만 재로드 (연결은 유지)
+    - force_refresh=True로 강제 갱신 가능
+
+    ✅ 동시성: Double-Checked Locking
+    ✅ 쿼리 직렬화: db.execute_safe() 사용 권장
+    """
+    global _db_instance, _db_init_time
+
+    now = _time.monotonic()
+
+    # Fast path (락 없이)
+    if _db_instance is not None and not force_refresh:
+        # TTL 체크: gist 재로드만 (연결은 유지)
+        if (now - _db_init_time) > _DB_TTL_SECONDS:
+            with _db_lock:
+                if (now - _db_init_time) > _DB_TTL_SECONDS:
+                    try:
+                        _db_instance._load_users_from_gist()
+                        _db_instance._load_inquiries_from_gist()
+                    except Exception as e:
+                        print(f"⚠️ TTL 갱신 실패 (기존 데이터 유지): {e}")
+                    _db_init_time = _time.monotonic()
+        return _db_instance
+
+    # Slow path (초기화)
+    with _db_lock:
+        if _db_instance is None or force_refresh:
+            if _db_instance is not None:
+                try:
+                    _db_instance.close()
+                except Exception:
+                    pass
+            _db_instance = LDYDBManager()
+            _db_init_time = _time.monotonic()
+
+    return _db_instance
+
+
+def _reset_db_singleton():
+    """테스트용: 싱글톤 초기화"""
+    global _db_instance, _db_init_time
+    with _db_lock:
+        if _db_instance is not None:
+            try:
+                _db_instance.close()
+            except Exception:
+                pass
+        _db_instance = None
+        _db_init_time = 0.0
