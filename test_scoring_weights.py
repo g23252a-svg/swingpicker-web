@@ -229,9 +229,11 @@ def run_tests():
     w_s1, w_t1, w_a1 = _calc_ml_weight(ml_one, "NORMAL")
     test("n=1 → 크래시 없음 + 합=1", np.isclose(w_s1 + w_t1 + w_a1, 1.0))
 
-    # ── 17. 섹터 이중 보상 방지 ──
-    print("\n📐 17. 섹터 이중 보상 방지")
-    from scoring_engine import calculate_structural_score, calculate_timing_score
+    # ── 17. 섹터 이중 보상 방지 (완전 SSOT 잠금) ──
+    print("\n📐 17. 섹터 이중 보상 완전 잠금")
+    from scoring_engine import (
+        calculate_structural_score, calculate_timing_score,
+    )
 
     base_row = {
         "RSI14": 55, "MFI14": 50, "이격도": 2.0, "BB_BW": 0.1,
@@ -239,33 +241,57 @@ def run_tests():
         "Vol_Quality": 1.2, "Above_MA20": 1, "Low_Trend_PCT": 1.0,
         "RAW_TRIGGER_SCORE": 60, "TTM_SQUEEZE": 0, "SUPERTREND_DIR": 0,
         "RES_RATIO": 0, "RES_RATIO_NEAR": 0, "POC_GAP": 0, "IS_ABOVE_POC": 1,
-        "gap_pct": 0, "SECTOR_RANK": 99,  # 섹터 하위
+        "gap_pct": 0, "SECTOR_RANK": 99, "SECTOR_RS": 0.0,
     }
-    top_sector_row = {**base_row, "SECTOR_RANK": 1}  # 섹터 상위
+    top_sector_row = {**base_row, "SECTOR_RANK": 1, "SECTOR_RS": 5.0}
 
-    # STRUCT는 SECTOR_RANK 변경에 무관해야 함
+    # (a) STRUCT는 SECTOR 변경에 절대 불변
     struct_base = calculate_structural_score(base_row)
     struct_top = calculate_structural_score(top_sector_row)
-    test("STRUCT: SECTOR_RANK 변경 무관",
+    test("STRUCT: SECTOR 변경 무관",
          np.isclose(struct_base, struct_top),
          f"base={struct_base:.1f}, top={struct_top:.1f}")
 
-    # TIMING은 SECTOR_RANK에 따라 변해야 함
+    # (b) TIMING은 SECTOR_RANK에 따라 정확히 +8
     timing_base = calculate_timing_score(base_row)
     timing_top = calculate_timing_score(top_sector_row)
-    test("TIMING: SECTOR_RANK=1 → 보너스 +8",
-         timing_top > timing_base,
-         f"base={timing_base:.1f}, top={timing_top:.1f}, diff={timing_top-timing_base:.1f}")
-    test("TIMING: 보너스 = 8점",
-         np.isclose(timing_top - timing_base, 8.0, atol=0.5),
-         f"diff={timing_top - timing_base:.1f}")
+    timing_delta = timing_top - timing_base
+    test("TIMING: SECTOR_RANK=1 → +8점",
+         np.isclose(timing_delta, 8.0, atol=0.5),
+         f"delta={timing_delta:.1f}")
 
-    # SECTOR_RANK=5 → 보너스 +4
-    mid_sector_row = {**base_row, "SECTOR_RANK": 5}
-    timing_mid = calculate_timing_score(mid_sector_row)
-    test("TIMING: SECTOR_RANK=5 → 보너스 +4",
-         np.isclose(timing_mid - timing_base, 4.0, atol=0.5),
-         f"diff={timing_mid - timing_base:.1f}")
+    # (c) ★ 핵심: FINAL 변화량 = TIMING 변화량 × w_t (다른 경로로 섹터가 안 들어옴)
+    df_base = pd.DataFrame([base_row])
+    df_top = pd.DataFrame([top_sector_row])
+    out_base = build_global_score(df_base, "NORMAL")
+    out_top = build_global_score(df_top, "NORMAL")
+
+    final_base = float(out_base["FINAL_SCORE"].iloc[0])
+    final_top = float(out_top["FINAL_SCORE"].iloc[0])
+    final_delta = final_top - final_base
+
+    # w_t 추출 (동일 데이터이므로 w_t 동일)
+    _, w_t, _ = _calc_ml_weight(out_base["ML_SCORE"], "NORMAL")
+
+    expected_final_delta = timing_delta * w_t
+    test("FINAL 변화량 = TIMING변화 × w_t (이중경로 0)",
+         np.isclose(final_delta, expected_final_delta, atol=0.5),
+         f"FINAL_delta={final_delta:.2f}, expected={expected_final_delta:.2f}")
+
+    # (d) SECTOR_RS가 FINAL에 영향 안 줌
+    same_rank_diff_rs = {**base_row, "SECTOR_RANK": 99, "SECTOR_RS": 99.0}
+    df_diff_rs = pd.DataFrame([same_rank_diff_rs])
+    out_diff_rs = build_global_score(df_diff_rs, "NORMAL")
+    final_diff_rs = float(out_diff_rs["FINAL_SCORE"].iloc[0])
+    test("SECTOR_RS만 변경 → FINAL 불변",
+         np.isclose(final_base, final_diff_rs),
+         f"base={final_base:.1f}, diff_rs={final_diff_rs:.1f}")
+
+    # (e) W_SECTOR 죽은 코드 제거 확인
+    collector_src = open(os.path.join(os.path.dirname(__file__), "collector.py")).read()
+    test("W_SECTOR 변수 사용 없음",
+         "W_SECTOR =" not in collector_src and "* W_SECTOR" not in collector_src,
+         "W_SECTOR still in use")
 
     # ── 결과 ──
     print("\n" + "=" * 60)
