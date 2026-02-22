@@ -854,6 +854,7 @@ def make_rank_validation_report(
         target_days = [d for d in tail_days if d in rec_map]
 
         rows = []
+        per_trade_rows = []  # [v13] Kelly 캘리브레이션용 per-trade 히스토리
 
         for rec_ymd in target_days:
             rec_path = os.path.join(out_dir, rec_map[rec_ymd])
@@ -1018,6 +1019,32 @@ def make_rank_validation_report(
                         stop_hit_rate = float(stop_hit[valid_ret].mean() * 100) if n_ret > 0 else 0.0
                         tp_hit_rate = float(tp_hit[valid_ret].mean() * 100) if n_ret > 0 else 0.0
 
+                        # ── [v13] per-trade 히스토리 수집 (Kelly 캘리브레이션용) ──
+                        for j in range(len(codes)):
+                            if not np.isfinite(ret[j]) or not np.isfinite(epx[j]) or epx[j] <= 0:
+                                continue
+                            _score_j = float(pick[method].iloc[j]) if method in pick.columns else 0.0
+                            _risk_j = float(epx[j] - spx[j]) if np.isfinite(spx[j]) and spx[j] > 0 else 0.0
+                            _reward_j = float(tpx[j] - epx[j]) if np.isfinite(tpx[j]) and tpx[j] > 0 else 0.0
+                            _b_j = (_reward_j / _risk_j) if _risk_j > 0 else 0.0
+                            _exit_type = "stop_hit" if stop_hit[j] else ("tp_hit" if tp_hit[j] else "hold_close")
+                            per_trade_rows.append({
+                                "rec_date": rec_ymd,
+                                "code": codes[j],
+                                "method": method,
+                                "topk": topk,
+                                "horizon": h,
+                                "score": round(_score_j, 1),
+                                "entry_price": round(float(epx[j]), 0),
+                                "exit_price": round(float(exit_prices[j]), 0) if np.isfinite(exit_prices[j]) else 0,
+                                "stop_price": round(float(spx[j]), 0) if np.isfinite(spx[j]) else 0,
+                                "target_price": round(float(tpx[j]), 0) if np.isfinite(tpx[j]) else 0,
+                                "ret_pct": round(float(ret[j]), 2),
+                                "win": 1 if ret[j] > 0 else 0,
+                                "exit_type": _exit_type,
+                                "b_ratio": round(_b_j, 2),
+                            })
+
                         rows.append({
                             "추천일": rec_ymd,
                             "비교종가일": future_ymd,
@@ -1078,6 +1105,19 @@ def make_rank_validation_report(
 
         log(f"📊 Rank Validation 저장 완료 → {detail_path}")
         log(f"📊 Rank Validation Summary 저장 완료 → {summ_path}")
+
+        # ── [v13] per-trade 히스토리 저장 + 캘리브레이션 테이블 빌드 ──
+        if per_trade_rows:
+            try:
+                from kelly_calibrator import save_per_trade_log, build_calibration_table
+                pt_path = save_per_trade_log(out_dir, per_trade_rows, asof_ymd)
+                if pt_path:
+                    cal_df = build_calibration_table(out_dir, asof_ymd=asof_ymd)
+                    n_cal = len(cal_df) if cal_df is not None else 0
+                    log(f"📊 [v13] per-trade log: {len(per_trade_rows)}건 → {pt_path}")
+                    log(f"📊 [v13] calibration table: {n_cal}개 구간 빌드 완료")
+            except Exception as e:
+                log(f"⚠️ [v13] per-trade/calibration 저장 실패: {e}")
 
         # ── [v10.5] 워크포워드 리스크 KPI 자동 리포트 ──
         try:
@@ -3017,70 +3057,85 @@ def analyze_ticker(
 
 # 👇👇 [여기 사이에 함수를 통째로 붙여넣으세요] 👇👇
 
-# [v11.0 신규 추가] 켈리 공식을 이용한 최적 비중 계산
-def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000) -> pd.DataFrame:
+# [v13] 켈리 공식 — 캘리브레이션 기반 승률 사용
+def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000,
+                        out_dir: str = "") -> pd.DataFrame:
     """
-    Kelly Criterion을 적용하여 종목별 최적 매수 금액/수량을 다시 계산합니다.
-    - 승률(p) 추정: TOTAL_SCORE(0~100)를 30%~70% 확률로 매핑
-    - 손익비(b): (1차목표가 - 매수가) / (매수가 - 손절가)
+    Kelly Criterion 비중 최적화.
+    - 승률(p): 캘리브레이션 테이블 기반 (없으면 선형 fallback)
+    - 손익비(b): (목표가 - 매수가) / (매수가 - 손절가)
     """
-    log("💰 [Money Management] 켈리 공식(Kelly Criterion)으로 비중 최적화 중...")
-    
-    # 1. 안전 장치 (Half-Kelly 사용)
-    KELLY_MULTIPLIER = 0.5   # 켈리 비율의 50%만 진입 (변동성 관리)
-    MAX_ALLOCATION = 0.25    # 🔥 최대 비중 25%로 강화 (분산 투자 유도)
+    log("💰 [Money Management] 켈리 공식(Kelly Criterion) — 캘리브레이션 적용 중...")
+
+    KELLY_MULTIPLIER = 0.5
+    MAX_ALLOCATION = 0.25
+
+    # 캘리브레이션 테이블 로드 시도
+    _use_cal = False
+    try:
+        from kelly_calibrator import calibrated_win_rate, kelly_fraction
+        if out_dir:
+            _use_cal = True
+    except ImportError:
+        pass
+
     def _calc_row(row):
         try:
-            # 데이터 추출
             score = float(row.get("TOTAL_SCORE", 0))
             buy = float(row.get("추천매수가", 0))
             stop = float(row.get("손절가", 0))
             target = float(row.get("추천매도가1", 0))
-            
-            if buy <= 0 or stop <= 0 or target <= 0: return 0, 0
 
-            # (1) 손익비(b) 계산 (Reward / Risk)
+            if buy <= 0 or stop <= 0 or target <= 0:
+                return 0, 0
+
             risk = buy - stop
             reward = target - buy
-            if risk <= 0: return 0, 0
-            
-            b = reward / risk 
-            
-            # (2) 승률(p) 추정 (60점=40%, 80점=60%, 100점=80%)
-            p = 0.4 + (max(score, 0) - 60) * 0.01
-            p = min(max(p, 0.3), 0.85)
+            if risk <= 0:
+                return 0, 0
 
-            # 점수가 너무 낮으면(60점 미만) 켈리 적용 위험 -> 0
+            b = reward / risk
+
+            # ✅ 캘리브레이션 승률 (SSOT)
+            if _use_cal:
+                p = calibrated_win_rate(score, out_dir)
+            else:
+                # fallback: 기존 선형 추정
+                p = 0.4 + (max(score, 0) - 60) * 0.01
+                p = min(max(p, 0.3), 0.85)
+
             if score < 60:
                 return 0, 0
 
-            # (3) 켈리 공식: f = p - (1-p)/b
-            q = 1 - p
-            f = p - (q / b)
-            
-            # (4) Half-Kelly 적용 및 최대 비중 제한
-            f_safe = f * KELLY_MULTIPLIER
-            f_final = min(max(f_safe, 0.0), MAX_ALLOCATION)
-            
-            # (5) 최종 금액 및 수량 산출
+            if _use_cal:
+                f_final = kelly_fraction(p, b, KELLY_MULTIPLIER, MAX_ALLOCATION)
+            else:
+                q = 1 - p
+                f = p - (q / b)
+                f_safe = f * KELLY_MULTIPLIER
+                f_final = min(max(f_safe, 0.0), MAX_ALLOCATION)
+
             final_amt = int(total_capital * f_final)
             final_qty = int(final_amt / buy)
-            
+
             return final_qty, final_amt
 
         except Exception:
             return 0, 0
 
-    # DataFrame에 적용
     res = df.apply(_calc_row, axis=1, result_type='expand')
     df["켈리_수량"] = res[0]
     df["켈리_금액(원)"] = res[1]
-    
-    # 켈리 결과가 유의미하면 기존 추천 수량을 덮어씀
+
     mask = df["켈리_수량"] > 0
     df.loc[mask, "추천수량"] = df.loc[mask, "켈리_수량"]
     df.loc[mask, "추천금액(만원)"] = (df.loc[mask, "켈리_금액(원)"] / 10000).round(1)
-    
+
+    if _use_cal:
+        log("✅ [v13] 캘리브레이션 기반 승률 적용됨")
+    else:
+        log("⚠️ [v13] 캘리브레이션 없음 → 선형 fallback 사용")
+
     return df
 
 # ------------------------------- 메인 실행 -------------------------------
