@@ -9,7 +9,85 @@ import re
 import logging
 from typing import List, Tuple, Optional
 
+import time
+import random
+
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════
+#  Retry 유틸 (429/RESOURCE_EXHAUSTED 방어)
+# ═══════════════════════════════════════════════════
+
+def _extract_retry_after(exc: Exception) -> Optional[float]:
+    """에러 객체에서 Retry-After 힌트 추출 (있으면 우선 사용)"""
+    # google.api_core.exceptions 스타일
+    if hasattr(exc, 'retry_after'):
+        return float(exc.retry_after)
+    # HTTP response 헤더 스타일
+    if hasattr(exc, 'response') and hasattr(exc.response, 'headers'):
+        ra = exc.response.headers.get('Retry-After')
+        if ra:
+            try:
+                return float(ra)
+            except ValueError:
+                pass
+    return None
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """재시도 가능한 에러인지 판정 (status code 우선, 문자열 fallback)"""
+    # status_code 속성 (google, requests 등)
+    status = getattr(exc, 'code', None) or getattr(exc, 'status_code', None)
+    if status is not None:
+        try:
+            code = int(status)
+            return code in (429, 503, 529)
+        except (ValueError, TypeError):
+            pass
+    # grpc status
+    if hasattr(exc, 'grpc_status_code'):
+        grpc_code = str(exc.grpc_status_code)
+        if 'RESOURCE_EXHAUSTED' in grpc_code or 'UNAVAILABLE' in grpc_code:
+            return True
+    # 문자열 fallback (최후 수단)
+    msg = str(exc)
+    return any(kw in msg for kw in ('429', 'RESOURCE_EXHAUSTED', 'quota', 'rate limit'))
+
+
+def _llm_call_with_retry(
+    call_fn,
+    max_retries: int = 3,
+    base_delay: float = 2.0,
+    cap: float = 30.0,
+):
+    """
+    LLM API 호출 + exponential backoff + jitter + Retry-After.
+    - 429/RESOURCE_EXHAUSTED → 재시도
+    - 400/500 등 비재시도 에러 → 즉시 raise
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return call_fn()
+        except Exception as e:
+            if not _is_retryable(e):
+                raise  # 비재시도 에러 → 즉시 전파
+
+            if attempt >= max_retries:
+                logger.warning(f"LLM 재시도 한도 초과 ({max_retries}회): {e}")
+                raise
+
+            # Retry-After 우선, 없으면 exponential backoff + jitter
+            retry_after = _extract_retry_after(e)
+            if retry_after and retry_after > 0:
+                wait = min(retry_after, cap)
+            else:
+                wait = min(cap, base_delay * (2 ** attempt))
+                wait *= (0.5 + random.random())  # jitter: 0.5x ~ 1.5x
+
+            logger.info(f"LLM 429/재시도 {attempt+1}/{max_retries}: "
+                       f"wait={wait:.1f}s ({type(e).__name__})")
+            time.sleep(wait)
 
 # LLM import (optional)
 try:
@@ -75,7 +153,7 @@ def analyze_sentiment_llm(
 SCORE: [숫자]
 SUMMARY: [한줄요약]"""
 
-        response = model.generate_content(prompt)
+        response = _llm_call_with_retry(lambda: model.generate_content(prompt))
         text = response.text.strip()
 
         score = 0.0
@@ -131,7 +209,7 @@ def generate_ai_comment(
 
 2~3문장으로 핵심만 간결하게. 매수/매도 추천이 아닌 객관적 분석만."""
 
-        response = model.generate_content(prompt)
+        response = _llm_call_with_retry(lambda: model.generate_content(prompt))
         return response.text.strip()[:300]
     except Exception as e:
         logger.debug(f"AI 코멘트 생성 실패: {e}")
