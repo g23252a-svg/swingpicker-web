@@ -182,23 +182,32 @@ class DartAnalyzer:
     # Gemini LLM 호출 (신규/레거시 분기)
     # ──────────────────────────────────────────────
     def _call_gemini(self, prompt: str) -> str:
-        """Gemini 호출 → 응답 텍스트 반환 (SDK 버전에 따라 분기)"""
-        if self._gemini_client is not None:
-            # ✅ 신규 SDK (google-genai)
-            response = self._gemini_client.models.generate_content(
-                model=self._model_name,
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    max_output_tokens=512,
-                ),
-            )
-            return response.text.strip() if response.text else ""
-        elif self._gemini_model is not None:
-            # ⚠️ 레거시 SDK (google-generativeai)
-            response = self._gemini_model.generate_content(prompt)
-            return response.text.strip() if response.text else ""
-        return ""
+        """Gemini 호출 → 응답 텍스트 반환 (SDK 버전에 따라 분기)
+        ✅ [v14] news_engine._llm_call_with_retry로 429/RESOURCE_EXHAUSTED 방어
+        """
+        from news_engine import _llm_call_with_retry
+
+        def _raw_call():
+            if self._gemini_client is not None:
+                response = self._gemini_client.models.generate_content(
+                    model=self._model_name,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        max_output_tokens=512,
+                    ),
+                )
+                return response.text.strip() if response.text else ""
+            elif self._gemini_model is not None:
+                response = self._gemini_model.generate_content(prompt)
+                return response.text.strip() if response.text else ""
+            return ""
+
+        try:
+            return _llm_call_with_retry(_raw_call, max_retries=3, base_delay=2.0, cap=30.0)
+        except Exception as e:
+            logger.warning(f"Gemini 호출 최종 실패: {e}")
+            return ""
 
     # ──────────────────────────────────────────────
     # 개별 보고서 LLM 분석
@@ -248,8 +257,14 @@ class DartAnalyzer:
                 logger.warning(f"⚠️ 형식 오류 재시도 중... ({report_nm})")
 
             except Exception as e:
-                logger.error(f"❌ 분석 시도 {attempt + 1} 실패 ({report_nm}): {e}")
-                time.sleep(1)
+                from news_engine import _is_retryable
+                if _is_retryable(e):
+                    wait = min(30, 2 ** (attempt + 1))
+                    logger.warning(f"⚠️ 429/재시도 {attempt+1}/2 ({report_nm}): wait={wait}s")
+                    time.sleep(wait)
+                else:
+                    logger.error(f"❌ 비재시도 에러 ({report_nm}): {e}")
+                    break  # 400/500 등 → 즉시 중단
 
         return 0.0, "분석 불가(서버 응답 오류)"
 
