@@ -89,15 +89,24 @@ def load_secrets_to_env():
         with open(secrets_path, "rb") as f:
             data = tomllib.load(f)
 
-        # 최상위 키 (예: GEMINI_API_KEY = "...")
+        # ✅ [v14] #19: 섹션 키 네임스페이스 + 충돌 방지
         for key, val in data.items():
             if isinstance(val, str):
                 os.environ[key] = val
+            elif isinstance(val, (int, float, bool)):
+                os.environ[key] = str(val)
             elif isinstance(val, dict):
-                # 섹션 내부 키 (예: [telegram] TG_TOKEN = "...")
+                # 섹션 내부 키: sub_key 우선, SECTION_SUBKEY로도 등록 (충돌 방지)
+                section = key.upper()
                 for sub_key, sub_val in val.items():
-                    if isinstance(sub_val, str):
-                        os.environ[sub_key] = sub_val
+                    if isinstance(sub_val, (str, int, float, bool)):
+                        sv = str(sub_val)
+                        # sub_key 직접 등록 (기존 호환)
+                        if sub_key not in os.environ:
+                            os.environ[sub_key] = sv
+                        # SECTION_SUBKEY로도 등록 (네임스페이스)
+                        ns_key = f"{section}_{sub_key.upper()}"
+                        os.environ[ns_key] = sv
 
     except Exception as e:
         print(f"⚠️ Secrets 로드 실패: {e}")
