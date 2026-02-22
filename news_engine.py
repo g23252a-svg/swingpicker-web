@@ -60,21 +60,34 @@ def _llm_call_with_retry(
     max_retries: int = 3,
     base_delay: float = 2.0,
     cap: float = 30.0,
+    total_timeout: float = 60.0,
 ):
     """
     LLM API 호출 + exponential backoff + jitter + Retry-After.
     - 429/RESOURCE_EXHAUSTED → 재시도
     - 400/500 등 비재시도 에러 → 즉시 raise
+    - total_timeout: 전체 대기시간 상한 (초). 초과 시 마지막 에러 raise.
     """
+    t_start = time.monotonic()
+    last_exc = None
+
     for attempt in range(max_retries + 1):
         try:
             return call_fn()
         except Exception as e:
+            last_exc = e
             if not _is_retryable(e):
                 raise  # 비재시도 에러 → 즉시 전파
 
             if attempt >= max_retries:
                 logger.warning(f"LLM 재시도 한도 초과 ({max_retries}회): {e}")
+                raise
+
+            # 총 대기시간 상한 체크
+            elapsed = time.monotonic() - t_start
+            remaining = total_timeout - elapsed
+            if remaining <= 0:
+                logger.warning(f"LLM 총 대기시간 상한 초과 ({total_timeout}s): {e}")
                 raise
 
             # Retry-After 우선, 없으면 exponential backoff + jitter
@@ -85,8 +98,11 @@ def _llm_call_with_retry(
                 wait = min(cap, base_delay * (2 ** attempt))
                 wait *= (0.5 + random.random())  # jitter: 0.5x ~ 1.5x
 
+            # remaining으로 한번 더 클램프
+            wait = min(wait, remaining)
+
             logger.info(f"LLM 429/재시도 {attempt+1}/{max_retries}: "
-                       f"wait={wait:.1f}s ({type(e).__name__})")
+                       f"wait={wait:.1f}s, elapsed={elapsed:.1f}s/{total_timeout}s")
             time.sleep(wait)
 
 # LLM import (optional)
