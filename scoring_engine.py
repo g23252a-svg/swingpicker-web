@@ -35,6 +35,7 @@ def calculate_structural_score(row) -> float:
     """
     [STRUCT_SCORE] 종목의 기초 체력 (0~100)
     ✅ 섹터 보너스 미포함 (TIMING_SCORE에서만 반영 → 이중 보상 방지)
+    ✅ [v15] Multi-Timeframe 보정: 완료된 주봉/월봉 기반 bonus/penalty
     """
     def _norm(val, max_val):
         return min(max(val / max_val, 0), 1)
@@ -57,7 +58,36 @@ def calculate_structural_score(row) -> float:
     if row.get('Above_MA20', 0) == 0:
         penalty += 20
 
-    return max(0.0, base - penalty)
+    # ✅ [v15] Multi-Timeframe 보정 (주봉/월봉)
+    # MTF_WEEKLY_TREND: +1=상승, 0=중립, -1=하락 (collector에서 주입)
+    # MTF_MONTHLY_TREND: 동일
+    # Config: MTF_STRUCT_BONUS / MTF_STRUCT_PENALTY
+    _sf = safe_float
+    mtf_w = int(_sf(row.get('MTF_WEEKLY_TREND', 0)))
+    mtf_m = int(_sf(row.get('MTF_MONTHLY_TREND', 0)))
+    mtf_data_ok = int(_sf(row.get('MTF_DATA_SUFFICIENT', 0)))
+
+    mtf_bonus_val = float(row.get('_MTF_STRUCT_BONUS', 10))
+    mtf_penalty_val = float(row.get('_MTF_STRUCT_PENALTY', 15))
+
+    mtf_adj = 0.0
+    if mtf_data_ok:
+        # 주봉+월봉 모두 상승 → bonus
+        if mtf_w >= 1 and mtf_m >= 1:
+            mtf_adj = mtf_bonus_val
+        # 주봉+월봉 모두 하락 → penalty
+        elif mtf_w <= -1 and mtf_m <= -1:
+            mtf_adj = -mtf_penalty_val
+        # 한쪽만 상승 → 소폭 bonus
+        elif mtf_w >= 1 or mtf_m >= 1:
+            mtf_adj = mtf_bonus_val * 0.5
+        # 한쪽만 하락 → 소폭 penalty
+        elif mtf_w <= -1 or mtf_m <= -1:
+            mtf_adj = -mtf_penalty_val * 0.5
+        # 양쪽 중립 → 0
+    # mtf_data_ok=0 → 데이터 부족 → 보정 0 (안전장치 2)
+
+    return max(0.0, min(100.0, base - penalty + mtf_adj))
 
 
 def calculate_timing_score(row) -> float:
