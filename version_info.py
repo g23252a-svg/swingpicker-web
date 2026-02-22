@@ -15,6 +15,29 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "19.0.0",
+        "date": "2026-02-22",
+        "type": "major",
+        "title": "Production-Grade Refactor: P2~P5 완전체 (276/276 Tests)",
+        "items": [
+            "🏗️ **P2 모듈화:** collector.py 3306줄→2730줄, 7개 모듈 분리 (collector_config, data_source, macro_filter, news_engine, telegram_sender, validation, scoring_engine)",
+            "🗄️ **Parquet 캐시:** pickle RCE 취약점 제거 → Parquet 기반 안전 캐시 (allow_legacy_pickle=False 기본)",
+            "⚙️ **Config 중앙화:** 40+개 상수 dataclass화 (collector_config.py), 매직넘버 자동검출 grep 패턴",
+            "🔒 **섹터 이중 보상 잠금:** STRUCT 불변, TIMING만 +8/+4, FINAL=TIMING×w_t 수학적 검증",
+            "📊 **P3 #13 자동 백테스트:** 폐루프 완성 (추천→실현수익률→승률테이블→Kelly), 7개 안전장치 (누수차단/진입청산고정/binning/min_n+스무딩/Kelly제한/비용반영/기업행위필터)",
+            "📍 **P3 #14 포지션 트래킹:** 실시간 SL/TP/드로다운 감지, event_key 중복방지, positions.json SSOT, 원자적 저장(tmp→rename+락)",
+            "🧠 **P3 #15 Multi-Timeframe:** 주봉/월봉 구조 필터 (STRUCT±10/15), 미완성봉 누수방지, Config화, TIMING 무관 수학적 검증",
+            "🔄 **#16 Gemini 429 방어:** exponential backoff + jitter + Retry-After 우선 + cap + total_timeout(60s), news_engine SSOT 공유",
+            "🗃️ **#17 DB 싱글톤:** thread-safe Double-Checked Locking, 쿼리 직렬화 _conn_lock, TTL(10분) gist 재로드, force_refresh",
+            "🛡️ **P4 #18 평문 제거:** MASTER_ADMIN_PW 전역변수 del, _ADMIN_PW_SET(bool)만 유지, compare_digest timing-safe",
+            "📝 **P4 #19 tomllib 전환:** SECTION_SUBKEY 네임스페이스 등록 (AUTH_MASTER_ADMIN_PW), 섹션 키 충돌 방지",
+            "🧪 **P5 #20 단위테스트 확대:** TIMING/STRUCT/SuperTrend/EBS/safe_float 경계값+NULL방어, build_global_score 불변식",
+            "📈 **P5 #21 일일 성과 리포트:** #13 realized_returns 재사용, report_key 중복방지, 점수대별 승률/Top 수익·손실",
+            "✅ **276/276 ALL PASSED:** 9개 테스트 파일 (scoring_weights 54, ssot_import 14, toxic_filter 12, p2_refactor 53, auto_backtest 31, llm_retry 30, db_singleton 15, security 23, p5_final 44)",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "18.0.0",
         "date": "2026-02-17",
         "type": "major",
