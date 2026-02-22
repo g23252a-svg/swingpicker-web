@@ -293,6 +293,70 @@ def run_tests():
          "W_SECTOR =" not in collector_src and "* W_SECTOR" not in collector_src,
          "W_SECTOR still in use")
 
+    # ── 18. Multi-Timeframe 경로 검증 (#15) ──
+    print("\n📐 18. Multi-Timeframe 경로 잠금 (#15)")
+
+    # MTF 없는 기본 row (MTF_DATA_SUFFICIENT=0)
+    mtf_base_row = {**base_row, "MTF_WEEKLY_TREND": 0, "MTF_MONTHLY_TREND": 0,
+                    "MTF_DATA_SUFFICIENT": 0}
+    struct_mtf_base = calculate_structural_score(mtf_base_row)
+
+    # (a) 데이터 부족 시 보정 0 (안전장치 2)
+    mtf_no_data_up = {**base_row, "MTF_WEEKLY_TREND": 1, "MTF_MONTHLY_TREND": 1,
+                      "MTF_DATA_SUFFICIENT": 0}
+    struct_no_data = calculate_structural_score(mtf_no_data_up)
+    test("MTF 데이터 부족 → 보정 0",
+         np.isclose(struct_mtf_base, struct_no_data),
+         f"base={struct_mtf_base:.1f}, nodata={struct_no_data:.1f}")
+
+    # (b) 주봉+월봉 모두 상승 → STRUCT +10 (Config값)
+    mtf_both_up = {**base_row, "MTF_WEEKLY_TREND": 1, "MTF_MONTHLY_TREND": 1,
+                   "MTF_DATA_SUFFICIENT": 1, "_MTF_STRUCT_BONUS": 10}
+    struct_both_up = calculate_structural_score(mtf_both_up)
+    test("MTF 양쪽 상승 → STRUCT +10",
+         np.isclose(struct_both_up - struct_mtf_base, 10.0, atol=0.5),
+         f"delta={struct_both_up - struct_mtf_base:.1f}")
+
+    # (c) 주봉+월봉 모두 하락 → STRUCT -15
+    mtf_both_dn = {**base_row, "MTF_WEEKLY_TREND": -1, "MTF_MONTHLY_TREND": -1,
+                   "MTF_DATA_SUFFICIENT": 1, "_MTF_STRUCT_PENALTY": 15}
+    struct_both_dn = calculate_structural_score(mtf_both_dn)
+    test("MTF 양쪽 하락 → STRUCT -15",
+         np.isclose(struct_both_dn - struct_mtf_base, -15.0, atol=0.5),
+         f"delta={struct_both_dn - struct_mtf_base:.1f}")
+
+    # (d) 한쪽만 상승 → 절반 bonus (+5)
+    mtf_w_up = {**base_row, "MTF_WEEKLY_TREND": 1, "MTF_MONTHLY_TREND": 0,
+                "MTF_DATA_SUFFICIENT": 1, "_MTF_STRUCT_BONUS": 10}
+    struct_w_up = calculate_structural_score(mtf_w_up)
+    test("MTF 한쪽 상승 → STRUCT +5",
+         np.isclose(struct_w_up - struct_mtf_base, 5.0, atol=0.5),
+         f"delta={struct_w_up - struct_mtf_base:.1f}")
+
+    # (e) TIMING은 MTF에 영향 안 받음
+    timing_mtf_up = calculate_timing_score(mtf_both_up)
+    timing_mtf_base = calculate_timing_score(mtf_base_row)
+    test("TIMING: MTF 변경 무관",
+         np.isclose(timing_mtf_up, timing_mtf_base),
+         f"base={timing_mtf_base:.1f}, up={timing_mtf_up:.1f}")
+
+    # (f) ★ FINAL 변화량 = STRUCT 변화량 × w_s (MTF가 STRUCT에만 영향)
+    df_mtf_base = pd.DataFrame([mtf_base_row])
+    df_mtf_up = pd.DataFrame([mtf_both_up])
+    out_mtf_base = build_global_score(df_mtf_base, "NORMAL")
+    out_mtf_up = build_global_score(df_mtf_up, "NORMAL")
+
+    final_mtf_base = float(out_mtf_base["FINAL_SCORE"].iloc[0])
+    final_mtf_up = float(out_mtf_up["FINAL_SCORE"].iloc[0])
+    final_mtf_delta = final_mtf_up - final_mtf_base
+
+    struct_delta = struct_both_up - struct_mtf_base
+    w_s_mtf, _, _ = _calc_ml_weight(out_mtf_base["ML_SCORE"], "NORMAL")
+    expected_mtf_final = struct_delta * w_s_mtf
+    test("FINAL 변화량 = STRUCT변화 × w_s (MTF→STRUCT만)",
+         np.isclose(final_mtf_delta, expected_mtf_final, atol=0.5),
+         f"FINAL_delta={final_mtf_delta:.2f}, expected={expected_mtf_final:.2f}")
+
     # ── 결과 ──
     print("\n" + "=" * 60)
     total = PASS + FAIL
