@@ -1,0 +1,245 @@
+"""스코어링 가중치 동적화 테스트"""
+
+import sys, os
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from scoring_engine import _calc_ml_weight, build_global_score
+
+PASS = 0
+FAIL = 0
+
+def test(name, cond, detail=""):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        print(f"  ✅ {name}")
+    else:
+        FAIL += 1
+        print(f"  ❌ {name}" + (f" — {detail}" if detail else ""))
+
+
+def run_tests():
+    global PASS, FAIL
+    PASS, FAIL = 0, 0
+
+    print("=" * 60)
+    print("🧪 스코어링 가중치 동적화 테스트")
+    print("=" * 60)
+
+    # ── 1. ML 비활성 (전부 0) → w_a = 0 ──
+    print("\n📐 1. ML 비활성 → AI 가중치 0")
+    ml_zero = pd.Series([0.0] * 100)
+    w_s, w_t, w_a = _calc_ml_weight(ml_zero, "NORMAL")
+    test("w_a = 0", np.isclose(w_a, 0.0), f"w_a={w_a}")
+    test("w_s + w_t = 1.0", np.isclose(w_s + w_t, 1.0), f"sum={w_s+w_t}")
+    test("NORMAL: S ≈ T", abs(w_s - w_t) < 0.01, f"s={w_s:.3f}, t={w_t:.3f}")
+
+    # ── 2. ML 완전 활성 (mean=50) → w_a = 0.20 ──
+    print("\n📐 2. ML 완전 활성 → AI 가중치 0.20")
+    ml_active = pd.Series([50.0] * 100)
+    w_s2, w_t2, w_a2 = _calc_ml_weight(ml_active, "NORMAL")
+    test("w_a = 0.20", np.isclose(w_a2, 0.20), f"w_a={w_a2}")
+    test("합 = 1.0", np.isclose(w_s2 + w_t2 + w_a2, 1.0))
+
+    # ── 3. 선형 보간 (mean=15 → 중간 가중치) ──
+    print("\n📐 3. 선형 보간")
+    ml_mid = pd.Series([15.0] * 100)
+    w_s3, w_t3, w_a3 = _calc_ml_weight(ml_mid, "NORMAL")
+    test("0 < w_a < 0.20", 0 < w_a3 < 0.20, f"w_a={w_a3}")
+    test("합 = 1.0", np.isclose(w_s3 + w_t3 + w_a3, 1.0))
+    # mean=15, LOW=5, HIGH=25 → w_a = 0.20 * (15-5)/(25-5) = 0.10
+    test("w_a ≈ 0.10", np.isclose(w_a3, 0.10, atol=0.01), f"w_a={w_a3}")
+
+    # ── 4. 커버리지 게이트 (mean 높지만 커버리지 낮음) ──
+    print("\n📐 4. 커버리지 게이트")
+    # 100개 중 10개만 ML=80, 나머지 0 → cov=0.10 (<0.20)
+    ml_sparse = pd.Series([0.0] * 90 + [80.0] * 10)
+    w_s4, w_t4, w_a4 = _calc_ml_weight(ml_sparse, "NORMAL")
+    test("cov < 0.20 → w_a = 0", np.isclose(w_a4, 0.0),
+         f"w_a={w_a4}, mean={ml_sparse.mean():.1f}, cov={(ml_sparse>0).mean():.2f}")
+
+    # ── 5. CRITICAL 매크로 → STRUCT 비중 높음 ──
+    print("\n📐 5. CRITICAL 매크로")
+    w_sc, w_tc, w_ac = _calc_ml_weight(ml_active, "CRITICAL")
+    test("CRITICAL: w_s > w_t", w_sc > w_tc,
+         f"s={w_sc:.3f}, t={w_tc:.3f}")
+    test("합 = 1.0", np.isclose(w_sc + w_tc + w_ac, 1.0))
+
+    # ML 비활성 + CRITICAL
+    w_sc0, w_tc0, w_ac0 = _calc_ml_weight(ml_zero, "CRITICAL")
+    test("CRITICAL + ML off: w_s > w_t", w_sc0 > w_tc0,
+         f"s={w_sc0:.3f}, t={w_tc0:.3f}")
+    test("CRITICAL + ML off: w_a = 0", np.isclose(w_ac0, 0.0))
+
+    # ── 6. 불연속 경계 테스트 (mean=4.9 vs 5.1) ──
+    print("\n📐 6. 경계 연속성")
+    ml_49 = pd.Series([4.9] * 100)
+    ml_51 = pd.Series([5.1] * 100)
+    _, _, w_a49 = _calc_ml_weight(ml_49, "NORMAL")
+    _, _, w_a51 = _calc_ml_weight(ml_51, "NORMAL")
+    test("mean=4.9 → w_a=0", np.isclose(w_a49, 0.0))
+    test("mean=5.1 → w_a 매우 작음", w_a51 < 0.02,
+         f"w_a={w_a51:.4f}")
+    # 급격한 변화가 없어야 함
+    test("경계 차이 < 0.02", abs(w_a51 - w_a49) < 0.02,
+         f"diff={abs(w_a51-w_a49):.4f}")
+
+    # ── 7. build_global_score 통합 — 진짜 검증 ──
+    print("\n📐 7. build_global_score 통합")
+    test_df = pd.DataFrame({
+        "RSI14": [55, 70, 40],
+        "MFI14": [50, 60, 45],
+        "이격도": [2.0, 5.0, -1.0],
+        "BB_BW": [0.1, 0.2, 0.05],
+        "ret_5d_%": [3.0, 8.0, -2.0],
+        "ret_10d_%": [5.0, 12.0, 0.0],
+        "ret_20d_%": [10.0, 15.0, -5.0],
+        "ret_60d_%": [20.0, 30.0, 5.0],
+        "MACD_Slope_PCT": [0.01, 0.03, -0.01],
+        "Range_Pos": [0.7, 0.9, 0.3],
+        "Vol_Quality": [1.2, 1.8, 0.8],
+        "Above_MA20": [1, 1, 0],
+        "거래강도": [2.0, 4.0, 0.5],
+        "Low_Trend_PCT": [1.0, 2.0, -1.0],
+        "IS_SWING_SUPPORT": [1, 0, 0],
+        "SECTOR_RANK": [2, 5, 10],
+        "ML_SCORE": [0.0, 0.0, 0.0],  # ML 비활성
+    })
+    result = build_global_score(test_df, "NORMAL")
+    test("FINAL_SCORE 존재", "FINAL_SCORE" in result.columns)
+    test("FINAL_SCORE > 0", result["FINAL_SCORE"].mean() > 0)
+
+    # ✅ 진짜 공식 검증: 가중치 역산 후 비교
+    w_s7, w_t7, w_a7 = _calc_ml_weight(test_df["ML_SCORE"], "NORMAL")
+    expected7 = ((result["STRUCT_SCORE"] * w_s7)
+                 + (result["TIMING_SCORE"] * w_t7)
+                 + (result["AI_SCORE"] * w_a7)).round(1)
+    test("FINAL 공식 일치 (일반)", expected7.equals(result["FINAL_SCORE"]),
+         f"expected={expected7.tolist()}, actual={result['FINAL_SCORE'].tolist()}")
+
+    # ML off → w_a=0 확인
+    test("ML off: w_a=0", np.isclose(w_a7, 0.0),
+         f"w_a={w_a7}")
+
+    # ML 활성 시 점수 변화
+    test_df2 = test_df.copy()
+    test_df2["ML_SCORE"] = [80.0, 70.0, 60.0]
+    result2 = build_global_score(test_df2, "NORMAL")
+    test("ML 활성 시 FINAL 변화",
+         not result["FINAL_SCORE"].equals(result2["FINAL_SCORE"]))
+
+    # ML 활성 시도 공식 일치
+    w_s72, w_t72, w_a72 = _calc_ml_weight(test_df2["ML_SCORE"], "NORMAL")
+    expected72 = ((result2["STRUCT_SCORE"] * w_s72)
+                  + (result2["TIMING_SCORE"] * w_t72)
+                  + (result2["AI_SCORE"] * w_a72)).round(1)
+    test("ML 활성: FINAL 공식 일치", expected72.equals(result2["FINAL_SCORE"]))
+
+    # ── 8. NaN 방어 ──
+    print("\n📐 8. NaN 방어")
+    ml_nan = pd.Series([np.nan, np.nan, 50.0])
+    w_sn, w_tn, w_an = _calc_ml_weight(ml_nan, "NORMAL")
+    test("NaN 포함 → 크래시 없음", True)
+    test("합 ≈ 1.0", np.isclose(w_sn + w_tn + w_an, 1.0),
+         f"sum={w_sn + w_tn + w_an}")
+
+    # ── 9. ML_SCORE clip 검증 ──
+    print("\n📐 9. ML_SCORE clip")
+    test_df9 = test_df.copy()
+    test_df9["ML_SCORE"] = [-50.0, 150.0, 80.0]
+    result9 = build_global_score(test_df9, "NORMAL")
+    test("음수 → clip 0", result9["AI_SCORE"].iloc[0] == 0.0)
+    test("150 → clip 100", result9["AI_SCORE"].iloc[1] == 100.0)
+    test("80 → 그대로", result9["AI_SCORE"].iloc[2] == 80.0)
+
+    # ── 10. ML_SCORE 컬럼 없을 때 ──
+    print("\n📐 10. ML_SCORE 컬럼 없음")
+    test_df10 = test_df.drop(columns=["ML_SCORE"])
+    result10 = build_global_score(test_df10, "NORMAL")
+    test("ML 없음 → 크래시 없음", "FINAL_SCORE" in result10.columns)
+    test("ML 없음 → AI_SCORE=0", (result10["AI_SCORE"] == 0.0).all())
+
+    # ── 11. macro_risk = HIGH ──
+    print("\n📐 11. macro_risk = HIGH")
+    ml_high = pd.Series([50.0] * 100)
+    w_sh, w_th, w_ah = _calc_ml_weight(ml_high, "HIGH")
+    test("HIGH: w_s > w_t", w_sh > w_th, f"s={w_sh:.4f}, t={w_th:.4f}")
+    test("HIGH: 합 ≈ 1.0", np.isclose(w_sh + w_th + w_ah, 1.0))
+    # NORMAL과 비교
+    w_sn2, w_tn2, _ = _calc_ml_weight(ml_high, "NORMAL")
+    test("HIGH s > NORMAL s", w_sh > w_sn2,
+         f"HIGH={w_sh:.4f}, NORMAL={w_sn2:.4f}")
+
+    # ── 12. 절사평균(trimmed mean) 왜곡 방지 ──
+    print("\n📐 12. 절사평균 왜곡 방지")
+    # 100개 중 5개만 ML=100, 나머지 30 → cov OK, 단순평균 흔들림
+    ml_skew = pd.Series([30.0] * 95 + [100.0] * 5)
+    w_s12, w_t12, w_a12 = _calc_ml_weight(ml_skew, "NORMAL")
+    # 절사평균이면 100짜리 5개가 제거되어 ~30 근처 → w_a ≈ 0.20 * (30-5)/(25-5) = 0.25 → cap 0.20
+    test("절사평균: w_a = 0.20 (outlier 제거)",
+         np.isclose(w_a12, 0.20, atol=0.01),
+         f"w_a={w_a12:.4f}")
+
+    # 단순평균이었다면 mean=33.5 → w_a=0.20 (같은 결과긴 한데)
+    # 더 극단적 케이스: 90개 0점 + 10개 80점 → cov=0.10 → 게이트에 걸림
+    ml_extreme = pd.Series([0.0] * 90 + [80.0] * 10)
+    _, _, w_a_ext = _calc_ml_weight(ml_extreme, "NORMAL")
+    test("극단 분포: cov gate → w_a=0", np.isclose(w_a_ext, 0.0),
+         f"w_a={w_a_ext:.4f}")
+
+    # ── 13. PASS_EBS 생성 검증 ──
+    print("\n📐 13. PASS_EBS 생성")
+    result13 = build_global_score(test_df, "NORMAL")
+    test("PASS_EBS 컬럼 존재", "PASS_EBS" in result13.columns)
+    test("PASS_EBS = 0 or 1", set(result13["PASS_EBS"].unique()).issubset({0, 1}))
+
+    # ── 14. config 외부화 ──
+    print("\n📐 14. config 외부화")
+    from scoring_engine import WEIGHT_CONFIG
+    custom_cfg = {**WEIGHT_CONFIG, "ml_max_weight": 0.30, "ml_low": 0.0, "ml_high": 10.0}
+    ml_cfg = pd.Series([8.0] * 100)
+    w_s14, w_t14, w_a14 = _calc_ml_weight(ml_cfg, "NORMAL", config=custom_cfg)
+    # ml_center=8, LOW=0, HIGH=10 → w_a = 0.30 * 8/10 = 0.24
+    test("커스텀 max=0.30: w_a ≈ 0.24", np.isclose(w_a14, 0.24, atol=0.02),
+         f"w_a={w_a14:.4f}")
+    test("합 ≈ 1.0", np.isclose(w_s14 + w_t14 + w_a14, 1.0))
+
+    # ── 15. 미지정 macro_risk → NORMAL fallback ──
+    print("\n📐 15. macro_risk 방어")
+    w_s15, w_t15, w_a15 = _calc_ml_weight(ml_active, "UNKNOWN_RISK")
+    w_sn15, w_tn15, w_an15 = _calc_ml_weight(ml_active, "NORMAL")
+    test("미지정 macro → NORMAL과 동일",
+         np.isclose(w_s15, w_sn15) and np.isclose(w_t15, w_tn15),
+         f"unknown=({w_s15:.4f},{w_t15:.4f}), normal=({w_sn15:.4f},{w_tn15:.4f})")
+
+    # ── 16. 소규모 n (n<10) trimmed mean 안정성 ──
+    print("\n📐 16. 소규모 n (trimmed mean)")
+    ml_small = pd.Series([30.0, 30.0, 30.0, 100.0, 0.0])  # n=5 < 10
+    w_s16, w_t16, w_a16 = _calc_ml_weight(ml_small, "NORMAL")
+    test("n<10 → 크래시 없음", True)
+    test("n<10: 합 ≈ 1.0", np.isclose(w_s16 + w_t16 + w_a16, 1.0))
+    # n<10이면 단순 mean 사용 → mean=38.0, cov=0.80 → HIGH 이상 → w_a=0.20
+    test("n<10: w_a 계산됨", w_a16 > 0, f"w_a={w_a16:.4f}")
+
+    # n=1
+    ml_one = pd.Series([50.0])
+    w_s1, w_t1, w_a1 = _calc_ml_weight(ml_one, "NORMAL")
+    test("n=1 → 크래시 없음 + 합=1", np.isclose(w_s1 + w_t1 + w_a1, 1.0))
+
+    # ── 결과 ──
+    print("\n" + "=" * 60)
+    total = PASS + FAIL
+    print(f"🏁 결과: {PASS}/{total} 통과 ({FAIL} 실패)")
+    if FAIL > 0:
+        print("⚠️ 실패 항목이 있습니다!")
+        sys.exit(1)
+    else:
+        print("🏆 ALL PASSED!")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    run_tests()
