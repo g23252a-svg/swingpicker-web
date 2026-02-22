@@ -153,7 +153,8 @@ W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (
 P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = _CFG.p_overheat_5d, _CFG.p_overheat_10d, _CFG.p_rsi_out
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = (
     _CFG.p_macd_neg, _CFG.p_near_far, _CFG.p_liq_low, _CFG.p_vol_spike)
-W_SECTOR = _CFG.w_sector
+# ✅ [v14] W_SECTOR 제거 — 섹터 보너스는 TIMING_SCORE 한 곳에서만 반영 (SSOT)
+# 레거시 W_SECTOR=0.05는 더 이상 사용되지 않음
 P_BIG_SL = _CFG.p_big_sl
 
 # ── 분할 모듈 import ──
