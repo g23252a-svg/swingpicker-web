@@ -189,7 +189,7 @@ def run():
         if os.path.exists(json_path):
             data = json.load(open(json_path))
             test("JSON 내용 유효", isinstance(data, dict) and "table" in data)
-            test("meta 버전 태깅", data.get("meta", {}).get("version") == "v14.0")
+            test("meta 버전 태깅", data.get("meta", {}).get("version") == "v19.0")
             test("meta horizon 기록", data.get("meta", {}).get("horizon_bdays") == cfg5.horizon_bdays)
             test("meta 비용 기록",
                  abs(data.get("meta", {}).get("round_trip_cost_pct", 0) - cfg5.round_trip_cost_pct) < 0.01)
