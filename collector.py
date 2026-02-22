@@ -3007,6 +3007,8 @@ def analyze_ticker(
     return {
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
         "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1),
+        # ✅ [v14] TOXIC Filter용: 거래대금(원) 항상 포함 (determine_state_dynamic 분모 보장)
+        "거래대금(원)": round(float(tv_eok if tv_eok is not None and not np.isnan(tv_eok) else 0.0) * 1e8, 0),
         "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
         "BB_BW": round(bb_bw_val, 2), "TTM_SQUEEZE": int(ttm_squeeze), "TTM_SQUEEZE_CNT": sqz_cnt,
         "BB_SQUEEZE_BW": int(bw_squeeze),
