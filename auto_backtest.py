@@ -408,7 +408,7 @@ def auto_calibrate(
 
     # 3. 저장 (버전 태깅 포함)
     meta = {
-        "version": "v14.0",
+        "version": "v19.0",
         "as_of_ymd": as_of_ymd,
         "horizon_bdays": config.horizon_bdays,
         "entry_rule": config.entry_rule,
