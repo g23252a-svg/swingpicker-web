@@ -176,6 +176,56 @@ def run():
     finally:
         time.sleep = original_sleep
 
+    # ═══ 8. 총 대기시간 상한 (total_timeout) ═══
+    print("\n📐 8. 총 대기시간 상한")
+    timeout_sleeps = []
+    fake_clock = [0.0]  # 가짜 시계
+
+    def mock_sleep_tick(s):
+        timeout_sleeps.append(s)
+        fake_clock[0] += s  # sleep한 만큼 시계 진행
+
+    original_monotonic = time.monotonic
+    time.sleep = mock_sleep_tick
+    time.monotonic = lambda: fake_clock[0]
+    call_count6 = [0]
+
+    try:
+        def always_429_slow():
+            call_count6[0] += 1
+            raise Http429("429")
+
+        raised_timeout = False
+        try:
+            _llm_call_with_retry(always_429_slow, max_retries=10,
+                                 base_delay=2.0, cap=30.0, total_timeout=5.0)
+        except Http429:
+            raised_timeout = True
+
+        test("total_timeout=5s → 결국 raise", raised_timeout)
+        total_slept = sum(timeout_sleeps)
+        test("총 sleep ≤ total_timeout(5s)",
+             total_slept <= 6.0,
+             f"total_slept={total_slept:.2f}")
+        test("max_retries 전에 timeout으로 중단", call_count6[0] < 11,
+             f"calls={call_count6[0]}")
+
+    finally:
+        time.sleep = original_sleep
+        time.monotonic = original_monotonic
+
+    # ═══ 9. 스모크: 정상 호출 1회 → 즉시 리턴 ═══
+    print("\n📐 9. 스모크(canary) 정상 호출")
+    smoke_sleeps = []
+    time.sleep = lambda s: smoke_sleeps.append(s)
+
+    try:
+        result_smoke = _llm_call_with_retry(lambda: "healthy", max_retries=3)
+        test("정상 호출 → 즉시 성공", result_smoke == "healthy")
+        test("sleep 0회", len(smoke_sleeps) == 0)
+    finally:
+        time.sleep = original_sleep
+
     # ── 결과 ──
     print("\n" + "=" * 60)
     total = PASS + FAIL
