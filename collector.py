@@ -2740,3 +2740,16 @@ def main(
             f"승률={cal_summary.get('overall_winrate', 0):.1%}")
     except Exception as e:
         log(f"⚠️ 자동 캘리브레이션 스킵: {e}")
+
+    # -----------------------------------------------------------
+    # [Step 11] 포지션 트래킹 & 자동 알림
+    # -----------------------------------------------------------
+    try:
+        from position_tracker import track_open_positions, register_from_recommendations
+        register_from_recommendations(OUT_DIR, df_out, trade_ymd, top_n=rec_limit_cnt)
+        track_result = track_open_positions(OUT_DIR, trade_ymd)
+        log(f"📍 포지션: 체크={track_result.get('checked',0)}, "
+            f"이벤트={track_result.get('events',0)}, "
+            f"청산={track_result.get('closed',0)}")
+    except Exception as e:
+        log(f"⚠️ 포지션 트래킹 스킵: {e}")
