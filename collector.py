@@ -2336,28 +2336,56 @@ def determine_state_dynamic(row, thresholds: dict):
 
 
 def build_global_score(df: pd.DataFrame, macro_risk: str) -> pd.DataFrame:
+    """
+    STRUCT + TIMING + AI → FINAL_SCORE 산출.
+    EBS는 필터/게이트 역할 → PASS_EBS 컬럼 생성 (점수 합산에는 미포함).
+    ✅ [v14] ML 활성도 기반 동적 가중치 — scoring_engine SSOT 호출
+    """
     x = df.copy()
     
-    # [핵심] EBS 독립 체크리스트 계산 (정예군 편성의 기준점)
     x["EBS"] = x.apply(calculate_ebs_independent, axis=1)
+    x["PASS_EBS"] = (x["EBS"] >= 3).astype(int)
     
-    # 기초 체력 및 타이밍 계산
     x["STRUCT_SCORE"] = x.apply(calculate_structural_score, axis=1).round(1)
     x["TIMING_SCORE"] = x.apply(calculate_timing_score, axis=1).round(1)
     
     if "ML_SCORE" not in x.columns: x["ML_SCORE"] = 0.0
     x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
     
-    # 매크로 가중치 적용 (순수 엔진 실력)
-    if macro_risk == "CRITICAL": w_s, w_t, w_a = 0.6, 0.2, 0.2
-    elif macro_risk == "HIGH": w_s, w_t, w_a = 0.5, 0.3, 0.2
-    else: w_s, w_t, w_a = 0.4, 0.4, 0.2
+    # ✅ SSOT: scoring_engine._calc_ml_weight 호출
+    try:
+        from scoring_engine import _calc_ml_weight as _se_calc
+        w_s, w_t, w_a = _se_calc(x["ML_SCORE"], macro_risk)
+    except ImportError:
+        # fallback: 인라인 계산
+        ml = x["ML_SCORE"].fillna(0)
+        ml_cov = float((ml > 0).mean())
+        n = len(ml)
+        if n >= 10:
+            trim_k = max(1, int(n * 0.10))
+            ml_sorted = ml.sort_values().values
+            ml_center = float(ml_sorted[trim_k:-trim_k].mean())
+        else:
+            ml_center = float(ml.mean())
+        LOW, HIGH = 5.0, 25.0
+        if ml_center <= LOW or ml_cov < 0.20: w_a = 0.0
+        elif ml_center >= HIGH: w_a = 0.20
+        else: w_a = 0.20 * (ml_center - LOW) / (HIGH - LOW)
+        macro_w = {"CRITICAL": (0.55, 0.25), "HIGH": (0.50, 0.30)}
+        base_s, base_t = macro_w.get(macro_risk, (0.40, 0.40))
+        rem = 1.0 - w_a
+        st_sum = base_s + base_t
+        w_s = rem * (base_s / st_sum)
+        w_t = rem * (base_t / st_sum)
+        total = w_s + w_t + w_a
+        if total > 0: w_s /= total; w_t /= total; w_a /= total
+
+    log(f"🎯 [v14] 동적 가중치: S={w_s:.4f} T={w_t:.4f} A={w_a:.4f} (macro={macro_risk})")
         
     x["FINAL_SCORE"] = ((x["STRUCT_SCORE"] * w_s) + 
                         (x["TIMING_SCORE"] * w_t) + 
                         (x["AI_SCORE"] * w_a)).round(1)
     
-    # 실전용 점수 초기화
     x["DISPLAY_SCORE"] = x["FINAL_SCORE"]
     
     return x
