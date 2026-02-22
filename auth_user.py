@@ -21,17 +21,20 @@ MASTER_ADMIN_ID = "admin"
 
 # [핵심 수정 1] 비밀번호 로드 로직 강화 (secrets.toml 없는 환경에서도 안전)
 try:
-    raw_pw = st.secrets.get("MASTER_ADMIN_PW") or st.secrets.get("auth", {}).get("master_admin_pw", "")
+    _raw_pw = st.secrets.get("MASTER_ADMIN_PW") or st.secrets.get("auth", {}).get("master_admin_pw", "")
 except Exception:
-    raw_pw = os.environ.get("MASTER_ADMIN_PW", "")
-MASTER_ADMIN_PW = str(raw_pw).strip() if raw_pw else ""
-if not MASTER_ADMIN_PW:
+    _raw_pw = os.environ.get("MASTER_ADMIN_PW", "")
+_raw_pw = str(_raw_pw).strip() if _raw_pw else ""
+
+if not _raw_pw:
     logger.warning("⚠️ MASTER_ADMIN_PW 미설정 — 관리자 로그인 비활성화됨 (Streamlit Secrets 또는 환경변수에 설정 필요)")
 
 # [v2.0] 관리자 비밀번호를 메모리에 해시로만 보관 (평문 제거)
-_ADMIN_PW_HASH = hashlib.sha256(MASTER_ADMIN_PW.encode()).hexdigest() if MASTER_ADMIN_PW else ""
-# 원문 참조를 제거하여 메모리 덤프 공격 표면 축소
-# (MASTER_ADMIN_PW 변수 자체는 다른 곳에서 if 조건으로 참조하므로 bool 판별용으로만 유지)
+_ADMIN_PW_HASH = hashlib.sha256(_raw_pw.encode()).hexdigest() if _raw_pw else ""
+_ADMIN_PW_SET = bool(_raw_pw)  # 설정 여부 판별용 (평문 아님)
+
+# ✅ [v14] #18: 평문 즉시 제거 — 전역에 평문 없음
+del _raw_pw
 
 def _verify_admin_password(input_pw: str) -> bool:
     """[v2.0] 관리자 비밀번호를 해시로 비교 (timing-safe)"""
@@ -56,8 +59,8 @@ ALLOWED_DOMAINS = [
 # ----------------- 1. DB 지연 연결 (순환 참조 방지) -----------------
 def get_db():
     try:
-        from db_utils import LDYDBManager
-        return LDYDBManager()
+        from db_utils import get_db as _get_singleton_db
+        return _get_singleton_db()
     except Exception as e:
         logger.error(f"DB Load Error: {e}")
         return None
@@ -295,7 +298,7 @@ def render_auth_box(show_debug: bool = False):
                 start_t = time.time()
                 
                 # ✅ [v2.0 보안 패치] 마스터 관리자 — 해시 비교 (timing-safe)
-                if lid == MASTER_ADMIN_ID and MASTER_ADMIN_PW and _verify_admin_password(lpw):
+                if lid == MASTER_ADMIN_ID and _ADMIN_PW_SET and _verify_admin_password(lpw):
                     st.session_state[CURRENT_USER_KEY] = "admin"
                     st.toast("🛡️ 마스터 관리자 로그인 성공")
                     st.rerun()
