@@ -83,8 +83,10 @@ PRICE_PRIME = 39000
 
 # Auth 상수
 MASTER_ADMIN_ID = "admin"
-MASTER_ADMIN_PW = os.environ.get("MASTER_ADMIN_PW", "").strip()
-_ADMIN_PW_HASH = hashlib.sha256(MASTER_ADMIN_PW.encode()).hexdigest() if MASTER_ADMIN_PW else ""
+_raw_admin_pw = os.environ.get("MASTER_ADMIN_PW", "").strip()
+_ADMIN_PW_HASH = hashlib.sha256(_raw_admin_pw.encode()).hexdigest() if _raw_admin_pw else ""
+_ADMIN_PW_SET = bool(_raw_admin_pw)
+del _raw_admin_pw  # ✅ [v14] #18: 평문 즉시 제거
 
 SECURITY_QUESTIONS = [
     "선택하세요...", "가장 기억에 남는 여행지는?", "어릴 적 살던 동네 이름은?",
@@ -118,8 +120,8 @@ def to_kst_str(value, fmt="%Y-%m-%d %H:%M:%S"):
 # ═══════════════════════════════════════════
 def _get_db():
     try:
-        from db_utils import LDYDBManager
-        return LDYDBManager()
+        from db_utils import get_db
+        return get_db()
     except Exception as e:
         logger.error(f"DB Error: {e}")
         return None
@@ -598,7 +600,7 @@ def login_page():
                 async def do_login():
                     uid = lid.value.strip()
                     pw = lpw.value
-                    if uid == MASTER_ADMIN_ID and MASTER_ADMIN_PW and _verify_admin_pw(pw):
+                    if uid == MASTER_ADMIN_ID and _ADMIN_PW_SET and _verify_admin_pw(pw):
                         set_current_user({"id": "admin", "role": "admin", "nickname": "관리자"})
                         ui.navigate.to("/"); return
                     db = _get_db()
