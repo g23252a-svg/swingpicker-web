@@ -3447,7 +3447,12 @@ def main(
         dart_engine = dart_analyzer.DartAnalyzer(dart_api_key=dart_key)
         if not dart_key: log("⚠️ DART_API_KEY 미설정. 공시 분석 스킵.")
 
-        target_indices = df_out.index[:10]
+        # ✅ [v14] 뉴스 대상 = 최종 스코어 상위 10개 (index[:10] 의존 제거)
+        # 정의: "점수 기준 최우선 10개" = 화면 표시 점수(DISPLAY_SCORE) 상위
+        #   → 정예군/일반군 배치 순서가 아닌, 순수 점수 기준으로 뉴스 분석
+        _score_col = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
+        df_out[_score_col] = pd.to_numeric(df_out[_score_col], errors="coerce").fillna(-1)
+        target_indices = df_out.nlargest(10, _score_col).index
         target_codes = [str(df_out.loc[i, "종목코드"]).zfill(6) for i in target_indices]
         
         news_map = {}
