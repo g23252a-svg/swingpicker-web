@@ -454,23 +454,46 @@ def _ymd8_to_dash(s: str) -> str:
         return f"{s[:4]}-{s[4:6]}-{s[6:]}"
     return s
 
-# [v14 REMOVED → _pykrx_df moved to module] (15 lines deleted)
+# ═══════════════════════════════════════════════════
+#  [v14 호환 래퍼] data_source 클래스 → 기존 함수명 매핑
+# ═══════════════════════════════════════════════════
+_ds = get_data_source()
+_cache = OHLCVCache(OUT_DIR, fmt=_CFG.cache_format, allow_legacy_pickle=True)
 
-# [v14 REMOVED → safe_ohlcv_by_date moved to module] (25 lines deleted)
 
-# [v14 REMOVED → safe_ohlcv_by_ticker moved to module] (3 lines deleted)
+def safe_ohlcv_by_date(start_ymd: str, end_ymd: str, code: str) -> Optional[pd.DataFrame]:
+    """종목 코드 기반 OHLCV 조회 (기간)"""
+    return _ds.get_ohlcv(str(code).zfill(6), start_ymd, end_ymd)
 
-# [v14 REMOVED → safe_market_cap_by_ticker moved to module] (2 lines deleted)
 
-# [v14 REMOVED → safe_ticker_list moved to module] (3 lines deleted)
+def safe_ohlcv_by_ticker(ymd: str, market: str = "ALL") -> Optional[pd.DataFrame]:
+    """일별 전종목 OHLCV 조회"""
+    return _ds.get_ohlcv_by_ticker(ymd, market=market)
 
-# [v14 REMOVED → safe_ticker_name moved to module] (10 lines deleted)
 
-# [v14 REMOVED → check_macro_env moved to module] (78 lines deleted)
+def safe_market_cap_by_ticker(ymd: str, market: str = "ALL") -> Optional[pd.DataFrame]:
+    """일별 전종목 시가총액 조회"""
+    return _ds.get_market_cap(ymd, market=market)
 
-# [v14 REMOVED → load_ohlcv_cache moved to module] (15 lines deleted)
 
-# [v14 REMOVED → save_ohlcv_cache moved to module] (12 lines deleted)
+def safe_ticker_list(ymd: str, market: str = "KOSPI") -> list:
+    """종목 코드 리스트 조회"""
+    return _ds.get_ticker_list(ymd, market=market)
+
+
+def safe_ticker_name(ticker: str) -> Optional[str]:
+    """종목명 조회"""
+    return _ds.get_ticker_name(ticker)
+
+
+def load_ohlcv_cache(trade_ymd: str) -> Dict[str, pd.DataFrame]:
+    """OHLCV 캐시 로드"""
+    return _cache.load(trade_ymd)
+
+
+def save_ohlcv_cache(trade_ymd: str, data: Dict[str, pd.DataFrame]) -> None:
+    """OHLCV 캐시 저장"""
+    _cache.save(trade_ymd, data)
 
 def prepare_ohlcv_data(
     tickers: List[str], 
