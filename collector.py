@@ -2763,3 +2763,6 @@ def main(
             f"청산={track_result.get('closed',0)}")
     except Exception as e:
         log(f"⚠️ 포지션 트래킹 스킵: {e}")
+
+if __name__ == "__main__":
+    main()
