@@ -989,48 +989,77 @@ def resolve_trade_date(force_ymd: Optional[str] = None) -> str:
 
     return find_latest_valid_date(_has_ohlcv_and_mcap, max_back_days=10)
 
-def build_mcap_map(ref_ymd: Optional[str] = None) -> Tuple[Dict[str, float], str]:
-    # ✅ (1) 함수 첫 줄 방어코드: PYKRX 자체가 없으면 "빈 맵"으로 안전 종료
-    if (not PYKRX_OK) or (stock is None):
-        use = ref_ymd or now_kst().strftime("%Y%m%d")
-        log("⚠️ PYKRX 사용 불가 → 시총 맵 비활성(빈 맵 반환)")
-        return {}, use
-
-    # ✅ (2) _check_mcap을 safe wrapper 기반으로 교체
-    def _check_mcap(ymd: str) -> bool:
-        a = safe_market_cap_by_ticker(ymd, market="KOSPI")
-        b = safe_market_cap_by_ticker(ymd, market="KOSDAQ")
-        return (a is not None and not a.empty) or (b is not None and not b.empty)
-
-    use: Optional[str] = None
-
-    # 1순위: ref_ymd 그대로 시도
-    if ref_ymd and _check_mcap(ref_ymd):
-        use = ref_ymd
-
-    # 2순위: 자동 탐색
-    if use is None:
-        use = find_latest_valid_date(_check_mcap, max_back_days=10)
-
+def _build_mcap_map_fdr() -> Dict[str, float]:
+    """
+    [v19.1] FDR 폴백: pykrx 차단 시 FDR StockListing의 Marcap 컬럼으로 시총 맵 생성
+    Marcap 단위: 원 → 억원 변환
+    """
     try:
-        parts = []
-        a = safe_market_cap_by_ticker(use, market="KOSPI")
-        b = safe_market_cap_by_ticker(use, market="KOSDAQ")
-        if a is not None and not a.empty: parts.append(a)
-        if b is not None and not b.empty: parts.append(b)
+        df_fdr = fdr.StockListing("KRX")
+        if df_fdr is None or df_fdr.empty:
+            return {}
 
-        df = pd.concat(parts) if parts else pd.DataFrame()
-        if df.empty:
-            log(f"⚠️ 시가총액 맵이 비어 있음(use={use}), 빈 맵 반환")
-            return {}, use
+        code_col = "Code" if "Code" in df_fdr.columns else ("Symbol" if "Symbol" in df_fdr.columns else None)
+        mcap_col = "Marcap" if "Marcap" in df_fdr.columns else None
 
-        df["Code"] = df.index.astype(str).str.zfill(6)
-        mcap_map = dict(zip(df["Code"], df["시가총액"] / 1e8))  # 억원
-        return mcap_map, use
+        if not code_col or not mcap_col:
+            log(f"⚠️ FDR 시총 폴백: 필요 컬럼 없음 (cols={df_fdr.columns.tolist()})")
+            return {}
+
+        df_fdr[code_col] = df_fdr[code_col].astype(str).str.zfill(6)
+        df_fdr[mcap_col] = pd.to_numeric(df_fdr[mcap_col], errors="coerce").fillna(0)
+        # Marcap은 원 단위 → 억원 변환
+        mcap_map = dict(zip(df_fdr[code_col], df_fdr[mcap_col] / 1e8))
+        # 0 이하 제거
+        mcap_map = {k: v for k, v in mcap_map.items() if v > 0}
+        log(f"✅ [FDR 폴백] 시총 맵 생성 성공: {len(mcap_map)}개 종목")
+        return mcap_map
 
     except Exception as e:
-        log(f"⚠️ 시가총액 맵 생성 실패({use}): {e}")
-        return {}, use
+        log(f"⚠️ FDR 시총 폴백 실패: {e}")
+        return {}
+
+
+def build_mcap_map(ref_ymd: Optional[str] = None) -> Tuple[Dict[str, float], str]:
+    use = ref_ymd or now_kst().strftime("%Y%m%d")
+
+    # ── 1순위: pykrx ──
+    if PYKRX_OK and stock is not None:
+        def _check_mcap(ymd: str) -> bool:
+            a = safe_market_cap_by_ticker(ymd, market="KOSPI")
+            b = safe_market_cap_by_ticker(ymd, market="KOSDAQ")
+            return (a is not None and not a.empty) or (b is not None and not b.empty)
+
+        pykrx_use = None
+        if ref_ymd and _check_mcap(ref_ymd):
+            pykrx_use = ref_ymd
+        if pykrx_use is None:
+            pykrx_use = find_latest_valid_date(_check_mcap, max_back_days=10)
+
+        try:
+            parts = []
+            a = safe_market_cap_by_ticker(pykrx_use, market="KOSPI")
+            b = safe_market_cap_by_ticker(pykrx_use, market="KOSDAQ")
+            if a is not None and not a.empty: parts.append(a)
+            if b is not None and not b.empty: parts.append(b)
+
+            df = pd.concat(parts) if parts else pd.DataFrame()
+            if not df.empty:
+                df["Code"] = df.index.astype(str).str.zfill(6)
+                mcap_map = dict(zip(df["Code"], df["시가총액"] / 1e8))
+                log(f"✅ [pykrx] 시총 맵 생성 성공: {len(mcap_map)}개 종목")
+                return mcap_map, pykrx_use
+        except Exception as e:
+            log(f"⚠️ pykrx 시총 맵 실패: {e}")
+
+    # ── 2순위: FDR 폴백 (pykrx 차단/실패 시) ──
+    log("🔄 pykrx 시총 실패 → FDR Marcap 폴백 시도...")
+    fdr_map = _build_mcap_map_fdr()
+    if fdr_map:
+        return fdr_map, use
+
+    log(f"⚠️ 시총 맵 생성 실패 (pykrx+FDR 모두), 빈 맵 반환")
+    return {}, use
 
 def get_mcap_eok_from_map(mcap_map: Dict[str, float], ticker: str) -> float:
     return float(mcap_map.get(str(ticker).zfill(6), 0))
@@ -1564,6 +1593,37 @@ def save_price_snapshot(trade_ymd: str, name_map: Dict[str, str]) -> None:
         except Exception as e:
             log(f"⚠️ 가격 스냅샷({m}) 수집 실패: {e}")
             continue
+
+    if not frames:
+        # ── FDR 폴백: pykrx 실패 시 FDR StockListing으로 스냅샷 생성 ──
+        log(f"🔄 pykrx 스냅샷 실패 → FDR 폴백 시도...")
+        try:
+            df_fdr = fdr.StockListing("KRX")
+            if df_fdr is not None and not df_fdr.empty:
+                code_col = "Code" if "Code" in df_fdr.columns else "Symbol"
+                market_col = "Market" if "Market" in df_fdr.columns else None
+
+                df_fdr["종목코드"] = df_fdr[code_col].astype(str).str.zfill(6)
+                df_fdr["종목명"] = df_fdr["종목코드"].map(name_map).fillna(df_fdr.get("Name", ""))
+                df_fdr["시장"] = df_fdr[market_col] if market_col else "KRX"
+
+                col_map = {"Close": "종가", "Open": "시가", "Low": "저가", "High": "고가"}
+                df_fdr = df_fdr.rename(columns={k: v for k, v in col_map.items() if k in df_fdr.columns})
+
+                save_cols = ["종목코드", "종목명", "시장", "종가"]
+                for extra in ["시가", "저가", "고가"]:
+                    if extra in df_fdr.columns:
+                        save_cols.append(extra)
+
+                snap_fdr = df_fdr[save_cols].copy()
+                snap_fdr["종가"] = pd.to_numeric(snap_fdr["종가"], errors="coerce").fillna(0)
+                snap_fdr = snap_fdr[snap_fdr["종가"] > 0]
+
+                if not snap_fdr.empty:
+                    frames.append(snap_fdr)
+                    log(f"✅ [FDR 폴백] 가격 스냅샷 {len(snap_fdr)}종목 확보")
+        except Exception as e:
+            log(f"⚠️ FDR 스냅샷 폴백 실패: {e}")
 
     if not frames:
         log(f"❌ 가격 스냅샷 생성 실패: 데이터 없음({trade_ymd})")
