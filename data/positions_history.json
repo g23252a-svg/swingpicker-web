@@ -1,0 +1,71 @@
+[
+  {
+    "code": "355150",
+    "name": "코스텍시스",
+    "entry_ymd": "20260223",
+    "entry_px": 15260.0,
+    "qty": 0,
+    "stop_px": 14490.0,
+    "stop_px_initial": 14490.0,
+    "take_px1": 17570.0,
+    "take_px2": 17960.0,
+    "trailing_high": 15260.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260223",
+    "last_close_px": 13500.0,
+    "unrealized_pnl_pct": -11.53,
+    "realized_pnl_pct": -11.53,
+    "close_ymd": "20260223",
+    "close_px": 13500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "355150_20260223_STOP_HIT_20260223"
+    ]
+  },
+  {
+    "code": "307930",
+    "name": "컴퍼니케이",
+    "entry_ymd": "20260223",
+    "entry_px": 7410.0,
+    "qty": 0,
+    "stop_px": 7040.0,
+    "stop_px_initial": 7040.0,
+    "take_px1": 8520.0,
+    "take_px2": 8710.0,
+    "trailing_high": 7410.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260223",
+    "last_close_px": 6390.0,
+    "unrealized_pnl_pct": -13.77,
+    "realized_pnl_pct": -13.77,
+    "close_ymd": "20260223",
+    "close_px": 6390.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "307930_20260223_STOP_HIT_20260223"
+    ]
+  },
+  {
+    "code": "006260",
+    "name": "LS",
+    "entry_ymd": "20260223",
+    "entry_px": 243000.0,
+    "qty": 0,
+    "stop_px": 233000.0,
+    "stop_px_initial": 233000.0,
+    "take_px1": 273000.0,
+    "take_px2": 278000.0,
+    "trailing_high": 243000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260223",
+    "last_close_px": 199900.0,
+    "unrealized_pnl_pct": -17.74,
+    "realized_pnl_pct": -17.74,
+    "close_ymd": "20260223",
+    "close_px": 199900.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "006260_20260223_STOP_HIT_20260223"
+    ]
+  }
+]
