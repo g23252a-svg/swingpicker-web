@@ -198,8 +198,8 @@ def run_tests():
 
     # ── 14. config 외부화 ──
     print("\n📐 14. config 외부화")
-    from scoring_engine import WEIGHT_CONFIG
-    custom_cfg = {**WEIGHT_CONFIG, "ml_max_weight": 0.30, "ml_low": 0.0, "ml_high": 10.0}
+    from collector_config import CollectorConfig
+    custom_cfg = CollectorConfig(ml_max_weight=0.30, ml_low=0.0, ml_high=10.0)
     ml_cfg = pd.Series([8.0] * 100)
     w_s14, w_t14, w_a14 = _calc_ml_weight(ml_cfg, "NORMAL", config=custom_cfg)
     # ml_center=8, LOW=0, HIGH=10 → w_a = 0.30 * 8/10 = 0.24

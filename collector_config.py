@@ -18,7 +18,7 @@ from typing import Dict, Tuple
 class CollectorConfig:
     """collector 파이프라인 전체 설정 — SSOT (Single Source of Truth)
 
-    [Phase 1-1] scoring_engine.py WEIGHT_CONFIG를 여기로 통합.
+    [Phase 1-1] ML/매크로 가중치 등 모든 설정을 이 클래스에 통합 (SSOT).
     [Phase 1-2] Time Stop 필드 추가.
     [Phase 1-3] 슬리피지 모델 필드 추가.
     """
@@ -106,7 +106,7 @@ class CollectorConfig:
     base_dir: str = field(default_factory=lambda: os.path.dirname(os.path.abspath(__file__)))
 
     # ═══════════════════════════════════════════════════
-    #  [Phase 1-1] 구 WEIGHT_CONFIG 통합 (scoring_engine.py에서 이전)
+    #  [Phase 1-1] ML/매크로 동적 가중치 (SSOT)
     # ═══════════════════════════════════════════════════
     ml_low: float = 5.0               # AI 가중치 시작점 (이하 → w_a=0)
     ml_high: float = 25.0             # AI 가중치 최대점 (이상 → w_a=max)
@@ -167,27 +167,9 @@ class CollectorConfig:
         """snapshot을 JSON 문자열로 반환 (CSV 컬럼 저장용)"""
         return json.dumps(self.snapshot(), ensure_ascii=False, default=str)
 
-    def to_weight_config_dict(self) -> dict:
-        """하위호환: 기존 WEIGHT_CONFIG dict 형태로 변환.
-        scoring_engine.py 전환 완료 후 제거 가능."""
-        return {
-            "ml_low": self.ml_low,
-            "ml_high": self.ml_high,
-            "ml_max_weight": self.ml_max_weight,
-            "ml_cov_gate": self.ml_cov_gate,
-            "trim_pct": self.trim_pct,
-            "ebs_pass_threshold": self.ebs_pass_threshold,
-            "macro_weights": self.macro_weights,
-        }
-
 
 # ── 싱글턴 기본 인스턴스 ──
 DEFAULT_CONFIG = CollectorConfig()
-
-# ── 하위호환: WEIGHT_CONFIG dict ──
-# ⚠️ DEPRECATED: 이 dict 대신 DEFAULT_CONFIG 필드를 직접 사용하세요.
-# scoring_engine.py, collector.py 전환이 완료되면 제거.
-WEIGHT_CONFIG_COMPAT = DEFAULT_CONFIG.to_weight_config_dict()
 
 # ── BacktestConfig 참조 (auto_backtest.py SSOT) ──
 # from auto_backtest import BacktestConfig, DEFAULT_BT_CONFIG

@@ -847,3 +847,111 @@ def rolling_risk_kpi(
         if c not in result.columns:
             result[c] = ""
     return result[col_order]
+
+
+# ═══════════════════════════════════════════════════
+#  [Phase 2-3] 표준화된 진입 방어 규칙
+# ═══════════════════════════════════════════════════
+
+ENTRY_DEFENSE_RULES = [
+    {
+        "name": "gap_12pct",
+        "condition": lambda row: float(row.get("gap_pct", 0) or 0) > 12,
+        "action": "hold",
+        "position_pct": 0,
+        "reason": "갭 12%+ 진입 보류",
+    },
+    {
+        "name": "gap_7pct",
+        "condition": lambda row: 7 < float(row.get("gap_pct", 0) or 0) <= 12,
+        "action": "split",
+        "position_pct": 50,
+        "reason": "갭 7%+ 분할 진입",
+    },
+    {
+        "name": "vi_triggered",
+        "condition": lambda row: bool(row.get("is_vi_triggered", False)),
+        "action": "hold",
+        "position_pct": 0,
+        "reason": "VI 발동 진입 보류",
+    },
+    {
+        "name": "consecutive_limit_up",
+        "condition": lambda row: int(row.get("consecutive_limit_up", 0) or 0) >= 2,
+        "action": "hold",
+        "position_pct": 0,
+        "reason": "연속 상한가 진입 보류",
+    },
+    {
+        "name": "extreme_surge",
+        "condition": lambda row: float(row.get("ret_1d_%", 0) or 0) > 15,
+        "action": "hold",
+        "position_pct": 0,
+        "reason": "당일 15%+ 급등 진입 보류",
+    },
+    {
+        "name": "moderate_surge",
+        "condition": lambda row: 10 < float(row.get("ret_1d_%", 0) or 0) <= 15,
+        "action": "split",
+        "position_pct": 50,
+        "reason": "당일 10%+ 급등 분할 진입",
+    },
+    # ── [Phase 2-3] 추가 방어 규칙 ──
+    {
+        "name": "very_low_liquidity",
+        "condition": lambda row: float(row.get("거래대금(억)", row.get("거래대금(억원)", 999)) or 999) < 5,
+        "action": "split",
+        "position_pct": 30,
+        "reason": "거래대금 5억 미만 소량 진입",
+    },
+    {
+        "name": "rsi_overheat",
+        "condition": lambda row: float(row.get("RSI14", 50) or 50) > 80,
+        "action": "split",
+        "position_pct": 50,
+        "reason": "RSI 80+ 과열 분할 진입",
+    },
+]
+
+
+def check_entry_defense(row: dict) -> dict:
+    """
+    표준화된 진입 방어 규칙 적용.
+    
+    Args:
+        row: 종목 데이터 (dict 또는 Series)
+    
+    Returns:
+        {"action": "enter"|"split"|"hold", "position_pct": float, "reason": str, "rules_triggered": list}
+    """
+    triggered = []
+    for rule in ENTRY_DEFENSE_RULES:
+        try:
+            if rule["condition"](row):
+                triggered.append(rule)
+        except Exception:
+            continue
+
+    if not triggered:
+        return {"action": "enter", "position_pct": 100.0, "reason": "정상", "rules_triggered": []}
+
+    # hold 규칙이 하나라도 있으면 hold
+    holds = [r for r in triggered if r["action"] == "hold"]
+    if holds:
+        reasons = " + ".join([r["reason"] for r in holds])
+        return {
+            "action": "hold",
+            "position_pct": 0.0,
+            "reason": reasons,
+            "rules_triggered": [r["name"] for r in triggered],
+        }
+
+    # split 규칙만 있으면 가장 작은 position_pct
+    min_pct = min(r["position_pct"] for r in triggered)
+    reasons = " + ".join([r["reason"] for r in triggered])
+    return {
+        "action": "split",
+        "position_pct": min_pct,
+        "reason": reasons,
+        "rules_triggered": [r["name"] for r in triggered],
+    }

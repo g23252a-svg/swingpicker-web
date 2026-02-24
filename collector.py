@@ -723,6 +723,9 @@ def make_rank_validation_report(
                                     stop=float(spx[j]) if np.isfinite(spx[j]) else 0.0,
                                     tp1=float(tpx[j]) if np.isfinite(tpx[j]) else 0.0,
                                     exec_rule_id=_exec_rule.rule_id,
+                                    time_stop_days=DEFAULT_CONFIG.time_stop_days,
+                                    time_stop_min_move_pct=DEFAULT_CONFIG.time_stop_min_move_pct,
+                                    time_stop_extend_if_profit=DEFAULT_CONFIG.time_stop_extend_if_profit,
                                 )
                                 bar_result = _exec_bar(
                                     _plan_j,
@@ -1753,7 +1756,6 @@ try:
         calculate_timing_score,
         build_global_score,
         _calc_ml_weight,
-        WEIGHT_CONFIG,
     )
     log("✅ scoring_engine SSOT import 성공")
 except ImportError as _ie:
@@ -2698,6 +2700,55 @@ def main(
         # -----------------------------------------------------------
         # 5. [정예군 편성] Elite 120 대형 박제 (Placement Logic)
         # -----------------------------------------------------------
+
+        # ── [Phase 2-1] 전략 팩토리 실행 ──
+        try:
+            from strategies import StrategyFactory, select_strategies
+            _breadth_all = breadth.get("ALL", 50.0)
+            _active_strats = select_strategies(macro_risk, _breadth_all)
+            if _active_strats:
+                _all_strat_picks = []
+                for _sname in _active_strats:
+                    _strat = StrategyFactory.create(_sname)
+                    _filtered = _strat.filter(df_out)
+                    _scored = _strat.score(_filtered)
+                    _picks = _strat.rank_and_pick(_scored, top_k=5)
+                    _all_strat_picks.append(_picks)
+                if _all_strat_picks:
+                    _strat_df = pd.concat(_all_strat_picks, ignore_index=True)
+                    # STRATEGY, STRATEGY_SCORE, STRATEGY_HORIZON 컬럼을 df_out에 머지
+                    _key = "종목코드" if "종목코드" in _strat_df.columns else _strat_df.index.name
+                    if _key and _key in df_out.columns:
+                        _merge_cols = ["STRATEGY", "STRATEGY_SCORE", "STRATEGY_HORIZON"]
+                        _merge_cols = [c for c in _merge_cols if c in _strat_df.columns]
+                        if _merge_cols:
+                            _strat_map = _strat_df.drop_duplicates(_key).set_index(_key)[_merge_cols]
+                            for _mc in _merge_cols:
+                                df_out[_mc] = df_out[_key].map(_strat_map[_mc])
+                    log(f"🎯 전략 분류: {_active_strats}, 매칭 {len(_strat_df)}건")
+        except Exception as _st_err:
+            log(f"⚠️ 전략 팩토리 스킵: {_st_err}")
+
+        # ── [Phase 2-2] 캘리브레이션 승률 → 추천 필터 ──
+        try:
+            from kelly_calibrator import calibrated_win_rate as _cal_wr
+            _score_col = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
+            _est_wr_list = []
+            for _, _row in df_out.iterrows():
+                _s = float(_row.get(_score_col, 0) or 0)
+                _wr = _cal_wr(_s, OUT_DIR, method="RANK_SCORE", horizon=5, asof_ymd=trade_ymd)
+                _est_wr_list.append(round(_wr, 3))
+            df_out["EST_WIN_RATE"] = _est_wr_list
+
+            # 승률 45% 미만 → 보류 마킹
+            _low_wr_mask = df_out["EST_WIN_RATE"] < 0.45
+            _low_wr_count = _low_wr_mask.sum()
+            if _low_wr_count > 0:
+                df_out.loc[_low_wr_mask, "LOW_WR_FLAG"] = True
+                log(f"📉 캘리브레이션: 승률 45%미만 {_low_wr_count}건 마킹")
+        except Exception as _cal_err:
+            log(f"⚠️ 캘리브레이션 연동 스킵: {_cal_err}")
+
         ebs_val = pd.to_numeric(df_out.get("EBS", 0), errors='coerce').fillna(0)
         struct_val = pd.to_numeric(df_out.get("STRUCT_SCORE", 0), errors='coerce').fillna(0)
         
@@ -2801,6 +2852,79 @@ def main(
     df_out["IS_ACTIVE"]    = df_out["ROUTE"].isin(["ATTACK", "ARMED"])
     df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == "ATTACK"
     df_out["IS_WATCH"]     = df_out["ROUTE"] == "WAIT"
+
+    # ── [Phase 2-1] 전략 팩토리: 시장 상황별 전략 적용 ──
+    try:
+        from strategies import StrategyFactory, select_strategies
+        _breadth_all = breadth.get("ALL", 50.0) if isinstance(breadth, dict) else 50.0
+        _active_strats = select_strategies(macro_risk, _breadth_all)
+        log(f"🎯 활성 전략: {_active_strats} (breadth={_breadth_all:.1f})")
+
+        _strat_picks = []
+        for _sn in _active_strats:
+            try:
+                _strat = StrategyFactory.create(_sn, cfg)
+                _result = _strat.run(df_out, top_k=5)
+                if not _result.picks.empty:
+                    _strat_picks.append(_result.picks)
+                    log(f"   ✅ {_sn}: {_result.filtered_count}건 필터 → {len(_result.picks)}건 선정")
+                else:
+                    log(f"   ⬜ {_sn}: 0건 (필터 통과 {_result.filtered_count}건)")
+            except Exception as _se:
+                log(f"   ⚠️ {_sn} 전략 에러: {_se}")
+
+        # 전략 태그 반영 (기존 df_out에 STRATEGY 컬럼 추가)
+        df_out["STRATEGY"] = "default"
+        if _strat_picks:
+            _all_strat = pd.concat(_strat_picks, ignore_index=True)
+            # 전략 선정 종목의 STRATEGY/STRATEGY_SCORE 매핑
+            for _, _sp in _all_strat.iterrows():
+                _code_match = df_out["종목코드"] == _sp.get("종목코드", "")
+                if _code_match.any():
+                    _idx = df_out[_code_match].index[0]
+                    # 이미 다른 전략으로 태그되어 있으면 점수 높은 쪽 유지
+                    if df_out.at[_idx, "STRATEGY"] != "default":
+                        _existing_ss = df_out.at[_idx, "STRATEGY_SCORE"] if "STRATEGY_SCORE" in df_out.columns else 0
+                        _new_ss = _sp.get("STRATEGY_SCORE", 0)
+                        if _new_ss <= _existing_ss:
+                            continue
+                    df_out.at[_idx, "STRATEGY"] = _sp.get("STRATEGY", "default")
+                    if "STRATEGY_SCORE" not in df_out.columns:
+                        df_out["STRATEGY_SCORE"] = np.nan
+                    df_out.at[_idx, "STRATEGY_SCORE"] = _sp.get("STRATEGY_SCORE", np.nan)
+    except ImportError:
+        log("ℹ️ strategies 패키지 미설치, 전략 팩토리 스킵")
+    except Exception as _sf_err:
+        log(f"⚠️ 전략 팩토리 에러: {_sf_err}")
+
+    # ── [Phase 2-2] 캘리브레이션 테이블 → 추천 필터 연동 ──
+    try:
+        from kelly_calibrator import calibrated_win_rate as _cal_wr
+        df_out["EST_WIN_RATE"] = np.nan
+        df_out["CAL_HOLD_REASON"] = ""
+
+        _score_col_cal = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
+        _wr_min = 0.42  # 승률 하한
+
+        for _idx in df_out.index:
+            _sc = float(df_out.at[_idx, _score_col_cal]) if pd.notna(df_out.at[_idx, _score_col_cal]) else 0
+            try:
+                _wr = _cal_wr(_sc, OUT_DIR, method="RANK_SCORE", horizon=5)
+                df_out.at[_idx, "EST_WIN_RATE"] = round(_wr, 3)
+
+                # 상위 추천 대상이면서 승률 하한 미달 → 보류 태그
+                if _wr < _wr_min and df_out.at[_idx, "ROUTE"] in ("ATTACK", "ARMED"):
+                    df_out.at[_idx, "CAL_HOLD_REASON"] = f"low_wr_{_wr:.2f}"
+            except Exception:
+                pass
+
+        _low_wr_cnt = (df_out["CAL_HOLD_REASON"] != "").sum()
+        if _low_wr_cnt > 0:
+            log(f"📊 캘리브레이션: {_low_wr_cnt}건 승률 하한 미달 태그")
+    except ImportError:
+        log("ℹ️ kelly_calibrator 미설치, 캘리브레이션 연동 스킵")
+    except Exception as _cal_err:
+        log(f"⚠️ 캘리브레이션 연동 에러: {_cal_err}")
 
     # -----------------------------------------------------------
     # [Step 8] 데이터 저장 및 정합성 체크

@@ -309,15 +309,10 @@ def determine_state_dynamic(row, thresholds: dict):
 # ═══════════════════════════════════════════════════
 #  5. 글로벌 스코어 통합 (collector 용)
 # ═══════════════════════════════════════════════════
-#  [Phase 1-1] WEIGHT_CONFIG → CollectorConfig SSOT 전환
-#  하위호환: WEIGHT_CONFIG dict는 CollectorConfig에서 생성
+#  [Phase 1-1] CollectorConfig SSOT 전환 완료
 # ═══════════════════════════════════════════════════
 
 from collector_config import DEFAULT_CONFIG, CollectorConfig
-
-# ⚠️ DEPRECATED: collector.py 등 기존 코드에서 `from scoring_engine import WEIGHT_CONFIG` 하는 곳의
-# 하위호환을 위해 유지. 신규 코드는 DEFAULT_CONFIG 필드를 직접 사용하세요.
-WEIGHT_CONFIG = DEFAULT_CONFIG.to_weight_config_dict()
 
 
 def _calc_ml_weight(ml_series: pd.Series, macro_risk: str,
@@ -325,39 +320,9 @@ def _calc_ml_weight(ml_series: pd.Series, macro_risk: str,
     """
     ML 활성도 기반 동적 가중치 (w_struct, w_timing, w_ai).
 
-    [Phase 1-1] config 파라미터: CollectorConfig 또는 dict 모두 수용 (하위호환).
-
-    판정 기준:
-      - ML 활성도: 절사평균(trimmed mean) + 커버리지 복합
-      - 선형 보간: LOW~HIGH 구간에서 w_a가 0→max으로 부드럽게 전환
-      - 합=1.0 보장: 마지막에 정규화
+    config: CollectorConfig 인스턴스 (None → DEFAULT_CONFIG)
     """
-    # [Phase 1-1] config 타입 통일
-    if config is None:
-        cfg_obj = DEFAULT_CONFIG
-    elif isinstance(config, CollectorConfig):
-        cfg_obj = config
-    else:
-        # dict → 하위호환 (기존 WEIGHT_CONFIG dict 형태)
-        cfg_obj = None
-
-    if cfg_obj is not None:
-        # CollectorConfig 필드 직접 접근
-        trim_pct = cfg_obj.trim_pct
-        LOW = cfg_obj.ml_low
-        HIGH = cfg_obj.ml_high
-        MAX_W = cfg_obj.ml_max_weight
-        COV_GATE = cfg_obj.ml_cov_gate
-        macro_weights_map = cfg_obj.macro_weights
-    else:
-        # dict fallback
-        cfg = config
-        trim_pct = cfg.get("trim_pct", 0.10)
-        LOW = cfg.get("ml_low", 5.0)
-        HIGH = cfg.get("ml_high", 25.0)
-        MAX_W = cfg.get("ml_max_weight", 0.20)
-        COV_GATE = cfg.get("ml_cov_gate", 0.20)
-        macro_weights_map = cfg.get("macro_weights", WEIGHT_CONFIG["macro_weights"])
+    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
 
     ml = ml_series.fillna(0)
     ml_cov = float((ml > 0).mean())
@@ -365,22 +330,22 @@ def _calc_ml_weight(ml_series: pd.Series, macro_risk: str,
     # 절사평균(상하 trim_pct 제거)
     n = len(ml)
     if n >= 10:
-        trim_k = max(1, int(n * trim_pct))
+        trim_k = max(1, int(n * cfg.trim_pct))
         ml_sorted = ml.sort_values().values
         ml_center = float(ml_sorted[trim_k:-trim_k].mean())
     else:
         ml_center = float(ml.mean())
 
     # AI 가중치: 선형 보간 + 커버리지 게이트
-    if ml_center <= LOW or ml_cov < COV_GATE:
+    if ml_center <= cfg.ml_low or ml_cov < cfg.ml_cov_gate:
         w_a = 0.0
-    elif ml_center >= HIGH:
-        w_a = MAX_W
+    elif ml_center >= cfg.ml_high:
+        w_a = cfg.ml_max_weight
     else:
-        w_a = MAX_W * (ml_center - LOW) / (HIGH - LOW)
+        w_a = cfg.ml_max_weight * (ml_center - cfg.ml_low) / (cfg.ml_high - cfg.ml_low)
 
-    # 매크로별 기본 S:T 비율 (미지정 macro → NORMAL fallback)
-    base_s, base_t = macro_weights_map.get(macro_risk, macro_weights_map.get("NORMAL", (0.40, 0.40)))
+    # 매크로별 기본 S:T 비율
+    base_s, base_t = cfg.macro_weights.get(macro_risk, cfg.macro_weights.get("NORMAL", (0.40, 0.40)))
 
     # S/T에 비례 재분배
     rem = 1.0 - w_a
@@ -404,21 +369,12 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
     STRUCT + TIMING + AI → FINAL_SCORE 산출.
     EBS는 필터/게이트 역할 → PASS_EBS 컬럼 생성 (점수 합산에는 미포함).
     ✅ [v14] ML 활성도 기반 동적 가중치
-    ✅ [Phase 1-1] config: CollectorConfig 또는 dict 모두 수용
     """
-    # [Phase 1-1] config 타입 통일
-    if config is None:
-        cfg_obj = DEFAULT_CONFIG
-    elif isinstance(config, CollectorConfig):
-        cfg_obj = config
-    else:
-        cfg_obj = None
-
+    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     x = df.copy()
 
     x["EBS"] = x.apply(calculate_ebs_independent, axis=1)
-    ebs_thresh = cfg_obj.ebs_pass_threshold if cfg_obj else config.get("ebs_pass_threshold", 3)
-    x["PASS_EBS"] = (x["EBS"] >= ebs_thresh).astype(int)
+    x["PASS_EBS"] = (x["EBS"] >= cfg.ebs_pass_threshold).astype(int)
 
     x["STRUCT_SCORE"] = x.apply(calculate_structural_score, axis=1).round(1)
     x["TIMING_SCORE"] = x.apply(calculate_timing_score, axis=1).round(1)
@@ -427,7 +383,7 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
         x["ML_SCORE"] = 0.0
     x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
 
-    w_s, w_t, w_a = _calc_ml_weight(x["ML_SCORE"], macro_risk, config=config)
+    w_s, w_t, w_a = _calc_ml_weight(x["ML_SCORE"], macro_risk, config=cfg)
 
     x["FINAL_SCORE"] = (
         (x["STRUCT_SCORE"] * w_s)

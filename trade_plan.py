@@ -63,6 +63,11 @@ class ExecRule:
     # 최소 주문금액 (원) — 이하이면 진입 스킵
     min_order_amount: float = 100000.0
 
+    # [Phase 2-3] 트레일링 스탑
+    trailing_stop_enabled: bool = False
+    trailing_stop_trigger_pct: float = 3.0    # 수익 3% 이상 시 활성화
+    trailing_stop_distance_pct: float = 2.0   # 고점 대비 2% 하락 시 청산
+
 
 # ═══════════════════════════════════════════════════
 #  2. 트레이딩 계획 (Trade Plan) — SSOT
@@ -324,6 +329,12 @@ def build_trade_plan(
         reason_parts.append(reason_parts_extra)
     plan_reason = "+".join([p for p in reason_parts if p])
 
+    # [Phase 1-2] Time Stop: CollectorConfig에서 자동 주입
+    from collector_config import DEFAULT_CONFIG as _ts_cfg
+    _ts_days = _ts_cfg.time_stop_days
+    _ts_min_move = _ts_cfg.time_stop_min_move_pct
+    _ts_extend = _ts_cfg.time_stop_extend_if_profit
+
     return TradePlan(
         entry=entry_final,
         stop=stop_final,
@@ -338,6 +349,9 @@ def build_trade_plan(
         rr_mult=rr_mult,
         regime=regime,
         exec_rule_id=exec_rule.rule_id,
+        time_stop_days=_ts_days,
+        time_stop_min_move_pct=_ts_min_move,
+        time_stop_extend_if_profit=_ts_extend,
     )
 
 
@@ -348,7 +362,7 @@ def build_trade_plan(
 @dataclass
 class BarResult:
     """단일 바(일봉) 체결 결과"""
-    action: str = "hold"        # "hold" | "stop_hit" | "tp_hit" | "time_stop" | "timeout" | "none"
+    action: str = "hold"        # "hold" | "stop_hit" | "tp_hit" | "time_stop" | "trailing_stop" | "timeout" | "none"
     fill_price: float = 0.0     # 체결가 (0이면 미체결)
     return_pct: float = 0.0     # 수익률 (%)
     reason: str = ""
@@ -511,14 +525,36 @@ def exec_multi_bar(
     if rule is None:
         rule = ExecRule()
 
-    # ── scaleout OFF: 기존 단순 로직 + [Phase 1-2] Time Stop ──
+    # ── scaleout OFF: 기존 단순 로직 + [Phase 1-2] Time Stop + [Phase 2-3] Trailing Stop ──
     if not rule.use_scaleout:
+        _highest_close = 0.0  # trailing stop용 고점 추적
+        _trailing_active = False
+
         for i, (o, h, l, c) in enumerate(bars[:max_hold_days]):
             if o <= 0 or not np.isfinite(o):
                 continue
             result = exec_bar(plan, o, h, l, c, rule=rule)
             if result.action in ("stop_hit", "tp_hit"):
                 return result
+
+            # 고점 갱신 (고가 기준)
+            _highest_close = max(_highest_close, h)
+
+            # ── [Phase 2-3] Trailing Stop 체크 ──
+            if rule.trailing_stop_enabled and plan.entry > 0:
+                _move_from_entry = (c / plan.entry - 1.0) * 100.0
+                if _move_from_entry >= rule.trailing_stop_trigger_pct:
+                    _trailing_active = True
+
+                if _trailing_active and _highest_close > 0:
+                    _drop_from_high = (1.0 - c / _highest_close) * 100.0
+                    if _drop_from_high >= rule.trailing_stop_distance_pct:
+                        ret = _apply_fee((_move_from_entry), rule)
+                        return BarResult(
+                            action="trailing_stop", fill_price=c,
+                            return_pct=ret,
+                            reason=f"trail_triggered_high{_highest_close:.0f}_drop{_drop_from_high:.1f}%"
+                        )
 
             # ── [Phase 1-2] Time Stop 체크 ──
             if plan.time_stop_days > 0 and i >= plan.time_stop_days - 1:

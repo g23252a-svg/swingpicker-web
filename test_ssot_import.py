@@ -35,7 +35,6 @@ def run_tests():
             calculate_timing_score,
             build_global_score,
             _calc_ml_weight,
-            WEIGHT_CONFIG,
         )
         test("모든 함수 import 성공", True)
     except ImportError as e:
@@ -51,12 +50,16 @@ def run_tests():
     test("scoring_engine에 collector import 없음",
          "import collector " not in src and "from collector " not in src
          and "from collector_config" in src)  # collector_config는 OK (SSOT)
+    test("WEIGHT_CONFIG 완전 제거",
+         "WEIGHT_CONFIG" not in src or "WEIGHT_CONFIG →" in src)  # 주석 OK, 변수 NO
 
-    # ── 3. WEIGHT_CONFIG 접근 ──
-    print("\n📐 3. WEIGHT_CONFIG 접근")
-    test("WEIGHT_CONFIG dict", isinstance(WEIGHT_CONFIG, dict))
-    test("ml_low 존재", "ml_low" in WEIGHT_CONFIG)
-    test("macro_weights 존재", "macro_weights" in WEIGHT_CONFIG)
+    # ── 3. CollectorConfig SSOT 접근 ──
+    print("\n📐 3. CollectorConfig SSOT 접근")
+    from collector_config import DEFAULT_CONFIG, CollectorConfig
+    test("DEFAULT_CONFIG 존재", isinstance(DEFAULT_CONFIG, CollectorConfig))
+    test("ml_low 필드", hasattr(DEFAULT_CONFIG, 'ml_low'))
+    test("macro_weights 필드", hasattr(DEFAULT_CONFIG, 'macro_weights'))
+    test("snapshot 메서드", hasattr(DEFAULT_CONFIG, 'snapshot'))
 
     # ── 4. 함수 호출 smoke ──
     print("\n📐 4. 함수 호출 smoke")
