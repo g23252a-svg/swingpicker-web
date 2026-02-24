@@ -77,9 +77,9 @@ class CollectorConfig:
     mtf_min_weekly_bars: int = 26      # 주봉 최소 바 수 (6개월)
     mtf_min_monthly_bars: int = 12     # 월봉 최소 바 수 (1년)
 
-    # ── 매크로 환경 ──
-    macro_fx_caution: float = 1400.0
-    macro_fx_critical: float = 1420.0
+    # ── 매크로 환경 (2026-02 현실화: 1440대가 뉴 노멀) ──
+    macro_fx_caution: float = 1470.0
+    macro_fx_critical: float = 1490.0
     macro_nasdaq_caution: float = -1.5
     macro_nasdaq_critical: float = -2.5
 
