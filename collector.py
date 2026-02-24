@@ -2702,10 +2702,12 @@ def main(
         # -----------------------------------------------------------
 
         # ── [Phase 2-1] 전략 팩토리 실행 ──
+        df_out["STRATEGY"] = "default"  # 초기화
         try:
             from strategies import StrategyFactory, select_strategies
             _breadth_all = breadth.get("ALL", 50.0)
             _active_strats = select_strategies(macro_risk, _breadth_all)
+            log(f"🎯 활성 전략: {_active_strats} (breadth={_breadth_all:.1f}, macro={macro_risk})")
             if _active_strats:
                 _all_strat_picks = []
                 for _sname in _active_strats:
@@ -2714,9 +2716,9 @@ def main(
                     _scored = _strat.score(_filtered)
                     _picks = _strat.rank_and_pick(_scored, top_k=5)
                     _all_strat_picks.append(_picks)
+                    log(f"   {'✅' if len(_picks) else '⬜'} {_sname}: 필터 {len(_filtered)}건 → 선정 {len(_picks)}건")
                 if _all_strat_picks:
                     _strat_df = pd.concat(_all_strat_picks, ignore_index=True)
-                    # STRATEGY, STRATEGY_SCORE, STRATEGY_HORIZON 컬럼을 df_out에 머지
                     _key = "종목코드" if "종목코드" in _strat_df.columns else _strat_df.index.name
                     if _key and _key in df_out.columns:
                         _merge_cols = ["STRATEGY", "STRATEGY_SCORE", "STRATEGY_HORIZON"]
@@ -2724,8 +2726,8 @@ def main(
                         if _merge_cols:
                             _strat_map = _strat_df.drop_duplicates(_key).set_index(_key)[_merge_cols]
                             for _mc in _merge_cols:
-                                df_out[_mc] = df_out[_key].map(_strat_map[_mc])
-                    log(f"🎯 전략 분류: {_active_strats}, 매칭 {len(_strat_df)}건")
+                                df_out[_mc] = df_out[_key].map(_strat_map[_mc]).fillna(df_out.get(_mc, "default"))
+                    log(f"🎯 전략 분류 완료: 매칭 {len(_strat_df)}건")
         except Exception as _st_err:
             log(f"⚠️ 전략 팩토리 스킵: {_st_err}")
 
@@ -2853,49 +2855,7 @@ def main(
     df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == "ATTACK"
     df_out["IS_WATCH"]     = df_out["ROUTE"] == "WAIT"
 
-    # ── [Phase 2-1] 전략 팩토리: 시장 상황별 전략 적용 ──
-    try:
-        from strategies import StrategyFactory, select_strategies
-        _breadth_all = breadth.get("ALL", 50.0) if isinstance(breadth, dict) else 50.0
-        _active_strats = select_strategies(macro_risk, _breadth_all)
-        log(f"🎯 활성 전략: {_active_strats} (breadth={_breadth_all:.1f})")
-
-        _strat_picks = []
-        for _sn in _active_strats:
-            try:
-                _strat = StrategyFactory.create(_sn, cfg)
-                _result = _strat.run(df_out, top_k=5)
-                if not _result.picks.empty:
-                    _strat_picks.append(_result.picks)
-                    log(f"   ✅ {_sn}: {_result.filtered_count}건 필터 → {len(_result.picks)}건 선정")
-                else:
-                    log(f"   ⬜ {_sn}: 0건 (필터 통과 {_result.filtered_count}건)")
-            except Exception as _se:
-                log(f"   ⚠️ {_sn} 전략 에러: {_se}")
-
-        # 전략 태그 반영 (기존 df_out에 STRATEGY 컬럼 추가)
-        df_out["STRATEGY"] = "default"
-        if _strat_picks:
-            _all_strat = pd.concat(_strat_picks, ignore_index=True)
-            # 전략 선정 종목의 STRATEGY/STRATEGY_SCORE 매핑
-            for _, _sp in _all_strat.iterrows():
-                _code_match = df_out["종목코드"] == _sp.get("종목코드", "")
-                if _code_match.any():
-                    _idx = df_out[_code_match].index[0]
-                    # 이미 다른 전략으로 태그되어 있으면 점수 높은 쪽 유지
-                    if df_out.at[_idx, "STRATEGY"] != "default":
-                        _existing_ss = df_out.at[_idx, "STRATEGY_SCORE"] if "STRATEGY_SCORE" in df_out.columns else 0
-                        _new_ss = _sp.get("STRATEGY_SCORE", 0)
-                        if _new_ss <= _existing_ss:
-                            continue
-                    df_out.at[_idx, "STRATEGY"] = _sp.get("STRATEGY", "default")
-                    if "STRATEGY_SCORE" not in df_out.columns:
-                        df_out["STRATEGY_SCORE"] = np.nan
-                    df_out.at[_idx, "STRATEGY_SCORE"] = _sp.get("STRATEGY_SCORE", np.nan)
-    except ImportError:
-        log("ℹ️ strategies 패키지 미설치, 전략 팩토리 스킵")
-    except Exception as _sf_err:
-        log(f"⚠️ 전략 팩토리 에러: {_sf_err}")
+    # (Phase 2-1 전략 팩토리는 위 Step 5에서 통합 실행됨)
 
     # ── [Phase 2-2] 캘리브레이션 테이블 → 추천 필터 연동 ──
     try:
