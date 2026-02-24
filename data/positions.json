@@ -40,5 +40,26 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": []
+  },
+  {
+    "code": "031330",
+    "name": "에스에이엠티",
+    "entry_ymd": "20260224",
+    "entry_px": 4990.0,
+    "qty": 0,
+    "stop_px": 4740.0,
+    "stop_px_initial": 4740.0,
+    "take_px1": 5740.0,
+    "take_px2": 5870.0,
+    "trailing_high": 5560.0,
+    "status": "OPEN",
+    "last_check_ymd": "20260224",
+    "last_close_px": 5510.0,
+    "unrealized_pnl_pct": 10.42,
+    "realized_pnl_pct": 0.0,
+    "close_ymd": "",
+    "close_px": 0.0,
+    "close_reason": "",
+    "alerted_events": []
   }
 ]
