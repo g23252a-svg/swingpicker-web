@@ -2214,6 +2214,13 @@ def analyze_ticker(
         major_ratio = abs(major_net) / tv_won if tv_won > 0 else 0.0
 
     from trade_plan import build_trade_plan as _build_plan
+    from trade_plan import ExecRule as _ExecRule, estimate_slippage_bps as _est_slip
+    from collector_config import DEFAULT_CONFIG as _cfg
+
+    # [Phase 1-3] 거래대금 기반 동적 슬리피지 → ExecRule 생성
+    _slip_bps = _est_slip(tv_eok, _cfg)
+    _exec_rule = _ExecRule(sl_slippage_bps=_slip_bps, tp_slippage_bps=max(5.0, _slip_bps * 0.3))
+
     _plan = _build_plan(
         buy=buy,
         atr_val=atr_val,
@@ -2228,7 +2235,17 @@ def analyze_ticker(
         gap_pct=gap_pct_val,
         major_net=major_net,
         major_ratio=major_ratio,
+        exec_rule=_exec_rule,
     )
+
+    # [Phase 1-2] Time Stop 활성화 — config에서 자동 주입
+    if _cfg.time_stop_days > 0:
+        import dataclasses as _dc
+        _plan = _dc.replace(_plan,
+            time_stop_days=_cfg.time_stop_days,
+            time_stop_min_move_pct=_cfg.time_stop_min_move_pct,
+            time_stop_extend_if_profit=_cfg.time_stop_extend_if_profit,
+        )
 
     # SSOT 결과를 기존 변수명에 매핑 (하위 호환)
     buy = _plan.entry
@@ -2655,6 +2672,19 @@ def main(
         # 최종 통합 스코어링 실행 (v15.1 엔진: EBS/STRUCT/TIMING/FINAL 일괄 산출)
         df_out = build_global_score(df_out, macro_risk)
 
+        # ── [Phase 1-4] Hard Block 데이터 품질 게이트 ──
+        try:
+            from validation import apply_hard_blocks, block_summary
+            df_out, df_blocked = apply_hard_blocks(df_out)
+            if len(df_blocked) > 0:
+                _bs = block_summary(df_blocked)
+                log(f"🚫 Hard Block: {_bs['total_blocked']}건 제외 {_bs['by_rule']}")
+                # blocked 종목 별도 저장
+                blocked_path = os.path.join(OUT_DIR, f"blocked_{trade_ymd}.csv")
+                df_blocked.to_csv(blocked_path, index=False, encoding="utf-8-sig")
+        except Exception as _hb_err:
+            log(f"⚠️ Hard Block 스킵: {_hb_err}")
+
         # -----------------------------------------------------------
         # 4. [전술 상태] 동적 임계값 기반 ROUTE 결정
         # -----------------------------------------------------------
@@ -2787,7 +2817,15 @@ def main(
         if c not in df_out.columns: df_out[c] = np.nan
 
     df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]
-    
+
+    # [Phase 1-1] Config Snapshot 저장 (재현성)
+    try:
+        from collector_config import DEFAULT_CONFIG as _snap_cfg
+        df_out["CONFIG_SNAPSHOT"] = _snap_cfg.snapshot_json()
+        df_out["CONFIG_VERSION"] = _snap_cfg.config_version
+    except Exception:
+        pass
+
     ensure_dir(OUT_DIR)
     out_path_dated = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{tag}' if tag else ''}.csv")
     out_path_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
