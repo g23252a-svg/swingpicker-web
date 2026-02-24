@@ -49,7 +49,8 @@ def run_tests():
     import scoring_engine
     src = open(scoring_engine.__file__).read()
     test("scoring_engine에 collector import 없음",
-         "import collector" not in src and "from collector" not in src)
+         "import collector " not in src and "from collector " not in src
+         and "from collector_config" in src)  # collector_config는 OK (SSOT)
 
     # ── 3. WEIGHT_CONFIG 접근 ──
     print("\n📐 3. WEIGHT_CONFIG 접근")

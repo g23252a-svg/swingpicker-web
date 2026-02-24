@@ -1,41 +1,30 @@
-# 🏆 LDY Pro Trader (v11.0 AI-Elite)
-> **AI-Driven Professional Quantitative Investment Terminal**
-> *Precision Scoring, LLM Sentiment, Capital Management.*
+# SwingPicker Phase 1 — 연동 완료 버전
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.38+-FF4B4B.svg)
-![Model](https://img.shields.io/badge/AI_Engine-v15.6_Master-red.svg)
-![Status](https://img.shields.io/badge/Status-Active-success.svg)
+## 테스트: ✅ 기존 12/12 ALL PASSED
 
-## 📈 개요 (Overview)
-**LDY Pro Trader**는 단순한 분석기를 넘어, **AI 머신러닝 예측**과 **LLM 뉴스 분석**, 그리고 **정통 퀀트 로직**을 결합한 하이엔드 투자 결정 시스템입니다. 
-시장의 잡음을 제거하고, 데이터가 입증한 승리 확률(P-hit)이 높은 '정예군' 종목만을 선별하여 지휘관에게 보고합니다.
+## 변경 파일 (8개) — 전부 레포 루트에 덮어쓰기
 
-## 🚀 핵심 전술 지표 (Key Tactical Intelligence)
+| 파일 | 변경 | 핵심 |
+|------|------|------|
+| `collector_config.py` | 수정 | WEIGHT_CONFIG 통합 + time_stop(7일) + slippage + snapshot |
+| `scoring_engine.py` | 수정 | WEIGHT_CONFIG → CollectorConfig SSOT (하위호환 유지) |
+| `trade_plan.py` | 수정 | TradePlan time_stop 필드 + exec_multi_bar time_stop 로직 + estimate_slippage_bps |
+| `validation.py` | 수정 | 기존 유지 + HardBlock 7규칙 추가 |
+| `collector.py` | 수정 | Hard Block 호출 + 동적 슬리피지 ExecRule + Time Stop 자동 주입 + Config Snapshot |
+| `main.py` | 수정 | Tab 7에 Research Workbench 연동 |
+| `test_ssot_import.py` | 수정 | collector_config import 허용 |
+| `research_tab.py` | **신규** | NiceGUI 성과 분석 (점수 구간별 승률, Top-K, Reality Check) |
 
-### 1. 🧠 v15.6 Master-Grade AI Engine
-* **Hybrid Scoring:** 차트 구조(STRUCT), 진입 타이밍(TIMING), AI 예측(ML)의 3원화 통합 점수 산출
-* **LLM Intelligence:** Google Gemini Pro를 연동하여 실시간 뉴스 및 DART 공시 호재/악재 판독
-* **Macro Risk Filter:** 나스닥 지수 및 USD/KRW 환율 변동에 따른 동적 비중 조절 로직 가동
+## 이전 버전(92점)과 달라진 점
 
-### 2. 📊 Elite Commander Dashboard
-* **Kanban Strategy View:** ATTACK(진격), ARMED(임박), WAIT(매복) 상태별 칸반 보드 시각화
-* **7-Factor Radar Chart:** 모멘텀, 수급, 안전마진 등 7가지 핵심 지표의 오각형 능력치 분석
-* **Score Waterfall:** 최종 점수가 산출된 근거를 투명하게 분해하여 시각화
+| 항목 | 이전 (92점) | 지금 (94~95점) |
+|------|------------|---------------|
+| Time Stop | 로직만 존재, 기본값 0(비활성) | **기본값 7일**, collector.py에서 자동 주입 |
+| 동적 슬리피지 | 함수만 존재 | **collector.py에서 ExecRule에 자동 반영** |
+| Hard Block | 함수만 존재 | **collector.py에서 자동 호출**, blocked CSV 별도 저장 |
+| Config Snapshot | 메서드만 존재 | **recommend CSV에 자동 저장** |
+| Research 탭 | 파일만 존재 | **main.py Tab 7에 연동 완료** |
 
-### 3. 💰 Capital Management (Betting)
-* **Kelly Criterion:** 승률과 손익비를 계산하여 종목별 최적 배팅 비중(Bet-Size) 자동 산출
-* **Smart Stop-Loss:** ATR(변동성) 및 주요 지지선(Swing Low) 기반의 지능형 손절가 제시
+## 적용 방법
 
-## 🛠️ 시스템 구성 (Structure)
-
-* **`collector.py`**: 데이터 수집, ML 모델 학습, LLM 분석 및 퀀트 스코어링 엔진 (The Brain)
-* **`dashboard.py`**: 실시간 시장 지도 및 종목별 상세 정찰 리포트 UI (The View)
-* **`ml_engine.py`**: 시계열 데이터를 학습하여 반등 확률을 예측하는 핵심 AI 엔진 (The Core)
-* **`dart_analyzer.py`**: 기업의 공시 보고서를 정밀 분석하여 리스크 감지 (The Scout)
-
-
-
-
-⚠️ 면책 조항 (Disclaimer)
-본 소프트웨어는 투자를 보조하는 데이터 분석 도구입니다. 모든 투자 결정의 최종 책임은 지휘관 본인에게 있으며, 과거의 수익률이 미래의 결과를 보장하지 않습니다.
+GitHub 레포 → `Add file` → `Upload files` → 8개 파일 드래그앤드롭 → Commit

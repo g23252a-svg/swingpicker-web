@@ -8,13 +8,20 @@ collector_config.py — 모든 매직넘버/임계치 중앙화
 - collector.py, scoring_engine.py 등에서 import하여 사용
 """
 import os
+import json
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
 
 @dataclass
 class CollectorConfig:
-    """collector 파이프라인 전체 설정"""
+    """collector 파이프라인 전체 설정 — SSOT (Single Source of Truth)
+
+    [Phase 1-1] scoring_engine.py WEIGHT_CONFIG를 여기로 통합.
+    [Phase 1-2] Time Stop 필드 추가.
+    [Phase 1-3] 슬리피지 모델 필드 추가.
+    """
 
     # ── 데이터 수집 ──
     lookback_days: int = 250
@@ -98,6 +105,46 @@ class CollectorConfig:
     # ── 디렉토리 ──
     base_dir: str = field(default_factory=lambda: os.path.dirname(os.path.abspath(__file__)))
 
+    # ═══════════════════════════════════════════════════
+    #  [Phase 1-1] 구 WEIGHT_CONFIG 통합 (scoring_engine.py에서 이전)
+    # ═══════════════════════════════════════════════════
+    ml_low: float = 5.0               # AI 가중치 시작점 (이하 → w_a=0)
+    ml_high: float = 25.0             # AI 가중치 최대점 (이상 → w_a=max)
+    ml_max_weight: float = 0.20       # AI 최대 가중치
+    ml_cov_gate: float = 0.20         # 커버리지 최소 비율
+    trim_pct: float = 0.10            # 절사평균 상하 제거 비율
+    ebs_pass_threshold: int = 3       # EBS ≥ 이 값이면 PASS_EBS=True
+    macro_weights: Dict[str, Tuple[float, float]] = field(default_factory=lambda: {
+        "CRITICAL": (0.55, 0.25),
+        "HIGH":     (0.50, 0.30),
+        "NORMAL":   (0.40, 0.40),
+    })
+
+    # ═══════════════════════════════════════════════════
+    #  [Phase 1-2] Time Stop
+    # ═══════════════════════════════════════════════════
+    time_stop_days: int = 7            # 7영업일 (0=비활성)
+    time_stop_min_move_pct: float = 2.0  # N일 내 이 수준 미달 시 청산
+    time_stop_extend_if_profit: bool = True  # 수익 중이면 연장 허용
+
+    # ═══════════════════════════════════════════════════
+    #  [Phase 1-3] 슬리피지 모델 (거래대금 기반)
+    # ═══════════════════════════════════════════════════
+    slippage_base_bps: float = 10.0         # 기본 슬리피지 (bps, 0.1%)
+    slippage_low_liq_mult: float = 3.0      # 저유동 배율
+    slippage_liq_threshold_eok: float = 20.0  # 이 거래대금(억) 미만 = 저유동
+
+    # 유동성 감점 강화
+    liq_penalty_very_low_eok: float = 5.0   # 극저유동 기준 (억)
+    liq_penalty_very_low_pts: float = 8.0   # 극저유동 감점
+    liq_penalty_low_eok: float = 10.0       # 저유동 기준 (억)
+    liq_penalty_low_pts: float = 4.0        # 저유동 감점
+
+    # ═══════════════════════════════════════════════════
+    #  메타
+    # ═══════════════════════════════════════════════════
+    config_version: str = "1.1.0"      # Phase 1 적용 버전
+
     @property
     def out_dir(self) -> str:
         return os.path.join(self.base_dir, "data")
@@ -106,9 +153,41 @@ class CollectorConfig:
     def rsi_range(self) -> Tuple[float, float]:
         return (self.rsi_low, self.rsi_high)
 
+    def snapshot(self) -> dict:
+        """현재 설정의 재현 가능한 스냅샷 (민감정보 제외)"""
+        from datetime import datetime
+        d = dataclasses.asdict(self)
+        d.pop("tg_token", None)
+        d.pop("tg_id", None)
+        d.pop("base_dir", None)
+        d["_snapshot_ts"] = datetime.now().isoformat()
+        return d
+
+    def snapshot_json(self) -> str:
+        """snapshot을 JSON 문자열로 반환 (CSV 컬럼 저장용)"""
+        return json.dumps(self.snapshot(), ensure_ascii=False, default=str)
+
+    def to_weight_config_dict(self) -> dict:
+        """하위호환: 기존 WEIGHT_CONFIG dict 형태로 변환.
+        scoring_engine.py 전환 완료 후 제거 가능."""
+        return {
+            "ml_low": self.ml_low,
+            "ml_high": self.ml_high,
+            "ml_max_weight": self.ml_max_weight,
+            "ml_cov_gate": self.ml_cov_gate,
+            "trim_pct": self.trim_pct,
+            "ebs_pass_threshold": self.ebs_pass_threshold,
+            "macro_weights": self.macro_weights,
+        }
+
 
 # ── 싱글턴 기본 인스턴스 ──
 DEFAULT_CONFIG = CollectorConfig()
+
+# ── 하위호환: WEIGHT_CONFIG dict ──
+# ⚠️ DEPRECATED: 이 dict 대신 DEFAULT_CONFIG 필드를 직접 사용하세요.
+# scoring_engine.py, collector.py 전환이 완료되면 제거.
+WEIGHT_CONFIG_COMPAT = DEFAULT_CONFIG.to_weight_config_dict()
 
 # ── BacktestConfig 참조 (auto_backtest.py SSOT) ──
 # from auto_backtest import BacktestConfig, DEFAULT_BT_CONFIG

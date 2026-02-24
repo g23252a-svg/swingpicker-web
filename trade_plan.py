@@ -93,6 +93,11 @@ class TradePlan:
     regime: str = "normal"          # normal/high_vol/low_vol
     exec_rule_id: str = ""          # 적용된 체결 규칙 ID
 
+    # [Phase 1-2] Time Stop
+    time_stop_days: int = 0          # 0=비활성 (하위호환), 7=7영업일
+    time_stop_min_move_pct: float = 2.0  # N일 내 이 수준 미달 시 청산
+    time_stop_extend_if_profit: bool = True  # 수익 중이면 연장 허용
+
     def to_row(self) -> Dict[str, Any]:
         """recommend CSV용 dict 변환 + 계약 검증"""
         row = {
@@ -109,6 +114,7 @@ class TradePlan:
             "RR_MULT": round(self.rr_mult, 1),
             "REGIME": self.regime,
             "EXEC_RULE_ID": self.exec_rule_id,
+            "TIME_STOP_DAYS": self.time_stop_days,
         }
         validate_row(row)
         return row
@@ -342,10 +348,42 @@ def build_trade_plan(
 @dataclass
 class BarResult:
     """단일 바(일봉) 체결 결과"""
-    action: str = "hold"        # "hold" | "stop_hit" | "tp_hit" | "none"
+    action: str = "hold"        # "hold" | "stop_hit" | "tp_hit" | "time_stop" | "timeout" | "none"
     fill_price: float = 0.0     # 체결가 (0이면 미체결)
     return_pct: float = 0.0     # 수익률 (%)
     reason: str = ""
+
+
+# ═══════════════════════════════════════════════════
+#  [Phase 1-3] 동적 슬리피지 추정
+# ═══════════════════════════════════════════════════
+
+def estimate_slippage_bps(tv_eok, config=None):
+    """
+    거래대금(억) 기반 슬리피지 추정 (bps).
+
+    Args:
+        tv_eok: 거래대금 (억 원). None/0 → 최대 슬리피지
+        config: CollectorConfig (None이면 DEFAULT_CONFIG)
+
+    Returns:
+        슬리피지 (bps). 10bps = 0.1%
+    """
+    from collector_config import DEFAULT_CONFIG as _DC
+    cfg = config or _DC
+
+    base = cfg.slippage_base_bps
+    mult = cfg.slippage_low_liq_mult
+    threshold = cfg.slippage_liq_threshold_eok
+
+    if tv_eok is None or tv_eok <= 0:
+        return base * mult
+
+    if tv_eok < threshold:
+        ratio = 1.0 + (mult - 1.0) * (1.0 - tv_eok / threshold)
+        return base * ratio
+
+    return base
 
 
 def _apply_fee(ret_pct: float, rule: ExecRule) -> float:
@@ -473,7 +511,7 @@ def exec_multi_bar(
     if rule is None:
         rule = ExecRule()
 
-    # ── scaleout OFF: 기존 단순 로직 ──
+    # ── scaleout OFF: 기존 단순 로직 + [Phase 1-2] Time Stop ──
     if not rule.use_scaleout:
         for i, (o, h, l, c) in enumerate(bars[:max_hold_days]):
             if o <= 0 or not np.isfinite(o):
@@ -481,6 +519,20 @@ def exec_multi_bar(
             result = exec_bar(plan, o, h, l, c, rule=rule)
             if result.action in ("stop_hit", "tp_hit"):
                 return result
+
+            # ── [Phase 1-2] Time Stop 체크 ──
+            if plan.time_stop_days > 0 and i >= plan.time_stop_days - 1:
+                move_pct = (c / plan.entry - 1.0) * 100.0 if plan.entry > 0 else 0.0
+                # 수익 중이고 extend_if_profit 설정이면 → 연장
+                if plan.time_stop_extend_if_profit and move_pct > 0:
+                    pass  # 수익 중이면 time_stop 스킵
+                elif move_pct < plan.time_stop_min_move_pct:
+                    ret = _apply_fee(move_pct, rule)
+                    return BarResult(
+                        action="time_stop", fill_price=c,
+                        return_pct=ret,
+                        reason=f"time_stop_{plan.time_stop_days}d_move_{move_pct:.1f}%"
+                    )
 
         if bars and len(bars) > 0:
             last_close = bars[min(max_hold_days - 1, len(bars) - 1)][3]

@@ -123,3 +123,111 @@ def run_reality_check(out_dir: str, trade_ymd: str) -> None:
                 valid.to_csv(out_path, index=False, encoding="utf-8-sig")
     except Exception as e:
         logger.warning(f"reality_check 에러: {e}")
+
+
+# ═══════════════════════════════════════════════════
+#  [Phase 1-4] Hard Block 데이터 품질 게이트
+# ═══════════════════════════════════════════════════
+
+import re
+from dataclasses import dataclass as _dataclass
+from typing import Tuple
+
+
+@_dataclass
+class HardBlockRule:
+    """단일 Hard Block 규칙"""
+    name: str           # 규칙 이름
+    check: str          # 검사할 컬럼명
+    op: str             # 연산자: "gt", "lt", "gte", "lte"
+    threshold: float    # 임계값
+    reason: str         # 차단 사유 (한글)
+
+
+HARD_BLOCK_RULES = [
+    HardBlockRule("연속급등",     "ret_5d_%",             "gt",  40.0,  "5일 수익률 40%+ 과열"),
+    HardBlockRule("거래대금부족", "거래대금(억)",          "lt",  3.0,   "거래대금 3억 미만"),
+    HardBlockRule("갭과대",       "gap_pct",              "gt",  15.0,  "갭 15%+ 비정상"),
+    HardBlockRule("RSI극단",      "RSI14",                "gt",  85.0,  "RSI 85+ 극단과열"),
+    HardBlockRule("데이터부족",   "_data_length",         "lt",  60,    "OHLCV 60일 미만"),
+    HardBlockRule("급락종목",     "ret_5d_%",             "lt",  -25.0, "5일 -25% 이하 급락"),
+    HardBlockRule("상한가연속",   "consecutive_limit_up", "gte", 2,     "연속 상한가 2회+"),
+]
+
+
+def _eval_block_condition(col: pd.Series, op: str, threshold: float) -> pd.Series:
+    """조건 평가 → bool Series (True = 위반)"""
+    if op == "gt":
+        return col > threshold
+    elif op == "lt":
+        return col < threshold
+    elif op == "gte":
+        return col >= threshold
+    elif op == "lte":
+        return col <= threshold
+    return pd.Series(False, index=col.index)
+
+
+def apply_hard_blocks(
+    df: pd.DataFrame,
+    rules: Optional[List] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Hard Block 필터 적용.
+
+    Args:
+        df: 종목 DataFrame
+        rules: 적용할 HardBlockRule 리스트 (None이면 HARD_BLOCK_RULES 사용)
+
+    Returns:
+        (passed_df, blocked_df) — blocked_df에는 BLOCK_REASON 컬럼 포함
+    """
+    if rules is None:
+        rules = HARD_BLOCK_RULES
+
+    if df.empty:
+        empty = df.copy()
+        empty["BLOCK_REASON"] = pd.Series(dtype=str)
+        return df.copy(), empty
+
+    mask = pd.Series(True, index=df.index)
+    block_reasons = pd.Series("", index=df.index)
+
+    for rule in rules:
+        if rule.check not in df.columns:
+            continue
+
+        col = pd.to_numeric(df[rule.check], errors="coerce")
+
+        # NaN 처리: "작으면 차단" → NaN은 0으로 (차단 가능성 높임)
+        col = col.fillna(0)
+
+        violated = _eval_block_condition(col, rule.op, rule.threshold)
+
+        block_reasons = block_reasons.where(
+            ~violated,
+            block_reasons + f"[{rule.name}: {rule.reason}]"
+        )
+        mask = mask & ~violated
+
+    passed = df[mask].copy()
+    blocked = df[~mask].copy()
+    if not blocked.empty:
+        blocked = blocked.copy()
+        blocked["BLOCK_REASON"] = block_reasons[~mask]
+
+    return passed, blocked
+
+
+def block_summary(blocked_df: pd.DataFrame) -> Dict:
+    """차단 종목 요약 통계"""
+    if blocked_df.empty or "BLOCK_REASON" not in blocked_df.columns:
+        return {"total_blocked": 0, "by_rule": {}}
+
+    by_rule: Dict[str, int] = {}
+    for reasons in blocked_df["BLOCK_REASON"]:
+        matches = re.findall(r"\[([^:]+):", str(reasons))
+        for rule_name in matches:
+            by_rule[rule_name] = by_rule.get(rule_name, 0) + 1
+
+    return {"total_blocked": len(blocked_df), "by_rule": by_rule}

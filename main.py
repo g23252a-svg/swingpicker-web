@@ -1314,6 +1314,14 @@ def render_tab7_performance():
         if w: w.on("update:model-value", lambda _: _build_chart())
     _build_chart()
 
+    # ── [Phase 1-5] Research Workbench 확장 ──
+    try:
+        from research_tab import render_research_tab
+        ui.separator().classes("my-6")
+        render_research_tab(data_dir=DATA_DIR)
+    except Exception as _rt_err:
+        ui.label(f"⚠️ Research 탭 로드 실패: {_rt_err}").classes("text-gray-400")
+
 
 # ═══════════════════════════════════════════
 #  Tab 8: 회원 관리 (Admin)
