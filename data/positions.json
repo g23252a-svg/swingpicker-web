@@ -1,1 +1,44 @@
-[]
+[
+  {
+    "code": "389020",
+    "name": "자람테크놀로지",
+    "entry_ymd": "20260224",
+    "entry_px": 45350.0,
+    "qty": 0,
+    "stop_px": 43050.0,
+    "stop_px_initial": 43050.0,
+    "take_px1": 52300.0,
+    "take_px2": 53400.0,
+    "trailing_high": 52900.0,
+    "status": "OPEN",
+    "last_check_ymd": "20260224",
+    "last_close_px": 51300.0,
+    "unrealized_pnl_pct": 13.12,
+    "realized_pnl_pct": 0.0,
+    "close_ymd": "",
+    "close_px": 0.0,
+    "close_reason": "",
+    "alerted_events": []
+  },
+  {
+    "code": "018000",
+    "name": "유니슨",
+    "entry_ymd": "20260224",
+    "entry_px": 1110.0,
+    "qty": 0,
+    "stop_px": 1054.0,
+    "stop_px_initial": 1054.0,
+    "take_px1": 1278.0,
+    "take_px2": 1306.0,
+    "trailing_high": 1299.0,
+    "status": "OPEN",
+    "last_check_ymd": "20260224",
+    "last_close_px": 1259.0,
+    "unrealized_pnl_pct": 13.42,
+    "realized_pnl_pct": 0.0,
+    "close_ymd": "",
+    "close_px": 0.0,
+    "close_reason": "",
+    "alerted_events": []
+  }
+]
