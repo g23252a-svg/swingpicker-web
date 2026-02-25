@@ -67,5 +67,29 @@
     "alerted_events": [
       "006260_20260223_STOP_HIT_20260223"
     ]
+  },
+  {
+    "code": "093520",
+    "name": "매커스",
+    "entry_ymd": "20260225",
+    "entry_px": 25450.0,
+    "qty": 0,
+    "stop_px": 24150.0,
+    "stop_px_initial": 24150.0,
+    "take_px1": 29350.0,
+    "take_px2": 30000.0,
+    "trailing_high": 31300.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260225",
+    "last_close_px": 30150.0,
+    "unrealized_pnl_pct": 18.47,
+    "realized_pnl_pct": 18.47,
+    "close_ymd": "20260225",
+    "close_px": 30150.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "093520_20260225_TP1_HIT_20260225",
+      "093520_20260225_TP2_HIT_20260225"
+    ]
   }
 ]
