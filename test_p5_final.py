@@ -181,7 +181,7 @@ def run():
     # ═══════════════════════════════════════════════════
     print("\n" + "=" * 60)
     print("📐 7. #21: 일일 성과 리포트")
-    from daily_report import generate_daily_report, _format_report_text
+    from daily_report import generate_daily_report, _format_report_text, DailyReport
 
     tmp = tempfile.mkdtemp()
     try:
@@ -211,7 +211,7 @@ def run():
 
         # 리포트 생성 (lookback 충분히 확보)
         report = generate_daily_report(tmp, "20260221", lookback_days=30)
-        test("리포트 dict 리턴", isinstance(report, dict))
+        test("리포트 DailyReport 리턴", isinstance(report, DailyReport))
         test("n_recommendations ≥ 0", report.get("n_recommendations", -1) >= 0)
         test("overall_winrate 존재", "overall_winrate" in report)
         test("report_key 존재", "report_key" in report)
