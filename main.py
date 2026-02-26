@@ -28,6 +28,8 @@ from functools import lru_cache
 
 import pandas as pd
 import numpy as np
+import requests
+import io
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -77,6 +79,10 @@ logger = logging.getLogger("ldy-nicegui")
 # ═══════════════════════════════════════════
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 RECOMMEND_PATH = os.path.join(DATA_DIR, "recommend_latest.csv")
+REMOTE_CSV_URL = os.getenv(
+    "LDY_RAW_URL",
+    "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
+)
 NICEGUI_VERSION = "2.0.0-nicegui"
 PRICE_PRO = 19000
 PRICE_PRIME = 39000
@@ -180,11 +186,41 @@ class DataStore:
         self.loaded = False
 
     def refresh(self):
-        if not os.path.exists(RECOMMEND_PATH):
-            logger.warning(f"CSV not found: {RECOMMEND_PATH}")
+        df = None
+
+        # 1) 로컬 파일 시도
+        if os.path.exists(RECOMMEND_PATH):
+            try:
+                df = pd.read_csv(RECOMMEND_PATH, dtype={"종목코드": str})
+                logger.info(f"📂 로컬 CSV 로드: {RECOMMEND_PATH}")
+            except Exception as e:
+                logger.warning(f"로컬 CSV 읽기 실패: {e}")
+
+        # 2) 로컬 실패 → GitHub raw URL 폴백
+        if df is None or df.empty:
+            url = REMOTE_CSV_URL.strip()
+            if url:
+                try:
+                    logger.info(f"🌐 원격 CSV 다운로드 시도: {url}")
+                    r = requests.get(url, timeout=30,
+                                     headers={"Cache-Control": "no-cache"})
+                    r.raise_for_status()
+                    df = pd.read_csv(io.BytesIO(r.content),
+                                     encoding="utf-8-sig",
+                                     dtype={"종목코드": str})
+                    # 로컬에 캐싱 (다음 로드 시 빠르게)
+                    os.makedirs(DATA_DIR, exist_ok=True)
+                    with open(RECOMMEND_PATH, "wb") as f:
+                        f.write(r.content)
+                    logger.info(f"✅ 원격 CSV 다운로드 성공 → 로컬 캐싱 완료 ({len(df)}건)")
+                except Exception as e:
+                    logger.warning(f"원격 CSV 다운로드 실패: {e}")
+
+        if df is None or df.empty:
+            logger.warning("❌ 로컬/원격 모두 데이터 로드 실패")
             return
+
         try:
-            df = pd.read_csv(RECOMMEND_PATH, dtype={"종목코드": str})
             num_cols = [
                 "FINAL_SCORE", "DISPLAY_SCORE", "STRUCT_SCORE",
                 "TIMING_SCORE", "AI_SCORE", "ML_SCORE", "TOTAL_SCORE",
