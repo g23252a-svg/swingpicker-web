@@ -2170,10 +2170,9 @@ def main(
         except Exception as e:
             log(f"⚠️ 모델 학습 실패: {e}")
     
-    # ✅ 여기에 넣기 (resolve_trade_date() 호출 전에!)
+    # [v19.5] pykrx 없어도 FDR 폴백으로 진행 가능 — 원천 차단 제거
     if not PYKRX_OK:
-        log("❌ pykrx 미사용 환경에서는 거래대금 TopN/스냅샷 생성이 불가합니다.")
-        return
+        log("⚠️ pykrx 미설치 → FDR 폴백으로 진행합니다.")
 
     # 1) 먼저 거래 기준일 결정
     trade_ymd = resolve_trade_date(trade_date)
@@ -2330,9 +2329,7 @@ def main(
     if err_cnt > 0:
         log(f"⚠️ 분석 중 오류 발생/데이터 부족 종목 수: {err_cnt}건")
 
-    # [v3.2 #2] 분석 완료 후 대형 객체 메모리 해제
-    # full_ohlcv_map은 수백~수천 종목의 DataFrame을 담고 있으므로 즉시 해제
-    del full_ohlcv_map
+    # [v19.5] full_ohlcv_map은 ML 스코어링 + 트리거에서 아직 필요 → 여기서 del 금지
     gc.collect()
 
     if not rows:
@@ -2396,6 +2393,10 @@ def main(
         
         df_out['TRIGGER_SCORE'] = trigger_list
         df_out['RAW_TRIGGER_SCORE'] = df_out['TRIGGER_SCORE'] 
+
+        # [v19.5] ML + Trigger 완료 → full_ohlcv_map 메모리 해제
+        del full_ohlcv_map
+        gc.collect()
 
         # 최종 통합 스코어링 실행 (v15.1 엔진: EBS/STRUCT/TIMING/FINAL 일괄 산출)
         df_out = build_global_score(df_out, macro_risk)
