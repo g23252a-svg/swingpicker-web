@@ -2,60 +2,37 @@
 """
 strategies/ — Swing Mode 전략 팩토리
 ═══════════════════════════════════════
-[Phase 2-1] 단일 점수 대신, 시장 상황별로 다른 전략 적용.
+[v3.4] 리팩터링:
+  - StrategyConfig 삭제 → 각 전략 내부 DEFAULTS
+  - CollectorConfig 종속성 제거 → **overrides만 수용
+  - 템플릿 메서드 → _filter_rules / _score_weights 선언적 정의
 
 Usage:
-    from strategies import StrategyFactory, select_strategies
-    active = select_strategies(macro_risk, breadth_all)
-    for name in active:
-        strat = StrategyFactory.create(name, config)
-        filtered = strat.filter(df)
-        scored = strat.score(filtered)
-        picks = strat.rank_and_pick(scored, top_k=5)
+    from strategies import StrategyFactory
+
+    # 가중치 기반 선택 (config 불필요)
+    candidates = StrategyFactory.select("NORMAL", 65.0)
+
+    # 그리드 서치: 특정 전략 파라미터만 오버라이드
+    strat = StrategyFactory.create("breakout", min_breadth=60, vol_quality_min=1.5)
+
+    # 기존 호환
+    active = select_strategies("NORMAL", 65.0)
 """
 
-from strategies.base import SwingStrategy
-from strategies.breakout import BreakoutStrategy
-from strategies.pullback import PullbackStrategy
-from strategies.mean_revert import MeanRevertStrategy
+from strategies.base import SwingStrategy, StrategyFactory
 
-
-class StrategyFactory:
-    _registry = {
-        "breakout": BreakoutStrategy,
-        "pullback": PullbackStrategy,
-        "mean_revert": MeanRevertStrategy,
-    }
-
-    @classmethod
-    def create(cls, name: str, config=None) -> SwingStrategy:
-        klass = cls._registry.get(name)
-        if klass is None:
-            raise ValueError(f"Unknown strategy: {name}. Available: {list(cls._registry.keys())}")
-        return klass(config=config)
-
-    @classmethod
-    def available(cls):
-        return list(cls._registry.keys())
+# ── 전략 import (= 자동 등록 트리거) ──
+from strategies.breakout import BreakoutStrategy       # noqa: F401
+from strategies.pullback import PullbackStrategy       # noqa: F401
+from strategies.mean_revert import MeanRevertStrategy   # noqa: F401
 
 
 def select_strategies(
     macro_risk: str = "NORMAL",
     breadth_all: float = 50.0,
+    **overrides,
 ) -> list:
-    """시장 상황에 따라 활성화할 전략 결정."""
-    if macro_risk == "CRITICAL":
-        return []
-
-    active = []
-    if breadth_all >= 55:
-        active.append("breakout")
-    if breadth_all >= 40:
-        active.append("pullback")
-    if breadth_all < 35 and macro_risk == "NORMAL":
-        active.append("mean_revert")
-
-    if not active and macro_risk != "CRITICAL":
-        active.append("pullback")
-
-    return active
+    """기존 호환 래퍼 — 이름 리스트 반환."""
+    candidates = StrategyFactory.select(macro_risk, breadth_all, **overrides)
+    return [name for name, _weight in candidates]
