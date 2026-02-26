@@ -119,6 +119,22 @@ class LDYDBManager:
                 final_score DOUBLE, ai_comment VARCHAR
             )
         """)
+
+        # ── price_snapshots 스키마 마이그레이션 (snap_date → trade_date) ──
+        try:
+            cols = [r[1] for r in self.execute_safe(
+                "PRAGMA table_info(price_snapshots)").fetchall()]
+            if cols and "snap_date" in cols and "trade_date" not in cols:
+                _logger.info(" 🔄 price_snapshots 스키마 마이그레이션: snap_date → trade_date")
+                self.execute_safe("ALTER TABLE price_snapshots RENAME COLUMN snap_date TO trade_date")
+        except Exception as _mig_err:
+            # ALTER 실패 시 (구버전 DuckDB 등) → DROP + 재생성
+            try:
+                _logger.warning(f" 마이그레이션 실패({_mig_err}), 테이블 재생성")
+                self.execute_safe("DROP TABLE IF EXISTS price_snapshots")
+            except Exception:
+                pass
+
         self.execute_safe("""
             CREATE TABLE IF NOT EXISTS price_snapshots (
                 trade_date VARCHAR, code VARCHAR, name VARCHAR,
@@ -127,7 +143,7 @@ class LDYDBManager:
             )
         """)
         self.execute_safe("CREATE INDEX IF NOT EXISTS idx_rec_date ON daily_recommend (trade_date)")
-        self.execute_safe("CREATE INDEX IF NOT EXISTS idx_snap_date ON price_snapshots (trade_date)")
+        self.execute_safe("CREATE INDEX IF NOT EXISTS idx_trade_date ON price_snapshots (trade_date)")
 
     # ═══════════════════════════════════════════
     #  Gist 다운로드 (Read — 락 밖 I/O)
@@ -551,10 +567,19 @@ class LDYDBManager:
             _logger.error(f" DB Save Failed: {e}")
 
     def save_snapshot(self, df, trade_ymd):
-        """[v19.5] 가격 스냅샷 DB 저장 — register 패턴 사용"""
+        """[v19.5] 가격 스냅샷 DB 저장 — 기존 trade_date 스키마 호환"""
         if df is None or df.empty:
             return
         try:
+            # 기존 테이블 스키마 감지 → 불일치 시 재생성
+            try:
+                cols = [r[1] for r in self.execute_safe("PRAGMA table_info(price_snapshots)").fetchall()]
+                if cols and "trade_date" not in cols:
+                    _logger.warning(" price_snapshots 스키마 불일치 → 재생성")
+                    self.execute_safe("DROP TABLE price_snapshots")
+            except Exception:
+                pass
+
             self.execute_safe("""
                 CREATE TABLE IF NOT EXISTS price_snapshots (
                     trade_date VARCHAR,
