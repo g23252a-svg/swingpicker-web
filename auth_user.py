@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader Auth System (Debug & Robust Version)
+LDY Pro Trader Auth System v3.0 (Security Review Patch)
+───────────────────────────────────────────────────────
+v3.0 개선사항:
+  #1. 마스터 관리자 Brute-force 방어 — rate limit 최우선 적용
+  #2. Salt Rotation 시 보안답변 동시 재해싱 — 복구 무한루프 방지
+  #3. 세션 캐시 TTL(120s) + DB 경량 재검증 — 실시간 밴/강등 반영
+  보너스. 회원가입 시 normalize_email → 도메인 검증 순서 정리
 """
 import streamlit as st
 import hashlib
@@ -77,17 +83,53 @@ def check_password_strength(pw: str) -> bool:
 # ----------------- 2. 핵심 함수 -----------------
 
 def get_user():
-    """[채찍: Zero-Leak Caching] 민감 정보(PW, Salt)를 제거한 프로필만 세션 캐싱"""
+    """
+    [v3.0 #3] Zero-Leak Caching + TTL 기반 권한 재검증
+    
+    민감 정보(PW, Salt)를 제거한 프로필만 세션 캐싱하되,
+    일정 시간(SESSION_RECHECK_SEC)마다 DB에서 is_banned/role을 재확인.
+    → 관리자가 유저를 밴/강등해도 세션 무한 캐시 악용 방지
+    """
+    SESSION_RECHECK_SEC = 120  # 2분마다 DB 재검증
+
     if CURRENT_USER_KEY not in st.session_state:
         st.session_state[CURRENT_USER_KEY] = None
     
     val = st.session_state[CURRENT_USER_KEY]
     if not val: return None
     
-    # 세션에 이미 딕셔너리가 있다면 즉시 반환 (DB 부하 0)
-    if isinstance(val, dict): return val
+    # 세션에 딕셔너리가 있으면 TTL 체크
+    if isinstance(val, dict):
+        cached_at = val.get("_cached_at", 0)
+        if time.time() - cached_at < SESSION_RECHECK_SEC:
+            return val  # TTL 이내 → 캐시 그대로 반환
         
-    # 최초 로드 시 정보 정제 후 캐싱
+        # TTL 만료 → is_banned / role만 DB에서 경량 재검증
+        login_id = val.get("login_id") or val.get("id")
+        if login_id and login_id != MASTER_ADMIN_ID:
+            db = get_db()
+            if db:
+                try:
+                    fresh = db.get_user_by_id(login_id)
+                    if not fresh:
+                        # 계정 삭제됨 → 세션 무효화
+                        st.session_state[CURRENT_USER_KEY] = None
+                        return None
+                    if str(fresh.get("is_banned", "")).upper() in ["Y", "TRUE", "1"]:
+                        st.session_state[CURRENT_USER_KEY] = None
+                        return None
+                    # 권한 정보 갱신
+                    val["role"] = fresh.get("role", val.get("role", "free"))
+                    val["is_banned"] = fresh.get("is_banned")
+                    val["prime_expire_date"] = fresh.get("prime_expire_date")
+                except Exception:
+                    pass  # DB 조회 실패 시 기존 캐시 유지 (가용성 우선)
+        
+        val["_cached_at"] = time.time()
+        st.session_state[CURRENT_USER_KEY] = val
+        return val
+        
+    # 최초 로드 시 (val이 문자열 = login_id) → DB 조회 후 정제 캐싱
     db = get_db()
     if not db: return None
     
@@ -102,7 +144,8 @@ def get_user():
             "role": raw_user.get("role", "free"),
             "nickname": raw_user.get("nickname"),
             "prime_expire_date": raw_user.get("prime_expire_date"),
-            "is_banned": raw_user.get("is_banned")
+            "is_banned": raw_user.get("is_banned"),
+            "_cached_at": time.time(),
         }
         st.session_state[CURRENT_USER_KEY] = safe_profile
         return safe_profile
@@ -194,71 +237,89 @@ def normalize_email(email):
         
     return f"{local}@{domain}"
 
-def check_rate_limit(email, limit=5, window_sec=300, lock_sec=600):
+def check_rate_limit(email, limit=5, lock_sec=600):
     """
-    [v2.0] DB 기반 rate limiting (브라우저 새로고침 우회 방지)
-    세션은 메모리 캐시 역할만 하고, 실제 기록은 DB에 저장.
-    """
-    now = time.time()
+    [v3.1] DB 우선 rate limiting — db_utils.get_login_failures() 기반
     
-    # 1차: 세션 캐시 확인 (DB 부하 절감)
-    if "login_rl" not in st.session_state:
-        st.session_state.login_rl = {}
-    cached = st.session_state.login_rl.get(email)
-    if cached and now < cached.get("lock_until", 0):
-        remain = int(cached["lock_until"] - now)
-        return False, f"⛔ 로그인 잠금({remain}s 남음)"
-
-    # 2차: DB 기반 확인
+    DB에서 (login_fail_count, lock_until) 튜플을 조회하고,
+    DB 불가 시에만 세션(메모리) fallback.
+    
+    Returns
+    -------
+    (bool, str) : (통과 여부, 에러 메시지)
+    """
+    now = datetime.now(timezone.utc)
+    
+    # 1순위: DB 조회
     db = get_db()
     if db:
         try:
-            rec = db.get_rate_limit(email) or {"fails": 0, "first_ts": now, "lock_until": 0}
-        except Exception:
-            # DB에 rate_limit 테이블이 없으면 세션 fallback
-            rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
-    else:
-        rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
-
-    if now < rec.get("lock_until", 0):
-        remain = int(rec["lock_until"] - now)
-        st.session_state.login_rl[email] = rec  # 세션 캐시 갱신
+            fail_count, lock_until = db.get_login_failures(email)
+            
+            if lock_until and now < lock_until:
+                remain = int((lock_until - now).total_seconds())
+                return False, f"⛔ 로그인 잠금({remain}s 남음)"
+            
+            # 잠금 시간이 지났으면 통과 (실패 카운트는 record에서 관리)
+            return True, ""
+        except Exception as e:
+            logger.warning(f"DB rate limit 조회 실패, 세션 fallback: {e}")
+    
+    # 2순위: 세션(메모리) fallback — DB 불가 시에만 사용
+    if "login_rl" not in st.session_state:
+        st.session_state.login_rl = {}
+    cached = st.session_state.login_rl.get(email, {})
+    
+    lock_until_ts = cached.get("lock_until", 0)
+    now_ts = time.time()
+    if lock_until_ts and now_ts < lock_until_ts:
+        remain = int(lock_until_ts - now_ts)
         return False, f"⛔ 로그인 잠금({remain}s 남음)"
-
-    if now - rec.get("first_ts", now) > window_sec:
-        rec = {"fails": 0, "first_ts": now, "lock_until": 0}
-
-    st.session_state.login_rl[email] = rec
+    
     return True, ""
 
-def record_login_failure(email, limit=5, window_sec=300, lock_sec=600):
-    """[v2.0] 실패 기록을 DB + 세션 양쪽에 저장"""
-    now = time.time()
+def record_login_failure(email, limit=5, lock_sec=600):
+    """
+    [v3.1] DB 우선 실패 기록 — db_utils.record_login_failure() 호출
     
-    if "login_rl" not in st.session_state:
-        st.session_state.login_rl = {}
-    rec = st.session_state.login_rl.get(email, {"fails": 0, "first_ts": now, "lock_until": 0})
-
-    if now - rec.get("first_ts", now) > window_sec:
-        rec = {"fails": 0, "first_ts": now, "lock_until": 0}
-
-    rec["fails"] = rec.get("fails", 0) + 1
-
-    if rec["fails"] >= limit:
-        rec["lock_until"] = now + lock_sec
-        logger.warning(f"🔒 계정 잠금: {email} ({limit}회 실패)")
-
-    st.session_state.login_rl[email] = rec
-    
-    # DB에도 저장 (새로고침 우회 방지)
+    DB 메서드가 내부적으로 fail_count 누적 + 5회 초과 시 10분 잠금 처리.
+    DB 불가 시 세션(메모리) fallback으로 최소한의 보호 유지.
+    """
+    # 1순위: DB 기록
     db = get_db()
     if db:
         try:
-            db.set_rate_limit(email, rec)
-        except Exception:
-            pass  # DB 테이블 미존재 시 세션만으로 동작
+            db.record_login_failure(email)
+            return  # DB 기록 성공 → 끝
+        except Exception as e:
+            logger.warning(f"DB 실패 기록 오류, 세션 fallback: {e}")
+    
+    # 2순위: 세션 fallback
+    now_ts = time.time()
+    if "login_rl" not in st.session_state:
+        st.session_state.login_rl = {}
+    rec = st.session_state.login_rl.get(email, {"fails": 0, "lock_until": 0})
+    
+    rec["fails"] = rec.get("fails", 0) + 1
+    if rec["fails"] >= limit:
+        rec["lock_until"] = now_ts + lock_sec
+        logger.warning(f"🔒 [세션] 계정 잠금: {email} ({limit}회 실패)")
+    
+    st.session_state.login_rl[email] = rec
 
 def reset_login_failures(email):
+    """
+    [v3.1] DB + 세션 양쪽의 실패 기록 초기화
+    """
+    # DB 초기화
+    db = get_db()
+    if db:
+        try:
+            db.reset_login_failures(email)
+        except Exception:
+            pass
+    
+    # 세션 초기화
     if "login_rl" in st.session_state and email in st.session_state.login_rl:
         st.session_state.login_rl.pop(email, None)
 
@@ -293,23 +354,32 @@ def render_auth_box(show_debug: bool = False):
             lid = st.text_input("아이디 (또는 이메일)").strip()
             lpw = st.text_input("비밀번호", type="password")
             
-            # ❗ 버튼 이름을 '로그인'으로 원복
             if st.form_submit_button("로그인", type="primary", use_container_width=True):
                 start_t = time.time()
                 
-                # ✅ [v2.0 보안 패치] 마스터 관리자 — 해시 비교 (timing-safe)
-                if lid == MASTER_ADMIN_ID and _ADMIN_PW_SET and _verify_admin_password(lpw):
-                    st.session_state[CURRENT_USER_KEY] = "admin"
-                    st.toast("🛡️ 마스터 관리자 로그인 성공")
-                    st.rerun()
-
-                # 일반 유저 프로세스
-                clean_lid = normalize_email(lid)
-                ok, msg = check_rate_limit(clean_lid)
+                # [v3.0 #1] Rate limit는 계정 종류 무관하게 최우선 실행
+                # 마스터 관리자도 Brute-force 공격으로부터 동일하게 보호
+                rl_key = MASTER_ADMIN_ID if lid == MASTER_ADMIN_ID else normalize_email(lid)
+                ok, msg = check_rate_limit(rl_key)
                 
-                if not ok: 
+                if not ok:
                     st.error(msg)
+                
+                # ── 마스터 관리자 인증 ──
+                elif lid == MASTER_ADMIN_ID:
+                    if _ADMIN_PW_SET and _verify_admin_password(lpw):
+                        reset_login_failures(rl_key)
+                        st.session_state[CURRENT_USER_KEY] = "admin"
+                        st.toast("🛡️ 마스터 관리자 로그인 성공")
+                        st.rerun()
+                    else:
+                        record_login_failure(rl_key)
+                        time.sleep(max(0, 0.5 - (time.time() - start_t)))
+                        st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
+                
+                # ── 일반 유저 인증 ──
                 else:
+                    clean_lid = rl_key  # 이미 normalize_email 됨
                     u = db.get_user_by_id(clean_lid)
                     # 존재하지 않는 계정도 연산 시간은 동일하게 가져감 (보안)
                     dummy_salt = "static_dummy_salt"
@@ -325,7 +395,6 @@ def render_auth_box(show_debug: bool = False):
                             st.rerun()
                     else:
                         record_login_failure(clean_lid)
-                        # 보안을 위한 응답 시간 지연 (0.5초)
                         time.sleep(max(0, 0.5 - (time.time() - start_t)))
                         st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
 
@@ -341,7 +410,9 @@ def render_auth_box(show_debug: bool = False):
             ans = st.text_input("보안 질문 답변")
             
             if st.form_submit_button("전략군 가입 신청"):
-                domain = em.split("@")[-1].lower() if "@" in em else ""
+                # [v3.0 보너스] 정규화를 먼저 수행한 뒤 도메인 검증
+                clean_em = normalize_email(em)
+                domain = clean_em.split("@")[-1] if "@" in clean_em else ""
                 if domain not in ALLOWED_DOMAINS:
                     st.error(f"🚫 허용된 도메인이 아닙니다. ({', '.join(ALLOWED_DOMAINS)})")
                 elif not check_password_strength(p1):
@@ -349,7 +420,6 @@ def render_auth_box(show_debug: bool = False):
                 elif p1 != p2: st.error("비밀번호가 일치하지 않습니다.")
                 elif not ans.strip(): st.error("보안 질문 답변은 필수입니다.")
                 else:
-                    clean_em = normalize_email(em)
                     salt = _create_salt()
                     ok, msg = db.register_user(clean_em, _hash_password(p1, salt), salt, nk[:8], q_idx, _hash_answer(ans, salt))
                     if ok:
@@ -373,12 +443,18 @@ def render_auth_box(show_debug: bool = False):
                 u = db.get_user_by_id(clean_fid)
                 
                 success = False
-                # [Salt Rotation 적용] 비번 변경 시 소금도 새로 발급하여 보안 등급 상향
-                if u and _hash_answer(ans_in, u["salt"]) == u["security_ans"]:
+                # [v3.0 #2] Salt Rotation: 비번 변경 시 보안답변도 새 salt로 재해싱
+                # 이전 버전은 salt만 교체하고 security_ans를 갱신하지 않아
+                # 다음 계정 복구 시 보안답변 검증이 영구 불가능했음
+                if u and _hash_answer(ans_in, u["salt"]) == u["security_a_hash"]:
                     if check_password_strength(new_pw):
                         new_salt = _create_salt()
                         new_hash = _hash_password(new_pw, new_salt)
-                        if db.update_user_password(clean_fid, new_hash, new_salt): # 👈 DB 함수 수정 필요
+                        new_ans_hash = _hash_answer(ans_in, new_salt)  # 보안답변도 새 salt로!
+                        if db.update_user_password(
+                            clean_fid, new_hash, new_salt,
+                            new_security_ans=new_ans_hash,
+                        ):
                             success = True
                 
                 # 성공/실패와 무관하게 1초 지연 (계정 존재 여부 은폐)
