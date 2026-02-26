@@ -1,45 +1,47 @@
-# ─── Secrets & Config ───
-.streamlit/secrets.toml
-.env
-*.env
+# ═══════════════════════════════════════════════════
+#  swingpicker-web .gitignore
+#  [v3.4] 감사 결과 반영: DuckDB·venv 추가, 모델 와일드카드화
+# ═══════════════════════════════════════════════════
 
-# ─── Python ───
+# ─── Python Cache & Virtual Env ───
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
+*.egg
 dist/
 build/
-*.egg
+.pytest_cache/
+.coverage
+venv/
+.venv/
+env/
 
-# ─── Data: 일별 스냅샷 (latest/기준 파일만 Git 추적) ───
-data/recommend_2*.csv
-data/recommend_*_v*.csv
-data/recommend_latest_cp949.csv
-data/krx_codes_2*.csv
-data/rank_validation_2*.csv
-data/rank_validation_summary_2*.csv
-data/price_snapshot_2*.csv
+# ─── Secrets & Config ───
+.env
+*.env
+.streamlit/secrets.toml
+# 주의: .streamlit/config.toml 은 UI 테마용이므로 커밋 유지
 
-# ─── Data: 레거시 모델 (v17 + v15.6 폴백만 유지) ───
-data/trading_model_lstm.pth
-data/trading_model_lstm_attn.pth
-data/trading_model_lstm_attn_v14.pth
-data/trading_model_lstm_attn_v15.pth
-data/trading_scaler.pkl
-data/trading_scaler_v2.pkl
-data/trading_scaler_v14.pkl
-data/trading_scaler_v15.pkl
-data/trading_model_xgb.pkl
+# ─── Data: 시스템 생성 파일 전체 무시 (Railway Volume에 위임) ───
+data/*
+!data/.keep
+
+# ─── Data: ML 모델 (Railway Volume에 위임) ───
+# data/ 전체가 이미 무시되므로 별도 규칙 불필요
 
 # ─── Cache & DB (런타임 생성) ───
 docs_cache/
 *.db
 *.db-journal
 *.db-wal
+*.duckdb
+*.duckdb.wal
 
 # ─── IDE & OS ───
 .vscode/
 .idea/
 *.swp
+*.swo
 .DS_Store
 Thumbs.db
