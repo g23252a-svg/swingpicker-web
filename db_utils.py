@@ -111,6 +111,24 @@ class LDYDBManager:
             )
         """)
 
+        # [v19.5] 추천/스냅샷 테이블 미리 생성 + 조회 성능용 인덱스
+        self.execute_safe("""
+            CREATE TABLE IF NOT EXISTS daily_recommend (
+                trade_date VARCHAR, code VARCHAR, name VARCHAR,
+                close_price DOUBLE, display_score DOUBLE,
+                final_score DOUBLE, ai_comment VARCHAR
+            )
+        """)
+        self.execute_safe("""
+            CREATE TABLE IF NOT EXISTS price_snapshots (
+                trade_date VARCHAR, code VARCHAR, name VARCHAR,
+                market VARCHAR, close_price DOUBLE, open_price DOUBLE,
+                low_price DOUBLE, high_price DOUBLE
+            )
+        """)
+        self.execute_safe("CREATE INDEX IF NOT EXISTS idx_rec_date ON daily_recommend (trade_date)")
+        self.execute_safe("CREATE INDEX IF NOT EXISTS idx_snap_date ON price_snapshots (trade_date)")
+
     # ═══════════════════════════════════════════
     #  Gist 다운로드 (Read — 락 밖 I/O)
     # ═══════════════════════════════════════════
@@ -518,12 +536,64 @@ class LDYDBManager:
             date_val = target_df['trade_date'].iloc[0]
             # [v5.0 #3] f-string SQL 인젝션 → 파라미터 바인딩
             self.execute_safe("DELETE FROM daily_recommend WHERE trade_date = ?", [date_val])
-            self.execute_safe("INSERT INTO daily_recommend SELECT * FROM target_df")
+
+            # [v19.5 Fix 1] DuckDB는 Python 변수를 직접 참조 불가
+            # → con.register()로 가상 테이블 등록 후 INSERT, 완료 후 해제
+            self.conn.register("_tmp_target_df", target_df)
+            try:
+                self.execute_safe("INSERT INTO daily_recommend SELECT * FROM _tmp_target_df")
+            finally:
+                self.conn.unregister("_tmp_target_df")
 
             _logger.info(f" DB Saved: {len(target_df)} rows for {date_val}")
 
         except Exception as e:
             _logger.error(f" DB Save Failed: {e}")
+
+    def save_snapshot(self, df, trade_ymd):
+        """[v19.5] 가격 스냅샷 DB 저장 — register 패턴 사용"""
+        if df is None or df.empty:
+            return
+        try:
+            self.execute_safe("""
+                CREATE TABLE IF NOT EXISTS price_snapshots (
+                    trade_date VARCHAR,
+                    code VARCHAR,
+                    name VARCHAR,
+                    market VARCHAR,
+                    close_price DOUBLE,
+                    open_price DOUBLE,
+                    low_price DOUBLE,
+                    high_price DOUBLE
+                )
+            """)
+
+            snap = df.copy()
+            s_ymd = str(trade_ymd)
+            formatted = f"{s_ymd[:4]}-{s_ymd[4:6]}-{s_ymd[6:]}" if len(s_ymd) == 8 and s_ymd.isdigit() else s_ymd
+            snap["trade_date"] = formatted
+            snap["code"] = snap["종목코드"].astype(str).str.zfill(6)
+            snap["name"] = snap.get("종목명", "")
+            snap["market"] = snap.get("시장", "")
+            snap["close_price"] = pd.to_numeric(snap.get("종가", 0), errors="coerce").fillna(0)
+            snap["open_price"] = pd.to_numeric(snap.get("시가", 0), errors="coerce").fillna(0)
+            snap["low_price"] = pd.to_numeric(snap.get("저가", 0), errors="coerce").fillna(0)
+            snap["high_price"] = pd.to_numeric(snap.get("고가", 0), errors="coerce").fillna(0)
+
+            target_cols = ["trade_date", "code", "name", "market",
+                           "close_price", "open_price", "low_price", "high_price"]
+            snap_db = snap[target_cols]
+
+            self.conn.register("_tmp_snap", snap_db)
+            try:
+                self.execute_safe("DELETE FROM price_snapshots WHERE trade_date = ?", [formatted])
+                self.execute_safe("INSERT INTO price_snapshots SELECT * FROM _tmp_snap")
+            finally:
+                self.conn.unregister("_tmp_snap")
+
+            _logger.info(f" Snapshot Saved: {len(snap_db)} rows for {formatted}")
+        except Exception as e:
+            _logger.error(f" Snapshot Save Failed: {e}")
 
     def save_inquiries(self, items):
         self.execute_safe("DELETE FROM inquiries")
