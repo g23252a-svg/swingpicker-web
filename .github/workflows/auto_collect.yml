@@ -83,11 +83,19 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git status --porcelain | grep -q .; then
-            git add -A
+          
+          # .gitignore가 data/*를 막고 있으므로 -f(force)로 우회
+          # Railway Volume 이관 완료 시 이 스텝 전체 삭제
+          git add -f data/*.csv data/*.json data/*.pkl data/*.pth || true
+          git add -f data/*.parquet || true
+          git add -f data/*.duckdb || true
+          
+          # data 외 코드 변경도 포함
+          git add -A
+          
+          git diff --staged --quiet || {
             git commit -m "chore: add CSV $(date +'%Y-%m-%d %H:%M:%S %Z')"
             git pull --rebase -X theirs
             git push
-          else
-            echo "No changes; skip commit."
-          fi
+          }
+          echo "Done."
