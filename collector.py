@@ -2091,6 +2091,11 @@ def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000,
 
     def _calc_row(row):
         try:
+            # [v19.5] 상태 기반 가드 — 비활성 ROUTE는 무조건 0원
+            _route = row.get("ROUTE", row.get("상태", ""))
+            if _route in (Route.WAIT, Route.OVERHEAT, Route.EXIT_WARNING):
+                return 0, 0
+
             score = float(row.get("TOTAL_SCORE", 0))
             buy = float(row.get("추천매수가", 0))
             stop = float(row.get("손절가", 0))
@@ -2159,16 +2164,27 @@ def main(
     log("🚀 LDY Collector v10.0 (AI Powered) 시작...")
 
     # ----------------------------------------------------------------------
-    # 🔥 [v15.6] 스마트 훈련 스킵 (당일 이미 학습했다면 30분 절약)
+    # 🔥 [v19.5 Fix 2] ML 모델 학습 + 존재 검증
     # ----------------------------------------------------------------------
     if ml_engine.is_trained_today():
-        log("✅ [SKIP] 오늘 이미 v15.6 Master 모델 학습이 완료되었습니다.")
+        log("✅ [SKIP] 오늘 이미 모델 학습이 완료되었습니다.")
     else:
-        log("🤖 AI 모델 최적화(v15.6 Master) 진행 중... (약 30분 소요)")
+        log("🤖 AI 모델 최적화 진행 중...")
         try:
             ml_engine.train_model() 
         except Exception as e:
             log(f"⚠️ 모델 학습 실패: {e}")
+
+    # [v19.5] 학습 후 모델 파일 존재 검증 — 없으면 명시적 경고
+    _model_exists = any(
+        os.path.exists(p) for p in [
+            ml_engine.MODEL_PATH,
+            *[fb[0] for fb in ml_engine.FALLBACK_PATHS],
+        ]
+    )
+    if not _model_exists:
+        log("🚨 [ML] 모델 파일이 전혀 없습니다! ML_SCORE=0으로 진행됩니다.")
+        log("   → data/에 ohlcv_cache_*.pkl 학습 데이터가 있는지 확인하세요.")
     
     # [v19.5] pykrx 없어도 FDR 폴백으로 진행 가능 — 원천 차단 제거
     if not PYKRX_OK:
@@ -2461,25 +2477,7 @@ def main(
         except Exception as _st_err:
             log(f"⚠️ 전략 팩토리 스킵: {_st_err}")
 
-        # ── [Phase 2-2] 캘리브레이션 승률 → 추천 필터 ──
-        try:
-            from kelly_calibrator import calibrated_win_rate as _cal_wr
-            _score_col = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
-            _est_wr_list = []
-            for _, _row in df_out.iterrows():
-                _s = float(_row.get(_score_col, 0) or 0)
-                _wr = _cal_wr(_s, OUT_DIR, method="RANK_SCORE", horizon=5, asof_ymd=trade_ymd)
-                _est_wr_list.append(round(_wr, 3))
-            df_out["EST_WIN_RATE"] = _est_wr_list
-
-            # 승률 45% 미만 → 보류 마킹
-            _low_wr_mask = df_out["EST_WIN_RATE"] < 0.45
-            _low_wr_count = _low_wr_mask.sum()
-            if _low_wr_count > 0:
-                df_out.loc[_low_wr_mask, "LOW_WR_FLAG"] = True
-                log(f"📉 캘리브레이션: 승률 45%미만 {_low_wr_count}건 마킹")
-        except Exception as _cal_err:
-            log(f"⚠️ 캘리브레이션 연동 스킵: {_cal_err}")
+        # ── [v19.5] 캘리브레이션은 Phase 2-2에서 단일 실행 (중복 제거) ──
 
         ebs_val = pd.to_numeric(df_out.get("EBS", 0), errors='coerce').fillna(0)
         struct_val = pd.to_numeric(df_out.get("STRUCT_SCORE", 0), errors='coerce').fillna(0)
@@ -2662,32 +2660,40 @@ def main(
 
     # (Phase 2-1 전략 팩토리는 위 Step 5에서 통합 실행됨)
 
-    # ── [Phase 2-2] 캘리브레이션 테이블 → 추천 필터 연동 ──
+    # ── [Phase 2-2] 캘리브레이션 승률 → 추천 필터 (단일 실행점) ──
     try:
         from kelly_calibrator import calibrated_win_rate as _cal_wr
         df_out["EST_WIN_RATE"] = np.nan
         df_out["CAL_HOLD_REASON"] = ""
+        df_out["LOW_WR_FLAG"] = False
 
         _score_col_cal = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
-        _wr_min = 0.42  # 승률 하한
+        _wr_min = 0.45  # [v19.5] 승률 하한 상향 (0.42 → 0.45)
 
         for _idx in df_out.index:
             _sc = float(df_out.at[_idx, _score_col_cal]) if pd.notna(df_out.at[_idx, _score_col_cal]) else 0
             try:
-                _wr = _cal_wr(_sc, OUT_DIR, method="RANK_SCORE", horizon=5)
+                # ✅ 핵심: asof_ymd=trade_ymd 강제 → 과거 백테스트 정합성 보장
+                _wr = _cal_wr(_sc, OUT_DIR, method="RANK_SCORE", horizon=5, asof_ymd=trade_ymd)
                 df_out.at[_idx, "EST_WIN_RATE"] = round(_wr, 3)
 
-                # 상위 추천 대상이면서 승률 하한 미달 → 보류 태그
-                if _wr < _wr_min and df_out.at[_idx, "ROUTE"] in (Route.ATTACK, Route.ARMED):
-                    df_out.at[_idx, "CAL_HOLD_REASON"] = f"low_wr_{_wr:.2f}"
+                if _wr < _wr_min:
+                    df_out.at[_idx, "LOW_WR_FLAG"] = True
+                    # ATTACK/ARMED 상태의 저승률 종목 → WAIT 강제 격하
+                    if df_out.at[_idx, "ROUTE"] in (Route.ATTACK, Route.ARMED):
+                        df_out.at[_idx, "ROUTE"] = Route.WAIT
+                        df_out.at[_idx, "상태"] = Route.WAIT
+                        df_out.at[_idx, "CAL_HOLD_REASON"] = f"low_wr_{_wr:.2f}"
             except (KeyError, ValueError, FileNotFoundError) as e:
-                logger.debug(f"캘리브레이션 승률 조회 실패 ({code6}): {e}")
+                logger.debug(f"캘리브레이션 승률 조회 실패 ({_idx}): {e}")
             except Exception as e:
-                logger.warning(f"⚠️ 캘리브레이션 예기치 않은 오류 ({code6}): {type(e).__name__}: {e}")
+                logger.warning(f"⚠️ 캘리브레이션 예기치 않은 오류 ({_idx}): {type(e).__name__}: {e}")
 
-        _low_wr_cnt = (df_out["CAL_HOLD_REASON"] != "").sum()
-        if _low_wr_cnt > 0:
-            log(f"📊 캘리브레이션: {_low_wr_cnt}건 승률 하한 미달 태그")
+        _demoted_cnt = (df_out["CAL_HOLD_REASON"] != "").sum()
+        _low_total = df_out["LOW_WR_FLAG"].sum()
+        if _low_total > 0:
+            log(f"📊 캘리브레이션: 승률 45%미만 {_low_total}건 중 "
+                f"{_demoted_cnt}건 ATTACK/ARMED → WAIT 격하")
     except ImportError:
         log("ℹ️ kelly_calibrator 미설치, 캘리브레이션 연동 스킵")
     except Exception as _cal_err:
