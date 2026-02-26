@@ -1,24 +1,46 @@
-__pycache__
-*.pyc
-*.pyo
+# ═══════════════════════════════════════════════════
+#  swingpicker-web .dockerignore (Railway 배포 최적화)
+# ═══════════════════════════════════════════════════
+
+# ─── Git 관련 (이미지에 깃 히스토리는 필요 없음) ───
 .git
 .gitignore
-*.md
-.pytest_cache
-.coverage
+.github/
+
+# ─── Python 캐시 및 가상환경 ───
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
 venv/
 .venv/
+env/
+
+# ─── Secrets (환경변수는 Railway 대시보드에서 주입) ───
 .env
+*.env
+.streamlit/secrets.toml
+
+# ─── Local Data & DB (Railway Volume으로 마운트) ───
+data/
 docs_cache/
-data/krx_codes_*.csv
-data/price_snapshot_*.csv
-data/recommend_2025*.csv
-data/recommend_2026*.csv
-data/rank_validation_*.csv
-!data/recommend_latest.csv
-!data/rank_validation_latest.csv
-!data/rank_validation_summary_latest.csv
-!data/price_snapshot_latest.csv
-dashboard.py
-strategy_lab.py
-.streamlit/
+*.db
+*.db-journal
+*.db-wal
+*.duckdb
+*.duckdb.wal
+
+# ─── 테스트 및 IDE ───
+.pytest_cache/
+.coverage
+.vscode/
+.idea/
+
+# ─── OS 생성 파일 ───
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
