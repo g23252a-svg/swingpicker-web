@@ -52,11 +52,13 @@ def save_per_trade_log(
     path = os.path.join(out_dir, "per_trade_log.csv")
     df_new = pd.DataFrame(trades)
 
-    # [v3.1 #1] 절대 스키마 강제: reindex로 누락 컬럼 NaN 채움 + 순서 고정
-    # Before: existing_cols 필터 → 컬럼 누락 시 열 수 불일치 → CSV 데이터 밀림
-    # After:  reindex → 항상 PER_TRADE_COLS 14열 보장 + extra 컬럼 후미 배치
-    extra_cols = [c for c in df_new.columns if c not in PER_TRADE_COLS]
-    df_new = df_new.reindex(columns=PER_TRADE_COLS + extra_cols)
+    # [v3.2 #4] Strict Schema: PER_TRADE_COLS만 허용 (extra_cols 제거)
+    # Before: extra_cols 허용 → 날마다 다른 컬럼 유입 → CSV 구조 깨짐
+    # After:  PER_TRADE_COLS 14열만 강제, 미지 컬럼은 로그 경고 후 삭제
+    unknown_cols = [c for c in df_new.columns if c not in PER_TRADE_COLS]
+    if unknown_cols:
+        _logger.warning(f"미지 컬럼 {unknown_cols} 삭제됨 (Strict Schema)")
+    df_new = df_new.reindex(columns=PER_TRADE_COLS)
 
     # 컬럼 타입 정규화
     if "rec_date" in df_new.columns:
