@@ -1,27 +1,24 @@
 """
-Kelly Criterion 승률 캘리브레이션 (SSOT)
-
-핵심:
-  - 선형 추정(p = 0.4 + (score-60)*0.01) 대신
-  - rank_validation per-trade 히스토리 기반 실측 승률 사용
-  - 베이지안 스무딩으로 표본 적을 때 안정화
-  - 시간 가중(Decay)으로 레짐 변화 대응
-  - method/horizon별 분리 캘리브레이션
-
-사용법:
-  1. rank_validation 실행 시 save_per_trade_log() 호출 → per_trade_log.csv 저장
-  2. apply_kelly_betting 실행 시 load_calibration_table() → 승률 테이블 로드
-  3. calibrated_win_rate(score, method, horizon) → 실측 기반 p 반환
-
-v1.0 — 2026-02-22
+Kelly Criterion 승률 캘리브레이션 (v2.0)
+═══════════════════════════════════════════
+[v2.0] 5건 수정:
+  #1 보간법 자기모순: 구간 매칭 먼저 → 중심점 보간 먼저 (계단→연속)
+  #2 미래 참조(Look-ahead): rec_date < asof → (rec_date + horizon) < asof
+  #3 O(N²) apply: row별 calibrated_win_rate → pd.cut 벡터 병합
+  #4 전역 _CAL_CACHE: global dict → functools.lru_cache 캡슐화
+  #5 except Exception: pass → 명시적 예외 + logging
 """
 
 import os
 import json
+import logging
 import numpy as np
 import pandas as pd
+from functools import lru_cache
 from typing import Optional, Dict, Tuple, List
 from datetime import datetime, timedelta
+
+_logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════
@@ -29,20 +26,9 @@ from datetime import datetime, timedelta
 # ═══════════════════════════════════════════════════
 
 PER_TRADE_COLS = [
-    "rec_date",       # 추천일 (YYYYMMDD)
-    "code",           # 종목코드
-    "method",         # 정렬 방식 (RANK_SCORE, ENTRY_SCORE, LDY_SCORE)
-    "topk",           # 상위 K
-    "horizon",        # 검증 기간 (영업일)
-    "score",          # 해당 method의 점수
-    "entry_price",    # 진입가
-    "exit_price",     # 청산가 (SL/TP/종가)
-    "stop_price",     # 손절가
-    "target_price",   # 목표가
-    "ret_pct",        # 수익률 (%)
-    "win",            # 1=양수수익, 0=음수수익
-    "exit_type",      # stop_hit / tp_hit / hold_close
-    "b_ratio",        # 손익비 (reward/risk)
+    "rec_date", "code", "method", "topk", "horizon",
+    "score", "entry_price", "exit_price", "stop_price", "target_price",
+    "ret_pct", "win", "exit_type", "b_ratio",
 ]
 
 
@@ -51,91 +37,129 @@ def save_per_trade_log(
     trades: List[Dict],
     asof_ymd: str,
 ) -> str:
-    """
-    per-trade 히스토리를 CSV에 append (누적).
-    rank_validation 내부에서 호출.
+    """[v2.4] per-trade 히스토리 Append-only 저장
 
-    Returns: 저장 경로
+    v2.4 #1: 신규 행만 파일 끝에 append (O(k) I/O)
+    v2.4 #2: filelock으로 멀티프로세스 CSV 충돌 방어
+
+    Note: filelock 미설치 시 graceful fallback (락 없이 동작)
     """
     if not trades:
         return ""
 
+    # [v2.4 #4] 디렉토리 미존재 시 자동 생성 (배포 첫날 방어)
+    os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "per_trade_log.csv")
     df_new = pd.DataFrame(trades)
 
-    # 기존 로그에 append
-    if os.path.exists(path):
-        try:
-            df_old = pd.read_csv(path, dtype={"code": str})
-            # 동일 (rec_date, code, method, horizon) 중복 제거 후 append
-            key_cols = ["rec_date", "code", "method", "topk", "horizon"]
-            # 타입 정규화: rec_date → str, horizon → int
-            for kdf in [df_old, df_new]:
-                kdf["rec_date"] = kdf["rec_date"].astype(str)
-                kdf["code"] = kdf["code"].astype(str)
-                kdf["horizon"] = kdf["horizon"].astype(int)
-            existing_keys = set(df_old[key_cols].apply(lambda r: tuple(str(v) for v in r), axis=1))
-            new_rows = []
-            for _, row in df_new.iterrows():
-                key = tuple(str(row[c]) for c in key_cols)
-                if key not in existing_keys:
-                    new_rows.append(row)
-            if new_rows:
-                df_combined = pd.concat([df_old, pd.DataFrame(new_rows)], ignore_index=True)
-            else:
-                df_combined = df_old
-        except Exception:
-            df_combined = df_new
-    else:
-        df_combined = df_new
+    # [v3.1 #1] 절대 스키마 강제: reindex로 누락 컬럼 NaN 채움 + 순서 고정
+    # Before: existing_cols 필터 → 컬럼 누락 시 열 수 불일치 → CSV 데이터 밀림
+    # After:  reindex → 항상 PER_TRADE_COLS 14열 보장 + extra 컬럼 후미 배치
+    extra_cols = [c for c in df_new.columns if c not in PER_TRADE_COLS]
+    df_new = df_new.reindex(columns=PER_TRADE_COLS + extra_cols)
 
-    df_combined.to_csv(path, index=False, encoding="utf-8-sig")
+    # 컬럼 타입 정규화
+    if "rec_date" in df_new.columns:
+        df_new["rec_date"] = df_new["rec_date"].astype(str)
+    if "code" in df_new.columns:
+        df_new["code"] = df_new["code"].astype(str)
+    if "horizon" in df_new.columns:
+        df_new["horizon"] = pd.to_numeric(df_new["horizon"], errors="coerce").fillna(5).astype(int)
+
+    write_header = not os.path.exists(path)
+
+    # [v2.4 #2] 파일 락: 멀티프로세스 동시 쓰기 방어
+    lock = _acquire_filelock(path)
+    try:
+        if lock:
+            lock.acquire(timeout=10)
+        df_new.to_csv(path, mode="a", header=write_header, index=False, encoding="utf-8-sig")
+    except Exception as e:
+        _logger.error(f"트레이드 로그 저장 실패: {e}")
+    finally:
+        if lock:
+            try:
+                lock.release()
+            except Exception:
+                pass
+
     return path
+
+
+def _acquire_filelock(path: str):
+    """filelock 라이브러리 존재 시 FileLock 반환, 없으면 None (graceful)"""
+    try:
+        from filelock import FileLock
+        return FileLock(path + ".lock", timeout=10)
+    except ImportError:
+        return None
+
+
+# ── Dedup-on-load: 파일 읽을 때 중복 제거 ──
+_TRADE_KEY_COLS = ["rec_date", "code", "method", "topk", "horizon"]
+
+
+def load_per_trade_log(out_dir: str) -> pd.DataFrame:
+    """[v2.4 #1] 트레이드 로그 로드 + 중복 제거 (Read 시 1회)
+
+    Append-only 파일이므로 중복 가능 → load 시 drop_duplicates
+    """
+    path = os.path.join(out_dir, "per_trade_log.csv")
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=PER_TRADE_COLS)
+
+    try:
+        df = pd.read_csv(path, dtype={"code": str})
+    except (pd.errors.EmptyDataError, OSError) as e:
+        _logger.warning(f"트레이드 로그 읽기 실패: {e}")
+        return pd.DataFrame(columns=PER_TRADE_COLS)
+
+    # 키 컬럼 정규화 + dedup
+    for col in _TRADE_KEY_COLS:
+        if col in df.columns:
+            df[col] = df[col].astype(str) if col != "horizon" else \
+                pd.to_numeric(df[col], errors="coerce").fillna(5).astype(int)
+
+    existing_keys = [c for c in _TRADE_KEY_COLS if c in df.columns]
+    if existing_keys:
+        df = df.drop_duplicates(subset=existing_keys, keep="last")
+
+    return df
 
 
 # ═══════════════════════════════════════════════════
 #  2. 캘리브레이션 테이블 빌드
 # ═══════════════════════════════════════════════════
 
-# 스코어 빈 (하한, 상한)
 DEFAULT_SCORE_BINS = [
     (0, 50), (50, 60), (60, 70), (70, 80), (80, 90), (90, 100.01),
 ]
 
-# 베이지안 스무딩 파라미터
-# prior = fallback 승률 0.45 기반
-# α = prior * strength, β = (1-prior) * strength
 PRIOR_WIN_RATE = 0.45
-PRIOR_STRENGTH = 20  # "가상 관측 20건" 분량의 prior
+PRIOR_STRENGTH = 20
 
 
 def _time_weight(rec_dates: pd.Series, half_life_days: int = 90,
                  asof_date: Optional[str] = None) -> np.ndarray:
-    """
-    시간 가중: 최근 데이터일수록 가중치 ↑
-    지수 감쇠: w = exp(-λ * age_days), λ = ln(2) / half_life
-
-    asof_date: 기준일 (YYYYMMDD str). None이면 현재 시각.
-               ✅ 재현성: 동일 asof_date → 동일 가중치
-    """
+    """시간 가중: 최근 데이터일수록 가중치 ↑ (지수 감쇠)"""
     try:
         dates = pd.to_datetime(rec_dates.astype(str), format="%Y%m%d", errors="coerce")
-    except Exception:
+    except ValueError:
         dates = pd.to_datetime(rec_dates, errors="coerce")
 
     if asof_date is not None:
-        _asof_str = str(asof_date).replace("-", "")
+        _asof = str(asof_date).replace("-", "")
         try:
-            now = pd.to_datetime(_asof_str, format="%Y%m%d")
-        except Exception:
+            now = pd.to_datetime(_asof, format="%Y%m%d")
+        except ValueError:
             now = pd.Timestamp.now()
     else:
         now = pd.Timestamp.now()
+
     age_days = (now - dates).dt.total_seconds() / 86400.0
     age_days = age_days.fillna(half_life_days * 3)
     lam = np.log(2) / half_life_days
-    weights = np.exp(-lam * age_days.values)
-    return weights
+    return np.exp(-lam * age_days.values)
 
 
 def _bayesian_win_rate(
@@ -144,18 +168,11 @@ def _bayesian_win_rate(
     prior_p: float = PRIOR_WIN_RATE,
     prior_strength: float = PRIOR_STRENGTH,
 ) -> float:
-    """
-    가중 베이지안 승률:
-    p = (Σ(w_i * win_i) + α) / (Σ(w_i) + α + β)
-    α = prior_p * prior_strength
-    β = (1 - prior_p) * prior_strength
-    """
+    """가중 베이지안 승률"""
     alpha = prior_p * prior_strength
     beta = (1 - prior_p) * prior_strength
-
     w_sum = float(np.sum(weights))
     w_wins = float(np.sum(weights * wins))
-
     return (w_wins + alpha) / (w_sum + alpha + beta)
 
 
@@ -166,42 +183,48 @@ def build_calibration_table(
     min_effective_n: float = 5.0,
     asof_ymd: Optional[str] = None,
 ) -> pd.DataFrame:
-    """
-    per_trade_log.csv를 읽어 (method, horizon, score_bin) 별 캘리브레이션 테이블 생성.
+    """[v2.0 #2] 미래 참조 방지 — 청산 완료일 기준 필터링
 
-    Args:
-        asof_ymd: 기준일 (YYYYMMDD). 지정 시 rec_date < asof_ymd 만 사용.
-                  ✅ 룩어헤드 방지: 오늘 추천에 오늘 결과가 섞이지 않음.
-        min_effective_n: 가중 유효 표본수가 이 미만이면 fallback (테이블에서 제외).
-
-    Returns:
-        DataFrame: method, horizon, score_lo, score_hi, p_calibrated, n_effective, n_raw
+    Before: rec_date < asof_ymd (추천일 기준 → 미청산 트레이드 포함 = 미래 참조)
+    After:  (rec_date + horizon 영업일) < asof_ymd (청산 완료된 트레이드만)
     """
     if score_bins is None:
         score_bins = DEFAULT_SCORE_BINS
 
-    log_path = os.path.join(out_dir, "per_trade_log.csv")
-    if not os.path.exists(log_path):
-        return pd.DataFrame()
-
-    try:
-        df = pd.read_csv(log_path, dtype={"code": str})
-    except Exception:
-        return pd.DataFrame()
-
+    # [v2.4 #2] load_per_trade_log 재사용 (중복 제거된 데이터로 빌드)
+    df = load_per_trade_log(out_dir)
     if df.empty or "win" not in df.columns:
         return pd.DataFrame()
 
-    # ✅ 감점1 해결: 룩어헤드 방지 — asof_ymd 이전 데이터만 사용
+    # [v2.2 #1] 청산 완료일: np.busday_offset 벡터화 (for 루프 제거)
     if asof_ymd is not None:
         asof_str = str(asof_ymd).replace("-", "")
-        df["_rec_str"] = df["rec_date"].astype(str).str.replace("-", "")
-        df = df[df["_rec_str"] < asof_str].copy()
-        df.drop(columns=["_rec_str"], inplace=True)
+        try:
+            asof_dt = pd.to_datetime(asof_str, format="%Y%m%d")
+        except ValueError:
+            asof_dt = pd.Timestamp.now()
+
+        rec_dt = pd.to_datetime(df["rec_date"].astype(str), format="%Y%m%d", errors="coerce")
+
+        # [v2.4 #1] NaT 방어: busday_offset은 NaT 입력 시 ValueError 즉사
+        nat_mask = rec_dt.isna()
+        if nat_mask.any():
+            _logger.warning(f"rec_date 파싱 불가 {nat_mask.sum()}건 제거 (NaT 방어)")
+            df = df[~nat_mask].copy()
+            rec_dt = rec_dt[~nat_mask]
+
+        horizon_days = df["horizon"].fillna(5).astype(int)
+
+        # numpy datetime64[D]로 변환 → busday_offset 벡터 연산 (C 속도)
+        rec_np = rec_dt.values.astype("datetime64[D]")
+        exit_np = np.busday_offset(rec_np, horizon_days.values, roll="forward")
+        exit_dt = pd.Series(pd.to_datetime(exit_np), index=df.index)
+
+        df = df[exit_dt < asof_dt].copy()
+
         if df.empty:
             return pd.DataFrame()
 
-    # ✅ 감점2 해결: 재현성 — asof_date 전달
     weights = _time_weight(df["rec_date"], half_life_days, asof_date=asof_ymd)
 
     rows = []
@@ -223,7 +246,6 @@ def build_calibration_table(
                 n_eff = float(np.sum(bin_w))
                 n_raw = len(bin_df)
 
-                # ✅ 감점3 해결: 유효 표본 부족 시 스킵 → fallback으로 위임
                 if n_eff < min_effective_n:
                     continue
 
@@ -234,6 +256,7 @@ def build_calibration_table(
                     "horizon": int(horizon),
                     "score_lo": lo,
                     "score_hi": hi,
+                    "score_center": (lo + hi) / 2,  # [v2.0 #1] 보간용 중심점
                     "p_calibrated": round(p_cal, 4),
                     "n_effective": round(n_eff, 1),
                     "n_raw": n_raw,
@@ -241,12 +264,12 @@ def build_calibration_table(
 
     result = pd.DataFrame(rows)
 
-    # JSON으로도 저장 (빠른 로드용)
+    # JSON 저장
     cal_path = os.path.join(out_dir, "calibration_table.json")
     try:
         result.to_json(cal_path, orient="records", indent=2, force_ascii=False)
-    except Exception:
-        pass
+    except OSError as e:
+        _logger.warning(f"캘리브레이션 JSON 저장 실패: {e}")
 
     return result
 
@@ -255,132 +278,167 @@ def build_calibration_table(
 #  3. 캘리브레이션 승률 조회
 # ═══════════════════════════════════════════════════
 
-_CAL_CACHE: Optional[pd.DataFrame] = None
-_CAL_CACHE_KEY: Optional[str] = None  # (out_dir, asof_ymd) 복합 키
-
-
 def _normalize_ymd(ymd: Optional[str]) -> Optional[str]:
-    """YYYY-MM-DD / YYYYMMDD → YYYYMMDD 정규화"""
     if ymd is None:
         return None
     return str(ymd).replace("-", "").replace("/", "")[:8]
 
 
-def load_calibration_table(out_dir: str, asof_ymd: Optional[str] = None,
-                           force_reload: bool = False) -> pd.DataFrame:
-    """
-    캘리브레이션 테이블을 캐시로 로드.
-    asof_ymd 지정 시 해당 날짜 기준 테이블을 빌드/로드.
-    ✅ 날짜별 스냅샷: calibration_table_{asof_ymd}.json
-    """
-    global _CAL_CACHE, _CAL_CACHE_KEY
-    asof_norm = _normalize_ymd(asof_ymd)
-    cache_key = f"{out_dir}|{asof_norm or 'latest'}"
+def _get_csv_mtime(out_dir: str) -> int:
+    """CSV 파일의 mtime을 초 단위 정수로 반환 (캐시 키용)"""
+    csv_path = os.path.join(out_dir, "per_trade_log.csv")
+    try:
+        return int(os.path.getmtime(csv_path))
+    except OSError:
+        return 0
 
-    if _CAL_CACHE is not None and _CAL_CACHE_KEY == cache_key and not force_reload:
-        return _CAL_CACHE
 
-    # 날짜별 스냅샷 파일 먼저 확인
+@lru_cache(maxsize=32)
+def _load_cal_cached(out_dir: str, asof_norm: Optional[str],
+                     _mtime: int = 0) -> Optional[Tuple]:
+    """[v2.5 #1] 캘리브레이션 테이블 캐시 — mtime 기반 자동 무효화
+
+    Before: 키 = (out_dir, asof_norm) → CSV 갱신돼도 캐시 갱신 안 됨
+    After:  키 = (out_dir, asof_norm, mtime) → 파일 수정 시 자동 캐시 미스
+    """
+    # 날짜별 스냅샷 읽기 — CSV보다 최신일 때만 유효
     if asof_norm:
         snap_path = os.path.join(out_dir, f"calibration_table_{asof_norm}.json")
-        if os.path.exists(snap_path) and not force_reload:
+        if os.path.exists(snap_path):
             try:
-                _CAL_CACHE = pd.read_json(snap_path, orient="records")
-                _CAL_CACHE_KEY = cache_key
-                return _CAL_CACHE
-            except Exception:
+                snap_mtime = int(os.path.getmtime(snap_path))
+                # [v3.1 #2] 좀비 스냅샷 방어: CSV가 스냅샷보다 새로우면 스냅샷 무시
+                if snap_mtime >= _mtime:
+                    df = pd.read_json(snap_path, orient="records")
+                    if not df.empty:
+                        return tuple(df.to_dict("records"))
+                else:
+                    _logger.info(f"스냅샷 무효화: CSV({_mtime}) > snap({snap_mtime}), 재빌드")
+            except (OSError, ValueError):
                 pass
 
-    # 스냅샷 없으면 빌드
+    # 빌드
     csv_path = os.path.join(out_dir, "per_trade_log.csv")
     if os.path.exists(csv_path):
-        _CAL_CACHE = build_calibration_table(out_dir, asof_ymd=asof_norm)
-        _CAL_CACHE_KEY = cache_key
+        cal_df = build_calibration_table(out_dir, asof_ymd=asof_norm)
+        if cal_df is not None and not cal_df.empty:
+            return tuple(cal_df.to_dict("records"))
 
-        # 날짜별 스냅샷 저장
-        if asof_norm and _CAL_CACHE is not None and not _CAL_CACHE.empty:
-            snap_path = os.path.join(out_dir, f"calibration_table_{asof_norm}.json")
-            try:
-                _CAL_CACHE.to_json(snap_path, orient="records", indent=2, force_ascii=False)
-            except Exception:
-                pass
-
-        return _CAL_CACHE
-
-    # fallback: 기존 latest JSON
+    # fallback latest
     json_path = os.path.join(out_dir, "calibration_table.json")
     if os.path.exists(json_path):
         try:
-            _CAL_CACHE = pd.read_json(json_path, orient="records")
-            _CAL_CACHE_KEY = cache_key
-            return _CAL_CACHE
-        except Exception:
+            df = pd.read_json(json_path, orient="records")
+            if not df.empty:
+                return tuple(df.to_dict("records"))
+        except (OSError, ValueError):
             pass
 
-    _CAL_CACHE = pd.DataFrame()
-    _CAL_CACHE_KEY = cache_key
-    return _CAL_CACHE
+    return None
+
+
+def load_calibration_table(out_dir: str, asof_ymd: Optional[str] = None,
+                           force_reload: bool = False) -> pd.DataFrame:
+    """[v2.5 #1] 캘리브레이션 테이블 로드 — mtime 기반 캐시 무효화"""
+    asof_norm = _normalize_ymd(asof_ymd)
+
+    if force_reload:
+        _load_cal_cached.cache_clear()
+
+    mtime = _get_csv_mtime(out_dir)
+    records = _load_cal_cached(out_dir, asof_norm, _mtime=mtime)
+    if not records:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(list(records))
+
+    # 스냅샷 저장: CSV보다 오래된 스냅샷이거나 미존재 시 갱신
+    if asof_norm and not df.empty:
+        snap_path = os.path.join(out_dir, f"calibration_table_{asof_norm}.json")
+        need_write = not os.path.exists(snap_path)
+        if not need_write:
+            try:
+                need_write = int(os.path.getmtime(snap_path)) < mtime
+            except OSError:
+                need_write = True
+        if need_write:
+            try:
+                df.to_json(snap_path, orient="records", indent=2, force_ascii=False)
+            except OSError as e:
+                _logger.warning(f"스냅샷 저장 실패: {e}")
+
+    return df
+
+
+def _get_interp_arrays(cal: pd.DataFrame, method: str, horizon: int
+                       ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """캘리브레이션 테이블에서 (centers, probs) 보간 배열 추출 (DRY 공용)"""
+    mask = (cal["method"] == method) & (cal["horizon"] == horizon)
+    sub = cal[mask]
+    if sub.empty:
+        sub = cal[cal["method"] == method]
+    if sub.empty or len(sub) < 2:
+        if len(sub) == 1:
+            # 빈 1개: 상수 보간용 길이 2 배열
+            p = float(sub.iloc[0]["p_calibrated"])
+            return np.array([0.0, 100.0]), np.array([p, p])
+        return None
+    sub = sub.sort_values("score_lo")
+    if "score_center" in sub.columns:
+        centers = sub["score_center"].values
+    else:
+        centers = ((sub["score_lo"] + sub["score_hi"]) / 2).values
+    probs = sub["p_calibrated"].values
+    return centers, probs
 
 
 def calibrated_win_rate(
-    score: float,
+    score,
     out_dir: str,
     method: str = "RANK_SCORE",
     horizon: int = 5,
     fallback: float = PRIOR_WIN_RATE,
+    base_score: float = 60.0,
     asof_ymd: Optional[str] = None,
-) -> float:
-    """
-    캘리브레이션 테이블에서 (method, horizon, score 구간)에 해당하는 p를 조회.
-    테이블이 없거나 매칭 안 되면 fallback 반환.
-    asof_ymd: 룩어헤드 방지용 기준일.
+):
+    """[v2.4] 유니버설 승률 조회 — scalar/ndarray + base_score 전파
+
+    base_score: fallback 수식 기준점 (모델 스케일에 맞춰 주입)
     """
     cal = load_calibration_table(out_dir, asof_ymd=asof_ymd)
+
+    is_scalar = isinstance(score, (int, float, np.integer, np.floating))
+    scores_arr = np.atleast_1d(np.asarray(score, dtype=float))
+
     if cal.empty:
-        return _fallback_linear(score, fallback)
+        result = _fallback_linear(scores_arr, fallback, base_score=base_score)
+    else:
+        interp_data = _get_interp_arrays(cal, method, horizon)
+        if interp_data is not None:
+            centers, probs = interp_data
+            result = np.interp(scores_arr, centers, probs)
+        else:
+            result = _fallback_linear(scores_arr, fallback, base_score=base_score)
 
-    # method/horizon 매칭
-    mask = (cal["method"] == method) & (cal["horizon"] == horizon)
-    sub = cal[mask]
-
-    if sub.empty:
-        # horizon 무관하게 method만으로 시도
-        sub = cal[cal["method"] == method]
-
-    if sub.empty:
-        return _fallback_linear(score, fallback)
-
-    # ✅ 감점5 해결: 정렬 후 매칭 (순서 비의존)
-    sub = sub.sort_values("score_lo").reset_index(drop=True)
-
-    # score 구간 매칭
-    for _, row in sub.iterrows():
-        if row["score_lo"] <= score < row["score_hi"]:
-            return float(row["p_calibrated"])
-
-    # ✅ 감점3 해결: 구간 경계에서 선형 보간 (계단→연속)
-    # 매칭 실패 시 가장 가까운 두 빈의 중심값 기준 보간
-    if len(sub) >= 2:
-        centers = ((sub["score_lo"] + sub["score_hi"]) / 2).values
-        probs = sub["p_calibrated"].values
-        if score <= centers[0]:
-            return float(probs[0])
-        if score >= centers[-1]:
-            return float(probs[-1])
-        # 선형 보간
-        return float(np.interp(score, centers, probs))
-
-    return _fallback_linear(score, fallback)
+    if is_scalar:
+        return float(result[0])
+    return result
 
 
-def _fallback_linear(score: float, base: float = 0.45) -> float:
-    """캘리브레이션 없을 때 fallback: 기존 선형 추정 (하위호환)"""
-    p = 0.4 + (max(score, 0) - 60) * 0.01
-    return min(max(p, 0.30), 0.85)
+def _fallback_linear(score, base: float = 0.45, base_score: float = 60.0):
+    """[v2.5 #3] 유니버설 fallback — base 파라미터 실제 반영
+
+    np.maximum, np.clip은 ufunc → 스칼라 입력이면 스칼라 반환.
+    base_score: 기준 점수, base: 기준 점수에서의 사전 승률
+    공식: p = (base - 0.05) + (max(score, 0) - base_score) * 0.01
+    base=0.45 → base_score=60에서 p=0.40 (기존 호환)
+    """
+    p = (base - 0.05) + (np.maximum(score, 0.0) - base_score) * 0.01
+    return np.clip(p, 0.30, 0.85)
 
 
 # ═══════════════════════════════════════════════════
-#  4. Kelly 배팅 (캘리브레이션 연동)
+#  4. Kelly 배팅 (벡터화)
 # ═══════════════════════════════════════════════════
 
 def kelly_fraction(
@@ -389,10 +447,7 @@ def kelly_fraction(
     multiplier: float = 0.5,
     max_alloc: float = 0.25,
 ) -> float:
-    """
-    Kelly Criterion: f = p - (1-p)/b
-    Half-Kelly + 최대 비중 제한.
-    """
+    """Kelly Criterion: f = p - (1-p)/b, Half-Kelly + cap"""
     if p <= 0 or b <= 0:
         return 0.0
     q = 1.0 - p
@@ -409,55 +464,65 @@ def apply_kelly_calibrated(
     horizon: int = 5,
     kelly_multiplier: float = 0.5,
     max_allocation: float = 0.25,
+    min_score_threshold: float = 60.0,
     asof_ymd: Optional[str] = None,
 ) -> pd.DataFrame:
+    """[v2.4] 벡터화 Kelly 배팅 — 프로덕션 안정성 강화
+
+    v2.3: 순수 numpy 중간 연산
+    v2.4 #2: min_score_threshold 파라미터화 (매직넘버 60 제거)
+    v2.4 #3: pd.to_numeric(errors='coerce') 안전 캐스팅
+             → "N/A", "-", "" 등 문자열 쓰레기 → NaN → 0 (ValueError 방지)
     """
-    캘리브레이션 기반 Kelly 배팅.
-    - 승률: calibrated_win_rate() (실측 또는 fallback)
-    - 손익비: (목표가 - 매수가) / (매수가 - 손절가)
-    - asof_ymd: 룩어헤드 방지용 기준일
-    """
-    def _calc_row(row):
-        try:
-            score = float(row.get("TOTAL_SCORE", row.get("RANK_SCORE", 0)))
-            buy = float(row.get("추천매수가", 0))
-            stop = float(row.get("손절가", 0))
-            target = float(row.get("추천매도가1", 0))
+    df = df.copy()
 
-            if buy <= 0 or stop <= 0 or target <= 0:
-                return 0, 0
+    # 점수 컬럼 결정
+    score_col = "TOTAL_SCORE" if "TOTAL_SCORE" in df.columns else "RANK_SCORE"
+    if score_col not in df.columns:
+        df["켈리_수량"] = 0
+        df["켈리_금액(원)"] = 0
+        return df
 
-            risk = buy - stop
-            reward = target - buy
-            if risk <= 0:
-                return 0, 0
+    # [v2.4 #3] 안전 캐스팅: to_numeric(coerce) → 문자열 쓰레기 방어
+    def _safe_values(series: pd.Series, default: float = 0.0) -> np.ndarray:
+        return pd.to_numeric(series, errors="coerce").fillna(default).values.astype(float)
 
-            b = reward / risk
+    scores = _safe_values(df[score_col])
+    buy = _safe_values(df.get("추천매수가", pd.Series(0, index=df.index)))
+    stop = _safe_values(df.get("손절가", pd.Series(0, index=df.index)))
+    target = _safe_values(df.get("추천매도가1", pd.Series(0, index=df.index)))
 
-            # ✅ SSOT: 캘리브레이션 승률 + asof_ymd 누수 방지
-            p = calibrated_win_rate(score, out_dir, method=method,
-                                    horizon=horizon, asof_ymd=asof_ymd)
+    # ── 승률 (유니버설 함수, ndarray 반환) ──
+    p = calibrated_win_rate(scores, out_dir, method=method,
+                            horizon=horizon, base_score=min_score_threshold,
+                            asof_ymd=asof_ymd)
+    p = np.asarray(p, dtype=float)
 
-            # 점수 60 미만 → 스킵 (기존 정책 유지)
-            if score < 60:
-                return 0, 0
+    # ── 손익비 (순수 numpy) ──
+    risk = buy - stop
+    reward = target - buy
+    b_ratio = np.where(risk > 0, reward / risk, 0.0)
 
-            f = kelly_fraction(p, b, kelly_multiplier, max_allocation)
+    # ── Kelly fraction (순수 numpy) ──
+    q = 1.0 - p
+    f_raw = np.where(b_ratio > 0, p - (q / b_ratio), 0.0)
+    f_safe = np.clip(f_raw * kelly_multiplier, 0.0, max_allocation)
 
-            final_amt = int(total_capital * f)
-            final_qty = int(final_amt / buy)
+    # [v2.4 #2] 유효 조건 필터 — 매직넘버 → 파라미터 주입
+    valid = (scores >= min_score_threshold) & (buy > 0) & (stop > 0) & (target > 0) & (risk > 0)
+    f_safe = np.where(valid, f_safe, 0.0)
 
-            return final_qty, final_amt
+    # ── 수량/금액 (순수 numpy) ──
+    kelly_amt = (total_capital * f_safe).astype(int)
+    kelly_qty = np.where(buy > 0, kelly_amt / buy, 0).astype(int)
 
-        except Exception:
-            return 0, 0
+    # ── 최종 대입: 여기서만 pandas 개입 ──
+    df["켈리_수량"] = kelly_qty
+    df["켈리_금액(원)"] = kelly_amt
 
-    res = df.apply(_calc_row, axis=1, result_type="expand")
-    df["켈리_수량"] = res[0]
-    df["켈리_금액(원)"] = res[1]
-
-    mask = df["켈리_수량"] > 0
-    df.loc[mask, "추천수량"] = df.loc[mask, "켈리_수량"]
-    df.loc[mask, "추천금액(만원)"] = (df.loc[mask, "켈리_금액(원)"] / 10000).round(1)
+    mask_pos = kelly_qty > 0
+    if mask_pos.any():
+        df.loc[mask_pos, "추천수량"] = kelly_qty[mask_pos]
+        df.loc[mask_pos, "추천금액(만원)"] = np.round(kelly_amt[mask_pos] / 10000, 1)
 
     return df
