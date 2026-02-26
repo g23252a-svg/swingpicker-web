@@ -517,7 +517,7 @@ DARK_CSS = """
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="LDY Trader">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
 <script>
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/static/sw.js').then(r => console.log('SW registered'));
@@ -1421,7 +1421,7 @@ if __name__ in {"__main__", "__mp_main__"}:
         title=f"LDY Pro Trader v{APP_VERSION}",
         favicon="💎",
         dark=True,
-        storage_secret=os.environ.get("STORAGE_SECRET", "ldy-secret-key-change-me"),
+        storage_secret=os.environ["STORAGE_SECRET"],  # [v2.0 #3] 강제 — 미설정 시 앱 시작 차단
         reload=False,
         show=False,
     )
