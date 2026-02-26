@@ -318,7 +318,11 @@ def _open_detail_dialog(row: pd.Series):
                 else:
                     ui.label("📉 차트 데이터 로드 실패").classes("text-yellow-400")
 
-        ui.timer(0.1, _load_chart, once=True)
+        # [v2.0 #1] ui.timer 제거 → background_tasks로 비동기 직접 실행
+        # Before: ui.timer(0.1, _load_chart, once=True) → 서버 메모리 누수 위험
+        # After:  asyncio.create_task → 타이머 객체 없이 즉시 실행 + 자동 GC
+        import asyncio
+        asyncio.create_task(_load_chart())
 
         # ── 레이더 + 워터폴 ──
         with ui.row().classes("w-full gap-4 flex-wrap mt-4"):
