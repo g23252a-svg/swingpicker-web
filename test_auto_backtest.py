@@ -161,12 +161,12 @@ def run():
         print("\n📐 6. 안전장치5: 켈리 제한")
         if not table.empty:
             # 점수 85 → kelly 계산
-            k85 = kelly_from_table(85.0, table, avg_b_ratio=2.0, config=cfg5)
+            k85 = kelly_from_table(85.0, table, config=cfg5)
             test("kelly(85) ≤ cap(0.10)", k85 <= cfg5.kelly_cap)
             test("kelly(85) ≥ 0", k85 >= 0)
 
             # 표본 부족 구간 → kelly=0
-            k_strict = kelly_from_table(85.0, table_strict, avg_b_ratio=2.0,
+            k_strict = kelly_from_table(85.0, table_strict,
                                         config=cfg_strict)
             test("표본 부족 → kelly=0", k_strict == 0.0, f"got {k_strict}")
 
