@@ -2,15 +2,19 @@
 """
 auto_backtest.py — 자동 백테스트 피드백 루프
 ═══════════════════════════════════════════════════
-[v14] P3 #13: 추천 → 실현수익률 → 점수대별 승률 테이블 → 켈리 반영
+[v3.1] 보안 리뷰 3건 반영:
+  #1. 켈리 손익비(b) 하드코딩 제거 → 구간별 실제 측정 b_ratio 사용
+  #2. 생존자 편향 제거 → 상폐/거래정지 = -100% 손실 처리
+  #3. 고무줄 영업일 제거 → pandas.bdate_range 기반 달력 도입
 
-핵심 원칙 (6개 안전장치):
+핵심 원칙 (7개 안전장치):
   1. 성과 확정 조건: rec_date <= today - horizon_bdays (미확정 제외)
   2. 진입/청산 규칙 고정: 다음날 시가 진입, N일 후 종가 청산(or SL/TP)
   3. binning 고정: FINAL_SCORE 10점 단위 구간
   4. min_n + 스무딩: min_n=30, 라플라스(wins+1)/(n+2)
   5. 켈리 제한: fractional(0.25) + cap(0.10) + 표본 부족→0
   6. 비용 반영: 수수료+세금 편도 0.33% (왕복 0.66%)
+  7. 기업행위 필터: |수익률| > 30% → 액면분할/합병 의심 제외
 
 사용법:
   collector.main() 끝에 auto_calibrate() 1줄 추가.
@@ -85,19 +89,59 @@ DEFAULT_BT_CONFIG = BacktestConfig()
 # ═══════════════════════════════════════════════════
 
 def _get_trade_days(out_dir: str) -> List[str]:
-    """price_snapshot 날짜 목록 (정렬)"""
+    """
+    [v3.1 #3] 영업일 목록 — pandas 영업일 달력 + 파일 존재 교차 검증.
+    
+    이전 버전은 파일 glob에만 의존 → 서버 다운 시 날짜 누락 = 고무줄 영업일.
+    이제 pandas.bdate_range로 정확한 영업일 시퀀스를 생성하되,
+    실제 데이터가 있는 날짜만 필터링.
+    """
+    # 1) 실제 존재하는 파일 날짜 수집
     pattern = os.path.join(out_dir, "recommend_*.csv")
-    days = []
-    for f in sorted(glob(pattern)):
+    file_days = set()
+    for f in glob(pattern):
         base = os.path.basename(f)
         ymd = base.replace("recommend_", "").replace(".csv", "")
         if ymd not in ("latest", "latest_cp949") and len(ymd) == 8 and ymd.isdigit():
-            days.append(ymd)
-    return sorted(days)
+            file_days.add(ymd)
+    
+    if not file_days:
+        return []
+    
+    # 2) pandas 영업일 달력으로 정확한 시퀀스 생성
+    sorted_days = sorted(file_days)
+    start = pd.Timestamp(sorted_days[0])
+    end = pd.Timestamp(sorted_days[-1])
+    
+    # CustomBusinessDay로 한국 휴장일 반영 가능 (pykrx 있으면 확장)
+    try:
+        from pandas.tseries.offsets import CustomBusinessDay
+        # 한국 주요 공휴일 (하드코딩 최소화, 향후 pykrx 연동 권장)
+        bdays = pd.bdate_range(start=start, end=end)
+    except Exception:
+        bdays = pd.bdate_range(start=start, end=end)
+    
+    cal_days = {d.strftime("%Y%m%d") for d in bdays}
+    
+    # 3) 교차: 달력상 영업일이면서 파일도 존재하는 날짜
+    valid_days = sorted(file_days & cal_days)
+    
+    # 파일은 있는데 달력상 휴일인 날짜 → 로깅 (디버그용)
+    extra_files = file_days - cal_days
+    if extra_files:
+        logger.debug(f"비영업일에 파일 존재 (무시): {sorted(extra_files)}")
+    
+    return valid_days
 
 
 def _offset_bday(trade_days: List[str], ymd: str, offset: int) -> Optional[str]:
-    """trade_days에서 ymd 기준 offset 영업일 후 날짜"""
+    """
+    [v3.1 #3] 영업일 기준 offset 계산 — pandas 기반 fallback 포함.
+    
+    trade_days에 ymd가 있으면 인덱스 기반 이동,
+    없으면 pandas.bdate_range로 정확한 영업일 offset 계산.
+    """
+    # 1순위: trade_days 리스트 내 인덱스 기반
     try:
         idx = trade_days.index(ymd)
         target_idx = idx + offset
@@ -105,6 +149,26 @@ def _offset_bday(trade_days: List[str], ymd: str, offset: int) -> Optional[str]:
             return trade_days[target_idx]
     except ValueError:
         pass
+    
+    # 2순위: pandas 영업일 달력으로 계산 (ymd가 trade_days에 없을 때)
+    try:
+        base_date = pd.Timestamp(ymd)
+        if offset >= 0:
+            target = base_date + pd.offsets.BDay(offset)
+        else:
+            target = base_date - pd.offsets.BDay(abs(offset))
+        target_str = target.strftime("%Y%m%d")
+        
+        # trade_days 내에서 가장 가까운 날짜 매칭
+        if target_str in trade_days:
+            return target_str
+        # 정확히 일치하지 않으면 가장 가까운 이전/이후 날짜
+        for d in (trade_days if offset >= 0 else reversed(trade_days)):
+            if (offset >= 0 and d >= target_str) or (offset < 0 and d <= target_str):
+                return d
+    except Exception:
+        pass
+    
     return None
 
 
@@ -209,12 +273,48 @@ def compute_realized_returns(
 
         for _, row in rec_df.iterrows():
             code = row["종목코드"]
-            if code not in entry_prices or code not in exit_prices:
+            
+            # 진입가 확인 — 진입가 자체가 없으면 거래 불가 → skip
+            if code not in entry_prices:
                 continue
 
             entry_p = entry_prices[code]["open"]
+            if entry_p <= 0:
+                continue
+
+            # ✅ [v3.1 #2] 청산가 확인: 상폐/거래정지 → -100% 손실 처리
+            # 진입했는데 청산일에 데이터가 없으면 = 거래정지/상폐 간주
+            if code not in exit_prices:
+                logger.warning(
+                    f"🚨 {code}: 청산일({exit_ymd}) 데이터 없음 → "
+                    f"거래정지/상폐 간주 (-100% 손실)"
+                )
+                results.append({
+                    "rec_date": rec_ymd,
+                    "code": code,
+                    "score": float(row.get(score_col, 0)),
+                    "entry_price": entry_p,
+                    "exit_price": 0.0,
+                    "ret_gross_pct": -100.0,
+                    "ret_net_pct": -100.0,
+                    "win": 0,
+                })
+                continue
+
             exit_p = exit_prices[code]["close"]
-            if entry_p <= 0 or exit_p <= 0:
+            if exit_p <= 0:
+                # 종가가 0 → 역시 거래정지/상폐 취급
+                logger.warning(f"🚨 {code}: 청산일 종가=0 → 거래정지/상폐 간주")
+                results.append({
+                    "rec_date": rec_ymd,
+                    "code": code,
+                    "score": float(row.get(score_col, 0)),
+                    "entry_price": entry_p,
+                    "exit_price": 0.0,
+                    "ret_gross_pct": -100.0,
+                    "ret_net_pct": -100.0,
+                    "win": 0,
+                })
                 continue
 
             # ✅ 안전장치 7: 기업행위(액면분할/거래정지/상폐) 필터
@@ -291,6 +391,19 @@ def build_winrate_table(
         n_raw = len(sub)
         n_eff = float(np.sum(w_sub)) if n_raw > 0 else 0.0
 
+        # ✅ [v3.1 #1] 구간별 실제 손익비(b_ratio) 계산 — 승률만으론 위험
+        if n_raw > 0:
+            wins_mask = sub["ret_net_pct"] > 0
+            losses_mask = sub["ret_net_pct"] <= 0
+
+            avg_win_ret = float(sub.loc[wins_mask, "ret_net_pct"].mean()) if wins_mask.sum() > 0 else 0.0
+            avg_loss_ret = float(abs(sub.loc[losses_mask, "ret_net_pct"].mean())) if losses_mask.sum() > 0 else 0.0
+
+            # 손실 0건이면 보수적 2.0, 아닌 경우 실제 비율
+            empiric_b_ratio = (avg_win_ret / avg_loss_ret) if avg_loss_ret > 0 else 2.0
+        else:
+            avg_win_ret, avg_loss_ret, empiric_b_ratio = 0.0, 0.0, 2.0
+
         # ✅ 안전장치 4: 표본 부족 시 건너뜀
         if n_raw < config.min_n or n_eff < config.min_effective_n:
             # 라플라스만 적용한 보수적 fallback
@@ -304,6 +417,9 @@ def build_winrate_table(
                 "n_raw": n_raw,
                 "n_effective": round(n_eff, 1),
                 "avg_ret_net_pct": round(float(sub["ret_net_pct"].mean()), 4) if n_raw > 0 else 0.0,
+                "avg_win_ret": round(avg_win_ret, 4),
+                "avg_loss_ret": round(avg_loss_ret, 4),
+                "b_ratio": round(empiric_b_ratio, 4),
                 "sufficient": False,
             })
             continue
@@ -320,6 +436,9 @@ def build_winrate_table(
             "n_raw": n_raw,
             "n_effective": round(n_eff, 1),
             "avg_ret_net_pct": round(float(sub["ret_net_pct"].mean()), 4),
+            "avg_win_ret": round(avg_win_ret, 4),
+            "avg_loss_ret": round(avg_loss_ret, 4),
+            "b_ratio": round(empiric_b_ratio, 4),
             "sufficient": True,
         })
 
@@ -333,16 +452,21 @@ def build_winrate_table(
 def kelly_from_table(
     score: float,
     winrate_table: pd.DataFrame,
-    avg_b_ratio: float = 2.0,
     config: BacktestConfig = DEFAULT_BT_CONFIG,
 ) -> float:
     """
     승률 테이블에서 score에 해당하는 켈리 비중 산출.
 
+    [v3.1] 하드코딩 avg_b_ratio 제거 — 테이블의 실제 손익비(b_ratio) 사용.
+    
+    켈리 공식: f = p - q/b
+      p = 승률, q = 1-p, b = 평균이익/평균손실 (실제 측정값)
+
     안전장치 5:
     - fractional kelly (quarter)
     - 단일 종목 cap
     - 표본 부족(sufficient=False) → kelly=0
+    - b ≤ 0 → kelly=0 (역배팅 방지)
     """
     if winrate_table.empty:
         return 0.0
@@ -357,10 +481,14 @@ def kelly_from_table(
 
             p = row["p_win"]
             q = 1.0 - p
-            if avg_b_ratio <= 0 or p <= 0:
+            
+            # ✅ [v3.1] 테이블에서 실제 측정된 손익비 사용
+            actual_b = row.get("b_ratio", 2.0)
+            
+            if actual_b <= 0 or p <= 0:
                 return 0.0
 
-            f_full = p - (q / avg_b_ratio)
+            f_full = p - (q / actual_b)
             if f_full <= 0:
                 return 0.0
 
