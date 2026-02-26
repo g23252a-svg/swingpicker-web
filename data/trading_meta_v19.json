@@ -1,0 +1,39 @@
+{
+  "version": "19.0",
+  "seq_length": 40,
+  "n_features": 16,
+  "feature_cols": [
+    "Log_Ret",
+    "Volume_Norm",
+    "Low_Trend",
+    "Vol_Quality",
+    "Dist_MA20",
+    "RSI",
+    "MFI",
+    "MACD_Hist_Norm",
+    "BB_Width",
+    "ATR_Pct",
+    "OBV_Slope",
+    "Range_Pos",
+    "Vol_Ratio_5",
+    "Ret_5d",
+    "Ret_20d",
+    "Upper_Shadow_Ratio"
+  ],
+  "target_tiers": [
+    3.0,
+    5.0,
+    7.0
+  ],
+  "stop_loss_pct": -5.0,
+  "pos_ratio": 0.5341,
+  "best_kpi": 0.573,
+  "trained_at": "2026-02-27T02:02:11.749225",
+  "fixes": [
+    "first_touch_labeling",
+    "vectorized_inference",
+    "log_scaled_weights",
+    "dynamic_ensemble",
+    "rolling_zscore"
+  ]
+}
