@@ -9,6 +9,7 @@ import os
 import io
 import time
 import math
+import json
 import pickle  # ✅ [v7.0 추가] 데이터 직렬화/캐싱용
 from typing import Dict, Any, Optional, Callable, Tuple, List
 
@@ -35,6 +36,8 @@ import dart_analyzer  # ✅ [2단계] DART 분석기 추가
 
 from time_utils import now_kst, now_utc, KST
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
+import logging
 # 👇👇 [수정] 클래스 정의를 지우고, schema.py에서 가져오도록 변경 👇👇
 from schema import RouteState
 import stop_logic as SL
@@ -133,7 +136,7 @@ TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_ID = os.environ.get("TG_ID")
 
 # ------------------------------- 설정 (collector_config.py SSOT) -------------------------------
-from collector_config import CollectorConfig, DEFAULT_CONFIG as _CFG
+from collector_config import CollectorConfig, DEFAULT_CONFIG as _CFG, Route, Market
 
 LOOKBACK_DAYS = _CFG.lookback_days
 BENCH_LOOKBACK_DAYS = _CFG.bench_lookback_days
@@ -145,6 +148,18 @@ PASS_EBS = _CFG.pass_ebs
 BASE_DIR = _CFG.base_dir
 OUT_DIR = _CFG.out_dir
 UTF8 = "utf-8-sig"
+
+# [v3.2 #1] 런타임 컨텍스트 — global 변수 대신 DI 패턴으로 상태 전달
+# ThreadPoolExecutor 환경에서 Race Condition 없이 안전하게 상태 공유
+from dataclasses import dataclass as _dc, field as _field
+
+@_dc
+class RunContext:
+    """매크로 필터 등 런타임에 동적으로 변하는 상태를 담는 컨텍스트"""
+    pass_ebs: float = _CFG.pass_ebs
+    rec_limit_cnt: int = 20
+    macro_risk: str = "NORMAL"
+    macro_msg: str = ""
 
 MAX_WORKERS = int(os.environ.get("LDY_WORKERS", str(_CFG.max_workers)))
 
@@ -186,8 +201,19 @@ from validation import (
 
 # ------------------------------- 유틸 -------------------------------
 
+# [v3.2] 표준 logging 모듈 도입 — 콘솔 + 파일 로그 분리 가능
+# 기존 log() 호출 115곳을 보존하면서 내부적으로 logger로 위임
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("LDY_Collector")
+
+
 def log(msg: str) -> None:
-    print(f"[{now_kst().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+    """[v3.2] 기존 호환성 유지 래퍼 — 내부적으로 logger.info() 사용"""
+    logger.info(msg)
 
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -553,6 +579,10 @@ def prepare_ohlcv_data(
     # 4) 캐시 저장
     if collected_count > 0:
         save_ohlcv_cache(trade_ymd, ohlcv_map)
+
+    # [v3.2 #2] 병렬 수집 완료 후 메모리 정리 — 워커 잔여 참조 해제
+    del future_to_code
+    gc.collect()
 
     return ohlcv_map
 
@@ -922,9 +952,10 @@ def _has_ohlcv_and_mcap(ymd: str) -> bool:
             o = safe_ohlcv_by_ticker(ymd, market=m)
             if o is not None and not o.empty and "거래대금" in o.columns and _safe_sum(o["거래대금"]) > 0:
                 return True
-        except Exception:
-            pass
-    return False
+        except (KeyError, ValueError, TypeError) as e:
+            logger.debug(f"OHLCV 체크 실패 ({m}/{ymd}): {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ OHLCV 체크 예기치 않은 오류 ({m}/{ymd}): {type(e).__name__}: {e}")
 
 def find_latest_valid_date(check_fn, max_back_days: int = 14) -> str:
     """
@@ -1497,8 +1528,8 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
         try:
             df = pd.read_csv(path, dtype=str)
             return dict(zip(df["종목코드"], df["종목명"]))
-        except Exception:
-            pass
+        except (pd.errors.ParserError, KeyError, OSError) as e:
+            logger.debug(f"종목명 캐시 파싱 실패, 재생성: {e}")
 
     log("🔄 종목명 매핑 정보 생성 중... (FDR 우선)")
     name_map = {}
@@ -1512,10 +1543,10 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
         code_col = "Code" if "Code" in df_fdr.columns else ("Symbol" if "Symbol" in df_fdr.columns else None)
         
         if code_col and "Name" in df_fdr.columns:
-            for _, row in df_fdr.iterrows():
-                code = str(row[code_col]).strip().zfill(6)
-                name = str(row["Name"]).strip()
-                name_map[code] = name
+            # [v3.2] iterrows 제거 → 벡터화
+            codes = df_fdr[code_col].astype(str).str.strip().str.zfill(6)
+            names = df_fdr["Name"].astype(str).str.strip()
+            name_map.update(dict(zip(codes, names)))
             log(f"✅ FDR 종목명 확보 완료: {len(name_map)}개")
     except Exception as e:
         log(f"⚠️ FDR 종목명 조회 실패: {e}")
@@ -1788,23 +1819,24 @@ def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int],
         
         # 1. 외국인
         df_f = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "외국인")
-        if df_f is not None:
-            for code, row in df_f.iterrows():
-                frg[str(code).zfill(6)] = int(row['순매수거래대금'])
+        if df_f is not None and '순매수거래대금' in df_f.columns:
+            # [v3.2] iterrows 제거 → 벡터화
+            codes_f = df_f.index.astype(str).str.zfill(6)
+            frg.update(dict(zip(codes_f, df_f['순매수거래대금'].astype(int))))
         time.sleep(0.3) 
 
         # 2. 기관
         df_i = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "기관합계")
-        if df_i is not None:
-            for code, row in df_i.iterrows():
-                inst[str(code).zfill(6)] = int(row['순매수거래대금'])
+        if df_i is not None and '순매수거래대금' in df_i.columns:
+            codes_i = df_i.index.astype(str).str.zfill(6)
+            inst.update(dict(zip(codes_i, df_i['순매수거래대금'].astype(int))))
         time.sleep(0.3)
 
         # 3. 개인
         df_a = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "개인")
-        if df_a is not None:
-            for code, row in df_a.iterrows():
-                ant[str(code).zfill(6)] = int(row['순매수거래대금'])
+        if df_a is not None and '순매수거래대금' in df_a.columns:
+            codes_a = df_a.index.astype(str).str.zfill(6)
+            ant.update(dict(zip(codes_a, df_a['순매수거래대금'].astype(int))))
                 
     except Exception as e:
         log(f"⚠️ 수급 데이터 수집 실패: {e}")
@@ -1815,56 +1847,73 @@ def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int],
 
 def calculate_trigger_score(df: pd.DataFrame) -> float:
     """
-    [Updated v9.0] Safety Clamp 추가 + 최종 완성
-    - Vol Score 계산 후 안전 범위(0~40) 강제 (이상치 방지)
-    - Vol > 4.0 구간 점수 상향(20점) 및 선형 보간 유지
+    [v3.1 #3] 트리거 점수 — 사전 계산 최적화.
+    
+    이전 버전: _calc_raw_trigger(idx)마다 df.iloc[:idx+1]을 잘라 rolling/ewm을
+    밑바닥부터 재계산 → O(N²) 낭비.
+    
+    개선: 전체 df에 대해 rolling/ewm을 1회만 계산하고,
+    _calc_raw_trigger(idx)는 값만 인덱싱 → O(1).
     """
     if df is None or df.empty or len(df) < 30:
         return 0.0
 
+    # ═══ 1. 전체 데이터에 대해 미리 계산 (1회만) ═══
+    close = pd.to_numeric(df['종가'], errors='coerce').fillna(0)
+    high = pd.to_numeric(df['고가'], errors='coerce').fillna(0)
+    low = pd.to_numeric(df['저가'], errors='coerce').fillna(0)
+    open_p = pd.to_numeric(df['시가'], errors='coerce').fillna(0)
+    vol = pd.to_numeric(df['거래량'], errors='coerce').fillna(0)
+
+    vol_ma20 = vol.rolling(20).mean().shift(1)
+    sma20 = close.rolling(20).mean()
+    std20 = close.rolling(20).std()
+
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    sig = macd.ewm(span=9, adjust=False).mean()
+    hist = macd - sig
+
+    # 외인 데이터 존재 여부
+    has_foreign = '외인순매수' in df.columns
+    if has_foreign:
+        foreign_net = pd.to_numeric(df['외인순매수'], errors='coerce').fillna(0)
+
     def _calc_raw_trigger(idx):
-        if idx < 25: return 0.0
-
+        if idx < 25:
+            return 0.0
         try:
-            subset = df.iloc[:idx+1]
-            
-            # 1. 데이터 안전 추출
-            close = pd.to_numeric(subset['종가'], errors='coerce').fillna(0)
-            high = pd.to_numeric(subset['고가'], errors='coerce').fillna(0)
-            low = pd.to_numeric(subset['저가'], errors='coerce').fillna(0)
-            open_p = pd.to_numeric(subset['시가'], errors='coerce').fillna(0)
-            vol = pd.to_numeric(subset['거래량'], errors='coerce').fillna(0)
+            # ═══ 2. 값만 추출 — O(1) ═══
+            c_curr = float(close.iloc[idx])
+            h_curr = float(high.iloc[idx])
+            l_curr = float(low.iloc[idx])
+            o_curr = float(open_p.iloc[idx])
+            v_curr = float(vol.iloc[idx])
+            c_prev = float(close.iloc[idx - 1])
 
-            c_curr = float(close.iloc[-1])
-            h_curr = float(high.iloc[-1])
-            l_curr = float(low.iloc[-1])
-            o_curr = float(open_p.iloc[-1])
-            v_curr = float(vol.iloc[-1])
-            c_prev = float(close.iloc[-2])
+            if c_prev == 0:
+                return 0.0
 
-            if c_prev == 0: return 0.0
-
-            # 2. 기초 지표 계산
+            # 기초 지표
             ret_pct = (c_curr / c_prev - 1) * 100
             candle_len = h_curr - l_curr
-            
-            # 윗꼬리 비율 & 종가 위치
-            upper_wick = (h_curr - max(o_curr, c_curr))
+
+            upper_wick = h_curr - max(o_curr, c_curr)
             wick_ratio = upper_wick / candle_len if candle_len > 0 else 0.0
             range_pos = (c_curr - l_curr) / candle_len if candle_len > 0 else 0.5
-            
-            # 거래량 비율
-            vol_ma20_series = vol.rolling(window=20).mean().shift(1)
-            vol_ma20 = float(vol_ma20_series.iloc[-1])
-            if pd.isna(vol_ma20) or vol_ma20 == 0: vol_ma20 = v_curr 
-            
-            vol_ratio = v_curr / vol_ma20
+
+            # 거래량 비율 (사전 계산된 MA20 사용)
+            vm20 = float(vol_ma20.iloc[idx])
+            if pd.isna(vm20) or vm20 == 0:
+                vm20 = v_curr
+            vol_ratio = v_curr / vm20
 
             # ---------------------------------------------------------
             # [Base Score] 기본 점수 (Max 90)
             # ---------------------------------------------------------
-            
-            # (1) 거래량 점수 (Linear Interpolation)
+
+            # (1) 거래량 점수
             if vol_ratio < 0.5:
                 score_vol = 5.0
             elif 0.5 <= vol_ratio < 1.2:
@@ -1874,66 +1923,62 @@ def calculate_trigger_score(df: pd.DataFrame) -> float:
             elif 3.0 < vol_ratio <= 4.0:
                 score_vol = 40.0 - (vol_ratio - 3.0) * 20.0
             else:
-                score_vol = 20.0 # 대장주 보호
+                score_vol = 20.0
 
-            # [New] Safety Clamp: 혹시 모를 수치 튐 방지
             score_vol = max(0.0, min(40.0, score_vol))
 
-            # (2) 돌파/추세 점수 (std20 0 방어)
-            sma20 = close.rolling(20).mean().iloc[-1]
-            std20 = close.rolling(20).std().iloc[-1]
-            
+            # (2) 돌파/추세 점수 (사전 계산된 sma20, std20 사용)
+            s20 = float(sma20.iloc[idx])
+            sd20 = float(std20.iloc[idx])
+
             score_breakout = 0.0
-            if not (pd.isna(sma20) or pd.isna(std20) or std20 == 0):
-                bb_upper = sma20 + (2 * std20)
-                if c_curr >= bb_upper: score_breakout = 40.0
-                elif c_curr >= sma20: score_breakout = 20.0
-            
-            # (3) 모멘텀 가속
-            ema12 = close.ewm(span=12, adjust=False).mean()
-            ema26 = close.ewm(span=26, adjust=False).mean()
-            macd = ema12 - ema26
-            sig = macd.ewm(span=9, adjust=False).mean()
-            hist = macd - sig
-            
+            if not (pd.isna(s20) or pd.isna(sd20) or sd20 == 0):
+                bb_upper = s20 + (2 * sd20)
+                if c_curr >= bb_upper:
+                    score_breakout = 40.0
+                elif c_curr >= s20:
+                    score_breakout = 20.0
+
+            # (3) 모멘텀 가속 (사전 계산된 MACD 히스토그램 사용)
             score_mom = 0.0
-            if hist.iloc[-1] > hist.iloc[-2]:
+            if idx >= 1 and hist.iloc[idx] > hist.iloc[idx - 1]:
                 score_mom = 10.0
 
-            base = score_vol + score_breakout + score_mom 
+            base = score_vol + score_breakout + score_mom
 
             # ---------------------------------------------------------
             # [Penalty] 감점 로직 (Cap: 60)
             # ---------------------------------------------------------
             penalty = 0.0
 
-            # 1. 분배봉
             if ret_pct >= 5.0:
-                if wick_ratio >= 0.35: penalty += 25.0 
-                elif wick_ratio >= 0.25: penalty += 15.0
+                if wick_ratio >= 0.35:
+                    penalty += 25.0
+                elif wick_ratio >= 0.25:
+                    penalty += 15.0
 
-            # 2. 약한 종가
             if ret_pct >= 3.0 and range_pos < 0.6:
                 penalty += 15.0
 
-            # 3. 거래량 폭발 설거지
             if vol_ratio >= 3.0:
-                if c_curr < o_curr: penalty += 25.0 
-                elif wick_ratio > 0.3 or range_pos < 0.5: penalty += 20.0
+                if c_curr < o_curr:
+                    penalty += 25.0
+                elif wick_ratio > 0.3 or range_pos < 0.5:
+                    penalty += 20.0
 
-            # 4. 외인 이탈 결합
-            if '외인순매수' in subset.columns:
+            if has_foreign:
                 try:
-                    frg_net = float(subset['외인순매수'].iloc[-1])
+                    frg_net = float(foreign_net.iloc[idx])
                     if ret_pct >= 5.0 and frg_net < 0 and vol_ratio > 1.5:
                         if range_pos < 0.6 or wick_ratio > 0.25:
                             penalty += 20.0
-                except: pass
+                except (IndexError, ValueError, TypeError):
+                    pass  # 외국인 데이터 없는 종목은 정상 — 패널티 미적용
 
             penalty = min(penalty, 60.0)
 
             return max(0.0, base - penalty)
-            
+
         except Exception:
             return 0.0
 
@@ -2005,357 +2050,22 @@ def analyze_ticker(
     bench_map: Dict[str, Dict[int, float]],
     inv_maps: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Optional[Dict[str, Any]]:
-    code6 = str(t).zfill(6)
-    if ohlcv_df is None or ohlcv_df.empty or len(ohlcv_df) < 120: return None
-    ohlcv = ohlcv_df.tail(LOOKBACK_DAYS).copy()
-    ohlcv = sanitize_ohlcv(ohlcv)                    # [v10.0] 0값/상폐/거래정지 제거
-    if len(ohlcv) < 60: return None                   # 정제 후 데이터 부족 체크
+    """
+    [v3.2] SRP 분리 — ticker_analyzer.py로 위임.
     
-    # --- [데이터 타입 강제 변환] ---
-    # [v10.1] 가격 컬럼과 거래량 컬럼을 분리 처리
-    #   가격(시가/고가/저가/종가): fillna(0) 하면 "0원 행"이 새로 생겨서
-    #   수익률 계산 시 -100%가 발생 → ffill 후 남은 NaN만 drop
-    #   거래량: 0이 자연스러운 값(거래 없음)이므로 fillna(0) 유지
-    price_cols = ["종가", "고가", "저가", "시가"]
-    for col in price_cols:
-        if col in ohlcv.columns:
-            ohlcv[col] = pd.to_numeric(ohlcv[col], errors='coerce')
-    ohlcv[price_cols] = ohlcv[price_cols].ffill()     # 전일 가격으로 채움
-    ohlcv = ohlcv.dropna(subset=["종가"])              # 종가 NaN은 제거 (최초 행 등)
-
-    if "거래량" in ohlcv.columns:
-        ohlcv["거래량"] = pd.to_numeric(ohlcv["거래량"], errors='coerce').fillna(0)
-
-    if len(ohlcv) < 60: return None                    # ffill/drop 후 재체크
-    
-    # 변수 할당 (기존 로직 호환용)
-    c = ohlcv["종가"]
-    h = ohlcv["고가"]
-    l = ohlcv["저가"]
-    v = ohlcv["거래량"]
-    o = ohlcv["시가"]
-    
-    last_c = float(c.iloc[-1])
-
-    # --- [기본 필터링] 거래대금 및 시총 ---
-    tv_row = top_df.loc[top_df["종목코드"] == code6, "거래대금(원)"]
-    tv_eok = 0.0
-    if not tv_row.empty:
-        tv_eok = float(tv_row.values[0]) / 1e8
-
-    if tv_eok <= 0:
-        if "거래대금" in ohlcv.columns:
-            try: tv_eok = float(pd.to_numeric(ohlcv["거래대금"].iloc[-1], errors='coerce')) / 1e8
-            except: pass
-        if tv_eok <= 0:
-            try: tv_eok = (last_c * float(v.iloc[-1])) / 1e8
-            except: pass
-
-    mcap = get_mcap_eok_from_map(mcap_map, code6)
-    if mcap_map and mcap > 0 and mcap < MIN_MCAP_EOK: return None
-    if tv_eok < MIN_TURNOVER_EOK: return None
-
-    # --- [지표 계산] ---
-    ma20 = c.rolling(BB_PERIOD).mean()
-    ma60 = c.rolling(60).mean()
-    # 👇👇 [P2 최적화] 여기에 이 코드를 삽입하세요 👇👇
-    # -----------------------------------------------------------
-    # [Vectorization] 추후 연산을 위한 컬럼 미리 계산
-    # -----------------------------------------------------------
-    # 1. 갭 상승률 (시가 / 어제종가 - 1)
-    ohlcv['gap_pct'] = (o / c.shift(1) - 1) * 100
-    
-    # 2. 캔들 모양 벡터 (윗꼬리 비율)
-    ohlcv['candle_rng'] = h - l
-    ohlcv['upper_shadow_ratio'] = (h - c) / ohlcv['candle_rng'].replace(0, 1)
-    
-    # 3. 거래량 급증 여부 (5일 평균 대비)
-    ohlcv['vol_ma_5'] = v.rolling(window=5).mean()
-    ohlcv['vol_ratio'] = v / ohlcv['vol_ma_5'].replace(0, 1)
-    # -----------------------------------------------------------
-    # 👆👆 여기까지 삽입 👆👆
-    
-    # 🔥 [v14.1] 1. 구조적 상태 변화 (Structural State)
-    # (1) Low Trend: 저점 상승 여부 (Trend Check)
-    min_l_prev = float(l.iloc[-20:-10].min())
-    min_l_curr = float(l.iloc[-10:].min())
-    # 양수면 저점 상승 중(에너지 축적), 음수면 저점 붕괴(무효화 대상)
-    low_trend_pct = (min_l_curr - min_l_prev) / min_l_prev * 100 if min_l_prev > 0 else 0.0
-
-    # (2) RSI Trend: RSI 저점 상승 여부 (Momentum Check)
-    rsi_s = calc_rsi(c, 14)
-    rsi = float(rsi_s.iloc[-1])
-    rsi_min_prev = float(rsi_s.iloc[-20:-10].min())
-    rsi_min_curr = float(rsi_s.iloc[-10:].min())
-    # RSI 저점이 높아지고 있는가? (다이버전스 전조)
-    rsi_rising = 1 if rsi_min_curr > rsi_min_prev else 0
-
-    # (3) Volume Quality: 매집 강도
-    is_red = c > o
-    vol_red_avg = v[is_red].tail(20).mean()
-    vol_blue_avg = v[~is_red].tail(20).mean()
-    vol_quality = vol_red_avg / vol_blue_avg if vol_blue_avg > 0 else (1.5 if vol_red_avg > 0 else 1.0)
-
-    # (4) BB Expansion: 변동성 확장 조짐 (BB Width가 바닥찍고 고개 드는지)
-    std20 = c.rolling(BB_PERIOD).std()
-    bb_upper = ma20 + (BB_STD * std20)
-    bb_lower = ma20 - (BB_STD * std20)
-    bb_bw = ((bb_upper - bb_lower) / ma20.replace(0, np.nan)) * 100
-    bb_bw_val = float(bb_bw.iloc[-1])
-    bb_bw_prev = float(bb_bw.iloc[-5]) # 5일 전 폭
-    # 최근 폭이 과거보다 살짝 넓어지기 시작함 (확장 초입)
-    bb_expanding = 1 if (bb_bw_val > bb_bw_prev * 1.05) and (bb_bw_val < 20) else 0
-
-    # 박스권 위치 (Time Compression)
-    period_high_20 = float(h.tail(20).max())
-    period_low_20 = float(l.tail(20).min())
-    denom = period_high_20 - period_low_20
-    range_pos = (last_c - period_low_20) / denom if denom > 0 else 0.5
-
-    # 기존 지표 (Squeeze 등)
-    bw_squeeze = 1 if (np.isfinite(bb_bw_val) and bb_bw_val < BB_SQUEEZE_BW) else 0
-    atr_kc_series = calc_atr(h, l, c, KC_ATR_PERIOD)
-    kc_mid = ema(c, KC_PERIOD)
-    kc_upper = kc_mid + (KC_MULT * atr_kc_series)
-    kc_lower = kc_mid - (KC_MULT * atr_kc_series)
-    ttm_series = (bb_lower > kc_lower) & (bb_upper < kc_upper)
-    ttm_squeeze = 1 if (bool(ttm_series.iloc[-1])) else 0
-    sqz_cnt = int(ttm_series.iloc[-5:].sum()) # 최근 5일 중 스퀴즈 횟수
-
-    # MACD / MFI
-    mfi = float(calc_mfi(h, l, c, v, 14).iloc[-1])
-    macd = ema(c, 12) - ema(c, 26); sig = ema(macd, 9); hist = macd - sig
-    hist_val = float(hist.iloc[-1])
-    
-    # Returns
-    def _ret(d): return (last_c / float(c.iloc[-(d + 1)]) - 1.0) * 100 if len(c) >= d + 1 else np.nan
-    ret_5 = _ret(5); ret_10 = _ret(10); ret_20 = _ret(20); ret_60 = _ret(60); ret_120 = _ret(120)
-
-    # --- Trigger Logic (진입 엔진 분리) ---
-    triggers = []
-    
-    # 1. 🚀 급등 시동 (Ignition)
-    # 조건: 구조적 저점 상승 + RSI 저점 상승 + 상단 돌파 시도 + 매집
-    if (low_trend_pct > 0.5) and (rsi_rising == 1) and (range_pos > 0.75) and (vol_quality > 1.1):
-        if rsi < 70: triggers.append("🚀급등시동")
-    
-    # 2. ⚡ 눌림 회복 (Safe Pullback)
-    # 조건: 20일선 지지 + 양봉 + 스퀴즈 이력
-    disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100
-    if (-2 <= disp <= 3) and (c.iloc[-1] > o.iloc[-1]) and (low_trend_pct >= 0):
-        triggers.append("⚡눌림회복")
-
-    # 3. 📦 박스 돌파 (Squeeze Break) - 변동성 확장 감지
-    if (ttm_squeeze == 0) and (sqz_cnt >= 3) and (bb_expanding == 1):
-         triggers.append("📦박스돌파")
-
-    trigger_str = "/".join(triggers) if triggers else ""
-
-    # VWAP & SuperTrend
-    vwap_val = calc_vwap(ohlcv.tail(5))
-    vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
-    st_series, st_dir = calc_supertrend(h, l, c, 10, 3.0)
-    st_val = float(st_series.iloc[-1]); st_trend = int(st_dir.iloc[-1])
-    
-    # V-Power
-    tail5 = ohlcv.tail(5).copy()
-    body = (tail5["종가"] - tail5["시가"]).abs()
-    range_len = (tail5["고가"] - tail5["저가"]).replace(0, 1)
-    sign = np.where(tail5["종가"] >= tail5["시가"], 1, -1)
-    power_raw = (body / range_len) * tail5["거래량"] * sign
-    avg_vol = tail5["거래량"].mean()
-    v_power = power_raw.sum() / avg_vol if avg_vol > 0 else 0.0
-    vol_z = float((v / v.rolling(20).mean().replace(0, np.nan)).iloc[-1]) if len(v) else 0.0
-
-    # 캔들패턴
-    candle_patterns = check_candle_pattern(o, h, l, c)
-
-    # Swing Low Support Check
-    swing_low_10 = float(l.tail(10).min())
-    dist_to_swing = (last_c - swing_low_10) / last_c * 100
-    is_swing_support = (dist_to_swing < 5.0) and (last_c > swing_low_10)
-
-    # 🔥 [Fix A 준비: 1일 등락률 계산]
-    prev_c = float(c.iloc[-2]) if len(c) > 1 else last_c
-    ret_1d = (last_c / prev_c - 1.0) * 100
-
-    # ─── [v10.5] 극단 진입 필터 (상한가/VI/갭12%+ 방어) ───
-    gap_pct_val = float(ohlcv['gap_pct'].iloc[-1]) if 'gap_pct' in ohlcv.columns else 0.0
-    entry_filter = check_entry_filter(ret_1d=ret_1d, gap_pct=gap_pct_val)
-
-    # ─── [v10.0] 진입가 보수화 (기존 로직 유지) ───
-    buy = last_c
-
-    if 'disp' not in locals():
-        disp = (last_c / float(ma20.iloc[-1]) - 1.0) * 100
-
-    if disp >= 15.0:
-        buy = float(ma20.iloc[-1]) * 1.05
-    elif ret_1d >= 7.0:
-        mid_body = (float(o.iloc[-1]) + float(c.iloc[-1])) / 2
-        support_level = float(l.iloc[-1]) + (float(h.iloc[-1]) - float(l.iloc[-1])) * 0.3
-        buy = max(mid_body, support_level)
-    elif ret_1d >= 3.0:
-        buy = last_c * 0.985
-
-    # ─── [SSOT] trade_plan.build_trade_plan으로 ENTRY/SL/TP 통합 산출 ───
-    atr_val = float(atr_kc_series.iloc[-1]) if len(atr_kc_series) else last_c * 0.03
-    today_low_val = float(l.iloc[-1])
-    gap_pct_val = float(ohlcv['gap_pct'].iloc[-1]) if 'gap_pct' in ohlcv.columns else 0.0
-
-    # 수급 데이터 준비
-    major_net = 0
-    frg_net_val = 0
-    inst_net_val = 0
-    major_ratio = 0.0
-    if inv_maps:
-        frg_net_val = inv_maps.get("frg", {}).get(code6, 0)
-        inst_net_val = inv_maps.get("inst", {}).get(code6, 0)
-        major_net = frg_net_val + inst_net_val
-        tv_won = tv_eok * 1e8
-        major_ratio = abs(major_net) / tv_won if tv_won > 0 else 0.0
-
-    from trade_plan import build_trade_plan as _build_plan
-    from trade_plan import ExecRule as _ExecRule, estimate_slippage_bps as _est_slip
-    from collector_config import DEFAULT_CONFIG as _cfg
-
-    # [Phase 1-3] 거래대금 기반 동적 슬리피지 → ExecRule 생성
-    _slip_bps = _est_slip(tv_eok, _cfg)
-    _exec_rule = _ExecRule(sl_slippage_bps=_slip_bps, tp_slippage_bps=max(5.0, _slip_bps * 0.3))
-
-    _plan = _build_plan(
-        buy=buy,
-        atr_val=atr_val,
-        last_c=last_c,
-        mcap=mcap,
-        tv_eok=tv_eok,
-        today_low=today_low_val,
-        gap_up_pct=gap_pct_val,
-        swing_low_10=swing_low_10 if 'swing_low_10' in locals() else None,
-        dist_to_swing=dist_to_swing if 'dist_to_swing' in locals() else None,
-        ret_1d=ret_1d,
-        gap_pct=gap_pct_val,
-        major_net=major_net,
-        major_ratio=major_ratio,
-        exec_rule=_exec_rule,
+    기존 시그니처 100% 유지 (drop-in replacement).
+    내부 로직은 4개 단일 책임 함수로 분리됨:
+      1. prepare_ohlcv        → 데이터 정제 + 기본 필터링
+      2. calculate_indicators  → 기술적 지표 계산
+      3. build_ticker_plan     → 진입/청산/수급
+      4. assemble_result       → 메타 병합 + 최종 딕셔너리
+    """
+    from ticker_analyzer import analyze_ticker_v2
+    return analyze_ticker_v2(
+        t, ohlcv_df, top_df, mcap_map,
+        kospi_set, kosdaq_set, name_map, sector_map,
+        bench_map, inv_maps,
     )
-
-    # [Phase 1-2] Time Stop 활성화 — config에서 자동 주입
-    if _cfg.time_stop_days > 0:
-        import dataclasses as _dc
-        _plan = _dc.replace(_plan,
-            time_stop_days=_cfg.time_stop_days,
-            time_stop_min_move_pct=_cfg.time_stop_min_move_pct,
-            time_stop_extend_if_profit=_cfg.time_stop_extend_if_profit,
-        )
-
-    # SSOT 결과를 기존 변수명에 매핑 (하위 호환)
-    buy = _plan.entry
-    stop = _plan.stop
-    target = _plan.tp1
-    actual_stop_pct = _plan.stop_pct
-    max_loss_pct = _plan.max_loss_pct
-    rr_mult = _plan.rr_mult
-    stop_reason = _plan.plan_reason
-    entry_filter = {"action": _plan.entry_action, "position_pct": _plan.position_pct}
-
-    # 메타 정보 (기존 유지)
-    sector = sector_map.get(code6, "기타")
-    name = name_map.get(code6, code6)
-    m_row = top_df.loc[top_df["종목코드"] == code6, "시장"]
-    market = str(m_row.values[0]) if not m_row.empty else ("KOSPI" if code6 in kospi_set else "KOSDAQ")
-    bench_dict = bench_map.get(market, {})
-    idx_20 = bench_dict.get(20, np.nan); idx_60 = bench_dict.get(60, np.nan); idx_120 = bench_dict.get(120, np.nan)
-    rel_20 = ret_20 - idx_20 if np.isfinite(idx_20) and np.isfinite(ret_20) else np.nan
-    rel_60 = ret_60 - idx_60 if np.isfinite(idx_60) and np.isfinite(ret_60) else np.nan
-    rel_120 = ret_120 - idx_120 if np.isfinite(idx_120) and np.isfinite(ret_120) else np.nan
-    
-    # HMA
-    hma20 = calc_hma(c, 20)
-    curr_hma = float(hma20.iloc[-1]) if len(hma20) > 0 else 0
-    prev_hma = float(hma20.iloc[-2]) if len(hma20) > 1 else 0
-    hma_trend_up = curr_hma > prev_hma
-
-    # 주봉 (간단 체크)
-    is_above_w20 = False; is_w20_up = False
-    try:
-        w_res = ohlcv.resample('W').last()
-        w_ma = w_res['종가'].rolling(20).mean()
-        is_above_w20 = w_res['종가'].iloc[-1] > w_ma.iloc[-1]
-        is_w20_up = w_ma.iloc[-1] > w_ma.iloc[-2]
-    except: pass
-
-    # MACD Slope
-    slope = float(np.polyfit(np.arange(len(hist.tail(5))), hist.tail(5).values.astype(float), 1)[0]) if len(hist) >= 5 else 0.0
-    slope_pct = (slope / last_c) * 100.0 if last_c > 0 else 0.0
-
-    # [BugFix] 이전에 존재하던 두 번째 buy/stop/target 계산 블록 제거
-    # 첫 번째 블록(Fix v9.0: 급등주 추격방지 + 스마트 손절 + R:R 2.5)만 사용
-
-    # --- [이 코드가 빠져있으면 분석 결과에 반영되지 않습니다] ---
-    # 매물대 분석 실행 (최근 120일 데이터 사용)
-    poc_p, res_all, res_near, near_pct = calc_volume_profile_v2(ohlcv.tail(120))
-    
-    # POC 위치 버그 방지 및 이격도 계산
-    is_above_poc = 1 if (poc_p is not None and last_c > poc_p) else 0
-    poc_gap = round((last_c - poc_p) / poc_p * 100, 2) if poc_p else 0
-
-
-
-    return {
-        "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
-        "거래대금(억원)": round(tv_eok, 2), "시가총액(억원)": round(mcap, 1),
-        # ✅ [v14] TOXIC Filter용: 거래대금(원) 항상 포함 (determine_state_dynamic 분모 보장)
-        "거래대금(원)": round(float(tv_eok if tv_eok is not None and not np.isnan(tv_eok) else 0.0) * 1e8, 0),
-        "RSI14": round(rsi, 1), "MFI14": round(mfi, 1), "이격도": round(disp, 2),
-        "BB_BW": round(bb_bw_val, 2), "TTM_SQUEEZE": int(ttm_squeeze), "TTM_SQUEEZE_CNT": sqz_cnt,
-        "BB_SQUEEZE_BW": int(bw_squeeze),
-        "ret_1d_%": round(ret_1d, 2),  # 👈 [New] 당일 등락률 추가
-        "ret_5d_%": round(ret_5, 2), "ret_10d_%": round(ret_10, 2), "ret_20d_%": round(ret_20, 2),
-        "ret_60d_%": round(ret_60, 2), "ret_120d_%": round(ret_120, 2),
-        "rel_20d_%": round(rel_20, 2), "rel_60d_%": round(rel_60, 2), "rel_120d_%": round(rel_120, 2),
-
-        "RES_RATIO": round(res_all, 3),        # 상단 전체 매물 비중
-        "RES_RATIO_NEAR": round(res_near, 3),   # 상단 근접(8%) 매물 비중
-        "IS_ABOVE_POC": is_above_poc,          # 매물대(POC) 돌파 여부
-        "POC_GAP": poc_gap,                    # POC와의 이격도 (%)
-        "NEAR_THRES": round(near_pct, 1),       # 가변 NEAR 범위 (%)
-        
-        
-        # 🔥 [Step 1 & 2 핵심 지표]
-        "Low_Trend_PCT": round(low_trend_pct, 2), # 무효화 체크용 (음수면 아웃)
-        "RSI_Rising": int(rsi_rising),            # 상태 개선 체크용
-        "BB_Expanding": int(bb_expanding),        # 상태 개선 체크용
-        "Vol_Quality": round(vol_quality, 2),
-        "Range_Pos": round(range_pos, 2),
-        "추천매수가": buy, "손절가": stop, "추천매도가1": target, "추천매도가2": _plan.tp2 if _plan.tp2 else target * 1.1,
-        "EXEC_RULE_ID": _plan.exec_rule_id,
-        # [v10.4] 손절 디버깅 컬럼 — "왜 이 stop이 나왔는지" 한눈에 확인
-        "STOP_PCT": round(actual_stop_pct, 2),   # 실제 적용된 손절 퍼센트
-        "MAX_LOSS_PCT": round(max_loss_pct, 1),   # 시총 기반 최대 손실 캡
-        "RR_MULT": round(rr_mult, 1),             # R:R 배수
-        "STOP_REASON": stop_reason,                  # NORMAL/GAP/SWING/GAP+SWING
-        # [v10.5] 진입 필터 — 극단 갭/VI 시 보류/분할
-        "ENTRY_ACTION": entry_filter["action"],
-        "POSITION_PCT": entry_filter["position_pct"],
-        "TRIGGER": trigger_str, # Entry Engine 분리
-        "Above_MA20": 1 if disp > 0 else 0,
-        "SUPERTREND_DIR": st_trend, "SUPERTREND_VAL": st_val,
-        "VWAP": int(vwap_val), "VWAP_GAP": round(vwap_gap, 2),
-        "MACD_Slope_PCT": round(slope_pct, 4),
-        "거래강도": round(vol_z, 2), "V_POWER": round(v_power, 2),
-        "IS_SWING_SUPPORT": is_swing_support,
-        "주봉20선_상회": "O" if is_above_w20 else "X",
-        "주봉추세": "▲" if is_w20_up else "▼",
-        "HMA20": int(curr_hma), "HMA_Trend": "▲" if hma_trend_up else "▼", "HMA_On": "O" if last_c > curr_hma else "X",
-        "OBV_Div": "X",
-        # [v8.5] 수급 조기 주입
-        "외인순매수": frg_net_val,
-        "기관순매수": inst_net_val,
-        "메이저순매수": major_net,
-    }
-
-# 👇👇 [여기 사이에 함수를 통째로 붙여넣으세요] 👇👇
 
 # [v13] 켈리 공식 — 캘리브레이션 기반 승률 사용
 def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000,
@@ -2471,10 +2181,15 @@ def main(
     # 🔥 [v8.0 추가] 매크로 필터 적용 ---------------------------------
     macro_risk, macro_msg, new_ebs, rec_limit_cnt = check_macro_env(trade_ymd)
 
-    # 전역 변수 PASS_EBS를 동적으로 수정 (주의: ThreadPoolExecutor 사용 시에도 global 변경은 반영됨)
-    global PASS_EBS
-    PASS_EBS = new_ebs
-    log(f"⚙️ 매크로 필터 적용: PASS_EBS={PASS_EBS}, Telegram_Limit={rec_limit_cnt}")
+    # [v3.2 #1] RunContext로 상태 관리 — global 변수 변경 대신 DI 패턴
+    # ThreadPoolExecutor에서 Race Condition 없이 안전하게 상태 전달
+    run_ctx = RunContext(
+        pass_ebs=new_ebs,
+        rec_limit_cnt=rec_limit_cnt,
+        macro_risk=macro_risk,
+        macro_msg=macro_msg,
+    )
+    log(f"⚙️ 매크로 필터 적용: PASS_EBS={run_ctx.pass_ebs}, Telegram_Limit={rec_limit_cnt}")
 
 
     # 2) 그 날짜를 기준으로 시총 맵 생성 시도
@@ -2575,6 +2290,7 @@ def main(
                     rows.append(row)
             except Exception as e:
                 err_cnt += 1
+                log(f"⚠️ {code6} 분석 오류: {type(e).__name__}: {e}")
                 continue
     else:
         # 🔥 [수정 대상] 병렬 처리 (CPU 연산 분산)
@@ -2604,10 +2320,15 @@ def main(
                         rows.append(row)
                 except Exception as e:
                     err_cnt += 1
-                    # log(f"⚠️ 병렬 처리 중 오류: {e}")
+                    log(f"⚠️ 병렬 처리 중 오류: {type(e).__name__}: {e}")
 
     if err_cnt > 0:
         log(f"⚠️ 분석 중 오류 발생/데이터 부족 종목 수: {err_cnt}건")
+
+    # [v3.2 #2] 분석 완료 후 대형 객체 메모리 해제
+    # full_ohlcv_map은 수백~수천 종목의 DataFrame을 담고 있으므로 즉시 해제
+    del full_ohlcv_map
+    gc.collect()
 
     if not rows:
         log("⚠️ 필터를 통과한 종목이 없습니다. (시장 상황 악화 또는 데이터 부족)")
@@ -2755,8 +2476,9 @@ def main(
         struct_val = pd.to_numeric(df_out.get("STRUCT_SCORE", 0), errors='coerce').fillna(0)
         
         # [BugFix] OVERHEAT/EXIT_WARNING 종목은 정예군에서 제외
-        mask_safe = ~df_out["ROUTE"].isin(["OVERHEAT", "EXIT_WARNING"])
-        mask_qual = (ebs_val >= 6) & (struct_val >= 60) & mask_safe
+        mask_safe = ~df_out["ROUTE"].isin([Route.OVERHEAT, Route.EXIT_WARNING])
+        # [v3.2] 하드코딩 6 → run_ctx.pass_ebs (매크로 필터가 동적으로 조절한 EBS 임계치)
+        mask_qual = (ebs_val >= run_ctx.pass_ebs) & (struct_val >= 60) & mask_safe
         
         df_prime = df_out[mask_qual].copy().sort_values(["TIMING_SCORE", "AI_SCORE"], ascending=False)
         df_normal = df_out[~mask_qual].copy().sort_values("FINAL_SCORE", ascending=False)
@@ -2765,15 +2487,38 @@ def main(
         df_out = pd.concat([df_prime.head(120), df_normal, df_prime.iloc[120:]], ignore_index=True)
         
         # -----------------------------------------------------------
-        # 6. [최종 확정] 랭크 부여 및 날짜 메타데이터
+        # 6. [v3.1] 날짜 메타데이터 (랭크는 LLM 분석 후 확정)
         # -----------------------------------------------------------
-        df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
         df_out["기준일"] = trade_ymd
         df_out["시총기준일"] = mcap_ymd
 
     # -------------------------------------------------------------
     # 🔥 [v11.0 수정] 비동기 뉴스 수집 & LLM 분석 & DB 저장 통합
+    # [v3.2 #4] LLM 캐싱: 6시간 이내 분석 결과는 재활용 (API 비용/Rate Limit 절감)
     # -------------------------------------------------------------
+    LLM_CACHE_TTL_SEC = 6 * 3600  # 6시간
+    _llm_cache_path = os.path.join(OUT_DIR, "_llm_cache.json")
+    
+    def _load_llm_cache():
+        try:
+            if os.path.exists(_llm_cache_path):
+                with open(_llm_cache_path, "r", encoding="utf-8") as f:
+                    cache = json.load(f)
+                # 만료된 항목 정리
+                now_ts = time.time()
+                return {k: v for k, v in cache.items() 
+                        if now_ts - v.get("_ts", 0) < LLM_CACHE_TTL_SEC}
+        except (json.JSONDecodeError, KeyError, OSError):
+            pass
+        return {}
+    
+    def _save_llm_cache(cache):
+        try:
+            with open(_llm_cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+
     if LLM_AVAILABLE:
         log("🧠 상위 10개 종목 심층 분석 중 (뉴스 + DART 공시)...")
         
@@ -2800,8 +2545,27 @@ def main(
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = "특이사항 없음"
         
+        # [v3.2 #4] LLM 캐시 로드
+        llm_cache = _load_llm_cache()
+        cache_hits = 0
+        
         for idx in target_indices:
             code, name = str(df_out.loc[idx, "종목코드"]).zfill(6), df_out.loc[idx, "종목명"]
+            
+            # [v3.2 #4] 캐시 히트 확인 — 6시간 이내 분석 결과 재활용
+            cached = llm_cache.get(code)
+            if cached:
+                cache_hits += 1
+                event_val = cached["event_val"]
+                final_reason = cached["reason"]
+                df_out.at[idx, "NEWS_SCORE"] = event_val
+                old_final = df_out.at[idx, "FINAL_SCORE"]
+                df_out.at[idx, "DISPLAY_SCORE"] = np.clip(old_final + event_val, 0, 100)
+                df_out.at[idx, "NEWS_REASON"] = final_reason
+                if final_reason and final_reason != "특이사항 없음":
+                    cur_comment = str(df_out.at[idx, "AI_COMMENT"])
+                    df_out.at[idx, "AI_COMMENT"] = (cur_comment if cur_comment != "nan" else "") + f" 📢재료: {final_reason}"
+                continue
             
             # (A) 뉴스 감성 분석
             headlines = news_map.get(code, [])
@@ -2810,11 +2574,14 @@ def main(
             # (B) DART 공시 분석
             d_score, d_reason = 0.0, ""
             if dart_engine.dart:
-                disclosures = dart_engine.get_major_disclosures(code, days=3)
-                if disclosures:
-                    recent = disclosures[0]
-                    d_score, d_reason = dart_engine.analyze_report(recent['rcept_no'], recent['report_nm'])
-                    log(f"   📄 {name} DART 분석: {recent['report_nm']} -> {d_score}점")
+                try:
+                    disclosures = dart_engine.get_major_disclosures(code, days=3)
+                    if disclosures:
+                        recent = disclosures[0]
+                        d_score, d_reason = dart_engine.analyze_report(recent['rcept_no'], recent['report_nm'])
+                        log(f"   📄 {name} DART 분석: {recent['report_nm']} -> {d_score}점")
+                except Exception as e:
+                    log(f"   ⚠️ {name} DART 분석 오류: {type(e).__name__}: {e}")
 
             # (C) 점수 통합 (순수 FINAL은 보존, DISPLAY만 업데이트)
             event_val = np.clip(l_score + d_score, -10, 10)
@@ -2833,13 +2600,42 @@ def main(
             if reasons:
                 cur_comment = str(df_out.at[idx, "AI_COMMENT"])
                 df_out.at[idx, "AI_COMMENT"] = (cur_comment if cur_comment != "nan" else "") + f" 📢재료: {final_reason}"
+            
+            # [v3.2 #4] 캐시에 저장 (다음 실행 시 재활용)
+            llm_cache[code] = {
+                "event_val": float(event_val),
+                "reason": final_reason,
+                "_ts": time.time(),
+            }
+        
+        # [v3.2 #4] 캐시 파일 저장 + 히트율 로깅
+        _save_llm_cache(llm_cache)
+        if cache_hits > 0:
+            log(f"💾 LLM 캐시: {cache_hits}/{len(target_indices)}건 재활용 (TTL={LLM_CACHE_TTL_SEC//3600}h)")
     else:
         log("ℹ️ LLM 설정(API Key)이 없어 심층 분석을 건너뜁니다.")
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = "N/A"
 
     # -----------------------------------------------------------
-    # [Step 7] UI 호환성 동기화 및 상태 플래그 확정
+    # [Step 7] [v3.1 #2] 최종 점수 기준 재정렬 + 랭크 확정
+    # -----------------------------------------------------------
+    # LLM 뉴스/DART 분석으로 DISPLAY_SCORE가 변경되었을 수 있으므로
+    # 반드시 재정렬 후 랭크를 부여해야 함 (하극상 방지)
+    _sort_col = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
+    df_out[_sort_col] = pd.to_numeric(df_out[_sort_col], errors="coerce").fillna(0)
+    
+    # 정예군(상위 120) 내 재정렬 + 일반군 재정렬
+    _prime_mask = df_out.index < 120  # concat 순서에 의한 정예군 범위
+    df_prime_re = df_out[_prime_mask].sort_values(_sort_col, ascending=False)
+    df_normal_re = df_out[~_prime_mask].sort_values(_sort_col, ascending=False)
+    df_out = pd.concat([df_prime_re, df_normal_re], ignore_index=True)
+    
+    # 정렬 완료 후 랭크 확정
+    df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+
+    # -----------------------------------------------------------
+    # [Step 7.5] UI 호환성 동기화 및 상태 플래그 확정
     # -----------------------------------------------------------
     # 1. 모든 가시성 점수를 DISPLAY_SCORE로 수렴
     df_out["LDY_SCORE"]   = df_out["DISPLAY_SCORE"]
@@ -2851,9 +2647,9 @@ def main(
     df_out["벤치_60d_KOSDAQ_%"] = bench_map.get("KOSDAQ", {}).get(60, np.nan)
 
     # 3. 전략 활성 상태 플래그 (Code Matching 방식)
-    df_out["IS_ACTIVE"]    = df_out["ROUTE"].isin(["ATTACK", "ARMED"])
-    df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == "ATTACK"
-    df_out["IS_WATCH"]     = df_out["ROUTE"] == "WAIT"
+    df_out["IS_ACTIVE"]    = df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED])
+    df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == Route.ATTACK
+    df_out["IS_WATCH"]     = df_out["ROUTE"] == Route.WAIT
 
     # (Phase 2-1 전략 팩토리는 위 Step 5에서 통합 실행됨)
 
@@ -2873,10 +2669,12 @@ def main(
                 df_out.at[_idx, "EST_WIN_RATE"] = round(_wr, 3)
 
                 # 상위 추천 대상이면서 승률 하한 미달 → 보류 태그
-                if _wr < _wr_min and df_out.at[_idx, "ROUTE"] in ("ATTACK", "ARMED"):
+                if _wr < _wr_min and df_out.at[_idx, "ROUTE"] in (Route.ATTACK, Route.ARMED):
                     df_out.at[_idx, "CAL_HOLD_REASON"] = f"low_wr_{_wr:.2f}"
-            except Exception:
-                pass
+            except (KeyError, ValueError, FileNotFoundError) as e:
+                logger.debug(f"캘리브레이션 승률 조회 실패 ({code6}): {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ 캘리브레이션 예기치 않은 오류 ({code6}): {type(e).__name__}: {e}")
 
         _low_wr_cnt = (df_out["CAL_HOLD_REASON"] != "").sum()
         if _low_wr_cnt > 0:
@@ -2889,8 +2687,18 @@ def main(
     # -----------------------------------------------------------
     # [Step 8] 데이터 저장 및 정합성 체크
     # -----------------------------------------------------------
+    # ✅ [v3.1 #1] 켈리 자금 관리 적용 — 저장 직전에 반드시 실행
+    try:
+        df_out = apply_kelly_betting(df_out, total_capital=10_000_000, out_dir=OUT_DIR)
+    except Exception as e:
+        log(f"⚠️ 켈리 비중 계산 실패 (0으로 대체): {e}")
+        for _kc in ["켈리_수량", "켈리_금액(원)", "추천수량", "추천금액(만원)"]:
+            if _kc not in df_out.columns:
+                df_out[_kc] = 0
+
     must_cols = [
-        "종목코드", "종목명", "시장", "업종_대분류", "종가", "거래대금(억원)", "시가총액(억원)",
+        "LDY_RANK", "종목코드", "종목명", "시장", "업종_대분류", "종가", "거래대금(억원)", "시가총액(억원)",
+        "켈리_수량", "추천금액(만원)",
         "상태", "ROUTE", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
         "DISPLAY_SCORE", "FINAL_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", "NEWS_SCORE",
         "추천매수가", "손절가", "추천매도가1", "추천매도가2", "TRIGGER", "V_POWER", "거래강도", 
@@ -2907,8 +2715,10 @@ def main(
         from collector_config import DEFAULT_CONFIG as _snap_cfg
         df_out["CONFIG_SNAPSHOT"] = _snap_cfg.snapshot_json()
         df_out["CONFIG_VERSION"] = _snap_cfg.config_version
-    except Exception:
-        pass
+    except (ImportError, AttributeError) as e:
+        logger.debug(f"CONFIG_SNAPSHOT 생성 스킵: {e}")
+    except Exception as e:
+        logger.warning(f"⚠️ CONFIG_SNAPSHOT 예기치 않은 오류: {type(e).__name__}: {e}")
 
     ensure_dir(OUT_DIR)
     out_path_dated = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{tag}' if tag else ''}.csv")
