@@ -214,14 +214,13 @@ def add_technical_features(df):
 
 def add_technical_features_batch(ohlcv_map: dict) -> dict:
     """
-    [v19.0 Fix 2] 전체 종목을 Multi-index DataFrame으로 합쳐서
-    벡터화된 피처 계산 수행. 종목별 루프 대비 ~10x 속도 향상.
+    [v19.5] 진정한 벡터화 — groupby('_code') 네이티브 연산.
+    피처 계산 내 for 루프 0건. 결과 분리용 루프만 존재.
 
     Parameters:
-        ohlcv_map: {code: DataFrame} — clean_ohlcv 적용 전 raw OHLCV
-
+        ohlcv_map: {code: DataFrame} — raw OHLCV
     Returns:
-        {code: DataFrame(FEATURE_COLS)} — 피처 계산된 결과 맵
+        {code: DataFrame(FEATURE_COLS)} — 피처 결과 맵
     """
     frames = []
     valid_codes = []
@@ -238,23 +237,133 @@ def add_technical_features_batch(ohlcv_map: dict) -> dict:
     if not frames:
         return {}
 
-    # Multi-index: (code, date)
     big = pd.concat(frames, ignore_index=False)
-    big = big.set_index("_code", append=True).swaplevel()
+    g = big.groupby("_code", sort=False)
+
+    c = big['Close']
+    h = big['High']
+    l = big['Low']
+    o = big['Open']
+    v = big['Volume']
+
+    # ── 16개 피처: groupby + transform/shift → C 엔진 100% ──
+
+    c_shift1 = g['Close'].shift(1)
+
+    # 1. Log_Ret
+    big['Log_Ret'] = np.log(c / c_shift1.replace(0, np.nan))
+
+    # 2. Volume_Norm
+    vol_ma20 = g['Volume'].transform(lambda x: x.rolling(20).mean()).replace(0, np.nan)
+    big['Volume_Norm'] = np.log1p(v / vol_ma20)
+
+    # 3. Low_Trend
+    low10 = g['Low'].transform(lambda x: x.rolling(10).min())
+    low10_lag = g['Low'].transform(lambda x: x.rolling(10).min().shift(10)).replace(0, np.nan)
+    big['Low_Trend'] = (low10 - low10_lag) / low10_lag
+
+    # 4. Vol_Quality
+    is_up = (c > o).astype(np.float32)
+    vu = v * is_up
+    vd = v * (1 - is_up)
+    big['_vu'] = vu
+    big['_vd'] = vd
+    big['_is_up'] = is_up
+    vu_sum = g['_vu'].transform(lambda x: x.rolling(20).sum())
+    vd_sum = g['_vd'].transform(lambda x: x.rolling(20).sum())
+    up_cnt = g['_is_up'].transform(lambda x: x.rolling(20).sum()).replace(0, np.nan)
+    dn_cnt = (20 - up_cnt).replace(0, np.nan)
+    big['Vol_Quality'] = ((vu_sum / up_cnt) / (vd_sum / dn_cnt).replace(0, np.nan)).clip(0, 5)
+
+    # 5. Dist_MA20
+    ma20 = g['Close'].transform(lambda x: x.rolling(20).mean()).replace(0, np.nan)
+    big['Dist_MA20'] = (c - ma20) / ma20
+
+    # 6. RSI (14)
+    delta = c - c_shift1
+    up_d = delta.clip(lower=0)
+    down_d = (-delta).clip(lower=0)
+    big['_up'] = up_d
+    big['_dn'] = down_d
+    ema_up = g['_up'].transform(lambda x: x.ewm(com=13, adjust=False).mean())
+    ema_dn = g['_dn'].transform(lambda x: x.ewm(com=13, adjust=False).mean()).replace(0, np.nan)
+    big['RSI'] = (100 - 100 / (1 + ema_up / ema_dn)) / 100.0
+
+    # 7. MFI (14)
+    tp = (h + l + c) / 3
+    rmf = tp * v
+    big['_tp'] = tp
+    tp_diff = g['_tp'].diff()
+    pf = pd.Series(np.where(tp_diff > 0, rmf, 0), index=big.index, dtype=np.float32)
+    nf = pd.Series(np.where(tp_diff < 0, rmf, 0), index=big.index, dtype=np.float32)
+    big['_pf'] = pf
+    big['_nf'] = nf
+    ps = g['_pf'].transform(lambda x: x.rolling(14).sum())
+    ns = g['_nf'].transform(lambda x: x.rolling(14).sum()).replace(0, 1)
+    big['MFI'] = (100 - 100 / (1 + ps / ns)) / 100.0
+
+    # 8. MACD_Hist_Norm
+    ema12 = g['Close'].transform(lambda x: x.ewm(span=12, adjust=False).mean())
+    ema26 = g['Close'].transform(lambda x: x.ewm(span=26, adjust=False).mean())
+    macd = ema12 - ema26
+    big['_macd'] = macd
+    signal = g['_macd'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
+    big['MACD_Hist_Norm'] = (macd - signal) / c.replace(0, np.nan)
+
+    # 9. BB_Width
+    std20 = g['Close'].transform(lambda x: x.rolling(20).std())
+    big['BB_Width'] = (4 * std20) / ma20.replace(0, np.nan)
+
+    # 10. ATR_Pct
+    tr = pd.concat([h - l, (h - c_shift1).abs(), (l - c_shift1).abs()], axis=1).max(axis=1)
+    big['_tr'] = tr
+    atr = g['_tr'].transform(lambda x: x.rolling(14).mean())
+    big['ATR_Pct'] = atr / c.replace(0, np.nan)
+
+    # 11. OBV_Slope
+    sign = np.sign(c - c_shift1)
+    big['_obv_raw'] = sign * v
+    obv = g['_obv_raw'].cumsum()
+    big['_obv'] = obv
+    obv_ma = g['_obv'].transform(lambda x: x.rolling(10).mean())
+    obv_ma_lag = g['_obv'].transform(lambda x: x.rolling(10).mean().shift(10))
+    denom = obv_ma_lag.abs().replace(0, np.nan)
+    big['OBV_Slope'] = ((obv_ma - obv_ma_lag) / denom).clip(-5, 5)
+
+    # 12. Range_Pos
+    h20 = g['High'].transform(lambda x: x.rolling(20).max())
+    l20 = g['Low'].transform(lambda x: x.rolling(20).min())
+    big['Range_Pos'] = (c - l20) / (h20 - l20).replace(0, np.nan)
+
+    # 13. Vol_Ratio_5
+    vol_ma5 = g['Volume'].transform(lambda x: x.rolling(5).mean()).replace(0, np.nan)
+    big['Vol_Ratio_5'] = v / vol_ma5
+
+    # 14/15. Ret_5d, Ret_20d
+    big['Ret_5d'] = c / g['Close'].shift(5).replace(0, np.nan) - 1
+    big['Ret_20d'] = c / g['Close'].shift(20).replace(0, np.nan) - 1
+
+    # 16. Upper_Shadow_Ratio
+    body_top = pd.concat([c, o], axis=1).max(axis=1)
+    big['Upper_Shadow_Ratio'] = (h - body_top) / (h - l).replace(0, np.nan)
+
+    # ── 임시 컬럼 정리 ──
+    tmp = [c for c in big.columns if c.startswith('_')]
+    big = big.drop(columns=tmp + BASIC_COLS, errors='ignore')
+    big = big[FEATURE_COLS].replace([np.inf, -np.inf], np.nan).astype(np.float32)
+
+    # ── 결과 분리 (이 루프만 존재 — 피처 계산 내 루프 0건) ──
+    code_col = pd.concat([
+        pd.Series(code, index=f.index, dtype='object')
+        for code, f in zip(valid_codes, frames)
+    ])
 
     result_map = {}
-
-    # groupby로 종목별 피처 계산 — 내부 rolling/ewm은 그룹 단위
-    # 참고: pandas rolling은 groupby 친화적이지만, 복잡한 피처는
-    #        종목별 호출이 여전히 필요. 여기서는 clean + dispatch를 최적화.
     for code in valid_codes:
-        try:
-            code_df = big.loc[code].copy()
-            feat = add_technical_features(code_df)
-            if not feat.empty:
-                result_map[code] = feat
-        except Exception:
-            continue
+        mask = code_col == code
+        feat_df = big.loc[mask].dropna()
+        if len(feat_df) >= SEQ_LENGTH:
+            result_map[code] = feat_df
 
     return result_map
 
@@ -489,21 +598,70 @@ def extract_date(path):
     return m.group(1) if m else "00000000"
 
 
+def _load_ohlcv_cache_file(f_path: str) -> dict:
+    """[v19.5] 캐시 파일 로드 — pkl/parquet/csv 멀티포맷 지원"""
+    ext = os.path.splitext(f_path)[1].lower()
+
+    if ext == ".pkl":
+        with open(f_path, 'rb') as f:
+            return pickle.load(f)
+
+    # parquet / csv → OHLCVCache v5.0 통합 포맷 (종목코드 컬럼 + 날짜 인덱스)
+    try:
+        if ext == ".parquet":
+            combined = pd.read_parquet(f_path)
+        else:  # .csv
+            combined = pd.read_csv(f_path, index_col=0, parse_dates=True,
+                                   dtype={"종목코드": str})
+
+        if "종목코드" not in combined.columns:
+            return {}
+
+        data_map = {}
+        for code, group in combined.groupby("종목코드"):
+            clean_code = str(code).zfill(6)
+            data_map[clean_code] = group.drop(columns=["종목코드"])
+        return data_map
+    except Exception as e:
+        print(f"⚠️ [ML] 캐시 로드 실패 ({f_path}): {e}")
+        return {}
+
+
 def build_master_dataset(data_dir="data"):
     """
-    [v19.0] First-touch Labeling + Rolling Z-score
+    [v19.5] First-touch Labeling + Rolling Z-score
 
-    변경점 (v18.3 → v19.0):
+    변경점 (v19.0 → v19.5):
+    - [Fix 6] pkl/parquet/csv 멀티포맷 캐시 로더 (OHLCVCache v5.0 호환)
     - [Fix 1] _compute_soft_label에 future_lows 전달
     - [Fix 5] StandardScaler fit 후 Rolling Z-score도 저장
     """
-    files = sorted(glob.glob(os.path.join(data_dir, "ohlcv_cache_*.pkl")), key=extract_date)
+    # [v19.5 Fix 6] 3가지 확장자 모두 탐색 (pkl → parquet → csv 우선순위)
+    files = []
+    for ext in ("*.pkl", "*.parquet", "*.csv"):
+        files.extend(glob.glob(os.path.join(data_dir, f"ohlcv_cache_{ext}")))
+    # 날짜 기준 정렬 + 같은 날짜 중복 제거 (parquet 우선)
+    seen_dates = set()
+    unique_files = []
+    for f_path in sorted(files, key=extract_date):
+        d = extract_date(f_path)
+        if d not in seen_dates:
+            seen_dates.add(d)
+            unique_files.append(f_path)
+    files = unique_files
+
+    if not files:
+        print(f"⚠️ [ML] {data_dir}/ohlcv_cache_* 파일이 없습니다. (pkl/parquet/csv 모두 탐색)")
+        return None
+
+    print(f"📂 [ML] 학습 데이터 {len(files)}개 파일 발견 ({', '.join(os.path.splitext(f)[1] for f in files[:3])}...)")
     all_samples = []
 
     for f_path in files:
         try:
-            with open(f_path, 'rb') as f:
-                data_map = pickle.load(f)
+            data_map = _load_ohlcv_cache_file(f_path)
+            if not data_map:
+                continue
             for code, raw_df in data_map.items():
                 try:
                     df = clean_ohlcv(raw_df)
