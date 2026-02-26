@@ -1,59 +1,81 @@
-# db_utils.py (Admin Event Feature Added)
+# db_utils.py — DuckDB 싱글톤 + Gist 동기화 (v4.0)
 
 import duckdb
-import pandas as pd
-import requests
 import json
+import logging
 import os
-try:
-    import streamlit as st
-    _HAS_ST = True
-except ImportError:
-    _HAS_ST = False
+import requests
+import pandas as pd
 from datetime import datetime, timedelta
 
-# Gist 설정 — os.environ 우선, st.secrets는 안전하게 폴백
+_logger = logging.getLogger("db_utils")
+
+# Gist 설정 — Railway 환경변수 전용 (st.secrets 의존 완전 제거)
 def _safe_secret(key: str) -> str:
-    """환경변수 → st.secrets 순으로 조회. secrets.toml 없어도 크래시 안 남."""
-    val = os.environ.get(key)
-    if val: return val
-    if _HAS_ST:
-        try:
-            return st.secrets.get(key) or ""
-        except Exception:
-            return ""
-    return ""
+    """Railway 환경변수에서 조회 (Streamlit 의존성 제거)"""
+    return os.environ.get(key, "")
 
 GIST_ID = _safe_secret("LDY_GIST_ID") or None
 GIST_TOKEN = _safe_secret("LDY_GIST_TOKEN") or None
 
 # [진단 로그] Gist 연동 상태 확인
 if GIST_ID and GIST_TOKEN:
-    print(f"✅ [Gist] 연동 준비 완료 (ID: {GIST_ID[:8]}...)")
+    _logger.info(f" [Gist] 연동 준비 완료 (ID: {GIST_ID[:8]}...)")
 else:
     _missing = []
     if not GIST_ID: _missing.append("LDY_GIST_ID")
     if not GIST_TOKEN: _missing.append("LDY_GIST_TOKEN")
-    print(f"⚠️ [Gist] 연동 불가 — 누락된 키: {', '.join(_missing)}")
+    _logger.warning(f" [Gist] 연동 불가 — 누락된 키: {', '.join(_missing)}")
 
 USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json" 
 
 class LDYDBManager:
+    _DB_PATH = "ldy_trader.db"
+
     def __init__(self):
-        # 파일 DB 사용 (없으면 생성됨)
-        self.conn = duckdb.connect("ldy_trader.db") 
-        self._conn_lock = __import__('threading').Lock()  # 쿼리 직렬화 락
+        self.conn = duckdb.connect(self._DB_PATH)
+        self._conn_lock = __import__('threading').Lock()
+        self._gist_loaded = False  # Gist 로딩은 lazy로 분리
         self._init_tables()
-        self._load_users_from_gist()
-        self._load_inquiries_from_gist()
+        # ⚠️ __init__에서 Gist HTTP 호출 제거
+        # _load_users_from_gist() / _load_inquiries_from_gist()는
+        # ensure_gist_loaded() 또는 app.on_startup에서 호출
+
+    def ensure_gist_loaded(self):
+        """Gist 데이터를 lazy 로드 (최초 1회만 실행)
+        
+        NiceGUI에서는 app.on_startup에서 비동기 호출:
+            await run.io_bound(db.ensure_gist_loaded)
+        """
+        if self._gist_loaded:
+            return
+        try:
+            self._load_users_from_gist()
+            self._load_inquiries_from_gist()
+            self._gist_loaded = True
+        except Exception as e:
+            import logging
+            logging.getLogger("db_utils").warning(f"Gist 초기 로드 실패 (DB는 정상): {e}")
+
+    def _reconnect(self):
+        """Stale 커넥션 재연결"""
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        self.conn = duckdb.connect(self._DB_PATH)
 
     def execute_safe(self, query, params=None):
-        """Thread-safe 쿼리 실행 (락 기반 직렬화)"""
+        """Thread-safe 쿼리 실행 + 커넥션 헬스체크"""
         with self._conn_lock:
-            if params:
-                return self.conn.execute(query, params)
-            return self.conn.execute(query)
+            try:
+                return self.conn.execute(query, params) if params else self.conn.execute(query)
+            except (duckdb.ConnectionException, duckdb.IOException) as e:
+                import logging
+                logging.getLogger("db_utils").warning(f"DuckDB 재연결: {e}")
+                self._reconnect()
+                return self.conn.execute(query, params) if params else self.conn.execute(query)
 
     def _init_tables(self):
         # 1. 사용자 테이블 (로그인 실패 및 잠금 컬럼 추가)
@@ -87,6 +109,115 @@ class LDYDBManager:
         """)
 
     # --- Gist Sync Logic ---
+    def _download_gist_data(self) -> dict:
+        """Gist 데이터를 다운로드만 수행 (락 없이, I/O만)
+        
+        Returns: {"users_db.json": data, "inquiries_db.json": data} 또는 빈 dict
+        """
+        if not GIST_ID or not GIST_TOKEN:
+            return {}
+        try:
+            url = f"https://api.github.com/gists/{GIST_ID}"
+            headers = {"Authorization": f"token {GIST_TOKEN}"}
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                return {}
+            files = resp.json().get("files", {})
+            result = {}
+            for fname in [USER_DB_FILE, INQUIRY_DB_FILE]:
+                if fname in files:
+                    content = files[fname].get("content", "")
+                    if content:
+                        result[fname] = json.loads(content)
+            return result
+        except Exception as e:
+            _logger.warning(f" [Gist] 다운로드 실패: {e}")
+            return {}
+
+    def _apply_gist_data(self, downloaded: dict):
+        """다운로드된 Gist 데이터를 DB에 적용 (짧은 락만 사용)"""
+        if USER_DB_FILE in downloaded:
+            self._insert_gist_users(downloaded[USER_DB_FILE])
+        if INQUIRY_DB_FILE in downloaded:
+            self._insert_gist_inquiries(downloaded[INQUIRY_DB_FILE])
+
+    def _insert_gist_users(self, data):
+        """이미 파싱된 users 데이터를 DB에 INSERT (HTTP 호출 없음)"""
+        if not data:
+            return
+        try:
+            if isinstance(data, dict) and "users" in data:
+                user_dict = data["users"]
+                for u in user_dict.values():
+                    self._upsert_user_row(u)
+                _logger.info(f" users 적용 완료 (Dict, {len(user_dict)}명)")
+            elif isinstance(data, list):
+                for item in data:
+                    self._upsert_user_row(item)
+                _logger.info(f" users 적용 완료 (List, {len(data)}명)")
+        except Exception as e:
+            _logger.warning(f" users INSERT 실패: {e}")
+
+    def _upsert_user_row(self, u: dict):
+        """단일 유저 Safe UPSERT — Gist 관리 필드만 갱신, 운영 데이터 보존
+
+        ON CONFLICT(id) DO UPDATE:
+          갱신: password, salt, nickname, role, prime_expire_date (Gist 관리)
+          보존: last_login, login_fail_count, lock_until, session_token (운영 데이터)
+        """
+        join_dt_str = u.get('created_at', u.get('join_date'))
+        join_dt = None
+        try:
+            if join_dt_str:
+                clean_str = str(join_dt_str)[:19].replace("T", " ")
+                join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+        expire_val = u.get('prime_expire_date')
+        role = u.get('role', 'free')
+        if not expire_val and role in ['prime', 'pro'] and join_dt:
+            expire_val = join_dt + timedelta(days=7)
+        vals = [
+            u.get('login_id', u.get('id')),
+            u.get('password_hash', u.get('password')),
+            u.get('salt'), u.get('nickname'), role, join_dt_str,
+            u.get('last_login'), u.get('is_banned', False),
+            u.get('security_q_idx', 0), u.get('security_a_hash'),
+            u.get('session_token'), expire_val,
+        ]
+        self.conn.execute("""
+            INSERT INTO users 
+            (id, password, salt, nickname, role, join_date, last_login, 
+             is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date) 
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                password = EXCLUDED.password,
+                salt = EXCLUDED.salt,
+                nickname = EXCLUDED.nickname,
+                role = EXCLUDED.role,
+                join_date = COALESCE(users.join_date, EXCLUDED.join_date),
+                is_banned = EXCLUDED.is_banned,
+                security_q_idx = EXCLUDED.security_q_idx,
+                security_a_hash = EXCLUDED.security_a_hash,
+                prime_expire_date = EXCLUDED.prime_expire_date
+                -- last_login, login_fail_count, lock_until, session_token 보존
+        """, vals)
+
+    def _insert_gist_inquiries(self, data):
+        """이미 파싱된 inquiries 데이터를 DB에 INSERT (HTTP 호출 없음)"""
+        if not data or not isinstance(data, list):
+            return
+        try:
+            for item in data:
+                vals = [
+                    item.get('id'), item.get('nickname'), item.get('title'),
+                    item.get('content'), item.get('created_at'),
+                ]
+                self.conn.execute("INSERT INTO inquiries VALUES (?,?,?,?,?)", vals)
+            _logger.info(f" inquiries 적용 완료 ({len(data)}건)")
+        except Exception as e:
+            _logger.warning(f" inquiries INSERT 실패: {e}")
+
     def _load_users_from_gist(self):
         self._load_gist_to_table(USER_DB_FILE, "users", 12)
 
@@ -95,7 +226,7 @@ class LDYDBManager:
 
     def _load_gist_to_table(self, filename, tablename, col_count):
         if not GIST_ID or not GIST_TOKEN:
-            print(f"⚠️ [Gist] {tablename} 로드 스킵 — Gist 인증 키 없음")
+            _logger.warning(f" [Gist] {tablename} 로드 스킵 — Gist 인증 키 없음")
             return
         try:
             url = f"https://api.github.com/gists/{GIST_ID}"
@@ -103,18 +234,18 @@ class LDYDBManager:
             resp = requests.get(url, headers=headers, timeout=5)
 
             if resp.status_code != 200:
-                print(f"❌ [Gist] API 응답 실패: {resp.status_code} — {resp.text[:200]}")
+                _logger.error(f" [Gist] API 응답 실패: {resp.status_code} — {resp.text[:200]}")
                 return
 
             files = resp.json().get("files", {})
             if filename not in files:
-                print(f"⚠️ [Gist] '{filename}' 파일이 Gist에 없음. 존재하는 파일: {list(files.keys())}")
+                _logger.warning(f" [Gist] '{filename}' 파일이 Gist에 없음. 존재하는 파일: {list(files.keys())}")
                 return
 
             content = files[filename]["content"]
             data = json.loads(content)
             if not data:
-                print(f"⚠️ [Gist] '{filename}' 데이터가 비어있음")
+                _logger.warning(f" [Gist] '{filename}' 데이터가 비어있음")
                 return
 
             # 1. Users 테이블
@@ -122,75 +253,20 @@ class LDYDBManager:
                 if isinstance(data, dict) and "users" in data:
                     user_dict = data["users"]
                     for u in user_dict.values():
-                        join_dt_str = u.get('created_at', u.get('join_date'))
-                        join_dt = None
-                        try:
-                            if join_dt_str:
-                                clean_str = str(join_dt_str)[:19].replace("T", " ")
-                                join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
-                        except: pass
-
-                        expire_val = u.get('prime_expire_date')
-                        role = u.get('role', 'free')
-
-                        if not expire_val and role in ['prime', 'pro'] and join_dt:
-                            expire_val = join_dt + timedelta(days=7)
-
-                        vals = [
-                            u.get('login_id', u.get('id')),
-                            u.get('password_hash', u.get('password')),
-                            u.get('salt'),
-                            u.get('nickname'),
-                            role,
-                            join_dt_str,
-                            u.get('last_login'),
-                            u.get('is_banned', False),
-                            u.get('security_q_idx', 0),
-                            u.get('security_a_hash'),
-                            u.get('session_token'),
-                            expire_val
-                        ]
-                        self.conn.execute("""
-                            INSERT OR IGNORE INTO users 
-                            (id, password, salt, nickname, role, join_date, last_login, 
-                             is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date) 
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                        """, vals)
-                    print(f"✅ {tablename} 복원 완료 (Dict Format, {len(user_dict)}명)")
+                        self._upsert_user_row(u)
+                    _logger.info(f" {tablename} 복원 완료 (Dict Format, {len(user_dict)}명)")
                     return
 
                 elif isinstance(data, list):
                     loaded = 0
                     for item in data:
-                        join_dt_str = item.get('join_date')
-                        expire_val = item.get('prime_expire_date')
-                        role = item.get('role', 'free')
-
-                        if not expire_val and role in ['prime', 'pro'] and join_dt_str:
-                            try:
-                                clean_str = str(join_dt_str)[:19].replace("T", " ")
-                                join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
-                                expire_val = join_dt + timedelta(days=7)
-                            except: pass
-
-                        vals = [
-                            item.get('id'), item.get('password'), item.get('salt'), item.get('nickname'),
-                            role, join_dt_str, item.get('last_login'), item.get('is_banned'),
-                            item.get('security_q_idx'), item.get('security_a_hash'), item.get('session_token'),
-                            expire_val
-                        ]
-                        self.conn.execute("""
-                            INSERT OR IGNORE INTO users 
-                            (id, password, salt, nickname, role, join_date, last_login, 
-                             is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date) 
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                        """, vals)
+                        self._upsert_user_row(item)
                         loaded += 1
-                    print(f"✅ {tablename} 로드 완료 (List Format, {loaded}명)")
+                    _logger.info(f" {tablename} 로드 완료 (List Format, {loaded}명)")
                     return
 
                 else:
-                    print(f"⚠️ [Gist] {filename} 데이터 형식 미지원: {type(data).__name__}")
+                    _logger.warning(f" [Gist] {filename} 데이터 형식 미지원: {type(data).__name__}")
 
             # 2. Inquiries 테이블
             elif tablename == 'inquiries':
@@ -201,10 +277,10 @@ class LDYDBManager:
                             item.get('content'), item.get('created_at')
                         ]
                         self.conn.execute("INSERT INTO inquiries VALUES (?,?,?,?,?)", vals)
-                    print(f"✅ {tablename} 로드 완료 ({len(data)}건)")
+                    _logger.info(f" {tablename} 로드 완료 ({len(data)}건)")
 
         except Exception as e:
-            print(f"❌ [Gist] {tablename} 로드 실패: {e}")
+            _logger.error(f" [Gist] {tablename} 로드 실패: {e}")
 
     def _sync_table_to_gist(self, tablename, filename):
         if not GIST_ID or not GIST_TOKEN: return
@@ -221,7 +297,7 @@ class LDYDBManager:
             payload = {"files": {filename: {"content": json_str}}}
             requests.patch(url, headers=headers, json=payload, timeout=5)
         except Exception as e:
-            print(f"⚠️ {tablename} 저장 실패: {e}")
+            _logger.warning(f" {tablename} 저장 실패: {e}")
 
     # --- User Methods ---
     def register_user(self, email, pw_hash, salt, nickname, q_idx, a_hash):
@@ -261,33 +337,15 @@ class LDYDBManager:
         self.conn.execute("UPDATE users SET last_login = ? WHERE id = ?", [datetime.now(), email])
         self._sync_table_to_gist("users", USER_DB_FILE)
 
-    def update_user_password(self, email, pw_hash, salt, new_security_ans=None):
-        """
-        [v3.0] 비밀번호 변경 시 Salt Rotation + 보안답변 동시 갱신
-        
-        Parameters
-        ----------
-        new_security_ans : str, optional
-            새 salt로 재해싱된 보안답변. 제공 시 security_a_hash 컬럼도 갱신.
-            미제공 시 기존 동작(pw+salt만 변경)과 하위 호환 유지.
-        """
+    def update_user_password(self, email, pw_hash, salt):
+        """[v11.0 패치] 비밀번호 변경 시 Salt Rotation 필수 적용"""
         try:
-            if new_security_ans:
-                self.conn.execute(
-                    "UPDATE users SET password = ?, salt = ?, security_a_hash = ?, "
-                    "login_fail_count = 0, lock_until = NULL WHERE id = ?",
-                    [pw_hash, salt, new_security_ans, email]
-                )
-            else:
-                self.conn.execute(
-                    "UPDATE users SET password = ?, salt = ?, "
-                    "login_fail_count = 0, lock_until = NULL WHERE id = ?",
-                    [pw_hash, salt, email]
-                )
+            self.conn.execute("UPDATE users SET password = ?, salt = ?, login_fail_count = 0, lock_until = NULL WHERE id = ?", 
+                             [pw_hash, salt, email])
             self._sync_table_to_gist("users", USER_DB_FILE)
             return True
         except Exception as e:
-            print(f"❌ 비밀번호 업데이트 실패: {e}")
+            _logger.error(f" 비밀번호 업데이트 실패: {e}")
             return False
 
     # --- [v11.0 보안 패치: Rate Limit 로직] ---
@@ -301,13 +359,13 @@ class LDYDBManager:
             lock_time = None
             if new_count >= 5:
                 lock_time = datetime.now() + timedelta(minutes=10)
-                print(f"🔒 {email} 계정 10분 잠금 발동")
+                _logger.warning(f"🔒 {email} 계정 10분 잠금 발동")
                 
             self.conn.execute("UPDATE users SET login_fail_count = ?, lock_until = ? WHERE id = ?", 
                              [new_count, lock_time, email])
             self._sync_table_to_gist("users", USER_DB_FILE)
         except Exception as e:
-            print(f"⚠️ 실패 기록 오류: {e}")
+            _logger.warning(f" 실패 기록 오류: {e}")
 
     def get_login_failures(self, email):
         """현재 실패 횟수와 잠금 시간 조회"""
@@ -398,7 +456,7 @@ class LDYDBManager:
             try:
                 table_info = self.conn.execute("PRAGMA table_info(daily_recommend)").fetchall()
                 if len(table_info) > 0 and len(table_info) != 7:
-                    print(f"⚠️ 스키마 불일치 감지. 테이블을 재생성합니다.")
+                    _logger.warning(f" 스키마 불일치 감지. 테이블을 재생성합니다.")
                     self.conn.execute("DROP TABLE daily_recommend")
             except:
                 pass
@@ -454,10 +512,10 @@ class LDYDBManager:
             self.conn.execute(f"DELETE FROM daily_recommend WHERE trade_date = '{date_val}'")
             self.conn.execute("INSERT INTO daily_recommend SELECT * FROM target_df")
             
-            print(f"✅ DB Saved: {len(target_df)} rows for {date_val}")
+            _logger.info(f" DB Saved: {len(target_df)} rows for {date_val}")
             
         except Exception as e:
-            print(f"❌ DB Save Failed: {e}")
+            _logger.error(f" DB Save Failed: {e}")
 
     def save_inquiries(self, items):
         self.conn.execute("DELETE FROM inquiries")
@@ -475,7 +533,7 @@ class LDYDBManager:
         try:
             self.conn.close()
         except Exception as e:
-            print(f"⚠️ DB Close Error: {e}")
+            _logger.warning(f" DB Close Error: {e}")
 
 
 # ═══════════════════════════════════════════════════
@@ -499,6 +557,7 @@ def get_db(force_refresh: bool = False) -> LDYDBManager:
 
     ✅ 동시성: Double-Checked Locking
     ✅ 쿼리 직렬화: db.execute_safe() 사용 권장
+    ✅ TTL 갱신: 백그라운드 스레드 (사용자 블로킹 0)
     """
     global _db_instance, _db_init_time
 
@@ -506,19 +565,12 @@ def get_db(force_refresh: bool = False) -> LDYDBManager:
 
     # Fast path (락 없이)
     if _db_instance is not None and not force_refresh:
-        # TTL 체크: gist 재로드만 (연결은 유지)
+        # TTL 만료 → 백그라운드 스레드로 갱신 (사용자 블로킹 없음)
         if (now - _db_init_time) > _DB_TTL_SECONDS:
-            with _db_lock:
-                if (now - _db_init_time) > _DB_TTL_SECONDS:
-                    try:
-                        _db_instance._load_users_from_gist()
-                        _db_instance._load_inquiries_from_gist()
-                    except Exception as e:
-                        print(f"⚠️ TTL 갱신 실패 (기존 데이터 유지): {e}")
-                    _db_init_time = _time.monotonic()
+            _schedule_background_refresh()
         return _db_instance
 
-    # Slow path (초기화)
+    # Slow path (최초 초기화)
     with _db_lock:
         if _db_instance is None or force_refresh:
             if _db_instance is not None:
@@ -530,6 +582,61 @@ def get_db(force_refresh: bool = False) -> LDYDBManager:
             _db_init_time = _time.monotonic()
 
     return _db_instance
+
+
+_bg_refresh_running = False
+
+def _schedule_background_refresh():
+    """백그라운드 스레드로 Gist 갱신 — 사용자 요청을 절대 블로킹하지 않음"""
+    global _bg_refresh_running, _db_init_time
+    if _bg_refresh_running:
+        return  # 이미 갱신 중 → 스킵
+
+    def _do_refresh():
+        global _bg_refresh_running, _db_init_time
+        try:
+            _bg_refresh_running = True
+            if _db_instance is None:
+                return
+            # ① 락 밖에서 다운로드 (3~5초 소요 가능)
+            downloaded = _db_instance._download_gist_data()
+            # ② 짧은 락으로 데이터 교체만 (밀리초)
+            if downloaded:
+                with _db_lock:
+                    _db_instance._apply_gist_data(downloaded)
+                    _db_init_time = _time.monotonic()
+            else:
+                # 타임스탬프만 갱신 (재시도 폭주 방지)
+                _db_init_time = _time.monotonic()
+        except Exception as e:
+            _logger.warning(f" 백그라운드 Gist 갱신 실패 (기존 데이터 유지): {e}")
+            _db_init_time = _time.monotonic()
+        finally:
+            _bg_refresh_running = False
+
+    threading.Thread(target=_do_refresh, daemon=True, name="gist-refresh").start()
+
+
+def start_gist_background_loader(interval_sec: int = 600):
+    """NiceGUI app.on_startup에서 호출 — 주기적 백그라운드 Gist 동기화
+
+    사용법 (main.py):
+        from db_utils import get_db, start_gist_background_loader
+        app.on_startup(lambda: start_gist_background_loader(600))
+    """
+    import time as _t
+
+    def _loop():
+        # 최초 로드
+        db = get_db()
+        if db:
+            db.ensure_gist_loaded()
+        # 주기적 갱신
+        while True:
+            _t.sleep(interval_sec)
+            _schedule_background_refresh()
+
+    threading.Thread(target=_loop, daemon=True, name="gist-bg-loader").start()
 
 
 def _reset_db_singleton():
