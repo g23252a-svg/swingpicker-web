@@ -261,11 +261,29 @@ class LDYDBManager:
         self.conn.execute("UPDATE users SET last_login = ? WHERE id = ?", [datetime.now(), email])
         self._sync_table_to_gist("users", USER_DB_FILE)
 
-    def update_user_password(self, email, pw_hash, salt):
-        """[v11.0 패치] 비밀번호 변경 시 Salt Rotation 필수 적용"""
+    def update_user_password(self, email, pw_hash, salt, new_security_ans=None):
+        """
+        [v3.0] 비밀번호 변경 시 Salt Rotation + 보안답변 동시 갱신
+        
+        Parameters
+        ----------
+        new_security_ans : str, optional
+            새 salt로 재해싱된 보안답변. 제공 시 security_a_hash 컬럼도 갱신.
+            미제공 시 기존 동작(pw+salt만 변경)과 하위 호환 유지.
+        """
         try:
-            self.conn.execute("UPDATE users SET password = ?, salt = ?, login_fail_count = 0, lock_until = NULL WHERE id = ?", 
-                             [pw_hash, salt, email])
+            if new_security_ans:
+                self.conn.execute(
+                    "UPDATE users SET password = ?, salt = ?, security_a_hash = ?, "
+                    "login_fail_count = 0, lock_until = NULL WHERE id = ?",
+                    [pw_hash, salt, new_security_ans, email]
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE users SET password = ?, salt = ?, "
+                    "login_fail_count = 0, lock_until = NULL WHERE id = ?",
+                    [pw_hash, salt, email]
+                )
             self._sync_table_to_gist("users", USER_DB_FILE)
             return True
         except Exception as e:
