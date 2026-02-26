@@ -1,9 +1,5 @@
-# ═══════════════════════════════════════════════════
-#  swingpicker-web .gitignore
-#  [v3.4] 감사 결과 반영: DuckDB·venv 추가, 모델 와일드카드화
-# ═══════════════════════════════════════════════════
+# swingpicker-web .gitignore v3.4
 
-# ─── Python Cache & Virtual Env ───
 __pycache__/
 *.py[cod]
 *$py.class
@@ -17,20 +13,13 @@ venv/
 .venv/
 env/
 
-# ─── Secrets & Config ───
 .env
 *.env
 .streamlit/secrets.toml
-# 주의: .streamlit/config.toml 은 UI 테마용이므로 커밋 유지
 
-# ─── Data: 시스템 생성 파일 전체 무시 (Railway Volume에 위임) ───
 data/*
 !data/.keep
 
-# ─── Data: ML 모델 (Railway Volume에 위임) ───
-# data/ 전체가 이미 무시되므로 별도 규칙 불필요
-
-# ─── Cache & DB (런타임 생성) ───
 docs_cache/
 *.db
 *.db-journal
@@ -38,7 +27,6 @@ docs_cache/
 *.duckdb
 *.duckdb.wal
 
-# ─── IDE & OS ───
 .vscode/
 .idea/
 *.swp
