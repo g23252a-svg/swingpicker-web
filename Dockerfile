@@ -1,26 +1,36 @@
 # ─────────────────────────────────────────────
 # LDY Pro Trader — NiceGUI Docker Image
-# Railway/Render/Fly.io 배포용
+# Railway 배포 최적화 (v4.0)
 # ─────────────────────────────────────────────
 FROM python:3.11-slim
 
-# 시스템 패키지 (최소)
+# 1. 환경 변수 (로그 실시간 출력 + KST 시간대)
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Asia/Seoul
+
+# 2. 시스템 패키지 (tzdata 추가)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ && \
+    gcc \
+    g++ \
+    tzdata && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     rm -rf /var/lib/apt/lists/*
 
+# 3. 작업 디렉토리
 WORKDIR /app
 
-# 의존성 먼저 설치 (캐시 활용)
+# 4. 의존성 설치 (pip 최신화 → requirements)
 COPY requirements_nicegui.txt requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# 소스 코드 복사
+# 5. 소스 코드 복사
 COPY . .
 
-# Railway는 PORT 환경변수를 자동 주입
+# 6. 포트 (Railway가 $PORT로 동적 덮어씀)
 ENV PORT=8080
-EXPOSE 8080
+EXPOSE ${PORT}
 
-# NiceGUI 실행
+# 7. 실행
 CMD ["python", "main.py"]
