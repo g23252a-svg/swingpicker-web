@@ -2293,7 +2293,12 @@ def main(
                 log(f"⚠️ {code6} 분석 오류: {type(e).__name__}: {e}")
                 continue
     else:
-        # 🔥 [수정 대상] 병렬 처리 (CPU 연산 분산)
+        # ⚠️ [v3.4 NOTE] ThreadPoolExecutor의 GIL 한계
+        # analyze_ticker는 CPU-bound Pandas 연산이므로 ThreadPool에서
+        # 실질적 병렬화 이득이 제한적. 그러나:
+        #   - 내부에 pykrx API 호출(I/O)이 혼재된 경우 이점 있음
+        #   - ProcessPoolExecutor는 DataFrame 직렬화 오버헤드가 큼
+        # 현재는 ThreadPool 유지하되, 장기적으로 전체 벡터 연산 전환 검토.
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
             futs = []
             for t in tickers:
@@ -2422,22 +2427,25 @@ def main(
         # 5. [정예군 편성] Elite 120 대형 박제 (Placement Logic)
         # -----------------------------------------------------------
 
-        # ── [Phase 2-1] 전략 팩토리 실행 ──
+        # ── [Phase 2-1] 전략 팩토리 실행 (가중치 기반) ──
         df_out["STRATEGY"] = "default"  # 초기화
         try:
-            from strategies import StrategyFactory, select_strategies
+            from strategies import StrategyFactory
             _breadth_all = breadth.get("ALL", 50.0)
-            _active_strats = select_strategies(macro_risk, _breadth_all)
-            log(f"🎯 활성 전략: {_active_strats} (breadth={_breadth_all:.1f}, macro={macro_risk})")
-            if _active_strats:
+            _candidates = StrategyFactory.select(macro_risk, _breadth_all)
+            log(f"🎯 활성 전략: {_candidates} (breadth={_breadth_all:.1f}, macro={macro_risk})")
+            if _candidates:
                 _all_strat_picks = []
-                for _sname in _active_strats:
+                _default_top_k = 5
+                for _sname, _weight in _candidates:
                     _strat = StrategyFactory.create(_sname)
                     _filtered = _strat.filter(df_out)
                     _scored = _strat.score(_filtered)
-                    _picks = _strat.rank_and_pick(_scored, top_k=5)
+                    _adj_k = max(2, round(_default_top_k * _weight))
+                    _picks = _strat.rank_and_pick(_scored, top_k=_adj_k)
                     _all_strat_picks.append(_picks)
-                    log(f"   {'✅' if len(_picks) else '⬜'} {_sname}: 필터 {len(_filtered)}건 → 선정 {len(_picks)}건")
+                    log(f"   {'✅' if len(_picks) else '⬜'} {_sname}(w={_weight:.2f}): "
+                        f"필터 {len(_filtered)}건 → 선정 {len(_picks)}건")
                 if _all_strat_picks:
                     _strat_df = pd.concat(_all_strat_picks, ignore_index=True)
                     _key = "종목코드" if "종목코드" in _strat_df.columns else _strat_df.index.name
