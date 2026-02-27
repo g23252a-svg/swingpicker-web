@@ -193,7 +193,7 @@ def render_kelly_calculator(row_data: dict, container):
                 value=10_000_000,
                 min=100_000,
                 step=500_000,
-                format="%,.0f",
+                format="%.0f",
             ).classes("flex-1 min-w-[200px]")
 
             wr_input = ui.number(
