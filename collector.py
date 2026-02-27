@@ -1527,40 +1527,95 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
     if os.path.exists(path):
         try:
             df = pd.read_csv(path, dtype=str)
-            return dict(zip(df["종목코드"], df["종목명"]))
+            cached_map = dict(zip(df["종목코드"], df["종목명"]))
+            # sanity check: 종목명이 종목코드와 동일한 비율이 높으면 캐시 무효화
+            if cached_map:
+                _bad = sum(1 for c, n in cached_map.items() if c == n)
+                if _bad / len(cached_map) > 0.3:
+                    log(f"⚠️ 종목명 캐시 오염 감지 ({_bad}/{len(cached_map)}건이 코드=이름), 재생성")
+                else:
+                    return cached_map
         except (pd.errors.ParserError, KeyError, OSError) as e:
             logger.debug(f"종목명 캐시 파싱 실패, 재생성: {e}")
 
     log("🔄 종목명 매핑 정보 생성 중... (FDR 우선)")
     name_map = {}
 
-    # 2. FDR로 전체 종목명 한방에 가져오기 (가장 확실하고 빠름)
+    # 2. FDR로 전체 종목명 한방에 가져오기
     try:
-        # KRX 전체 상장 종목 리스트 다운로드
         df_fdr = fdr.StockListing("KRX")
-        
-        # FDR 버전에 따라 컬럼명이 Code/Symbol로 다를 수 있음
-        code_col = "Code" if "Code" in df_fdr.columns else ("Symbol" if "Symbol" in df_fdr.columns else None)
-        
-        if code_col and "Name" in df_fdr.columns:
-            # [v3.2] iterrows 제거 → 벡터화
-            codes = df_fdr[code_col].astype(str).str.strip().str.zfill(6)
-            names = df_fdr["Name"].astype(str).str.strip()
-            name_map.update(dict(zip(codes, names)))
-            log(f"✅ FDR 종목명 확보 완료: {len(name_map)}개")
+
+        if df_fdr is not None and not df_fdr.empty:
+            # FDR 버전별 컬럼명 변형 모두 대응
+            _code_candidates = ["Code", "Symbol", "Ticker", "ISU_SRT_CD", "종목코드"]
+            _name_candidates = ["Name", "종목명", "ISU_ABBRV"]
+
+            code_col = None
+            for c in _code_candidates:
+                if c in df_fdr.columns:
+                    code_col = c
+                    break
+
+            name_col = None
+            for c in _name_candidates:
+                if c in df_fdr.columns:
+                    name_col = c
+                    break
+
+            # 일부 FDR 버전은 종목코드가 index에 들어감
+            if code_col is None and df_fdr.index.dtype == object:
+                sample_idx = str(df_fdr.index[0]).strip()
+                if sample_idx.isdigit() and len(sample_idx) == 6:
+                    df_fdr = df_fdr.reset_index()
+                    df_fdr.rename(columns={df_fdr.columns[0]: "_idx_code"}, inplace=True)
+                    code_col = "_idx_code"
+
+            if code_col and name_col:
+                codes = df_fdr[code_col].astype(str).str.strip().str.zfill(6)
+                names = df_fdr[name_col].astype(str).str.strip()
+                name_map.update(dict(zip(codes, names)))
+                log(f"✅ FDR 종목명 확보 완료: {len(name_map)}개 (code_col={code_col}, name_col={name_col})")
+            else:
+                log(f"⚠️ FDR 컬럼 매칭 실패: code_col={code_col}, name_col={name_col}, 실제 컬럼={df_fdr.columns.tolist()[:10]}")
+        else:
+            log("⚠️ FDR StockListing('KRX') 결과가 비어 있음")
     except Exception as e:
         log(f"⚠️ FDR 종목명 조회 실패: {e}")
 
-    # 3. FDR 실패했거나 누락된 게 있다면 pykrx로 보완 (기존 방식)
-    # (FDR이 성공했다면 이 부분은 거의 실행되지 않음)
+    # 2-1. FDR 실패 시 KRX Open API 직접 호출 폴백
+    if not name_map:
+        log("🔄 FDR 실패 → KRX 직접 조회 폴백 시도...")
+        try:
+            _krx_url = "http://data.krx.co.kr/comm/bldAttend498/getJsonData.cmd"
+            for _mkt_id in ["STK", "KSQ"]:  # KOSPI, KOSDAQ
+                _payload = {
+                    "bld": "dbms/MDC/STAT/standard/MDCSTAT01901",
+                    "mktId": _mkt_id,
+                    "share": "1",
+                    "csvxls_is498": "false",
+                }
+                _headers = {"User-Agent": "Mozilla/5.0", "Referer": "http://data.krx.co.kr/contents/MDC/MDI/mdiStat/default.cmd"}
+                resp = requests.post(_krx_url, data=_payload, headers=_headers, timeout=15)
+                if resp.ok:
+                    _items = resp.json().get("OutBlock_1", [])
+                    for item in _items:
+                        _c = str(item.get("ISU_SRT_CD", "")).strip().zfill(6)
+                        _n = str(item.get("ISU_ABBRV", "")).strip()
+                        if _c and _n and _c != _n:
+                            name_map[_c] = _n
+            if name_map:
+                log(f"✅ KRX 직접 조회 성공: {len(name_map)}개")
+        except Exception as e:
+            log(f"⚠️ KRX 직접 조회 실패: {e}")
+
+    # 3. FDR/KRX 모두 실패 시 pykrx로 보완 (느림)
     if (not name_map) and PYKRX_OK and (stock is not None):
-        log("🔄 FDR 데이터 부족 -> pykrx로 개별 조회 시도 (느림)")
+        log("🔄 FDR/KRX 모두 실패 -> pykrx로 개별 조회 시도 (느림)")
         for m in ["KOSPI", "KOSDAQ"]:
             try:
                 tickers = safe_ticker_list(d, market=m)
                 for t in tickers:
                     code = str(t).zfill(6)
-                    # 이미 FDR로 확보했으면 패스
                     if code in name_map:
                         continue
                         
@@ -1568,7 +1623,7 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
                     if nm:
                         name_map[code] = nm
                     else:
-                        name_map[code] = code # 이름 없으면 코드라도 사용
+                        name_map[code] = code
                     time.sleep(0.001) 
             except:
                 pass
