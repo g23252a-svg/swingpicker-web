@@ -166,5 +166,26 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": []
+  },
+  {
+    "code": "064400",
+    "name": "064400",
+    "entry_ymd": "20260227",
+    "entry_px": 74500.0,
+    "qty": 0,
+    "stop_px": 71500.0,
+    "stop_px_initial": 71500.0,
+    "take_px1": 83500.0,
+    "take_px2": 85000.0,
+    "trailing_high": 75400.0,
+    "status": "OPEN",
+    "last_check_ymd": "20260227",
+    "last_close_px": 74300.0,
+    "unrealized_pnl_pct": -0.27,
+    "realized_pnl_pct": 0.0,
+    "close_ymd": "",
+    "close_px": 0.0,
+    "close_reason": "",
+    "alerted_events": []
   }
 ]
