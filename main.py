@@ -264,7 +264,28 @@ class DataStore:
                             .map(_code_to_name)
                             .fillna(df.loc[mask, "종목명"])
                         )
-                        logger.info(f"🔧 종목명 오염 {mask.sum()}건 자동 복구")
+                        logger.info(f"🔧 종목명 오염 {mask.sum()}건 자동 복구 [KRX캐시]")
+                    else:
+                        # 최후 수단: Naver Finance API로 개별 조회
+                        _naver_fixed = 0
+                        _codes = df.loc[mask, "종목코드"].astype(str).str.zfill(6).unique()
+                        logger.info(f"🔄 Naver API로 종목명 {len(_codes)}건 개별 조회 시도...")
+                        for _c in _codes:
+                            try:
+                                _r = requests.get(
+                                    f"https://m.stock.naver.com/api/stock/{_c}/basic",
+                                    timeout=5,
+                                    headers={"User-Agent": "Mozilla/5.0"}
+                                )
+                                if _r.ok:
+                                    _name = _r.json().get("stockName", "")
+                                    if _name and _name != _c:
+                                        df.loc[(mask) & (df["종목코드"].astype(str).str.zfill(6) == _c), "종목명"] = _name
+                                        _naver_fixed += 1
+                            except Exception:
+                                pass
+                        if _naver_fixed:
+                            logger.info(f"🔧 종목명 오염 {_naver_fixed}/{len(_codes)}건 복구 [Naver]")
             # ─── 종목명 복구 끝 ──────────────────────────────────
 
             primary = next((c for c in ["DISPLAY_SCORE", "FINAL_SCORE", "TOTAL_SCORE"] if c in df.columns and df[c].abs().sum() > 0), None)
@@ -316,40 +337,79 @@ def _recent_trade_date() -> str:
 _KRX_NAME_MAP = {}
 
 def _ensure_krx_map():
-    """FDR로 전체 종목 목록 로드 (pykrx 대신 — Railway 해외 IP에서도 동작)"""
+    """전체 종목 목록 로드 (FDR → GitHub CSV → 로컬 파일 순 폴백)"""
     global _KRX_NAME_MAP
     if _KRX_NAME_MAP:
         return
-    if not FDR_OK:
-        return
+
+    # ── 방법 1: FDR (Railway 해외 IP에서 실패 가능) ──
+    if FDR_OK:
+        try:
+            listing = fdr.StockListing("KRX")
+            if listing is not None and not listing.empty:
+                code_col = None
+                for c in ["Code", "Symbol", "Ticker", "ISU_SRT_CD", "종목코드"]:
+                    if c in listing.columns:
+                        code_col = c
+                        break
+                name_col = None
+                for c in ["Name", "종목명", "ISU_ABBRV"]:
+                    if c in listing.columns:
+                        name_col = c
+                        break
+                if code_col is None and listing.index.dtype == object:
+                    sample_idx = str(listing.index[0]).strip()
+                    if sample_idx.isdigit() and len(sample_idx) == 6:
+                        listing = listing.reset_index()
+                        listing.rename(columns={listing.columns[0]: "_idx_code"}, inplace=True)
+                        code_col = "_idx_code"
+                if code_col and name_col:
+                    _KRX_NAME_MAP = dict(zip(listing[name_col], listing[code_col].astype(str).str.zfill(6)))
+                    logger.info(f"✅ KRX 종목 캐시 [FDR]: {len(_KRX_NAME_MAP)}개")
+                    return
+                else:
+                    logger.warning(f"⚠️ FDR 컬럼 매칭 실패: cols={listing.columns.tolist()[:10]}")
+        except Exception as e:
+            logger.warning(f"⚠️ FDR 로드 실패: {e}")
+
+    # ── 방법 2: GitHub에서 krx_names_latest.csv 다운로드 ──
     try:
-        listing = fdr.StockListing("KRX")
-        if listing is not None and not listing.empty:
-            # FDR 버전별 컬럼명 변형 모두 대응
-            code_col = None
-            for c in ["Code", "Symbol", "Ticker", "ISU_SRT_CD", "종목코드"]:
-                if c in listing.columns:
-                    code_col = c
-                    break
-            name_col = None
-            for c in ["Name", "종목명", "ISU_ABBRV"]:
-                if c in listing.columns:
-                    name_col = c
-                    break
-            # 일부 FDR 버전은 종목코드가 index에 들어감
-            if code_col is None and listing.index.dtype == object:
-                sample_idx = str(listing.index[0]).strip()
-                if sample_idx.isdigit() and len(sample_idx) == 6:
-                    listing = listing.reset_index()
-                    listing.rename(columns={listing.columns[0]: "_idx_code"}, inplace=True)
-                    code_col = "_idx_code"
-            if code_col and name_col:
-                _KRX_NAME_MAP = dict(zip(listing[name_col], listing[code_col].astype(str).str.zfill(6)))
-                logger.info(f"✅ KRX 전체 종목 캐시 로드: {len(_KRX_NAME_MAP)}개 (code={code_col}, name={name_col})")
-            else:
-                logger.warning(f"⚠️ KRX 캐시 컬럼 매칭 실패: code={code_col}, name={name_col}, cols={listing.columns.tolist()[:10]}")
+        _base = REMOTE_CSV_URL.rsplit("/", 1)[0]  # .../data
+        _names_url = f"{_base}/krx_names_latest.csv"
+        resp = requests.get(_names_url, timeout=10)
+        if resp.ok and resp.text.strip():
+            _df = pd.read_csv(io.StringIO(resp.text), dtype=str)
+            if "종목코드" in _df.columns and "종목명" in _df.columns:
+                _map = {}
+                for _, row in _df.iterrows():
+                    c = str(row["종목코드"]).strip().zfill(6)
+                    n = str(row["종목명"]).strip()
+                    if c != n and n:
+                        _map[n] = c
+                if _map:
+                    _KRX_NAME_MAP = _map
+                    logger.info(f"✅ KRX 종목 캐시 [GitHub]: {len(_KRX_NAME_MAP)}개")
+                    return
     except Exception as e:
-        logger.warning(f"KRX 종목 목록 로드 실패: {e}")
+        logger.warning(f"⚠️ GitHub 종목명 다운로드 실패: {e}")
+
+    # ── 방법 3: 로컬 파일 폴백 ──
+    for _path in ["data/krx_names_latest.csv", "/app/data/krx_names_latest.csv"]:
+        try:
+            if os.path.exists(_path):
+                _df = pd.read_csv(_path, dtype=str)
+                if "종목코드" in _df.columns and "종목명" in _df.columns:
+                    _map = {str(row["종목명"]).strip(): str(row["종목코드"]).strip().zfill(6)
+                            for _, row in _df.iterrows()
+                            if str(row["종목명"]).strip() != str(row["종목코드"]).strip()}
+                    if _map:
+                        _KRX_NAME_MAP = _map
+                        logger.info(f"✅ KRX 종목 캐시 [로컬]: {len(_KRX_NAME_MAP)}개")
+                        return
+        except Exception:
+            pass
+
+    logger.warning("⚠️ KRX 종목 매핑 로드 완전 실패 — 종목명이 코드로 표시될 수 있음")
 
 
 def find_code_by_name(name, code_map):
