@@ -251,6 +251,22 @@ class DataStore:
                 if c in df.columns:
                     df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
+            # ─── 종목명 오염 자동 복구 (종목명==종목코드인 경우) ───
+            if "종목코드" in df.columns and "종목명" in df.columns:
+                mask = df["종목명"].astype(str).str.match(r'^\d+$')
+                if mask.any():
+                    _ensure_krx_map()
+                    if _KRX_NAME_MAP:
+                        # _KRX_NAME_MAP은 {이름: 코드} → 역전하여 {코드: 이름}
+                        _code_to_name = {v: k for k, v in _KRX_NAME_MAP.items()}
+                        df.loc[mask, "종목명"] = (
+                            df.loc[mask, "종목코드"].astype(str).str.zfill(6)
+                            .map(_code_to_name)
+                            .fillna(df.loc[mask, "종목명"])
+                        )
+                        logger.info(f"🔧 종목명 오염 {mask.sum()}건 자동 복구")
+            # ─── 종목명 복구 끝 ──────────────────────────────────
+
             primary = next((c for c in ["DISPLAY_SCORE", "FINAL_SCORE", "TOTAL_SCORE"] if c in df.columns and df[c].abs().sum() > 0), None)
             if primary:
                 for alias in ["DISPLAY_SCORE", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE"]:
@@ -309,11 +325,29 @@ def _ensure_krx_map():
     try:
         listing = fdr.StockListing("KRX")
         if listing is not None and not listing.empty:
-            code_col = "Code" if "Code" in listing.columns else "Symbol"
-            name_col = "Name" if "Name" in listing.columns else "종목명"
-            if code_col in listing.columns and name_col in listing.columns:
+            # FDR 버전별 컬럼명 변형 모두 대응
+            code_col = None
+            for c in ["Code", "Symbol", "Ticker", "ISU_SRT_CD", "종목코드"]:
+                if c in listing.columns:
+                    code_col = c
+                    break
+            name_col = None
+            for c in ["Name", "종목명", "ISU_ABBRV"]:
+                if c in listing.columns:
+                    name_col = c
+                    break
+            # 일부 FDR 버전은 종목코드가 index에 들어감
+            if code_col is None and listing.index.dtype == object:
+                sample_idx = str(listing.index[0]).strip()
+                if sample_idx.isdigit() and len(sample_idx) == 6:
+                    listing = listing.reset_index()
+                    listing.rename(columns={listing.columns[0]: "_idx_code"}, inplace=True)
+                    code_col = "_idx_code"
+            if code_col and name_col:
                 _KRX_NAME_MAP = dict(zip(listing[name_col], listing[code_col].astype(str).str.zfill(6)))
-                logger.info(f"✅ KRX 전체 종목 캐시 로드: {len(_KRX_NAME_MAP)}개")
+                logger.info(f"✅ KRX 전체 종목 캐시 로드: {len(_KRX_NAME_MAP)}개 (code={code_col}, name={name_col})")
+            else:
+                logger.warning(f"⚠️ KRX 캐시 컬럼 매칭 실패: code={code_col}, name={name_col}, cols={listing.columns.tolist()[:10]}")
     except Exception as e:
         logger.warning(f"KRX 종목 목록 로드 실패: {e}")
 
