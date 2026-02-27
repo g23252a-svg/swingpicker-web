@@ -1,0 +1,26 @@
+[
+  {
+    "code": "489790",
+    "name": "489790",
+    "entry_ymd": "20260227",
+    "entry_px": 68600.0,
+    "qty": 0,
+    "stop_px": 65800.0,
+    "stop_px_initial": 65800.0,
+    "take_px1": 77000.0,
+    "take_px2": 78400.0,
+    "trailing_high": 94400.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260227",
+    "last_close_px": 86000.0,
+    "unrealized_pnl_pct": 25.36,
+    "realized_pnl_pct": 25.36,
+    "close_ymd": "20260227",
+    "close_px": 86000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "489790_20260227_TP1_HIT_20260227",
+      "489790_20260227_TP2_HIT_20260227"
+    ]
+  }
+]
