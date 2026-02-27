@@ -36,6 +36,25 @@ from plotly.subplots import make_subplots
 
 from nicegui import ui, app
 
+# ─── 신규 모듈 (v13 개선) ───
+try:
+    from price_cache import fetch_with_cache, fetch_prices_async, cache_stats, set_cache
+    PRICE_CACHE_OK = True
+except ImportError:
+    PRICE_CACHE_OK = False
+
+try:
+    from kelly_widget import render_kelly_calculator, render_portfolio_kelly_summary
+    KELLY_OK = True
+except ImportError:
+    KELLY_OK = False
+
+try:
+    from trade_journal_tab import render_trade_journal_tab
+    JOURNAL_OK = True
+except ImportError:
+    JOURNAL_OK = False
+
 # ─── 기존 모듈 재사용 ───
 from shared_utils import nz_num, safe_float, calc_hma as calc_hma_series
 from chart_components import (
@@ -369,6 +388,78 @@ def get_stock_chart_data(code):
         return None
 
 
+def _add_vpvr_trace(fig, df, price_bins: int = 25):
+    """
+    가격대별 거래량 히스토그램 (VPVR) — 캔들차트 우측에 투명 바 오버레이.
+    매물대가 두꺼운 구간(황색)이 지지·저항선 역할을 시각적으로 납득시킨다.
+
+    ✅ [Fix #3] 고래(Block Trade) 왜곡 방지:
+      - 95th percentile clip: 상위 5% 극단치를 95% 값으로 제한
+      - log1p 스케일: 이후 로그 변환으로 중간 매물대도 시각적으로 부각
+      덕분에 기관 블록딜 한 번이 터져도 나머지 매물대가 점처럼 사라지지 않는다.
+    """
+    try:
+        if "Volume" not in df.columns or df.empty:
+            return
+        lo = float(df["Low"].min())
+        hi = float(df["High"].max())
+        if hi <= lo:
+            return
+
+        bin_size = (hi - lo) / price_bins
+        centers, volumes = [], []
+        for i in range(price_bins):
+            b_lo = lo + bin_size * i
+            b_hi = b_lo + bin_size
+            mid  = (b_lo + b_hi) / 2
+            mask = (df["Close"] >= b_lo) & (df["Close"] < b_hi)
+            vol  = int(df.loc[mask, "Volume"].sum())
+            centers.append(mid)
+            volumes.append(vol)
+
+        if not volumes or max(volumes) == 0:
+            return
+
+        # ── ✅ Fix #3a: 95th percentile clip (블록딜·자전거래 극단치 제거) ──
+        import numpy as np
+        arr        = np.array(volumes, dtype=float)
+        clip_ceil  = float(np.percentile(arr, 95))
+        arr_clipped = np.clip(arr, 0, clip_ceil)
+
+        # ── ✅ Fix #3b: log1p 스케일 (중간 매물대 시인성 확보) ──
+        arr_log = np.log1p(arr_clipped)
+        max_log = arr_log.max() if arr_log.max() > 0 else 1.0
+
+        n = len(df)
+        for mid, log_vol, raw_vol in zip(centers, arr_log, volumes):
+            if log_vol == 0:
+                continue
+            bar_w   = (log_vol / max_log) * n * 0.15  # 전체 캔들 폭의 15%
+            # 고거래량 강조 기준도 clip된 값 기준으로 (원본 arr 아닌 arr_clipped)
+            is_hv   = raw_vol >= float(np.percentile(arr, 70))
+            color   = "rgba(251,191,36,0.55)" if is_hv else "rgba(100,116,139,0.22)"
+            x_start_idx = max(0, n - 1 - int(bar_w))
+            x_start = df.index[x_start_idx]
+            x_end   = df.index[-1]
+            fig.add_shape(
+                type="rect",
+                x0=x_start, x1=x_end,
+                y0=mid - bin_size * 0.45,
+                y1=mid + bin_size * 0.45,
+                fillcolor=color,
+                line=dict(width=0),
+                layer="below",
+                row=1, col=1,
+            )
+    except Exception as e:
+        logger.debug(f"VPVR 렌더 실패: {e}")
+
+
+def _add_vpvr(fig, df, price_bins=30, row=1, col=1):
+    """(하위 호환 래퍼 — _add_vpvr_trace로 위임)"""
+    _add_vpvr_trace(fig, df, price_bins=price_bins)
+
+
 def plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, target2=None):
     """캔들차트 (dashboard.py plot_interactive_chart 변환)"""
     if df is None or df.empty:
@@ -438,6 +529,12 @@ def plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, targe
         fig.add_hrect(y0=70, y1=100, fillcolor="red", opacity=0.1, layer="below", row=cur_row, col=1)
         fig.add_hrect(y0=0, y1=30, fillcolor="blue", opacity=0.1, layer="below", row=cur_row, col=1)
 
+    # VPVR: 가격대별 거래량 히스토그램 (우측)
+    try:
+        _add_vpvr_trace(fig, df)
+    except Exception:
+        pass
+
     fig.update_layout(
         title=dict(text=f"<b>{name}</b> ({code})", x=0.02),
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
@@ -451,20 +548,29 @@ def plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, targe
 
 
 def fetch_current_price(code, name):
-    """현재가 조회 — FDR 전용 (Railway 해외 서버에서 pykrx/KRX 불가)"""
+    """현재가 조회 — 캐시 → Circuit Breaker → FDR 순 (Railway 해외 서버 대응)"""
     code_str = str(code).zfill(6) if str(code).isdigit() else ""
 
-    # 1차: 코드가 있으면 FDR로 최근 30일 조회
-    if FDR_OK and code_str:
+    def _fdr_fetch(c: str) -> int:
+        """FDR 동기 조회"""
+        if not FDR_OK or not c:
+            return 0
         try:
             start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-            d = fdr.DataReader(code_str, start)
+            d = fdr.DataReader(c, start)
             if d is not None and not d.empty:
-                return code, name, int(d.iloc[-1]["Close"])
+                return int(d.iloc[-1]["Close"])
         except Exception:
             pass
+        return 0
 
-    # 2차: 코드 없으면 (종목명만) → KRX 캐시에서 코드 찾아서 재시도
+    # ── 캐시 + Circuit Breaker 경로 ──
+    if PRICE_CACHE_OK and code_str:
+        c, n, p = fetch_with_cache(code_str, name, _fdr_fetch)
+        if p > 0:
+            return c, n, p
+
+    # ── 코드 없으면 KRX 캐시에서 검색 ──
     if FDR_OK and not code_str:
         _ensure_krx_map()
         found = _KRX_NAME_MAP.get(name)
@@ -474,13 +580,20 @@ def fetch_current_price(code, name):
                     found = v
                     break
         if found:
-            try:
-                start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-                d = fdr.DataReader(found, start)
-                if d is not None and not d.empty:
-                    return found, name, int(d.iloc[-1]["Close"])
-            except Exception:
-                pass
+            if PRICE_CACHE_OK:
+                c, n, p = fetch_with_cache(found, name, _fdr_fetch)
+                if p > 0:
+                    return found, name, p
+            else:
+                p = _fdr_fetch(found)
+                if p > 0:
+                    return found, name, p
+
+    # ── 직접 FDR (캐시 없는 fallback) ──
+    if FDR_OK and code_str:
+        p = _fdr_fetch(code_str)
+        if p > 0:
+            return code, name, p
 
     return code, name, 0
 
@@ -751,6 +864,7 @@ def index():
         t5 = ui.tab("⚖️ 약관")
         t6 = ui.tab("🧩 업데이트")
         t7 = ui.tab("📈 성과")
+        t9 = ui.tab("📓 매매 일지")
         if auth == "admin":
             t8 = ui.tab("👑 관리")
 
@@ -762,6 +876,11 @@ def index():
         with ui.tab_panel(t5): render_tab5_terms()
         with ui.tab_panel(t6): render_tab6_updates()
         with ui.tab_panel(t7): render_tab7_performance()
+        with ui.tab_panel(t9):
+            if JOURNAL_OK:
+                render_trade_journal_tab(df_scored=df)
+            else:
+                ui.label("⚠️ trade_journal_tab 모듈 없음").classes("text-yellow-400")
         if auth == "admin":
             with ui.tab_panel(t8): render_tab8_admin()
 
@@ -778,8 +897,97 @@ async def _do_refresh():
 # ═══════════════════════════════════════════
 #  Tab 1: 시장 현황
 # ═══════════════════════════════════════════
+def _render_macro_sparklines():
+    """
+    글로벌 매크로 스파크라인 배너 (Bloomberg 터미널 스타일).
+    FDR로 USD/KRW, NASDAQ, KOSPI, 미국 10년 국채금리 최근 20일 데이터.
+    """
+    if not FDR_OK:
+        return
+
+    MACRO_TICKERS = [
+        ("USD/KRW",    "USD/KRW",   "#F59E0B"),
+        ("NASDAQ",     "IXIC",      "#3B82F6"),
+        ("KOSPI",      "KS11",      "#10B981"),
+        ("US 10Y",     "US10YT=RR", "#E040FB"),
+    ]
+
+    with ui.card().classes("w-full p-3 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
+        ui.label("🌍 글로벌 매크로").classes("text-xs text-gray-400 mb-2")
+        with ui.row().classes("w-full gap-3 flex-wrap"):
+            for label, ticker, color in MACRO_TICKERS:
+                _spark_card(label, ticker, color)
+
+
+def _spark_card(label: str, ticker: str, color: str):
+    """개별 스파크라인 카드 (20일)"""
+    import plotly.graph_objects as go
+    try:
+        from nicegui import ui
+    except ImportError:
+        return
+
+    with ui.card().classes("flex-1 min-w-[140px] p-2 bg-[#1a1a2e] border border-gray-700/50 rounded-lg"):
+        val_label  = ui.label("—").classes("text-sm font-bold text-white")
+        chg_label  = ui.label("—").classes("text-xs")
+        chart_slot = ui.column().classes("w-full")
+
+        async def _load():
+            try:
+                start = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+                d = fdr.DataReader(ticker, start)
+                if d is None or d.empty:
+                    val_label.set_text("N/A")
+                    return
+                d = d.tail(20)
+                last   = float(d["Close"].iloc[-1])
+                prev   = float(d["Close"].iloc[-2]) if len(d) > 1 else last
+                chg    = (last - prev) / prev * 100 if prev else 0
+
+                # 표시 형식
+                if ticker in ("USD/KRW",):
+                    fmt = f"{last:,.1f}"
+                elif "10Y" in ticker:
+                    fmt = f"{last:.3f}%"
+                else:
+                    fmt = f"{last:,.2f}"
+
+                val_label.set_text(f"{label}: {fmt}")
+                chg_label.set_text(f"{chg:+.2f}%")
+                chg_label.classes(replace="text-xs text-green-400" if chg >= 0 else "text-xs text-red-400")
+
+                # 스파크라인 mini chart
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=list(range(len(d))),
+                    y=d["Close"].tolist(),
+                    mode="lines",
+                    line=dict(color=color, width=1.5),
+                    fill="tozeroy",
+                    fillcolor=f"{color}22",
+                    showlegend=False,
+                ))
+                fig.update_layout(
+                    height=50, margin=dict(t=0,b=0,l=0,r=0),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(visible=False),
+                    yaxis=dict(visible=False),
+                )
+                chart_slot.clear()
+                with chart_slot:
+                    ui.plotly(fig).classes("w-full")
+            except Exception as _e:
+                val_label.set_text(f"{label}: 조회 실패")
+
+        ui.timer(0.5, _load, once=True)
+
+
 def render_tab1_market(df):
     fg_score, fg_label = get_fear_greed(df)
+
+    # ── 매크로 스파크라인 배너 ──────────────────────────────
+    _render_macro_sparklines()
 
     section_title("📡 시장 현황")
     with ui.row().classes("w-full gap-4 flex-wrap"):
@@ -1006,6 +1214,13 @@ def render_tab2_stocks(df, auth):
             rc = {"ATTACK": "#EF4444", "ARMED": "#F59E0B", "WAIT": "#3B82F6", "NEUTRAL": "#6B7280"}.get(rv, "#6B7280")
             ui.label(f"⚡ 현재 상태: {rv}").classes("text-lg font-bold mt-4 px-4 py-2 rounded-lg text-white").style(f"background:{rc}")
 
+            # ── Kelly 포지션 사이저 (종목별) ─────────────────
+            if KELLY_OK:
+                kelly_holder = ui.card().classes(
+                    "w-full p-4 bg-[#1a1a2e] border border-yellow-700/40 rounded-xl mt-4"
+                )
+                render_kelly_calculator(row.to_dict(), kelly_holder)
+
     # 이벤트 바인딩
     for w in [view_mode, route_filter, sort_mode]:
         w.on("update:model-value", lambda _: _build_view())
@@ -1077,13 +1292,24 @@ def render_tab3_portfolio(df, auth):
         with result_area:
             ui.label("⚡ 시세 조회 중...").classes("text-gray-400")
 
-        # 현재가 조회
+        # ── 비동기 현재가 조회 (asyncio.gather) ──
         price_map = {}
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            futs = [ex.submit(fetch_current_price, t[0], t[1]) for t in targets]
-            for f in futs:
-                c, n, p = f.result()
-                price_map[c] = p
+        if PRICE_CACHE_OK and FDR_OK:
+            try:
+                price_results = await fetch_prices_async(
+                    [(t[0], t[1]) for t in targets], fdr
+                )
+                price_map = price_results
+            except Exception as _ae:
+                logger.warning(f"async 조회 실패, ThreadPool fallback: {_ae}")
+
+        # fallback: ThreadPoolExecutor
+        if not price_map:
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                futs = [ex.submit(fetch_current_price, t[0], t[1]) for t in targets]
+                for f in futs:
+                    c, n, p = f.result()
+                    price_map[c] = p
 
         total_eval = total_buy = 0.0
         pf_rows = []
@@ -1156,6 +1382,11 @@ def render_tab3_portfolio(df, auth):
                     pie_data.append({"종목명": "현금", "평가금": cash_amt})
                 fig = px.pie(pd.DataFrame(pie_data), values="평가금", names="종목명", title="📊 자산 구성", hole=0.4)
                 ui.plotly(_plotly_dark(fig, 300)).classes("w-full")
+
+            # ── Kelly 포지션 사이저 ──────────────────────────
+            if KELLY_OK and pf_rows:
+                kelly_section = ui.card().classes("w-full p-4 bg-[#1a1a2e] border border-yellow-700/40 rounded-xl mt-4")
+                render_portfolio_kelly_summary(pf_rows, total_eval, kelly_section)
 
     ui.button("🤖 AI 진단 실행", on_click=analyze).classes("mt-4").props("color=primary")
 
