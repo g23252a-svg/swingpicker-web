@@ -215,10 +215,10 @@ def render_trade_journal_tab(df_scored=None):
             f_score = ui.number("시스템 점수", value=0, min=0, max=100).classes("min-w-[100px]")
 
         with ui.row().classes("w-full gap-3 flex-wrap"):
-            f_rec   = ui.number("추천 매수가",  value=0, min=0, format="%,.0f").classes("flex-1")
-            f_act   = ui.number("실제 체결가",  value=0, min=0, format="%,.0f").classes("flex-1")
-            f_stop  = ui.number("손절가",       value=0, min=0, format="%,.0f").classes("flex-1")
-            f_tgt   = ui.number("목표가 (T1)",  value=0, min=0, format="%,.0f").classes("flex-1")
+            f_rec   = ui.number("추천 매수가",  value=0, min=0).classes("flex-1")
+            f_act   = ui.number("실제 체결가",  value=0, min=0).classes("flex-1")
+            f_stop  = ui.number("손절가",       value=0, min=0).classes("flex-1")
+            f_tgt   = ui.number("목표가 (T1)",  value=0, min=0).classes("flex-1")
             f_qty   = ui.number("수량",         value=0, min=0).classes("min-w-[80px]")
 
         f_notes = ui.input("메모", placeholder="진입 근거, 특이사항 등").classes("w-full")
@@ -392,7 +392,7 @@ def render_trade_journal_tab(df_scored=None):
                 })
 
             exit_id   = ui.number("청산 기록 ID", value=0, min=1).classes("min-w-[100px]")
-            exit_px   = ui.number("청산가", value=0, min=0, format="%,.0f").classes("min-w-[120px]")
+            exit_px   = ui.number("청산가", value=0, min=0).classes("min-w-[120px]")
             exit_note = ui.input("메모").classes("flex-1")
 
             def _do_exit():
