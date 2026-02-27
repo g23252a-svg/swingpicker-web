@@ -85,7 +85,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
           # .gitignore가 data/*를 막고 있으므로 -f(force)로 우회
-          # Railway Volume 이관 완료 시 이 스텝 전체 삭제
           git add -f data/*.csv data/*.json data/*.pkl data/*.pth || true
           git add -f data/*.parquet || true
           git add -f data/*.duckdb || true
@@ -95,7 +94,16 @@ jobs:
           
           git diff --staged --quiet || {
             git commit -m "chore: add CSV $(date +'%Y-%m-%d %H:%M:%S %Z')"
-            git pull --rebase -X theirs
-            git push
+            
+            # 원격 변경사항 가져오기 (충돌 시 collector 결과물 우선)
+            git fetch origin main
+            git merge origin/main --no-edit -X ours --allow-unrelated-histories || {
+              echo "⚠️ Merge 충돌 → collector 결과물 강제 적용"
+              git checkout --ours -- data/ || true
+              git add -A
+              git commit --no-edit -m "chore: resolve conflict — keep collector output" || true
+            }
+            
+            git push origin main
           }
           echo "Done."
