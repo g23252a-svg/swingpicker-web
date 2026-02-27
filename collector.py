@@ -2798,6 +2798,21 @@ def main(
     df_out.to_csv(out_path_latest, index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건) → {out_path_dated}")
 
+    # ── 종목명 매핑 파일 별도 저장 (Railway UI 복구용) ──
+    try:
+        _names_df = df_out[["종목코드", "종목명"]].drop_duplicates("종목코드")
+        # name_map에서 추가 보완 (recommend에 없는 종목도 포함)
+        if name_map:
+            _extra = [{"종목코드": c, "종목명": n} for c, n in name_map.items()
+                      if c not in _names_df["종목코드"].values and c != n]
+            if _extra:
+                _names_df = pd.concat([_names_df, pd.DataFrame(_extra)], ignore_index=True)
+        _names_path = os.path.join(OUT_DIR, "krx_names_latest.csv")
+        _names_df.to_csv(_names_path, index=False, encoding=UTF8)
+        log(f"📋 종목명 매핑 저장: {len(_names_df)}건 → {_names_path}")
+    except Exception as e:
+        log(f"⚠️ 종목명 매핑 파일 저장 실패: {e}")
+
     # DuckDB 저장
     try:
         from db_utils import get_db
