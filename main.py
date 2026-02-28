@@ -23,6 +23,7 @@ import logging
 import hashlib
 import secrets
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -171,6 +172,22 @@ def _create_salt(): return secrets.token_hex(16)
 def _hash_pw(pw, salt): return hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
 def _hash_ans(ans, salt): return _hash_pw(ans.strip().lower(), salt)
 
+def _authenticate_user(db, email: str, password: str):
+    """인증 로직 캡슐화: UI는 성공/실패만 받음.
+    반환: (user_dict, None) 성공 | (None, error_msg) 실패
+    """
+    u = db.get_user_by_id(email)
+    h = _hash_pw(password, u["salt"] if u else "dummy")
+    if not u or h != u.get("password"):
+        return None, "아이디 또는 비밀번호 오류"
+    if str(u.get("is_banned")).upper() in ("Y", "TRUE", "1"):
+        return None, "🚫 차단된 계정"
+    try:
+        db.update_login_timestamp(email)
+    except Exception:
+        pass
+    return u, None
+
 def normalize_email(email):
     email = email.strip().lower()
     if "@" not in email: return email
@@ -212,9 +229,21 @@ def get_auth_status():
 # ═══════════════════════════════════════════
 class DataStore:
     def __init__(self):
-        self.scored = pd.DataFrame()
+        self._lock = threading.Lock()
+        self._scored = pd.DataFrame()
         self.data_ts = ""
         self.loaded = False
+
+    @property
+    def scored(self):
+        """읽기 시 항상 스냅샷 복사본 반환 — 쓰기 중 참조 꼬임 방지"""
+        with self._lock:
+            return self._scored
+
+    @scored.setter
+    def scored(self, value):
+        with self._lock:
+            self._scored = value
 
     def refresh(self):
         df = None
@@ -936,23 +965,12 @@ def login_page():
                     if not db:
                         msg.set_text("❌ DB 연결 실패"); msg.classes(replace="text-sm mt-2 text-red-400"); return
                     clean = normalize_email(uid)
-                    u = db.get_user_by_id(clean)
-                    h = _hash_pw(pw, u["salt"] if u else "dummy")
-                    if u and h == u.get("password"):
-                        if str(u.get("is_banned")).upper() in ["Y", "TRUE", "1"]:
-                            msg.set_text("🚫 차단된 계정"); msg.classes(replace="text-sm mt-2 text-red-400"); return
-                        # ──────────────────────────────────────────
-                        # [Fix] 최근접속일 갱신
-                        # ──────────────────────────────────────────
-                        try:
-                            db.update_login_timestamp(clean)
-                        except Exception:
-                            pass
-                        set_current_user({"id": u["id"], "login_id": u["id"], "role": u.get("role", "free"),
-                                          "nickname": u.get("nickname"), "prime_expire_date": u.get("prime_expire_date")})
-                        ui.navigate.to("/")
-                    else:
-                        msg.set_text("아이디 또는 비밀번호 오류"); msg.classes(replace="text-sm mt-2 text-red-400")
+                    u, err = _authenticate_user(db, clean, pw)
+                    if err:
+                        msg.set_text(err); msg.classes(replace="text-sm mt-2 text-red-400"); return
+                    set_current_user({"id": u["id"], "login_id": u["id"], "role": u.get("role", "free"),
+                                      "nickname": u.get("nickname"), "prime_expire_date": u.get("prime_expire_date")})
+                    ui.navigate.to("/")
 
                 ui.button("로그인", on_click=do_login).classes("w-full mt-4").props("color=primary")
                 ui.button("🔓 둘러보기 (게스트)", on_click=lambda: ui.navigate.to("/")).classes("w-full mt-2").props("flat")
@@ -1234,7 +1252,7 @@ def render_tab2_stocks(df, auth):
     section_title("🎯 AI & Quant 추천 종목")
 
     # ── 테이블 참조 (nonlocal로 접근) ──
-    _tbl_ref = [None]  # list로 감싸서 closure에서 접근 가능하게
+    _tbl = None
 
     # ── 뷰모드 + 필터 + 액션 버튼 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
@@ -1245,7 +1263,8 @@ def render_tab2_stocks(df, auth):
         # ── 체크된 종목 → 매매일지 자동 추가 버튼 ──
         def _add_checked_to_journal():
             """체크된 종목들을 매매일지에 자동 등록"""
-            tbl = _tbl_ref[0]
+            nonlocal _tbl
+            tbl = _tbl
             if tbl is None:
                 ui.notify("⚠️ 테이블 뷰에서 사용해주세요", type="warning")
                 return
@@ -1323,8 +1342,9 @@ def render_tab2_stocks(df, auth):
         return fdf
 
     def _build_view():
+        nonlocal _tbl
         table_area.clear()
-        _tbl_ref[0] = None
+        _tbl = None
         show = _filtered()
         with table_area:
             if view_mode.value == "🃏 칸반":
@@ -1357,7 +1377,8 @@ def render_tab2_stocks(df, auth):
                 "sector": str(r.get("업종", "—")),
             })
         tbl = ui.table(columns=columns, rows=rows, row_key="code", selection="multiple", pagination={"rowsPerPage": 15}).classes("w-full").props("dense dark flat bordered")
-        _tbl_ref[0] = tbl  # 버튼 핸들러에서 접근 가능
+        nonlocal _tbl
+        _tbl = tbl  # 버튼 핸들러에서 접근 가능
 
         # 마지막 체크한 종목 상세 표시
         def _on_selection_change(e):
