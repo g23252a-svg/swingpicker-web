@@ -1204,6 +1204,9 @@ def render_tab1_market(df):
 def render_tab2_stocks(df, auth):
     section_title("🎯 AI & Quant 추천 종목")
 
+    # ── 테이블 참조 (nonlocal로 접근) ──
+    _tbl_ref = [None]  # list로 감싸서 closure에서 접근 가능하게
+
     # ── 뷰모드 + 필터 + 액션 버튼 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
         view_mode = ui.toggle(["📋 테이블", "🃏 칸반"], value="📋 테이블")
@@ -1211,31 +1214,37 @@ def render_tab2_stocks(df, auth):
         sort_mode = ui.toggle(["🔢 점수순", "🚦 상태순"], value="🔢 점수순")
 
         # ── 체크된 종목 → 매매일지 자동 추가 버튼 ──
-        journal_btn_msg = ui.label("").classes("text-sm")
-
         def _add_checked_to_journal():
             """체크된 종목들을 매매일지에 자동 등록"""
-            if not _selected_codes:
-                ui.notify("⚠️ 종목을 먼저 체크하세요", type="warning")
+            tbl = _tbl_ref[0]
+            if tbl is None:
+                ui.notify("⚠️ 테이블 뷰에서 사용해주세요", type="warning")
                 return
+
+            selected = tbl.selected
+            if not selected:
+                ui.notify("⚠️ 종목을 먼저 체크하세요 (왼쪽 체크박스 클릭)", type="warning")
+                return
+
             if not JOURNAL_OK:
                 ui.notify("⚠️ trade_journal_tab 모듈 없음", type="negative")
                 return
 
             from trade_journal_tab import save_trade
             added = 0
-            for code in _selected_codes:
+            for sel_row in selected:
+                code = str(sel_row.get("code", "")).zfill(6)
                 row = df[df["종목코드"].astype(str).str.zfill(6) == code]
                 if row.empty:
                     continue
                 r = row.iloc[0]
                 tid = save_trade({
-                    "stock_name":      str(r.get("종목명", "")),
+                    "stock_name":      str(r.get("종목명", sel_row.get("name", ""))),
                     "stock_code":      code,
-                    "route":           str(r.get("ROUTE", "")),
+                    "route":           str(r.get("ROUTE", sel_row.get("route", ""))),
                     "score":           safe_float(r.get("DISPLAY_SCORE", 0)),
                     "recommend_price": nz_num(r.get("추천매수가", 0)),
-                    "actual_price":    nz_num(r.get("추천매수가", 0)),  # 체결가 = 추천매수가 (나중에 수정 가능)
+                    "actual_price":    nz_num(r.get("추천매수가", 0)),
                     "stop_price":      nz_num(r.get("손절가", 0)),
                     "target_price":    nz_num(r.get("추천매도가1", 0)),
                     "qty":             0,
@@ -1245,7 +1254,10 @@ def render_tab2_stocks(df, auth):
                     added += 1
 
             if added > 0:
-                ui.notify(f"✅ {added}건 매매일지에 추가 완료! (📓 매매 일지 탭에서 확인)", type="positive")
+                ui.notify(f"✅ {added}건 매매일지 추가 완료! (📓 매매 일지 탭 확인)", type="positive")
+                # 선택 해제
+                tbl.selected.clear()
+                tbl.update()
             else:
                 ui.notify("❌ 추가 실패", type="negative")
 
@@ -1268,9 +1280,6 @@ def render_tab2_stocks(df, auth):
     table_area = ui.column().classes("w-full")
     detail_area = ui.column().classes("w-full mt-4")
 
-    # ── 다중 선택 상태 추적 ──
-    _selected_codes: list[str] = []
-
     def _filtered():
         fdf = df.copy()
         if route_filter.value != "전체" and "ROUTE" in fdf.columns:
@@ -1286,7 +1295,7 @@ def render_tab2_stocks(df, auth):
 
     def _build_view():
         table_area.clear()
-        _selected_codes.clear()
+        _tbl_ref[0] = None
         show = _filtered()
         with table_area:
             if view_mode.value == "🃏 칸반":
@@ -1319,14 +1328,15 @@ def render_tab2_stocks(df, auth):
                 "sector": str(r.get("업종", "—")),
             })
         tbl = ui.table(columns=columns, rows=rows, row_key="code", selection="multiple", pagination={"rowsPerPage": 15}).classes("w-full").props("dense dark flat bordered")
+        _tbl_ref[0] = tbl  # 버튼 핸들러에서 접근 가능
 
+        # 마지막 체크한 종목 상세 표시
         def _on_selection_change(e):
-            sel_rows = e.args.get("rows", [])
-            _selected_codes.clear()
-            _selected_codes.extend([r.get("code", "") for r in sel_rows])
-            # 마지막 선택된 종목 상세 표시 (단일 클릭 시)
-            if sel_rows:
-                _on_stock_select_by_code(sel_rows[-1].get("code", ""), df)
+            sel = tbl.selected
+            if sel:
+                last_code = sel[-1].get("code", "")
+                if last_code:
+                    _on_stock_select_by_code(last_code, df)
 
         tbl.on("selection", _on_selection_change)
 
@@ -1457,6 +1467,82 @@ def render_tab2_stocks(df, auth):
 # ═══════════════════════════════════════════
 #  Tab 3: 내 자산
 # ═══════════════════════════════════════════
+
+# ── 과거 추천 캐시 (포트폴리오 보유 종목이 금일 추천에서 빠졌을 때 참조) ──
+_hist_recommend_cache: dict = {}  # {종목코드: {row data}}
+_hist_cache_loaded = False
+
+def _ensure_hist_cache():
+    """최근 7일치 recommend 파일에서 종목 정보를 캐싱"""
+    global _hist_recommend_cache, _hist_cache_loaded
+    if _hist_cache_loaded:
+        return
+    _hist_cache_loaded = True
+
+    pattern = os.path.join(DATA_DIR, "recommend_*.csv")
+    files = sorted(glob.glob(pattern), reverse=True)  # 최신순
+
+    for fpath in files[:7]:  # 최근 7일분만
+        if "latest" in fpath:
+            continue
+        try:
+            hdf = pd.read_csv(fpath, dtype={"종목코드": str, "종목명": str})
+            for _, r in hdf.iterrows():
+                code = str(r.get("종목코드", "")).zfill(6)
+                if code and code not in _hist_recommend_cache:
+                    # 최신 데이터만 유지 (먼저 나온 파일이 최신)
+                    _hist_recommend_cache[code] = {
+                        "종목명": str(r.get("종목명", "")),
+                        "DISPLAY_SCORE": safe_float(r.get("DISPLAY_SCORE", r.get("FINAL_SCORE", 0))),
+                        "ROUTE": str(r.get("ROUTE", r.get("상태", ""))),
+                        "추천매수가": nz_num(r.get("추천매수가", 0)),
+                        "손절가": nz_num(r.get("손절가", 0)),
+                        "추천매도가1": nz_num(r.get("추천매도가1", 0)),
+                        "종가": nz_num(r.get("종가", 0)),
+                        "_source_file": os.path.basename(fpath),
+                    }
+        except Exception as e:
+            logger.debug(f"과거 추천 캐시 로드 실패 ({fpath}): {e}")
+
+    if _hist_recommend_cache:
+        logger.info(f"📦 과거 추천 캐시: {len(_hist_recommend_cache)}종목 (최근 {min(len(files), 7)}일)")
+
+
+def _lookup_stock_info(code: str, name: str, df):
+    """
+    종목 정보 조회 순서:
+      1순위: 오늘 추천 df (scored)
+      2순위: 과거 추천 캐시 (최근 7일)
+    반환: (score, route, source_label) 또는 (0, "", "미추천")
+    """
+    code6 = str(code).zfill(6)
+
+    # 1순위: 오늘 추천 목록
+    if not df.empty and "종목코드" in df.columns:
+        match = df[df["종목코드"].astype(str).str.zfill(6) == code6]
+        if match.empty and "종목명" in df.columns:
+            match = df[df["종목명"] == name]
+        if not match.empty:
+            r = match.iloc[0]
+            return (
+                safe_float(r.get("DISPLAY_SCORE", 0)),
+                str(r.get("ROUTE", "")),
+                "금일추천",
+            )
+
+    # 2순위: 과거 추천 캐시
+    _ensure_hist_cache()
+    hist = _hist_recommend_cache.get(code6)
+    if hist:
+        return (
+            hist["DISPLAY_SCORE"],
+            hist["ROUTE"],
+            f"전일추천({hist.get('_source_file', '')[10:18]})",  # recommend_20260227.csv → 20260227
+        )
+
+    return (0, "", "미추천")
+
+
 def render_tab3_portfolio(df, auth):
     if auth in ("guest", "free"):
         ui.label("🔒 내 자산 분석은 Pro 등급부터 이용 가능합니다.").classes("text-yellow-400 p-8")
@@ -1561,22 +1647,29 @@ def render_tab3_portfolio(df, auth):
             total_buy += buy_amt
             pct = (curr - avg) / avg * 100 if avg > 0 and curr > 0 else 0
 
-            # AI 점수 매핑
-            match = df[df['종목코드'] == str(code).zfill(6)] if not df.empty and '종목코드' in df.columns else pd.DataFrame()
-            if match.empty and not df.empty and '종목명' in df.columns:
-                match = df[df['종목명'] == name]
-            score = float(match.iloc[0].get('DISPLAY_SCORE', 0)) if not match.empty else 0
+            # AI 점수 매핑 (오늘 추천 → 과거 추천 → 미추천 순)
+            score, route, source = _lookup_stock_info(code, name, df)
 
-            if score >= 80: advice, acolor = "💪강력홀딩", "#10B981"
-            elif score >= 60: advice, acolor = "👌보유(양호)", "#3B82F6"
-            elif score <= 40 and score > 0: advice, acolor = "⚠️교체권장", "#EF4444"
-            elif score == 0 and curr == 0: advice, acolor = "❓시세조회 실패", "#EF4444"
-            elif score == 0: advice, acolor = "❓시스템 외 종목", "#9CA3AF"
-            else: advice, acolor = "👀관망", "#F59E0B"
+            if source == "금일추천":
+                # 오늘 추천 목록에 있음 — 기존 로직
+                if score >= 80: advice, acolor = "💪강력홀딩", "#10B981"
+                elif score >= 60: advice, acolor = "👌보유(양호)", "#3B82F6"
+                elif score <= 40 and score > 0: advice, acolor = "⚠️교체권장", "#EF4444"
+                else: advice, acolor = "👀관망", "#F59E0B"
+            elif source.startswith("전일추천"):
+                # 과거에 추천됐으나 오늘 필터에서 빠짐
+                if score >= 70: advice, acolor = f"📤금일 제외 (전일 {score:.0f}점) — 홀딩 검토", "#F59E0B"
+                elif score >= 50: advice, acolor = f"📤금일 제외 (전일 {score:.0f}점) — 모니터링", "#F59E0B"
+                else: advice, acolor = f"📤금일 제외 (전일 {score:.0f}점) — 손절 검토", "#EF4444"
+            else:
+                # 시스템에서 추천된 적 없는 종목
+                if curr == 0: advice, acolor = "❓시세조회 실패", "#EF4444"
+                else: advice, acolor = "ℹ️시스템 외 종목", "#9CA3AF"
 
             pf_rows.append({"종목명": name, "현재가": curr, "평단가": avg, "수량": qty,
                             "매입금": buy_amt, "평가금": eval_amt, "수익률": pct,
-                            "점수": score, "AI조언": advice, "색상": acolor, "code": code})
+                            "점수": score, "상태": route, "소스": source,
+                            "AI조언": advice, "색상": acolor, "code": code})
 
         result_area.clear()
         with result_area:
@@ -1598,13 +1691,19 @@ def render_tab3_portfolio(df, auth):
                 with ui.card().classes("w-full p-4 mb-2 bg-[#1a1a2e] border border-gray-700 rounded-xl"):
                     with ui.row().classes("w-full justify-between items-center"):
                         with ui.column().classes("gap-0"):
-                            ui.label(r["종목명"]).classes("text-white font-bold")
+                            with ui.row().classes("items-center gap-2"):
+                                ui.label(r["종목명"]).classes("text-white font-bold")
+                                # 상태 배지 표시
+                                if r.get("상태"):
+                                    _rc = {"ATTACK": "red", "ARMED": "orange", "WAIT": "blue"}.get(r["상태"], "gray")
+                                    ui.badge(r["상태"], color=_rc).classes("text-xs")
                             p_color = "text-red-400" if r["수익률"] > 0 else "text-blue-400"
-                            ui.label(f"{r['수익률']:+.2f}%  |  평가금: {int(r['평가금']):,}원").classes(f"text-sm {p_color}")
+                            ui.label(f"{r['수익률']:+.2f}%  |  현재가: {int(r['현재가']):,}  |  평가금: {int(r['평가금']):,}원").classes(f"text-sm {p_color}")
                         with ui.column().classes("items-end gap-0"):
                             ui.label(r["AI조언"]).classes(f"text-sm font-bold").style(f"color:{r['색상']}")
                             if r["점수"] > 0:
-                                ui.label(f"점수: {r['점수']:.0f}").classes("text-xs text-gray-400")
+                                _src_tag = f" ({r['소스']})" if r.get("소스") != "금일추천" else ""
+                                ui.label(f"점수: {r['점수']:.0f}{_src_tag}").classes("text-xs text-gray-400")
 
             # 파이 차트
             if pf_rows:
