@@ -18,6 +18,7 @@ import os
 import math
 import glob
 import time
+import asyncio
 import logging
 import hashlib
 import secrets
@@ -128,6 +129,10 @@ ALLOWED_DOMAINS = [
 ]
 
 KST = timezone(timedelta(hours=9))
+
+# ── 매크로 지표 메모리 캐시 (1시간 TTL — API 밴 방지) ──
+_MACRO_CACHE: dict = {}
+_MACRO_CACHE_TIME: dict = {}
 
 def now_kst():
     return datetime.now(KST)
@@ -1091,8 +1096,9 @@ def _render_macro_sparklines():
 
 
 def _spark_card(label: str, ticker: str, color: str):
-    """개별 스파크라인 카드 (20일)"""
+    """개별 스파크라인 카드 (20일) — 캐시 + 안전 비동기"""
     import plotly.graph_objects as go
+    import asyncio
     try:
         from nicegui import ui
     except ImportError:
@@ -1105,12 +1111,21 @@ def _spark_card(label: str, ticker: str, color: str):
 
         async def _load():
             try:
-                start = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
-                d = await run_sync(fdr.DataReader, ticker, start)
+                now = time.time()
+                # ✅ 캐시된 데이터가 있고 1시간이 안 지났으면 재사용 (API 밴 방지)
+                if ticker in _MACRO_CACHE and (now - _MACRO_CACHE_TIME.get(ticker, 0)) < 3600:
+                    d = _MACRO_CACHE[ticker]
+                else:
+                    start = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+                    d = await run_sync(fdr.DataReader, ticker, start)
+                    if d is not None and not d.empty:
+                        d = d.tail(20)
+                        _MACRO_CACHE[ticker] = d
+                        _MACRO_CACHE_TIME[ticker] = now
+
                 if d is None or d.empty:
                     val_label.set_text("N/A")
                     return
-                d = d.tail(20)
                 last   = float(d["Close"].iloc[-1])
                 prev   = float(d["Close"].iloc[-2]) if len(d) > 1 else last
                 chg    = (last - prev) / prev * 100 if prev else 0
@@ -1151,7 +1166,14 @@ def _spark_card(label: str, ticker: str, color: str):
             except Exception as _e:
                 val_label.set_text(f"{label}: 조회 실패")
 
-        ui.timer(0.5, _load, once=True)
+        # ✅ ui.timer → safe background task (parent slot deleted 방지)
+        async def _safe_load():
+            await asyncio.sleep(0.5)
+            if chart_slot.is_deleted:
+                return  # 부모 UI 사라짐 → 조용히 종료
+            await _load()
+
+        ui.background_tasks.create(_safe_load())
 
 
 def render_tab1_market(df):
@@ -1429,7 +1451,15 @@ def render_tab2_stocks(df, auth):
                             ui.plotly(fig).classes("w-full")
                         else:
                             ui.label("📉 차트 데이터 로드 실패 (FDR 미설치 또는 네트워크 오류)").classes("text-yellow-400")
-                ui.timer(0.1, load_chart, once=True)
+
+                # ✅ ui.timer → safe background task (parent slot deleted 방지)
+                async def _safe_load_chart():
+                    await asyncio.sleep(0.1)
+                    if chart_holder.is_deleted:
+                        return
+                    await load_chart()
+
+                ui.background_tasks.create(_safe_load_chart())
 
             # 레이더 + 워터폴
             with ui.row().classes("w-full gap-4 flex-wrap mt-4"):
@@ -1616,17 +1646,19 @@ def render_tab3_portfolio(df, auth):
             except Exception as _ae:
                 logger.warning(f"async 조회 실패, ThreadPool fallback: {_ae}")
 
-        # fallback: ThreadPoolExecutor
+        # fallback: asyncio.gather + 글로벌 I/O 풀 재활용
         if not price_map:
-            def _fetch_all_prices():
-                _pm = {}
-                with ThreadPoolExecutor(max_workers=8) as ex:
-                    futs = [ex.submit(fetch_current_price, t[0], t[1]) for t in targets]
-                    for f in futs:
-                        c, n, p = f.result()
-                        _pm[c] = p
-                return _pm
-            price_map = await run_sync(_fetch_all_prices)
+            from async_helpers import _io_pool
+            loop = asyncio.get_event_loop()
+            tasks = [
+                loop.run_in_executor(_io_pool, fetch_current_price, t[0], t[1])
+                for t in targets
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, tuple) and len(res) == 3:
+                    c, n, p = res
+                    price_map[c] = p
 
         total_eval = total_buy = 0.0
         pf_rows = []
@@ -1640,6 +1672,45 @@ def render_tab3_portfolio(df, auth):
                     match_p = df[df['종목명'] == name]
                 if not match_p.empty:
                     curr = int(nz_num(match_p.iloc[0].get('종가', 0)))
+
+            # 폴백 2: 과거 추천 캐시의 종가 (주말/휴장일 대응)
+            if curr == 0:
+                _ensure_hist_cache()
+                hist = _hist_recommend_cache.get(str(code).zfill(6))
+                if hist and hist.get("종가", 0) > 0:
+                    curr = int(hist["종가"])
+                    logger.debug(f"📦 {name} 종가 폴백 (과거 추천): {curr:,}")
+
+            # 폴백 3: price_snapshots (가장 최근 스냅샷)
+            if curr == 0:
+                for _snap_name in ["price_snapshot_latest.csv", "price_snapshot.csv"]:
+                    _snap_path = os.path.join(DATA_DIR, _snap_name)
+                    if os.path.exists(_snap_path):
+                        try:
+                            _snap = pd.read_csv(_snap_path, dtype={"종목코드": str})
+                            _sm = _snap[_snap["종목코드"].astype(str).str.zfill(6) == str(code).zfill(6)]
+                            if _sm.empty and "종목명" in _snap.columns:
+                                _sm = _snap[_snap["종목명"] == name]
+                            if not _sm.empty and "종가" in _snap.columns:
+                                _p = int(nz_num(_sm.iloc[0]["종가"]))
+                                if _p > 0:
+                                    curr = _p
+                                    logger.debug(f"📦 {name} 종가 폴백 (스냅샷): {curr:,}")
+                                    break
+                        except Exception:
+                            pass
+
+            # 폴백 4: 평단가를 현재가로 사용 (최후 수단 — 수익률 0% 표시)
+            if curr == 0 and avg > 0:
+                curr = avg
+                logger.debug(f"📦 {name} 현재가 = 평단가 폴백: {curr:,}")
+
+            # 가격 소스 추적 (실시간 vs 폴백)
+            _price_src = ""
+            if curr == avg and curr > 0:
+                _price_src = " (평단가)"
+            elif curr > 0 and price_map.get(code, 0) == 0:
+                _price_src = " (전일종가)"
 
             eval_amt = curr * qty
             buy_amt = avg * qty
@@ -1669,6 +1740,7 @@ def render_tab3_portfolio(df, auth):
             pf_rows.append({"종목명": name, "현재가": curr, "평단가": avg, "수량": qty,
                             "매입금": buy_amt, "평가금": eval_amt, "수익률": pct,
                             "점수": score, "상태": route, "소스": source,
+                            "가격소스": _price_src,
                             "AI조언": advice, "색상": acolor, "code": code})
 
         result_area.clear()
@@ -1698,7 +1770,8 @@ def render_tab3_portfolio(df, auth):
                                     _rc = {"ATTACK": "red", "ARMED": "orange", "WAIT": "blue"}.get(r["상태"], "gray")
                                     ui.badge(r["상태"], color=_rc).classes("text-xs")
                             p_color = "text-red-400" if r["수익률"] > 0 else "text-blue-400"
-                            ui.label(f"{r['수익률']:+.2f}%  |  현재가: {int(r['현재가']):,}  |  평가금: {int(r['평가금']):,}원").classes(f"text-sm {p_color}")
+                            _psrc = r.get("가격소스", "")
+                            ui.label(f"{r['수익률']:+.2f}%  |  현재가: {int(r['현재가']):,}{_psrc}  |  평가금: {int(r['평가금']):,}원").classes(f"text-sm {p_color}")
                         with ui.column().classes("items-end gap-0"):
                             ui.label(r["AI조언"]).classes(f"text-sm font-bold").style(f"color:{r['색상']}")
                             if r["점수"] > 0:
