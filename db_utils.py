@@ -48,12 +48,14 @@ INQUIRY_DB_FILE = "inquiries_db.json"
 _GIST_SYNC_INTERVAL = 60  # 초
 
 class _GistSyncManager:
-    """변경 감지 → 배치 업로드 (Rate Limit 폭탄 방지)"""
+    """변경 감지 → 배치 업로드 (Rate Limit 폭탄 방지 + 실패 시 자동 재시도)"""
 
     def __init__(self):
         self._dirty: set[str] = set()  # {"users", "inquiries"}
         self._lock = threading.Lock()
         self._running = False
+        self._consecutive_fails: dict[str, int] = {}  # 테이블별 연속 실패 횟수
+        self._MAX_RETRIES = 5  # 연속 실패 상한 (초과 시 경고 후 포기)
 
     def mark_dirty(self, table_name: str):
         with self._lock:
@@ -73,11 +75,33 @@ class _GistSyncManager:
 
                 for tbl in tables:
                     filename = USER_DB_FILE if tbl == "users" else INQUIRY_DB_FILE
-                    db_manager._do_gist_upload(tbl, filename)
+                    success = db_manager._do_gist_upload(tbl, filename)
+
+                    if success:
+                        # 성공 → 연속 실패 카운터 초기화
+                        self._consecutive_fails.pop(tbl, None)
+                    else:
+                        # 실패 → dirty 플래그 복원 (다음 주기에 재시도)
+                        fail_count = self._consecutive_fails.get(tbl, 0) + 1
+                        self._consecutive_fails[tbl] = fail_count
+
+                        if fail_count <= self._MAX_RETRIES:
+                            with self._lock:
+                                self._dirty.add(tbl)
+                            _logger.warning(
+                                f" [Gist] {tbl} 업로드 실패 ({fail_count}/{self._MAX_RETRIES}) "
+                                f"→ 다음 주기에 재시도"
+                            )
+                        else:
+                            _logger.error(
+                                f" [Gist] {tbl} 업로드 {self._MAX_RETRIES}회 연속 실패 "
+                                f"→ 재시도 중단 (수동 확인 필요)"
+                            )
+                            self._consecutive_fails.pop(tbl, None)
 
         t = threading.Thread(target=_loop, daemon=True, name="gist-batch-sync")
         t.start()
-        _logger.info(f" [Gist] 배치 동기화 시작 (간격: {_GIST_SYNC_INTERVAL}초)")
+        _logger.info(f" [Gist] 배치 동기화 시작 (간격: {_GIST_SYNC_INTERVAL}초, 최대 재시도: {self._MAX_RETRIES}회)")
 
 
 _gist_sync = _GistSyncManager()
@@ -368,10 +392,10 @@ class LDYDBManager:
         """[v6.0] 즉시 업로드 대신 dirty 플래그만 세움 → 배치 루프가 처리"""
         _gist_sync.mark_dirty(tablename)
 
-    def _do_gist_upload(self, tablename: str, filename: str):
-        """실제 업로드 (배치 루프에서만 호출)"""
+    def _do_gist_upload(self, tablename: str, filename: str) -> bool:
+        """실제 업로드 (배치 루프에서 호출). 성공 시 True, 실패 시 False."""
         if not GIST_ID or not GIST_TOKEN:
-            return
+            return True  # Gist 미설정은 실패가 아님
         try:
             rows = self._exec_sqlite(f"SELECT * FROM {tablename}", fetch=True)
             if tablename == "users":
@@ -390,10 +414,13 @@ class LDYDBManager:
             resp = requests.patch(url, headers=headers, json=payload, timeout=10)
             if resp.status_code == 200:
                 _logger.debug(f" Gist 배치 업로드 완료: {tablename}")
+                return True
             else:
                 _logger.warning(f" Gist 배치 업로드 실패 ({resp.status_code}): {tablename}")
+                return False
         except Exception as e:
             _logger.warning(f" Gist 배치 업로드 에러: {e}", exc_info=True)
+            return False
 
     # ═══════════════════════════════════════════
     #  User Methods — SQLite OLTP
