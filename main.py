@@ -36,6 +36,9 @@ from plotly.subplots import make_subplots
 
 from nicegui import ui, app
 
+# ─── [v6.0] 비동기 래퍼 (UI 프리징 방지) ───
+from async_helpers import run_sync, run_cpu
+
 # ─── 신규 모듈 (v13 개선) ───
 try:
     from price_cache import fetch_with_cache, fetch_prices_async, cache_stats, set_cache
@@ -923,10 +926,10 @@ def login_page():
 #  7. 메인 페이지 (8개 탭)
 # ═══════════════════════════════════════════
 @ui.page('/')
-def index():
+async def index():
     ui.add_head_html(DARK_CSS)
     if not store.loaded:
-        store.refresh()
+        await run_sync(store.refresh)
     df = store.scored
     auth = get_auth_status()
     user = get_current_user()
@@ -983,7 +986,7 @@ def index():
 
 
 async def _do_refresh():
-    store.refresh()
+    await run_sync(store.refresh)
     ui.notify("🔄 데이터 새로고침 완료!", type="positive")
     await ui.run_javascript("setTimeout(()=>location.reload(),500)")
 
@@ -1029,7 +1032,7 @@ def _spark_card(label: str, ticker: str, color: str):
         async def _load():
             try:
                 start = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
-                d = fdr.DataReader(ticker, start)
+                d = await run_sync(fdr.DataReader, ticker, start)
                 if d is None or d.empty:
                     val_label.set_text("N/A")
                     return
@@ -1280,7 +1283,7 @@ def render_tab2_stocks(df, auth):
                 async def load_chart():
                     chart_holder.clear()
                     with chart_holder:
-                        cdata = get_stock_chart_data(code)
+                        cdata = await run_sync(get_stock_chart_data, code)
                         if cdata is not None:
                             fig = plot_candle_chart(cdata, code, row.get("종목명", ""), _entry, _stop, _t1, _t2)
                             ui.plotly(fig).classes("w-full")
@@ -1355,7 +1358,7 @@ def render_tab3_portfolio(df, auth):
 
         # 브라우저 + Gist 이중 저장
         app.storage.user["portfolio_text"] = text
-        save_portfolio_file(text)
+        await run_sync(save_portfolio_file, text)
         ui.notify("💾 포트폴리오 저장됨", type="positive")
 
         code_map = get_code_map(df)
@@ -1399,11 +1402,15 @@ def render_tab3_portfolio(df, auth):
 
         # fallback: ThreadPoolExecutor
         if not price_map:
-            with ThreadPoolExecutor(max_workers=8) as ex:
-                futs = [ex.submit(fetch_current_price, t[0], t[1]) for t in targets]
-                for f in futs:
-                    c, n, p = f.result()
-                    price_map[c] = p
+            def _fetch_all_prices():
+                _pm = {}
+                with ThreadPoolExecutor(max_workers=8) as ex:
+                    futs = [ex.submit(fetch_current_price, t[0], t[1]) for t in targets]
+                    for f in futs:
+                        c, n, p = f.result()
+                        _pm[c] = p
+                return _pm
+            price_map = await run_sync(_fetch_all_prices)
 
         total_eval = total_buy = 0.0
         pf_rows = []
