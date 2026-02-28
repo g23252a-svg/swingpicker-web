@@ -154,7 +154,11 @@ def to_kst_str(value, fmt="%Y-%m-%d %H:%M:%S"):
 def _get_db():
     try:
         from db_utils import get_db
-        return get_db()
+        db = get_db()
+        # ✅ Railway 재배포 시 Gist에서 회원 데이터 복원 (최초 1회)
+        if db and hasattr(db, 'ensure_gist_loaded'):
+            db.ensure_gist_loaded()
+        return db
     except Exception as e:
         logger.error(f"DB Error: {e}")
         return None
