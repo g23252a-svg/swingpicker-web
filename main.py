@@ -1204,11 +1204,56 @@ def render_tab1_market(df):
 def render_tab2_stocks(df, auth):
     section_title("🎯 AI & Quant 추천 종목")
 
-    # ── 뷰모드 + 필터 + CSV 다운로드 ──
+    # ── 뷰모드 + 필터 + 액션 버튼 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
         view_mode = ui.toggle(["📋 테이블", "🃏 칸반"], value="📋 테이블")
         route_filter = ui.select(["전체", "ATTACK", "ARMED", "WAIT", "NEUTRAL"], value="전체", label="상태").classes("min-w-[120px]")
         sort_mode = ui.toggle(["🔢 점수순", "🚦 상태순"], value="🔢 점수순")
+
+        # ── 체크된 종목 → 매매일지 자동 추가 버튼 ──
+        journal_btn_msg = ui.label("").classes("text-sm")
+
+        def _add_checked_to_journal():
+            """체크된 종목들을 매매일지에 자동 등록"""
+            if not _selected_codes:
+                ui.notify("⚠️ 종목을 먼저 체크하세요", type="warning")
+                return
+            if not JOURNAL_OK:
+                ui.notify("⚠️ trade_journal_tab 모듈 없음", type="negative")
+                return
+
+            from trade_journal_tab import save_trade
+            added = 0
+            for code in _selected_codes:
+                row = df[df["종목코드"].astype(str).str.zfill(6) == code]
+                if row.empty:
+                    continue
+                r = row.iloc[0]
+                tid = save_trade({
+                    "stock_name":      str(r.get("종목명", "")),
+                    "stock_code":      code,
+                    "route":           str(r.get("ROUTE", "")),
+                    "score":           safe_float(r.get("DISPLAY_SCORE", 0)),
+                    "recommend_price": nz_num(r.get("추천매수가", 0)),
+                    "actual_price":    nz_num(r.get("추천매수가", 0)),  # 체결가 = 추천매수가 (나중에 수정 가능)
+                    "stop_price":      nz_num(r.get("손절가", 0)),
+                    "target_price":    nz_num(r.get("추천매도가1", 0)),
+                    "qty":             0,
+                    "notes":           f"[자동등록] 점수 {safe_float(r.get('DISPLAY_SCORE', 0)):.0f} | {r.get('ROUTE', '')}",
+                })
+                if tid > 0:
+                    added += 1
+
+            if added > 0:
+                ui.notify(f"✅ {added}건 매매일지에 추가 완료! (📓 매매 일지 탭에서 확인)", type="positive")
+            else:
+                ui.notify("❌ 추가 실패", type="negative")
+
+        ui.button("📝 매매일지 추가", on_click=_add_checked_to_journal).props(
+            "flat dense"
+        ).classes("text-yellow-400 border border-yellow-700/50").tooltip(
+            "체크한 종목들을 매매일지에 자동 등록합니다"
+        )
 
         # CSV 다운로드 (Prime/Admin만)
         if auth in ("prime", "admin"):
@@ -1222,6 +1267,9 @@ def render_tab2_stocks(df, auth):
 
     table_area = ui.column().classes("w-full")
     detail_area = ui.column().classes("w-full mt-4")
+
+    # ── 다중 선택 상태 추적 ──
+    _selected_codes: list[str] = []
 
     def _filtered():
         fdf = df.copy()
@@ -1238,6 +1286,7 @@ def render_tab2_stocks(df, auth):
 
     def _build_view():
         table_area.clear()
+        _selected_codes.clear()
         show = _filtered()
         with table_area:
             if view_mode.value == "🃏 칸반":
@@ -1269,8 +1318,17 @@ def render_tab2_stocks(df, auth):
                 "t1": f'{int(nz_num(r.get("추천매도가1", 0))):,}',
                 "sector": str(r.get("업종", "—")),
             })
-        tbl = ui.table(columns=columns, rows=rows, row_key="code", selection="single", pagination={"rowsPerPage": 15}).classes("w-full").props("dense dark flat bordered")
-        tbl.on("selection", lambda e: _on_stock_select(e, df))
+        tbl = ui.table(columns=columns, rows=rows, row_key="code", selection="multiple", pagination={"rowsPerPage": 15}).classes("w-full").props("dense dark flat bordered")
+
+        def _on_selection_change(e):
+            sel_rows = e.args.get("rows", [])
+            _selected_codes.clear()
+            _selected_codes.extend([r.get("code", "") for r in sel_rows])
+            # 마지막 선택된 종목 상세 표시 (단일 클릭 시)
+            if sel_rows:
+                _on_stock_select_by_code(sel_rows[-1].get("code", ""), df)
+
+        tbl.on("selection", _on_selection_change)
 
     def _render_kanban(show):
         if show.empty:
@@ -1311,11 +1369,9 @@ def render_tab2_stocks(df, auth):
                         rc = "#10B981" if rr >= 2 else "#F59E0B" if rr >= 1 else "#EF4444"
                         ui.label(f"R:R {rr:.1f}").classes("text-xs mt-1").style(f"color:{rc}")
 
-    def _on_stock_select(event, full_df):
+    def _on_stock_select_by_code(code, full_df):
         detail_area.clear()
-        sel = event.args.get("rows", [])
-        if not sel: return
-        code = sel[0].get("code", "")
+        if not code: return
         row = full_df[full_df["종목코드"].astype(str).str.zfill(6) == code]
         if row.empty: return
         row = row.iloc[0]
