@@ -37,7 +37,7 @@ from plotly.subplots import make_subplots
 from nicegui import ui, app
 
 # ─── [v6.0] 비동기 래퍼 (UI 프리징 방지) ───
-from async_helpers import run_sync, run_cpu
+from async_helpers import run_sync, run_cpu, register_shutdown
 
 # ─── 신규 모듈 (v13 개선) ───
 try:
@@ -1783,6 +1783,7 @@ if os.path.isdir(STATIC_DIR):
 
 if __name__ in {"__main__", "__mp_main__"}:
     store.refresh()
+    register_shutdown(app)  # [v6.0] 재배포 시 스레드 풀 + DB + Gist 최종 flush
     ui.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 8080)),
