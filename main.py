@@ -213,7 +213,7 @@ class DataStore:
         # 1) 로컬 파일 시도
         if os.path.exists(RECOMMEND_PATH):
             try:
-                df = pd.read_csv(RECOMMEND_PATH, dtype={"종목코드": str})
+                df = pd.read_csv(RECOMMEND_PATH, dtype={"종목코드": str, "종목명": str})
                 logger.info(f"📂 로컬 CSV 로드: {RECOMMEND_PATH}")
             except Exception as e:
                 logger.warning(f"로컬 CSV 읽기 실패: {e}")
@@ -229,7 +229,7 @@ class DataStore:
                     r.raise_for_status()
                     df = pd.read_csv(io.BytesIO(r.content),
                                      encoding="utf-8-sig",
-                                     dtype={"종목코드": str})
+                                     dtype={"종목코드": str, "종목명": str})
                     # 로컬에 캐싱 (다음 로드 시 빠르게)
                     os.makedirs(DATA_DIR, exist_ok=True)
                     with open(RECOMMEND_PATH, "wb") as f:
@@ -258,18 +258,87 @@ class DataStore:
             if "종목코드" in df.columns and "종목명" in df.columns:
                 mask = df["종목명"].astype(str).str.match(r'^\d+$')
                 if mask.any():
-                    _ensure_krx_map()
-                    if _KRX_NAME_MAP:
-                        # _KRX_NAME_MAP은 {이름: 코드} → 역전하여 {코드: 이름}
-                        _code_to_name = {v: k for k, v in _KRX_NAME_MAP.items()}
-                        df.loc[mask, "종목명"] = (
-                            df.loc[mask, "종목코드"].astype(str).str.zfill(6)
-                            .map(_code_to_name)
-                            .fillna(df.loc[mask, "종목명"])
-                        )
-                        logger.info(f"🔧 종목명 오염 {mask.sum()}건 자동 복구 [KRX캐시]")
-                    else:
-                        # 최후 수단: Naver Finance API로 개별 조회
+                    _fixed = False
+                    _bad_count = mask.sum()
+
+                    # ── 1순위: krx_names_latest.csv (collector가 recommend와 함께 항상 저장) ──
+                    _names_paths = [
+                        os.path.join(DATA_DIR, "krx_names_latest.csv"),
+                        "data/krx_names_latest.csv",
+                        "/app/data/krx_names_latest.csv",
+                    ]
+                    for _np in _names_paths:
+                        if _fixed:
+                            break
+                        try:
+                            if os.path.exists(_np):
+                                _ndf = pd.read_csv(_np, dtype=str)
+                                if "종목코드" in _ndf.columns and "종목명" in _ndf.columns:
+                                    _c2n = dict(zip(
+                                        _ndf["종목코드"].astype(str).str.zfill(6),
+                                        _ndf["종목명"]
+                                    ))
+                                    # 코드==이름인 항목 제거
+                                    _c2n = {c: n for c, n in _c2n.items() if c != n and n and not n.isdigit()}
+                                    if _c2n:
+                                        df.loc[mask, "종목명"] = (
+                                            df.loc[mask, "종목코드"].astype(str).str.zfill(6)
+                                            .map(_c2n)
+                                            .fillna(df.loc[mask, "종목명"])
+                                        )
+                                        _still_bad = df["종목명"].astype(str).str.match(r'^\d+$').sum()
+                                        if _still_bad < _bad_count:
+                                            logger.info(f"🔧 종목명 오염 {_bad_count - _still_bad}/{_bad_count}건 복구 [krx_names: {_np}]")
+                                            _fixed = (_still_bad == 0)
+                                            mask = df["종목명"].astype(str).str.match(r'^\d+$')  # 마스크 갱신
+                        except Exception as _e:
+                            logger.debug(f"krx_names 로드 실패 ({_np}): {_e}")
+
+                    # ── 2순위: GitHub raw에서 krx_names_latest.csv 다운로드 ──
+                    if not _fixed and mask.any():
+                        try:
+                            _base = REMOTE_CSV_URL.rsplit("/", 1)[0]
+                            _names_url = f"{_base}/krx_names_latest.csv"
+                            _resp = requests.get(_names_url, timeout=10)
+                            if _resp.ok and _resp.text.strip():
+                                _ndf = pd.read_csv(io.StringIO(_resp.text), dtype=str)
+                                if "종목코드" in _ndf.columns and "종목명" in _ndf.columns:
+                                    _c2n = dict(zip(
+                                        _ndf["종목코드"].astype(str).str.zfill(6),
+                                        _ndf["종목명"]
+                                    ))
+                                    _c2n = {c: n for c, n in _c2n.items() if c != n and n and not n.isdigit()}
+                                    if _c2n:
+                                        df.loc[mask, "종목명"] = (
+                                            df.loc[mask, "종목코드"].astype(str).str.zfill(6)
+                                            .map(_c2n)
+                                            .fillna(df.loc[mask, "종목명"])
+                                        )
+                                        _still_bad = df["종목명"].astype(str).str.match(r'^\d+$').sum()
+                                        logger.info(f"🔧 종목명 오염 {_bad_count - _still_bad}/{_bad_count}건 복구 [GitHub krx_names]")
+                                        _fixed = (_still_bad == 0)
+                                        mask = df["종목명"].astype(str).str.match(r'^\d+$')
+                        except Exception as _e:
+                            logger.debug(f"GitHub krx_names 다운로드 실패: {_e}")
+
+                    # ── 3순위: _ensure_krx_map (FDR 전체 목록) ──
+                    if not _fixed and mask.any():
+                        _ensure_krx_map()
+                        if _KRX_NAME_MAP:
+                            _code_to_name = {v: k for k, v in _KRX_NAME_MAP.items()}
+                            df.loc[mask, "종목명"] = (
+                                df.loc[mask, "종목코드"].astype(str).str.zfill(6)
+                                .map(_code_to_name)
+                                .fillna(df.loc[mask, "종목명"])
+                            )
+                            _still_bad = df["종목명"].astype(str).str.match(r'^\d+$').sum()
+                            if _still_bad < _bad_count:
+                                logger.info(f"🔧 종목명 오염 {_bad_count - _still_bad}/{_bad_count}건 복구 [KRX캐시]")
+                                _fixed = (_still_bad == 0)
+                                mask = df["종목명"].astype(str).str.match(r'^\d+$')
+
+                    # ── 4순위 (최후 수단): Naver API 개별 조회 ──
+                    if not _fixed and mask.any():
                         _naver_fixed = 0
                         _codes = df.loc[mask, "종목코드"].astype(str).str.zfill(6).unique()
                         logger.info(f"🔄 Naver API로 종목명 {len(_codes)}건 개별 조회 시도...")
@@ -289,6 +358,11 @@ class DataStore:
                                 pass
                         if _naver_fixed:
                             logger.info(f"🔧 종목명 오염 {_naver_fixed}/{len(_codes)}건 복구 [Naver]")
+
+                    # 최종 상태 로깅
+                    _final_bad = df["종목명"].astype(str).str.match(r'^\d+$').sum()
+                    if _final_bad > 0:
+                        logger.warning(f"⚠️ 종목명 복구 불완전: {_final_bad}건 여전히 코드 상태")
             # ─── 종목명 복구 끝 ──────────────────────────────────
 
             primary = next((c for c in ["DISPLAY_SCORE", "FINAL_SCORE", "TOTAL_SCORE"] if c in df.columns and df[c].abs().sum() > 0), None)
