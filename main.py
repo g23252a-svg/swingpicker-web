@@ -1166,14 +1166,17 @@ def _spark_card(label: str, ticker: str, color: str):
             except Exception as _e:
                 val_label.set_text(f"{label}: 조회 실패")
 
-        # ✅ ui.timer → safe background task (parent slot deleted 방지)
+        # ✅ ui.timer → safe async task (parent slot deleted 방지)
         async def _safe_load():
             await asyncio.sleep(0.5)
-            if chart_slot.is_deleted:
-                return  # 부모 UI 사라짐 → 조용히 종료
+            try:
+                if chart_slot.is_deleted:
+                    return
+            except AttributeError:
+                pass  # NiceGUI 구버전: is_deleted 없으면 그냥 진행
             await _load()
 
-        ui.background_tasks.create(_safe_load())
+        asyncio.create_task(_safe_load())
 
 
 def render_tab1_market(df):
@@ -1452,14 +1455,17 @@ def render_tab2_stocks(df, auth):
                         else:
                             ui.label("📉 차트 데이터 로드 실패 (FDR 미설치 또는 네트워크 오류)").classes("text-yellow-400")
 
-                # ✅ ui.timer → safe background task (parent slot deleted 방지)
+                # ✅ ui.timer → safe async task (parent slot deleted 방지)
                 async def _safe_load_chart():
                     await asyncio.sleep(0.1)
-                    if chart_holder.is_deleted:
-                        return
+                    try:
+                        if chart_holder.is_deleted:
+                            return
+                    except AttributeError:
+                        pass
                     await load_chart()
 
-                ui.background_tasks.create(_safe_load_chart())
+                asyncio.create_task(_safe_load_chart())
 
             # 레이더 + 워터폴
             with ui.row().classes("w-full gap-4 flex-wrap mt-4"):
