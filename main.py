@@ -72,6 +72,7 @@ from components.tab_terms import render_tab_terms  # ✅ Tab5 컴포넌트 분�
 from components.tab_updates import render_tab_updates  # ✅ Tab6 컴포넌트 분리
 from components.tab_perf import render_tab_perf  # ✅ Tab7 컴포넌트 분리
 from components.tab_inquiry import render_tab_inquiry  # ✅ Tab4 컴포넌트 분리
+from components.tab_admin import render_tab_admin  # ✅ Tab8 컴포넌트 분리
 
 # Optional imports (graceful fallback)
 FDR_OK = False
@@ -1080,7 +1081,7 @@ async def index():
             else:
                 ui.label("⚠️ trade_journal_tab 모듈 없음").classes("text-yellow-400")
         if auth == "admin":
-            with ui.tab_panel(t8): render_tab8_admin()
+            with ui.tab_panel(t8): render_tab_admin()  # ✅ components/tab_admin.py
 
     # 푸터
     ui.label(f"📅 데이터 기준: {store.data_ts} · ⚠️ 투자 판단은 본인 책임").classes("text-xs text-gray-500 text-center mt-8 mb-4")
@@ -1846,85 +1847,8 @@ def render_tab3_portfolio(df, auth):
 
 
 # ═══════════════════════════════════════════
-#  Tab 8: 회원 관리 (Admin)
+#  Tab 8: → components/tab_admin.py로 분리 완료
 # ═══════════════════════════════════════════
-def render_tab8_admin():
-    section_title("👑 회원 관리")
-    db = _get_db()
-    if not db:
-        ui.label("❌ DB 연결 실패").classes("text-red-400"); return
-
-    users = db.get_all_users()
-    if not users:
-        ui.label("등록된 회원 없음").classes("text-gray-400"); return
-
-    ui.label(f"👥 총 가입자: {len(users)}명").classes("text-white mb-4")
-
-    columns = [
-        {"name": "email", "label": "이메일", "field": "email", "align": "left"},
-        {"name": "nick", "label": "닉네임", "field": "nick"},
-        {"name": "role", "label": "권한", "field": "role"},
-        {"name": "status", "label": "상태", "field": "status"},
-        {"name": "joined", "label": "가입일", "field": "joined"},
-        {"name": "last", "label": "최근접속", "field": "last"},
-    ]
-    rows = []
-    for u in users:
-        rows.append({
-            "email": u.get("login_id") or u.get("id", ""),
-            "nick": u.get("nickname", ""),
-            "role": u.get("role", "free").upper(),
-            "status": "🚫차단" if u.get("is_banned") else "✅",
-            "joined": to_kst_str(u.get("join_date"), "%Y-%m-%d"),
-            "last": to_kst_str(u.get("last_login")),
-        })
-
-    ui.table(columns=columns, rows=rows, row_key="email", pagination={"rowsPerPage": 20}).classes("w-full").props("dense dark flat bordered")
-
-    # 관리자 액션
-    ui.separator().classes("my-4")
-    with ui.row().classes("w-full gap-8 flex-wrap"):
-        with ui.column().classes("flex-1"):
-            ui.label("🛠️ 개별 회원 제어").classes("text-white font-bold mb-2")
-            emails = [r["email"] for r in rows]
-            sel_email = ui.select(emails, label="회원 선택").classes("w-full")
-            sel_role = ui.select(["free", "pro", "prime", "admin"], label="등급 변경", value="free").classes("w-full")
-
-            async def apply_role():
-                if sel_email.value:
-                    db = _get_db()
-                    if db:
-                        ok = db.update_user_role(sel_email.value, sel_role.value)
-                        ui.notify(f"{'✅ 변경 완료' if ok else '❌ 실패'}")
-                    else:
-                        ui.notify("DB 연결 실패", type="negative")
-
-            async def toggle_ban():
-                if sel_email.value:
-                    db = _get_db()
-                    if db:
-                        ok, msg = db.toggle_user_ban(sel_email.value)
-                        ui.notify(msg)
-                    else:
-                        ui.notify("DB 연결 실패", type="negative")
-
-            with ui.row().classes("gap-2 mt-2"):
-                ui.button("등급 적용", on_click=apply_role).props("color=primary")
-                ui.button("🚫 차단/해제", on_click=toggle_ban).props("color=negative")
-
-        with ui.column().classes("flex-1"):
-            ui.label("🎉 전체 이벤트").classes("text-white font-bold mb-2")
-            ui.label("전 회원에게 체험권을 지급합니다.").classes("text-gray-400 text-sm mb-2")
-
-            async def grant_trial():
-                db = _get_db()
-                if db:
-                    ok, msg = db.grant_all_users_trial(7)
-                    ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
-                else:
-                    ui.notify("DB 연결 실패", type="negative")
-
-            ui.button("🎁 전원 7일 Prime 지급", on_click=grant_trial).props("color=positive")
 
 
 # ═══════════════════════════════════════════
