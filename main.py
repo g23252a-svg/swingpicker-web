@@ -71,6 +71,7 @@ from chart_components import (
 from components.tab_terms import render_tab_terms  # ✅ Tab5 컴포넌트 분리
 from components.tab_updates import render_tab_updates  # ✅ Tab6 컴포넌트 분리
 from components.tab_perf import render_tab_perf  # ✅ Tab7 컴포넌트 분리
+from components.tab_inquiry import render_tab_inquiry  # ✅ Tab4 컴포넌트 분리
 
 # Optional imports (graceful fallback)
 FDR_OK = False
@@ -846,14 +847,6 @@ def save_portfolio_file(text_data):
     except Exception:
         return False
 
-def load_inquiry_items():
-    db = _get_db()
-    return db.get_all_inquiries() if db else []
-
-def save_inquiry_items(items):
-    db = _get_db()
-    return db.save_inquiries(items) if db else False
-
 
 # ═══════════════════════════════════════════
 #  5. 공통 UI 컴포넌트
@@ -1077,7 +1070,7 @@ async def index():
         with ui.tab_panel(t1): render_tab1_market(df)
         with ui.tab_panel(t2): render_tab2_stocks(df, auth)
         with ui.tab_panel(t3): render_tab3_portfolio(df, auth)
-        with ui.tab_panel(t4): render_tab4_inquiry(auth, user)
+        with ui.tab_panel(t4): render_tab_inquiry(auth, user)  # ✅ components/tab_inquiry.py
         with ui.tab_panel(t5): render_tab_terms()  # ✅ components/tab_terms.py
         with ui.tab_panel(t6): render_tab_updates()  # ✅ components/tab_updates.py
         with ui.tab_panel(t7): render_tab_perf()  # ✅ components/tab_perf.py
@@ -1833,64 +1826,8 @@ def render_tab3_portfolio(df, auth):
 
 
 # ═══════════════════════════════════════════
-#  Tab 4: 문의 게시판
+#  Tab 4: → components/tab_inquiry.py로 분리 완료
 # ═══════════════════════════════════════════
-def render_tab4_inquiry(auth, user):
-    section_title("📮 문의 게시판")
-
-    d_nick = user.get("nickname", "") if user else ""
-    d_email = user.get("login_id", "") if user else ""
-
-    ui.label("✏️ 문의 작성").classes("text-white font-bold mt-4")
-    with ui.row().classes("w-full gap-4"):
-        nick_in = ui.input("닉네임", value=d_nick).classes("flex-1")
-        email_in = ui.input("이메일 (선택)", value=d_email).classes("flex-1")
-    title_in = ui.input("제목", placeholder="문의 제목").classes("w-full")
-    content_in = ui.textarea("내용", placeholder="자유롭게 남겨주세요.").classes("w-full").props("rows=5")
-    inq_list = ui.column().classes("w-full mt-4")
-
-    async def submit_inquiry():
-        if not title_in.value.strip() or not content_in.value.strip():
-            ui.notify("제목과 내용을 입력하세요.", type="warning"); return
-        items = load_inquiry_items()
-        items.append({
-            "title": title_in.value.strip(), "content": content_in.value.strip(),
-            "nickname": nick_in.value.strip() or "익명", "email": email_in.value.strip(),
-            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        if save_inquiry_items(items):
-            ui.notify("💌 문의 등록 완료!", type="positive")
-            title_in.value = ""; content_in.value = ""
-            _load_inquiries()
-        else:
-            ui.notify("등록 실패", type="negative")
-
-    ui.button("💌 문의 등록", on_click=submit_inquiry).classes("mt-2").props("color=primary")
-
-    def _load_inquiries():
-        inq_list.clear()
-        items = load_inquiry_items()
-        with inq_list:
-            ui.label("📂 최근 문의 내역").classes("text-white font-bold mt-4")
-            if not items:
-                ui.label("등록된 문의가 없습니다.").classes("text-gray-400")
-                return
-            for i, item in enumerate(reversed(items[-30:])):
-                with ui.card().classes("w-full p-3 mb-2 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
-                    with ui.row().classes("justify-between"):
-                        ui.label(f"📌 {item.get('title', '-')}").classes("text-white font-bold text-sm")
-                        if auth == "admin":
-                            ui.button("🗑️", on_click=lambda it=item: _del_inquiry(it)).props("flat dense size=sm")
-                    ui.label(item.get("content", "")).classes("text-gray-300 text-sm mt-1")
-                    meta = f"{item.get('nickname', '익명')} · {to_kst_str(item.get('created_at'))}"
-                    ui.label(meta).classes("text-xs text-gray-500 mt-1")
-
-    def _del_inquiry(item):
-        items = [x for x in load_inquiry_items() if x.get("created_at") != item.get("created_at")]
-        save_inquiry_items(items)
-        ui.notify("삭제됨"); _load_inquiries()
-
-    _load_inquiries()
 
 
 # ═══════════════════════════════════════════
