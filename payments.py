@@ -34,8 +34,8 @@ SUBSCRIPTION_DAYS = 30
 try:
     from version_info import PRICE_PRO, PRICE_PRIME
 except ImportError:
-    PRICE_PRO = 19_000
-    PRICE_PRIME = 39_000
+    PRICE_PRO = 19_900
+    PRICE_PRIME = 19_900
 
 
 def _get_db():

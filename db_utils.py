@@ -563,7 +563,7 @@ class LDYDBManager:
         except Exception as e:
             _logger.warning(f"구독 업데이트 실패: {e}", exc_info=True)
 
-    def grant_all_users_trial(self, days=7):
+    def grant_all_users_trial(self, days=14):
         try:
             new_expire = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
             self._exec_sqlite(

@@ -126,25 +126,12 @@ def render_tab_admin():
             async def grant_trial():
                 db = _get_db()
                 if db:
-                    ok, msg = db.grant_all_users_trial(7)
+                    ok, msg = db.grant_all_users_trial(14)
                     ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
                 else:
                     ui.notify("DB 연결 실패", type="negative")
 
-            def _reset_all_members():
-                db_r = _get_db()
-                if db_r:
-                    try:
-                        db_r._exec_sqlite("DELETE FROM users WHERE role != 'admin'")
-                        db_r._exec_sqlite("DELETE FROM inquiries")
-                        db_r._mark_gist_dirty("users")
-                        db_r._mark_gist_dirty("inquiries")
-                        ui.notify("🔄 전체 회원 초기화 완료 (관리자 제외)")
-                    except Exception as ex:
-                        ui.notify(f"❌ 오류: {ex}")
-
-            ui.button("🔄 전체 회원 초기화 (관리자 제외)", on_click=lambda: _reset_all_members()).props("color=red").tooltip("관리자 제외 전체 삭제")
-            ui.button("🎁 전원 7일 Prime 지급", on_click=grant_trial).props("color=positive")
+            ui.button("🎁 전원 14일 Prime 지급", on_click=grant_trial).props("color=positive")
 
         # ── 입금확인 요청 목록 ──
         with ui.column().classes("flex-1"):

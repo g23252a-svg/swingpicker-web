@@ -17,9 +17,10 @@ KST = timezone(timedelta(hours=9))
 
 # ── 가격 설정 ──
 try:
-    from version_info import PRICE_PRIME
+    from version_info import PRICE_PRO, PRICE_PRIME
 except ImportError:
-    PRICE_PRIME = 39_000
+    PRICE_PRO = 19_000
+    PRICE_PRIME = 19_900
 
 # ── 무통장 입금 계좌 (환경변수 or 하드코딩) ──
 BANK_NAME = os.environ.get("BANK_NAME", "카카오뱅크")
@@ -92,6 +93,7 @@ def render_tab_pricing(auth, user):
     if auth != "guest":
         badge_map = {
             "free": ("🆓 Free", "gray", "무료 체험 중"),
+            "pro": ("📊 Pro", "blue", "Pro 구독 중"),
             "prime": ("👑 Prime", "amber", "Prime 구독 중"),
             "admin": ("🛡️ Admin", "green", "관리자"),
         }
@@ -101,7 +103,7 @@ def render_tab_pricing(auth, user):
                 ui.badge(emoji).props(f"color={color}")
                 ui.label(f"현재 등급: {desc}").classes("text-white text-sm")
                 expire = user.get("prime_expire_date", "")
-                if expire and auth == "prime":
+                if expire and auth in ("pro", "prime"):
                     ui.label(f"· 만료: {str(expire)[:10]}").classes("text-gray-400 text-xs")
 
     # ── 등급 비교 테이블 ──
@@ -126,20 +128,20 @@ def render_tab_pricing(auth, user):
 #  등급 비교 테이블
 # ═══════════════════════════════════════════════════
 def _render_comparison_table(auth):
-    """Free / Prime 기능 비교"""
+    """Free / Pro / Prime 기능 비교"""
 
     features = [
-        ("📊 시장 현황 대시보드",     "✅", "✅"),
-        ("🔭 종목 분석 (TOP 3만)",   "✅", "✅"),
-        ("🔭 종목 분석 (전체 종목)",  "❌", "✅"),
-        ("🔭 종목 상세 (AI 코멘트)", "❌", "✅"),
-        ("💼 내 자산 AI 진단",        "❌", "✅"),
-        ("📈 성과 리포트",            "❌", "✅"),
-        ("📓 매매 일지",              "❌", "✅"),
-        ("🧪 전략 샌드박스 (백테스트)", "❌", "✅"),
-        ("🎯 켈리 비율 포지션 사이징",  "❌", "✅"),
-        ("📬 텔레그램 시그널 알림",     "❌", "✅"),
-        ("🆘 1:1 운영자 채팅 지원",    "❌", "✅"),
+        ("📊 시장 현황 대시보드",     "✅", "✅", "✅"),
+        ("🔭 종목 분석 (TOP 3만)",   "✅", "✅", "✅"),
+        ("🔭 종목 분석 (전체 종목)",  "❌", "✅", "✅"),
+        ("🔭 종목 상세 (AI 코멘트)", "❌", "✅", "✅"),
+        ("💼 내 자산 AI 진단",        "❌", "✅", "✅"),
+        ("📈 성과 리포트",            "❌", "✅", "✅"),
+        ("📓 매매 일지",              "❌", "✅", "✅"),
+        ("🧪 전략 샌드박스 (백테스트)", "❌", "❌", "✅"),
+        ("🎯 켈리 비율 포지션 사이징",  "❌", "❌", "✅"),
+        ("📬 텔레그램 시그널 알림",     "❌", "❌", "✅"),
+        ("🆘 1:1 운영자 채팅 지원",    "❌", "❌", "✅"),
     ]
 
     with ui.row().classes("w-full gap-4 flex-wrap justify-center"):
@@ -155,6 +157,18 @@ def _render_comparison_table(auth):
             is_current=(auth == "free"),
             button_text=None,
         )
+        # Pro
+        _plan_card(
+            title="Pro",
+            emoji="📊",
+            price=f"{PRICE_PRO:,}원",
+            period="/월",
+            color_border="border-blue-500",
+            color_gradient="from-blue-900 to-blue-800",
+            features=[(f[0], f[2]) for f in features],
+            is_current=(auth == "pro"),
+            button_text="Pro 시작하기" if auth in ("guest", "free") else None,
+        )
         # Prime
         _plan_card(
             title="Prime",
@@ -163,9 +177,9 @@ def _render_comparison_table(auth):
             period="/월",
             color_border="border-amber-500",
             color_gradient="from-amber-900 to-yellow-800",
-            features=[(f[0], f[2]) for f in features],
+            features=[(f[0], f[3]) for f in features],
             is_current=(auth == "prime"),
-            button_text="Prime 시작하기" if auth in ("guest", "free") else None,
+            button_text="Prime 시작하기" if auth in ("guest", "free", "pro") else None,
             popular=True,
         )
 
@@ -235,8 +249,12 @@ def _render_bank_transfer(auth, user):
 
         with ui.row().classes("w-full gap-2 mb-2"):
             ui.html(f"""
+            <div style="background:#1e293b; border:1px solid #334155; border-radius:8px; padding:10px 14px; flex:1;">
+                <div style="color:#94A3B8; font-size:12px;">📊 Pro</div>
+                <div style="color:white; font-size:18px; font-weight:bold;">{PRICE_PRO:,}원<span style="color:#64748B; font-size:12px;">/월</span></div>
+            </div>
             <div style="background:#1e293b; border:2px solid #F59E0B; border-radius:8px; padding:10px 14px; flex:1;">
-                <div style="color:#F59E0B; font-size:12px;">👑 Prime</div>
+                <div style="color:#F59E0B; font-size:12px;">👑 Prime (추천)</div>
                 <div style="color:white; font-size:18px; font-weight:bold;">{PRICE_PRIME:,}원<span style="color:#64748B; font-size:12px;">/월</span></div>
             </div>
             """)
@@ -268,7 +286,7 @@ def _render_bank_transfer(auth, user):
         email_input = ui.input("가입 이메일", value=d_email).classes("w-full").props("readonly outlined dense")
         nick_input = ui.input("입금자명", value=d_nick, placeholder="입금 시 표시되는 이름").classes("w-full").props("outlined dense")
         plan_select = ui.select(
-            {f"prime_{PRICE_PRIME}": f"👑 Prime ({PRICE_PRIME:,}원/월)"},
+            {f"pro_{PRICE_PRO}": f"📊 Pro ({PRICE_PRO:,}원/월)", f"prime_{PRICE_PRIME}": f"👑 Prime ({PRICE_PRIME:,}원/월)"},
             label="신청 플랜",
             value=f"prime_{PRICE_PRIME}",
         ).classes("w-full").props("outlined dense")
@@ -368,6 +386,7 @@ def _render_toss_payment(auth, user):
 
         plan_select = ui.select(
             {
+                "pro": f"📊 Pro ({PRICE_PRO:,}원/월)",
                 "prime": f"👑 Prime ({PRICE_PRIME:,}원/월)",
             },
             label="결제 플랜",
@@ -376,8 +395,8 @@ def _render_toss_payment(auth, user):
 
         async def open_toss_widget():
             plan = plan_select.value
-            amount = PRICE_PRIME
-            plan_name = "Prime"
+            amount = PRICE_PRIME if plan == "prime" else PRICE_PRO
+            plan_name = "Prime" if plan == "prime" else "Pro"
             order_id = f"LDY-{plan.upper()}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{d_email[:8]}"
 
             # 토스페이먼츠 결제 위젯 JS 삽입
@@ -428,10 +447,10 @@ def _render_faq():
             ("환불은 가능한가요?",
              "결제 후 7일 이내, 유료 기능 미사용 시 전액 환불 가능합니다.\n"
              "📮 문의 탭에서 환불 요청을 남겨주세요."),
-            ("Free와 Prime의 차이는 무엇인가요?",
-             "Free: 시장 현황, TOP 3 종목 분석 등 기본 기능\n"
-             "Prime: AI 자산진단, 전략 백테스트, 켈리 포지션 사이징,\n"
-             "텔레그램 시그널 등 모든 프리미엄 기능을 이용할 수 있습니다."),
+            ("Pro와 Prime의 차이는 무엇인가요?",
+             "Pro: AI 자산진단, 전 종목 분석, 매매일지 등 핵심 기능\n"
+             "Prime: 전략 백테스트, 켈리 포지션 사이징, 텔레그램 시그널 등 \n"
+             "모든 프리미엄 기능을 포함합니다."),
         ]
 
         for q, a in faqs:
