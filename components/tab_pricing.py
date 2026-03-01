@@ -16,15 +16,11 @@ _logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 
 # ── 가격 설정 ──
-try:
-    from version_info import PRICE_PRO, PRICE_PRIME
-except ImportError:
-    PRICE_PRO = 19_000
-    PRICE_PRIME = 19_900
+PRICE_PRIME = 19_900
 
 # ── 무통장 입금 계좌 (환경변수 or 하드코딩) ──
 BANK_NAME = os.environ.get("BANK_NAME", "카카오뱅크")
-BANK_ACCOUNT = os.environ.get("BANK_ACCOUNT", "3333-00-0000000")
+BANK_ACCOUNT = os.environ.get("BANK_ACCOUNT", "3333-22-2658701")
 BANK_HOLDER = os.environ.get("BANK_HOLDER", "이두영")
 
 # ── Telegram 알림 ──
@@ -75,7 +71,7 @@ def render_tab_pricing(auth, user):
     Tab: 💎 멤버십
 
     Args:
-        auth: "guest" | "free" | "pro" | "prime" | "admin"
+        auth: "guest" | "free" | "prime" | "admin"
         user: 로그인 유저 정보 dict
     """
     if user is None:
@@ -93,7 +89,6 @@ def render_tab_pricing(auth, user):
     if auth != "guest":
         badge_map = {
             "free": ("🆓 Free", "gray", "무료 체험 중"),
-            "pro": ("📊 Pro", "blue", "Pro 구독 중"),
             "prime": ("👑 Prime", "amber", "Prime 구독 중"),
             "admin": ("🛡️ Admin", "green", "관리자"),
         }
@@ -103,7 +98,7 @@ def render_tab_pricing(auth, user):
                 ui.badge(emoji).props(f"color={color}")
                 ui.label(f"현재 등급: {desc}").classes("text-white text-sm")
                 expire = user.get("prime_expire_date", "")
-                if expire and auth in ("pro", "prime"):
+                if expire and auth == "prime":
                     ui.label(f"· 만료: {str(expire)[:10]}").classes("text-gray-400 text-xs")
 
     # ── 등급 비교 테이블 ──
@@ -128,20 +123,20 @@ def render_tab_pricing(auth, user):
 #  등급 비교 테이블
 # ═══════════════════════════════════════════════════
 def _render_comparison_table(auth):
-    """Free / Pro / Prime 기능 비교"""
+    """Free / Prime 기능 비교"""
 
     features = [
-        ("📊 시장 현황 대시보드",     "✅", "✅", "✅"),
-        ("🔭 종목 분석 (TOP 3만)",   "✅", "✅", "✅"),
-        ("🔭 종목 분석 (전체 종목)",  "❌", "✅", "✅"),
-        ("🔭 종목 상세 (AI 코멘트)", "❌", "✅", "✅"),
-        ("💼 내 자산 AI 진단",        "❌", "✅", "✅"),
-        ("📈 성과 리포트",            "❌", "✅", "✅"),
-        ("📓 매매 일지",              "❌", "✅", "✅"),
-        ("🧪 전략 샌드박스 (백테스트)", "❌", "❌", "✅"),
-        ("🎯 켈리 비율 포지션 사이징",  "❌", "❌", "✅"),
-        ("📬 텔레그램 시그널 알림",     "❌", "❌", "✅"),
-        ("🆘 1:1 운영자 채팅 지원",    "❌", "❌", "✅"),
+        ("📊 시장 현황 대시보드",     "✅", "✅"),
+        ("🔭 종목 분석 (TOP 3만)",   "✅", "✅"),
+        ("🔭 종목 분석 (전체 종목)",  "❌", "✅"),
+        ("🔭 종목 상세 (AI 코멘트)", "❌", "✅"),
+        ("💼 내 자산 AI 진단",        "❌", "✅"),
+        ("📈 성과 리포트",            "❌", "✅"),
+        ("📓 매매 일지",              "❌", "✅"),
+        ("🧪 전략 샌드박스 (백테스트)", "❌", "✅"),
+        ("🎯 켈리 비율 포지션 사이징",  "❌", "✅"),
+        ("📬 텔레그램 시그널 알림",     "❌", "✅"),
+        ("🆘 1:1 운영자 채팅 지원",    "❌", "✅"),
     ]
 
     with ui.row().classes("w-full gap-4 flex-wrap justify-center"):
@@ -157,18 +152,6 @@ def _render_comparison_table(auth):
             is_current=(auth == "free"),
             button_text=None,
         )
-        # Pro
-        _plan_card(
-            title="Pro",
-            emoji="📊",
-            price=f"{PRICE_PRO:,}원",
-            period="/월",
-            color_border="border-blue-500",
-            color_gradient="from-blue-900 to-blue-800",
-            features=[(f[0], f[2]) for f in features],
-            is_current=(auth == "pro"),
-            button_text="Pro 시작하기" if auth in ("guest", "free") else None,
-        )
         # Prime
         _plan_card(
             title="Prime",
@@ -177,9 +160,9 @@ def _render_comparison_table(auth):
             period="/월",
             color_border="border-amber-500",
             color_gradient="from-amber-900 to-yellow-800",
-            features=[(f[0], f[3]) for f in features],
+            features=[(f[0], f[2]) for f in features],
             is_current=(auth == "prime"),
-            button_text="Prime 시작하기" if auth in ("guest", "free", "pro") else None,
+            button_text="Prime 시작하기" if auth in ("guest", "free") else None,
             popular=True,
         )
 
@@ -208,53 +191,42 @@ def _plan_card(title, emoji, price, period, color_border, color_gradient,
             color = "text-white" if status == "✅" else "text-gray-600"
             with ui.row().classes("gap-2 items-center py-1"):
                 ui.label(status).classes("text-sm")
-                ui.label(feat_name).classes(f"text-sm {color}")
+                ui.label(feat_name).classes(f"{color} text-sm")
 
         if button_text:
             ui.button(
-                f"💎 {button_text}",
-                on_click=lambda: ui.run_javascript(
-                    "document.querySelector('#bank-transfer-section')?.scrollIntoView({behavior:'smooth'})"
-                ),
+                f"✦ {button_text.upper()}",
+                on_click=lambda: ui.navigate.to("#bank-transfer"),
             ).classes("w-full mt-4").props("color=primary rounded")
 
 
 # ═══════════════════════════════════════════════════
-#  Phase 1: 무통장 입금 안내 + 입금확인 요청 폼
+#  Phase 1: 무통장 입금 안내
 # ═══════════════════════════════════════════════════
 def _render_bank_transfer(auth, user):
-    """무통장 입금 계좌 안내 + 입금 확인 요청 폼"""
-
-    ui.html('<div id="bank-transfer-section"></div>')  # 스크롤 앵커
-
+    """무통장 입금 안내 + 입금확인 요청 폼"""
     with ui.card().classes(
         "w-full p-6 bg-gradient-to-br from-[#1a1a2e] to-[#16213e] "
-        "border border-blue-700 rounded-2xl"
-    ):
-        ui.label("🏦 무통장 입금으로 결제하기").classes("text-xl font-bold text-white mb-4")
+        "border border-blue-800 rounded-2xl"
+    ).props("id=bank-transfer"):
+        ui.label("🏦 무통장 입금 안내").classes("text-xl font-bold text-white mb-4")
 
-        # ── 계좌 안내 ──
-        with ui.card().classes("w-full p-4 bg-[#0f3460] rounded-xl mb-4"):
-            ui.label("입금 계좌 정보").classes("text-blue-300 font-bold text-sm mb-2")
-            with ui.column().classes("gap-1"):
-                with ui.row().classes("items-center gap-2"):
-                    ui.label(f"🏦 {BANK_NAME}").classes("text-white font-bold")
-                with ui.row().classes("items-center gap-2"):
-                    ui.label(f"💳 {BANK_ACCOUNT}").classes("text-white text-lg font-mono tracking-wider")
-                    ui.button("복사", on_click=lambda: ui.run_javascript(
-                        f"navigator.clipboard.writeText('{BANK_ACCOUNT}'); "
-                    )).props("flat dense size=sm color=blue").classes("text-xs")
-                with ui.row().classes("items-center gap-2"):
-                    ui.label(f"👤 예금주: {BANK_HOLDER}").classes("text-gray-300")
+        # ── 계좌 정보 ──
+        with ui.card().classes("w-full p-4 bg-[#0d1b2a] rounded-xl mb-4"):
+            with ui.row().classes("items-center gap-2 mb-2"):
+                ui.icon("account_balance").classes("text-blue-400")
+                ui.label("입금 계좌 정보").classes("text-blue-400 font-bold")
 
+            for label, val in [("은행", BANK_NAME), ("계좌번호", BANK_ACCOUNT), ("예금주", BANK_HOLDER)]:
+                with ui.row().classes("gap-2 items-center"):
+                    ui.label(f"{label}:").classes("text-gray-400 text-sm w-20")
+                    ui.label(val).classes("text-white font-mono text-sm")
+
+        # ── 가격 안내 (Prime만) ──
         with ui.row().classes("w-full gap-2 mb-2"):
             ui.html(f"""
-            <div style="background:#1e293b; border:1px solid #334155; border-radius:8px; padding:10px 14px; flex:1;">
-                <div style="color:#94A3B8; font-size:12px;">📊 Pro</div>
-                <div style="color:white; font-size:18px; font-weight:bold;">{PRICE_PRO:,}원<span style="color:#64748B; font-size:12px;">/월</span></div>
-            </div>
             <div style="background:#1e293b; border:2px solid #F59E0B; border-radius:8px; padding:10px 14px; flex:1;">
-                <div style="color:#F59E0B; font-size:12px;">👑 Prime (추천)</div>
+                <div style="color:#F59E0B; font-size:12px;">👑 Prime</div>
                 <div style="color:white; font-size:18px; font-weight:bold;">{PRICE_PRIME:,}원<span style="color:#64748B; font-size:12px;">/월</span></div>
             </div>
             """)
@@ -286,7 +258,7 @@ def _render_bank_transfer(auth, user):
         email_input = ui.input("가입 이메일", value=d_email).classes("w-full").props("readonly outlined dense")
         nick_input = ui.input("입금자명", value=d_nick, placeholder="입금 시 표시되는 이름").classes("w-full").props("outlined dense")
         plan_select = ui.select(
-            {f"pro_{PRICE_PRO}": f"📊 Pro ({PRICE_PRO:,}원/월)", f"prime_{PRICE_PRIME}": f"👑 Prime ({PRICE_PRIME:,}원/월)"},
+            {f"prime_{PRICE_PRIME}": f"👑 Prime ({PRICE_PRIME:,}원/월)"},
             label="신청 플랜",
             value=f"prime_{PRICE_PRIME}",
         ).classes("w-full").props("outlined dense")
@@ -308,7 +280,7 @@ def _render_bank_transfer(auth, user):
                 ui.notify("입금 금액을 입력하세요.", type="warning")
                 return
 
-            plan_label = "Pro" if "pro" in plan else "Prime"
+            plan_label = "Prime"
             now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
 
             # DB에 결제 요청 기록 (inquiries 테이블 활용)
@@ -386,7 +358,6 @@ def _render_toss_payment(auth, user):
 
         plan_select = ui.select(
             {
-                "pro": f"📊 Pro ({PRICE_PRO:,}원/월)",
                 "prime": f"👑 Prime ({PRICE_PRIME:,}원/월)",
             },
             label="결제 플랜",
@@ -395,9 +366,9 @@ def _render_toss_payment(auth, user):
 
         async def open_toss_widget():
             plan = plan_select.value
-            amount = PRICE_PRIME if plan == "prime" else PRICE_PRO
-            plan_name = "Prime" if plan == "prime" else "Pro"
-            order_id = f"LDY-{plan.upper()}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{d_email[:8]}"
+            amount = PRICE_PRIME
+            plan_name = "Prime"
+            order_id = f"LDY-PRIME-{datetime.now().strftime('%Y%m%d%H%M%S')}-{d_email[:8]}"
 
             # 토스페이먼츠 결제 위젯 JS 삽입
             js_code = f"""
@@ -412,7 +383,7 @@ def _render_toss_payment(auth, user):
                 tossPayments.requestPayment('카드', {{
                     amount: {amount},
                     orderId: '{order_id}',
-                    orderName: 'LDY Pro Trader {plan_name} 월간 구독',
+                    orderName: 'SwingPicker {plan_name} 월간 구독',
                     customerName: '{user.get("nickname", "")}',
                     customerEmail: '{d_email}',
                     successUrl: window.location.origin + '/api/payments/toss/success',
@@ -447,10 +418,10 @@ def _render_faq():
             ("환불은 가능한가요?",
              "결제 후 7일 이내, 유료 기능 미사용 시 전액 환불 가능합니다.\n"
              "📮 문의 탭에서 환불 요청을 남겨주세요."),
-            ("Pro와 Prime의 차이는 무엇인가요?",
-             "Pro: AI 자산진단, 전 종목 분석, 매매일지 등 핵심 기능\n"
-             "Prime: 전략 백테스트, 켈리 포지션 사이징, 텔레그램 시그널 등 \n"
-             "모든 프리미엄 기능을 포함합니다."),
+            ("Free와 Prime의 차이는 무엇인가요?",
+             "Free: 시장 현황, TOP 3 종목 분석 등 기본 기능\n"
+             "Prime: AI 자산진단, 전략 백테스트, 켈리 포지션 사이징,\n"
+             "텔레그램 시그널 등 모든 프리미엄 기능을 이용할 수 있습니다."),
         ]
 
         for q, a in faqs:
