@@ -103,8 +103,10 @@ async def index():
 
     with ui.tabs().classes("w-full text-white") as tabs:
         tab_refs = {}
+        label_to_key = {}
         for key, label in TAB_DEFS:
-            tab_refs[key] = ui.tab(label, name=key)
+            tab_refs[key] = ui.tab(label)
+            label_to_key[label] = key
 
     # ─── 빈 컨테이너 패널 (Lazy Loading 핵심) ───
     containers = {}
@@ -156,8 +158,10 @@ async def index():
 
     # 나머지는 클릭 시 Lazy 렌더
     def on_tab_change(e):
-        key = e.value if isinstance(e.value, str) else getattr(e.value, "name", str(e.value))
-        load_tab(key)
+        tab_val = e.value if isinstance(e.value, str) else getattr(e.value, "label", str(e.value))
+        key = label_to_key.get(tab_val)
+        if key:
+            load_tab(key)
 
     tabs.on_value_change(on_tab_change)
 
