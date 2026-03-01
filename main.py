@@ -73,6 +73,7 @@ from components.tab_updates import render_tab_updates  # ✅ Tab6 컴포넌트 �
 from components.tab_perf import render_tab_perf  # ✅ Tab7 컴포넌트 분리
 from components.tab_inquiry import render_tab_inquiry  # ✅ Tab4 컴포넌트 분리
 from components.tab_admin import render_tab_admin  # ✅ Tab8 컴포넌트 분리
+from components.tab_market import render_tab_market  # ✅ Tab1 컴포넌트 분리
 
 # Optional imports (graceful fallback)
 FDR_OK = False
@@ -139,8 +140,7 @@ ALLOWED_DOMAINS = [
 KST = timezone(timedelta(hours=9))
 
 # ── 매크로 지표 메모리 캐시 (1시간 TTL — API 밴 방지) ──
-_MACRO_CACHE: dict = {}
-_MACRO_CACHE_TIME: dict = {}
+
 
 def now_kst():
     return datetime.now(KST)
@@ -430,18 +430,6 @@ store = DataStore()
 # ═══════════════════════════════════════════
 #  4. 데이터 유틸리티 (dashboard.py에서 추출)
 # ═══════════════════════════════════════════
-def get_fear_greed(df):
-    if df.empty or "DISPLAY_SCORE" not in df.columns:
-        return 50, "데이터 부족"
-    avg = df["DISPLAY_SCORE"].mean()
-    score = min(max(avg, 0), 100)
-    if score >= 80: label = "극단적 탐욕"
-    elif score >= 60: label = "탐욕"
-    elif score >= 40: label = "중립"
-    elif score >= 20: label = "공포"
-    else: label = "극단적 공포"
-    return score, label
-
 def get_code_map(df):
     if df.empty or "종목코드" not in df.columns or "종목명" not in df.columns:
         return {}
@@ -1068,7 +1056,7 @@ async def index():
             t8 = ui.tab("👑 관리")
 
     with ui.tab_panels(tabs, value=t1).classes("w-full"):
-        with ui.tab_panel(t1): render_tab1_market(df)
+        with ui.tab_panel(t1): render_tab_market(df)  # ✅ components/tab_market.py
         with ui.tab_panel(t2): render_tab2_stocks(df, auth)
         with ui.tab_panel(t3): render_tab3_portfolio(df, auth)
         with ui.tab_panel(t4): render_tab_inquiry(auth, user)  # ✅ components/tab_inquiry.py
@@ -1094,156 +1082,8 @@ async def _do_refresh():
 
 
 # ═══════════════════════════════════════════
-#  Tab 1: 시장 현황
+#  Tab 1: → components/tab_market.py로 분리 완료
 # ═══════════════════════════════════════════
-def _render_macro_sparklines():
-    """
-    글로벌 매크로 스파크라인 배너 (Bloomberg 터미널 스타일).
-    FDR로 USD/KRW, NASDAQ, KOSPI, 미국 10년 국채금리 최근 20일 데이터.
-    """
-    if not FDR_OK:
-        return
-
-    MACRO_TICKERS = [
-        ("USD/KRW",    "USD/KRW",   "#F59E0B"),
-        ("NASDAQ",     "IXIC",      "#3B82F6"),
-        ("KOSPI",      "KS11",      "#10B981"),
-        ("US 10Y",     "US10YT=RR", "#E040FB"),
-    ]
-
-    with ui.card().classes("w-full p-3 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
-        ui.label("🌍 글로벌 매크로").classes("text-xs text-gray-400 mb-2")
-        with ui.row().classes("w-full gap-3 flex-wrap"):
-            for label, ticker, color in MACRO_TICKERS:
-                _spark_card(label, ticker, color)
-
-
-def _spark_card(label: str, ticker: str, color: str):
-    """개별 스파크라인 카드 (20일) — 캐시 + 안전 비동기"""
-    import plotly.graph_objects as go
-    import asyncio
-    try:
-        from nicegui import ui
-    except ImportError:
-        return
-
-    with ui.card().classes("flex-1 min-w-[140px] p-2 bg-[#1a1a2e] border border-gray-700/50 rounded-lg"):
-        val_label  = ui.label("—").classes("text-sm font-bold text-white")
-        chg_label  = ui.label("—").classes("text-xs")
-        chart_slot = ui.column().classes("w-full")
-
-        async def _load():
-            try:
-                now = time.time()
-                # ✅ 캐시된 데이터가 있고 1시간이 안 지났으면 재사용 (API 밴 방지)
-                if ticker in _MACRO_CACHE and (now - _MACRO_CACHE_TIME.get(ticker, 0)) < 3600:
-                    d = _MACRO_CACHE[ticker]
-                else:
-                    start = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
-                    d = await run_sync(fdr.DataReader, ticker, start)
-                    if d is not None and not d.empty:
-                        d = d.tail(20)
-                        _MACRO_CACHE[ticker] = d
-                        _MACRO_CACHE_TIME[ticker] = now
-
-                if d is None or d.empty:
-                    val_label.set_text("N/A")
-                    return
-                last   = float(d["Close"].iloc[-1])
-                prev   = float(d["Close"].iloc[-2]) if len(d) > 1 else last
-                chg    = (last - prev) / prev * 100 if prev else 0
-
-                # 표시 형식
-                if ticker in ("USD/KRW",):
-                    fmt = f"{last:,.1f}"
-                elif "10Y" in ticker:
-                    fmt = f"{last:.3f}%"
-                else:
-                    fmt = f"{last:,.2f}"
-
-                val_label.set_text(f"{label}: {fmt}")
-                chg_label.set_text(f"{chg:+.2f}%")
-                chg_label.classes(replace="text-xs text-green-400" if chg >= 0 else "text-xs text-red-400")
-
-                # 스파크라인 mini chart
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=list(range(len(d))),
-                    y=d["Close"].tolist(),
-                    mode="lines",
-                    line=dict(color=color, width=1.5),
-                    fill="tozeroy",
-                    fillcolor=f"{color}22",
-                    showlegend=False,
-                ))
-                fig.update_layout(
-                    height=50, margin=dict(t=0,b=0,l=0,r=0),
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    xaxis=dict(visible=False),
-                    yaxis=dict(visible=False),
-                )
-                chart_slot.clear()
-                with chart_slot:
-                    ui.plotly(fig).classes("w-full")
-            except Exception as _e:
-                val_label.set_text(f"{label}: 조회 실패")
-
-        # ✅ ui.timer → safe async task (parent slot deleted 방지)
-        async def _safe_load():
-            await asyncio.sleep(0.5)
-            try:
-                if chart_slot.is_deleted:
-                    return
-            except AttributeError:
-                pass  # NiceGUI 구버전: is_deleted 없으면 그냥 진행
-            await _load()
-
-        asyncio.create_task(_safe_load())
-
-
-def render_tab1_market(df):
-    fg_score, fg_label = get_fear_greed(df)
-
-    # ── 매크로 스파크라인 배너 ──────────────────────────────
-    _render_macro_sparklines()
-
-    section_title("📡 시장 현황")
-    with ui.row().classes("w-full gap-4 flex-wrap"):
-        fg_icon = "🟢" if fg_score >= 50 else "🔴"
-        metric_card("시장 심리", f"{fg_icon} {fg_label}", f"지수: {fg_score:.0f}/100", fg_score >= 50)
-
-        if "ret_1d_%" in df.columns:
-            avg_ret = df.head(20)["ret_1d_%"].mean()
-            metric_card("Top20 평균 수익률", f"{avg_ret:+.2f}%", "전일 대비", avg_ret >= 0)
-
-        total = len(df)
-        armed = len(df[df.get("ROUTE", pd.Series()).str.contains("ARMED|ATTACK", na=False)]) if "ROUTE" in df.columns else 0
-        metric_card("분석 종목", f"{total}개", f"ARMED/ATTACK: {armed}개")
-
-    # 게이지 + 트리맵
-    section_title("🌡️ 공포/탐욕 & 주도 섹터")
-    with ui.row().classes("w-full gap-4 flex-wrap items-start"):
-        with ui.card().classes("flex-1 min-w-[300px] p-2 bg-[#1a1a2e]"):
-            fig_g = plot_fear_greed_gauge(fg_score)
-            if fig_g:
-                ui.plotly(_plotly_dark(fig_g, 280)).classes("w-full")
-
-        with ui.card().classes("flex-1 min-w-[300px] p-2 bg-[#1a1a2e]"):
-            ui.label("🔥 오늘의 주도 섹터").classes("text-sm font-bold text-white mb-2")
-            if "업종" in df.columns:
-                fig_m = plot_sector_treemap(df.head(50))
-                if fig_m:
-                    ui.plotly(_plotly_dark(fig_m, 280)).classes("w-full")
-                else:
-                    ui.label("섹터 데이터 부족").classes("text-gray-500")
-
-    section_title("🚀 섹터 모멘텀 Top 10")
-    fig_mom = plot_sector_momentum_bar(df)
-    if fig_mom and len(fig_mom.data) > 0:
-        ui.plotly(_plotly_dark(fig_mom, 350)).classes("w-full")
-    else:
-        ui.label("모멘텀 데이터 부족").classes("text-gray-500")
 
 
 # ═══════════════════════════════════════════
