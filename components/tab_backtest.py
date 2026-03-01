@@ -334,21 +334,25 @@ def render_tab_backtest(df, auth):
         with result_container:
             spinner = ui.spinner("dots", size="lg", color="blue")
 
-        all_recs = _load_recommend_files()
+        from async_helpers import run_sync
+
+        all_recs = await run_sync(_load_recommend_files)
         if all_recs.empty:
             result_container.clear()
             with result_container:
                 ui.label("❌ data/ 폴더에 recommend_*.csv 파일이 없습니다").classes("text-red-400")
             return
 
-        result = _run_backtest(
-            all_recs,
-            min_score=int(sl_score.value),
-            hold_days=int(sl_hold.value),
-            stop_pct=float(sl_stop.value),
-            target_pct=float(sl_target.value),
-            top_k=int(sl_topk.value),
-            cost_pct=float(sl_cost.value),
+        _min_score = int(sl_score.value)
+        _hold_days = int(sl_hold.value)
+        _stop_pct = float(sl_stop.value)
+        _target_pct = float(sl_target.value)
+        _top_k = int(sl_topk.value)
+        _cost_pct = float(sl_cost.value)
+
+        result = await run_sync(
+            lambda: _run_backtest(all_recs, _min_score, _hold_days,
+                                  _stop_pct, _target_pct, _top_k, _cost_pct)
         )
 
         result_container.clear()
