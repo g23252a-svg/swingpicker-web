@@ -24,6 +24,7 @@ import hashlib
 import secrets
 import re
 import threading
+import bcrypt  # ✅ Fix#3: SHA256 → bcrypt 전환
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -113,8 +114,9 @@ PRICE_PRIME = 39000
 
 # Auth 상수
 MASTER_ADMIN_ID = "admin"
+BCRYPT_COST = int(os.environ.get("BCRYPT_COST", "12"))  # ✅ Fix#3: 환경별 cost 조절
 _raw_admin_pw = os.environ.get("MASTER_ADMIN_PW", "").strip()
-_ADMIN_PW_HASH = hashlib.sha256(_raw_admin_pw.encode()).hexdigest() if _raw_admin_pw else ""
+_ADMIN_PW_HASH = bcrypt.hashpw(_raw_admin_pw.encode(), bcrypt.gensalt(BCRYPT_COST)) if _raw_admin_pw else b""  # ✅ Fix#3
 _ADMIN_PW_SET = bool(_raw_admin_pw)
 del _raw_admin_pw  # ✅ [v14] #18: 평문 즉시 제거
 
@@ -166,7 +168,7 @@ def _get_db():
 
 def _verify_admin_pw(pw):
     if not _ADMIN_PW_HASH: return False
-    return secrets.compare_digest(hashlib.sha256(pw.encode()).hexdigest(), _ADMIN_PW_HASH)
+    return bcrypt.checkpw(pw.encode(), _ADMIN_PW_HASH)  # ✅ Fix#3: 타이밍 공격 방어 내장
 
 def _create_salt(): return secrets.token_hex(16)
 def _hash_pw(pw, salt): return hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
@@ -184,8 +186,8 @@ def _authenticate_user(db, email: str, password: str):
         return None, "🚫 차단된 계정"
     try:
         db.update_login_timestamp(email)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"로그인 타임스탬프 갱신 실패 ({email}): {e}", exc_info=True)  # ✅ Fix#4
     return u, None
 
 def normalize_email(email):
@@ -220,7 +222,8 @@ def get_auth_status():
             exp_dt = datetime.strptime(str(expire).split(" ")[0], "%Y-%m-%d")
             if exp_dt.date() >= datetime.now().date():
                 return role
-        except Exception: pass
+        except Exception as e:
+            logger.warning(f"구독 만료일 파싱 실패: {expire} → {e}")  # ✅ Fix#4
     return "free" if role in ("pro", "prime") else role
 
 
@@ -238,7 +241,7 @@ class DataStore:
     def scored(self):
         """읽기 시 항상 스냅샷 복사본 반환 — 쓰기 중 참조 꼬임 방지"""
         with self._lock:
-            return self._scored
+            return self._scored.copy()  # ✅ Fix#1: 참조→복사본 (진짜 Thread-Safety)
 
     @scored.setter
     def scored(self, value):
