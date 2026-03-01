@@ -678,6 +678,7 @@ def plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, targe
         return go.Figure()
 
     df = df.copy()
+    df.index = df.index.strftime('%Y-%m-%d')  # ✅ Timestamp → 문자열 (NiceGUI orjson 직렬화 호환)
     col_map = {"시가": "Open", "고가": "High", "저가": "Low", "종가": "Close", "거래량": "Volume"}
     df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
 
