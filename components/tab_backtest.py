@@ -81,7 +81,8 @@ def _load_recommend_files() -> pd.DataFrame:
 
     # ── 종목명 오염 복구 (코드==이름인 경우) ──
     if "종목코드" in merged.columns and "종목명" in merged.columns:
-        mask = merged["종목명"].astype(str).str.match(r'^\d+$')
+        merged["종목명"] = merged["종목명"].astype(str)
+        mask = merged["종목명"].str.match(r'^\d+$')
         if mask.any():
             code_to_name = _load_code_to_name()
             if code_to_name:
