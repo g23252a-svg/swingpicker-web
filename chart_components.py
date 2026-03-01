@@ -136,17 +136,51 @@ def plot_radar_chart(row) -> go.Figure:
     raw_name = row.get('종목명')
     stock_name = str(raw_name) if pd.notna(raw_name) else "종목"
 
-    def _safe_get(key):
+    def _safe(key, default=0):
         val = pd.to_numeric(row.get(key), errors='coerce')
-        return val * 100 if pd.notna(val) else 0
+        return float(val) if pd.notna(val) else default
+
+    def _clamp(v, lo=0, hi=100):
+        return max(lo, min(hi, v))
+
+    # ── 7-Factor 실계산 (CSV 실제 컬럼 기반) ──
+    close = _safe("종가")
+    entry = _safe("추천매수가")
+    stop = _safe("손절가")
+    t1 = _safe("추천매도가1")
+
+    # 1) 모멘텀: RSI14 (이미 0~100)
+    momentum = _clamp(_safe("RSI14", 50))
+
+    # 2) 가성비(RR): (T1-Entry)/(Entry-Stop), 4:1이면 100점
+    risk = entry - stop if entry > stop else 1
+    reward = t1 - entry if t1 > entry else 0
+    rr_ratio = reward / risk if risk > 0 else 0
+    rr_score = _clamp(rr_ratio / 4 * 100)
+
+    # 3) 상승여력: T1까지 잔여 상승률, 20%이면 100점
+    upside_pct = ((t1 / close) - 1) * 100 if close > 0 and t1 > 0 else 0
+    upside_score = _clamp(upside_pct / 20 * 100)
+
+    # 4) 안전마진: 종가→손절 거리, 10%이면 100점
+    sl_dist_pct = ((close - stop) / close) * 100 if close > 0 and stop > 0 else 0
+    safety_score = _clamp(sl_dist_pct / 10 * 100)
+
+    # 5) 타이밍: TIMING_SCORE (이미 0~100)
+    timing = _clamp(_safe("TIMING_SCORE", 50))
+
+    # 6) 유동성: 거래대금(억원), 2000억이면 100점
+    liquidity_raw = _safe("거래대금(억원)")
+    liquidity = _clamp(liquidity_raw / 2000 * 100)
+
+    # 7) 세력강도: V_POWER (-1~3 범위를 0~100으로)
+    vp = _safe("V_POWER")
+    tech_score = _clamp((vp + 1) / 4 * 100)  # -1→0, 3→100
 
     keys = ["모멘텀", "가성비(RR)", "상승여력", "안전마진",
             "타이밍", "유동성", "세력강도"]
-    values = [
-        _safe_get("NORM_MOM"), _safe_get("NORM_RR"), _safe_get("NORM_T1"),
-        _safe_get("NORM_SL"), _safe_get("NORM_NEAR"), _safe_get("NORM_LIQ"),
-        _safe_get("NORM_TEC"),
-    ]
+    values = [momentum, rr_score, upside_score, safety_score,
+              timing, liquidity, tech_score]
 
     # 폐곡선
     values += values[:1]
