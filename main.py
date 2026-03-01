@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LDY Pro Trader — NiceGUI Full Edition
+SwingPicker — NiceGUI Full Edition
 ═══════════════════════════════════════
 순수 라우터 + Lazy Loading: 탭 클릭 시에만 렌더링
 
@@ -72,16 +72,17 @@ async def index():
     with ui.row().classes("w-full items-center justify-between px-4 py-3 rounded-xl mb-2 "
                           "bg-gradient-to-r from-[#1a1a2e] via-[#16213e] to-[#0f3460]"):
         with ui.column().classes("gap-0"):
-            ui.label("💎 LDY Pro Trader").classes(
+            ui.label("💎 SwingPicker").classes(
                 "text-2xl font-bold text-transparent bg-clip-text "
                 "bg-gradient-to-r from-blue-400 to-purple-400"
             ).style("font-family:Outfit,sans-serif")
-            ui.label(f"v{APP_VERSION} · NiceGUI Edition").classes("text-xs text-gray-400")
+            ui.label(f"v{APP_VERSION}").classes("text-xs text-gray-400")
         with ui.row().classes("gap-2 items-center"):
             if user:
                 ui.label(f"👋 {user.get('nickname', '')}").classes("text-white text-sm")
-                badge_color = "green" if auth in ("admin", "prime") else "blue" if auth == "pro" else "gray"
-                ui.badge(auth.upper()).props(f"color={badge_color}")
+                badge_color = "green" if auth in ("admin", "prime") else "gray"
+                badge_label = {"admin": "관리자", "prime": "프라임", "free": "무료"}.get(auth, auth)
+                ui.badge(badge_label).props(f"color={badge_color}")
                 ui.button("로그아웃", on_click=lambda: (set_current_user(None), ui.navigate.to("/login"))
                           ).props("flat dense").classes("text-white text-xs")
             else:
@@ -208,7 +209,7 @@ if __name__ in {"__main__", "__mp_main__"}:
     ui.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 8080)),
-        title=f"LDY Pro Trader v{APP_VERSION}",
+        title=f"SwingPicker v{APP_VERSION}",
         favicon="💎",
         dark=True,
         storage_secret=os.environ["STORAGE_SECRET"],

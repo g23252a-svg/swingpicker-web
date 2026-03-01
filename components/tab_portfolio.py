@@ -49,10 +49,10 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
 # 이용권 가격
 try:
-    from version_info import PRICE_PRO, PRICE_PRIME
+    from version_info import PRICE_PRIME
 except ImportError:
-    PRICE_PRO = 19000
-    PRICE_PRIME = 39000
+    PRICE_PRIME = 19_900
+    PRICE_PRIME = 19_900
 
 
 # ══════════════════════════════════════════════════════
@@ -279,8 +279,8 @@ def render_tab_portfolio(df, auth):
     if auth in ("guest", "free"):
         with ui.card().classes("w-full p-8 bg-[#1a1a2e] border border-gray-700 rounded-xl text-center"):
             ui.label("🔒 내 자산 분석").classes("text-2xl font-bold text-white mb-2")
-            ui.label("Pro 등급부터 이용 가능합니다").classes("text-gray-400 mb-2")
-            ui.label(f"🚀 Pro ({PRICE_PRO:,}원/월) · 👑 Prime ({PRICE_PRIME:,}원/월)").classes("text-gray-400 text-sm mb-4")
+            ui.label("Prime 회원 전용 기능입니다").classes("text-gray-400 mb-2")
+            ui.label(f"👑 Prime ({PRICE_PRIME:,}원/월) · 신규 가입 시 14일 무료체험!").classes("text-gray-400 text-sm mb-4")
             with ui.row().classes("justify-center mt-2 gap-4"):
                 ui.html("""
                 <div style="text-align:center; padding:16px; border:1px solid #374151; border-radius:12px; min-width:100px;">

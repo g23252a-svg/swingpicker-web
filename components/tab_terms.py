@@ -9,16 +9,15 @@ from nicegui import ui
 # 이용권 가격 (config에서 가져오거나 기본값)
 try:
     from config import settings
-    PRICE_PRO = getattr(settings, "PRICE_PRO", 19000)
-    PRICE_PRIME = getattr(settings, "PRICE_PRIME", 39000)
+    PRICE_PRIME = getattr(settings, "PRICE_PRIME", 19_900)
+    
 except Exception:
-    PRICE_PRO = 19000
-    PRICE_PRIME = 39000
+    PRICE_PRIME = 19_900
 
 _TERMS_MD = f"""
 ## 1. 서비스 성격
 
-LDY Pro Trader는 **퀀트 지표 기반의 데이터 분석 도구**로,
+SwingPicker는 **퀀트 지표 기반의 데이터 분석 도구**로,
 개별 종목의 매수·매도, 수익을 보장하는 리딩 서비스가 아닙니다.
 
 제공되는 모든 정보는 **교육 및 참고용**이며,
@@ -45,10 +44,8 @@ LDY Pro Trader는 **퀀트 지표 기반의 데이터 분석 도구**로,
 
 | 등급 | 기능 | 가격 |
 |------|------|------|
-| **Guest (비회원)** | 상위 3개 종목 맛보기 | 무료 |
-| **Free (회원)** | 상위 5개 종목 열람 | 무료 |
-| **Pro 1개월** | 상위 20 종목, 내 자산 분석 | {PRICE_PRO:,}원 |
-| **Prime 1개월** | 전체 종목, CSV 다운로드, 텔레그램 알림 | {PRICE_PRIME:,}원 |
+| **무료 회원** | 시장 현황, TOP 3 종목 분석 | 무료 |
+| **Prime (월간)** | 전체 종목, AI 자산진단, 백테스트, 텔레그램 알림 | {PRICE_PRIME:,}원/월 |
 
 - 자동 결제는 지원하지 않으며, 1개월 단위 선불 결제·연장 방식입니다.
 - 구체적인 결제/환불/이용 기간 정책은 별도 안내를 따릅니다.
