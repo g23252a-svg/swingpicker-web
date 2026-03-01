@@ -15,18 +15,11 @@ Tab 8: 👑 회원 관리 (Admin)
 """
 
 import os
-import math
 import time
 import asyncio
 import logging
-import hashlib
-import secrets
-import re
 import threading
-import bcrypt  # ✅ Fix#3: SHA256 → bcrypt 전환
 from datetime import datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 
 import pandas as pd
 import numpy as np
@@ -35,51 +28,40 @@ import io
 
 from nicegui import ui, app
 
-# ─── [v6.0] 비동기 래퍼 (UI 프리징 방지) ───
+# ─── 비동기 래퍼 ───
 from async_helpers import run_sync, run_cpu, register_shutdown
 
-# ─── 신규 모듈 (v13 개선) ───
+# ─── 서비스 & UI ───
+from services.auth import (
+    get_current_user, set_current_user, get_auth_status,
+)
+from components.ui_utils import DARK_CSS
+from views.login_page import login_page  # noqa: F401 — @ui.page('/login') 등록
+
+# ─── 탭 컴포넌트 ───
+from components.tab_terms import render_tab_terms
+from components.tab_updates import render_tab_updates
+from components.tab_perf import render_tab_perf
+from components.tab_inquiry import render_tab_inquiry
+from components.tab_admin import render_tab_admin
+from components.tab_market import render_tab_market
+from components.tab_stocks import render_tab_stocks
+from components.tab_portfolio import render_tab_portfolio
+
+# ─── 매매일지 (선택) ───
 try:
     from trade_journal_tab import render_trade_journal_tab
     JOURNAL_OK = True
 except ImportError:
     JOURNAL_OK = False
 
-# ─── 기존 모듈 재사용 ───
-from shared_utils import nz_num, safe_float, calc_hma as calc_hma_series
-from chart_components import (
-    plot_fear_greed_gauge, plot_sector_treemap,
-    plot_sector_momentum_bar, plot_radar_chart,
-    plot_score_waterfall, plot_ai_gauge_chart,
-)
-from components.tab_terms import render_tab_terms  # ✅ Tab5 컴포넌트 분리
-from components.tab_updates import render_tab_updates  # ✅ Tab6 컴포넌트 분리
-from components.tab_perf import render_tab_perf  # ✅ Tab7 컴포넌트 분리
-from components.tab_inquiry import render_tab_inquiry  # ✅ Tab4 컴포넌트 분리
-from components.tab_admin import render_tab_admin  # ✅ Tab8 컴포넌트 분리
-from components.tab_market import render_tab_market  # ✅ Tab1 컴포넌트 분리
-from components.tab_stocks import render_tab_stocks  # ✅ Tab2 컴포넌트 분리
-from components.tab_portfolio import render_tab_portfolio  # ✅ Tab3 컴포넌트 분리
-
-# Optional imports (graceful fallback)
+# Optional imports
 FDR_OK = False
-PYKRX_OK = False
 try:
     import FinanceDataReader as fdr
     FDR_OK = True
 except ImportError:
     pass
-
-try:
-    from pykrx import stock
-    PYKRX_OK = True
-except ImportError:
-    pass
-
-try:
-    from indicators import calculate_supertrend
-except ImportError:
-    def calculate_supertrend(df): return df
 
 try:
     import version_info
@@ -92,7 +74,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ldy-nicegui")
 
 # ═══════════════════════════════════════════
-#  1. 설정 & 상수
+#  설정 & 상수
 # ═══════════════════════════════════════════
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 RECOMMEND_PATH = os.path.join(DATA_DIR, "recommend_latest.csv")
@@ -100,126 +82,16 @@ REMOTE_CSV_URL = os.getenv(
     "LDY_RAW_URL",
     "https://raw.githubusercontent.com/g23252a-svg/swingpicker-web/main/data/recommend_latest.csv"
 )
-NICEGUI_VERSION = "2.0.0-nicegui"
-PRICE_PRO = 19000
-PRICE_PRIME = 39000
-
-# Auth 상수
-MASTER_ADMIN_ID = "admin"
-BCRYPT_COST = int(os.environ.get("BCRYPT_COST", "12"))  # ✅ Fix#3: 환경별 cost 조절
-_raw_admin_pw = os.environ.get("MASTER_ADMIN_PW", "").strip()
-_ADMIN_PW_HASH = bcrypt.hashpw(_raw_admin_pw.encode(), bcrypt.gensalt(BCRYPT_COST)) if _raw_admin_pw else b""  # ✅ Fix#3
-_ADMIN_PW_SET = bool(_raw_admin_pw)
-del _raw_admin_pw  # ✅ [v14] #18: 평문 즉시 제거
-
-SECURITY_QUESTIONS = [
-    "선택하세요...", "가장 기억에 남는 여행지는?", "어릴 적 살던 동네 이름은?",
-    "가장 좋아하는 보물 1호는?", "초등학교 담임 선생님 성함은?",
-    "나의 좌우명은?", "부모님의 고향은 어디인가요?",
-]
-ALLOWED_DOMAINS = [
-    "naver.com", "gmail.com", "daum.net", "hanmail.net",
-    "kakao.com", "nate.com", "icloud.com", "outlook.com",
-    "hotmail.com", "yahoo.com", "taiyoinkproducts.co.kr"
-]
 
 KST = timezone(timedelta(hours=9))
-
-# ── 매크로 지표 메모리 캐시 (1시간 TTL — API 밴 방지) ──
 
 
 def now_kst():
     return datetime.now(KST)
 
-def to_kst_str(value, fmt="%Y-%m-%d %H:%M:%S"):
-    if not value or str(value).strip() in ("", "-", "None", "NaT"):
-        return "-"
-    try:
-        dt = pd.to_datetime(value)
-        if dt.tzinfo is None:
-            dt = dt.tz_localize("UTC")
-        return dt.tz_convert(KST).strftime(fmt)
-    except Exception:
-        return str(value)
 
 # ═══════════════════════════════════════════
-#  2. Auth 시스템 (st.session_state → app.storage)
-# ═══════════════════════════════════════════
-def _get_db():
-    try:
-        from db_utils import get_db
-        db = get_db()
-        # ✅ Railway 재배포 시 Gist에서 회원 데이터 복원 (최초 1회)
-        if db and hasattr(db, 'ensure_gist_loaded'):
-            db.ensure_gist_loaded()
-        return db
-    except Exception as e:
-        logger.error(f"DB Error: {e}")
-        return None
-
-def _verify_admin_pw(pw):
-    if not _ADMIN_PW_HASH: return False
-    return bcrypt.checkpw(pw.encode(), _ADMIN_PW_HASH)  # ✅ Fix#3: 타이밍 공격 방어 내장
-
-def _create_salt(): return secrets.token_hex(16)
-def _hash_pw(pw, salt): return hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
-def _hash_ans(ans, salt): return _hash_pw(ans.strip().lower(), salt)
-
-def _authenticate_user(db, email: str, password: str):
-    """인증 로직 캡슐화: UI는 성공/실패만 받음.
-    반환: (user_dict, None) 성공 | (None, error_msg) 실패
-    """
-    u = db.get_user_by_id(email)
-    h = _hash_pw(password, u["salt"] if u else "dummy")
-    if not u or h != u.get("password"):
-        return None, "아이디 또는 비밀번호 오류"
-    if str(u.get("is_banned")).upper() in ("Y", "TRUE", "1"):
-        return None, "🚫 차단된 계정"
-    try:
-        db.update_login_timestamp(email)
-    except Exception as e:
-        logger.error(f"로그인 타임스탬프 갱신 실패 ({email}): {e}", exc_info=True)  # ✅ Fix#4
-    return u, None
-
-def normalize_email(email):
-    email = email.strip().lower()
-    if "@" not in email: return email
-    local, domain = email.split("@", 1)
-    if domain in ("gmail.com", "googlemail.com"):
-        local = local.replace(".", "")
-        if "+" in local: local = local.split("+")[0]
-    return f"{local}@{domain}"
-
-def check_pw_strength(pw):
-    return len(pw) >= 8 and re.search(r"[a-z]", pw.lower()) and re.search(r"[0-9]", pw)
-
-def get_current_user():
-    return app.storage.user.get("profile")
-
-def set_current_user(profile):
-    if profile:
-        app.storage.user["profile"] = profile
-    else:
-        app.storage.user.pop("profile", None)
-
-def get_auth_status():
-    user = get_current_user()
-    if not user: return "guest"
-    role = user.get("role", "free")
-    if role == "admin": return "admin"
-    expire = user.get("prime_expire_date")
-    if expire:
-        try:
-            exp_dt = datetime.strptime(str(expire).split(" ")[0], "%Y-%m-%d")
-            if exp_dt.date() >= datetime.now().date():
-                return role
-        except Exception as e:
-            logger.warning(f"구독 만료일 파싱 실패: {expire} → {e}")  # ✅ Fix#4
-    return "free" if role in ("pro", "prime") else role
-
-
-# ═══════════════════════════════════════════
-#  3. 데이터 저장소
+#  데이터 저장소
 # ═══════════════════════════════════════════
 class DataStore:
     def __init__(self):
@@ -414,12 +286,7 @@ store = DataStore()
 
 
 # ═══════════════════════════════════════════
-#  4. 데이터 유틸리티 (dashboard.py에서 추출)
-# ═══════════════════════════════════════════
-# get_code_map, _recent_trade_date → components/tab_portfolio.py로 이동
-
-
-# KRX 전체 종목 캐시 (앱 시작 시 1번만 로드)
+#  KRX 종목 캐시
 _KRX_NAME_MAP = {}
 
 def _ensure_krx_map():
@@ -497,186 +364,9 @@ def _ensure_krx_map():
 
     logger.warning("⚠️ KRX 종목 매핑 로드 완전 실패 — 종목명이 코드로 표시될 수 있음")
 
-# find_code_by_name, fetch_current_price, load/save_portfolio_file → components/tab_portfolio.py로 이동
-
 
 # ═══════════════════════════════════════════
-#  5. 공통 UI 컴포넌트
-# ═══════════════════════════════════════════
-DARK_CSS = """
-<style>
-    body { background: #0d0d1a !important; }
-    .nicegui-content { max-width: 1400px; margin: 0 auto; }
-    .q-tab-panel { padding: 8px 0 !important; }
-    .q-card { background: #1a1a2e !important; }
-    .q-table { background: #1a1a2e !important; color: white !important; }
-    .q-table th { color: #94A3B8 !important; }
-    .kanban-col { min-width: 280px; flex: 1; }
-    .kanban-card {
-        background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 12px; padding: 12px; margin-bottom: 8px;
-        transition: transform 0.2s; cursor: pointer;
-    }
-    .kanban-card:hover { transform: translateY(-2px); background: rgba(255,255,255,0.08); }
-</style>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<!-- PWA -->
-<link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#1a1a2e">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="LDY Trader">
-<link rel="apple-touch-icon" href="/static/icon-192.png">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
-<script>
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js').then(r => console.log('SW registered'));
-}
-</script>
-"""
-
-
-def metric_card(title, value, delta="", positive=True):
-    with ui.card().classes("p-4 min-w-[140px] bg-[#1a1a2e] border border-gray-700 rounded-xl"):
-        ui.label(title).classes("text-xs text-gray-400 uppercase tracking-wide")
-        ui.label(str(value)).classes("text-xl font-bold text-white mt-1")
-        if delta:
-            color = "text-green-400" if positive else "text-red-400"
-            ui.label(str(delta)).classes(f"text-sm {color} mt-0.5")
-
-
-def section_title(text):
-    ui.label(text).classes("text-lg font-bold text-white mt-6 mb-2 border-b border-gray-700 pb-2")
-
-
-def price_bar_html(stop, entry, close, t1, t2=0):
-    points = [("손절", stop, "#EF4444"), ("매수", entry, "#3B82F6"), ("현재", close, "#FFFFFF")]
-    if t1 > 0: points.append(("T1", t1, "#10B981"))
-    if t2 > 0 and t2 != t1: points.append(("T2", t2, "#EAB308"))
-    points.sort(key=lambda x: x[1])
-    p_min, p_max = points[0][1] * 0.98, points[-1][1] * 1.02
-    rng = p_max - p_min
-    if rng <= 0: return ""
-
-    html = '<div style="position:relative;height:55px;background:linear-gradient(90deg,rgba(239,68,68,0.15) 0%,rgba(16,185,129,0.15) 100%);border-radius:10px;margin:8px 0 20px 0;">'
-    for label, price, color in points:
-        pct = max(3, min((price - p_min) / rng * 100, 97))
-        is_cur = label == "현재"
-        sz = "14px" if is_cur else "10px"
-        bdr = "2px solid #FFF" if is_cur else "none"
-        fw = "bold" if is_cur else "normal"
-        html += (
-            f'<div style="position:absolute;left:{pct}%;top:50%;transform:translate(-50%,-50%);z-index:{"10" if is_cur else "5"};text-align:center;">'
-            f'<div style="width:{sz};height:{sz};background:{color};border-radius:50%;border:{bdr};margin:0 auto;"></div>'
-            f'<div style="font-size:10px;color:{color};white-space:nowrap;margin-top:3px;font-weight:{fw};">{label}<br>{int(price):,}</div>'
-            f'</div>'
-        )
-    html += '</div>'
-    return html
-
-
-def _plotly_dark(fig, height=300):
-    """Plotly 차트 다크 테마 적용"""
-    if fig:
-        fig.update_layout(
-            height=height, paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)", font_color="white",
-            margin=dict(t=30, b=10, l=10, r=10),
-        )
-    return fig
-
-
-# ═══════════════════════════════════════════
-#  6. 로그인 페이지
-# ═══════════════════════════════════════════
-@ui.page('/login')
-def login_page():
-    ui.add_head_html(DARK_CSS.replace("1400px", "500px"))
-
-    with ui.card().classes("w-full p-8 bg-[#1a1a2e] border border-gray-700 rounded-2xl mt-16"):
-        ui.label("🔐 LDY Pro Trader").classes("text-2xl font-bold text-center text-white w-full mb-4")
-
-        with ui.tabs().classes("w-full") as tabs:
-            t_login = ui.tab("로그인")
-            t_join = ui.tab("전략군 가입")
-            t_recover = ui.tab("계정 복구")
-
-        with ui.tab_panels(tabs, value=t_login).classes("w-full"):
-            with ui.tab_panel(t_login):
-                lid = ui.input("아이디 (또는 이메일)").classes("w-full")
-                lpw = ui.input("비밀번호", password=True, password_toggle_button=True).classes("w-full")
-                msg = ui.label("").classes("text-sm mt-2")
-
-                async def do_login():
-                    uid = lid.value.strip()
-                    pw = lpw.value
-                    if uid == MASTER_ADMIN_ID and _ADMIN_PW_SET and _verify_admin_pw(pw):
-                        set_current_user({"id": "admin", "role": "admin", "nickname": "관리자"})
-                        ui.navigate.to("/"); return
-                    db = _get_db()
-                    if not db:
-                        msg.set_text("❌ DB 연결 실패"); msg.classes(replace="text-sm mt-2 text-red-400"); return
-                    clean = normalize_email(uid)
-                    u, err = _authenticate_user(db, clean, pw)
-                    if err:
-                        msg.set_text(err); msg.classes(replace="text-sm mt-2 text-red-400"); return
-                    set_current_user({"id": u["id"], "login_id": u["id"], "role": u.get("role", "free"),
-                                      "nickname": u.get("nickname"), "prime_expire_date": u.get("prime_expire_date")})
-                    ui.navigate.to("/")
-
-                ui.button("로그인", on_click=do_login).classes("w-full mt-4").props("color=primary")
-                ui.button("🔓 둘러보기 (게스트)", on_click=lambda: ui.navigate.to("/")).classes("w-full mt-2").props("flat")
-
-            with ui.tab_panel(t_join):
-                ui.label("👋 가입을 환영합니다!").classes("text-white mb-2")
-                j_em = ui.input("이메일").classes("w-full")
-                j_nk = ui.input("닉네임 (최대 8자)").classes("w-full")
-                j_p1 = ui.input("비밀번호 (8자+, 영문/숫자)", password=True).classes("w-full")
-                j_p2 = ui.input("비밀번호 확인", password=True).classes("w-full")
-                j_q = ui.select({i: q for i, q in enumerate(SECURITY_QUESTIONS)}, value=0, label="보안 질문").classes("w-full")
-                j_ans = ui.input("보안 질문 답변").classes("w-full")
-                j_msg = ui.label("").classes("text-sm mt-2")
-
-                async def do_join():
-                    domain = j_em.value.split("@")[-1].lower() if "@" in j_em.value else ""
-                    if domain not in ALLOWED_DOMAINS:
-                        j_msg.set_text("🚫 허용 도메인 아님"); j_msg.classes(replace="text-sm mt-2 text-red-400"); return
-                    if not check_pw_strength(j_p1.value):
-                        j_msg.set_text("⚠️ 8자+영문+숫자"); j_msg.classes(replace="text-sm mt-2 text-red-400"); return
-                    if j_p1.value != j_p2.value:
-                        j_msg.set_text("비밀번호 불일치"); j_msg.classes(replace="text-sm mt-2 text-red-400"); return
-                    db = _get_db()
-                    if not db: j_msg.set_text("DB 오류"); return
-                    salt = _create_salt()
-                    ok, m = db.register_user(normalize_email(j_em.value), _hash_pw(j_p1.value, salt), salt, j_nk.value[:8], j_q.value, _hash_ans(j_ans.value, salt))
-                    if ok:
-                        j_msg.set_text("🎉 가입 성공! 로그인하세요."); j_msg.classes(replace="text-sm mt-2 text-green-400")
-                    else:
-                        j_msg.set_text(m); j_msg.classes(replace="text-sm mt-2 text-red-400")
-                ui.button("가입 신청", on_click=do_join).classes("w-full mt-4").props("color=primary")
-
-            with ui.tab_panel(t_recover):
-                r_id = ui.input("이메일").classes("w-full")
-                r_ans = ui.input("보안 답변").classes("w-full")
-                r_pw = ui.input("새 비밀번호", password=True).classes("w-full")
-                r_msg = ui.label("").classes("text-sm mt-2")
-
-                async def do_recover():
-                    db = _get_db()
-                    if not db: r_msg.set_text("DB 오류"); return
-                    u = db.get_user_by_id(normalize_email(r_id.value.strip()))
-                    ok = False
-                    if u and _hash_ans(r_ans.value, u["salt"]) == u.get("security_ans"):
-                        if check_pw_strength(r_pw.value):
-                            ns = _create_salt()
-                            ok = db.update_user_password(normalize_email(r_id.value), _hash_pw(r_pw.value, ns), ns)
-                    r_msg.set_text("✅ 변경 완료!" if ok else "정보 불일치")
-                    r_msg.classes(replace=f"text-sm mt-2 {'text-green-400' if ok else 'text-red-400'}")
-                ui.button("비밀번호 재설정", on_click=do_recover).classes("w-full mt-4").props("color=primary")
-
-
-# ═══════════════════════════════════════════
-#  7. 메인 페이지 (8개 탭)
+#  메인 페이지 (8개 탭)
 # ═══════════════════════════════════════════
 @ui.page('/')
 async def index():
@@ -742,45 +432,6 @@ async def _do_refresh():
     await run_sync(store.refresh)
     ui.notify("🔄 데이터 새로고침 완료!", type="positive")
     await ui.run_javascript("setTimeout(()=>location.reload(),500)")
-
-
-# ═══════════════════════════════════════════
-#  Tab 1: → components/tab_market.py로 분리 완료
-# ═══════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════
-#  Tab 2: → components/tab_stocks.py로 분리 완료
-# ═══════════════════════════════════════════
-
-# ═══════════════════════════════════════════
-#  Tab 3: → components/tab_portfolio.py로 분리 완료
-# ═══════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════
-#  Tab 4: → components/tab_inquiry.py로 분리 완료
-# ═══════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════
-#  Tab 5: → components/tab_terms.py로 분리 완료
-# ═══════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════
-#  Tab 6: → components/tab_updates.py로 분리 완료
-# ═══════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════
-#  Tab 7: → components/tab_perf.py로 분리 완료
-# ═══════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════
-#  Tab 8: → components/tab_admin.py로 분리 완료
-# ═══════════════════════════════════════════
 
 
 # ═══════════════════════════════════════════
