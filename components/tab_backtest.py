@@ -76,7 +76,66 @@ def _load_recommend_files() -> pd.DataFrame:
 
     if not dfs:
         return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
+
+    merged = pd.concat(dfs, ignore_index=True)
+
+    # ── 종목명 오염 복구 (코드==이름인 경우) ──
+    if "종목코드" in merged.columns and "종목명" in merged.columns:
+        mask = merged["종목명"].astype(str).str.match(r'^\d+$')
+        if mask.any():
+            code_to_name = _load_code_to_name()
+            if code_to_name:
+                merged.loc[mask, "종목명"] = (
+                    merged.loc[mask, "종목코드"].astype(str).str.zfill(6)
+                    .map(code_to_name)
+                    .fillna(merged.loc[mask, "종목명"])
+                )
+
+    return merged
+
+
+def _load_code_to_name() -> dict:
+    """종목코드→종목명 매핑 로드 (krx_names CSV → data_store KRX 캐시)"""
+    # 1순위: krx_names_latest.csv
+    names_path = os.path.join(_DATA_DIR, "krx_names_latest.csv")
+    if os.path.exists(names_path):
+        try:
+            ndf = pd.read_csv(names_path, dtype=str)
+            if "종목코드" in ndf.columns and "종목명" in ndf.columns:
+                c2n = dict(zip(
+                    ndf["종목코드"].astype(str).str.zfill(6),
+                    ndf["종목명"]
+                ))
+                c2n = {c: n for c, n in c2n.items() if c != n and n and not n.isdigit()}
+                if c2n:
+                    return c2n
+        except Exception:
+            pass
+
+    # 2순위: data_store의 KRX 캐시
+    try:
+        from services.data_store import _KRX_NAME_MAP
+        if _KRX_NAME_MAP:
+            return {v: k for k, v in _KRX_NAME_MAP.items()}
+    except Exception:
+        pass
+
+    # 3순위: store.scored에서 추출
+    try:
+        from services.data_store import store
+        if store.loaded:
+            scored = store.scored
+            if "종목코드" in scored.columns and "종목명" in scored.columns:
+                valid = scored[~scored["종목명"].astype(str).str.match(r'^\d+$')]
+                if not valid.empty:
+                    return dict(zip(
+                        valid["종목코드"].astype(str).str.zfill(6),
+                        valid["종목명"]
+                    ))
+    except Exception:
+        pass
+
+    return {}
 
 
 def _run_backtest(all_recs: pd.DataFrame, min_score: int, hold_days: int,
