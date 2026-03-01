@@ -140,6 +140,14 @@ def render_tab_admin():
 
             payment_list = ui.column().classes("w-full")
 
+            def _dismiss_payment(req):
+                db_d = _get_db()
+                if db_d:
+                    items = [x for x in db_d.get_all_inquiries() if x.get("created_at") != req.get("created_at")]
+                    db_d.save_inquiries(items)
+                    ui.notify("✅ 처리 완료")
+                    _load_payment_requests()
+
             def _load_payment_requests():
                 payment_list.clear()
                 db_p = _get_db()
@@ -153,7 +161,9 @@ def render_tab_admin():
                         return
                     for req in reversed(pay_reqs[-10:]):
                         with ui.card().classes("w-full p-3 mb-2 bg-[#0f3460] border border-blue-700 rounded-lg"):
-                            ui.label(f"📌 {req.get('title', '')}").classes("text-white font-bold text-sm")
+                            with ui.row().classes("w-full justify-between items-center"):
+                                ui.label(f"📌 {req.get('title', '')}").classes("text-white font-bold text-sm")
+                                ui.button("✅ 처리완료", on_click=lambda r=req: _dismiss_payment(r)).props("flat dense size=sm color=green")
                             ui.label(req.get("content", "")).classes("text-gray-300 text-xs mt-1 whitespace-pre-line")
                             ui.label(f"🕐 {_to_kst_str(req.get('created_at'))}").classes("text-xs text-gray-500 mt-1")
 
