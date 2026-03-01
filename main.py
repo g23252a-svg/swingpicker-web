@@ -2,17 +2,10 @@
 """
 LDY Pro Trader — NiceGUI Full Edition
 ═══════════════════════════════════════
-순수 라우터: 페이지 등록 + 탭 배선 + 앱 부트스트랩
+순수 라우터 + Lazy Loading: 탭 클릭 시에만 렌더링
 
-Tab 1: 📊 시장 현황       → components/tab_market.py
-Tab 2: 🔭 종목 분석       → components/tab_stocks.py
-Tab 3: 💼 내 자산         → components/tab_portfolio.py
-Tab 4: 📮 문의 게시판      → components/tab_inquiry.py
-Tab 5: ⚖️ 이용 약관       → components/tab_terms.py
-Tab 6: 🧩 업데이트 노트    → components/tab_updates.py
-Tab 7: 📈 시스템 성과      → components/tab_perf.py
-Tab 8: 👑 회원 관리        → components/tab_admin.py
-Tab 9: 📓 매매 일지        → trade_journal_tab.py
+Tab 1: 📊 시장 현황       → 즉시 로드 (기본 탭)
+Tab 2~9: Lazy Loading     → 최초 클릭 시에만 렌더링
 """
 
 import os
@@ -39,14 +32,12 @@ from components.tab_updates import render_tab_updates
 from components.tab_perf import render_tab_perf
 from components.tab_admin import render_tab_admin
 
-# ─── 매매일지 (선택) ───
 try:
     from trade_journal_tab import render_trade_journal_tab
     JOURNAL_OK = True
 except ImportError:
     JOURNAL_OK = False
 
-# ─── 버전 정보 ───
 try:
     from version_info import APP_VERSION
 except Exception:
@@ -93,35 +84,80 @@ async def index():
         ui.label("⚠️ 데이터 없음 — data/recommend_latest.csv 확인").classes("text-yellow-400 text-lg p-8")
         return
 
-    # ─── 탭 구성 ───
+    # ─── 탭 정의 ───
+    TAB_DEFS = [
+        ("t1", "📊 시장"),
+        ("t2", "🔭 종목 분석"),
+        ("t3", "💼 내 자산"),
+        ("t4", "📮 문의"),
+        ("t5", "⚖️ 약관"),
+        ("t6", "🧩 업데이트"),
+        ("t7", "📈 성과"),
+        ("t9", "📓 매매 일지"),
+    ]
+    if auth == "admin":
+        TAB_DEFS.append(("t8", "👑 관리"))
+
     with ui.tabs().classes("w-full text-white") as tabs:
-        t1 = ui.tab("📊 시장")
-        t2 = ui.tab("🔭 종목 분석")
-        t3 = ui.tab("💼 내 자산")
-        t4 = ui.tab("📮 문의")
-        t5 = ui.tab("⚖️ 약관")
-        t6 = ui.tab("🧩 업데이트")
-        t7 = ui.tab("📈 성과")
-        t9 = ui.tab("📓 매매 일지")
-        if auth == "admin":
-            t8 = ui.tab("👑 관리")
+        tab_refs = {}
+        for key, label in TAB_DEFS:
+            tab_refs[key] = ui.tab(label, name=key)
 
-    with ui.tab_panels(tabs, value=t1).classes("w-full"):
-        with ui.tab_panel(t1): render_tab_market(df)
-        with ui.tab_panel(t2): render_tab_stocks(df, auth, store)
-        with ui.tab_panel(t3): render_tab_portfolio(df, auth)
-        with ui.tab_panel(t4): render_tab_inquiry(auth, user)
-        with ui.tab_panel(t5): render_tab_terms()
-        with ui.tab_panel(t6): render_tab_updates()
-        with ui.tab_panel(t7): render_tab_perf()
-        with ui.tab_panel(t9):
-            if JOURNAL_OK:
-                render_trade_journal_tab(df_scored=df)
-            else:
-                ui.label("⚠️ trade_journal_tab 모듈 없음").classes("text-yellow-400")
-        if auth == "admin":
-            with ui.tab_panel(t8): render_tab_admin()
+    # ─── 빈 컨테이너 패널 (Lazy Loading 핵심) ───
+    containers = {}
+    with ui.tab_panels(tabs, value=tab_refs["t1"]).classes("w-full"):
+        for key in tab_refs:
+            with ui.tab_panel(tab_refs[key]):
+                containers[key] = ui.column().classes("w-full")
 
+    # ─── 렌더 함수 매핑 ───
+    def _render_journal():
+        if JOURNAL_OK:
+            render_trade_journal_tab(df_scored=df)
+        else:
+            ui.label("⚠️ trade_journal_tab 모듈 없음").classes("text-yellow-400")
+
+    render_map = {
+        "t1": lambda: render_tab_market(df),
+        "t2": lambda: render_tab_stocks(df, auth, store),
+        "t3": lambda: render_tab_portfolio(df, auth),
+        "t4": lambda: render_tab_inquiry(auth, user),
+        "t5": lambda: render_tab_terms(),
+        "t6": lambda: render_tab_updates(),
+        "t7": lambda: render_tab_perf(),
+        "t9": _render_journal,
+    }
+    if auth == "admin":
+        render_map["t8"] = lambda: render_tab_admin()
+
+    # ─── Lazy 로더 ───
+    loaded = set()
+
+    def load_tab(key):
+        if key in loaded or key not in render_map:
+            return
+        loaded.add(key)
+        container = containers.get(key)
+        if not container:
+            return
+        with container:
+            try:
+                render_map[key]()
+            except Exception as e:
+                logger.error(f"탭 렌더링 오류 [{key}]: {e}", exc_info=True)
+                ui.label(f"❌ 로딩 실패: {e}").classes("text-red-400")
+
+    # Tab 1 즉시 렌더 (기본 탭)
+    load_tab("t1")
+
+    # 나머지는 클릭 시 Lazy 렌더
+    def on_tab_change(e):
+        key = e.value if isinstance(e.value, str) else getattr(e.value, "name", str(e.value))
+        load_tab(key)
+
+    tabs.on_value_change(on_tab_change)
+
+    # ─── 푸터 ───
     ui.label(f"📅 데이터 기준: {store.data_ts} · ⚠️ 투자 판단은 본인 책임"
              ).classes("text-xs text-gray-500 text-center mt-8 mb-4")
 
