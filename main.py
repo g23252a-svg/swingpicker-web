@@ -70,6 +70,7 @@ from chart_components import (
 )
 from components.tab_terms import render_tab_terms  # ✅ Tab5 컴포넌트 분리
 from components.tab_updates import render_tab_updates  # ✅ Tab6 컴포넌트 분리
+from components.tab_perf import render_tab_perf  # ✅ Tab7 컴포넌트 분리
 
 # Optional imports (graceful fallback)
 FDR_OK = False
@@ -1079,7 +1080,7 @@ async def index():
         with ui.tab_panel(t4): render_tab4_inquiry(auth, user)
         with ui.tab_panel(t5): render_tab_terms()  # ✅ components/tab_terms.py
         with ui.tab_panel(t6): render_tab_updates()  # ✅ components/tab_updates.py
-        with ui.tab_panel(t7): render_tab7_performance()
+        with ui.tab_panel(t7): render_tab_perf()  # ✅ components/tab_perf.py
         with ui.tab_panel(t9):
             if JOURNAL_OK:
                 render_trade_journal_tab(df_scored=df)
@@ -1903,90 +1904,8 @@ def render_tab4_inquiry(auth, user):
 
 
 # ═══════════════════════════════════════════
-#  Tab 7: 시스템 성과
+#  Tab 7: → components/tab_perf.py로 분리 완료
 # ═══════════════════════════════════════════
-def render_tab7_performance():
-    section_title("📈 시스템 성과 추세")
-
-    pattern = os.path.join(DATA_DIR, "rank_validation_summary_*.csv")
-    all_files = sorted(glob.glob(pattern))
-
-    # 날짜별 파일 + latest 파일 모두 사용
-    dfs = []
-    for f in all_files:
-        try:
-            base = os.path.basename(f)
-            ds = base.replace("rank_validation_summary_", "").replace(".csv", "")
-            d = pd.read_csv(f)
-            if "latest" in ds:
-                # latest 파일은 오늘 날짜로 처리
-                d['Date'] = pd.to_datetime(now_kst().strftime("%Y-%m-%d"))
-            else:
-                d['Date'] = pd.to_datetime(ds, format="%Y%m%d")
-            dfs.append(d)
-        except Exception:
-            pass
-
-    if not dfs:
-        ui.label("축적된 성과 데이터가 부족합니다.").classes("text-gray-400 p-8"); return
-
-    history = pd.concat(dfs, ignore_index=True).sort_values('Date')
-
-    col_win, col_ret = 'WIN_RATE_%', 'AVG_RET_%'
-    if col_win not in history.columns or col_ret not in history.columns:
-        ui.label("필요 컬럼 없음").classes("text-gray-400"); return
-
-    # 필터
-    with ui.row().classes("w-full gap-4 flex-wrap mb-4"):
-        methods = sorted(history['METHOD'].unique()) if 'METHOD' in history.columns else []
-        def_m = 'RANK_SCORE' if 'RANK_SCORE' in methods else (methods[0] if methods else None)
-        sel_m = ui.select(methods, value=def_m, label="Method").classes("min-w-[150px]") if methods else None
-
-        topks = sorted(history['TOPK'].unique().tolist()) if 'TOPK' in history.columns else []
-        def_k = 5 if 5 in topks else (topks[0] if topks else None)
-        sel_k = ui.select([str(k) for k in topks], value=str(def_k), label="Top K").classes("min-w-[100px]") if topks else None
-
-        holds = sorted(history['H(영업일)'].unique().tolist()) if 'H(영업일)' in history.columns else []
-        def_h = 5 if 5 in holds else (holds[0] if holds else None)
-        sel_h = ui.select([str(h) for h in holds], value=str(def_h), label="보유기간").classes("min-w-[100px]") if holds else None
-
-    chart_area = ui.column().classes("w-full")
-
-    def _build_chart():
-        chart_area.clear()
-        cdf = history.copy()
-        if sel_m and sel_m.value: cdf = cdf[cdf['METHOD'] == sel_m.value]
-        if sel_k and sel_k.value: cdf = cdf[cdf['TOPK'] == int(sel_k.value)]
-        if sel_h and sel_h.value: cdf = cdf[cdf['H(영업일)'] == int(sel_h.value)]
-        cdf = cdf.sort_values('Date').tail(30)
-
-        with chart_area:
-            if cdf.empty:
-                ui.label("조건 맞는 데이터 없음").classes("text-gray-400"); return
-
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            fig.add_trace(go.Bar(x=cdf['Date'], y=cdf[col_win], name="승률(%)", marker_color='#FFA726', opacity=0.6), secondary_y=False)
-            fig.add_trace(go.Scatter(x=cdf['Date'], y=cdf[col_ret], name="수익률(%)", mode='lines+markers', line=dict(color='#29B6F6', width=3)), secondary_y=True)
-            fig.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white', hovermode="x unified", legend=dict(orientation="h", y=1.1))
-            fig.update_yaxes(title_text="승률(%)", range=[0, 100], secondary_y=False)
-            fig.update_yaxes(title_text="수익률(%)", secondary_y=True)
-            ui.plotly(fig).classes("w-full")
-
-            with ui.row().classes("w-full gap-4 mt-2"):
-                metric_card("평균 승률", f"{cdf[col_win].mean():.1f}%")
-                metric_card("평균 수익률", f"{cdf[col_ret].mean():.2f}%")
-
-    for w in [sel_m, sel_k, sel_h]:
-        if w: w.on("update:model-value", lambda _: _build_chart())
-    _build_chart()
-
-    # ── [Phase 1-5] Research Workbench 확장 ──
-    try:
-        from research_tab import render_research_tab
-        ui.separator().classes("my-6")
-        render_research_tab(data_dir=DATA_DIR)
-    except Exception as _rt_err:
-        ui.label(f"⚠️ Research 탭 로드 실패: {_rt_err}").classes("text-gray-400")
 
 
 # ═══════════════════════════════════════════
