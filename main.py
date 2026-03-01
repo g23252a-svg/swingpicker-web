@@ -5,7 +5,8 @@ LDY Pro Trader — NiceGUI Full Edition
 순수 라우터 + Lazy Loading: 탭 클릭 시에만 렌더링
 
 Tab 1: 📊 시장 현황       → 즉시 로드 (기본 탭)
-Tab 2~9: Lazy Loading     → 최초 클릭 시에만 렌더링
+Tab 2~10: Lazy Loading    → 최초 클릭 시에만 렌더링
+Tab 10: 🧪 전략 샌드박스   → components/tab_backtest.py (Prime 전용)
 """
 
 import os
@@ -31,6 +32,7 @@ from components.tab_terms import render_tab_terms
 from components.tab_updates import render_tab_updates
 from components.tab_perf import render_tab_perf
 from components.tab_admin import render_tab_admin
+from components.tab_backtest import render_tab_backtest
 
 try:
     from trade_journal_tab import render_trade_journal_tab
@@ -93,6 +95,7 @@ async def index():
         ("t5", "⚖️ 약관"),
         ("t6", "🧩 업데이트"),
         ("t7", "📈 성과"),
+        ("t10", "🧪 전략 샌드박스"),
         ("t9", "📓 매매 일지"),
     ]
     if auth == "admin":
@@ -125,6 +128,7 @@ async def index():
         "t5": lambda: render_tab_terms(),
         "t6": lambda: render_tab_updates(),
         "t7": lambda: render_tab_perf(),
+        "t10": lambda: render_tab_backtest(df, auth),
         "t9": _render_journal,
     }
     if auth == "admin":
