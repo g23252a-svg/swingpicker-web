@@ -2,7 +2,7 @@
 """
 tab_admin.py — 👑 회원 관리 (NiceGUI Dark Theme)
 ═══════════════════════════════════════════════════
-관리자 전용: 회원 목록, 등급 변경, 차단/해제, 전체 이벤트
+관리자 전용: 회원 목록, 등급 변경, 차단/해제, 전체 이벤트, 회원 초기화
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -47,12 +47,13 @@ def render_tab_admin():
         return
 
     users = db.get_all_users()
-    if not users:
-        ui.label("등록된 회원 없음").classes("text-gray-400")
-        return
 
     ui.label(f"👥 총 가입자: {len(users)}명").classes("text-white mb-4")
 
+    if not users:
+        ui.label("등록된 회원 없음").classes("text-gray-400")
+
+    # ── 회원 테이블 ──
     columns = [
         {"name": "email", "label": "이메일", "field": "email", "align": "left"},
         {"name": "nick", "label": "닉네임", "field": "nick"},
@@ -74,43 +75,45 @@ def render_tab_admin():
             "last": _to_kst_str(u.get("last_login")),
         })
 
-    ui.table(columns=columns, rows=rows, row_key="email",
-             pagination={"rowsPerPage": 20}).classes("w-full").props("dense dark flat bordered")
+    if rows:
+        ui.table(columns=columns, rows=rows, row_key="email",
+                 pagination={"rowsPerPage": 20}).classes("w-full").props("dense dark flat bordered")
 
-    # 관리자 액션
+    # ── 관리자 액션 ──
     ui.separator().classes("my-4")
     with ui.row().classes("w-full gap-8 flex-wrap"):
+
+        # ── 개별 회원 제어 ──
         with ui.column().classes("flex-1"):
             ui.label("🛠️ 개별 회원 제어").classes("text-white font-bold mb-2")
             emails = [r["email"] for r in rows]
             sel_email = ui.select(emails, label="회원 선택").classes("w-full")
-            sel_role = ui.select(["free", "pro", "prime", "admin"], label="등급 변경", value="free").classes("w-full")
+            sel_role = ui.select(["free", "prime", "admin"], label="등급 변경", value="free").classes("w-full")
             sel_days = ui.select(
-                {0: "만료일 없음", 7: "7일", 30: "30일 (1개월)", 90: "90일 (3개월)", 180: "180일 (6개월)", 365: "365일 (1년)"},
+                {0: "만료일 없음", 7: "7일", 14: "14일", 30: "30일 (1개월)", 90: "90일 (3개월)", 180: "180일 (6개월)", 365: "365일 (1년)"},
                 label="구독 기간", value=30,
             ).classes("w-full")
 
             async def apply_role():
                 if sel_email.value:
-                    db = _get_db()
-                    if db:
+                    db_a = _get_db()
+                    if db_a:
                         days = sel_days.value or 0
-                        if days > 0 and sel_role.value in ("pro", "prime"):
-                            from datetime import datetime as dt2
-                            expire = (dt2.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-                            db.update_user_subscription(sel_email.value, sel_role.value, expire)
+                        if days > 0 and sel_role.value == "prime":
+                            expire = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+                            db_a.update_user_subscription(sel_email.value, sel_role.value, expire)
                             ui.notify(f"✅ {sel_email.value} → {sel_role.value.upper()} (만료: {expire})")
                         else:
-                            ok = db.update_user_role(sel_email.value, sel_role.value)
+                            ok = db_a.update_user_role(sel_email.value, sel_role.value)
                             ui.notify(f"{'✅ 변경 완료' if ok else '❌ 실패'}")
                     else:
                         ui.notify("DB 연결 실패", type="negative")
 
             async def toggle_ban():
                 if sel_email.value:
-                    db = _get_db()
-                    if db:
-                        ok, msg = db.toggle_user_ban(sel_email.value)
+                    db_a = _get_db()
+                    if db_a:
+                        ok, msg = db_a.toggle_user_ban(sel_email.value)
                         ui.notify(msg)
                     else:
                         ui.notify("DB 연결 실패", type="negative")
@@ -119,19 +122,37 @@ def render_tab_admin():
                 ui.button("등급 적용", on_click=apply_role).props("color=primary")
                 ui.button("🚫 차단/해제", on_click=toggle_ban).props("color=negative")
 
+        # ── 전체 이벤트 + 초기화 ──
         with ui.column().classes("flex-1"):
             ui.label("🎉 전체 이벤트").classes("text-white font-bold mb-2")
             ui.label("전 회원에게 체험권을 지급합니다.").classes("text-gray-400 text-sm mb-2")
 
             async def grant_trial():
-                db = _get_db()
-                if db:
-                    ok, msg = db.grant_all_users_trial(14)
+                db_a = _get_db()
+                if db_a:
+                    ok, msg = db_a.grant_all_users_trial(14)
                     ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
                 else:
                     ui.notify("DB 연결 실패", type="negative")
 
             ui.button("🎁 전원 14일 Prime 지급", on_click=grant_trial).props("color=positive")
+
+            ui.separator().classes("my-3")
+            ui.label("⚠️ 위험 구역").classes("text-red-400 font-bold mb-2")
+
+            async def _reset_all_members():
+                db_a = _get_db()
+                if db_a:
+                    try:
+                        db_a._exec_sqlite("DELETE FROM users WHERE role != 'admin'")
+                        db_a._exec_sqlite("DELETE FROM inquiries")
+                        db_a._mark_gist_dirty("users")
+                        db_a._mark_gist_dirty("inquiries")
+                        ui.notify("🔄 전체 회원 초기화 완료 (관리자 제외)", type="positive")
+                    except Exception as ex:
+                        ui.notify(f"❌ 오류: {ex}", type="negative")
+
+            ui.button("🔄 전체 회원 초기화 (관리자 제외)", on_click=_reset_all_members).props("color=red outlined").tooltip("관리자 제외 모든 회원 + 문의 삭제")
 
         # ── 입금확인 요청 목록 ──
         with ui.column().classes("flex-1"):
@@ -143,9 +164,10 @@ def render_tab_admin():
             def _dismiss_payment(req):
                 db_d = _get_db()
                 if db_d:
-                    items = [x for x in db_d.get_all_inquiries() if x.get("created_at") != req.get("created_at")]
+                    items = [x for x in db_d.get_all_inquiries()
+                             if x.get("created_at") != req.get("created_at")]
                     db_d.save_inquiries(items)
-                    ui.notify("✅ 처리 완료")
+                    ui.notify("✅ 처리 완료", type="positive")
                     _load_payment_requests()
 
             def _load_payment_requests():
