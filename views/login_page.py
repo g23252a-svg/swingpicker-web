@@ -2,6 +2,7 @@
 """
 login_page.py — 🔐 로그인 / 가입 / 계정 복구 페이지
 ═══════════════════════════════════════════════════
+[v2] 가입 시 이메일 인증코드 검증 추가
 """
 from nicegui import ui
 
@@ -12,6 +13,12 @@ from services.auth import (
     authenticate_user, set_current_user,
     create_salt, hash_pw, hash_ans,
 )
+
+try:
+    from email_verify import send_verification_email, verify_code, is_configured as email_configured
+    EMAIL_VERIFY_OK = True
+except ImportError:
+    EMAIL_VERIFY_OK = False
 
 
 @ui.page('/login')
@@ -27,6 +34,7 @@ def login_page():
             t_recover = ui.tab("계정 복구")
 
         with ui.tab_panels(tabs, value=t_login).classes("w-full"):
+            # ── 로그인 탭 ──
             with ui.tab_panel(t_login):
                 lid = ui.input("아이디 (또는 이메일)").classes("w-full")
                 lpw = ui.input("비밀번호", password=True, password_toggle_button=True).classes("w-full")
@@ -59,9 +67,45 @@ def login_page():
                 ui.button("로그인", on_click=do_login).classes("w-full mt-4").props("color=primary")
                 ui.button("🔓 둘러보기 (게스트)", on_click=lambda: ui.navigate.to("/")).classes("w-full mt-2").props("flat")
 
+            # ── 가입 탭 (이메일 인증 포함) ──
             with ui.tab_panel(t_join):
                 ui.label("👋 가입을 환영합니다!").classes("text-white mb-2")
+
+                use_email_verify = EMAIL_VERIFY_OK and email_configured()
+
                 j_em = ui.input("이메일").classes("w-full")
+
+                if use_email_verify:
+                    with ui.row().classes("w-full gap-2 items-end"):
+                        j_code = ui.input("인증코드 6자리").classes("flex-1").props("outlined dense maxlength=6")
+                        send_btn = ui.button("📩 코드발송").props("color=blue dense")
+                    verify_msg = ui.label("").classes("text-xs mt-1")
+
+                    async def send_code():
+                        email = j_em.value.strip()
+                        if not email or "@" not in email:
+                            verify_msg.set_text("⚠️ 이메일을 먼저 입력하세요.")
+                            verify_msg.classes(replace="text-xs mt-1 text-red-400")
+                            return
+                        domain = email.split("@")[-1].lower()
+                        if domain not in ALLOWED_DOMAINS:
+                            verify_msg.set_text("🚫 허용 도메인이 아닙니다.")
+                            verify_msg.classes(replace="text-xs mt-1 text-red-400")
+                            return
+                        send_btn.props("loading")
+                        verify_msg.set_text("📩 발송 중...")
+                        verify_msg.classes(replace="text-xs mt-1 text-blue-400")
+                        ok, msg_text = send_verification_email(email)
+                        send_btn.props(remove="loading")
+                        if ok:
+                            verify_msg.set_text(f"✅ {email}로 인증코드 발송 완료 (5분 이내 입력)")
+                            verify_msg.classes(replace="text-xs mt-1 text-green-400")
+                        else:
+                            verify_msg.set_text(msg_text)
+                            verify_msg.classes(replace="text-xs mt-1 text-red-400")
+
+                    send_btn.on_click(send_code)
+
                 j_nk = ui.input("닉네임 (최대 8자)").classes("w-full")
                 j_p1 = ui.input("비밀번호 (8자+, 영문/숫자)", password=True).classes("w-full")
                 j_p2 = ui.input("비밀번호 확인", password=True).classes("w-full")
@@ -75,6 +119,19 @@ def login_page():
                         j_msg.set_text("🚫 허용 도메인 아님")
                         j_msg.classes(replace="text-sm mt-2 text-red-400")
                         return
+
+                    if use_email_verify:
+                        code_input = j_code.value.strip()
+                        if not code_input:
+                            j_msg.set_text("⚠️ 인증코드를 입력하세요.")
+                            j_msg.classes(replace="text-sm mt-2 text-red-400")
+                            return
+                        v_ok, v_msg = verify_code(j_em.value.strip(), code_input)
+                        if not v_ok:
+                            j_msg.set_text(v_msg)
+                            j_msg.classes(replace="text-sm mt-2 text-red-400")
+                            return
+
                     if not check_pw_strength(j_p1.value):
                         j_msg.set_text("⚠️ 8자+영문+숫자")
                         j_msg.classes(replace="text-sm mt-2 text-red-400")
@@ -83,6 +140,7 @@ def login_page():
                         j_msg.set_text("비밀번호 불일치")
                         j_msg.classes(replace="text-sm mt-2 text-red-400")
                         return
+
                     db = get_db()
                     if not db:
                         j_msg.set_text("DB 오류")
@@ -101,6 +159,12 @@ def login_page():
 
                 ui.button("가입 신청", on_click=do_join).classes("w-full mt-4").props("color=primary")
 
+                if use_email_verify:
+                    ui.label("📧 이메일 인증 후 가입이 완료됩니다.").classes("text-xs text-gray-500 text-center mt-2")
+                else:
+                    ui.label("").classes("text-xs")
+
+            # ── 계정 복구 탭 ──
             with ui.tab_panel(t_recover):
                 r_id = ui.input("이메일").classes("w-full")
                 r_ans = ui.input("보안 답변").classes("w-full")
