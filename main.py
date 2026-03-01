@@ -168,8 +168,11 @@ async def index():
 
 async def _do_refresh():
     await run_sync(store.refresh)
-    ui.notify("🔄 데이터 새로고침 완료!", type="positive")
-    await ui.run_javascript("setTimeout(()=>location.reload(),500)")
+    try:
+        ui.notify("🔄 데이터 새로고침 완료!", type="positive")
+        await ui.run_javascript("setTimeout(()=>location.reload(),500)")
+    except RuntimeError:
+        pass  # 페이지 이탈 시 슬롯 삭제됨 — 무시 가능
 
 
 # ═══════════════════════════════════════════

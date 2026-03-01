@@ -268,27 +268,39 @@ class DataStore:
                                 _fixed = (_still_bad == 0)
                                 mask = df["종목명"].astype(str).str.match(r'^\d+$')
 
-                    # 4순위 (최후 수단): Naver API 개별 조회
+                    # 4순위 (최후 수단): Naver API 병렬 조회 (ThreadPool)
                     if not _fixed and mask.any():
-                        _naver_fixed = 0
+                        from concurrent.futures import ThreadPoolExecutor, as_completed
                         _codes = df.loc[mask, "종목코드"].astype(str).str.zfill(6).unique()
-                        _logger.info(f"🔄 Naver API로 종목명 {len(_codes)}건 개별 조회 시도...")
-                        for _c in _codes:
+                        _logger.info(f"🔄 Naver API로 종목명 {len(_codes)}건 병렬 조회 시도...")
+                        _code_to_name = {}
+
+                        def _fetch_name(code):
                             try:
-                                _r = requests.get(
-                                    f"https://m.stock.naver.com/api/stock/{_c}/basic",
+                                r = requests.get(
+                                    f"https://m.stock.naver.com/api/stock/{code}/basic",
                                     timeout=5,
                                     headers={"User-Agent": "Mozilla/5.0"}
                                 )
-                                if _r.ok:
-                                    _name = _r.json().get("stockName", "")
-                                    if _name and _name != _c:
-                                        df.loc[(mask) & (df["종목코드"].astype(str).str.zfill(6) == _c), "종목명"] = _name
-                                        _naver_fixed += 1
+                                if r.ok:
+                                    name = r.json().get("stockName", "")
+                                    if name and name != code:
+                                        return code, name
                             except Exception:
                                 pass
-                        if _naver_fixed:
-                            _logger.info(f"🔧 종목명 오염 {_naver_fixed}/{len(_codes)}건 복구 [Naver]")
+                            return code, None
+
+                        with ThreadPoolExecutor(max_workers=20) as pool:
+                            futures = {pool.submit(_fetch_name, c): c for c in _codes}
+                            for fut in as_completed(futures):
+                                code, name = fut.result()
+                                if name:
+                                    _code_to_name[code] = name
+
+                        if _code_to_name:
+                            for code, name in _code_to_name.items():
+                                df.loc[(mask) & (df["종목코드"].astype(str).str.zfill(6) == code), "종목명"] = name
+                            _logger.info(f"🔧 종목명 오염 {len(_code_to_name)}/{len(_codes)}건 복구 [Naver 병렬]")
 
                     _final_bad = df["종목명"].astype(str).str.match(r'^\d+$').sum()
                     if _final_bad > 0:
