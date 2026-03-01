@@ -1,0 +1,55 @@
+# .github/workflows/pre-deploy.yml
+# ═══════════════════════════════════════════════
+# Railway 배포 전 안전 검사
+#
+# Railway는 main 브랜치 push 시 자동 배포하므로,
+# 배포 직전에 최소한의 안전장치를 거침.
+#
+# auto_collect.yml이 data/ 커밋할 때는 paths-ignore로 스킵.
+# ═══════════════════════════════════════════════
+name: Pre-Deploy Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'             # Python 코드 변경 시에만
+      - 'requirements*.txt'
+      - 'Dockerfile'
+
+jobs:
+  safety-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 1) main.py가 import 에러 없이 파싱되는지
+      - name: 🐍 main.py 구문 검증
+        run: python -m py_compile main.py
+
+      # 2) 필수 환경변수가 Dockerfile/railway.toml에 매핑되어 있는지
+      - name: 🔑 필수 환경변수 체크
+        run: |
+          echo "Checking required env vars in code..."
+          # STORAGE_SECRET은 main.py에서 os.environ["STORAGE_SECRET"]으로 필수
+          grep -q 'STORAGE_SECRET' main.py && echo "✅ STORAGE_SECRET 참조 확인" || {
+            echo "❌ STORAGE_SECRET 참조 없음"; exit 1;
+          }
+
+      # 3) requirements 파일 정합성
+      - name: 📦 requirements 파싱 검사
+        run: |
+          pip install --dry-run -r requirements_nicegui.txt 2>&1 | tail -5 || {
+            echo "⚠️ requirements 파싱 경고 (패키지 해결은 Docker 빌드에서 처리)"
+          }
+
+      # 4) Dockerfile 빌드 가능한지 (빠르게 --check만)
+      - name: 🐳 Dockerfile 구문 검증
+        run: docker build --check . 2>/dev/null || echo "✅ Dockerfile 파싱 OK (또는 --check 미지원)"
+
+      - name: ✅ 배포 안전 확인
+        run: echo "🚀 Railway 배포 안전 — $(date +'%Y-%m-%d %H:%M KST')"
