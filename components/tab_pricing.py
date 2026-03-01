@@ -24,7 +24,7 @@ except ImportError:
 
 # ── 무통장 입금 계좌 (환경변수 or 하드코딩) ──
 BANK_NAME = os.environ.get("BANK_NAME", "카카오뱅크")
-BANK_ACCOUNT = os.environ.get("BANK_ACCOUNT", "3333-00-0000000")
+BANK_ACCOUNT = os.environ.get("BANK_ACCOUNT", "3333-22-2658701")
 BANK_HOLDER = os.environ.get("BANK_HOLDER", "이두영")
 
 # ── Telegram 알림 ──
