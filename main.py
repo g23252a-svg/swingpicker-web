@@ -68,6 +68,7 @@ from chart_components import (
     plot_sector_momentum_bar, plot_radar_chart,
     plot_score_waterfall, plot_ai_gauge_chart,
 )
+from components.tab_terms import render_tab_terms  # ✅ Tab5 컴포넌트 분리
 
 # Optional imports (graceful fallback)
 FDR_OK = False
@@ -1075,7 +1076,7 @@ async def index():
         with ui.tab_panel(t2): render_tab2_stocks(df, auth)
         with ui.tab_panel(t3): render_tab3_portfolio(df, auth)
         with ui.tab_panel(t4): render_tab4_inquiry(auth, user)
-        with ui.tab_panel(t5): render_tab5_terms()
+        with ui.tab_panel(t5): render_tab_terms()  # ✅ components/tab_terms.py
         with ui.tab_panel(t6): render_tab6_updates()
         with ui.tab_panel(t7): render_tab7_performance()
         with ui.tab_panel(t9):
@@ -1891,30 +1892,8 @@ def render_tab4_inquiry(auth, user):
 
 
 # ═══════════════════════════════════════════
-#  Tab 5: 이용 약관
+#  Tab 5: → components/tab_terms.py로 분리 완료
 # ═══════════════════════════════════════════
-def render_tab5_terms():
-    section_title("⚖️ 이용 약관 / 투자 유의사항")
-    terms_md = f"""
-### 1. 서비스 성격
-LDY Pro Trader는 **퀀트 지표 기반 데이터 분석 도구**로, 매수·매도·수익을 보장하는 리딩 서비스가 아닙니다.
-
-### 2. 투자 책임
-최종 투자 의사결정은 **전적으로 이용자 본인**의 판단이며, 손익은 모두 본인에게 귀속됩니다.
-
-### 3. 데이터 한계
-시장 데이터는 지연·오류·누락이 발생할 수 있으며, 과거 기반 지표는 미래와 괴리가 발생할 수 있습니다.
-
-### 4. 이용권 정책
-- **Guest**: 상위 3개 맛보기
-- **Free**: 상위 5개 열람
-- **Pro ({PRICE_PRO:,}원/월)**: 상위 20 종목 + 내 자산 분석
-- **Prime ({PRICE_PRIME:,}원/월)**: 전체 종목 + CSV + 텔레그램
-
-### 5. 한 줄 요약
-> 👉 데이터와 퀀트는 도구일 뿐, 최종 책임은 언제나 본인에게 있다.
-"""
-    ui.markdown(terms_md).classes("text-gray-300")
 
 
 # ═══════════════════════════════════════════
