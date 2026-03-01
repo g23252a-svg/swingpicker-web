@@ -16,7 +16,10 @@ KST = timezone(timedelta(hours=9))
 def _get_db():
     try:
         from db_utils import get_db
-        return get_db()
+        db = get_db()
+        if db and hasattr(db, 'ensure_gist_loaded'):
+            db.ensure_gist_loaded()
+        return db
     except Exception:
         return None
 
