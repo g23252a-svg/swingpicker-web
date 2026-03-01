@@ -131,6 +131,19 @@ def render_tab_admin():
                 else:
                     ui.notify("DB 연결 실패", type="negative")
 
+            def _reset_all_members():
+                db_r = _get_db()
+                if db_r:
+                    try:
+                        db_r._exec_sqlite("DELETE FROM users WHERE role != 'admin'")
+                        db_r._exec_sqlite("DELETE FROM inquiries")
+                        db_r._mark_gist_dirty("users")
+                        db_r._mark_gist_dirty("inquiries")
+                        ui.notify("🔄 전체 회원 초기화 완료 (관리자 제외)")
+                    except Exception as ex:
+                        ui.notify(f"❌ 오류: {ex}")
+
+            ui.button("🔄 전체 회원 초기화 (관리자 제외)", on_click=lambda: _reset_all_members()).props("color=red").tooltip("관리자 제외 전체 삭제")
             ui.button("🎁 전원 7일 Prime 지급", on_click=grant_trial).props("color=positive")
 
         # ── 입금확인 요청 목록 ──
@@ -139,14 +152,6 @@ def render_tab_admin():
             ui.label("멤버십 탭에서 요청된 입금확인 내역").classes("text-gray-400 text-sm mb-2")
 
             payment_list = ui.column().classes("w-full")
-
-            def _dismiss_payment(req):
-                db_d = _get_db()
-                if db_d:
-                    items = [x for x in db_d.get_all_inquiries() if x.get("created_at") != req.get("created_at")]
-                    db_d.save_inquiries(items)
-                    ui.notify("✅ 처리 완료")
-                    _load_payment_requests()
 
             def _load_payment_requests():
                 payment_list.clear()
@@ -161,9 +166,7 @@ def render_tab_admin():
                         return
                     for req in reversed(pay_reqs[-10:]):
                         with ui.card().classes("w-full p-3 mb-2 bg-[#0f3460] border border-blue-700 rounded-lg"):
-                            with ui.row().classes("w-full justify-between items-center"):
-                                ui.label(f"📌 {req.get('title', '')}").classes("text-white font-bold text-sm")
-                                ui.button("✅ 처리완료", on_click=lambda r=req: _dismiss_payment(r)).props("flat dense size=sm color=green")
+                            ui.label(f"📌 {req.get('title', '')}").classes("text-white font-bold text-sm")
                             ui.label(req.get("content", "")).classes("text-gray-300 text-xs mt-1 whitespace-pre-line")
                             ui.label(f"🕐 {_to_kst_str(req.get('created_at'))}").classes("text-xs text-gray-500 mt-1")
 
