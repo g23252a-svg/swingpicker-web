@@ -20,7 +20,7 @@ _logger = logging.getLogger("email_verify")
 # ── Resend API 설정 ──
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_URL = "https://api.resend.com/emails"
-FROM_EMAIL = "SwingPicker <onboarding@resend.dev>"
+FROM_EMAIL = "SwingPicker <noreply@ldyprotrader.com>"
 
 # ── 인증코드 저장소 (메모리) ──
 _codes: dict = {}
