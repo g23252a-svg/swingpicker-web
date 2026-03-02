@@ -528,7 +528,16 @@ def render_tab_stocks(df, auth, store=None):
         row = row.iloc[0]
 
         with detail_area:
-            _section_title(f"🔍 {row.get('종목명', '')} ({code}) 상세 분석")
+            with ui.row().classes("w-full items-center justify-between mt-6 mb-2"):
+                ui.label(f"🔍 {row.get('종목명', '')} ({code}) 상세 분석").classes(
+                    "text-lg font-bold text-white border-b border-gray-700 pb-2")
+                with ui.row().classes("gap-2"):
+                    _share_url = f"/stock/{code}"
+                    ui.button("🔗 공유 링크", on_click=lambda u=_share_url: ui.run_javascript(
+                        f'navigator.clipboard.writeText(window.location.origin + "{u}");'
+                    )).props("flat dense").classes("text-blue-400 text-xs")
+                    ui.button("↗ 새 탭", on_click=lambda u=_share_url: ui.navigate.to(u)
+                              ).props("flat dense").classes("text-purple-400 text-xs")
 
             _close = nz_num(row.get("종가", 0))
             _entry = nz_num(row.get("추천매수가", 0))

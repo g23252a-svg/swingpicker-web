@@ -34,6 +34,8 @@ from components.tab_perf import render_tab_perf
 from components.tab_admin import render_tab_admin
 from components.tab_backtest import render_tab_backtest
 from components.tab_pricing import render_tab_pricing
+from components.page_stock import render_stock_page
+from components.page_briefing import render_briefing_page
 
 try:
     from payments import register_payment_routes
@@ -54,6 +56,22 @@ except Exception:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ldy-nicegui")
+
+
+# ═══════════════════════════════════════════
+#  종목 개별 페이지 (/stock/{code}) — 공유 가능 URL
+# ═══════════════════════════════════════════
+@ui.page('/stock/{code}')
+async def stock_page(code: str):
+    await render_stock_page(code, store)
+
+
+# ═══════════════════════════════════════════
+#  오늘의 Top 3 브리핑 (/briefing) — 매일 자동 생성
+# ═══════════════════════════════════════════
+@ui.page('/briefing')
+async def briefing_page():
+    await render_briefing_page()
 
 
 # ═══════════════════════════════════════════

@@ -2980,5 +2980,19 @@ def main(
     except Exception as e:
         log(f"⚠️ 포지션 트래킹 스킵: {e}")
 
+    # -----------------------------------------------------------
+    # [Step 12] 일일 브리핑 자동 생성 (Top 3 ATTACK/ARMED)
+    # -----------------------------------------------------------
+    try:
+        from daily_briefing import generate_daily_briefing
+        briefing = generate_daily_briefing(OUT_DIR, trade_ymd, df_out)
+        if briefing["count"] > 0:
+            log(f"📝 일일 브리핑: {briefing['count']}종목 "
+                f"[{', '.join(briefing.get('names', []))}]")
+        else:
+            log("📝 일일 브리핑: 대상 없음 (ATTACK/ARMED 0건)")
+    except Exception as e:
+        log(f"⚠️ 일일 브리핑 생성 스킵: {e}")
+
 if __name__ == "__main__":
     main()
