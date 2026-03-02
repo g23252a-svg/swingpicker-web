@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260302",
+  "generated_at": "2026-03-02 23:51:07",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "064400",
+      "name": "LG씨엔에스",
+      "route": "ARMED",
+      "score": 86.5,
+      "close": 74500,
+      "entry": 74500,
+      "stop": 71500,
+      "target1": 83500,
+      "target2": 85000,
+      "est_win_rate": 0.665,
+      "rr": 3.0,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/064400"
+    },
+    {
+      "rank": 2,
+      "code": "450080",
+      "name": "에코프로머티",
+      "route": "ARMED",
+      "score": 84.8,
+      "close": 71900,
+      "entry": 71900,
+      "stop": 69000,
+      "target1": 80600,
+      "target2": 82100,
+      "est_win_rate": 0.648,
+      "rr": 3.0,
+      "sector": "2차전지",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/450080"
+    },
+    {
+      "rank": 3,
+      "code": "420770",
+      "name": "기가비스",
+      "route": "ARMED",
+      "score": 83.3,
+      "close": 72000,
+      "entry": 63400,
+      "stop": 60200,
+      "target1": 73000,
+      "target2": 74600,
+      "est_win_rate": 0.633,
+      "rr": 3.0,
+      "sector": "조선·기계·설비",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/420770"
+    }
+  ]
+}
