@@ -144,15 +144,22 @@ def render_tab_admin():
                 db_a = _get_db()
                 if db_a:
                     try:
+                        # 1) 로컬 SQLite 삭제
                         db_a._exec_sqlite("DELETE FROM users WHERE role != 'admin'")
                         db_a._exec_sqlite("DELETE FROM inquiries")
-                        db_a._mark_gist_dirty("users")
-                        db_a._mark_gist_dirty("inquiries")
-                        ui.notify("🔄 전체 회원 초기화 완료 (관리자 제외)", type="positive")
+
+                        # 2) Gist에 즉시 강제 업로드 (재시작해도 복원 안 됨)
+                        u_ok = db_a._do_gist_upload("users", "users.json")
+                        i_ok = db_a._do_gist_upload("inquiries", "inquiries.json")
+
+                        if u_ok and i_ok:
+                            ui.notify("🔄 전체 회원 초기화 + Gist 동기화 완료!", type="positive")
+                        else:
+                            ui.notify("⚠️ SQLite 삭제 완료, Gist 동기화 일부 실패", type="warning")
                     except Exception as ex:
                         ui.notify(f"❌ 오류: {ex}", type="negative")
 
-            ui.button("🔄 전체 회원 초기화 (관리자 제외)", on_click=_reset_all_members).props("color=red outlined").tooltip("관리자 제외 모든 회원 + 문의 삭제")
+            ui.button("🔄 전체 회원 초기화 (관리자 제외)", on_click=_reset_all_members).props("color=red outlined").tooltip("관리자 제외 모든 회원 + 문의 삭제 + Gist 즉시 반영")
 
         # ── 입금확인 요청 목록 ──
         with ui.column().classes("flex-1"):
