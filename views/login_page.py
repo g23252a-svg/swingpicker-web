@@ -4,6 +4,7 @@ login_page.py — 🔐 로그인 / 가입 / 계정 복구 페이지
 ═══════════════════════════════════════════════════
 가입 시 이메일 인증코드 검증 + 14일 Prime 자동 부여
 """
+import asyncio
 from datetime import datetime, timedelta
 from nicegui import ui
 
@@ -91,44 +92,54 @@ def login_page():
                 verified = {"done": False}  # 인증 완료 여부
 
                 if use_verify:
-                    verify_row = ui.row().classes("w-full gap-2 items-center")
+                    send_msg = ui.label("").classes("text-xs mt-1")
                     code_section = ui.column().classes("w-full")
                     code_section.set_visibility(False)
 
-                    with verify_row:
-                        send_msg = ui.label("").classes("text-xs")
+                    async def send_code():
+                        email = j_em.value.strip()
+                        if not email or "@" not in email:
+                            ui.notify("이메일을 입력하세요.", type="warning")
+                            return
+                        domain = email.split("@")[-1].lower()
+                        if domain not in ALLOWED_DOMAINS:
+                            ui.notify("🚫 허용되지 않는 이메일 도메인입니다.", type="warning")
+                            return
 
-                        async def send_code():
-                            email = j_em.value.strip()
-                            if not email or "@" not in email:
-                                ui.notify("이메일을 입력하세요.", type="warning")
-                                return
-                            domain = email.split("@")[-1].lower()
-                            if domain not in ALLOWED_DOMAINS:
-                                ui.notify("🚫 허용되지 않는 이메일 도메인입니다.", type="warning")
-                                return
-                            ok, m = send_verification_email(email)
+                        send_msg.set_text("⏳ 인증코드 발송 중...")
+                        send_msg.classes(replace="text-xs mt-1 text-blue-400")
+
+                        try:
+                            # SMTP는 blocking이므로 별도 스레드에서 실행
+                            ok, m = await asyncio.to_thread(send_verification_email, email)
                             send_msg.set_text(m)
-                            send_msg.classes(replace=f"text-xs {'text-green-400' if ok else 'text-red-400'}")
+                            send_msg.classes(replace=f"text-xs mt-1 {'text-green-400' if ok else 'text-red-400'}")
                             if ok:
                                 code_section.set_visibility(True)
                                 ui.notify("📩 인증코드가 발송되었습니다!", type="positive")
+                        except Exception as e:
+                            send_msg.set_text(f"❌ 발송 실패: {str(e)[:50]}")
+                            send_msg.classes(replace="text-xs mt-1 text-red-400")
 
-                        ui.button("📩 코드발송", on_click=send_code).props("color=primary dense size=sm")
+                    ui.button("📩 인증코드 발송", on_click=send_code).classes("w-full mt-1").props("color=primary outline")
 
                     with code_section:
                         j_code = ui.input("인증코드 (6자리)", placeholder="123456").classes("w-full")
                         verify_msg = ui.label("").classes("text-xs")
 
                         async def check_code():
-                            ok, m = verify_code(j_em.value.strip(), j_code.value.strip())
-                            verify_msg.set_text(m)
-                            verify_msg.classes(replace=f"text-xs {'text-green-400' if ok else 'text-red-400'}")
-                            if ok:
-                                verified["done"] = True
-                                ui.notify("✅ 이메일 인증 완료!", type="positive")
+                            try:
+                                ok, m = verify_code(j_em.value.strip(), j_code.value.strip())
+                                verify_msg.set_text(m)
+                                verify_msg.classes(replace=f"text-xs {'text-green-400' if ok else 'text-red-400'}")
+                                if ok:
+                                    verified["done"] = True
+                                    ui.notify("✅ 이메일 인증 완료!", type="positive")
+                            except Exception as e:
+                                verify_msg.set_text(f"❌ 오류: {str(e)[:50]}")
+                                verify_msg.classes(replace="text-xs text-red-400")
 
-                        ui.button("✅ 인증확인", on_click=check_code).props("color=green dense size=sm")
+                        ui.button("✅ 인증확인", on_click=check_code).classes("w-full mt-1").props("color=green outline")
 
                 # ── Step 2: 나머지 정보 ──
                 j_nk = ui.input("닉네임 (최대 8자)").classes("w-full")
