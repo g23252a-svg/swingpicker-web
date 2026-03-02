@@ -3,7 +3,9 @@
 tab_admin.py — 👑 회원 관리 (NiceGUI Dark Theme)
 ═══════════════════════════════════════════════════
 관리자 전용: 회원 목록, 등급 변경, 차단/해제, 전체 이벤트, 회원 초기화
+모든 네트워크/DB 호출은 asyncio.to_thread로 비동기 처리 (connection lost 방지)
 """
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -95,28 +97,38 @@ def render_tab_admin():
             ).classes("w-full")
 
             async def apply_role():
-                if sel_email.value:
+                if not sel_email.value:
+                    return
+
+                def _do():
                     db_a = _get_db()
-                    if db_a:
-                        days = sel_days.value or 0
-                        if days > 0 and sel_role.value == "prime":
-                            expire = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-                            db_a.update_user_subscription(sel_email.value, sel_role.value, expire)
-                            ui.notify(f"✅ {sel_email.value} → {sel_role.value.upper()} (만료: {expire})")
-                        else:
-                            ok = db_a.update_user_role(sel_email.value, sel_role.value)
-                            ui.notify(f"{'✅ 변경 완료' if ok else '❌ 실패'}")
+                    if not db_a:
+                        return False, "DB 연결 실패"
+                    days = sel_days.value or 0
+                    if days > 0 and sel_role.value == "prime":
+                        expire = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+                        db_a.update_user_subscription(sel_email.value, sel_role.value, expire)
+                        return True, f"✅ {sel_email.value} → PRIME (만료: {expire})"
                     else:
-                        ui.notify("DB 연결 실패", type="negative")
+                        ok = db_a.update_user_role(sel_email.value, sel_role.value)
+                        return ok, "✅ 변경 완료" if ok else "❌ 실패"
+
+                ok, msg = await asyncio.to_thread(_do)
+                ui.notify(msg, type="positive" if ok else "negative")
 
             async def toggle_ban():
-                if sel_email.value:
+                if not sel_email.value:
+                    return
+
+                def _do():
                     db_a = _get_db()
-                    if db_a:
-                        ok, msg = db_a.toggle_user_ban(sel_email.value)
-                        ui.notify(msg)
-                    else:
-                        ui.notify("DB 연결 실패", type="negative")
+                    if not db_a:
+                        return "DB 연결 실패"
+                    ok, msg = db_a.toggle_user_ban(sel_email.value)
+                    return msg
+
+                msg = await asyncio.to_thread(_do)
+                ui.notify(msg)
 
             with ui.row().classes("gap-2 mt-2"):
                 ui.button("등급 적용", on_click=apply_role).props("color=primary")
@@ -128,12 +140,14 @@ def render_tab_admin():
             ui.label("전 회원에게 체험권을 지급합니다.").classes("text-gray-400 text-sm mb-2")
 
             async def grant_trial():
-                db_a = _get_db()
-                if db_a:
-                    ok, msg = db_a.grant_all_users_trial(14)
-                    ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
-                else:
-                    ui.notify("DB 연결 실패", type="negative")
+                def _do():
+                    db_a = _get_db()
+                    if not db_a:
+                        return False, "DB 연결 실패"
+                    return db_a.grant_all_users_trial(14)
+
+                ok, msg = await asyncio.to_thread(_do)
+                ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
 
             ui.button("🎁 전원 14일 Prime 지급", on_click=grant_trial).props("color=positive")
 
@@ -141,23 +155,26 @@ def render_tab_admin():
             ui.label("⚠️ 위험 구역").classes("text-red-400 font-bold mb-2")
 
             async def _reset_all_members():
-                db_a = _get_db()
-                if db_a:
+                ui.notify("⏳ 초기화 중...", type="info")
+
+                def _do():
+                    db_a = _get_db()
+                    if not db_a:
+                        return False, "DB 연결 실패"
                     try:
-                        # 1) 로컬 SQLite 삭제
                         db_a._exec_sqlite("DELETE FROM users WHERE role != 'admin'")
                         db_a._exec_sqlite("DELETE FROM inquiries")
-
-                        # 2) Gist에 즉시 강제 업로드 (재시작해도 복원 안 됨)
                         u_ok = db_a._do_gist_upload("users", "users.json")
                         i_ok = db_a._do_gist_upload("inquiries", "inquiries.json")
-
                         if u_ok and i_ok:
-                            ui.notify("🔄 전체 회원 초기화 + Gist 동기화 완료!", type="positive")
+                            return True, "🔄 전체 회원 초기화 + Gist 동기화 완료!"
                         else:
-                            ui.notify("⚠️ SQLite 삭제 완료, Gist 동기화 일부 실패", type="warning")
+                            return True, "⚠️ SQLite 삭제 완료, Gist 일부 실패"
                     except Exception as ex:
-                        ui.notify(f"❌ 오류: {ex}", type="negative")
+                        return False, f"❌ 오류: {ex}"
+
+                ok, msg = await asyncio.to_thread(_do)
+                ui.notify(msg, type="positive" if ok else "negative")
 
             ui.button("🔄 전체 회원 초기화 (관리자 제외)", on_click=_reset_all_members).props("color=red outlined").tooltip("관리자 제외 모든 회원 + 문의 삭제 + Gist 즉시 반영")
 
@@ -168,14 +185,20 @@ def render_tab_admin():
 
             payment_list = ui.column().classes("w-full")
 
-            def _dismiss_payment(req):
-                db_d = _get_db()
-                if db_d:
-                    items = [x for x in db_d.get_all_inquiries()
-                             if x.get("created_at") != req.get("created_at")]
-                    db_d.save_inquiries(items)
+            async def _dismiss_payment(req):
+                def _do():
+                    db_d = _get_db()
+                    if db_d:
+                        items = [x for x in db_d.get_all_inquiries()
+                                 if x.get("created_at") != req.get("created_at")]
+                        db_d.save_inquiries(items)
+                        return True
+                    return False
+
+                ok = await asyncio.to_thread(_do)
+                if ok:
                     ui.notify("✅ 처리 완료", type="positive")
-                    _load_payment_requests()
+                _load_payment_requests()
 
             def _load_payment_requests():
                 payment_list.clear()
