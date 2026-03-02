@@ -27,7 +27,7 @@ _logger = logging.getLogger("email_verify")
 GMAIL_USER = os.environ.get("GMAIL_USER", "")
 GMAIL_APP_PW = os.environ.get("GMAIL_APP_PW", "")
 SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
+SMTP_PORT = 465
 
 # ── 인증코드 저장소 (메모리) ──
 # { "email": {"code": "123456", "expires": timestamp, "attempts": 0} }
@@ -98,8 +98,7 @@ def send_verification_email(to_email: str) -> tuple[bool, str]:
         msg.attach(MIMEText(text, "plain"))
         msg.attach(MIMEText(html, "html"))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            server.starttls()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as server:
             server.login(GMAIL_USER, GMAIL_APP_PW)
             server.sendmail(GMAIL_USER, to_email, msg.as_string())
 
