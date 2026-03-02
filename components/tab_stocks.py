@@ -65,6 +65,7 @@ ROUTE_KR = {
     "WAIT": "👀 관망",
     "OVERHEAT": "🔥 과열",
     "NEUTRAL": "⚪ 중립",
+    "CARRY": "📌 보유 관찰",
 }
 ROUTE_DESC = {
     "ATTACK": "매수 시그널 발생! 진입 조건 충족",
@@ -72,6 +73,7 @@ ROUTE_DESC = {
     "WAIT": "아직 조건 미충족, 추이 관망",
     "OVERHEAT": "과열 구간, 신규 진입 주의",
     "NEUTRAL": "뚜렷한 방향성 없음",
+    "CARRY": "이전 추천 종목 — 손절/익절가 관찰 중",
 }
 ROUTE_COLOR = {
     "ATTACK": "#EF4444",
@@ -79,6 +81,7 @@ ROUTE_COLOR = {
     "WAIT": "#3B82F6",
     "OVERHEAT": "#F97316",
     "NEUTRAL": "#6B7280",
+    "CARRY": "#8B5CF6",
 }
 
 def _route_kr(route_en):
@@ -361,7 +364,7 @@ def render_tab_stocks(df, auth, store=None):
 
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
         view_mode = ui.toggle(["📋 테이블", "🃏 칸반"], value="📋 테이블")
-        route_filter = ui.select({"전체": "전체", "ATTACK": "🚀 매수 돌입", "ARMED": "🔫 매수 대기", "WAIT": "👀 관망", "NEUTRAL": "⚪ 중립"}, value="전체", label="상태").classes("min-w-[140px]")
+        route_filter = ui.select({"전체": "전체", "ATTACK": "🚀 매수 돌입", "ARMED": "🔫 매수 대기", "CARRY": "📌 보유 관찰", "WAIT": "👀 관망", "NEUTRAL": "⚪ 중립"}, value="전체", label="상태").classes("min-w-[140px]")
         sort_mode = ui.toggle(["🔢 점수순", "🚦 상태순"], value="🔢 점수순")
 
         def _add_checked_to_journal():
@@ -615,6 +618,7 @@ def render_tab_stocks(df, auth, store=None):
             if trend_s > 0: reasons.append("🔼 추세 지표 긍정적")
             if rv == "ATTACK": reasons.append("🚀 매수 진입 시그널 활성")
             elif rv == "ARMED": reasons.append("🔫 매수 조건 근접 (돌파 대기)")
+            elif rv == "CARRY": reasons.append("📌 이전 추천 종목 — 손절/익절가 관찰 중")
 
             if reasons:
                 with ui.card().classes("w-full p-4 mt-2 bg-[#1a1a2e] border border-gray-700 rounded-xl"):

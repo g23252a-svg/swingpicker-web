@@ -1628,6 +1628,52 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
             except:
                 pass
 
+    # 3-1. 전부 실패 시 Naver API 병렬 조회 (최종 폴백)
+    if not name_map:
+        log("🔄 FDR/KRX/pykrx 모두 실패 → Naver API 병렬 조회 시도...")
+        # 코드 목록 확보: 이전 recommend_latest.csv 또는 pykrx ticker_list
+        _target_codes = set()
+        _prev_path = os.path.join(OUT_DIR, "recommend_latest.csv")
+        if os.path.exists(_prev_path):
+            try:
+                _prev = pd.read_csv(_prev_path, dtype={"종목코드": str}, usecols=["종목코드"])
+                _target_codes.update(_prev["종목코드"].astype(str).str.zfill(6).tolist())
+            except Exception:
+                pass
+        if not _target_codes and PYKRX_OK and stock is not None:
+            for _m in ["KOSPI", "KOSDAQ"]:
+                try:
+                    _target_codes.update(str(t).zfill(6) for t in safe_ticker_list(d, market=_m))
+                except Exception:
+                    pass
+
+        if _target_codes:
+            def _fetch_name_naver(code):
+                try:
+                    r = requests.get(
+                        f"https://m.stock.naver.com/api/stock/{code}/basic",
+                        timeout=5, headers={"User-Agent": "Mozilla/5.0"}
+                    )
+                    if r.ok:
+                        nm = r.json().get("stockName", "")
+                        if nm and nm != code:
+                            return code, nm
+                except Exception:
+                    pass
+                return code, None
+
+            with ThreadPoolExecutor(max_workers=20) as pool:
+                futures = {pool.submit(_fetch_name_naver, c): c for c in _target_codes}
+                for fut in as_completed(futures):
+                    code, nm = fut.result()
+                    if nm:
+                        name_map[code] = nm
+
+            if name_map:
+                log(f"✅ Naver API 병렬 조회 성공: {len(name_map)}개 ({len(_target_codes)}건 중)")
+            else:
+                log("⚠️ Naver API 병렬 조회도 실패")
+
     # 4. 결과 저장 및 반환
     if name_map:
         rows = [{"종목코드": c, "종목명": n} for c, n in name_map.items()]
@@ -2766,6 +2812,62 @@ def main(
             if _kc not in df_out.columns:
                 df_out[_kc] = 0
 
+    # -----------------------------------------------------------
+    # [Step 7.9] 이전 추천 종목 캐리오버 (ARMED/ATTACK → 미편입 종목 유지)
+    # 손절가/매도목표가 관찰을 위해 이전 CSV의 활성 종목을 CARRY 상태로 병합
+    # -----------------------------------------------------------
+    try:
+        _prev_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
+        if os.path.exists(_prev_latest):
+            _prev_df = pd.read_csv(_prev_latest, dtype={"종목코드": str})
+            _prev_df["종목코드"] = _prev_df["종목코드"].astype(str).str.zfill(6)
+            _cur_codes = set(df_out["종목코드"].astype(str).str.zfill(6))
+
+            # 이전에 ARMED/ATTACK/CARRY였으나 오늘 리스트에 없는 종목
+            _active_routes = {Route.ARMED, Route.ARMED.value, Route.ATTACK, Route.ATTACK.value,
+                              Route.CARRY, Route.CARRY.value, "ARMED", "ATTACK", "CARRY"}
+            _carry_mask = (
+                _prev_df["ROUTE"].isin(_active_routes)
+                & ~_prev_df["종목코드"].isin(_cur_codes)
+            )
+            _carry_df = _prev_df[_carry_mask].copy()
+
+            if not _carry_df.empty:
+                # 상태를 CARRY로 변경
+                _carry_df["ROUTE"] = Route.CARRY.value
+                _carry_df["상태"] = Route.CARRY.value
+                _carry_df["IS_ACTIVE"] = False
+                _carry_df["IS_NOW_ENTRY"] = False
+                _carry_df["IS_WATCH"] = False
+
+                # 현재가 업데이트 (price_snapshot 활용)
+                _snap_path = os.path.join(OUT_DIR, f"price_snapshot_{trade_ymd}.csv")
+                if not os.path.exists(_snap_path):
+                    _snap_path = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
+                if os.path.exists(_snap_path):
+                    try:
+                        _snap = pd.read_csv(_snap_path, dtype={"종목코드": str})
+                        _snap["종목코드"] = _snap["종목코드"].astype(str).str.zfill(6)
+                        _price_map = dict(zip(_snap["종목코드"], pd.to_numeric(_snap["종가"], errors="coerce")))
+                        for _idx in _carry_df.index:
+                            _code = _carry_df.at[_idx, "종목코드"]
+                            if _code in _price_map and pd.notna(_price_map[_code]):
+                                _carry_df.at[_idx, "종가"] = _price_map[_code]
+                    except Exception:
+                        pass
+
+                # 랭크를 기존 종목 뒤로 배치
+                _max_rank = df_out["LDY_RANK"].max() if len(df_out) > 0 else 0
+                _carry_df["LDY_RANK"] = range(int(_max_rank) + 1, int(_max_rank) + 1 + len(_carry_df))
+
+                # 기준일 갱신
+                _carry_df["기준일"] = trade_ymd
+
+                df_out = pd.concat([df_out, _carry_df], ignore_index=True)
+                log(f"📌 이전 추천 캐리오버: {len(_carry_df)}건 (CARRY 상태로 유지)")
+    except Exception as e:
+        log(f"⚠️ 캐리오버 처리 실패 (무시): {e}")
+
     must_cols = [
         "LDY_RANK", "종목코드", "종목명", "시장", "업종_대분류", "종가", "거래대금(억원)", "시가총액(억원)",
         "켈리_수량", "추천금액(만원)",
@@ -2793,6 +2895,20 @@ def main(
     ensure_dir(OUT_DIR)
     out_path_dated = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{tag}' if tag else ''}.csv")
     out_path_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
+
+    # ── [최종 안전장치] 종목명 오염 복구 (코드==이름인 행) ──
+    if "종목명" in df_out.columns and "종목코드" in df_out.columns:
+        df_out["종목명"] = df_out["종목명"].astype(str)
+        _corrupt_mask = df_out["종목명"].str.match(r'^\d+$')
+        _corrupt_cnt = _corrupt_mask.sum()
+        if _corrupt_cnt > 0 and name_map:
+            df_out.loc[_corrupt_mask, "종목명"] = (
+                df_out.loc[_corrupt_mask, "종목코드"].astype(str).str.zfill(6)
+                .map(name_map).fillna(df_out.loc[_corrupt_mask, "종목명"])
+            )
+            _fixed = _corrupt_cnt - df_out["종목명"].str.match(r'^\d+$').sum()
+            if _fixed > 0:
+                log(f"🔧 종목명 최종 복구: {_fixed}/{_corrupt_cnt}건")
 
     df_out.to_csv(out_path_dated, index=False, encoding=UTF8)
     df_out.to_csv(out_path_latest, index=False, encoding=UTF8)
