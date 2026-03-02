@@ -58,6 +58,41 @@ from shared_utils import nz_num, safe_float, calc_hma as calc_hma_series
 from chart_components import plot_radar_chart, plot_score_waterfall
 
 _logger = logging.getLogger(__name__)
+# ── 상태 한글화 매핑 ──
+ROUTE_KR = {
+    "ATTACK": "🚀 매수 돌입",
+    "ARMED": "🔫 매수 대기",
+    "WAIT": "👀 관망",
+    "OVERHEAT": "🔥 과열",
+    "NEUTRAL": "⚪ 중립",
+}
+ROUTE_DESC = {
+    "ATTACK": "매수 시그널 발생! 진입 조건 충족",
+    "ARMED": "조건 근접, 돌파 시 매수 준비",
+    "WAIT": "아직 조건 미충족, 추이 관망",
+    "OVERHEAT": "과열 구간, 신규 진입 주의",
+    "NEUTRAL": "뚜렷한 방향성 없음",
+}
+ROUTE_COLOR = {
+    "ATTACK": "#EF4444",
+    "ARMED": "#F59E0B",
+    "WAIT": "#3B82F6",
+    "OVERHEAT": "#F97316",
+    "NEUTRAL": "#6B7280",
+}
+
+def _route_kr(route_en):
+    """영문 ROUTE를 한글 뱃지 텍스트로 변환"""
+    return ROUTE_KR.get(str(route_en).upper().strip(), str(route_en))
+
+def _route_desc(route_en):
+    """ROUTE 설명"""
+    return ROUTE_DESC.get(str(route_en).upper().strip(), "")
+
+def _route_color(route_en):
+    """ROUTE 색상"""
+    return ROUTE_COLOR.get(str(route_en).upper().strip(), "#6B7280")
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
 
@@ -90,8 +125,8 @@ def _plotly_dark(fig, height=300):
 
 def _price_bar_html(stop, entry, close, t1, t2=0):
     points = [("손절", stop, "#EF4444"), ("매수", entry, "#3B82F6"), ("현재", close, "#FFFFFF")]
-    if t1 > 0: points.append(("T1", t1, "#10B981"))
-    if t2 > 0 and t2 != t1: points.append(("T2", t2, "#EAB308"))
+    if t1 > 0: points.append(("목표1", t1, "#10B981"))
+    if t2 > 0 and t2 != t1: points.append(("목표2", t2, "#EAB308"))
     points.sort(key=lambda x: x[1])
     p_min, p_max = points[0][1] * 0.98, points[-1][1] * 1.02
     rng = p_max - p_min
@@ -276,10 +311,10 @@ def _plot_candle_chart(df, code, name, entry=None, stop=None, target1=None, targ
         except Exception:
             pass
 
-    _add_hline(entry, "#2962FF", "Entry", "solid")
-    _add_hline(stop, "#FF3B30", "Stop Loss")
-    _add_hline(target1, "#00E676", "T1")
-    _add_hline(target2, "#EAB308", "T2", "dashdot")
+    _add_hline(entry, "#2962FF", "매수가", "solid")
+    _add_hline(stop, "#FF3B30", "손절가")
+    _add_hline(target1, "#00E676", "목표1")
+    _add_hline(target2, "#EAB308", "목표2", "dashdot")
 
     cur_row = 2
     if "Volume" in df.columns:
@@ -320,13 +355,13 @@ def render_tab_stocks(df, auth, store=None):
         auth: "guest" | "free" | "pro" | "prime" | "admin"
         store: DataStore 인스턴스 (CSV 다운로드용)
     """
-    _section_title("🎯 AI & Quant 추천 종목")
+    _section_title("🎯 AI 추천 종목")
 
     _tbl = None
 
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
         view_mode = ui.toggle(["📋 테이블", "🃏 칸반"], value="📋 테이블")
-        route_filter = ui.select(["전체", "ATTACK", "ARMED", "WAIT", "NEUTRAL"], value="전체", label="상태").classes("min-w-[120px]")
+        route_filter = ui.select({"전체": "전체", "ATTACK": "🚀 매수 돌입", "ARMED": "🔫 매수 대기", "WAIT": "👀 관망", "NEUTRAL": "⚪ 중립"}, value="전체", label="상태").classes("min-w-[140px]")
         sort_mode = ui.toggle(["🔢 점수순", "🚦 상태순"], value="🔢 점수순")
 
         def _add_checked_to_journal():
@@ -393,7 +428,6 @@ def render_tab_stocks(df, auth, store=None):
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
         if auth == "guest": fdf = fdf.head(3)
         elif auth == "free": fdf = fdf.head(5)
-        elif auth == "pro": fdf = fdf.head(20)
         else: fdf = fdf.head(50)
         return fdf
 
@@ -410,20 +444,20 @@ def render_tab_stocks(df, auth, store=None):
 
     def _render_table(show):
         columns = [
-            {"name": "route", "label": "상태", "field": "route", "align": "center"},
+            {"name": "route", "label": "신호", "field": "route", "align": "center"},
             {"name": "name", "label": "종목명", "field": "name", "align": "left"},
-            {"name": "score", "label": "점수", "field": "score", "align": "center", "sortable": True},
+            {"name": "score", "label": "AI점수", "field": "score", "align": "center", "sortable": True},
             {"name": "close", "label": "현재가", "field": "close", "align": "right"},
             {"name": "buy", "label": "매수", "field": "buy", "align": "right"},
             {"name": "stop", "label": "손절", "field": "stop", "align": "right"},
-            {"name": "t1", "label": "T1목표", "field": "t1", "align": "right"},
+            {"name": "t1", "label": "목표가", "field": "t1", "align": "right"},
             {"name": "sector", "label": "업종", "field": "sector", "align": "left"},
         ]
         rows = []
         for _, r in show.iterrows():
             rows.append({
                 "code": str(r.get("종목코드", "")).zfill(6),
-                "route": str(r.get("ROUTE", "—")),
+                "route": _route_kr(r.get("ROUTE", "—")),
                 "name": str(r.get("종목명", "—")),
                 "score": f'{safe_float(r.get("DISPLAY_SCORE", 0)):.0f}',
                 "close": f'{int(nz_num(r.get("종가", 0))):,}',
@@ -455,9 +489,9 @@ def render_tab_stocks(df, auth, store=None):
         df_watch = show[~show.index.isin(ex)]
 
         with ui.row().classes("w-full gap-4 flex-wrap items-start"):
-            _kanban_col("🚀 ATTACK", df_atk, "#EF4444", df)
-            _kanban_col("🔫 ARMED", df_arm, "#F59E0B", df)
-            _kanban_col("👀 WATCH", df_watch, "#3B82F6", df)
+            _kanban_col("🚀 매수 돌입", df_atk, "#EF4444", df)
+            _kanban_col("🔫 매수 대기", df_arm, "#F59E0B", df)
+            _kanban_col("👀 관망", df_watch, "#3B82F6", df)
 
     def _kanban_col(title, sub_df, color, full_df):
         with ui.column().classes("kanban-col min-w-[280px] flex-1"):
@@ -477,11 +511,11 @@ def render_tab_stocks(df, auth, store=None):
                         ui.label(f"{r.get('종목명', '')}").classes("text-white font-bold text-sm")
                         ui.badge(f"{score:.0f}", color=sc).classes("text-xs")
                     if buy > 0:
-                        ui.label(f"🎯 {buy:,}  🛡️ {stop:,}  🟢 {t1:,}").classes("text-xs text-gray-400 mt-1")
+                        ui.label(f"매수 {buy:,} · 손절 {stop:,} · 목표 {t1:,}").classes("text-xs text-gray-400 mt-1")
                     rr = safe_float(r.get("RR1", 0))
                     if rr > 0:
                         rc = "#10B981" if rr >= 2 else "#F59E0B" if rr >= 1 else "#EF4444"
-                        ui.label(f"R:R {rr:.1f}").classes("text-xs mt-1").style(f"color:{rc}")
+                        ui.label(f"손익비 {rr:.1f}:1").classes("text-xs mt-1").style(f"color:{rc}")
 
     def _on_stock_select_by_code(code, full_df):
         detail_area.clear()
@@ -504,15 +538,15 @@ def render_tab_stocks(df, auth, store=None):
                 risk = _entry - _stop if _stop > 0 else 1
                 with ui.row().classes("w-full gap-3 flex-wrap"):
                     _metric_card("🔴 손절가", f"{int(_stop):,}", f"{(_stop/_close-1)*100:+.1f}%" if _close > 0 else "", False)
-                    _metric_card("🔵 매수가", f"{int(_entry):,}", "시스템 추천")
+                    _metric_card("🔵 매수가", f"{int(_entry):,}", "AI 추천가")
                     if _t1 > 0:
                         rr1 = (_t1 - _entry) / risk if risk > 0 else 0
-                        _metric_card("🟢 T1 목표", f"{int(_t1):,}", f"+{(_t1/_close-1)*100:.1f}% (RR {rr1:.1f}:1)")
+                        _metric_card("🟢 목표가 1", f"{int(_t1):,}", f"+{(_t1/_close-1)*100:.1f}% (손익비 {rr1:.1f}:1)")
                     if _t2 > 0 and _t2 != _t1:
                         rr2 = (_t2 - _entry) / risk if risk > 0 else 0
-                        _metric_card("🟡 T2 목표", f"{int(_t2):,}", f"+{(_t2/_close-1)*100:.1f}% (RR {rr2:.1f}:1)")
+                        _metric_card("🟡 목표가 2", f"{int(_t2):,}", f"+{(_t2/_close-1)*100:.1f}% (손익비 {rr2:.1f}:1)")
                     if _atr > 0 and _atr != _t1:
-                        _metric_card("⚪ ATR 목표", f"{int(_atr):,}", f"+{(_atr/_close-1)*100:.1f}%")
+                        _metric_card("⚪ ATR 목표가", f"{int(_atr):,}", f"+{(_atr/_close-1)*100:.1f}%")
 
             if _close > 0 and _stop > 0 and _t1 > 0:
                 ui.html(_price_bar_html(_stop, _entry, _close, _t1, _t2))
@@ -556,8 +590,37 @@ def render_tab_stocks(df, auth, store=None):
                         ui.label("워터폴 차트 오류").classes("text-gray-500")
 
             rv = str(row.get("ROUTE", "NEUTRAL"))
-            rc = {"ATTACK": "#EF4444", "ARMED": "#F59E0B", "WAIT": "#3B82F6", "NEUTRAL": "#6B7280"}.get(rv, "#6B7280")
-            ui.label(f"⚡ 현재 상태: {rv}").classes("text-lg font-bold mt-4 px-4 py-2 rounded-lg text-white").style(f"background:{rc}")
+            rc = _route_color(rv)
+            kr_label = _route_kr(rv)
+            kr_desc = _route_desc(rv)
+            with ui.card().classes("w-full p-4 mt-4 rounded-xl border").style(f"border-color:{rc}; background:rgba(0,0,0,0.3)"):
+                with ui.row().classes("items-center gap-3"):
+                    ui.label(f"⚡ 현재 신호: {kr_label}").classes("text-lg font-bold text-white").style(f"color:{rc}")
+                ui.label(kr_desc).classes("text-gray-300 text-sm mt-1")
+
+            # ── 추천 근거 요약 ──
+            score = safe_float(row.get("DISPLAY_SCORE", 0))
+            rr1 = safe_float(row.get("RR1", 0))
+            momentum = safe_float(row.get("MOMENTUM_SCORE", 0))
+            volume_s = safe_float(row.get("VOLUME_SCORE", 0))
+            trend_s = safe_float(row.get("TREND_SCORE", 0))
+
+            reasons = []
+            if score >= 80: reasons.append("📊 AI 종합 점수 우수 (상위권)")
+            elif score >= 70: reasons.append("📊 AI 종합 점수 양호")
+            if rr1 >= 3: reasons.append(f"💰 손익비 매우 우수 ({rr1:.1f}:1)")
+            elif rr1 >= 2: reasons.append(f"💰 손익비 양호 ({rr1:.1f}:1)")
+            if momentum > 0: reasons.append("📈 모멘텀 상승 추세")
+            if volume_s > 0: reasons.append("📦 거래량 증가 감지")
+            if trend_s > 0: reasons.append("🔼 추세 지표 긍정적")
+            if rv == "ATTACK": reasons.append("🚀 매수 진입 시그널 활성")
+            elif rv == "ARMED": reasons.append("🔫 매수 조건 근접 (돌파 대기)")
+
+            if reasons:
+                with ui.card().classes("w-full p-4 mt-2 bg-[#1a1a2e] border border-gray-700 rounded-xl"):
+                    ui.label("💡 추천 근거").classes("text-white font-bold mb-2")
+                    for reason in reasons:
+                        ui.label(reason).classes("text-gray-300 text-sm py-0.5")
 
             if KELLY_OK:
                 kelly_holder = ui.card().classes("w-full p-4 bg-[#1a1a2e] border border-yellow-700/40 rounded-xl mt-4")
