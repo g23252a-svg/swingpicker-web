@@ -1,68 +1,56 @@
 # -*- coding: utf-8 -*-
 """
-email_verify.py — 이메일 인증코드 발송 (Gmail SMTP)
+email_verify.py — 이메일 인증코드 발송 (Resend API)
 ═══════════════════════════════════════════════════════
 가입 시 6자리 인증코드를 발송하고 검증합니다.
 
 환경변수:
-    GMAIL_USER: 발송용 Gmail 주소 (예: myapp@gmail.com)
-    GMAIL_APP_PW: Gmail 앱 비밀번호 (16자리)
-
-Gmail 앱 비밀번호 발급 방법:
-    1. Google 계정 → 보안 → 2단계 인증 활성화
-    2. 앱 비밀번호 생성 → "메일" 선택 → 16자리 비밀번호 복사
+    RESEND_API_KEY: Resend API 키 (https://resend.com)
 """
 import logging
 import os
 import random
-import smtplib
 import threading
 import time
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+
+import requests as _requests
 
 _logger = logging.getLogger("email_verify")
 
-# ── Gmail SMTP 설정 ──
-GMAIL_USER = os.environ.get("GMAIL_USER", "")
-GMAIL_APP_PW = os.environ.get("GMAIL_APP_PW", "")
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 465
+# ── Resend API 설정 ──
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_URL = "https://api.resend.com/emails"
+FROM_EMAIL = "SwingPicker <onboarding@resend.dev>"
 
 # ── 인증코드 저장소 (메모리) ──
-# { "email": {"code": "123456", "expires": timestamp, "attempts": 0} }
 _codes: dict = {}
 _lock = threading.Lock()
 
 CODE_EXPIRE_SEC = 300  # 5분
-MAX_ATTEMPTS = 5       # 최대 검증 시도 횟수
-MAX_SEND_PER_EMAIL = 3 # 같은 이메일 연속 발송 제한
+MAX_ATTEMPTS = 5
+MAX_SEND_PER_EMAIL = 3
 
 
 def is_configured() -> bool:
-    """Gmail SMTP가 설정되어 있는지 확인"""
-    return bool(GMAIL_USER and GMAIL_APP_PW)
+    """Resend API가 설정되어 있는지 확인"""
+    return bool(RESEND_API_KEY)
 
 
 def generate_code() -> str:
-    """6자리 인증코드 생성"""
     return str(random.randint(100000, 999999))
 
 
-def send_verification_email(to_email: str) -> tuple[bool, str]:
+def send_verification_email(to_email: str) -> tuple:
     """
-    인증코드를 이메일로 발송합니다.
-
-    Returns:
-        (True, "코드 발송 완료") or (False, "에러 메시지")
+    인증코드를 이메일로 발송합니다. (Resend HTTP API)
     """
     if not is_configured():
-        _logger.warning("Gmail SMTP 미설정 (GMAIL_USER, GMAIL_APP_PW)")
+        _logger.warning("Resend API 미설정 (RESEND_API_KEY)")
         return False, "이메일 인증 서비스가 설정되지 않았습니다."
 
     to_email = to_email.strip().lower()
 
-    # 연속 발송 제한 체크
+    # 연속 발송 제한
     with _lock:
         existing = _codes.get(to_email)
         if existing and existing.get("send_count", 0) >= MAX_SEND_PER_EMAIL:
@@ -72,11 +60,6 @@ def send_verification_email(to_email: str) -> tuple[bool, str]:
     code = generate_code()
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[SwingPicker] 이메일 인증코드: {code}"
-        msg["From"] = f"SwingPicker <{GMAIL_USER}>"
-        msg["To"] = to_email
-
         html = f"""
         <div style="font-family:sans-serif; max-width:480px; margin:0 auto;
                     padding:32px; background:#1a1a2e; border-radius:16px; color:white;">
@@ -93,14 +76,26 @@ def send_verification_email(to_email: str) -> tuple[bool, str]:
             </p>
         </div>
         """
-        text = f"SwingPicker 인증코드: {code} (5분 이내 입력)"
 
-        msg.attach(MIMEText(text, "plain"))
-        msg.attach(MIMEText(html, "html"))
+        resp = _requests.post(
+            RESEND_URL,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": FROM_EMAIL,
+                "to": [to_email],
+                "subject": f"[SwingPicker] 이메일 인증코드: {code}",
+                "html": html,
+            },
+            timeout=10,
+        )
 
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            server.login(GMAIL_USER, GMAIL_APP_PW)
-            server.sendmail(GMAIL_USER, to_email, msg.as_string())
+        if resp.status_code not in (200, 201):
+            err_msg = resp.json().get("message", resp.text[:100])
+            _logger.error(f"Resend API 오류: {resp.status_code} {err_msg}")
+            return False, f"이메일 발송 실패: {err_msg}"
 
         # 코드 저장
         with _lock:
@@ -118,21 +113,15 @@ def send_verification_email(to_email: str) -> tuple[bool, str]:
         _logger.info(f"✉️ 인증코드 발송: {to_email[:3]}***")
         return True, "인증코드가 발송되었습니다. 이메일을 확인해주세요."
 
-    except smtplib.SMTPAuthenticationError:
-        _logger.error("Gmail 인증 실패 — GMAIL_APP_PW 확인 필요")
-        return False, "이메일 발송 실패 (서버 인증 오류)"
+    except _requests.Timeout:
+        return False, "이메일 발송 시간 초과. 다시 시도해주세요."
     except Exception as e:
         _logger.error(f"이메일 발송 실패: {e}", exc_info=True)
         return False, f"이메일 발송 실패: {str(e)[:50]}"
 
 
-def verify_code(email: str, code: str) -> tuple[bool, str]:
-    """
-    인증코드를 검증합니다.
-
-    Returns:
-        (True, "인증 성공") or (False, "에러 메시지")
-    """
+def verify_code(email: str, code: str) -> tuple:
+    """인증코드 검증"""
     email = email.strip().lower()
 
     with _lock:
@@ -160,7 +149,7 @@ def verify_code(email: str, code: str) -> tuple[bool, str]:
 
 
 def cleanup_expired():
-    """만료된 코드 정리 (주기적 호출용)"""
+    """만료된 코드 정리"""
     now = time.time()
     with _lock:
         expired = [k for k, v in _codes.items() if now > v["expires"]]
