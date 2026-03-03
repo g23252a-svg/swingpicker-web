@@ -2962,6 +2962,23 @@ def main(
     df_out.to_csv(out_path_latest, index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건) → {out_path_dated}")
 
+    # [v6.0] After-market price update via Naver API
+    try:
+        from naver_aftermarket import update_csv_with_aftermarket
+        _snap_latest = os.path.join(OUT_DIR, 'price_snapshot_latest.csv')
+        _after_cnt = update_csv_with_aftermarket(out_path_latest, _snap_latest)
+        if _after_cnt > 0:
+            import shutil as _sh
+            _sh.copy2(out_path_latest, out_path_dated)
+            log('After-market: %d stocks updated' % _after_cnt)
+        else:
+            log('After-market: no changes')
+    except ImportError:
+        log('naver_aftermarket.py not found - skipped')
+    except Exception as e:
+        log('After-market failed: ' + str(e))
+
+
     # ── 종목명 매핑 파일 별도 저장 (Railway UI 복구용) ──
     # Phase 2: price_snapshot 기반 전체 KRX 매핑 (2800+건)으로 확대
     try:
