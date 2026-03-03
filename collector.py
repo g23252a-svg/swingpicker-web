@@ -1489,24 +1489,49 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
         log(f"⚠️ FDR 수집 실패 (IP차단 의심): {e}")
 
     # ------------------------------------------------------------
-    # 3. 3차 시도 (최후의 보루): 섹터 맵 활용
     # ------------------------------------------------------------
-    log("🚨 3차 시도: KIND 섹터 맵을 이용해 종목 리스트만 복구합니다.")
+    # 3. 3차 시도 (최후의 보루): 전일자 주도주(recommend_latest) 복구
+    # ------------------------------------------------------------
+    log("🚨 3차 시도: API 차단 감지. 전일자 데이터를 이용해 주도주 풀을 복구합니다.")
     try:
-        # 이미 로드된/저장된 sector_map_krx.csv가 있다면 활용
-        sec_map = get_sector_map_krx()
-        if sec_map:
-            # 리스트만 만들고 거래대금은 0으로 설정 (분석 단계에서 걸러지더라도 프로그램은 안 죽음)
-            rows = [{"종목코드": k, "종목명": "Unknown", "시장": "KOSPI", "거래대금(원)": 0} for k in sec_map.keys()]
-            df_fallback = pd.DataFrame(rows)
-            log(f"✅ KIND 섹터 맵 기반 복구 성공 ({len(df_fallback)}종목)")
-            # 거래대금이 0이라 Top N 정렬은 의미 없지만, 분석은 진행 가능
-            return df_fallback.head(top_n)
-            
-    except Exception as e:
-        log(f"❌ 3차 복구 실패: {e}")
+        prev_path = os.path.join(OUT_DIR, "recommend_latest.csv")
+        if os.path.exists(prev_path):
+            df_prev = pd.read_csv(prev_path, dtype={"종목코드": str})
+            df_prev["종목코드"] = df_prev["종목코드"].astype(str).str.zfill(6)
 
-    raise RuntimeError(f"모든 데이터 수집 수단 실패 ({date_yyyymmdd})")
+            # 어제 파일의 거래대금 단위를 원 단위로 통일
+            if "거래대금(억원)" in df_prev.columns:
+                df_prev["거래대금(원)"] = pd.to_numeric(df_prev["거래대금(억원)"], errors="coerce").fillna(0) * 1e8
+            else:
+                df_prev["거래대금(원)"] = pd.to_numeric(df_prev.get("거래대금(원)", 0), errors="coerce").fillna(0)
+
+            # 시장 정보 보강 (price_snapshot 폴백)
+            if "시장" not in df_prev.columns or df_prev["시장"].nunique() <= 1:
+                _snap_path = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
+                if os.path.exists(_snap_path):
+                    try:
+                        _snap = pd.read_csv(_snap_path, dtype={"종목코드": str}, usecols=["종목코드", "시장"])
+                        _snap_map = dict(zip(_snap["종목코드"].str.zfill(6), _snap["시장"]))
+                        df_prev["시장"] = df_prev["종목코드"].map(_snap_map).fillna(df_prev.get("시장", "KOSPI"))
+                    except Exception:
+                        pass
+
+            df_fallback = df_prev[["종목코드", "시장", "거래대금(원)"]].copy()
+            _mkt_dist = dict(df_fallback["시장"].value_counts())
+            log(f"✅ 전일자 데이터 기반 복구 성공 ({len(df_fallback)}종목, 시장분포: {_mkt_dist})")
+
+            # 어제 기준 거래대금 순으로 정렬 후 상위 N개 반환
+            return df_fallback.sort_values("거래대금(원)", ascending=False).head(top_n)
+
+        else:
+            raise FileNotFoundError("이전 추천 파일이 없습니다.")
+
+    except Exception as e:
+        log(f"❌ 3차 복구(전일자 데이터) 실패: {e}")
+
+    # 4차: 진짜 최후의 보루 - 빈 DataFrame 반환으로 엉뚱한 매매 차단
+    log("🚨 모든 데이터 수집 수단 실패. 빈 종목 풀 반환.")
+    return pd.DataFrame(columns=["종목코드", "시장", "거래대금(원)"])
 
 def get_market_sets(d: str) -> Tuple[set, set]:
     try:

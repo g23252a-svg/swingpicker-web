@@ -43,6 +43,7 @@ class Route(str, Enum):
     OVERHEAT     = "OVERHEAT"
     EXIT_WARNING = "EXIT_WARNING"
     CARRY        = "CARRY"
+    BLOCKED      = "BLOCKED"
 
 
 class Market(str, Enum):
