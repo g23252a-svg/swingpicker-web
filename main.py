@@ -26,7 +26,7 @@ from views.login_page import login_page  # noqa: F401 — @ui.page('/login') 등
 # ─── 탭 컴포넌트 ───
 from components.tab_market import render_tab_market
 from components.tab_stocks import render_tab_stocks
-from components.tab_portfolio import render_tab_portfolio
+from components.tab_portfolio_v2 import render_tab_portfolio
 from components.tab_inquiry import render_tab_inquiry
 from components.tab_terms import render_tab_terms
 from components.tab_updates import render_tab_updates
