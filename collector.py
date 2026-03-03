@@ -2930,7 +2930,8 @@ def main(
             if _fixed > 0:
                 log(f"🔧 종목명 최종 복구: {_fixed}/{_corrupt_cnt}건 (잔여 오염: {_final_corrupt}건)")
             if _final_corrupt > 0:
-                log(f"⚠️ 종목명 미복구 {_final_corrupt}건: {df_out.loc[df_out['종목명'].str.match(r'^\\d+$'), '종목코드'].tolist()[:5]}")
+                _remain_codes = df_out.loc[df_out["종목명"].str.match(r'^\d+$'), "종목코드"].tolist()[:5]
+                log(f"⚠️ 종목명 미복구 {_final_corrupt}건: {_remain_codes}")
 
     df_out.to_csv(out_path_dated, index=False, encoding=UTF8)
     df_out.to_csv(out_path_latest, index=False, encoding=UTF8)
