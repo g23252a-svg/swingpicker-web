@@ -1,2 +1,3 @@
 ﻿rec_date,code,method,topk,horizon,score,entry_price,exit_price,stop_price,target_price,ret_pct,win,exit_type,b_ratio
 20260227,489790,POSITION_TRACK,0,0,0,68600.0,86000.0,65800.0,77000.0,25.3644,1,TP2_HIT,3.0
+20260303,475830,POSITION_TRACK,0,0,0,134200.0,126600.0,128800.0,150400.0,-5.6632,0,STOP_HIT,3.0
