@@ -3,8 +3,8 @@ name: Auto Collect and Push CSV
 
 on:
   schedule:
-    # 매일 23:00 KST (UTC 14:00)
-    - cron: "0 14 * * *"
+    # 평일 18:00 KST (UTC 09:00) — KRX API 야간 차단 회피
+    - cron: "0 9 * * 1-5"
   workflow_dispatch:
 
 permissions:
