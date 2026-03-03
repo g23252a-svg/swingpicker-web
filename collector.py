@@ -2897,32 +2897,64 @@ def main(
     out_path_latest = os.path.join(OUT_DIR, "recommend_latest.csv")
 
     # ── [최종 안전장치] 종목명 오염 복구 (코드==이름인 행) ──
+    # Phase 2: name_map → price_snapshot → Naver 순차 폴백
     if "종목명" in df_out.columns and "종목코드" in df_out.columns:
         df_out["종목명"] = df_out["종목명"].astype(str)
         _corrupt_mask = df_out["종목명"].str.match(r'^\d+$')
         _corrupt_cnt = _corrupt_mask.sum()
-        if _corrupt_cnt > 0 and name_map:
-            df_out.loc[_corrupt_mask, "종목명"] = (
-                df_out.loc[_corrupt_mask, "종목코드"].astype(str).str.zfill(6)
-                .map(name_map).fillna(df_out.loc[_corrupt_mask, "종목명"])
-            )
-            _fixed = _corrupt_cnt - df_out["종목명"].str.match(r'^\d+$').sum()
+        if _corrupt_cnt > 0:
+            # 1차: name_map으로 복구
+            if name_map:
+                df_out.loc[_corrupt_mask, "종목명"] = (
+                    df_out.loc[_corrupt_mask, "종목코드"].astype(str).str.zfill(6)
+                    .map(name_map).fillna(df_out.loc[_corrupt_mask, "종목명"])
+                )
+            # 2차: price_snapshot_latest.csv 폴백 (전체 KRX 2800+건)
+            _still_corrupt = df_out["종목명"].str.match(r'^\d+$')
+            if _still_corrupt.sum() > 0:
+                _snap_path = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
+                if os.path.exists(_snap_path):
+                    try:
+                        _snap = pd.read_csv(_snap_path, dtype={"종목코드": str}, usecols=["종목코드", "종목명"])
+                        _snap_map = dict(zip(_snap["종목코드"].str.zfill(6), _snap["종목명"]))
+                        df_out.loc[_still_corrupt, "종목명"] = (
+                            df_out.loc[_still_corrupt, "종목코드"].astype(str).str.zfill(6)
+                            .map(_snap_map).fillna(df_out.loc[_still_corrupt, "종목명"])
+                        )
+                        # name_map도 보강 (다음 단계에서 활용)
+                        name_map.update({c: n for c, n in _snap_map.items() if c != n})
+                    except Exception as _e:
+                        log(f"⚠️ price_snapshot 폴백 실패: {_e}")
+            _final_corrupt = df_out["종목명"].str.match(r'^\d+$').sum()
+            _fixed = _corrupt_cnt - _final_corrupt
             if _fixed > 0:
-                log(f"🔧 종목명 최종 복구: {_fixed}/{_corrupt_cnt}건")
+                log(f"🔧 종목명 최종 복구: {_fixed}/{_corrupt_cnt}건 (잔여 오염: {_final_corrupt}건)")
+            if _final_corrupt > 0:
+                log(f"⚠️ 종목명 미복구 {_final_corrupt}건: {df_out.loc[df_out['종목명'].str.match(r'^\\d+$'), '종목코드'].tolist()[:5]}")
 
     df_out.to_csv(out_path_dated, index=False, encoding=UTF8)
     df_out.to_csv(out_path_latest, index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건) → {out_path_dated}")
 
     # ── 종목명 매핑 파일 별도 저장 (Railway UI 복구용) ──
+    # Phase 2: price_snapshot 기반 전체 KRX 매핑 (2800+건)으로 확대
     try:
-        _names_df = df_out[["종목코드", "종목명"]].drop_duplicates("종목코드")
-        # name_map에서 추가 보완 (recommend에 없는 종목도 포함)
+        # 베이스: price_snapshot_latest.csv (전체 KRX)
+        _snap_path = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
+        if os.path.exists(_snap_path):
+            _names_df = pd.read_csv(_snap_path, dtype={"종목코드": str}, usecols=["종목코드", "종목명"])
+            _names_df["종목코드"] = _names_df["종목코드"].str.zfill(6)
+            _names_df = _names_df.drop_duplicates("종목코드")
+        else:
+            _names_df = df_out[["종목코드", "종목명"]].drop_duplicates("종목코드")
+        # name_map에서 추가 보완 (신규 상장 등)
         if name_map:
             _extra = [{"종목코드": c, "종목명": n} for c, n in name_map.items()
-                      if c not in _names_df["종목코드"].values and c != n]
+                      if c not in _names_df["종목코드"].values and c != n and not n.isdigit()]
             if _extra:
                 _names_df = pd.concat([_names_df, pd.DataFrame(_extra)], ignore_index=True)
+        # 오염된 항목 제거 (코드==이름)
+        _names_df = _names_df[_names_df["종목명"].astype(str) != _names_df["종목코드"].astype(str)]
         _names_path = os.path.join(OUT_DIR, "krx_names_latest.csv")
         _names_df.to_csv(_names_path, index=False, encoding=UTF8)
         log(f"📋 종목명 매핑 저장: {len(_names_df)}건 → {_names_path}")
