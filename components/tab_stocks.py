@@ -135,18 +135,27 @@ def _price_bar_html(stop, entry, close, t1, t2=0):
     rng = p_max - p_min
     if rng <= 0: return ""
 
-    html = '<div style="position:relative;height:55px;background:linear-gradient(90deg,rgba(239,68,68,0.15) 0%,rgba(16,185,129,0.15) 100%);border-radius:10px;margin:8px 0 20px 0;">'
-    for label, price, color in points:
+    html = '<div style="position:relative;height:90px;background:linear-gradient(90deg,rgba(239,68,68,0.15) 0%,rgba(16,185,129,0.15) 100%);border-radius:10px;margin:8px 0 20px 0;">'
+    # 중앙 라인
+    html += '<div style="position:absolute;top:50%;left:2%;right:2%;height:2px;background:rgba(255,255,255,0.15);"></div>'
+    for i, (label, price, color) in enumerate(points):
         pct = max(3, min((price - p_min) / rng * 100, 97))
         is_cur = label == "현재"
         sz = "14px" if is_cur else "10px"
         bdr = "2px solid #FFF" if is_cur else "none"
         fw = "bold" if is_cur else "normal"
+        # 짝수 → 위, 홀수 → 아래 (겹침 방지)
+        if i % 2 == 0:
+            dot_top = "25%"
+            label_style = "bottom:100%;margin-bottom:4px;"
+        else:
+            dot_top = "55%"
+            label_style = "top:100%;margin-top:4px;"
         html += (
-            f'<div style="position:absolute;left:{pct}%;top:50%;transform:translate(-50%,-50%);z-index:{"10" if is_cur else "5"};text-align:center;">'
-            f'<div style="width:{sz};height:{sz};background:{color};border-radius:50%;border:{bdr};margin:0 auto;"></div>'
-            f'<div style="font-size:10px;color:{color};white-space:nowrap;margin-top:3px;font-weight:{fw};">{label}<br>{int(price):,}</div>'
-            f'</div>'
+            f'<div style="position:absolute;left:{pct}%;top:{dot_top};transform:translate(-50%,-50%);z-index:{"10" if is_cur else "5"};text-align:center;">'
+            f'<div style="width:{sz};height:{sz};background:{color};border-radius:50%;border:{bdr};margin:0 auto;position:relative;">'
+            f'<div style="position:absolute;left:50%;transform:translateX(-50%);{label_style}font-size:10px;color:{color};white-space:nowrap;font-weight:{fw};line-height:1.2;">{label}<br>{int(price):,}</div>'
+            f'</div></div>'
         )
     html += '</div>'
     return html

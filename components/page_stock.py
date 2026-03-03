@@ -183,22 +183,104 @@ async def render_stock_page(code: str, store):
     with ui.card().classes("w-full p-5 mt-4 bg-[#0d1b2a] border border-gray-700 rounded-2xl"):
         ui.label("📊 기술적 지표").classes("text-lg font-bold text-white mb-3")
 
+        # 1행: 모멘텀 지표
+        ui.label("모멘텀").classes("text-xs text-gray-500 uppercase tracking-wide mb-2")
         with ui.row().classes("w-full gap-3 flex-wrap"):
             # RSI
-            rsi_color = "#EF4444" if rsi > 70 else "#10B981" if rsi < 30 else "#3B82F6"
-            _metric_card("RSI (14)", f"{rsi:.1f}", "과매수" if rsi > 70 else "과매도" if rsi < 30 else "중립")
+            _metric_card("RSI (14)", f"{rsi:.1f}",
+                         "과매수" if rsi > 70 else "과매도" if rsi < 30 else "중립",
+                         rsi < 70)
 
-            # V-Power
-            vp_color = "#10B981" if v_power > 0.5 else "#EF4444" if v_power < -0.5 else "#6B7280"
-            _metric_card("V-Power", f"{v_power:.2f}", "매수세 우위" if v_power > 0 else "매도세 우위")
+            # MFI
+            mfi = safe_float(row.get("MFI14", 0))
+            _metric_card("MFI (14)", f"{mfi:.1f}",
+                         "과매수" if mfi > 80 else "과매도" if mfi < 20 else "중립",
+                         mfi < 80)
 
+            # MACD 기울기
+            macd_slope = safe_float(row.get("MACD_Slope_PCT", 0))
+            _metric_card("MACD 기울기", f"{macd_slope:+.3f}",
+                         "상승 모멘텀" if macd_slope > 0 else "하락 모멘텀",
+                         macd_slope > 0)
+
+            # RSI 상승 여부
+            rsi_rising = str(row.get("RSI_Rising", ""))
+            _metric_card("RSI 방향", "상승 ↑" if rsi_rising == "1" else "하락 ↓",
+                         "추세 강화" if rsi_rising == "1" else "추세 약화",
+                         rsi_rising == "1")
+
+        ui.separator().classes("my-3")
+
+        # 2행: 추세 지표
+        ui.label("추세").classes("text-xs text-gray-500 uppercase tracking-wide mb-2")
+        with ui.row().classes("w-full gap-3 flex-wrap"):
             # 주봉 추세
             weekly_trend = str(row.get("주봉추세", ""))
-            _metric_card("주봉 추세", weekly_trend or "—", str(row.get("주봉20선_상회", "")))
+            _metric_card("주봉 추세", weekly_trend or "—",
+                         f"20선 {row.get('주봉20선_상회', '—')}")
+
+            # HMA 추세
+            hma_trend = str(row.get("HMA_Trend", ""))
+            hma_on = str(row.get("HMA_On", ""))
+            _metric_card("HMA 추세", hma_trend or "—",
+                         f"HMA 위: {hma_on}" if hma_on else "")
+
+            # SuperTrend
+            st_dir = safe_float(row.get("SUPERTREND_DIR", 0))
+            st_val = safe_float(row.get("SUPERTREND_VAL", 0))
+            _metric_card("SuperTrend",
+                         "매수 ↑" if st_dir > 0 else "매도 ↓",
+                         f"기준: {int(st_val):,}" if st_val > 0 else "",
+                         st_dir > 0)
+
+            # MA20 위치
+            above_ma20 = str(row.get("Above_MA20", ""))
+            _metric_card("MA20 위치",
+                         "상회 ✓" if above_ma20 == "1" else "하회 ✗",
+                         "단기 추세 양호" if above_ma20 == "1" else "단기 추세 약화",
+                         above_ma20 == "1")
+
+        ui.separator().classes("my-3")
+
+        # 3행: 변동성 & 거래량
+        ui.label("변동성 · 거래량").classes("text-xs text-gray-500 uppercase tracking-wide mb-2")
+        with ui.row().classes("w-full gap-3 flex-wrap"):
+            # V-Power
+            _metric_card("V-Power", f"{v_power:.2f}",
+                         "매수세 우위" if v_power > 0 else "매도세 우위",
+                         v_power > 0)
+
+            # TTM 스퀴즈
+            ttm = str(row.get("TTM_SQUEEZE", ""))
+            ttm_cnt = safe_float(row.get("TTM_SQUEEZE_CNT", 0))
+            _metric_card("TTM 스퀴즈",
+                         f"{'압축 중' if ttm == '1' else '해제'} ({int(ttm_cnt)}봉)",
+                         "에너지 축적 중" if ttm == "1" else "방향 결정",
+                         ttm == "1")
+
+            # 볼린저밴드 폭
+            bb_bw = safe_float(row.get("BB_BW", 0))
+            bb_exp = str(row.get("BB_Expanding", ""))
+            _metric_card("BB 밴드폭", f"{bb_bw:.1f}%",
+                         "확장 중" if bb_exp == "1" else "수축 중",
+                         bb_exp == "1")
 
             # 이격도
             gap = safe_float(row.get("이격도", 0))
-            _metric_card("이격도", f"{gap:+.1f}%", "괴리 주의" if abs(gap) > 5 else "정상 범위")
+            _metric_card("이격도", f"{gap:+.1f}%",
+                         "괴리 주의" if abs(gap) > 5 else "정상 범위",
+                         abs(gap) <= 5)
+
+            # 거래강도
+            vol_str = safe_float(row.get("거래강도", 0))
+            _metric_card("거래강도", f"{vol_str:.2f}",
+                         "매수 우위" if vol_str > 1 else "매도 우위",
+                         vol_str > 1)
+
+            # 거래대금
+            vol_amt = safe_float(row.get("거래대금(억원)", 0))
+            _metric_card("거래대금", f"{vol_amt:,.0f}억",
+                         "활발" if vol_amt > 500 else "보통" if vol_amt > 100 else "한산")
 
     # ═══════════════════════════════════════
     #  캔들차트
@@ -227,6 +309,23 @@ async def render_stock_page(code: str, store):
             await load_chart()
 
         asyncio.create_task(_safe_chart())
+
+    # ═══════════════════════════════════════
+    #  AI 점수 구성
+    # ═══════════════════════════════════════
+    struct_score = safe_float(row.get("STRUCT_SCORE", 0))
+    timing_score = safe_float(row.get("TIMING_SCORE", 0))
+    ml_score = safe_float(row.get("ML_SCORE", 0))
+    trigger_score = safe_float(row.get("TRIGGER_SCORE", 0))
+
+    if any([struct_score, timing_score, ml_score]):
+        with ui.card().classes("w-full p-5 mt-4 bg-[#0d1b2a] border border-gray-700 rounded-2xl"):
+            ui.label("🧠 AI 점수 구성").classes("text-lg font-bold text-white mb-3")
+            with ui.row().classes("w-full gap-3 flex-wrap"):
+                _metric_card("구조 점수", f"{struct_score:.1f}", "차트 패턴 + 추세")
+                _metric_card("타이밍 점수", f"{timing_score:.0f}", "진입 시점 적절성")
+                _metric_card("ML 점수", f"{ml_score:.1f}", "LSTM + XGBoost")
+                _metric_card("트리거 점수", f"{trigger_score:.1f}", "매수 조건 충족도")
 
     # ═══════════════════════════════════════
     #  CTA — 가입 유도
