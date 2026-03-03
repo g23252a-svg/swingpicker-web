@@ -1,6 +1,6 @@
 {
   "trade_date": "20260303",
-  "generated_at": "2026-03-03 21:24:01",
+  "generated_at": "2026-03-03 22:19:47",
   "count": 3,
   "stocks": [
     {
@@ -8,13 +8,13 @@
       "code": "489790",
       "name": "한화비전",
       "route": "ARMED",
-      "score": 78.5,
+      "score": 78.4,
       "close": 75800,
       "entry": 75800,
       "stop": 72700,
       "target1": 85100,
       "target2": 86700,
-      "est_win_rate": 0.585,
+      "est_win_rate": 0.584,
       "rr": 3.0,
       "sector": "IT/전기전자",
       "market": "KOSPI",
@@ -25,16 +25,16 @@
       "code": "476060",
       "name": "온코닉테라퓨틱스",
       "route": "ARMED",
-      "score": 74.1,
+      "score": 74.0,
       "close": 20550,
       "entry": 20550,
       "stop": 19520,
       "target1": 23650,
       "target2": 24200,
-      "est_win_rate": 0.541,
+      "est_win_rate": 0.54,
       "rr": 3.0,
       "sector": "기타",
-      "market": "KOSPI",
+      "market": "KOSDAQ",
       "url": "https://ldyprotrader.com/stock/476060"
     },
     {
