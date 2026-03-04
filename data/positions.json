@@ -274,5 +274,26 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": []
+  },
+  {
+    "code": "440110",
+    "name": "파두",
+    "entry_ymd": "20260304",
+    "entry_px": 49400.0,
+    "qty": 0,
+    "stop_px": 42000.0,
+    "stop_px_initial": 42000.0,
+    "take_px1": 71600.0,
+    "take_px2": 75300.0,
+    "trailing_high": 49400.0,
+    "status": "OPEN",
+    "last_check_ymd": "20260304",
+    "last_close_px": 59000.0,
+    "unrealized_pnl_pct": 19.43,
+    "realized_pnl_pct": 0.0,
+    "close_ymd": "",
+    "close_px": 0.0,
+    "close_reason": "",
+    "alerted_events": []
   }
 ]
