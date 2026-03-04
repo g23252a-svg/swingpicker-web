@@ -85,6 +85,13 @@ class StopConfig:
 
     # 안전장치
     min_stop_pct_if_above_buy: float = 1.0
+
+    # [v3.0] ATR-adaptive dynamic stop
+    adaptive_stop: bool = True
+    adaptive_atr_mult: float = 2.0       # ATR% * this = base stop
+    adaptive_floor_pct: float = 3.0      # absolute minimum stop %
+    adaptive_ceil_pct: float = 15.0      # absolute maximum stop %
+    market_breadth: float = 50.0         # set by collector (0~100)
     use_tick_rounding: bool = True
 
 
@@ -403,9 +410,21 @@ def calc_stop_price(
         gap_up_pct = None
 
     if atr_val <= 0:
-        base_stop_pct = c.max_stop_pct
+        atr_pct = 3.0  # fallback
     else:
         atr_pct = (atr_val / buy) * 100.0
+
+    if c.adaptive_stop:
+        # [v3.0] ATR-adaptive: stop width scales with actual volatility
+        base_stop_pct = atr_pct * c.adaptive_atr_mult
+        # Market regime scaling: wider stops in weak markets
+        if c.market_breadth < 25:
+            base_stop_pct *= 1.4   # panic/crash: 40% wider
+        elif c.market_breadth < 40:
+            base_stop_pct *= 1.2   # weak: 20% wider
+        # Clamp to floor/ceiling
+        base_stop_pct = max(c.adaptive_floor_pct, min(base_stop_pct, c.adaptive_ceil_pct))
+    else:
         base_stop_pct = min(atr_pct * c.atr_mult, c.max_stop_pct)
 
     # ── (1) 시총별 최대 손실 제한 ──
@@ -437,7 +456,12 @@ def calc_stop_price(
         max_loss_pct = c.max_loss_small
 
     # ── (2) 최종 손절폭: ATR 기반 vs 시총 기반 중 타이트한 쪽 ──
-    stop_pct = min(base_stop_pct, max_loss_pct)
+    if c.adaptive_stop:
+        # [v3.0] adaptive: ATR already determines width, skip static cap
+        # but still use mcap-based max as a soft reference for R:R
+        stop_pct = base_stop_pct
+    else:
+        stop_pct = min(base_stop_pct, max_loss_pct)
     stop = buy * (1.0 - stop_pct / 100.0)
 
     # ── (3) 급등(갭업) 방어 ──
