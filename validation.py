@@ -146,7 +146,9 @@ class HardBlockRule:
 
 HARD_BLOCK_RULES = [
     HardBlockRule("연속급등",     "ret_5d_%",             "gt",  40.0,  "5일 수익률 40%+ 과열"),
-    HardBlockRule("거래대금부족", "거래대금(억)",          "lt",  3.0,   "거래대금 3억 미만"),
+    HardBlockRule("거래대금부족", "거래대금(억)",          "lt",  30.0,  "거래대금 30억 미만"),  # [v4.0] 3→30억 상향
+    # [v4.0] scoring-overhaul: 거래대금(억원) 컬럼도 체크 (단위 혼재 대응)
+    HardBlockRule("거래대금부족2", "거래대금(억원)",        "lt",  30.0,  "거래대금 30억 미만"),
     HardBlockRule("갭과대",       "gap_pct",              "gt",  15.0,  "갭 15%+ 비정상"),
     HardBlockRule("RSI극단",      "RSI14",                "gt",  85.0,  "RSI 85+ 극단과열"),
     HardBlockRule("데이터부족",   "_data_length",         "lt",  60,    "OHLCV 60일 미만"),

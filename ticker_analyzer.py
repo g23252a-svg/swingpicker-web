@@ -287,7 +287,7 @@ def calculate_indicators(
     trigger_str = "/".join(triggers) if triggers else ""
 
     # VWAP / SuperTrend
-    vwap_val = calc_vwap_fn(ohlcv.tail(5))
+    vwap_val = calc_vwap_fn(ohlcv.tail(60))  # [v4.0] 20일 윈도우 VWAP용 충분한 데이터
     vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
     st_series, st_dir = calc_supertrend_fn(h, l, c, 10, 3.0)
     st_val = float(st_series.iloc[-1])
