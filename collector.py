@@ -2516,6 +2516,15 @@ def main(
         mkt_temp = label_market_temp(breadth.get("ALL", np.nan))
         log(f"🌡 시장 온도: {mkt_temp} (Breadth: {breadth.get('ALL', 0)}%) -> 동적 가중치 적용")
 
+    # [v3.0] breadth -> stop config for ATR-adaptive stops
+    try:
+        from stop_logic import get_config as _get_stop_cfg
+        _scfg = _get_stop_cfg()
+        _scfg.market_breadth = breadth.get('ALL', 50.0)
+        log('Stop config: breadth=%.1f adaptive=%s' % (_scfg.market_breadth, _scfg.adaptive_stop))
+    except Exception as _e:
+        log('Stop config breadth set failed: ' + str(_e))
+
         # -----------------------------------------------------------
         # 3. [통합 엔진] AI 엔진 동기화 및 3원화 스코어링 빌드
         # -----------------------------------------------------------
