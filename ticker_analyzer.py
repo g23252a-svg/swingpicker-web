@@ -109,6 +109,13 @@ class Indicators:
     # 갭/진입 필터용
     gap_pct_val: float
 
+    # [Fix] 누락 컬럼 — scoring_engine / validation에서 기대하는 필드
+    data_length: int = 0                 # OHLCV 행 수 (_data_length)
+    consecutive_limit_up: int = 0        # 연속 상한가 횟수
+    mtf_weekly_trend: int = 0            # 주봉 추세 (+1/0/-1)
+    mtf_monthly_trend: int = 0           # 월봉 추세 (+1/0/-1)
+    mtf_data_sufficient: int = 0         # MTF 데이터 충분 여부 (1/0)
+
 
 # ═══════════════════════════════════════════════════
 #  1. 데이터 정제 + 기본 필터링
@@ -337,6 +344,44 @@ def calculate_indicators(
 
     gap_pct_val = float(ohlcv['gap_pct'].iloc[-1]) if 'gap_pct' in ohlcv.columns else 0.0
 
+    # --- [Fix 1] 누락 컬럼 계산 ---
+    # (a) 데이터 길이
+    data_length = len(ohlcv)
+
+    # (b) 연속 상한가 (종가 대비 +29% 이상을 상한가로 간주, 역순 카운트)
+    _consecutive_limit_up = 0
+    if len(c) >= 2:
+        _daily_ret = c.pct_change() * 100
+        for _r in _daily_ret.iloc[::-1]:
+            if _r >= 29.0:
+                _consecutive_limit_up += 1
+            else:
+                break
+    consecutive_limit_up = _consecutive_limit_up
+
+    # (c) MTF: 주봉/월봉 추세
+    mtf_weekly_trend = 0
+    mtf_monthly_trend = 0
+    mtf_data_sufficient = 0
+    try:
+        # 주봉
+        w_res = ohlcv.resample('W').last().dropna(subset=['종가'])
+        if len(w_res) >= 26:
+            w_ma = w_res['종가'].rolling(20).mean()
+            if len(w_ma.dropna()) >= 2:
+                mtf_weekly_trend = 1 if w_ma.iloc[-1] > w_ma.iloc[-2] else -1
+        # 월봉
+        m_res = ohlcv.resample('ME').last().dropna(subset=['종가'])
+        if len(m_res) >= 12:
+            m_ma = m_res['종가'].rolling(6).mean()
+            if len(m_ma.dropna()) >= 2:
+                mtf_monthly_trend = 1 if m_ma.iloc[-1] > m_ma.iloc[-2] else -1
+        # 데이터 충분성
+        if len(w_res) >= 26 and len(m_res) >= 12:
+            mtf_data_sufficient = 1
+    except Exception:
+        pass
+
     return Indicators(
         low_trend_pct=low_trend_pct, rsi=rsi, rsi_rising=rsi_rising,
         vol_quality=vol_quality, bb_bw_val=bb_bw_val, bb_expanding=bb_expanding,
@@ -357,6 +402,11 @@ def calculate_indicators(
         is_above_poc=is_above_poc, poc_gap=poc_gap,
         ma20=ma20, bb_upper=bb_upper, bb_lower=bb_lower, atr_series=atr_series,
         gap_pct_val=gap_pct_val,
+        data_length=data_length,
+        consecutive_limit_up=consecutive_limit_up,
+        mtf_weekly_trend=mtf_weekly_trend,
+        mtf_monthly_trend=mtf_monthly_trend,
+        mtf_data_sufficient=mtf_data_sufficient,
     )
 
 
@@ -536,6 +586,13 @@ def assemble_result(
         "외인순매수": plan.frg_net_val,
         "기관순매수": plan.inst_net_val,
         "메이저순매수": plan.major_net,
+        # [Fix 1] 누락 컬럼 — scoring_engine / validation 연결
+        "gap_pct": round(ind.gap_pct_val, 2),
+        "_data_length": ind.data_length,
+        "consecutive_limit_up": ind.consecutive_limit_up,
+        "MTF_WEEKLY_TREND": ind.mtf_weekly_trend,
+        "MTF_MONTHLY_TREND": ind.mtf_monthly_trend,
+        "MTF_DATA_SUFFICIENT": ind.mtf_data_sufficient,
     }
 
 

@@ -2766,11 +2766,26 @@ def main(
     # 반드시 재정렬 후 랭크를 부여해야 함 (하극상 방지)
     _sort_col = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
     df_out[_sort_col] = pd.to_numeric(df_out[_sort_col], errors="coerce").fillna(0)
-    
+
+    # [Fix v3] ACTION_PRIORITY를 정렬 전에 먼저 생성
+    _action_map = {
+        Route.ATTACK: 1, "ATTACK": 1,
+        Route.ARMED: 2, "ARMED": 2,
+        Route.WAIT: 3, "WAIT": 3,
+        Route.NEUTRAL: 4, "NEUTRAL": 4,
+        Route.OVERHEAT: 5, "OVERHEAT": 5,
+        Route.EXIT_WARNING: 6, "EXIT_WARNING": 6,
+        Route.CARRY: 7, "CARRY": 7,       # 관찰군 — 항상 최하단
+    }
+    df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_action_map).fillna(7).astype(int)
+
     # 정예군(상위 120) 내 재정렬 + 일반군 재정렬
+    # ACTION_PRIORITY를 1차 정렬 키로 사용
     _prime_mask = df_out.index < 120  # concat 순서에 의한 정예군 범위
-    df_prime_re = df_out[_prime_mask].sort_values(_sort_col, ascending=False)
-    df_normal_re = df_out[~_prime_mask].sort_values(_sort_col, ascending=False)
+    _sort_keys = ["ACTION_PRIORITY", _sort_col]
+    _sort_asc = [True, False]
+    df_prime_re = df_out[_prime_mask].sort_values(_sort_keys, ascending=_sort_asc)
+    df_normal_re = df_out[~_prime_mask].sort_values(_sort_keys, ascending=_sort_asc)
     df_out = pd.concat([df_prime_re, df_normal_re], ignore_index=True)
     
     # 정렬 완료 후 랭크 확정
@@ -2902,10 +2917,38 @@ def main(
     except Exception as e:
         log(f"⚠️ 캐리오버 처리 실패 (무시): {e}")
 
+    # -----------------------------------------------------------
+    # [Fix v4] 캘리브레이션/캐리 후 상태 플래그 재동기화 + 최종 재정렬
+    # -----------------------------------------------------------
+    # 캘리브레이션에서 ROUTE가 변경(ATTACK→WAIT)되었을 수 있으므로
+    # 모든 파생 플래그를 ROUTE 기준으로 재계산
+    df_out["IS_ACTIVE"]    = df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED])
+    df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == Route.ATTACK
+    df_out["IS_WATCH"]     = df_out["ROUTE"] == Route.WAIT
+    df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_action_map).fillna(7).astype(int)
+
+    # 최종 재정렬: 정예군/일반군 분리 유지 + CARRY는 항상 최하단
+    _final_sort_col = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
+    _final_keys = ["ACTION_PRIORITY", _final_sort_col]
+    _final_asc = [True, False]
+
+    _carry_mask = df_out["ACTION_PRIORITY"] == 7
+    _non_carry = df_out[~_carry_mask]
+    _carry_part = df_out[_carry_mask].sort_values(_final_keys, ascending=_final_asc)
+
+    # 정예군(상위 120) / 일반군 분리 재정렬
+    _nc_prime = _non_carry.head(min(120, len(_non_carry)))
+    _nc_normal = _non_carry.iloc[len(_nc_prime):]
+    _nc_prime = _nc_prime.sort_values(_final_keys, ascending=_final_asc)
+    _nc_normal = _nc_normal.sort_values(_final_keys, ascending=_final_asc)
+
+    df_out = pd.concat([_nc_prime, _nc_normal, _carry_part], ignore_index=True)
+    df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+
     must_cols = [
         "LDY_RANK", "종목코드", "종목명", "시장", "업종_대분류", "종가", "거래대금(억원)", "시가총액(억원)",
         "켈리_수량", "추천금액(만원)",
-        "상태", "ROUTE", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
+        "상태", "ROUTE", "ACTION_PRIORITY", "IS_ACTIVE", "IS_NOW_ENTRY", "IS_WATCH",
         "DISPLAY_SCORE", "FINAL_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", "NEWS_SCORE",
         "추천매수가", "손절가", "추천매도가1", "추천매도가2", "TRIGGER", "V_POWER", "거래강도", 
         "VWAP", "POC_GAP", "NEWS_REASON", "TTM_SQUEEZE_CNT", "Low_Trend_PCT", "RSI14", "이격도"

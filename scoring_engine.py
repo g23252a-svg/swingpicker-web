@@ -26,19 +26,21 @@ def _safe_col(df: pd.DataFrame, col: str, default=0.0) -> pd.Series:
     return pd.Series(default, index=df.index)
 
 
-def _vec_ebs(df: pd.DataFrame) -> pd.Series:
+def _vec_ebs(df: pd.DataFrame, config=None) -> pd.Series:
     """
     [Vectorized EBS] 5가지 펀더멘털 체크리스트 (0~10점)
     기존: df.apply(calculate_ebs_independent, axis=1)
     """
+    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     score = pd.Series(0, index=df.index, dtype='int64')
 
     score += (_safe_col(df, 'Low_Trend_PCT') > 0).astype(int) * 2
-    score += (_safe_col(df, 'Vol_Quality') >= 1.1).astype(int) * 2
+    score += (_safe_col(df, 'Vol_Quality') >= cfg.indicator.vol_quality_min).astype(int) * 2
     score += (_safe_col(df, 'MACD_Slope_PCT') > 0).astype(int) * 2
 
     rsi = _safe_col(df, 'RSI14', 50)
-    score += ((rsi >= 45) & (rsi <= 70)).astype(int) * 2
+    rsi_lo, rsi_hi = cfg.indicator.rsi_range
+    score += ((rsi >= rsi_lo) & (rsi <= rsi_hi)).astype(int) * 2
 
     ttm = _safe_col(df, 'TTM_SQUEEZE')
     bb_exp = _safe_col(df, 'BB_Expanding')
@@ -114,11 +116,12 @@ def _vec_structural_score(df: pd.DataFrame) -> pd.Series:
     return (base - penalty + mtf_adj).clip(0, 100).round(1)
 
 
-def _vec_timing_score(df: pd.DataFrame) -> pd.Series:
+def _vec_timing_score(df: pd.DataFrame, config=None) -> pd.Series:
     """
     [Vectorized TIMING_SCORE] 매물대 + 기술적 + 섹터 보정 (0~100)
     기존: df.apply(calculate_timing_score, axis=1)
     """
+    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     raw = _safe_col(df, 'RAW_TRIGGER_SCORE')
     # fallback: RAW_TRIGGER_SCORE가 없으면 TRIGGER_SCORE
     mask_zero = raw == 0
@@ -154,8 +157,8 @@ def _vec_timing_score(df: pd.DataFrame) -> pd.Series:
     rsi = _safe_col(df, 'RSI14', 50)
     gap_pct = _safe_col(df, 'gap_pct')
 
-    penalty += (rsi > 75).astype(float) * 20
-    penalty += (gap_pct > 5.0).astype(float) * 10
+    penalty += (rsi > cfg.indicator.rsi_penalty_threshold).astype(float) * 20
+    penalty += (gap_pct > cfg.indicator.gap_pct_penalty_threshold).astype(float) * 10
 
     # 섹터 모멘텀 보너스
     sector_rank = _safe_col(df, 'SECTOR_RANK', 99)
@@ -191,7 +194,7 @@ def calculate_structural_score(row) -> float:
 def calculate_timing_score(row) -> float:
     """[레거시 호환] 단일 row dict → TIMING_SCORE"""
     df = pd.DataFrame([row])
-    return float(_vec_timing_score(df).iloc[0])
+    return float(_vec_timing_score(df, config=None).iloc[0])
 
 
 # ═══════════════════════════════════════════════════
@@ -256,8 +259,9 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
 #  4. 상태 머신 (ROUTE) — 기존 호환 유지
 # ═══════════════════════════════════════════════════
 
-def determine_state(row, RouteState=None):
+def determine_state(row, RouteState=None, config=None):
     """[정적 임계치] 레거시 호환"""
+    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     if RouteState is None:
         class _RS:
             OVERHEAT = "OVERHEAT"
@@ -277,9 +281,11 @@ def determine_state(row, RouteState=None):
         vol_qual = float(row.get('Vol_Quality', 1.0))
         range_pos = float(row.get('Range_Pos', 0))
 
-        if rsi >= 75 or r5 >= 20.0: return RouteState.OVERHEAT
-        if (above_ma20 == 1 and slope > 0 and t_score >= 60
-                and vol_qual >= 1.3 and range_pos >= 0.8):
+        if rsi >= cfg.indicator.rsi_overheat or r5 >= 20.0: return RouteState.OVERHEAT
+        if (above_ma20 == 1 and slope > 0
+                and t_score >= cfg.indicator.timing_attack_threshold
+                and vol_qual >= cfg.indicator.vol_quality_attack
+                and range_pos >= 0.8):
             return RouteState.ATTACK
         if is_squeeze == 1 and above_ma20 == 1: return RouteState.ARMED
         if vol_qual >= 2.0: return RouteState.ARMED
@@ -393,11 +399,11 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
     x = df.copy()
 
     # ── [v6.0] 벡터화된 스코어링 ──
-    x["EBS"] = _vec_ebs(x)
+    x["EBS"] = _vec_ebs(x, config=cfg)
     x["PASS_EBS"] = (x["EBS"] >= cfg.ebs_pass_threshold).astype(int)
 
     x["STRUCT_SCORE"] = _vec_structural_score(x)
-    x["TIMING_SCORE"] = _vec_timing_score(x)
+    x["TIMING_SCORE"] = _vec_timing_score(x, config=cfg)
 
     if "ML_SCORE" not in x.columns:
         x["ML_SCORE"] = 0.0

@@ -72,6 +72,52 @@ FEATURE_COLS = [
 _model_lock = threading.Lock()
 
 
+# ====================== 메타 검증 ======================
+
+def _check_feature_version(meta_path: str) -> dict:
+    """
+    [Fix 4] 모델 메타파일에서 feature_cols를 읽어 현재 FEATURE_COLS와 비교.
+
+    Returns:
+        {
+            "match": bool,
+            "model_features": list,
+            "current_features": list,
+            "missing_in_model": list,
+            "extra_in_model": list,
+        }
+    """
+    result = {
+        "match": False,
+        "model_features": [],
+        "current_features": list(FEATURE_COLS),
+        "missing_in_model": [],
+        "extra_in_model": [],
+    }
+
+    if not os.path.exists(meta_path):
+        return result
+
+    try:
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+
+        model_features = meta.get("feature_cols", [])
+        result["model_features"] = model_features
+
+        current_set = set(FEATURE_COLS)
+        model_set = set(model_features)
+
+        result["missing_in_model"] = sorted(current_set - model_set)
+        result["extra_in_model"] = sorted(model_set - current_set)
+        result["match"] = (current_set == model_set)
+
+    except (json.JSONDecodeError, KeyError, IOError) as e:
+        print(f"⚠️ [ML] 메타 파일 파싱 실패 ({meta_path}): {e}")
+
+    return result
+
+
 # ====================== 캐시 유틸 ======================
 
 def get_feature_cache():
@@ -507,6 +553,14 @@ def load_model():
         if _loaded_lstm_model is not None and _loaded_scaler is not None:
             return
 
+        # [Fix 4] 메타 검증: 현재 FEATURE_COLS와 모델 feature_cols 일치 확인
+        _meta_check = _check_feature_version(META_PATH)
+        if _meta_check["model_features"] and not _meta_check["match"]:
+            print(f"⚠️ [ML] Feature mismatch! "
+                  f"missing={_meta_check['missing_in_model']}, "
+                  f"extra={_meta_check['extra_in_model']}")
+            print(f"   → 모델은 로드하되, 예측 정확도가 저하될 수 있음")
+
         candidates = [
             (MODEL_PATH, SCALER_PATH, XGB_MODEL_PATH, SEQ_LENGTH, True),
         ]
@@ -533,6 +587,16 @@ def load_model():
                 _loaded_use_rolling_zscore = use_rolling
                 print(f"✅ [ML] LSTM 로드: {model_path} "
                       f"(features={in_dim}, seq={seq_len}, rolling_z={use_rolling})")
+
+                # [Fix 4] 로드 성공 시 메타 정보 로그
+                if os.path.exists(META_PATH):
+                    try:
+                        with open(META_PATH, 'r') as f:
+                            _meta = json.load(f)
+                        print(f"   → meta: version={_meta.get('version', '?')}, "
+                              f"features={len(_meta.get('feature_cols', []))}")
+                    except Exception:
+                        pass
 
                 if xgb_path and XGB_OK and os.path.exists(xgb_path):
                     try:

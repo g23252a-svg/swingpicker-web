@@ -94,6 +94,13 @@ class IndicatorConfig:
     rsi_high: float = 65.0
     rsi_overheat: float = 75.0
 
+    # EBS / Timing / ROUTE 임계치 (scoring_engine.py 연동)
+    vol_quality_min: float = 1.1             # EBS Vol_Quality 기준
+    rsi_penalty_threshold: float = 75.0      # TIMING_SCORE RSI 패널티 기준
+    gap_pct_penalty_threshold: float = 5.0   # TIMING_SCORE 갭 패널티 기준
+    timing_attack_threshold: float = 60.0    # ROUTE ATTACK 판정 TIMING_SCORE 기준
+    vol_quality_attack: float = 1.3          # ROUTE ATTACK 판정 Vol_Quality 기준
+
     # 볼린저밴드 / TTM Squeeze
     bb_period: int = 20
     bb_std: float = 2.0
