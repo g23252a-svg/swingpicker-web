@@ -1082,6 +1082,8 @@ def build_mcap_map(ref_ymd: Optional[str] = None) -> Tuple[Dict[str, float], str
                 df["Code"] = df.index.astype(str).str.zfill(6)
                 mcap_map = dict(zip(df["Code"], df["시가총액"] / 1e8))
                 log(f"✅ [pykrx] 시총 맵 생성 성공: {len(mcap_map)}개 종목")
+                # [v19.2] 성공 시 캐시 저장
+                _save_mcap_cache(mcap_map, OUT_DIR)
                 return mcap_map, pykrx_use
         except Exception as e:
             log(f"⚠️ pykrx 시총 맵 실패: {e}")
@@ -1090,10 +1092,43 @@ def build_mcap_map(ref_ymd: Optional[str] = None) -> Tuple[Dict[str, float], str
     log("🔄 pykrx 시총 실패 → FDR Marcap 폴백 시도...")
     fdr_map = _build_mcap_map_fdr()
     if fdr_map:
+        _save_mcap_cache(fdr_map, OUT_DIR)
         return fdr_map, use
 
-    log(f"⚠️ 시총 맵 생성 실패 (pykrx+FDR 모두), 빈 맵 반환")
+    # ── 3순위: [v19.2] 로컬 캐시 폴백 ──
+    cached = _load_mcap_cache(OUT_DIR)
+    if cached:
+        log(f"📂 [폴백] 시총 캐시 로드 성공: {len(cached)}개 종목")
+        return cached, use
+
+    log(f"⚠️ 시총 맵 생성 실패 (pykrx+FDR+캐시 모두), 빈 맵 반환")
     return {}, use
+
+
+def _save_mcap_cache(mcap_map: Dict[str, float], out_dir: str) -> None:
+    """시총 맵을 JSON 캐시로 저장"""
+    import json
+    try:
+        ensure_dir(out_dir)
+        path = os.path.join(out_dir, "mcap_cache_latest.json")
+        with open(path, "w") as f:
+            json.dump(mcap_map, f)
+        log(f"📂 [캐시] 시총 맵 저장: {len(mcap_map)}개 → {path}")
+    except Exception as e:
+        log(f"⚠️ 시총 캐시 저장 실패: {e}")
+
+
+def _load_mcap_cache(out_dir: str) -> Dict[str, float]:
+    """최근 저장된 시총 캐시 로드"""
+    import json
+    try:
+        path = os.path.join(out_dir, "mcap_cache_latest.json")
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
 
 def get_mcap_eok_from_map(mcap_map: Dict[str, float], ticker: str) -> float:
     return float(mcap_map.get(str(ticker).zfill(6), 0))
@@ -2968,6 +3003,42 @@ def main(
         logger.debug(f"CONFIG_SNAPSHOT 생성 스킵: {e}")
     except Exception as e:
         logger.warning(f"⚠️ CONFIG_SNAPSHOT 예기치 않은 오류: {type(e).__name__}: {e}")
+
+    # -----------------------------------------------------------
+    # [v19.2] Run Health 진단 — Degraded Run 명시
+    # -----------------------------------------------------------
+    _health = None
+    try:
+        from run_health import check_run_health, save_health
+        _health = check_run_health(
+            df_out, mcap_map=mcap_map, bench_map=bench_map,
+            inv_maps=inv_maps, trade_ymd=trade_ymd,
+        )
+        df_out = _health.inject_columns(df_out)
+        save_health(_health, OUT_DIR, trade_ymd)
+        log(_health.summary())
+    except ImportError:
+        log("ℹ️ run_health 모듈 없음, 건강 진단 스킵")
+    except Exception as _rh_err:
+        log(f"⚠️ Run Health 진단 실패 (무시): {_rh_err}")
+
+    # -----------------------------------------------------------
+    # [v19.2] 축 비활성 시 "0점" → "N/A" 중립 처리
+    # -----------------------------------------------------------
+    # "데이터 없음 → 조용히 0점"이 아니라 "데이터 없음 → 평가축에서 제외"
+    if _health:
+        _reasons = set(_health.reasons)
+        if "NEWS_OFF" in _reasons:
+            df_out["NEWS_SCORE"] = np.nan     # 0 → NaN (평가 불가 표시)
+            df_out["NEWS_REASON"] = "DATA_UNAVAILABLE"
+        if "SECTOR_FAIL" in _reasons:
+            df_out["SECTOR_RANK"] = np.nan
+            df_out["SECTOR_RS"] = np.nan
+        if "BENCH_FAIL" in _reasons or "BENCH_NAN" in _reasons:
+            for _bc in ["rel_20d_%", "rel_60d_%", "rel_120d_%",
+                        "벤치_60d_KOSPI_%", "벤치_60d_KOSDAQ_%"]:
+                if _bc in df_out.columns:
+                    df_out[_bc] = np.nan
 
     ensure_dir(OUT_DIR)
     out_path_dated = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{tag}' if tag else ''}.csv")

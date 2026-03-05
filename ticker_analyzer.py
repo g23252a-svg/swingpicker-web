@@ -546,6 +546,23 @@ def build_ticker_plan(
 
     # RR 재계산 (새 TP1 기준)
     _risk = _plan.entry - _plan.stop
+
+    # ── [v19.2] TP 단조성 강제: TP1 < TP2 < TP3 ──
+    # 어떤 경로로 왔든, 최종 출력 직전에 단조 증가를 보장
+    if _final_tp2 <= _final_tp1:
+        _final_tp2 = max(_final_tp1 * 1.05, _final_tp1 + _risk * 0.5) if _risk > 0 else _final_tp1 * 1.05
+        _tp2_method = _tp2_method if _tp2_method else "MONO_GUARD"
+    if _tp3_val > 0 and _tp3_val <= _final_tp2:
+        _tp3_val = max(_final_tp2 * 1.05, _final_tp2 + _risk * 0.5) if _risk > 0 else _final_tp2 * 1.05
+        _tp3_method = _tp3_method if _tp3_method else "MONO_GUARD"
+
+    # 호가 단위 반올림
+    from stop_logic import ceil_to_tick as _ceil_tick
+    _final_tp1 = float(_ceil_tick(_final_tp1))
+    _final_tp2 = float(_ceil_tick(_final_tp2))
+    if _tp3_val > 0:
+        _tp3_val = float(_ceil_tick(_tp3_val))
+
     _new_rr = (_final_tp1 - _plan.entry) / _risk if _risk > 0 else _plan.rr_mult
 
     return TradePlanResult(

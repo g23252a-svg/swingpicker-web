@@ -3107,6 +3107,69 @@ if df_latest is not None and not df_latest.empty:
     if "TRIGGER_SCORE" not in df_latest.columns:
         # TRIGGER_SCORE가 없으면 0점으로 초기화
         df_latest["TRIGGER_SCORE"] = 0.0
+
+    # ── [v19.2] Run Health 배너 ──
+    _run_status = df_latest["RUN_STATUS"].iloc[0] if "RUN_STATUS" in df_latest.columns else None
+    if _run_status == "DEGRADED":
+        _degraded_reasons = str(df_latest["DEGRADED_REASONS"].iloc[0]) if "DEGRADED_REASONS" in df_latest.columns else ""
+        _reason_labels = {
+            "MCAP_EMPTY": "시가총액", "MCAP_ALL_ZERO": "시가총액",
+            "BENCH_FAIL": "벤치마크", "BENCH_NAN": "벤치마크",
+            "FLOW_ZERO": "수급(외인/기관)", "NEWS_OFF": "뉴스분석",
+            "SECTOR_FAIL": "섹터분석",
+        }
+        _missing = []
+        for _code, _label in _reason_labels.items():
+            if _code in _degraded_reasons and _label not in _missing:
+                _missing.append(_label)
+        _miss_str = ", ".join(_missing) if _missing else _degraded_reasons
+        st.warning(f"⚠️ **오늘 분석은 일부 데이터 없이 실행되었습니다** — 누락: {_miss_str}. 추천 정확도가 평소보다 낮을 수 있습니다.")
+    elif _run_status == "CRITICAL":
+        st.error("🔴 **오늘 분석에 심각한 데이터 오류가 감지되었습니다.** 추천을 참고만 하시고, 내일 결과를 확인해주세요.")
+
+    # ── [v19.2.3] Run Health 상세 리포트 열기 ──
+    if _run_status and _run_status != "OK":
+        import json as _json
+        from glob import glob as _glob
+        _health_files = sorted(_glob(os.path.join(DATA_DIR, "run_health_*.json")), reverse=True)
+        if _health_files:
+            try:
+                with open(_health_files[0], "r", encoding="utf-8") as _hf:
+                    _health_data = _json.load(_hf)
+                with st.expander("📋 실행 건강 리포트 (Run Health Detail)", expanded=False):
+                    _h_cols = st.columns(3)
+                    _status_emoji = {"OK": "🟢", "DEGRADED": "🟡", "CRITICAL": "🔴"}.get(_health_data.get("status", ""), "⚪")
+                    _h_cols[0].metric("런 상태", f"{_status_emoji} {_health_data.get('status', '?')}")
+                    _h_cols[1].metric("이슈 수", f"{len(_health_data.get('reasons', []))}건")
+                    _h_cols[2].metric("데이터 신선도", "✅" if _health_data.get("data_freshness_ok", True) else "❌ 지연")
+
+                    # 항목별 체크 결과
+                    _checks = _health_data.get("checks", {})
+                    if _checks:
+                        _check_md = "| 항목 | 상태 |\n|---|---|\n"
+                        _check_labels = {
+                            "MCAP": "시가총액", "MCAP_EMPTY": "시가총액", "MCAP_ALL_ZERO": "시가총액(전행0)",
+                            "BENCH": "벤치마크", "BENCH_FAIL": "벤치마크", "BENCH_NAN": "벤치마크(NaN)",
+                            "FLOW": "수급(외인/기관)", "FLOW_ZERO": "수급(전행0)",
+                            "NEWS": "뉴스분석", "NEWS_OFF": "뉴스(비활성)",
+                            "SECTOR": "섹터분석", "SECTOR_FAIL": "섹터(실패)",
+                            "TP_MONOTONIC": "목표가 단조성",
+                        }
+                        for _ck, _ok in _checks.items():
+                            _label = _check_labels.get(_ck, _ck)
+                            _mark = "✅ 정상" if _ok else "❌ 실패"
+                            _check_md += f"| {_label} | {_mark} |\n"
+                        st.markdown(_check_md)
+
+                    # JSON 다운로드
+                    st.download_button(
+                        "📥 run_health.json 다운로드",
+                        data=_json.dumps(_health_data, ensure_ascii=False, indent=2),
+                        file_name=os.path.basename(_health_files[0]),
+                        mime="application/json",
+                    )
+            except Exception:
+                pass
 user = get_user()
 user_role = (user or {}).get("role", "guest")
 

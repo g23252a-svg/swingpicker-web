@@ -160,10 +160,11 @@ def _vec_timing_score(df: pd.DataFrame, config=None) -> pd.Series:
     penalty += (rsi > cfg.indicator.rsi_penalty_threshold).astype(float) * 20
     penalty += (gap_pct > cfg.indicator.gap_pct_penalty_threshold).astype(float) * 10
 
-    # 섹터 모멘텀 보너스
+    # 섹터 모멘텀 보너스 (데이터 있을 때만)
     sector_rank = _safe_col(df, 'SECTOR_RANK', 99)
-    bonus += (sector_rank <= 3).astype(float) * 8
-    bonus += ((sector_rank > 3) & (sector_rank <= 6)).astype(float) * 4
+    _sector_available = sector_rank.notna() & (sector_rank < 99)
+    bonus += (_sector_available & (sector_rank <= 3)).astype(float) * 8
+    bonus += (_sector_available & (sector_rank > 3) & (sector_rank <= 6)).astype(float) * 4
 
     return (std_trigger + bonus - penalty).clip(0, 100).round(1)
 
@@ -394,9 +395,15 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
     """
     STRUCT + TIMING + AI → FINAL_SCORE 산출.
     ✅ [v6.0] apply(axis=1) 전면 제거 → 벡터 연산
+    ✅ [v19.2] 가중치 투명성: W_STRUCT/W_TIMING/W_AI 컬럼 저장
+    ✅ [v19.2] 축 유무 감지: SECTOR/ML 비활성 시 해당 보너스 자동 제외
     """
     cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     x = df.copy()
+
+    # ── [v19.2] 축 가용성 감지 ──
+    _has_sector = "SECTOR_RANK" in x.columns and x["SECTOR_RANK"].notna().any()
+    _has_ml = "ML_SCORE" in x.columns and (x["ML_SCORE"].fillna(0) != 0).any()
 
     # ── [v6.0] 벡터화된 스코어링 ──
     x["EBS"] = _vec_ebs(x, config=cfg)
@@ -411,6 +418,18 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
 
     w_s, w_t, w_a = _calc_ml_weight(x["ML_SCORE"], macro_risk, config=cfg)
 
+    # [v19.2] ML 비활성 시 AI 가중치를 STRUCT/TIMING에 재배분
+    if not _has_ml and w_a > 0:
+        _redistribute = w_a
+        w_a = 0.0
+        w_s += _redistribute * 0.5
+        w_t += _redistribute * 0.5
+        # 재정규화
+        _total = w_s + w_t
+        if _total > 0:
+            w_s /= _total
+            w_t /= _total
+
     x["FINAL_SCORE"] = (
         (x["STRUCT_SCORE"] * w_s)
         + (x["TIMING_SCORE"] * w_t)
@@ -418,4 +437,14 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
     ).round(1)
 
     x["DISPLAY_SCORE"] = x["FINAL_SCORE"]
+
+    # [v19.2] 가중치 투명성: 오늘 어떤 비율로 계산됐는지 CSV에 저장
+    x["W_STRUCT"] = round(w_s, 3)
+    x["W_TIMING"] = round(w_t, 3)
+    x["W_AI"] = round(w_a, 3)
+    x["SCORING_AXES"] = (
+        ("STRUCT+TIMING+AI" if _has_ml else "STRUCT+TIMING")
+        + ("+SECTOR" if _has_sector else "")
+    )
+
     return x
