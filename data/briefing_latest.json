@@ -1,6 +1,6 @@
 {
   "trade_date": "20260304",
-  "generated_at": "2026-03-05 07:14:25",
+  "generated_at": "2026-03-05 15:17:51",
   "count": 2,
   "stocks": [
     {
@@ -12,10 +12,10 @@
       "close": 4000,
       "entry": 4000,
       "stop": 3505,
-      "target1": 5490,
-      "target2": 5740,
+      "target1": 5190,
+      "target2": 5790,
       "est_win_rate": 0.666,
-      "rr": 3.0,
+      "rr": 2.4,
       "sector": "화학·소재",
       "market": "KOSDAQ",
       "url": "https://ldyprotrader.com/stock/417500"
@@ -29,10 +29,10 @@
       "close": 54500,
       "entry": 49400,
       "stop": 42000,
-      "target1": 71600,
-      "target2": 75300,
+      "target1": 63800,
+      "target2": 70000,
       "est_win_rate": 0.494,
-      "rr": 3.0,
+      "rr": 1.9,
       "sector": "반도체",
       "market": "KOSDAQ",
       "url": "https://ldyprotrader.com/stock/440110"
