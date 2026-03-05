@@ -432,6 +432,14 @@ class TradePlanResult:
     frg_net_val: int
     inst_net_val: int
     major_net: int
+    # [v4.0] 도달 확률 기반 목표가 메타
+    tp1_method: str = "RR_LEGACY"
+    tp1_prob: int = 50
+    tp2_method: str = "RR_LEGACY"
+    tp2_prob: int = 35
+    tp3: float = 0.0
+    tp3_method: str = ""
+    tp3_prob: int = 0
 
 
 def build_ticker_plan(
@@ -496,14 +504,61 @@ def build_ticker_plan(
             time_stop_extend_if_profit=_cfg.time_stop_extend_if_profit,
         )
 
+    # [v4.0] 도달 확률 기반 목표가 — 기존 RR 배수를 기술적 저항 레벨로 교체
+    _tp1_method = "RR_LEGACY"
+    _tp1_prob = 50
+    _tp2_method = "RR_LEGACY"
+    _tp2_prob = 35
+    _tp3_val = 0.0
+    _tp3_method = ""
+    _tp3_prob = 0
+    _final_tp1 = _plan.tp1
+    _final_tp2 = _plan.tp2 if _plan.tp2 else _plan.tp1 * 1.1
+
+    try:
+        from stop_logic import compute_realistic_targets as _crt
+        _rt = _crt(
+            ohlcv=ctx.ohlcv,
+            entry=_plan.entry,
+            stop=_plan.stop,
+            poc_p=ind.poc_p if ind.poc_p else 0.0,
+            res_ratio=ind.res_all,
+            res_ratio_near=ind.res_near,
+            use_tick=True,
+        )
+        if _rt.get("TP1", 0) > _plan.entry:
+            _final_tp1 = _rt["TP1"]
+            _tp1_method = _rt.get("TP1_METHOD", "RR_LEGACY")
+            _tp1_prob = _rt.get("TP1_PROB", 50)
+        if _rt.get("TP2", 0) > _final_tp1:  # TP2는 반드시 TP1보다 위
+            _final_tp2 = _rt["TP2"]
+            _tp2_method = _rt.get("TP2_METHOD", "RR_LEGACY")
+            _tp2_prob = _rt.get("TP2_PROB", 35)
+        elif _rt.get("TP2", 0) > _plan.entry and _rt.get("TP2", 0) <= _final_tp1:
+            # TP2가 TP1 이하면, 기존 RR 기반 tp2를 유지
+            pass
+        if _rt.get("TP3", 0) > _final_tp2:  # TP3는 반드시 TP2보다 위
+            _tp3_val = _rt["TP3"]
+            _tp3_method = _rt.get("TP3_METHOD", "")
+            _tp3_prob = _rt.get("TP3_PROB", 0)
+    except (ImportError, Exception) as _tp_err:
+        pass  # 폴백: 기존 RR 배수 유지
+
+    # RR 재계산 (새 TP1 기준)
+    _risk = _plan.entry - _plan.stop
+    _new_rr = (_final_tp1 - _plan.entry) / _risk if _risk > 0 else _plan.rr_mult
+
     return TradePlanResult(
-        buy=_plan.entry, stop=_plan.stop, target=_plan.tp1,
-        tp2=_plan.tp2 if _plan.tp2 else _plan.tp1 * 1.1,
+        buy=_plan.entry, stop=_plan.stop, target=_final_tp1,
+        tp2=_final_tp2,
         actual_stop_pct=_plan.stop_pct, max_loss_pct=_plan.max_loss_pct,
-        rr_mult=_plan.rr_mult, stop_reason=_plan.plan_reason,
+        rr_mult=round(_new_rr, 1), stop_reason=_plan.plan_reason,
         entry_action=_plan.entry_action, position_pct=_plan.position_pct,
         exec_rule_id=_plan.exec_rule_id,
         frg_net_val=frg_net_val, inst_net_val=inst_net_val, major_net=major_net,
+        tp1_method=_tp1_method, tp1_prob=_tp1_prob,
+        tp2_method=_tp2_method, tp2_prob=_tp2_prob,
+        tp3=_tp3_val, tp3_method=_tp3_method, tp3_prob=_tp3_prob,
     )
 
 
@@ -563,6 +618,11 @@ def assemble_result(
         "Range_Pos": round(ind.range_pos, 2),
         "추천매수가": plan.buy, "손절가": plan.stop,
         "추천매도가1": plan.target, "추천매도가2": plan.tp2,
+        "추천매도가3": plan.tp3 if plan.tp3 > 0 else None,
+        "TP1_METHOD": plan.tp1_method, "TP1_PROB": plan.tp1_prob,
+        "TP2_METHOD": plan.tp2_method, "TP2_PROB": plan.tp2_prob,
+        "TP3_METHOD": plan.tp3_method if plan.tp3 > 0 else "",
+        "TP3_PROB": plan.tp3_prob if plan.tp3 > 0 else 0,
         "EXEC_RULE_ID": plan.exec_rule_id,
         "STOP_PCT": round(plan.actual_stop_pct, 2),
         "MAX_LOSS_PCT": round(plan.max_loss_pct, 1),
