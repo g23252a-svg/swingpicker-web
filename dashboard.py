@@ -3693,17 +3693,17 @@ with tab2:
                 price_max = bar_prices[-1][1] * 1.02
                 price_range = price_max - price_min
                 if price_range > 0:
-                    bar_html = '<div style="position:relative; height:50px; background:linear-gradient(90deg, rgba(255,59,48,0.15) 0%, rgba(255,59,48,0.05) 30%, rgba(0,230,118,0.05) 70%, rgba(0,230,118,0.15) 100%); border-radius:8px; margin:8px 0 16px 0;">'
+                    bar_html = '<div style="position:relative; height:80px; background:linear-gradient(90deg, rgba(255,59,48,0.15) 0%, rgba(255,59,48,0.05) 30%, rgba(0,230,118,0.05) 70%, rgba(0,230,118,0.15) 100%); border-radius:8px; margin:8px 0 40px 0; overflow:visible;">'
                     for label, price, color in bar_prices:
                         pct = (price - price_min) / price_range * 100
-                        pct = max(2, min(pct, 98))
+                        pct = max(3, min(pct, 97))
                         is_current = label == "현재가"
                         dot_size = "14px" if is_current else "10px"
                         z_idx = "10" if is_current else "5"
                         border = "2px solid #FFF" if is_current else "none"
-                        bar_html += f'''<div style="position:absolute; left:{pct}%; top:50%; transform:translate(-50%,-50%); z-index:{z_idx};">
+                        bar_html += f'''<div style="position:absolute; left:{pct}%; top:35%; transform:translate(-50%,-50%); z-index:{z_idx};">
                             <div style="width:{dot_size}; height:{dot_size}; background:{color}; border-radius:50%; border:{border}; margin:0 auto;"></div>
-                            <div style="font-size:10px; color:{color}; text-align:center; white-space:nowrap; margin-top:2px; font-weight:{"bold" if is_current else "normal"};">{label}<br>{int(price):,}</div>
+                            <div style="font-size:10px; color:{color}; text-align:center; white-space:nowrap; margin-top:4px; font-weight:{"bold" if is_current else "normal"}; line-height:1.3;">{label}<br>{int(price):,}</div>
                         </div>'''
                     bar_html += '</div>'
                     st.markdown(bar_html, unsafe_allow_html=True)
