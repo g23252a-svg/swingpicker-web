@@ -1,0 +1,20 @@
+{
+  "status": "DEGRADED",
+  "reasons": [
+    "MCAP_EMPTY",
+    "BENCH_FAIL",
+    "FLOW_ZERO",
+    "NEWS_OFF",
+    "SECTOR_FAIL"
+  ],
+  "warnings": [],
+  "data_freshness_ok": true,
+  "checks": {
+    "MCAP_EMPTY": false,
+    "BENCH_FAIL": false,
+    "FLOW_ZERO": false,
+    "NEWS_OFF": false,
+    "SECTOR_FAIL": false,
+    "TP_MONOTONIC": true
+  }
+}

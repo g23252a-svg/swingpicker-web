@@ -1,6 +1,6 @@
 {
   "trade_date": "20260305",
-  "generated_at": "2026-03-05 19:01:21",
+  "generated_at": "2026-03-05 22:55:31",
   "count": 2,
   "stocks": [
     {
@@ -25,13 +25,13 @@
       "code": "388790",
       "name": "라이콤",
       "route": "ARMED",
-      "score": 68.8,
+      "score": 69.0,
       "close": 3260,
       "entry": 3130,
       "stop": 2660,
       "target1": 3645,
       "target2": 4270,
-      "est_win_rate": 0.488,
+      "est_win_rate": 0.49,
       "rr": 1.1,
       "sector": "IT/전기전자",
       "market": "KOSDAQ",
