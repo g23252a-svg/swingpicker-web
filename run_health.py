@@ -59,13 +59,29 @@ class RunHealth:
 
     @property
     def max_allowed_route(self) -> str:
-        """[v20.0] 신뢰도 기반 최대 허용 ROUTE"""
+        """[v20.0.2] RUN_STATUS + 신뢰도 기반 최대 허용 ROUTE
+
+        핵심 규칙:
+          - CRITICAL → 무조건 WAIT
+          - DEGRADED → 최대 ARMED (ATTACK 금지)
+          - OK + 신뢰도 70+ → ATTACK 허용
+          - OK + 신뢰도 40~69 → ARMED까지
+          - OK + 신뢰도 <40 → WAIT만
+        """
+        if self.status == "CRITICAL":
+            return "WAIT"
+        if self.status == "DEGRADED":
+            # 결손 축 3개 이상이면 WAIT까지만
+            if len(self.reasons) >= 3 and self.confidence_score < 50:
+                return "WAIT"
+            return "ARMED"       # DEGRADED면 ATTACK 절대 금지
+        # OK 상태
         if self.confidence_score >= 70:
-            return "ATTACK"     # 풀 신뢰 → 제한 없음
+            return "ATTACK"
         elif self.confidence_score >= 40:
-            return "ARMED"      # 중간 → ATTACK 금지, ARMED까지만
+            return "ARMED"
         else:
-            return "WAIT"       # 낮음 → ARMED도 금지, WAIT까지만
+            return "WAIT"
 
     def inject_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """CSV에 건강 상태 컬럼 주입"""

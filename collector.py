@@ -3188,8 +3188,9 @@ def main(
                 _demote_count += _armed_mask.sum()
 
         if _demote_count > 0:
-            log(f"🛡️ [v20.0] 신뢰도 {_health.confidence_score:.0f}/100 → "
-                f"최대허용 {_max_route}, {_demote_count}건 격하")
+            _cap_reason = f"RUN_STATUS={_health.status}" if _health.status != "OK" else f"confidence={_health.confidence_score:.0f}"
+            log(f"🛡️ [v20.0.2] 행동 상한 제어: {_cap_reason} → "
+                f"최대허용 {_max_route}, {_demote_count}건 route_capped_by_run_status")
             # 격하 후 플래그 재동기화
             df_out["IS_ACTIVE"] = df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED])
             df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == Route.ATTACK
