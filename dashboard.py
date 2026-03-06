@@ -568,6 +568,75 @@ st.set_page_config(
 )
 
 # =====================================================================
+# 📱 [v20.0.1] 모바일 UX 개선 — 세로 고정 + 탭 전환 유지
+# =====================================================================
+st.markdown("""
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+</head>
+<style>
+/* 📱 화면 세로 고정 (가로 전환 방지) */
+@media screen and (orientation: landscape) and (max-width: 1024px) {
+    html {
+        transform: rotate(-90deg);
+        transform-origin: left top;
+        width: 100vh;
+        height: 100vw;
+        overflow-x: hidden;
+        position: absolute;
+        top: 100%;
+        left: 0;
+    }
+}
+</style>
+<script>
+// 📱 탭 전환 시 Streamlit WebSocket 유지 (튕김 방지)
+(function() {
+    // 1) visibilitychange로 탭 복귀 시 재연결 시도
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+            // 탭 복귀 시 — Streamlit이 이미 끊겼으면 부드럽게 복구
+            try {
+                const ws = window._stWebSocket || 
+                    (window.parent && window.parent._stWebSocket);
+                if (ws && ws.readyState > 1) {
+                    // WebSocket이 닫힌 상태면 페이지 새로고침 (가장 안정적)
+                    // 단, 3초 대기 후 — 즉시 리로드하면 깜빡임
+                    setTimeout(function() {
+                        if (document.querySelector('[data-testid="stException"]') ||
+                            document.querySelector('.stError')) {
+                            window.location.reload();
+                        }
+                    }, 2000);
+                }
+            } catch(e) {}
+        }
+    });
+
+    // 2) 백그라운드에서 WebSocket keep-alive 핑
+    setInterval(function() {
+        if (document.hidden) {
+            try {
+                // Streamlit의 내부 WebSocket에 빈 메시지 전송 시도
+                const frames = document.querySelectorAll('iframe');
+                frames.forEach(function(f) {
+                    try { f.contentWindow.postMessage('ping', '*'); } catch(e) {}
+                });
+            } catch(e) {}
+        }
+    }, 15000);  // 15초마다
+
+    // 3) Screen Orientation API로 세로 고정 시도
+    try {
+        if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('portrait').catch(function(){});
+        }
+    } catch(e) {}
+})();
+</script>
+""", unsafe_allow_html=True)
+
+# =====================================================================
 # 🎨 [v18.0] Global UI Theme — Premium Dark Finance Dashboard
 # =====================================================================
 st.markdown("""
@@ -3188,6 +3257,64 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
     ]
 )
 
+# ── [v20.0.1] 탭/종목 상태 자동 복원 (모바일 탭 전환 대응) ──
+st.markdown("""
+<script>
+(function() {
+    // ── 탭 클릭 시 localStorage에 저장 ──
+    function setupTabTracking() {
+        const tabs = document.querySelectorAll('[data-baseweb="tab"]');
+        if (!tabs.length) { setTimeout(setupTabTracking, 500); return; }
+        
+        tabs.forEach(function(tab, idx) {
+            tab.addEventListener('click', function() {
+                localStorage.setItem('ldy_active_tab', idx);
+            });
+        });
+        
+        // ── 페이지 로드 시 저장된 탭으로 복원 ──
+        const saved = localStorage.getItem('ldy_active_tab');
+        if (saved !== null) {
+            const tabIdx = parseInt(saved);
+            if (tabIdx > 0 && tabIdx < tabs.length) {
+                // 약간의 딜레이 후 클릭 (Streamlit 렌더링 완료 대기)
+                setTimeout(function() { tabs[tabIdx].click(); }, 300);
+            }
+        }
+    }
+    
+    // ── 종목 선택 시 localStorage에 저장 ──
+    function setupStockTracking() {
+        const observer = new MutationObserver(function() {
+            const selectbox = document.querySelector('[data-testid="stSelectbox"]');
+            if (selectbox) {
+                const span = selectbox.querySelector('[data-baseweb="select"] span');
+                if (span && span.textContent) {
+                    const current = span.textContent.trim();
+                    const prev = localStorage.getItem('ldy_selected_stock');
+                    if (current && current !== prev && current !== '분석할 종목을 선택하세요') {
+                        localStorage.setItem('ldy_selected_stock', current);
+                    }
+                }
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
+    
+    // ── 초기화 ──
+    if (document.readyState === 'complete') {
+        setupTabTracking();
+        setupStockTracking();
+    } else {
+        window.addEventListener('load', function() {
+            setupTabTracking();
+            setupStockTracking();
+        });
+    }
+})();
+</script>
+""", unsafe_allow_html=True)
+
 with tab1:
     # 🔥 v6.8 Reality Check: 지난 추천 성과 요약
     rc = reality_check_top(top20, DATA_TS, n=5)
@@ -3675,7 +3802,18 @@ with tab2:
     if not target_list:
         st.info("💡 분석할 종목이 없습니다.")
     else:
-        selected_name = st.selectbox("분석할 종목을 선택하세요", target_list, key="dd_select_final")
+        # [v20.0.1] 종목 선택 복원 — 탭 전환 후 돌아와도 유지
+        _saved_stock = st.query_params.get("stock", "")
+        _default_idx = 0
+        if _saved_stock and _saved_stock in target_list:
+            _default_idx = target_list.index(_saved_stock)
+
+        selected_name = st.selectbox("분석할 종목을 선택하세요", target_list,
+                                      index=_default_idx, key="dd_select_final")
+
+        # 선택 변경 시 URL에 저장 (새로고침 후에도 복원)
+        if selected_name and selected_name != _saved_stock:
+            st.query_params["stock"] = selected_name
         sel_row = None
         if not active_df.empty:
             found = active_df[active_df["종목명"] == selected_name]
