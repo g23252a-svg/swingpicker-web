@@ -105,12 +105,19 @@ def _llm_call_with_retry(
                        f"wait={wait:.1f}s, elapsed={elapsed:.1f}s/{total_timeout}s")
             time.sleep(wait)
 
-# LLM import (optional)
+# LLM import (optional) — 신규/구 SDK 자동 감지
+_USE_NEW_GENAI = False
 try:
-    import google.generativeai as genai
+    from google import genai as _genai_client
+    _USE_NEW_GENAI = True
     LLM_AVAILABLE = True
 except ImportError:
-    LLM_AVAILABLE = False
+    _genai_client = None
+    try:
+        import google.generativeai as genai
+        LLM_AVAILABLE = True
+    except ImportError:
+        LLM_AVAILABLE = False
 
 
 def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
@@ -155,9 +162,6 @@ def analyze_sentiment_llm(
         if not api_key:
             return (0.0, "")
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-
         prompt = f"""다음은 '{stock_name}'에 대한 최신 뉴스 헤드라인입니다.
 전체적인 투자 심리를 -1.0(매우 부정) ~ +1.0(매우 긍정) 사이 점수로 평가하고,
 한 줄 요약을 해주세요.
@@ -169,7 +173,19 @@ def analyze_sentiment_llm(
 SCORE: [숫자]
 SUMMARY: [한줄요약]"""
 
-        response = _llm_call_with_retry(lambda: model.generate_content(prompt))
+        # 신규/구 SDK 분기 호출
+        if _USE_NEW_GENAI:
+            client = _genai_client.Client(api_key=api_key)
+            response = _llm_call_with_retry(
+                lambda: client.models.generate_content(
+                    model="gemini-2.0-flash", contents=prompt
+                )
+            )
+        else:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            response = _llm_call_with_retry(lambda: model.generate_content(prompt))
+
         text = response.text.strip()
 
         score = 0.0
@@ -204,9 +220,6 @@ def generate_ai_comment(
         if not api_key:
             return ""
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-
         # 핵심 지표 요약
         rsi = row.get("RSI14", "N/A")
         timing = row.get("TIMING_SCORE", "N/A")
@@ -225,7 +238,17 @@ def generate_ai_comment(
 
 2~3문장으로 핵심만 간결하게. 매수/매도 추천이 아닌 객관적 분석만."""
 
-        response = _llm_call_with_retry(lambda: model.generate_content(prompt))
+        if _USE_NEW_GENAI:
+            client = _genai_client.Client(api_key=api_key)
+            response = _llm_call_with_retry(
+                lambda: client.models.generate_content(
+                    model="gemini-2.0-flash", contents=prompt
+                )
+            )
+        else:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            response = _llm_call_with_retry(lambda: model.generate_content(prompt))
         return response.text.strip()[:300]
     except Exception as e:
         logger.debug(f"AI 코멘트 생성 실패: {e}")

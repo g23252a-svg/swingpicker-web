@@ -121,15 +121,27 @@ load_secrets_to_env()
 # LLM API 키 설정 (환경변수 또는 직접 입력)
 # Google Gemini (무료 티어 가능) 또는 OpenAI 사용 권장
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") 
+LLM_AVAILABLE = False
+_USE_NEW_GENAI = False
+
 try:
-    import google.generativeai as genai
+    # 1순위: 신규 SDK (google-genai, 2025~)
+    from google import genai as _genai_client
     if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
+        _USE_NEW_GENAI = True
         LLM_AVAILABLE = True
-    else:
-        LLM_AVAILABLE = False
 except ImportError:
-    LLM_AVAILABLE = False
+    _genai_client = None
+
+if not LLM_AVAILABLE:
+    try:
+        # 2순위: 구 SDK (google-generativeai, EOL)
+        import google.generativeai as genai
+        if GEMINI_API_KEY:
+            genai.configure(api_key=GEMINI_API_KEY)
+            LLM_AVAILABLE = True
+    except ImportError:
+        LLM_AVAILABLE = False
 
 # [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
