@@ -15,5 +15,5 @@
     "TP_MONOTONIC": true
   },
   "confidence_score": 75.0,
-  "max_allowed_route": "ATTACK"
+  "max_allowed_route": "ARMED"
 }

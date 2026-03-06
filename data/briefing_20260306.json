@@ -1,6 +1,6 @@
 {
   "trade_date": "20260306",
-  "generated_at": "2026-03-06 18:57:00",
+  "generated_at": "2026-03-06 19:07:05",
   "count": 3,
   "stocks": [
     {
@@ -25,13 +25,13 @@
       "code": "489790",
       "name": "한화비전",
       "route": "ARMED",
-      "score": 78.1,
+      "score": 78.0,
       "close": 85800,
       "entry": 72600,
       "stop": 61700,
       "target1": 94400,
       "target2": 103300,
-      "est_win_rate": 0.581,
+      "est_win_rate": 0.58,
       "rr": 2.0,
       "sector": "IT/전기전자",
       "market": "KOSPI",
