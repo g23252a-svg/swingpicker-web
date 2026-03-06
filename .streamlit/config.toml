@@ -4,7 +4,10 @@ port = 8501
 enableCORS = false
 enableXsrfProtection = false
 # fileWatcherType은 배포 환경(Streamlit Cloud)에서는 'none'이 성능상 더 유리합니다.
-fileWatcherType = "none" 
+fileWatcherType = "none"
+# [v20.0.1] 모바일 탭 전환 시 튕김 방지
+enableWebsocketCompression = false
+maxMessageSize = 200
 
 [browser]
 gatherUsageStats = false
