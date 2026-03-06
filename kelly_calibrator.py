@@ -427,6 +427,52 @@ def calibrated_win_rate(
     return result
 
 
+# ── [v20.0] 캘리브레이션 성숙도 ──
+
+MIN_EMPIRICAL_TRADES = 20   # 최소 20건 이상이어야 EMPIRICAL
+
+def get_calibration_mode(out_dir: str, asof_ymd: Optional[str] = None) -> dict:
+    """
+    캘리브레이션 테이블 상태 진단
+
+    Returns:
+        {
+            "mode": "NO_DATA" | "FALLBACK" | "LIGHT" | "MATURE",
+            "n_trades": int,
+            "n_bins": int,
+            "table_date": str,
+        }
+    """
+    result = {"mode": "NO_DATA", "n_trades": 0, "n_bins": 0, "table_date": ""}
+
+    # per_trade_log 건수 확인
+    ptl_path = os.path.join(out_dir, "per_trade_log.csv")
+    if os.path.exists(ptl_path):
+        try:
+            ptl = pd.read_csv(ptl_path)
+            result["n_trades"] = len(ptl)
+        except Exception:
+            pass
+
+    # 캘리브레이션 테이블 확인
+    cal = load_calibration_table(out_dir, asof_ymd=asof_ymd)
+    if not cal.empty:
+        result["n_bins"] = len(cal)
+
+    # 모드 판정
+    n = result["n_trades"]
+    if n == 0:
+        result["mode"] = "NO_DATA"
+    elif n < MIN_EMPIRICAL_TRADES:
+        result["mode"] = "FALLBACK"    # 데이터는 있지만 표본 부족
+    elif n < 100:
+        result["mode"] = "LIGHT"       # 참고 가능하나 신뢰구간 넓음
+    else:
+        result["mode"] = "MATURE"      # 통계적으로 유의미
+
+    return result
+
+
 def _fallback_linear(score, base: float = 0.45, base_score: float = 60.0):
     """[v2.5 #3] 유니버설 fallback — base 파라미터 실제 반영
 

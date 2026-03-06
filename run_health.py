@@ -31,6 +31,16 @@ class RunHealth:
     warnings: List[str] = field(default_factory=list)
     data_freshness_ok: bool = True
     checks: Dict[str, bool] = field(default_factory=dict)
+    confidence_score: float = 100.0           # [v20.0] 0~100 신뢰도
+
+    # 축별 신뢰 가중치 (결손 시 감점)
+    _AXIS_WEIGHTS = {
+        "MCAP_EMPTY": 20, "MCAP_ALL_ZERO": 20,
+        "BENCH_FAIL": 15, "BENCH_NAN": 15,
+        "FLOW_ZERO": 15,
+        "NEWS_OFF": 10,
+        "SECTOR_FAIL": 10,
+    }
 
     def add_issue(self, code: str, severity: str = "DEGRADED"):
         """이슈 등록. severity = DEGRADED | CRITICAL"""
@@ -40,16 +50,30 @@ class RunHealth:
         elif self.status != "CRITICAL":
             self.status = "DEGRADED"
         self.checks[code] = False
+        # [v20.0] 신뢰도 감점
+        self.confidence_score = max(0, self.confidence_score - self._AXIS_WEIGHTS.get(code, 5))
 
     def add_ok(self, code: str):
         """정상 확인 등록"""
         self.checks[code] = True
+
+    @property
+    def max_allowed_route(self) -> str:
+        """[v20.0] 신뢰도 기반 최대 허용 ROUTE"""
+        if self.confidence_score >= 70:
+            return "ATTACK"     # 풀 신뢰 → 제한 없음
+        elif self.confidence_score >= 40:
+            return "ARMED"      # 중간 → ATTACK 금지, ARMED까지만
+        else:
+            return "WAIT"       # 낮음 → ARMED도 금지, WAIT까지만
 
     def inject_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """CSV에 건강 상태 컬럼 주입"""
         df["RUN_STATUS"] = self.status
         df["DEGRADED_REASONS"] = "|".join(self.reasons) if self.reasons else ""
         df["DATA_FRESHNESS_OK"] = self.data_freshness_ok
+        df["CONFIDENCE_SCORE"] = self.confidence_score
+        df["MAX_ALLOWED_ROUTE"] = self.max_allowed_route
 
         # 데이터 유무 플래그
         df["HAS_NEWS"] = df.get("NEWS_SCORE", pd.Series(0, index=df.index)).fillna(0).astype(float).ne(0).any()
@@ -64,7 +88,7 @@ class RunHealth:
     def summary(self) -> str:
         """사람이 읽기 좋은 요약"""
         emoji = {"OK": "🟢", "DEGRADED": "🟡", "CRITICAL": "🔴"}.get(self.status, "⚪")
-        lines = [f"{emoji} Run Status: {self.status}"]
+        lines = [f"{emoji} Run Status: {self.status} (신뢰도: {self.confidence_score:.0f}/100, 최대허용: {self.max_allowed_route})"]
         if self.reasons:
             lines.append(f"   Issues: {', '.join(self.reasons)}")
         if self.warnings:
@@ -186,6 +210,8 @@ def save_health(health: RunHealth, out_dir: str, trade_ymd: str) -> str:
         "warnings": health.warnings,
         "data_freshness_ok": health.data_freshness_ok,
         "checks": health.checks,
+        "confidence_score": health.confidence_score,
+        "max_allowed_route": health.max_allowed_route,
     }
     try:
         with open(path, "w", encoding="utf-8") as f:

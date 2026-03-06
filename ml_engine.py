@@ -53,6 +53,9 @@ FALLBACK_PATHS = [
     ("data/trading_model_v15_6_master.pth", "data/trading_scaler_v15_6_master.pkl", None),
 ]
 
+# [v20.0.1] data/ 디렉토리 자동 생성 — 최초 배포/CI에서 FileNotFoundError 방지
+os.makedirs("data", exist_ok=True)
+
 SEQ_LENGTH  = 40
 TARGET_TIERS = [3.0, 5.0, 7.0]
 TARGET_RET   = 3.0
@@ -136,6 +139,7 @@ def get_feature_cache():
 
 
 def save_feature_cache(cache_data):
+    os.makedirs(os.path.dirname(FEATURE_CACHE_PATH) or "data", exist_ok=True)
     with open(FEATURE_CACHE_PATH, 'wb') as f:
         pickle.dump(cache_data, f)
 

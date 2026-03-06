@@ -1119,15 +1119,67 @@ def _save_mcap_cache(mcap_map: Dict[str, float], out_dir: str) -> None:
 
 
 def _load_mcap_cache(out_dir: str) -> Dict[str, float]:
-    """최근 저장된 시총 캐시 로드"""
+    """최근 저장된 시총 캐시 로드 + 다단계 폴백"""
     import json
+    # 1순위: 전용 캐시
     try:
         path = os.path.join(out_dir, "mcap_cache_latest.json")
         if os.path.exists(path):
             with open(path, "r") as f:
-                return json.load(f)
+                data = json.load(f)
+            if data:
+                return data
     except Exception:
         pass
+
+    # 2순위: 이전 recommend CSV에서 시총 컬럼 복구
+    try:
+        rec_path = os.path.join(out_dir, "recommend_latest.csv")
+        if os.path.exists(rec_path):
+            _df = pd.read_csv(rec_path, dtype={"종목코드": str}, usecols=["종목코드", "시가총액(억원)"])
+            _df["종목코드"] = _df["종목코드"].astype(str).str.zfill(6)
+            _df["시가총액(억원)"] = pd.to_numeric(_df["시가총액(억원)"], errors="coerce").fillna(0)
+            _valid = _df[_df["시가총액(억원)"] > 0]
+            if not _valid.empty:
+                mcap = dict(zip(_valid["종목코드"], _valid["시가총액(억원)"]))
+                log(f"📂 [폴백] recommend CSV에서 시총 복구: {len(mcap)}개")
+                return mcap
+    except Exception:
+        pass
+
+    # 3순위: [v20.0] 거래대금 기반 시총 추정 (API 전면 차단 시 최후 수단)
+    # 거래대금은 OHLCV 캐시에서 항상 사용 가능
+    try:
+        rec_path = os.path.join(out_dir, "recommend_latest.csv")
+        if os.path.exists(rec_path):
+            _df = pd.read_csv(rec_path, dtype={"종목코드": str})
+            _df["종목코드"] = _df["종목코드"].astype(str).str.zfill(6)
+            tv_col = "거래대금(억원)" if "거래대금(억원)" in _df.columns else "거래대금(억)"
+            if tv_col in _df.columns:
+                _df["_tv"] = pd.to_numeric(_df[tv_col], errors="coerce").fillna(0)
+                mcap = {}
+                for _, row in _df.iterrows():
+                    tv = row["_tv"]
+                    # 거래대금 → 시총 추정 (경험적 매핑)
+                    if tv >= 1000:
+                        est = 100000  # 대형주
+                    elif tv >= 500:
+                        est = 60000
+                    elif tv >= 200:
+                        est = 30000
+                    elif tv >= 50:
+                        est = 10000
+                    elif tv >= 15:
+                        est = 5000
+                    else:
+                        est = 2000   # 소형주
+                    mcap[row["종목코드"]] = est
+                if mcap:
+                    log(f"📂 [폴백] 거래대금 기반 시총 추정: {len(mcap)}개 (정확도 낮음, API 복구 필요)")
+                    return mcap
+    except Exception:
+        pass
+
     return {}
 
 def get_mcap_eok_from_map(mcap_map: Dict[str, float], ticker: str) -> float:
@@ -2376,6 +2428,37 @@ def main(
     # [변경] 3) 20/60/120일 벤치마크 수익률 맵 생성
     bench_map = get_benchmark_returns(trade_ymd)
 
+    # [v20.0] FDR+yfinance+캐시 전부 실패 시 → OHLCV 캐시에서 시장 평균 역산
+    if not bench_map or not bench_map.get("KOSPI", {}).get(60):
+        try:
+            _ohlcv_cache_path = os.path.join(OUT_DIR, f"ohlcv_cache_{trade_ymd}.parquet")
+            if not os.path.exists(_ohlcv_cache_path):
+                # 최근 캐시 파일 찾기
+                from glob import glob as _glob
+                _candidates = sorted(_glob(os.path.join(OUT_DIR, "ohlcv_cache_*.parquet")), reverse=True)
+                if _candidates:
+                    _ohlcv_cache_path = _candidates[0]
+
+            if os.path.exists(_ohlcv_cache_path):
+                _ohlcv_all = pd.read_parquet(_ohlcv_cache_path)
+                if "종가" in _ohlcv_all.columns and "종목코드" in _ohlcv_all.columns:
+                    # 종목별 최근 60일 수익률 중앙값 = 시장 벤치마크 프록시
+                    _rets = {}
+                    for _code, _grp in _ohlcv_all.groupby("종목코드"):
+                        _c = pd.to_numeric(_grp["종가"], errors="coerce").dropna()
+                        if len(_c) > 60:
+                            _rets[_code] = (float(_c.iloc[-1]) / float(_c.iloc[-61]) - 1) * 100
+                    if _rets:
+                        _all_rets = list(_rets.values())
+                        _median_ret = float(np.median(_all_rets))
+                        if "KOSPI" not in bench_map or not bench_map.get("KOSPI", {}).get(60):
+                            bench_map["KOSPI"] = {20: round(_median_ret * 0.33, 2), 60: round(_median_ret, 2), 120: round(_median_ret * 1.8, 2)}
+                        if "KOSDAQ" not in bench_map or not bench_map.get("KOSDAQ", {}).get(60):
+                            bench_map["KOSDAQ"] = {20: round(_median_ret * 0.33, 2), 60: round(_median_ret, 2), 120: round(_median_ret * 1.8, 2)}
+                        log(f"📂 [폴백] OHLCV 캐시 기반 벤치마크 역산: 중앙값 {_median_ret:.2f}% ({len(_rets)}종목)")
+        except Exception as _be:
+            log(f"⚠️ OHLCV 벤치마크 폴백 실패: {_be}")
+
     def _fmt(v): return f"{v:.2f}%" if isinstance(v, (int, float)) else "N/A"
 
     k_60 = bench_map.get("KOSPI", {}).get(60)
@@ -2847,10 +2930,17 @@ def main(
 
     # ── [Phase 2-2] 캘리브레이션 승률 → 추천 필터 (단일 실행점) ──
     try:
-        from kelly_calibrator import calibrated_win_rate as _cal_wr
+        from kelly_calibrator import calibrated_win_rate as _cal_wr, get_calibration_mode as _get_cal_mode
         df_out["EST_WIN_RATE"] = np.nan
         df_out["CAL_HOLD_REASON"] = ""
         df_out["LOW_WR_FLAG"] = False
+
+        # [v20.0] 캘리브레이션 성숙도 판정
+        _cal_mode = _get_cal_mode(OUT_DIR, asof_ymd=trade_ymd)
+        df_out["CALIBRATION_MODE"] = _cal_mode["mode"]
+        df_out["CAL_N_TRADES"] = _cal_mode["n_trades"]
+        _is_empirical = _cal_mode["mode"] in ("LIGHT", "MATURE")
+        log(f"📊 캘리브레이션 모드: {_cal_mode['mode']} (트레이드 {_cal_mode['n_trades']}건)")
 
         _score_col_cal = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
         _wr_min = 0.45  # [v19.5] 승률 하한 상향 (0.42 → 0.45)
@@ -2858,27 +2948,31 @@ def main(
         for _idx in df_out.index:
             _sc = float(df_out.at[_idx, _score_col_cal]) if pd.notna(df_out.at[_idx, _score_col_cal]) else 0
             try:
-                # ✅ 핵심: asof_ymd=trade_ymd 강제 → 과거 백테스트 정합성 보장
                 _wr = _cal_wr(_sc, OUT_DIR, method="RANK_SCORE", horizon=5, asof_ymd=trade_ymd)
                 df_out.at[_idx, "EST_WIN_RATE"] = round(_wr, 3)
 
                 if _wr < _wr_min:
                     df_out.at[_idx, "LOW_WR_FLAG"] = True
-                    # ATTACK/ARMED 상태의 저승률 종목 → WAIT 강제 격하
-                    if df_out.at[_idx, "ROUTE"] in (Route.ATTACK, Route.ARMED):
+                    # [v20.0] FALLBACK/NO_DATA 모드에서는 승률 기반 강등을 하지 않음
+                    # "승률이 낮다"와 "승률 데이터를 아직 모른다"를 분리
+                    if _is_empirical and df_out.at[_idx, "ROUTE"] in (Route.ATTACK, Route.ARMED):
                         df_out.at[_idx, "ROUTE"] = Route.WAIT
                         df_out.at[_idx, "상태"] = Route.WAIT
                         df_out.at[_idx, "CAL_HOLD_REASON"] = f"low_wr_{_wr:.2f}"
+                    elif not _is_empirical and df_out.at[_idx, "ROUTE"] in (Route.ATTACK, Route.ARMED):
+                        df_out.at[_idx, "CAL_HOLD_REASON"] = f"fallback_wr_{_wr:.2f}"
+                        # 표시만 하고 강등하지 않음
             except (KeyError, ValueError, FileNotFoundError) as e:
                 logger.debug(f"캘리브레이션 승률 조회 실패 ({_idx}): {e}")
             except Exception as e:
                 logger.warning(f"⚠️ 캘리브레이션 예기치 않은 오류 ({_idx}): {type(e).__name__}: {e}")
 
-        _demoted_cnt = (df_out["CAL_HOLD_REASON"] != "").sum()
+        _demoted_cnt = (df_out["CAL_HOLD_REASON"].str.startswith("low_wr")).sum()
         _low_total = df_out["LOW_WR_FLAG"].sum()
         if _low_total > 0:
+            _fallback_cnt = (df_out["CAL_HOLD_REASON"].str.startswith("fallback")).sum()
             log(f"📊 캘리브레이션: 승률 45%미만 {_low_total}건 중 "
-                f"{_demoted_cnt}건 ATTACK/ARMED → WAIT 격하")
+                f"{_demoted_cnt}건 실제 격하, {_fallback_cnt}건 fallback(격하 안 함)")
     except ImportError:
         log("ℹ️ kelly_calibrator 미설치, 캘리브레이션 연동 스킵")
     except Exception as _cal_err:
@@ -2923,6 +3017,32 @@ def main(
                 _carry_df["IS_ACTIVE"] = False
                 _carry_df["IS_NOW_ENTRY"] = False
                 _carry_df["IS_WATCH"] = False
+
+                # [v20.0.1] Carry 메타 — 신선도 추적
+                # CARRY_FROM_DATE: 최초 추천(ATTACK/ARMED)된 날짜
+                _carry_df["CARRY_FROM_DATE"] = _carry_df.get("기준일", trade_ymd)
+                try:
+                    _from_dates = pd.to_datetime(_carry_df["CARRY_FROM_DATE"], format="%Y%m%d", errors="coerce")
+                    _today = pd.Timestamp(trade_ymd)
+                    _carry_df["CARRY_AGE_DAYS"] = (_today - _from_dates).dt.days.fillna(0).astype(int)
+                except Exception:
+                    _carry_df["CARRY_AGE_DAYS"] = 0
+                # 7일 이상이면 stale
+                _carry_df["IS_STALE_CARRY"] = _carry_df["CARRY_AGE_DAYS"] >= 7
+                # stale carry는 점수 감쇠 (-5점/일, 최대 -20)
+                _stale_penalty = _carry_df["CARRY_AGE_DAYS"].clip(0, 30).apply(
+                    lambda d: min(20.0, max(0, (d - 5) * 5.0)) if d > 5 else 0.0
+                )
+                _carry_df["STALE_PENALTY"] = _stale_penalty
+                if "DISPLAY_SCORE" in _carry_df.columns:
+                    _carry_df["DISPLAY_SCORE"] = (
+                        pd.to_numeric(_carry_df["DISPLAY_SCORE"], errors="coerce").fillna(0)
+                        - _stale_penalty
+                    ).clip(0, 100)
+
+                _stale_cnt = _carry_df["IS_STALE_CARRY"].sum()
+                if _stale_cnt > 0:
+                    log(f"   ⏳ stale carry {_stale_cnt}건 (7일+ 경과, 점수 감쇠 적용)")
 
                 # 현재가 업데이트 (price_snapshot 활용)
                 _snap_path = os.path.join(OUT_DIR, f"price_snapshot_{trade_ymd}.csv")
@@ -2992,6 +3112,11 @@ def main(
     for c in must_cols:
         if c not in df_out.columns: df_out[c] = np.nan
 
+    # [v20.0.1] Carry 메타 기본값 — non-CARRY 행은 빈값
+    for _cm in ["CARRY_FROM_DATE", "CARRY_AGE_DAYS", "IS_STALE_CARRY", "STALE_PENALTY"]:
+        if _cm not in df_out.columns:
+            df_out[_cm] = np.nan if _cm == "CARRY_FROM_DATE" else (False if _cm == "IS_STALE_CARRY" else 0)
+
     df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]
 
     # [Phase 1-1] Config Snapshot 저장 (재현성)
@@ -3039,6 +3164,37 @@ def main(
                         "벤치_60d_KOSPI_%", "벤치_60d_KOSDAQ_%"]:
                 if _bc in df_out.columns:
                     df_out[_bc] = np.nan
+
+        # ── [v20.0] 신뢰도 기반 행동 제한 ──
+        # 데이터 품질이 행동 강도를 직접 제어
+        _max_route = _health.max_allowed_route
+        _demote_count = 0
+
+        if _max_route != "ATTACK":
+            # ATTACK 금지
+            _attack_mask = df_out["ROUTE"] == Route.ATTACK
+            if _attack_mask.any():
+                _fallback_route = Route.ARMED if _max_route == "ARMED" else Route.WAIT
+                df_out.loc[_attack_mask, "ROUTE"] = _fallback_route
+                df_out.loc[_attack_mask, "상태"] = _fallback_route
+                _demote_count += _attack_mask.sum()
+
+        if _max_route == "WAIT":
+            # ARMED도 금지
+            _armed_mask = df_out["ROUTE"] == Route.ARMED
+            if _armed_mask.any():
+                df_out.loc[_armed_mask, "ROUTE"] = Route.WAIT
+                df_out.loc[_armed_mask, "상태"] = Route.WAIT
+                _demote_count += _armed_mask.sum()
+
+        if _demote_count > 0:
+            log(f"🛡️ [v20.0] 신뢰도 {_health.confidence_score:.0f}/100 → "
+                f"최대허용 {_max_route}, {_demote_count}건 격하")
+            # 격하 후 플래그 재동기화
+            df_out["IS_ACTIVE"] = df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED])
+            df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == Route.ATTACK
+            df_out["IS_WATCH"] = df_out["ROUTE"] == Route.WAIT
+            df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_action_map).fillna(7).astype(int)
 
     ensure_dir(OUT_DIR)
     out_path_dated = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{tag}' if tag else ''}.csv")

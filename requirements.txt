@@ -26,6 +26,7 @@ tqdm>=4.66.0
 finance-datareader>=0.9.6
 pykrx==1.0.51             # 👈 [검증됨] 안정적인 Harbor 버전
 opendartreader            # 👈 설치 호환성 중심의 유연한 선언
+yfinance>=0.2.36          # 👈 [v20.0] 벤치마크 yfinance 폴백 (해외 IP에서도 동작)
 
 # --- [Web Scraping & AI] ---
 google-genai>=1.0.0       # 👈 신규 통합 SDK (구 google-generativeai EOL 2025-11-30)
