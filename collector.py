@@ -118,30 +118,14 @@ def load_secrets_to_env():
 load_secrets_to_env()
 # ▲▲▲ [여기] 까지 삽입 ▲▲▲
 
-# LLM API 키 설정 (환경변수 또는 직접 입력)
-# Google Gemini (무료 티어 가능) 또는 OpenAI 사용 권장
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") 
-LLM_AVAILABLE = False
-_USE_NEW_GENAI = False
-
-try:
-    # 1순위: 신규 SDK (google-genai, 2025~)
-    from google import genai as _genai_client
-    if GEMINI_API_KEY:
-        _USE_NEW_GENAI = True
-        LLM_AVAILABLE = True
-except ImportError:
-    _genai_client = None
-
-if not LLM_AVAILABLE:
-    try:
-        # 2순위: 구 SDK (google-generativeai, EOL)
-        import google.generativeai as genai
-        if GEMINI_API_KEY:
-            genai.configure(api_key=GEMINI_API_KEY)
-            LLM_AVAILABLE = True
-    except ImportError:
-        LLM_AVAILABLE = False
+# ── [v20.2] 공용 모듈에서 import (SSOT) ──
+from shared_log import (
+    log, logger, ensure_dir, safe_quantile, RunContext,
+    GEMINI_API_KEY, LLM_AVAILABLE, _USE_NEW_GENAI,
+    PYKRX_OK, OUT_DIR, UTF8, BASE_DIR,
+    LOOKBACK_DAYS, BENCH_LOOKBACK_DAYS, TOP_N,
+    MIN_TURNOVER_EOK, MIN_MCAP_EOK, MAX_WORKERS,
+)
 
 # [보안 설정]
 TG_TOKEN = os.environ.get("TG_TOKEN")
@@ -150,30 +134,8 @@ TG_ID = os.environ.get("TG_ID")
 # ------------------------------- 설정 (collector_config.py SSOT) -------------------------------
 from collector_config import CollectorConfig, DEFAULT_CONFIG as _CFG, Route, Market
 
-LOOKBACK_DAYS = _CFG.lookback_days
-BENCH_LOOKBACK_DAYS = _CFG.bench_lookback_days
-TOP_N = _CFG.top_n
-MIN_TURNOVER_EOK = _CFG.min_turnover_eok
-MIN_MCAP_EOK = _CFG.min_mcap_eok
 RSI_LOW, RSI_HIGH = _CFG.rsi_low, _CFG.rsi_high
 PASS_EBS = _CFG.pass_ebs
-BASE_DIR = _CFG.base_dir
-OUT_DIR = _CFG.out_dir
-UTF8 = "utf-8-sig"
-
-# [v3.2 #1] 런타임 컨텍스트 — global 변수 대신 DI 패턴으로 상태 전달
-# ThreadPoolExecutor 환경에서 Race Condition 없이 안전하게 상태 공유
-from dataclasses import dataclass as _dc, field as _field
-
-@_dc
-class RunContext:
-    """매크로 필터 등 런타임에 동적으로 변하는 상태를 담는 컨텍스트"""
-    pass_ebs: float = _CFG.pass_ebs
-    rec_limit_cnt: int = 20
-    macro_risk: str = "NORMAL"
-    macro_msg: str = ""
-
-MAX_WORKERS = int(os.environ.get("LDY_WORKERS", str(_CFG.max_workers)))
 
 BB_PERIOD = _CFG.bb_period
 BB_STD = _CFG.bb_std
@@ -189,8 +151,6 @@ W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (
 P_OVERHEAT_5D, P_OVERHEAT_10D, P_RSI_OUT = _CFG.p_overheat_5d, _CFG.p_overheat_10d, _CFG.p_rsi_out
 P_MACD_NEG, P_NEAR_FAR, P_LIQ_LOW, P_VOL_SPIKE = (
     _CFG.p_macd_neg, _CFG.p_near_far, _CFG.p_liq_low, _CFG.p_vol_spike)
-# ✅ [v14] W_SECTOR 제거 — 섹터 보너스는 TIMING_SCORE 한 곳에서만 반영 (SSOT)
-# 레거시 W_SECTOR=0.05는 더 이상 사용되지 않음
 P_BIG_SL = _CFG.p_big_sl
 
 # ── 분할 모듈 import ──
@@ -211,24 +171,8 @@ from validation import (
     run_reality_check,
 )
 
-# ------------------------------- 유틸 -------------------------------
-
-# [v3.2] 표준 logging 모듈 도입 — 콘솔 + 파일 로그 분리 가능
-# 기존 log() 호출 115곳을 보존하면서 내부적으로 logger로 위임
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("LDY_Collector")
-
-
-def log(msg: str) -> None:
-    """[v3.2] 기존 호환성 유지 래퍼 — 내부적으로 logger.info() 사용"""
-    logger.info(msg)
-
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+# ------------------------------- 유틸 (shared_log에서 import) -------------------------------
+# log(), ensure_dir(), safe_quantile(), RunContext → shared_log.py (v20.2 SSOT)
 
 def ema(s: pd.Series, span: int) -> pd.Series:
     return s.ewm(span=span, adjust=False).mean()
