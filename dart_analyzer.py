@@ -90,7 +90,7 @@ class DartAnalyzer:
         self.dart = None
         self._gemini_client = None
         self._gemini_model = None
-        self._model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+        self._model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 
         if DART_OK and self.dart_api_key:
             self._init_dart()

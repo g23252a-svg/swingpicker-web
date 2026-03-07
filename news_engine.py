@@ -178,12 +178,12 @@ SUMMARY: [한줄요약]"""
             client = _genai_client.Client(api_key=api_key)
             response = _llm_call_with_retry(
                 lambda: client.models.generate_content(
-                    model="gemini-2.0-flash", contents=prompt
+                    model="gemini-1.5-flash", contents=prompt
                 )
             )
         else:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            model = genai.GenerativeModel("gemini-1.5-flash")
             response = _llm_call_with_retry(lambda: model.generate_content(prompt))
 
         text = response.text.strip()
@@ -242,12 +242,12 @@ def generate_ai_comment(
             client = _genai_client.Client(api_key=api_key)
             response = _llm_call_with_retry(
                 lambda: client.models.generate_content(
-                    model="gemini-2.0-flash", contents=prompt
+                    model="gemini-1.5-flash", contents=prompt
                 )
             )
         else:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            model = genai.GenerativeModel("gemini-1.5-flash")
             response = _llm_call_with_retry(lambda: model.generate_content(prompt))
         return response.text.strip()[:300]
     except Exception as e:
