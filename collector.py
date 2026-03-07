@@ -2816,6 +2816,8 @@ def main(
 
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = "특이사항 없음"
+        if "AI_COMMENT" not in df_out.columns:
+            df_out["AI_COMMENT"] = ""
         
         # [v3.2 #4] LLM 캐시 로드
         llm_cache = _load_llm_cache()
@@ -2888,6 +2890,8 @@ def main(
         log("ℹ️ LLM 설정(API Key)이 없어 심층 분석을 건너뜁니다.")
         df_out["NEWS_SCORE"] = 0.0
         df_out["NEWS_REASON"] = "N/A"
+        if "AI_COMMENT" not in df_out.columns:
+            df_out["AI_COMMENT"] = ""
 
     # -----------------------------------------------------------
     # [Step 7] [v3.1 #2] 최종 점수 기준 재정렬 + 랭크 확정
