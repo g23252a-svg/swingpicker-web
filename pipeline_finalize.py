@@ -93,7 +93,10 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                     except Exception as _e: log(f"⚠️ snapshot 폴백 실패: {_e}")
             _fc = df_out["종목명"].str.match(r'^\d+$').sum(); _fx = _cc - _fc
             if _fx > 0: log(f"🔧 종목명 복구: {_fx}/{_cc}건")
-            if _fc > 0: log(f"⚠️ 미복구 {_fc}건: {df_out.loc[df_out['종목명'].str.match(r'^\\d+$'),'종목코드'].tolist()[:5]}")
+            if _fc > 0:
+                _pat = r'^\d+$'
+                _remain = df_out.loc[df_out['종목명'].str.match(_pat), '종목코드'].tolist()[:5]
+                log(f"⚠️ 미복구 {_fc}건: {_remain}")
     df_out.to_csv(op_d, index=False, encoding=UTF8); df_out.to_csv(op_l, index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건) → {op_d}")
     # After-market
