@@ -169,16 +169,20 @@ def analyze_sentiment_llm(
 헤드라인:
 {chr(10).join(f'- {h}' for h in headlines[:8])}
 
-응답 형식 (반드시 이 형식만):
-SCORE: [숫자]
-SUMMARY: [한줄요약]"""
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
+{{"score": 0.0, "summary": "한줄요약"}}"""
 
         # 신규/구 SDK 분기 호출
         if _USE_NEW_GENAI:
+            from google.genai import types as _genai_types
             client = _genai_client.Client(api_key=api_key)
             response = _llm_call_with_retry(
                 lambda: client.models.generate_content(
-                    model="gemini-2.5-flash", contents=prompt
+                    model="gemini-2.5-flash", contents=prompt,
+                    config=_genai_types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        max_output_tokens=1024,
+                    ),
                 )
             )
         else:
@@ -190,15 +194,41 @@ SUMMARY: [한줄요약]"""
 
         score = 0.0
         summary = ""
-        for line in text.split("\n"):
-            if line.startswith("SCORE:"):
-                try:
-                    score = float(line.replace("SCORE:", "").strip())
-                    score = max(-1.0, min(1.0, score))
-                except ValueError:
-                    pass
-            elif line.startswith("SUMMARY:"):
-                summary = line.replace("SUMMARY:", "").strip()
+
+        # 1차: JSON 파싱
+        try:
+            import json as _json
+            _cleaned = re.sub(r'```json\s*|```\s*', '', text).strip()
+            data = _json.loads(_cleaned)
+            score = max(-1.0, min(1.0, float(data.get("score", 0))))
+            summary = str(data.get("summary", ""))
+            return (score, summary)
+        except (ValueError, KeyError):
+            pass
+
+        # 2차: regex 폴백 (잘린 JSON 대응)
+        import re as _re
+        _sm = _re.search(r'"score"\s*:\s*(-?\d+\.?\d*)', text)
+        if _sm:
+            try:
+                score = max(-1.0, min(1.0, float(_sm.group(1))))
+            except ValueError:
+                pass
+        _rm = _re.search(r'"summary"\s*:\s*"([^"]*)', text)
+        if _rm:
+            summary = _rm.group(1)
+
+        # 3차: SCORE:/SUMMARY: 레거시 포맷 폴백
+        if score == 0.0:
+            for line in text.split("\n"):
+                if line.startswith("SCORE:"):
+                    try:
+                        score = float(line.replace("SCORE:", "").strip())
+                        score = max(-1.0, min(1.0, score))
+                    except ValueError:
+                        pass
+                elif line.startswith("SUMMARY:"):
+                    summary = line.replace("SUMMARY:", "").strip()
 
         return (score, summary)
     except Exception as e:
