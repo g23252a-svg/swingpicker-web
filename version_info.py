@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "20.5c",
+        "date": "2026-03-08",
+        "type": "minor",
+        "title": "KIS API 수급 연동 완전체 — Run Status: OK 100/100 달성",
+        "items": [
+            "📡 **KIS API 수급 선수집 (prefetch_flow.py v2.0):** pykrx 전용 구조 → KIS API v2.0 완전 교체, `/uapi/domestic-stock/v1/quotations/foreign-institution-total` (tr_id: FHPTJ04400000) 단일 호출로 외인·기관 동시 수집",
+            "🗂️ **flow 캐시 구조 확정:** `frg` / `inst` / `ant` 키 기반 저장, 주말 stale 오판 수정 (직전 평일 기준 비교)",
+            "🔌 **collector 캐시 우선 로드:** `fetch_investor_net_buying()` 상단에 KIS 캐시 우선 로드 블록 삽입, pykrx 폴백은 캐시 미존재 시에만 실행",
+            "✅ **end-to-end 검증 완료:** 수급 캐시 로드: 외인 30건 기관 30건 → 🟢 Run Status: OK (신뢰도: 100/100, 최대허용: ATTACK)",
+            "🔧 **GitHub Secrets 연동:** KIS_APP_KEY / KIS_APP_SECRET 등록, prefetch_flow.yml 환경변수 연결 완료",
+            "🐛 **load_cache 주말 버그 수정:** 일요일 실행 시 trade_ymd(금) 불일치 → stale=True 오판 해소",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "19.1.0",
         "date": "2026-03-01",
         "type": "minor",
