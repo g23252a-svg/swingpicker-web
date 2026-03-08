@@ -1984,14 +1984,12 @@ def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int],
     if not _cp.exists(): _cp = _pl.Path("data/flow_cache_latest.json")
     if _cp.exists():
         try:
-            _raw = _json.loads(_cp.read_text())
-            _rows = _raw.get("data", _raw) if isinstance(_raw, dict) else _raw
-            _mf, _mi = {}, {}
-            for _c, _r in _rows.items():
-                _mf[_c] = int(_r.get("frgn_ntby_tr_pbmn", 0))
-                _mi[_c] = int(_r.get("orgn_ntby_tr_pbmn", 0))
+            _raw = _json.loads(_cp.read_text(encoding="utf-8"))
+            _mf  = {k: int(v) for k, v in _raw.get("frg", {}).items()}
+            _mi  = {k: int(v) for k, v in _raw.get("inst", {}).items()}
+            _ma  = {k: int(v) for k, v in _raw.get("ant", {}).items()}
             logging.info(f"📊 [수급] 캐시 로드: 외인 {len(_mf)}건 기관 {len(_mi)}건")
-            return _mf, _mi, {}
+            return _mf, _mi, _ma
         except Exception as _e:
             logging.warning(f"flow 캐시 로드 실패: {_e}")
     # ── 이하 기존 pykrx 로직 ────────────────────────────────
