@@ -113,7 +113,17 @@ def load_cache(ymd):
             age=(datetime.now()-datetime.fromisoformat(c["fetched_at"])).total_seconds()/3600
             stale=age>CACHE_STALE_HOURS
         except: pass
-    if c.get("ymd")!=ymd: stale=True
+    cached_ymd = c.get("ymd","")
+    if cached_ymd != ymd:
+        from datetime import datetime, timedelta
+        def _last_wd(d):
+            while d.weekday()>=5: d-=timedelta(days=1)
+            return d.strftime("%Y%m%d")
+        try:
+            req_last = _last_wd(datetime.strptime(ymd,"%Y%m%d"))
+            stale = cached_ymd != req_last
+        except:
+            stale = True
     c["stale"]=stale
     return c
 
