@@ -1978,6 +1978,23 @@ def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int],
     해당 일자의 외국인, 기관, 개인 순매수금액(원)을 가져옵니다.
     Returns: (외인_맵, 기관_맵, 개인_맵)
     """
+    # ── KIS 캐시 우선 로드 ──────────────────────────────────
+    import json as _json, pathlib as _pl
+    _cp = _pl.Path(f"data/flow_{ymd}.json")
+    if not _cp.exists(): _cp = _pl.Path("data/flow_cache_latest.json")
+    if _cp.exists():
+        try:
+            _raw = _json.loads(_cp.read_text())
+            _rows = _raw.get("data", _raw) if isinstance(_raw, dict) else _raw
+            _mf, _mi = {}, {}
+            for _c, _r in _rows.items():
+                _mf[_c] = int(_r.get("frgn_ntby_tr_pbmn", 0))
+                _mi[_c] = int(_r.get("orgn_ntby_tr_pbmn", 0))
+            logging.info(f"📊 [수급] 캐시 로드: 외인 {len(_mf)}건 기관 {len(_mi)}건")
+            return _mf, _mi, {}
+        except Exception as _e:
+            logging.warning(f"flow 캐시 로드 실패: {_e}")
+    # ── 이하 기존 pykrx 로직 ────────────────────────────────
     if (not PYKRX_OK) or (stock is None):
         return {}, {}, {}
 
