@@ -27,6 +27,8 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: "1"
+      KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+      KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
       TZ: Asia/Seoul
 
     steps:
