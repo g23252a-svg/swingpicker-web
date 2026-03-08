@@ -45,9 +45,6 @@ jobs:
         run: |
           pip install pykrx pandas --quiet
 
-      - name: Run diagnose_flow (환경 확인)
-        run: |
-          python diagnose_flow.py ${{ github.event.inputs.trade_date || '' }}
 
       - name: Prefetch investor flow
         id: prefetch
