@@ -37,7 +37,8 @@ class RunHealth:
     _AXIS_WEIGHTS = {
         "MCAP_EMPTY": 20, "MCAP_ALL_ZERO": 20,
         "BENCH_FAIL": 15, "BENCH_NAN": 15,
-        "FLOW_ZERO": 15,
+        "FLOW_ZERO": 15,      # 수급 전무 (외인+기관+개인 모두 0)
+        "FLOW_PARTIAL": 8,    # 수급 부분 결손 (외인/기관 없고 개인만 있음)
         "NEWS_OFF": 10,
         "SECTOR_FAIL": 10,
     }
@@ -166,11 +167,17 @@ def check_run_health(
     else:
         frg = inv_maps.get("frg", {})
         inst = inv_maps.get("inst", {})
-        if len(frg) == 0 and len(inst) == 0:
+        ant = inv_maps.get("ant", {})
+        major_ok = len(frg) > 0 or len(inst) > 0
+        if major_ok:
+            h.add_ok("FLOW")
+        elif len(ant) > 0:
+            # 외인/기관 없지만 개인 데이터 있음 → 부분 결손
+            h.add_issue("FLOW_PARTIAL")
+            logger.warning("⚠️ [Health] 외인/기관 수급 0건, 개인 수급만 있음 → 부분 보정")
+        else:
             h.add_issue("FLOW_ZERO")
             logger.warning("⚠️ [Health] 수급 데이터 0건 → 수급 보정 비활성")
-        else:
-            h.add_ok("FLOW")
 
     # ── 4. 뉴스 ──
     if "NEWS_SCORE" in df.columns:

@@ -3184,7 +3184,7 @@ if df_latest is not None and not df_latest.empty:
         _reason_labels = {
             "MCAP_EMPTY": "시가총액", "MCAP_ALL_ZERO": "시가총액",
             "BENCH_FAIL": "벤치마크", "BENCH_NAN": "벤치마크",
-            "FLOW_ZERO": "수급(외인/기관)", "NEWS_OFF": "뉴스분석",
+            "FLOW_ZERO": "수급(외인/기관)", "FLOW_PARTIAL": "수급(개인만)", "NEWS_OFF": "뉴스분석",
             "SECTOR_FAIL": "섹터분석",
         }
         _missing = []
@@ -3219,7 +3219,7 @@ if df_latest is not None and not df_latest.empty:
                         _check_labels = {
                             "MCAP": "시가총액", "MCAP_EMPTY": "시가총액", "MCAP_ALL_ZERO": "시가총액(전행0)",
                             "BENCH": "벤치마크", "BENCH_FAIL": "벤치마크", "BENCH_NAN": "벤치마크(NaN)",
-                            "FLOW": "수급(외인/기관)", "FLOW_ZERO": "수급(전행0)",
+                            "FLOW": "수급(외인/기관)", "FLOW_ZERO": "수급(전행0)", "FLOW_PARTIAL": "수급(개인만)",
                             "NEWS": "뉴스분석", "NEWS_OFF": "뉴스(비활성)",
                             "SECTOR": "섹터분석", "SECTOR_FAIL": "섹터(실패)",
                             "TP_MONOTONIC": "목표가 단조성",

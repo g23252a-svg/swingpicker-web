@@ -195,7 +195,7 @@ class DartAnalyzer:
     # ──────────────────────────────────────────────
     def _call_gemini(self, prompt: str) -> str:
         """Gemini 호출 → 응답 텍스트 반환"""
-        from news_engine import _llm_call_with_retry
+        from llm_retry_utils import _llm_call_with_retry
 
         def _raw_call():
             if self._gemini_client is not None:
@@ -355,7 +355,7 @@ class DartAnalyzer:
                 logger.warning(f"⚠️ 형식 오류 재시도 중... ({report_nm})")
 
             except Exception as e:
-                from news_engine import _is_retryable
+                from llm_retry_utils import _is_retryable
                 if _is_retryable(e):
                     wait = min(30, 2 ** (attempt + 1))
                     logger.warning(f"⚠️ 429/재시도 {attempt+1}/2 ({report_nm}): wait={wait}s")

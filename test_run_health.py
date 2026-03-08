@@ -143,5 +143,66 @@ class TestCheckRunHealth(unittest.TestCase):
         self.assertIn("NEWS_OFF", h.reasons)
 
 
+class TestFlowPartial(unittest.TestCase):
+    """FLOW_PARTIAL 분기 테스트 — 개인 수급만 있는 경우"""
+
+    def _base_df(self):
+        return pd.DataFrame({
+            "NEWS_SCORE": [5.0] * 3,
+            "SECTOR_RANK": [3.0] * 3,
+            "시가총액(억원)": [5000] * 3,
+            "rel_60d_%": [1.0] * 3,
+            "추천매도가1": [5000] * 3,
+            "추천매도가2": [6000] * 3,
+        })
+
+    def test_flow_partial_when_ant_only(self):
+        """외인/기관 0, 개인(ant)만 있음 → FLOW_PARTIAL(-8), DEGRADED, ARMED"""
+        h = check_run_health(
+            self._base_df(),
+            mcap_map={"005930": 100000},
+            bench_map={"KOSPI": {60: 1.5}},
+            inv_maps={"frg": {}, "inst": {}, "ant": {"005930": 500}},
+        )
+        self.assertIn("FLOW_PARTIAL", h.reasons)
+        self.assertNotIn("FLOW_ZERO", h.reasons)
+        self.assertEqual(h.status, "DEGRADED")
+        # 감점: FLOW_PARTIAL=8 → confidence=92 → max_allowed=ARMED
+        self.assertEqual(h.confidence_score, 92.0)
+        self.assertEqual(h.max_allowed_route, "ARMED")
+
+    def test_flow_zero_when_all_empty(self):
+        """외인/기관/개인 모두 0 → FLOW_ZERO(-15) 유지"""
+        h = check_run_health(
+            self._base_df(),
+            mcap_map={"005930": 100000},
+            bench_map={"KOSPI": {60: 1.5}},
+            inv_maps={"frg": {}, "inst": {}, "ant": {}},
+        )
+        self.assertIn("FLOW_ZERO", h.reasons)
+        self.assertNotIn("FLOW_PARTIAL", h.reasons)
+        self.assertEqual(h.confidence_score, 85.0)
+
+    def test_flow_ok_when_major_present(self):
+        """외인 있음 → FLOW OK, 감점 없음"""
+        h = check_run_health(
+            self._base_df(),
+            mcap_map={"005930": 100000},
+            bench_map={"KOSPI": {60: 1.5}},
+            inv_maps={"frg": {"005930": 100}, "inst": {}, "ant": {}},
+        )
+        self.assertNotIn("FLOW_ZERO", h.reasons)
+        self.assertNotIn("FLOW_PARTIAL", h.reasons)
+        self.assertEqual(h.status, "OK")
+
+    def test_flow_partial_confidence_is_higher_than_flow_zero(self):
+        """FLOW_PARTIAL 감점(8) < FLOW_ZERO 감점(15) 확인"""
+        h_partial = RunHealth()
+        h_partial.add_issue("FLOW_PARTIAL")
+        h_zero = RunHealth()
+        h_zero.add_issue("FLOW_ZERO")
+        self.assertGreater(h_partial.confidence_score, h_zero.confidence_score)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
