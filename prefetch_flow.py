@@ -55,6 +55,7 @@ def _kis_fetch_investor(token, app_key, app_secret, investor_code):
     try:
         r = requests.get(f"{KIS_BASE_URL}/uapi/domestic-stock/v1/ranking/investor",
             headers=headers, params=params, timeout=15)
+        log.info(f"KIS HTTP {r.status_code} inv={investor_code} body={r.text[:400]}")
         data = r.json()
         if data.get("rt_cd") != "0":
             log.warning(f"KIS rt_cd={data.get('rt_cd')} msg={data.get('msg1','')}")
