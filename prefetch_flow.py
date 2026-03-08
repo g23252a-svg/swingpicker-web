@@ -37,23 +37,19 @@ def _kis_fetch_investor(token, app_key, app_secret, investor_code):
         "Authorization": f"Bearer {token}",
         "appkey": app_key,
         "appsecret": app_secret,
-        "tr_id": "FHKST03030100",
+        "tr_id": "FHPTJ04400000",
         "content-type": "application/json; charset=utf-8",
     }
     params = {
         "FID_COND_MRKT_DIV_CODE": "V",
-        "FID_COND_SCR_DIV_CODE": "20174",
+        "FID_COND_SCR_DIV_CODE": "16449",
         "FID_INPUT_ISCD": "0000",
-        "FID_DIV_CLS_CODE": investor_code,
-        "FID_BLNG_CLS_CODE": "0",
-        "FID_TRGT_CLS_CODE": "0",
-        "FID_TRGT_EXLS_CLS_CODE": "0",
-        "FID_INPUT_PRICE_1": "",
-        "FID_INPUT_PRICE_2": "",
-        "FID_VOL_CNT": "",
+        "FID_DIV_CLS_CODE": "1",
+        "FID_RANK_SORT_CLS_CODE": "0",
+        "FID_ETC_CLS_CODE": investor_code,
     }
     try:
-        r = requests.get(f"{KIS_BASE_URL}/uapi/domestic-stock/v1/ranking/investor",
+        r = requests.get(f"{KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/foreign-institution-total",
             headers=headers, params=params, timeout=15)
         log.info(f"KIS HTTP {r.status_code} inv={investor_code} body={r.text[:400]}")
         data = r.json()
@@ -63,9 +59,7 @@ def _kis_fetch_investor(token, app_key, app_secret, investor_code):
         result = {}
         for row in data.get("output", []):
             code = str(row.get("mksc_shrn_iscd","")).zfill(6)
-            val = row.get("frgn_ntby_tr_pbmn") or row.get("orgn_ntby_tr_pbmn") or row.get("prsn_ntby_tr_pbmn") or "0"
-            try: result[code] = int(str(val).replace(",",""))
-            except: pass
+            result[code] = row
         return result
     except Exception as e:
         log.warning(f"KIS fetch 실패 investor={investor_code}: {e}")
@@ -81,11 +75,16 @@ def fetch_flow(ymd):
     if not token:
         return {},{},{},"FETCH_FAIL"
     log.info(f"KIS 수급 선수집 시작 (기준일: {ymd})")
-    frg = _kis_fetch_investor(token, app_key, app_secret, "1") or {}
-    time.sleep(0.3)
-    inst = _kis_fetch_investor(token, app_key, app_secret, "4") or {}
-    time.sleep(0.3)
-    ant = _kis_fetch_investor(token, app_key, app_secret, "3") or {}
+    raw = _kis_fetch_investor(token, app_key, app_secret, "0") or {}
+    frg, inst, ant = {}, {}, {}
+    for code, row in raw.items():
+        if isinstance(row, dict):
+            try: frg[code] = int(str(row.get("frgn_ntby_tr_pbmn","0")).replace(",",""))
+            except: pass
+            try: inst[code] = int(str(row.get("orgn_ntby_tr_pbmn","0")).replace(",",""))
+            except: pass
+        else:
+            frg[code] = row
     log.info(f"외인: {len(frg)}건  기관: {len(inst)}건  개인: {len(ant)}건")
     major_ok = len(frg)>0 or len(inst)>0
     if major_ok: status="OK"
