@@ -1,0 +1,16 @@
+{
+  "status": "OK",
+  "reasons": [],
+  "warnings": [],
+  "data_freshness_ok": true,
+  "checks": {
+    "MCAP": true,
+    "BENCH": true,
+    "FLOW": true,
+    "NEWS": true,
+    "SECTOR": true,
+    "TP_MONOTONIC": true
+  },
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK"
+}
