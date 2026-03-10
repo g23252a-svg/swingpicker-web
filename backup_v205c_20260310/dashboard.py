@@ -27,7 +27,6 @@ from dart_analyzer import DartAnalyzer
 
 # ─── 모듈 분리 import (v2.0) ───
 from shared_utils import nz_num, wma, safe_float
-from scoring_engine import build_global_score as _ssot_build_global_score  # [v20.6] SSOT
 from shared_utils import calc_hma as calc_hma_series  # 기존 호출 호환
 from chart_components import (
     plot_ai_gauge_chart, plot_fear_greed_gauge, plot_kelly_visual,
@@ -569,75 +568,6 @@ st.set_page_config(
 )
 
 # =====================================================================
-# 📱 [v20.0.1] 모바일 UX 개선 — 세로 고정 + 탭 전환 유지
-# =====================================================================
-st.markdown("""
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-</head>
-<style>
-/* 📱 화면 세로 고정 (가로 전환 방지) */
-@media screen and (orientation: landscape) and (max-width: 1024px) {
-    html {
-        transform: rotate(-90deg);
-        transform-origin: left top;
-        width: 100vh;
-        height: 100vw;
-        overflow-x: hidden;
-        position: absolute;
-        top: 100%;
-        left: 0;
-    }
-}
-</style>
-<script>
-// 📱 탭 전환 시 Streamlit WebSocket 유지 (튕김 방지)
-(function() {
-    // 1) visibilitychange로 탭 복귀 시 재연결 시도
-    document.addEventListener('visibilitychange', function() {
-        if (!document.hidden) {
-            // 탭 복귀 시 — Streamlit이 이미 끊겼으면 부드럽게 복구
-            try {
-                const ws = window._stWebSocket || 
-                    (window.parent && window.parent._stWebSocket);
-                if (ws && ws.readyState > 1) {
-                    // WebSocket이 닫힌 상태면 페이지 새로고침 (가장 안정적)
-                    // 단, 3초 대기 후 — 즉시 리로드하면 깜빡임
-                    setTimeout(function() {
-                        if (document.querySelector('[data-testid="stException"]') ||
-                            document.querySelector('.stError')) {
-                            window.location.reload();
-                        }
-                    }, 2000);
-                }
-            } catch(e) {}
-        }
-    });
-
-    // 2) 백그라운드에서 WebSocket keep-alive 핑
-    setInterval(function() {
-        if (document.hidden) {
-            try {
-                // Streamlit의 내부 WebSocket에 빈 메시지 전송 시도
-                const frames = document.querySelectorAll('iframe');
-                frames.forEach(function(f) {
-                    try { f.contentWindow.postMessage('ping', '*'); } catch(e) {}
-                });
-            } catch(e) {}
-        }
-    }, 15000);  // 15초마다
-
-    // 3) Screen Orientation API로 세로 고정 시도
-    try {
-        if (screen.orientation && screen.orientation.lock) {
-            screen.orientation.lock('portrait').catch(function(){});
-        }
-    } catch(e) {}
-})();
-</script>
-""", unsafe_allow_html=True)
-
-# =====================================================================
 # 🎨 [v18.0] Global UI Theme — Premium Dark Finance Dashboard
 # =====================================================================
 st.markdown("""
@@ -1025,8 +955,15 @@ MIN_TURN_KOSPI    = float(get_conf("LDY_MIN_TURN_KOSPI",    200.0))
 MIN_TURN_KOSDAQ   = float(get_conf("LDY_MIN_TURN_KOSDAQ",   100.0))
 MIN_TURN_DEFAULT  = float(get_conf("LDY_MIN_TURN_DEFAULT",  100.0))
 
-# [v20.6] 독자 가중치 상수 제거 — scoring_engine.build_global_score()로 SSOT 통합
-RSI_LOW, RSI_HIGH = 45, 65  # liquidity_gate 등 UI에서 참조
+W_RR, W_T1, W_SL, W_NEAR, W_MOM, W_LIQ, W_TEC = (0.25, 0.18, 0.12, 0.12, 0.10, 0.13, 0.10)
+P_OVERHEAT_5D  = 6.0
+P_OVERHEAT_10D = 6.0
+P_RSI_OUT      = 4.0
+P_MACD_NEG     = 4.0
+P_NEAR_FAR     = 4.0
+P_LIQ_LOW      = 4.0
+P_VOL_SPIKE    = 2.0
+RSI_LOW, RSI_HIGH = 45, 65
 
 # ---------------------------
 # 유틸 함수
@@ -2176,39 +2113,146 @@ def liquidity_gate(x_turn, market):
 # [Fix 3] Preview Sort Logic (숫자 정렬 + 순서 보장)
 # ---------------------------
 
-def build_global_score(lat, keep_order: bool = False, macro_risk: str = "NORMAL"):
-    """
-    [v20.6] SSOT 위임 — scoring_engine.build_global_score()에 단일 경로.
-    Legacy 호환 시그니처 유지. Dashboard CASE 2 fallback 전용.
-    """
+def build_global_score(lat, keep_order: bool = False):
     x = lat.copy()
-    
-    # scoring_engine SSOT 경로 (macro_risk 전달)
-    x = _ssot_build_global_score(x, macro_risk=macro_risk)
-    
-    # UI 호환: LDY_SCORE 매핑
-    x["LDY_SCORE"] = x.get("DISPLAY_SCORE", x.get("FINAL_SCORE", 0.0))
-    
-    # 게이트 + MA20 갭 (UI 전용)
-    from shared_utils import nz_num
-    if "_GATE_OK" not in x.columns:
-        x["_GATE_OK"] = liquidity_gate(
-            x.get("거래대금(억원)", 0),
-            x.get("시장", pd.Series(np.nan, index=x.index))
-        ).fillna(False)
-    
+    req = [
+        "종가", "추천매수가", "손절가", "추천매도가1",
+        "거래대금(억원)", "RSI14", "MACD_Slope", "거래강도",
+        "이격도", "ret_5d_%", "ret_10d_%", "EBS",
+        "MACD_Hist", "MFI14", "시장",
+    ]
+    for c in req:
+        if c not in x.columns:
+            x[c] = np.nan
+
+    slope_col = "MACD_Slope" if "MACD_Slope" in x.columns and x["MACD_Slope"].notna().any() \
+        else ("MACD_slope" if "MACD_slope" in x.columns else "MACD_Slope")
+    kairi_col = "이격도" if "이격도" in x.columns and x["이격도"].notna().any() \
+        else ("乖離%" if "乖離%" in x.columns else "이격도")
+    vol_col = "거래강도" if "거래강도" in x.columns and x["거래강도"].notna().any() \
+        else ("Vol_Z" if "Vol_Z" in x.columns else "거래강도")
+
+    close = nz_num(x["종가"])
+    entry = nz_num(x["추천매수가"])
+    stop = nz_num(x["손절가"])
+    t1 = nz_num(x["추천매도가1"])
+    turn = nz_num(x["거래대금(억원)"])
+    rsi = nz_num(x["RSI14"])
+    slope = nz_num(x.get(slope_col, pd.Series(np.nan, index=x.index)))
+    volz = nz_num(x.get(vol_col, pd.Series(np.nan, index=x.index)))
+    kairi = nz_num(x.get(kairi_col, pd.Series(np.nan, index=x.index)))
+    r5 = nz_num(x["ret_5d_%"])
+    r10 = nz_num(x["ret_10d_%"])
+    ebs = nz_num(x["EBS"]).fillna(0)
+
+    rr_den = (entry - stop)
+    rr_den = rr_den.where(rr_den > 0, np.nan)
+    rr1 = (t1 - entry) / rr_den
+    now_gap = ((close - entry).abs() / entry * 100)
+    t1_room = ((t1 - close) / close * 100)
+    sl_room = ((close - stop) / close * 100)
+
+    def cap_q(s, q=90, f=1.0):
+        arr = nz_num(s)
+        arr = arr.replace([np.inf, -np.inf], np.nan)
+        if arr.dropna().size == 0:
+            return float(f)
+        try:
+            val = float(np.nanpercentile(arr.dropna(), q))
+            return max(val, float(f))
+        except Exception:
+            return float(f)
+
+    def pct_norm(s, q=90, f=1.0):
+        s_num = nz_num(s).clip(lower=0)
+        cap = cap_q(s_num, q, f)
+        if cap == 0:
+            return np.zeros_like(s_num)
+        return np.clip(s_num / cap, 0, 1)
+
+    def inv_dist_norm(dist, cap):
+        cap_val = float(cap) if cap is not None and not np.isnan(cap) else 1.0
+        return np.clip(1 - (nz_num(dist) / max(cap_val, 1e-9)), 0, 1)
+
+    rr_norm = pct_norm(rr1, q=90, f=1.0).fillna(0)
+    t1_norm = np.clip(t1_room / cap_q(t1_room, q=90, f=5.0), 0, 1).fillna(0)
+    sl_norm = np.clip(sl_room / cap_q(sl_room, q=90, f=3.0), 0, 1).fillna(0)
+    near_norm = inv_dist_norm(now_gap, cap=cap_q(now_gap, q=75, f=1.0)).fillna(0)
+
+    ers_bits = (
+        (ebs >= PASS_EBS).astype(int)
+        + (slope > 0).astype(int)
+        + ((rsi >= RSI_LOW) & (rsi <= RSI_HIGH)).astype(int)
+    )
+    ers_norm = np.clip(ers_bits / 3.0, 0, 1).fillna(0)
+    slope_pos_norm = pct_norm(slope, q=90, f=1.0).fillna(0)
+    mom_mid_norm = pct_norm(r10.clip(lower=0), q=90, f=1.0).fillna(0)
+    mom_norm = np.clip(0.5 * ers_norm + 0.3 * slope_pos_norm + 0.2 * mom_mid_norm, 0, 1).fillna(0)
+
+    if turn.notna().any():
+        try:
+            lo, hi = np.nanpercentile(turn.dropna(), 30), np.nanpercentile(turn.dropna(), 90)
+            denom = max(hi - lo, 1e-9)
+            liq_norm = np.clip((turn - lo) / denom, 0, 1).fillna(0)
+            liq_low = (turn < lo).astype(float)
+        except Exception:
+            liq_norm = pd.Series(0.0, index=x.index)
+            liq_low = pd.Series(0.0, index=x.index)
+    else:
+        liq_norm = pd.Series(0.0, index=x.index)
+        liq_low = pd.Series(0.0, index=x.index)
+
+    vol_sweet = (1 - np.minimum((volz - 1).abs() / 3, 1)).clip(0, 1).fillna(0)
+    kairi_abs = kairi.abs()
+    kairi_norm = (1 - np.minimum(kairi_abs / cap_q(kairi_abs, q=80, f=3.0), 1)).clip(0, 1).fillna(0)
+    tec_norm = np.clip(0.6 * vol_sweet + 0.4 * kairi_norm, 0, 1).fillna(0)
+
+    base_score = (
+        100 * W_RR * rr_norm
+        + 100 * W_T1 * t1_norm
+        + 100 * W_SL * sl_norm
+        + 100 * W_NEAR * near_norm
+        + 100 * W_MOM * mom_norm
+        + 100 * W_LIQ * liq_norm
+        + 100 * W_TEC * tec_norm
+    )
+
+    pen = pd.Series(0.0, index=x.index)
+    pen += P_OVERHEAT_5D * np.clip((r5 - 10) / 10, 0, 1).fillna(0)
+    pen += P_OVERHEAT_10D * np.clip((r10 - 25) / 25, 0, 1).fillna(0)
+    pen += P_RSI_OUT * ((rsi < RSI_LOW) | (rsi > RSI_HIGH)).astype(float)
+    pen += P_MACD_NEG * (slope < 0).astype(float)
+    pen += P_NEAR_FAR * np.clip((now_gap - 15) / 15, 0, 1).fillna(0)
+    pen += P_LIQ_LOW * liq_low
+    pen += P_VOL_SPIKE * (volz > 3).astype(float)
+
+    score = np.clip(base_score - pen, 0, 100)
+
+    x["RR1"] = rr1
+    x["Now%"] = now_gap
+    x["T1_ROOM%"] = t1_room
+    x["SL_ROOM%"] = sl_room
+    x["LDY_SCORE"] = score.round(1)
+
+    x["_GATE_OK"] = liquidity_gate(
+        x["거래대금(억원)"],
+        x.get("시장", pd.Series(np.nan, index=x.index))
+    ).fillna(False)
+
     if "MA20" in x.columns:
         x["MA20_GAP"] = ((nz_num(x["종가"]) / nz_num(x["MA20"]) - 1.0) * 100).replace([np.inf, -np.inf], np.nan)
     else:
         x["MA20_GAP"] = np.nan
-    
+
+    # ✅ 여기부터가 핵심
     if not keep_order:
         x = x.sort_values("LDY_SCORE", ascending=False, na_position="last")
         x["LDY_RANK"] = range(1, len(x) + 1)
-    
+    # keep_order=True면 CSV 순서 유지 (LDY_RANK는 밖에서 결정)
+
     if "AI_COMMENT" in x.columns:
         x["WHY"] = x["AI_COMMENT"]
-    
+
     return x
 
 # ---------------------------
@@ -2540,59 +2584,16 @@ def prepare_scored_data(raw_url, local_raw, pass_ebs):
                     scored[target_col] = fallback
 
     else:
-        # ⚠️ CASE 2: Legacy (점수 부재 시) -> scoring_engine SSOT 재계산
+        # ⚠️ CASE 2: Legacy (점수 부재 시) -> 대시보드 자체 스코어링 엔진 가동
         df = normalize_cols(df_raw)
+        scored = build_global_score(df, keep_order=True).reset_index(drop=True)
         
-        # [v20.6] macro_risk: CSV 직접 → run_health 간접 → NORMAL fallback
-        _resolved_macro = "NORMAL"
-        if "MACRO_RISK" in df_raw.columns:
-            # v20.6+ CSV에 직접 저장된 값 사용 (추론 불필요)
-            _mr_vals = df_raw["MACRO_RISK"].dropna().unique()
-            if len(_mr_vals) > 0:
-                _resolved_macro = str(_mr_vals[0])
-        else:
-            # 구버전 CSV fallback: run_meta JSON 직접 → run_health JSON 직접 → 간접 추론
-            try:
-                import glob as _glob_mod
-                # [v20.6.3] run_meta sidecar 우선 (가장 정확)
-                _rm_files = sorted(_glob_mod.glob(os.path.join(DATA_DIR, "run_meta_*.json")), reverse=True)
-                if _rm_files:
-                    with open(_rm_files[0], 'r') as _rmf:
-                        _rm_data = json.load(_rmf)
-                    if "macro_risk" in _rm_data and _rm_data["macro_risk"]:
-                        _resolved_macro = str(_rm_data["macro_risk"])
-                else:
-                    # run_health JSON fallback
-                    _rh_files = sorted(_glob_mod.glob(os.path.join(DATA_DIR, "run_health_*.json")), reverse=True)
-                    if _rh_files:
-                        with open(_rh_files[0], 'r') as _rhf:
-                            _rh_data = json.load(_rhf)
-                        if "macro_risk" in _rh_data and _rh_data["macro_risk"]:
-                            _resolved_macro = str(_rh_data["macro_risk"])
-                        else:
-                            _mar = _rh_data.get("max_allowed_route", "ATTACK")
-                            if _mar == "WAIT":
-                                _resolved_macro = "BEAR"
-                            elif _mar == "ARMED":
-                                _resolved_macro = "CAUTION"
-            except Exception:
-                pass
-        
-        scored = build_global_score(df, keep_order=True, macro_risk=_resolved_macro).reset_index(drop=True)
-        
-        # [v20.6] scoring_engine이 STRUCT/TIMING/AI_SCORE를 이미 생성 — 보존
-        # FINAL_SCORE/DISPLAY_SCORE도 scoring_engine 산출물 그대로 사용
-        if "FINAL_SCORE" in scored.columns:
-            scored["LDY_SCORE"] = scored["FINAL_SCORE"]
-            if "DISPLAY_SCORE" not in scored.columns:
-                scored["DISPLAY_SCORE"] = scored["FINAL_SCORE"]
-        else:
-            # scoring_engine 호출 자체가 실패한 극단적 fallback
-            scored["FINAL_SCORE"]   = scored.get("LDY_SCORE", 0.0)
-            scored["DISPLAY_SCORE"] = scored.get("LDY_SCORE", 0.0)
-            scored["STRUCT_SCORE"]  = scored.get("LDY_SCORE", 0.0)
-            scored["TIMING_SCORE"]  = 0.0
-            scored["AI_SCORE"]      = 0.0
+        # UI 호환성을 위해 대시보드 점수를 최신 규격(FINAL/DISPLAY)으로 매핑
+        scored["FINAL_SCORE"]   = scored["LDY_SCORE"]
+        scored["DISPLAY_SCORE"] = scored["LDY_SCORE"]
+        scored["STRUCT_SCORE"]  = scored["LDY_SCORE"]
+        scored["TIMING_SCORE"]  = 0.0
+        scored["AI_SCORE"]      = 0.0
 
     # 4. [Rank Restoration] 원본 파일의 배치 순서(Placement) 보존
     # CSV에 기록된 정예군(Top 120 등)의 전술적 순서를 최우선으로 존중합니다.
@@ -3106,69 +3107,6 @@ if df_latest is not None and not df_latest.empty:
     if "TRIGGER_SCORE" not in df_latest.columns:
         # TRIGGER_SCORE가 없으면 0점으로 초기화
         df_latest["TRIGGER_SCORE"] = 0.0
-
-    # ── [v19.2] Run Health 배너 ──
-    _run_status = df_latest["RUN_STATUS"].iloc[0] if "RUN_STATUS" in df_latest.columns else None
-    if _run_status == "DEGRADED":
-        _degraded_reasons = str(df_latest["DEGRADED_REASONS"].iloc[0]) if "DEGRADED_REASONS" in df_latest.columns else ""
-        _reason_labels = {
-            "MCAP_EMPTY": "시가총액", "MCAP_ALL_ZERO": "시가총액",
-            "BENCH_FAIL": "벤치마크", "BENCH_NAN": "벤치마크",
-            "FLOW_ZERO": "수급(외인/기관)", "FLOW_PARTIAL": "수급(개인만)", "NEWS_OFF": "뉴스분석",
-            "SECTOR_FAIL": "섹터분석",
-        }
-        _missing = []
-        for _code, _label in _reason_labels.items():
-            if _code in _degraded_reasons and _label not in _missing:
-                _missing.append(_label)
-        _miss_str = ", ".join(_missing) if _missing else _degraded_reasons
-        st.warning(f"⚠️ **오늘 분석은 일부 데이터 없이 실행되었습니다** — 누락: {_miss_str}. 추천 정확도가 평소보다 낮을 수 있습니다.")
-    elif _run_status == "CRITICAL":
-        st.error("🔴 **오늘 분석에 심각한 데이터 오류가 감지되었습니다.** 추천을 참고만 하시고, 내일 결과를 확인해주세요.")
-
-    # ── [v19.2.3] Run Health 상세 리포트 열기 ──
-    if _run_status and _run_status != "OK":
-        import json as _json
-        from glob import glob as _glob
-        _health_files = sorted(_glob(os.path.join(DATA_DIR, "run_health_*.json")), reverse=True)
-        if _health_files:
-            try:
-                with open(_health_files[0], "r", encoding="utf-8") as _hf:
-                    _health_data = _json.load(_hf)
-                with st.expander("📋 실행 건강 리포트 (Run Health Detail)", expanded=False):
-                    _h_cols = st.columns(3)
-                    _status_emoji = {"OK": "🟢", "DEGRADED": "🟡", "CRITICAL": "🔴"}.get(_health_data.get("status", ""), "⚪")
-                    _h_cols[0].metric("런 상태", f"{_status_emoji} {_health_data.get('status', '?')}")
-                    _h_cols[1].metric("이슈 수", f"{len(_health_data.get('reasons', []))}건")
-                    _h_cols[2].metric("데이터 신선도", "✅" if _health_data.get("data_freshness_ok", True) else "❌ 지연")
-
-                    # 항목별 체크 결과
-                    _checks = _health_data.get("checks", {})
-                    if _checks:
-                        _check_md = "| 항목 | 상태 |\n|---|---|\n"
-                        _check_labels = {
-                            "MCAP": "시가총액", "MCAP_EMPTY": "시가총액", "MCAP_ALL_ZERO": "시가총액(전행0)",
-                            "BENCH": "벤치마크", "BENCH_FAIL": "벤치마크", "BENCH_NAN": "벤치마크(NaN)",
-                            "FLOW": "수급(외인/기관)", "FLOW_ZERO": "수급(전행0)", "FLOW_PARTIAL": "수급(개인만)",
-                            "NEWS": "뉴스분석", "NEWS_OFF": "뉴스(비활성)",
-                            "SECTOR": "섹터분석", "SECTOR_FAIL": "섹터(실패)",
-                            "TP_MONOTONIC": "목표가 단조성",
-                        }
-                        for _ck, _ok in _checks.items():
-                            _label = _check_labels.get(_ck, _ck)
-                            _mark = "✅ 정상" if _ok else "❌ 실패"
-                            _check_md += f"| {_label} | {_mark} |\n"
-                        st.markdown(_check_md)
-
-                    # JSON 다운로드
-                    st.download_button(
-                        "📥 run_health.json 다운로드",
-                        data=_json.dumps(_health_data, ensure_ascii=False, indent=2),
-                        file_name=os.path.basename(_health_files[0]),
-                        mime="application/json",
-                    )
-            except Exception:
-                pass
 user = get_user()
 user_role = (user or {}).get("role", "guest")
 
@@ -3186,64 +3124,6 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         "👑 회원관리",  # 👈 추가된 부분
     ]
 )
-
-# ── [v20.0.1] 탭/종목 상태 자동 복원 (모바일 탭 전환 대응) ──
-st.markdown("""
-<script>
-(function() {
-    // ── 탭 클릭 시 localStorage에 저장 ──
-    function setupTabTracking() {
-        const tabs = document.querySelectorAll('[data-baseweb="tab"]');
-        if (!tabs.length) { setTimeout(setupTabTracking, 500); return; }
-        
-        tabs.forEach(function(tab, idx) {
-            tab.addEventListener('click', function() {
-                localStorage.setItem('ldy_active_tab', idx);
-            });
-        });
-        
-        // ── 페이지 로드 시 저장된 탭으로 복원 ──
-        const saved = localStorage.getItem('ldy_active_tab');
-        if (saved !== null) {
-            const tabIdx = parseInt(saved);
-            if (tabIdx > 0 && tabIdx < tabs.length) {
-                // 약간의 딜레이 후 클릭 (Streamlit 렌더링 완료 대기)
-                setTimeout(function() { tabs[tabIdx].click(); }, 300);
-            }
-        }
-    }
-    
-    // ── 종목 선택 시 localStorage에 저장 ──
-    function setupStockTracking() {
-        const observer = new MutationObserver(function() {
-            const selectbox = document.querySelector('[data-testid="stSelectbox"]');
-            if (selectbox) {
-                const span = selectbox.querySelector('[data-baseweb="select"] span');
-                if (span && span.textContent) {
-                    const current = span.textContent.trim();
-                    const prev = localStorage.getItem('ldy_selected_stock');
-                    if (current && current !== prev && current !== '분석할 종목을 선택하세요') {
-                        localStorage.setItem('ldy_selected_stock', current);
-                    }
-                }
-            }
-        });
-        observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    }
-    
-    // ── 초기화 ──
-    if (document.readyState === 'complete') {
-        setupTabTracking();
-        setupStockTracking();
-    } else {
-        window.addEventListener('load', function() {
-            setupTabTracking();
-            setupStockTracking();
-        });
-    }
-})();
-</script>
-""", unsafe_allow_html=True)
 
 with tab1:
     # 🔥 v6.8 Reality Check: 지난 추천 성과 요약
@@ -3732,18 +3612,7 @@ with tab2:
     if not target_list:
         st.info("💡 분석할 종목이 없습니다.")
     else:
-        # [v20.0.1] 종목 선택 복원 — 탭 전환 후 돌아와도 유지
-        _saved_stock = st.query_params.get("stock", "")
-        _default_idx = 0
-        if _saved_stock and _saved_stock in target_list:
-            _default_idx = target_list.index(_saved_stock)
-
-        selected_name = st.selectbox("분석할 종목을 선택하세요", target_list,
-                                      index=_default_idx, key="dd_select_final")
-
-        # 선택 변경 시 URL에 저장 (새로고침 후에도 복원)
-        if selected_name and selected_name != _saved_stock:
-            st.query_params["stock"] = selected_name
+        selected_name = st.selectbox("분석할 종목을 선택하세요", target_list, key="dd_select_final")
         sel_row = None
         if not active_df.empty:
             found = active_df[active_df["종목명"] == selected_name]
@@ -3824,17 +3693,17 @@ with tab2:
                 price_max = bar_prices[-1][1] * 1.02
                 price_range = price_max - price_min
                 if price_range > 0:
-                    bar_html = '<div style="position:relative; height:80px; background:linear-gradient(90deg, rgba(255,59,48,0.15) 0%, rgba(255,59,48,0.05) 30%, rgba(0,230,118,0.05) 70%, rgba(0,230,118,0.15) 100%); border-radius:8px; margin:8px 0 40px 0; overflow:visible;">'
+                    bar_html = '<div style="position:relative; height:50px; background:linear-gradient(90deg, rgba(255,59,48,0.15) 0%, rgba(255,59,48,0.05) 30%, rgba(0,230,118,0.05) 70%, rgba(0,230,118,0.15) 100%); border-radius:8px; margin:8px 0 16px 0;">'
                     for label, price, color in bar_prices:
                         pct = (price - price_min) / price_range * 100
-                        pct = max(3, min(pct, 97))
+                        pct = max(2, min(pct, 98))
                         is_current = label == "현재가"
                         dot_size = "14px" if is_current else "10px"
                         z_idx = "10" if is_current else "5"
                         border = "2px solid #FFF" if is_current else "none"
-                        bar_html += f'''<div style="position:absolute; left:{pct}%; top:35%; transform:translate(-50%,-50%); z-index:{z_idx};">
+                        bar_html += f'''<div style="position:absolute; left:{pct}%; top:50%; transform:translate(-50%,-50%); z-index:{z_idx};">
                             <div style="width:{dot_size}; height:{dot_size}; background:{color}; border-radius:50%; border:{border}; margin:0 auto;"></div>
-                            <div style="font-size:10px; color:{color}; text-align:center; white-space:nowrap; margin-top:4px; font-weight:{"bold" if is_current else "normal"}; line-height:1.3;">{label}<br>{int(price):,}</div>
+                            <div style="font-size:10px; color:{color}; text-align:center; white-space:nowrap; margin-top:2px; font-weight:{"bold" if is_current else "normal"};">{label}<br>{int(price):,}</div>
                         </div>'''
                     bar_html += '</div>'
                     st.markdown(bar_html, unsafe_allow_html=True)

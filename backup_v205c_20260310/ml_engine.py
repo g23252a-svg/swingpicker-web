@@ -1,6 +1,5 @@
 """
 ml_engine.py v19.0 — Elite Ensemble AI Engine (5-Fix Evolution)
-[v20.6.3] Feature cache: pickle → joblib + schema sidecar
 
 v18.3 → v19.0 주요 변경:
   ──────────────────────────────────────────────────────────────
@@ -41,8 +40,7 @@ except ImportError:
 MODEL_PATH       = "data/trading_model_v19.pth"
 SCALER_PATH      = "data/trading_scaler_v19.pkl"
 XGB_MODEL_PATH   = "data/trading_model_xgb_v19.pkl"
-FEATURE_CACHE_PATH = "data/feature_cache_v20.joblib"
-FEATURE_CACHE_SCHEMA_PATH = "data/feature_cache_schema.json"
+FEATURE_CACHE_PATH = "data/feature_cache_v19.pkl"
 META_PATH        = "data/trading_meta_v19.json"
 # [Fix 4] 앙상블 가중치 캐시
 ENSEMBLE_WEIGHTS_PATH = "data/ensemble_weights_v19.json"
@@ -54,9 +52,6 @@ FALLBACK_PATHS = [
     ("data/trading_model_v17.pth", "data/trading_scaler_v17.pkl", "data/trading_model_xgb_v17.pkl"),
     ("data/trading_model_v15_6_master.pth", "data/trading_scaler_v15_6_master.pkl", None),
 ]
-
-# [v20.0.1] data/ 디렉토리 자동 생성 — 최초 배포/CI에서 FileNotFoundError 방지
-os.makedirs("data", exist_ok=True)
 
 SEQ_LENGTH  = 40
 TARGET_TIERS = [3.0, 5.0, 7.0]
@@ -77,133 +72,26 @@ FEATURE_COLS = [
 _model_lock = threading.Lock()
 
 
-# ====================== 메타 검증 ======================
-
-def _check_feature_version(meta_path: str) -> dict:
-    """
-    [Fix 4] 모델 메타파일에서 feature_cols를 읽어 현재 FEATURE_COLS와 비교.
-
-    Returns:
-        {
-            "match": bool,
-            "model_features": list,
-            "current_features": list,
-            "missing_in_model": list,
-            "extra_in_model": list,
-        }
-    """
-    result = {
-        "match": False,
-        "model_features": [],
-        "current_features": list(FEATURE_COLS),
-        "missing_in_model": [],
-        "extra_in_model": [],
-    }
-
-    if not os.path.exists(meta_path):
-        return result
-
-    try:
-        with open(meta_path, 'r') as f:
-            meta = json.load(f)
-
-        model_features = meta.get("feature_cols", [])
-        result["model_features"] = model_features
-
-        current_set = set(FEATURE_COLS)
-        model_set = set(model_features)
-
-        result["missing_in_model"] = sorted(current_set - model_set)
-        result["extra_in_model"] = sorted(model_set - current_set)
-        result["match"] = (current_set == model_set)
-
-    except (json.JSONDecodeError, KeyError, IOError) as e:
-        print(f"⚠️ [ML] 메타 파일 파싱 실패 ({meta_path}): {e}")
-
-    return result
-
-
 # ====================== 캐시 유틸 ======================
 
-def _compute_feature_hash():
-    """FEATURE_COLS 해시 → schema 불일치 감지용"""
-    import hashlib
-    return hashlib.md5(",".join(FEATURE_COLS).encode()).hexdigest()[:12]
-
-
 def get_feature_cache():
-    """
-    [v20.6] Joblib 우선 → pickle fallback.
-    Schema sidecar 검증: feature_cols 불일치 시 캐시 무시.
-    """
-    # 1. Schema 검증
-    if os.path.exists(FEATURE_CACHE_SCHEMA_PATH):
-        try:
-            with open(FEATURE_CACHE_SCHEMA_PATH, 'r') as f:
-                schema = json.load(f)
-            saved_hash = schema.get("feature_cols_hash", "")
-            current_hash = _compute_feature_hash()
-            if saved_hash and saved_hash != current_hash:
-                print(f"⚠️ [ML] Feature schema mismatch: "
-                      f"cache={saved_hash}, current={current_hash} → 캐시 무시")
-                return {}
-        except Exception:
-            pass
-
-    # 2. Joblib 우선 로드
     for path in [FEATURE_CACHE_PATH,
-                 "data/feature_cache_v19.pkl",
                  "data/feature_cache_v18_3.pkl",
                  "data/feature_cache_v18_2.pkl",
                  "data/feature_cache_v18.pkl",
                  "data/feature_cache_v17.pkl"]:
         if os.path.exists(path):
             try:
-                if path.endswith('.joblib'):
-                    return joblib.load(path)
-                else:
-                    with open(path, 'rb') as f:
-                        data = pickle.load(f)
-                    # 구버전 pkl → 새 joblib 자동 마이그레이션
-                    try:
-                        save_feature_cache(data)
-                        print(f"✅ [ML] Cache migrated: {path} → {FEATURE_CACHE_PATH}")
-                    except Exception:
-                        pass
-                    return data
+                with open(path, 'rb') as f:
+                    return pickle.load(f)
             except Exception:
                 continue
     return {}
 
 
 def save_feature_cache(cache_data):
-    """
-    [v20.6] Joblib 저장 + Schema sidecar.
-    - joblib: pickle 대비 numpy 배열 압축 효율 ~3x
-    - schema: feature_cols_hash, last_trade_date 기록
-    """
-    os.makedirs(os.path.dirname(FEATURE_CACHE_PATH) or "data", exist_ok=True)
-    joblib.dump(cache_data, FEATURE_CACHE_PATH, compress=3)
-    
-    # Schema sidecar 저장
-    try:
-        schema = {
-            "schema_version": "v20.6",
-            "feature_cols_hash": _compute_feature_hash(),
-            "feature_cols": list(FEATURE_COLS),
-            "n_stocks": len(cache_data) if isinstance(cache_data, dict) else 0,
-            "saved_at": datetime.now().isoformat(),
-        }
-        # last_trade_date 추출 시도
-        if isinstance(cache_data, dict):
-            for v in cache_data.values():
-                if isinstance(v, dict) and "date" in v:
-                    schema["last_trade_date"] = str(v["date"])
-                    break
-        with open(FEATURE_CACHE_SCHEMA_PATH, 'w') as f:
-            json.dump(schema, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"⚠️ [ML] Schema sidecar 저장 실패 (무해): {e}")
+    with open(FEATURE_CACHE_PATH, 'wb') as f:
+        pickle.dump(cache_data, f)
 
 
 def is_trained_today(force=False):
@@ -619,14 +507,6 @@ def load_model():
         if _loaded_lstm_model is not None and _loaded_scaler is not None:
             return
 
-        # [Fix 4] 메타 검증: 현재 FEATURE_COLS와 모델 feature_cols 일치 확인
-        _meta_check = _check_feature_version(META_PATH)
-        if _meta_check["model_features"] and not _meta_check["match"]:
-            print(f"⚠️ [ML] Feature mismatch! "
-                  f"missing={_meta_check['missing_in_model']}, "
-                  f"extra={_meta_check['extra_in_model']}")
-            print(f"   → 모델은 로드하되, 예측 정확도가 저하될 수 있음")
-
         candidates = [
             (MODEL_PATH, SCALER_PATH, XGB_MODEL_PATH, SEQ_LENGTH, True),
         ]
@@ -653,16 +533,6 @@ def load_model():
                 _loaded_use_rolling_zscore = use_rolling
                 print(f"✅ [ML] LSTM 로드: {model_path} "
                       f"(features={in_dim}, seq={seq_len}, rolling_z={use_rolling})")
-
-                # [Fix 4] 로드 성공 시 메타 정보 로그
-                if os.path.exists(META_PATH):
-                    try:
-                        with open(META_PATH, 'r') as f:
-                            _meta = json.load(f)
-                        print(f"   → meta: version={_meta.get('version', '?')}, "
-                              f"features={len(_meta.get('feature_cols', []))}")
-                    except Exception:
-                        pass
 
                 if xgb_path and XGB_OK and os.path.exists(xgb_path):
                     try:

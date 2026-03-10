@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-scoring_engine.py — 종목 스코어링 + 상태 머신 엔진 (v6.0 Vectorized + v20.6.3 SSOT)
+scoring_engine.py — 종목 스코어링 + 상태 머신 엔진 (v6.0 Vectorized)
 ──────────────────────────────────────────────────────────────────────
 [v6.0] apply(axis=1) 전면 제거 → 벡터 연산으로 리팩토링
   - calculate_ebs_independent  → _vec_ebs()
   - calculate_structural_score → _vec_structural_score()
   - calculate_timing_score     → _vec_timing_score()
   - 100종목 기준 약 30~50x 속도 향상
-[v20.6.3] SSOT + Deterministic
-  - _vec_determine_state_dynamic(): ROUTE 벡터 판정 (단건 함수 100% 일치)
-  - generate_score_reasons(macro_risk): 장세 연동 임계치, numpy argsort 벡터화
 """
 import numpy as np
 import pandas as pd
@@ -29,21 +26,19 @@ def _safe_col(df: pd.DataFrame, col: str, default=0.0) -> pd.Series:
     return pd.Series(default, index=df.index)
 
 
-def _vec_ebs(df: pd.DataFrame, config=None) -> pd.Series:
+def _vec_ebs(df: pd.DataFrame) -> pd.Series:
     """
     [Vectorized EBS] 5가지 펀더멘털 체크리스트 (0~10점)
     기존: df.apply(calculate_ebs_independent, axis=1)
     """
-    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     score = pd.Series(0, index=df.index, dtype='int64')
 
     score += (_safe_col(df, 'Low_Trend_PCT') > 0).astype(int) * 2
-    score += (_safe_col(df, 'Vol_Quality') >= cfg.indicator.vol_quality_min).astype(int) * 2
+    score += (_safe_col(df, 'Vol_Quality') >= 1.1).astype(int) * 2
     score += (_safe_col(df, 'MACD_Slope_PCT') > 0).astype(int) * 2
 
     rsi = _safe_col(df, 'RSI14', 50)
-    rsi_lo, rsi_hi = cfg.indicator.rsi_range
-    score += ((rsi >= rsi_lo) & (rsi <= rsi_hi)).astype(int) * 2
+    score += ((rsi >= 45) & (rsi <= 70)).astype(int) * 2
 
     ttm = _safe_col(df, 'TTM_SQUEEZE')
     bb_exp = _safe_col(df, 'BB_Expanding')
@@ -76,19 +71,6 @@ def _vec_structural_score(df: pd.DataFrame) -> pd.Series:
 
     base = trend_score + mfi_score + vq_score + range_score + disp_score
 
-    # [v4.0] scoring-overhaul: 곱연산 과락(Gate) 시스템
-    # 핵심 지표가 최소 기준 미달이면 총점에 패널티 배수 적용
-    gate_mult = pd.Series(1.0, index=df.index)
-    vq_raw = _safe_col(df, 'Vol_Quality', 0.0)
-    gate_mult = gate_mult * np.where(vq_raw < 0.5, 0.3, np.where(vq_raw < 0.8, 0.6, 1.0))
-    mfi_raw = _safe_col(df, 'MFI14', 50)
-    gate_mult = gate_mult * np.where(mfi_raw < 20, 0.3, np.where(mfi_raw < 30, 0.6, 1.0))
-    tv = _safe_col(df, '거래대금(억원)', 0)
-    if tv.sum() == 0:
-        tv = _safe_col(df, '거래대금(억)', 0)
-    gate_mult = gate_mult * np.where(tv < 10, 0.2, np.where(tv < 30, 0.5, 1.0))
-    base = base * gate_mult
-
     # 패널티
     penalty = (_safe_col(df, 'Above_MA20') == 0).astype(float) * 20
 
@@ -119,12 +101,11 @@ def _vec_structural_score(df: pd.DataFrame) -> pd.Series:
     return (base - penalty + mtf_adj).clip(0, 100).round(1)
 
 
-def _vec_timing_score(df: pd.DataFrame, config=None) -> pd.Series:
+def _vec_timing_score(df: pd.DataFrame) -> pd.Series:
     """
     [Vectorized TIMING_SCORE] 매물대 + 기술적 + 섹터 보정 (0~100)
     기존: df.apply(calculate_timing_score, axis=1)
     """
-    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     raw = _safe_col(df, 'RAW_TRIGGER_SCORE')
     # fallback: RAW_TRIGGER_SCORE가 없으면 TRIGGER_SCORE
     mask_zero = raw == 0
@@ -160,14 +141,13 @@ def _vec_timing_score(df: pd.DataFrame, config=None) -> pd.Series:
     rsi = _safe_col(df, 'RSI14', 50)
     gap_pct = _safe_col(df, 'gap_pct')
 
-    penalty += (rsi > cfg.indicator.rsi_penalty_threshold).astype(float) * 20
-    penalty += (gap_pct > cfg.indicator.gap_pct_penalty_threshold).astype(float) * 10
+    penalty += (rsi > 75).astype(float) * 20
+    penalty += (gap_pct > 5.0).astype(float) * 10
 
-    # 섹터 모멘텀 보너스 (데이터 있을 때만)
+    # 섹터 모멘텀 보너스
     sector_rank = _safe_col(df, 'SECTOR_RANK', 99)
-    _sector_available = sector_rank.notna() & (sector_rank < 99)
-    bonus += (_sector_available & (sector_rank <= 3)).astype(float) * 8
-    bonus += (_sector_available & (sector_rank > 3) & (sector_rank <= 6)).astype(float) * 4
+    bonus += (sector_rank <= 3).astype(float) * 8
+    bonus += ((sector_rank > 3) & (sector_rank <= 6)).astype(float) * 4
 
     return (std_trigger + bonus - penalty).clip(0, 100).round(1)
 
@@ -198,7 +178,7 @@ def calculate_structural_score(row) -> float:
 def calculate_timing_score(row) -> float:
     """[레거시 호환] 단일 row dict → TIMING_SCORE"""
     df = pd.DataFrame([row])
-    return float(_vec_timing_score(df, config=None).iloc[0])
+    return float(_vec_timing_score(df).iloc[0])
 
 
 # ═══════════════════════════════════════════════════
@@ -263,9 +243,8 @@ def apply_curve_penalty(val, threshold, power=2.0, weight=1.0):
 #  4. 상태 머신 (ROUTE) — 기존 호환 유지
 # ═══════════════════════════════════════════════════
 
-def determine_state(row, RouteState=None, config=None):
+def determine_state(row, RouteState=None):
     """[정적 임계치] 레거시 호환"""
-    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     if RouteState is None:
         class _RS:
             OVERHEAT = "OVERHEAT"
@@ -285,11 +264,9 @@ def determine_state(row, RouteState=None, config=None):
         vol_qual = float(row.get('Vol_Quality', 1.0))
         range_pos = float(row.get('Range_Pos', 0))
 
-        if rsi >= cfg.indicator.rsi_overheat or r5 >= 20.0: return RouteState.OVERHEAT
-        if (above_ma20 == 1 and slope > 0
-                and t_score >= cfg.indicator.timing_attack_threshold
-                and vol_qual >= cfg.indicator.vol_quality_attack
-                and range_pos >= 0.8):
+        if rsi >= 75 or r5 >= 20.0: return RouteState.OVERHEAT
+        if (above_ma20 == 1 and slope > 0 and t_score >= 60
+                and vol_qual >= 1.3 and range_pos >= 0.8):
             return RouteState.ATTACK
         if is_squeeze == 1 and above_ma20 == 1: return RouteState.ARMED
         if vol_qual >= 2.0: return RouteState.ARMED
@@ -398,40 +375,22 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
     """
     STRUCT + TIMING + AI → FINAL_SCORE 산출.
     ✅ [v6.0] apply(axis=1) 전면 제거 → 벡터 연산
-    ✅ [v19.2] 가중치 투명성: W_STRUCT/W_TIMING/W_AI 컬럼 저장
-    ✅ [v19.2] 축 유무 감지: SECTOR/ML 비활성 시 해당 보너스 자동 제외
     """
     cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     x = df.copy()
 
-    # ── [v19.2] 축 가용성 감지 ──
-    _has_sector = "SECTOR_RANK" in x.columns and x["SECTOR_RANK"].notna().any()
-    _has_ml = "ML_SCORE" in x.columns and (x["ML_SCORE"].fillna(0) != 0).any()
-
     # ── [v6.0] 벡터화된 스코어링 ──
-    x["EBS"] = _vec_ebs(x, config=cfg)
+    x["EBS"] = _vec_ebs(x)
     x["PASS_EBS"] = (x["EBS"] >= cfg.ebs_pass_threshold).astype(int)
 
     x["STRUCT_SCORE"] = _vec_structural_score(x)
-    x["TIMING_SCORE"] = _vec_timing_score(x, config=cfg)
+    x["TIMING_SCORE"] = _vec_timing_score(x)
 
     if "ML_SCORE" not in x.columns:
         x["ML_SCORE"] = 0.0
     x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
 
     w_s, w_t, w_a = _calc_ml_weight(x["ML_SCORE"], macro_risk, config=cfg)
-
-    # [v19.2] ML 비활성 시 AI 가중치를 STRUCT/TIMING에 재배분
-    if not _has_ml and w_a > 0:
-        _redistribute = w_a
-        w_a = 0.0
-        w_s += _redistribute * 0.5
-        w_t += _redistribute * 0.5
-        # 재정규화
-        _total = w_s + w_t
-        if _total > 0:
-            w_s /= _total
-            w_t /= _total
 
     x["FINAL_SCORE"] = (
         (x["STRUCT_SCORE"] * w_s)
@@ -440,200 +399,4 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
     ).round(1)
 
     x["DISPLAY_SCORE"] = x["FINAL_SCORE"]
-
-    # [v19.2] 가중치 투명성: 오늘 어떤 비율로 계산됐는지 CSV에 저장
-    x["W_STRUCT"] = round(w_s, 3)
-    x["W_TIMING"] = round(w_t, 3)
-    x["W_AI"] = round(w_a, 3)
-    x["SCORING_AXES"] = (
-        ("STRUCT+TIMING+AI" if _has_ml else "STRUCT+TIMING")
-        + ("+SECTOR" if _has_sector else "")
-    )
-
-    return x
-
-# ═══════════════════════════════════════════════════
-#  6. [v20.6] 벡터화 ROUTE 판정
-# ═══════════════════════════════════════════════════
-
-def _vec_determine_state_dynamic(df: pd.DataFrame,
-                                  thresholds: dict) -> pd.Series:
-    """
-    [v20.6] determine_state_dynamic의 완전 벡터화 버전.
-    apply(axis=1) 제거 → 100종목 기준 ~20x 속도 향상.
-    """
-    def _col(name, default=0.0):
-        return _safe_col(df, name, default)
-
-    rsi       = _col('RSI14', 50)
-    r1        = _col('ret_1d_%')
-    r5        = _col('ret_5d_%')
-    slope     = _col('MACD_Slope_PCT')
-    range_pos = _col('Range_Pos')
-    vol_qual  = _col('Vol_Quality', 1.0)
-    t_score   = _col('TIMING_SCORE')
-    vol_z     = _col('거래강도')
-    low_trend = _col('Low_Trend_PCT')
-    above_ma20 = _col('Above_MA20').astype(int)
-
-    turnover  = _col('거래대금(원)')
-    frg_net   = _col('외인순매수금액').where(
-        _col('외인순매수금액') != 0, _col('외인순매수'))
-    ind_net   = _col('개인순매수금액').where(
-        _col('개인순매수금액') != 0, _col('개인순매수'))
-
-    _turnover_min = thresholds.get('turnover_min_valid', 50_000_000)
-    _turnover_valid = turnover >= _turnover_min
-
-    frg_ratio = np.where(_turnover_valid, frg_net / turnover.replace(0, np.nan) * 100, 0.0)
-    ant_ratio = np.where(_turnover_valid, ind_net / turnover.replace(0, np.nan) * 100, 0.0)
-
-    vol_cut   = thresholds.get('vol_q75', 1.2)
-    range_cut = thresholds.get('range_q75', 0.8)
-
-    # ── 우선순위 높은 것부터 판정 (하위 조건이 상위 조건 덮어씀) ──
-    route = pd.Series("NEUTRAL", index=df.index)
-
-    # WAIT
-    mask_wait = (low_trend > 0) | (r1 > 0)
-    route = route.where(~mask_wait, "WAIT")
-
-    # ARMED
-    is_squeeze = _col('TTM_SQUEEZE').astype(int)
-    mask_armed = ((is_squeeze == 1) | (vol_qual >= 2.0)) & (above_ma20 == 1) & (low_trend >= -3.0)
-    route = route.where(~mask_armed, "ARMED")
-
-    # ATTACK (low_trend 조건은 별도 downgrade에서 처리)
-    mask_attack_base = (
-        (slope > 0) & (range_pos >= range_cut) & (vol_qual >= vol_cut)
-        & (t_score >= 60) & (above_ma20 == 1)
-    )
-    route = route.where(~mask_attack_base, "ATTACK")
-
-    # ATTACK → WAIT 다운그레이드 (low_trend 악화 시)
-    mask_attack_downgrade = mask_attack_base & (low_trend < -3.0)
-    route = route.where(~mask_attack_downgrade, "WAIT")
-
-    # OVERHEAT
-    mask_overheat = (rsi >= 75) | (r5 >= 25.0)
-    route = route.where(~mask_overheat, "OVERHEAT")
-
-    # EXIT_WARNING
-    mask_exit_vol = (vol_z >= 10.0) & (r1 >= 10.0)
-    mask_exit_flow = (
-        _turnover_valid & (r1 > 5.0)
-        & (pd.Series(frg_ratio, index=df.index) < -20.0)
-        & (pd.Series(ant_ratio, index=df.index) > 20.0)
-    )
-    mask_exit = mask_exit_vol | mask_exit_flow
-    route = route.where(~mask_exit, "EXIT_WARNING")
-
-    return route
-
-
-# ═══════════════════════════════════════════════════
-#  7. [v20.6] 점수 설명(Reason) 생성
-# ═══════════════════════════════════════════════════
-
-def generate_score_reasons(df: pd.DataFrame,
-                           macro_risk: str = "NORMAL") -> pd.DataFrame:
-    """
-    [v20.6] FINAL_SCORE의 주요 기여/리스크 요인을 사람이 읽을 수 있게 생성.
-    컬럼 추가: SCORE_REASON_TOP1, SCORE_REASON_TOP2, SCORE_RISK, ROUTE_REASON
-
-    [v20.6.3] 장세 연동 임계치:
-      NORMAL/BULL → 70점 이상이 "강점"
-      CAUTION     → 60점 이상
-      BEAR/CRITICAL → 50점 이상  (약장에서도 상위 축 설명 가능)
-    """
-    # ── 장세별 임계치 ──
-    _STRENGTH_THRESHOLDS = {
-        "BULL": 70, "NORMAL": 70,
-        "CAUTION": 60,
-        "BEAR": 50, "CRITICAL": 50,
-    }
-    strength_th = _STRENGTH_THRESHOLDS.get(macro_risk, 70)
-
-    x = df.copy()
-    n = len(x)
-
-    reasons_top1 = pd.Series("", index=x.index)
-    reasons_top2 = pd.Series("", index=x.index)
-    risk_col     = pd.Series("", index=x.index)
-    route_reason = pd.Series("", index=x.index)
-
-    struct = _safe_col(x, 'STRUCT_SCORE')
-    timing = _safe_col(x, 'TIMING_SCORE')
-    ai     = _safe_col(x, 'AI_SCORE')
-    rsi    = _safe_col(x, 'RSI14', 50)
-    r5     = _safe_col(x, 'ret_5d_%')
-    low_t  = _safe_col(x, 'Low_Trend_PCT')
-    vq     = _safe_col(x, 'Vol_Quality', 1.0)
-    mfi    = _safe_col(x, 'MFI14', 50)
-    tv     = _safe_col(x, '거래대금(억원)')
-    route  = x.get('ROUTE', pd.Series("", index=x.index)).astype(str)
-
-    # ── 강점 판별 (실제 점수순 — 완전 벡터화, 장세 연동 임계치) ──
-    axis_names = np.array(['STRUCT', 'TIMING', 'AI'])
-    axis_vals  = np.column_stack([struct.values, timing.values, ai.values])  # (N, 3)
-
-    # 장세별 임계치 적용
-    axis_masked = np.where(axis_vals >= strength_th, axis_vals, -np.inf)
-
-    # 행별 내림차순 argsort (큰 값이 앞으로)
-    order = np.argsort(-axis_masked, axis=1)  # (N, 3)
-
-    # 1위/2위 인덱스
-    idx1 = order[:, 0]
-    idx2 = order[:, 1]
-
-    # 해당 축 값이 70점 이상인지 체크
-    val1 = axis_masked[np.arange(len(idx1)), idx1]
-    val2 = axis_masked[np.arange(len(idx2)), idx2]
-
-    top1_labels = np.where(val1 > -np.inf,
-                           np.char.add(axis_names[idx1], ' 강점'), '')
-    top2_labels = np.where(val2 > -np.inf,
-                           np.char.add(axis_names[idx2], ' 보조'), '')
-
-    reasons_top1 = pd.Series(top1_labels, index=x.index)
-    reasons_top2 = pd.Series(top2_labels, index=x.index)
-
-    # 추가 강점 세분화 (3축 모두 70점 미만일 때 fallback)
-    reasons_top1 = reasons_top1.where(
-        ~((low_t > 2.0) & (reasons_top1 == "")), "저점추세 양호")
-    reasons_top1 = reasons_top1.where(
-        ~((vq >= 2.0) & (reasons_top1 == "")), "거래품질 우수")
-
-    # ── 리스크 ──
-    risk_col = risk_col.where(~(rsi >= 70), "RSI 과열")
-    risk_col = risk_col.where(
-        ~((r5 >= 15) & (risk_col == "")), "5일 급등")
-    risk_col = risk_col.where(
-        ~((tv < 30) & (risk_col == "")), "유동성 부족")
-    risk_col = risk_col.where(
-        ~((mfi < 25) & (risk_col == "")), "MFI 약세")
-    risk_col = risk_col.where(
-        ~((low_t < -5) & (risk_col == "")), "저점 이탈")
-
-    # ── ROUTE 사유 ──
-    route_reason = route_reason.where(
-        ~(route == "EXIT_WARNING"), "수급/거래량 이상 감지")
-    route_reason = route_reason.where(
-        ~((route == "OVERHEAT") & (route_reason == "")), f"과열 (RSI/수익률)")
-    route_reason = route_reason.where(
-        ~((route == "ATTACK") & (route_reason == "")), "기술적 돌파 조건 충족")
-    route_reason = route_reason.where(
-        ~((route == "ARMED") & (route_reason == "")), "스퀴즈/품질 대기")
-    route_reason = route_reason.where(
-        ~((route == "WAIT") & (route_reason == "")), "추세 관망")
-    route_reason = route_reason.where(
-        ~((route == "NEUTRAL") & (route_reason == "")), "조건 미충족")
-
-    x["SCORE_REASON_TOP1"] = reasons_top1
-    x["SCORE_REASON_TOP2"] = reasons_top2
-    x["SCORE_RISK"]        = risk_col
-    x["ROUTE_REASON"]      = route_reason
-    x["REASON_THRESHOLD"]  = strength_th  # [v20.6.3] 장세별 임계치 기록
-
     return x

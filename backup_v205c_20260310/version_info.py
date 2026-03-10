@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-version_info.py (v20.6.3 SSOT Complete)
+version_info.py (v18.0 Premium-UI)
 - CHANGELOG: 전체 업데이트 이력 관리
 - UI: 프리미엄 사이드바 뱃지, 업데이트 타임라인
 - 100/100: dashboard.py에서 요청하는 모든 물자(변수/함수) 완비
@@ -14,40 +14,6 @@ logger = logging.getLogger("version_info")
 
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
-    {
-        "version": "20.6.3",
-        "date": "2026-03-10",
-        "type": "minor",
-        "title": "SSOT Complete + Deterministic Engine — Direct Macro SSOT + Adaptive Reason",
-        "items": [
-            "🎯 **SSOT 완성:** dashboard.py 독자 build_global_score() 제거 → scoring_engine.build_global_score() 단일 경로, CSV/Dashboard/Backtest 점수 100% 일치",
-            "⚡ **Trigger 병렬 배치:** ThreadPoolExecutor 4-worker 병렬 처리 (iterrows 제거), sequential 대비 ~3x 속도 향상",
-            "⚡ **ROUTE 벡터 판정:** apply(determine_state_dynamic) 제거 → _vec_determine_state_dynamic() 벡터 연산, 100% 단건 함수 일치 검증 완료",
-            "📝 **점수 설명 컬럼:** SCORE_REASON_TOP1/TOP2 실제 점수순 정렬 (numpy argsort 완전 벡터화), 장세 연동 임계치 (BEAR=50, CAUTION=60, NORMAL=70)",
-            "🔧 **예외 처리 등급화:** 투자 판단 축(ML/TRIGGER/SECTOR/FLOW) 실패 시 [AXIS:*] 태그 warning → run_health 후속 평가",
-            "💾 **ML 캐시 개선:** feature_cache pickle → joblib + schema sidecar (feature_cols_hash), 구버전 자동 마이그레이션",
-            "📡 **Macro SSOT 직접 전달:** MACRO_RISK/MARKET_BREADTH를 CSV + run_health JSON + run_meta JSON sidecar에 직접 저장",
-            "📋 **run_meta sidecar:** 레거시 CSV용 메타 복원 경로 — macro_risk/가중치/scoring_axes 등 파이프라인 컨텍스트 보존",
-            "📝 **주석/문서 동기화:** scoring_engine/pipeline_score/pipeline_finalize/ml_engine/run_health/version_info docstring을 v20.6.3 실제 구현과 일치시킴",
-            "✅ **테스트 동봉:** test_v206_features.py — ROUTE 벡터 정확도/설명 컬럼 점수순/장세 연동/Macro SSOT 회귀 검증",
-        ],
-        "schema_min": 5
-    },
-    {
-        "version": "20.5c",
-        "date": "2026-03-08",
-        "type": "minor",
-        "title": "KIS API 수급 연동 완전체 — Run Status: OK 100/100 달성",
-        "items": [
-            "📡 **KIS API 수급 선수집 (prefetch_flow.py v2.0):** pykrx 전용 구조 → KIS API v2.0 완전 교체, `/uapi/domestic-stock/v1/quotations/foreign-institution-total` (tr_id: FHPTJ04400000) 단일 호출로 외인·기관 동시 수집",
-            "🗂️ **flow 캐시 구조 확정:** `frg` / `inst` / `ant` 키 기반 저장, 주말 stale 오판 수정 (직전 평일 기준 비교)",
-            "🔌 **collector 캐시 우선 로드:** `fetch_investor_net_buying()` 상단에 KIS 캐시 우선 로드 블록 삽입, pykrx 폴백은 캐시 미존재 시에만 실행",
-            "✅ **end-to-end 검증 완료:** 수급 캐시 로드: 외인 30건 기관 30건 → 🟢 Run Status: OK (신뢰도: 100/100, 최대허용: ATTACK)",
-            "🔧 **GitHub Secrets 연동:** KIS_APP_KEY / KIS_APP_SECRET 등록, prefetch_flow.yml 환경변수 연결 완료",
-            "🐛 **load_cache 주말 버그 수정:** 일요일 실행 시 trade_ymd(금) 불일치 → stale=True 오판 해소",
-        ],
-        "schema_min": 5
-    },
     {
         "version": "19.1.0",
         "date": "2026-03-01",
