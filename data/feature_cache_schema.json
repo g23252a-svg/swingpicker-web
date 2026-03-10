@@ -1,0 +1,25 @@
+{
+  "schema_version": "v20.6",
+  "feature_cols_hash": "200fa0e985ab",
+  "feature_cols": [
+    "Log_Ret",
+    "Volume_Norm",
+    "Low_Trend",
+    "Vol_Quality",
+    "Dist_MA20",
+    "RSI",
+    "MFI",
+    "MACD_Hist_Norm",
+    "BB_Width",
+    "ATR_Pct",
+    "OBV_Slope",
+    "Range_Pos",
+    "Vol_Ratio_5",
+    "Ret_5d",
+    "Ret_20d",
+    "Upper_Shadow_Ratio"
+  ],
+  "n_stocks": 595,
+  "saved_at": "2026-03-10T21:46:51.437908",
+  "last_trade_date": "2026-02-26 00:00:00"
+}

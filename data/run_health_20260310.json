@@ -12,5 +12,7 @@
     "TP_MONOTONIC": true
   },
   "confidence_score": 100.0,
-  "max_allowed_route": "ATTACK"
+  "max_allowed_route": "ATTACK",
+  "macro_risk": "CAUTION",
+  "market_breadth": 83.5
 }
