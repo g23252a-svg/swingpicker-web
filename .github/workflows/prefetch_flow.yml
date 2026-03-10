@@ -1,0 +1,74 @@
+# .github/workflows/prefetch_flow.yml
+# 수급 데이터 선수집 — collector.py 본체와 분리된 전용 job
+#
+# 실행 순서:
+#   1. prefetch_flow (이 workflow): 장 마감 직후 수급 수집 → flow_cache_latest.json 저장
+#   2. auto_collect   (기존 workflow): flow_cache_latest.json 읽어서 분석
+#
+# 스케줄: 평일 15:35~15:50 KST (UTC 06:35) — KRX 마감(15:30) 직후
+name: Prefetch Flow Data
+
+on:
+  schedule:
+    - cron: "35 6 * * 1-5"   # 15:35 KST
+  workflow_dispatch:
+    inputs:
+      trade_date:
+        description: "기준일 (YYYYMMDD, 빈칸=오늘)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  prefetch:
+    runs-on: ubuntu-latest
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+      KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+      TZ: Asia/Seoul
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pykrx
+        run: |
+          pip install pykrx pandas --quiet
+
+
+      - name: Prefetch investor flow
+        id: prefetch
+        run: |
+          python prefetch_flow.py ${{ github.event.inputs.trade_date || '' }}
+          echo "status=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true   # 수급 실패해도 collector는 진행
+
+      - name: Show cache result
+        run: |
+          echo "=== flow_cache_latest.json ==="
+          cat data/flow_cache_latest.json 2>/dev/null || echo "(없음)"
+
+      - name: Commit & Push cache
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/flow_cache_latest.json data/flow_*.json || true
+          git diff --staged --quiet || {
+            git commit -m "chore: prefetch flow cache $(date +'%Y-%m-%d %H:%M:%S %Z')"
+            git fetch origin main
+            git merge origin/main --no-edit -X ours --allow-unrelated-histories || true
+            git push origin main
+          }
+          echo "Done."

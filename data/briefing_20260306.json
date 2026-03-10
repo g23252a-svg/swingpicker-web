@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260306",
+  "generated_at": "2026-03-09 12:56:23",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "388790",
+      "name": "라이콤",
+      "route": "ARMED",
+      "score": 83.6,
+      "close": 3215,
+      "entry": 3215,
+      "stop": 2730,
+      "target1": 3645,
+      "target2": 4375,
+      "est_win_rate": 0.636,
+      "rr": 0.9,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/388790"
+    },
+    {
+      "rank": 2,
+      "code": "489790",
+      "name": "한화비전",
+      "route": "ARMED",
+      "score": 78.0,
+      "close": 85800,
+      "entry": 72600,
+      "stop": 61700,
+      "target1": 94400,
+      "target2": 103300,
+      "est_win_rate": 0.58,
+      "rr": 2.0,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/489790"
+    },
+    {
+      "rank": 3,
+      "code": "417500",
+      "name": "제이아이테크",
+      "route": "ARMED",
+      "score": 72.3,
+      "close": 4710,
+      "entry": 3995,
+      "stop": 3395,
+      "target1": 5190,
+      "target2": 5300,
+      "est_win_rate": 0.523,
+      "rr": 2.0,
+      "sector": "화학·소재",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/417500"
+    }
+  ]
+}

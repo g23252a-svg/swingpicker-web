@@ -90,7 +90,7 @@ class DartAnalyzer:
         self.dart = None
         self._gemini_client = None
         self._gemini_model = None
-        self._model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+        self._model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
         if DART_OK and self.dart_api_key:
             self._init_dart()
@@ -195,14 +195,14 @@ class DartAnalyzer:
     # ──────────────────────────────────────────────
     def _call_gemini(self, prompt: str) -> str:
         """Gemini 호출 → 응답 텍스트 반환"""
-        from news_engine import _llm_call_with_retry
+        from llm_retry_utils import _llm_call_with_retry
 
         def _raw_call():
             if self._gemini_client is not None:
                 # Structured Output: response_schema로 JSON 강제
                 config_kwargs = {
                     "response_mime_type": "application/json",
-                    "max_output_tokens": 512,
+                    "max_output_tokens": 2048,   # [v20.3] 2.5-flash thinking 토큰 여유
                 }
                 # Pydantic 스키마가 있으면 주입 (파싱 에러율 0%)
                 if _PYDANTIC_SCHEMA is not None:
@@ -228,8 +228,10 @@ class DartAnalyzer:
     def _parse_gemini_response(self, res_text: str) -> Tuple[float, str]:
         """Gemini 응답 텍스트 → (score, reason) 파싱.
 
-        Structured Output 덕분에 대부분 깨끗한 JSON이 옴.
-        방어적으로 markdown 코드블록/중첩 중괄호도 처리.
+        [v20.3] 잘린 JSON 복구 + regex 폴백 3단계:
+          1) 정상 JSON 파싱
+          2) 잘린 JSON 복구 시도
+          3) regex로 score 숫자만 추출
         """
         if not res_text:
             return 0.0, ""
@@ -239,6 +241,7 @@ class DartAnalyzer:
         cleaned = re.sub(r'```\s*', '', cleaned)
         cleaned = cleaned.strip()
 
+        # ── 1단계: 정상 JSON 파싱 ──
         try:
             data = json.loads(cleaned)
             if "score" in data and "reason" in data:
@@ -247,14 +250,34 @@ class DartAnalyzer:
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # 폴백: 가장 바깥쪽 중괄호 매칭
-        json_match = re.search(r'\{[^{}]*"score"[^{}]*\}', cleaned, re.DOTALL)
-        if json_match:
+        # ── 2단계: 잘린 JSON 복구 ──
+        # {"score": 4.5, "reason": → 누락된 끝 보완
+        try:
+            repaired = cleaned
+            # 열린 따옴표 닫기
+            if repaired.count('"') % 2 != 0:
+                repaired += '"'
+            # 닫는 중괄호 없으면 추가
+            if '{' in repaired and '}' not in repaired:
+                repaired += '}'
+            data = json.loads(repaired)
+            if "score" in data:
+                score = max(-10.0, min(10.0, float(data["score"])))
+                return score, str(data.get("reason", "파싱 복구"))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # ── 3단계: regex로 score 숫자만 추출 ──
+        # {"score": 4.5 또는 "score":4.5 패턴
+        score_match = re.search(r'"score"\s*:\s*(-?\d+\.?\d*)', cleaned)
+        if score_match:
             try:
-                data = json.loads(json_match.group())
-                score = max(-10.0, min(10.0, float(data.get("score", 0))))
-                return score, str(data.get("reason", ""))
-            except (json.JSONDecodeError, ValueError):
+                score = max(-10.0, min(10.0, float(score_match.group(1))))
+                # reason도 시도
+                reason_match = re.search(r'"reason"\s*:\s*"([^"]*)', cleaned)
+                reason = reason_match.group(1) if reason_match else "regex 폴백"
+                return score, reason
+            except ValueError:
                 pass
 
         logger.warning(f"⚠️ Gemini 응답 파싱 실패: {res_text[:200]}")
@@ -332,7 +355,7 @@ class DartAnalyzer:
                 logger.warning(f"⚠️ 형식 오류 재시도 중... ({report_nm})")
 
             except Exception as e:
-                from news_engine import _is_retryable
+                from llm_retry_utils import _is_retryable
                 if _is_retryable(e):
                     wait = min(30, 2 ** (attempt + 1))
                     logger.warning(f"⚠️ 429/재시도 {attempt+1}/2 ({report_nm}): wait={wait}s")

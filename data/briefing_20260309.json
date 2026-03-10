@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260309",
+  "generated_at": "2026-03-09 19:08:31",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "402490",
+      "name": "그린리소스",
+      "route": "ARMED",
+      "score": 73.6,
+      "close": 10340,
+      "entry": 10340,
+      "stop": 8780,
+      "target1": 12900,
+      "target2": 13750,
+      "est_win_rate": 0.536,
+      "rr": 1.6,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/402490"
+    },
+    {
+      "rank": 2,
+      "code": "440110",
+      "name": "파두",
+      "route": "ATTACK",
+      "score": 72.7,
+      "close": 64200,
+      "entry": 56300,
+      "stop": 47800,
+      "target1": 71900,
+      "target2": 81400,
+      "est_win_rate": 0.527,
+      "rr": 1.8,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/440110"
+    },
+    {
+      "rank": 3,
+      "code": "489790",
+      "name": "한화비전",
+      "route": "ARMED",
+      "score": 69.9,
+      "close": 79500,
+      "entry": 79500,
+      "stop": 67500,
+      "target1": 94400,
+      "target2": 98100,
+      "est_win_rate": 0.499,
+      "rr": 1.2,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/489790"
+    }
+  ]
+}

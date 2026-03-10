@@ -109,6 +109,13 @@ class Indicators:
     # 갭/진입 필터용
     gap_pct_val: float
 
+    # [Fix] 누락 컬럼 — scoring_engine / validation에서 기대하는 필드
+    data_length: int = 0                 # OHLCV 행 수 (_data_length)
+    consecutive_limit_up: int = 0        # 연속 상한가 횟수
+    mtf_weekly_trend: int = 0            # 주봉 추세 (+1/0/-1)
+    mtf_monthly_trend: int = 0           # 월봉 추세 (+1/0/-1)
+    mtf_data_sufficient: int = 0         # MTF 데이터 충분 여부 (1/0)
+
 
 # ═══════════════════════════════════════════════════
 #  1. 데이터 정제 + 기본 필터링
@@ -287,7 +294,7 @@ def calculate_indicators(
     trigger_str = "/".join(triggers) if triggers else ""
 
     # VWAP / SuperTrend
-    vwap_val = calc_vwap_fn(ohlcv.tail(5))
+    vwap_val = calc_vwap_fn(ohlcv.tail(60))  # [v4.0] 20일 윈도우 VWAP용 충분한 데이터
     vwap_gap = (last_c - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
     st_series, st_dir = calc_supertrend_fn(h, l, c, 10, 3.0)
     st_val = float(st_series.iloc[-1])
@@ -337,6 +344,44 @@ def calculate_indicators(
 
     gap_pct_val = float(ohlcv['gap_pct'].iloc[-1]) if 'gap_pct' in ohlcv.columns else 0.0
 
+    # --- [Fix 1] 누락 컬럼 계산 ---
+    # (a) 데이터 길이
+    data_length = len(ohlcv)
+
+    # (b) 연속 상한가 (종가 대비 +29% 이상을 상한가로 간주, 역순 카운트)
+    _consecutive_limit_up = 0
+    if len(c) >= 2:
+        _daily_ret = c.pct_change() * 100
+        for _r in _daily_ret.iloc[::-1]:
+            if _r >= 29.0:
+                _consecutive_limit_up += 1
+            else:
+                break
+    consecutive_limit_up = _consecutive_limit_up
+
+    # (c) MTF: 주봉/월봉 추세
+    mtf_weekly_trend = 0
+    mtf_monthly_trend = 0
+    mtf_data_sufficient = 0
+    try:
+        # 주봉
+        w_res = ohlcv.resample('W').last().dropna(subset=['종가'])
+        if len(w_res) >= 26:
+            w_ma = w_res['종가'].rolling(20).mean()
+            if len(w_ma.dropna()) >= 2:
+                mtf_weekly_trend = 1 if w_ma.iloc[-1] > w_ma.iloc[-2] else -1
+        # 월봉
+        m_res = ohlcv.resample('ME').last().dropna(subset=['종가'])
+        if len(m_res) >= 12:
+            m_ma = m_res['종가'].rolling(6).mean()
+            if len(m_ma.dropna()) >= 2:
+                mtf_monthly_trend = 1 if m_ma.iloc[-1] > m_ma.iloc[-2] else -1
+        # 데이터 충분성
+        if len(w_res) >= 26 and len(m_res) >= 12:
+            mtf_data_sufficient = 1
+    except Exception:
+        pass
+
     return Indicators(
         low_trend_pct=low_trend_pct, rsi=rsi, rsi_rising=rsi_rising,
         vol_quality=vol_quality, bb_bw_val=bb_bw_val, bb_expanding=bb_expanding,
@@ -357,6 +402,11 @@ def calculate_indicators(
         is_above_poc=is_above_poc, poc_gap=poc_gap,
         ma20=ma20, bb_upper=bb_upper, bb_lower=bb_lower, atr_series=atr_series,
         gap_pct_val=gap_pct_val,
+        data_length=data_length,
+        consecutive_limit_up=consecutive_limit_up,
+        mtf_weekly_trend=mtf_weekly_trend,
+        mtf_monthly_trend=mtf_monthly_trend,
+        mtf_data_sufficient=mtf_data_sufficient,
     )
 
 
@@ -382,6 +432,14 @@ class TradePlanResult:
     frg_net_val: int
     inst_net_val: int
     major_net: int
+    # [v4.0] 도달 확률 기반 목표가 메타
+    tp1_method: str = "RR_LEGACY"
+    tp1_prob: int = 50
+    tp2_method: str = "RR_LEGACY"
+    tp2_prob: int = 35
+    tp3: float = 0.0
+    tp3_method: str = ""
+    tp3_prob: int = 0
 
 
 def build_ticker_plan(
@@ -446,14 +504,78 @@ def build_ticker_plan(
             time_stop_extend_if_profit=_cfg.time_stop_extend_if_profit,
         )
 
+    # [v4.0] 도달 확률 기반 목표가 — 기존 RR 배수를 기술적 저항 레벨로 교체
+    _tp1_method = "RR_LEGACY"
+    _tp1_prob = 50
+    _tp2_method = "RR_LEGACY"
+    _tp2_prob = 35
+    _tp3_val = 0.0
+    _tp3_method = ""
+    _tp3_prob = 0
+    _final_tp1 = _plan.tp1
+    _final_tp2 = _plan.tp2 if _plan.tp2 else _plan.tp1 * 1.1
+
+    try:
+        from stop_logic import compute_realistic_targets as _crt
+        _rt = _crt(
+            ohlcv=ctx.ohlcv,
+            entry=_plan.entry,
+            stop=_plan.stop,
+            poc_p=ind.poc_p if ind.poc_p else 0.0,
+            res_ratio=ind.res_all,
+            res_ratio_near=ind.res_near,
+            use_tick=True,
+        )
+        if _rt.get("TP1", 0) > _plan.entry:
+            _final_tp1 = _rt["TP1"]
+            _tp1_method = _rt.get("TP1_METHOD", "RR_LEGACY")
+            _tp1_prob = _rt.get("TP1_PROB", 50)
+        if _rt.get("TP2", 0) > _final_tp1:  # TP2는 반드시 TP1보다 위
+            _final_tp2 = _rt["TP2"]
+            _tp2_method = _rt.get("TP2_METHOD", "RR_LEGACY")
+            _tp2_prob = _rt.get("TP2_PROB", 35)
+        elif _rt.get("TP2", 0) > _plan.entry and _rt.get("TP2", 0) <= _final_tp1:
+            # TP2가 TP1 이하면, 기존 RR 기반 tp2를 유지
+            pass
+        if _rt.get("TP3", 0) > _final_tp2:  # TP3는 반드시 TP2보다 위
+            _tp3_val = _rt["TP3"]
+            _tp3_method = _rt.get("TP3_METHOD", "")
+            _tp3_prob = _rt.get("TP3_PROB", 0)
+    except (ImportError, Exception) as _tp_err:
+        pass  # 폴백: 기존 RR 배수 유지
+
+    # RR 재계산 (새 TP1 기준)
+    _risk = _plan.entry - _plan.stop
+
+    # ── [v19.2] TP 단조성 강제: TP1 < TP2 < TP3 ──
+    # 어떤 경로로 왔든, 최종 출력 직전에 단조 증가를 보장
+    if _final_tp2 <= _final_tp1:
+        _final_tp2 = max(_final_tp1 * 1.05, _final_tp1 + _risk * 0.5) if _risk > 0 else _final_tp1 * 1.05
+        _tp2_method = _tp2_method if _tp2_method else "MONO_GUARD"
+    if _tp3_val > 0 and _tp3_val <= _final_tp2:
+        _tp3_val = max(_final_tp2 * 1.05, _final_tp2 + _risk * 0.5) if _risk > 0 else _final_tp2 * 1.05
+        _tp3_method = _tp3_method if _tp3_method else "MONO_GUARD"
+
+    # 호가 단위 반올림
+    from stop_logic import ceil_to_tick as _ceil_tick
+    _final_tp1 = float(_ceil_tick(_final_tp1))
+    _final_tp2 = float(_ceil_tick(_final_tp2))
+    if _tp3_val > 0:
+        _tp3_val = float(_ceil_tick(_tp3_val))
+
+    _new_rr = (_final_tp1 - _plan.entry) / _risk if _risk > 0 else _plan.rr_mult
+
     return TradePlanResult(
-        buy=_plan.entry, stop=_plan.stop, target=_plan.tp1,
-        tp2=_plan.tp2 if _plan.tp2 else _plan.tp1 * 1.1,
+        buy=_plan.entry, stop=_plan.stop, target=_final_tp1,
+        tp2=_final_tp2,
         actual_stop_pct=_plan.stop_pct, max_loss_pct=_plan.max_loss_pct,
-        rr_mult=_plan.rr_mult, stop_reason=_plan.plan_reason,
+        rr_mult=round(_new_rr, 1), stop_reason=_plan.plan_reason,
         entry_action=_plan.entry_action, position_pct=_plan.position_pct,
         exec_rule_id=_plan.exec_rule_id,
         frg_net_val=frg_net_val, inst_net_val=inst_net_val, major_net=major_net,
+        tp1_method=_tp1_method, tp1_prob=_tp1_prob,
+        tp2_method=_tp2_method, tp2_prob=_tp2_prob,
+        tp3=_tp3_val, tp3_method=_tp3_method, tp3_prob=_tp3_prob,
     )
 
 
@@ -513,6 +635,11 @@ def assemble_result(
         "Range_Pos": round(ind.range_pos, 2),
         "추천매수가": plan.buy, "손절가": plan.stop,
         "추천매도가1": plan.target, "추천매도가2": plan.tp2,
+        "추천매도가3": plan.tp3 if plan.tp3 > 0 else None,
+        "TP1_METHOD": plan.tp1_method, "TP1_PROB": plan.tp1_prob,
+        "TP2_METHOD": plan.tp2_method, "TP2_PROB": plan.tp2_prob,
+        "TP3_METHOD": plan.tp3_method if plan.tp3 > 0 else "",
+        "TP3_PROB": plan.tp3_prob if plan.tp3 > 0 else 0,
         "EXEC_RULE_ID": plan.exec_rule_id,
         "STOP_PCT": round(plan.actual_stop_pct, 2),
         "MAX_LOSS_PCT": round(plan.max_loss_pct, 1),
@@ -536,6 +663,13 @@ def assemble_result(
         "외인순매수": plan.frg_net_val,
         "기관순매수": plan.inst_net_val,
         "메이저순매수": plan.major_net,
+        # [Fix 1] 누락 컬럼 — scoring_engine / validation 연결
+        "gap_pct": round(ind.gap_pct_val, 2),
+        "_data_length": ind.data_length,
+        "consecutive_limit_up": ind.consecutive_limit_up,
+        "MTF_WEEKLY_TREND": ind.mtf_weekly_trend,
+        "MTF_MONTHLY_TREND": ind.mtf_monthly_trend,
+        "MTF_DATA_SUFFICIENT": ind.mtf_data_sufficient,
     }
 
 

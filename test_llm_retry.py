@@ -21,7 +21,7 @@ def run():
     print("🧪 LLM Retry 테스트 (429/RESOURCE_EXHAUSTED)")
     print("=" * 60)
 
-    from news_engine import (
+    from llm_retry_utils import (
         _llm_call_with_retry, _is_retryable, _extract_retry_after,
     )
     import time

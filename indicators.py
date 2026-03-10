@@ -163,15 +163,18 @@ def calc_mfi(high: pd.Series, low: pd.Series, close: pd.Series,
 # ───────────────────── VWAP ─────────────────────
 
 def calc_vwap(high: pd.Series, low: pd.Series, close: pd.Series,
-              volume: pd.Series) -> pd.Series:
-    """[v2.0 #3] Daily VWAP Series — 순수 함수, 한글 컬럼 의존 제거
+              volume: pd.Series, window: int = 20) -> pd.Series:
+    """[v4.0] scoring-overhaul: Anchored VWAP — 최근 N일 윈도우 기반
 
-    Before: df['거래량'] 한글 하드코딩 + 단일 float 반환
-    After:  Series 파라미터 + 누적 VWAP Series 반환 (일중 리셋은 호출부 책임)
+    기존 무한 누적 VWAP → 20일 롤링 VWAP으로 변경.
+    스윙 트레이딩에서 세력 평단가를 유추하는 데 실질적으로 유용.
     """
     tp = (high + low + close) / 3
-    cum_tp_vol = (tp * volume).cumsum()
-    cum_vol = volume.cumsum().replace(0, np.nan)
+    tp_vol = tp * volume
+
+    # 최근 window일 롤링 VWAP
+    cum_tp_vol = tp_vol.rolling(window, min_periods=1).sum()
+    cum_vol = volume.rolling(window, min_periods=1).sum().replace(0, np.nan)
     return cum_tp_vol / cum_vol
 
 

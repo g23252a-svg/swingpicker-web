@@ -32,6 +32,13 @@ except ImportError:
     fdr = None  # type: ignore
     HAS_FDR = False
 
+try:
+    import yfinance as yf
+    HAS_YF = True
+except ImportError:
+    yf = None  # type: ignore
+    HAS_YF = False
+
 
 # ═══════════════════════════════════════════════════
 #  공통 유틸리티 (#4 DRY)
@@ -164,8 +171,8 @@ def check_macro_env(
       #3 시차 방어 (데이터 부족 시 안전 처리)
       #5 Fail-safe (API 실패 → CAUTION 격상, 침묵 금지)
     """
-    if not HAS_FDR:
-        return ("NORMAL", "FDR 미설치", config.pass_ebs, config.rec_limit_default)
+    if not HAS_FDR and not HAS_YF:
+        return ("NORMAL", "FDR/yfinance 미설치", config.pass_ebs, config.rec_limit_default)
 
     end_dt = _parse_ymd(trade_ymd)
     risk_level = "NORMAL"
@@ -173,7 +180,15 @@ def check_macro_env(
     data_failures = 0  # [v2.0 #5] 데이터 실패 카운터
 
     # ── 환율 (USD/KRW) ──
-    fx = _safe_fdr_fetch("USD/KRW", end_dt, min_rows=1)
+    fx = _safe_fdr_fetch("USD/KRW", end_dt, min_rows=1) if HAS_FDR else None
+    if fx is None and HAS_YF:
+        try:
+            _yf = yf.download("KRW=X", period="1mo", interval="1d", progress=False, timeout=10)
+            if _yf is not None and len(_yf) > 0:
+                fx = _yf.rename(columns={"Close": "Close"} if "Close" in _yf.columns else {})
+                logger.info("✅ yfinance 환율 폴백 성공")
+        except Exception:
+            pass
     if fx is not None:
         is_fresh, stale_days = _check_freshness(fx, end_dt)
         fx_last = float(fx["Close"].iloc[-1])
@@ -195,7 +210,15 @@ def check_macro_env(
         logger.warning("환율 데이터 조회 실패 — Fail-safe 적용")
 
     # ── 나스닥 전일 수익률 ──
-    nq = _safe_fdr_fetch("IXIC", end_dt, min_rows=2)
+    nq = _safe_fdr_fetch("IXIC", end_dt, min_rows=2) if HAS_FDR else None
+    if nq is None and HAS_YF:
+        try:
+            _yf_nq = yf.download("^IXIC", period="1mo", interval="1d", progress=False, timeout=10)
+            if _yf_nq is not None and len(_yf_nq) >= 2:
+                nq = _yf_nq
+                logger.info("✅ yfinance 나스닥 폴백 성공")
+        except Exception:
+            pass
     if nq is not None:
         close = nq["Close"].dropna()
         if len(close) >= 2:
@@ -284,36 +307,87 @@ def get_benchmark_returns(
 ) -> Dict[str, Dict[int, float]]:
     """[v2.0] 벤치마크(KOSPI/KOSDAQ) N일 수익률
 
-    Fixes:
-      #2 동적 조회 구간 (50 BDay → 최대 20영업일 수익률 커버)
-      #3 시차 방어 (dropna 후 안전 접근)
-      #4 DRY: _safe_fdr_fetch 재사용
-      #5 Fail-safe: 조회 실패 시 빈 dict (침묵 로깅 → warning 격상)
+    [v20.0] 3단계 폴백: FDR → yfinance → 캐시
     """
-    if not HAS_FDR:
-        return {}
-
     end_dt = _parse_ymd(trade_ymd)
     result = {}
 
-    for name, code in [("KOSPI", "KS11"), ("KOSDAQ", "KQ11")]:
-        df = _safe_fdr_fetch(code, end_dt, lookback_bdays=_LOOKBACK_BDAYS, min_rows=2)
-        if df is None:
-            logger.warning(f"벤치마크 {name}({code}) 조회 실패")
-            continue
+    # ── 1순위: FDR ──
+    if HAS_FDR:
+        for name, code in [("KOSPI", "KS11"), ("KOSDAQ", "KQ11")]:
+            df = _safe_fdr_fetch(code, end_dt, lookback_bdays=_LOOKBACK_BDAYS, min_rows=2)
+            if df is None:
+                logger.warning(f"벤치마크 {name}({code}) FDR 조회 실패")
+                continue
+            close = df["Close"].dropna()
+            if len(close) < 2:
+                continue
+            last = float(close.iloc[-1])
+            rets = {}
+            for d in [1, 3, 5, 10, 20, 60, 120]:
+                if len(close) > d:
+                    rets[d] = round((last / float(close.iloc[-(d + 1)]) - 1) * 100, 2)
+            result[name] = rets
 
-        # [v2.0 #3] 시차 방어: dropna 후 안전 접근
-        close = df["Close"].dropna()
-        if len(close) < 2:
-            logger.warning(f"벤치마크 {name}: Close 데이터 부족 ({len(close)}행)")
-            continue
+    # ── 2순위: yfinance (FDR 실패 시) ──
+    if len(result) < 2 and HAS_YF:
+        logger.info("🔄 벤치마크 FDR 실패 → yfinance 폴백")
+        for name, ticker in [("KOSPI", "^KS11"), ("KOSDAQ", "^KQ11")]:
+            if name in result:
+                continue
+            try:
+                yf_df = yf.download(ticker, period="6mo", interval="1d",
+                                     progress=False, timeout=10)
+                if yf_df is not None and len(yf_df) > 20:
+                    close = yf_df["Close"].dropna()
+                    if hasattr(close, 'columns'):
+                        close = close.iloc[:, 0]
+                    last = float(close.iloc[-1])
+                    rets = {}
+                    for d in [1, 3, 5, 10, 20, 60, 120]:
+                        if len(close) > d:
+                            rets[d] = round((last / float(close.iloc[-(d + 1)]) - 1) * 100, 2)
+                    result[name] = rets
+                    logger.info(f"✅ yfinance 벤치마크 {name} 성공 ({len(close)}일)")
+            except Exception as e:
+                logger.warning(f"⚠️ yfinance {name} 실패: {e}")
 
-        last = float(close.iloc[-1])
-        rets = {}
-        for d in [1, 3, 5, 10, 20]:
-            if len(close) > d:
-                # [v2.1 #2] pct_change 기반 N일 수익률
-                rets[d] = round((last / float(close.iloc[-(d + 1)]) - 1) * 100, 2)
-        result[name] = rets
+    # ── 3순위: 로컬 캐시 ──
+    if len(result) < 2:
+        cached = _load_bench_cache()
+        if cached:
+            for k, v in cached.items():
+                if k not in result:
+                    result[k] = v
+            logger.info(f"📂 벤치마크 캐시 폴백 사용: {list(cached.keys())}")
+
+    # 성공 시 캐시 저장
+    if result:
+        _save_bench_cache(result)
 
     return result
+
+
+def _save_bench_cache(bench_map: dict) -> None:
+    """벤치마크 캐시 저장"""
+    import json
+    try:
+        path = os.path.join(os.path.dirname(__file__), "data", "bench_cache_latest.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(bench_map, f)
+    except Exception:
+        pass
+
+
+def _load_bench_cache() -> dict:
+    """벤치마크 캐시 로드"""
+    import json
+    try:
+        path = os.path.join(os.path.dirname(__file__), "data", "bench_cache_latest.json")
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}

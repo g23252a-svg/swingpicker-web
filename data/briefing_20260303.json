@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260303",
+  "generated_at": "2026-03-04 16:48:43",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "489790",
+      "name": "한화비전",
+      "route": "ARMED",
+      "score": 78.4,
+      "close": 75800,
+      "entry": 75800,
+      "stop": 72700,
+      "target1": 85100,
+      "target2": 86700,
+      "est_win_rate": 0.584,
+      "rr": 3.0,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/489790"
+    },
+    {
+      "rank": 2,
+      "code": "476060",
+      "name": "온코닉테라퓨틱스",
+      "route": "ARMED",
+      "score": 74.0,
+      "close": 20550,
+      "entry": 20550,
+      "stop": 19520,
+      "target1": 23650,
+      "target2": 24200,
+      "est_win_rate": 0.54,
+      "rr": 3.0,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/476060"
+    },
+    {
+      "rank": 3,
+      "code": "450080",
+      "name": "에코프로머티",
+      "route": "ARMED",
+      "score": 73.1,
+      "close": 67800,
+      "entry": 67800,
+      "stop": 65000,
+      "target1": 76200,
+      "target2": 77600,
+      "est_win_rate": 0.531,
+      "rr": 3.0,
+      "sector": "2차전지",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/450080"
+    }
+  ]
+}

@@ -22,5 +22,51 @@
       "489790_20260227_TP1_HIT_20260227",
       "489790_20260227_TP2_HIT_20260227"
     ]
+  },
+  {
+    "code": "475830",
+    "name": "오름테라퓨틱",
+    "entry_ymd": "20260303",
+    "entry_px": 134200.0,
+    "qty": 0,
+    "stop_px": 128800.0,
+    "stop_px_initial": 128800.0,
+    "take_px1": 150400.0,
+    "take_px2": 153100.0,
+    "trailing_high": 134200.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260303",
+    "last_close_px": 126600.0,
+    "unrealized_pnl_pct": -5.66,
+    "realized_pnl_pct": -5.66,
+    "close_ymd": "20260303",
+    "close_px": 126600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "475830_20260303_STOP_HIT_20260303"
+    ]
+  },
+  {
+    "code": "064400",
+    "name": "064400",
+    "entry_ymd": "20260227",
+    "entry_px": 74500.0,
+    "qty": 0,
+    "stop_px": 71500.0,
+    "stop_px_initial": 71500.0,
+    "take_px1": 83500.0,
+    "take_px2": 85000.0,
+    "trailing_high": 75400.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260303",
+    "last_close_px": 65600.0,
+    "unrealized_pnl_pct": -11.95,
+    "realized_pnl_pct": -11.95,
+    "close_ymd": "20260303",
+    "close_px": 65600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "064400_20260227_STOP_HIT_20260303"
+    ]
   }
 ]

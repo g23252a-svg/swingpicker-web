@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260310",
+  "generated_at": "2026-03-10 19:05:22",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "388790",
+      "name": "라이콤",
+      "route": "ATTACK",
+      "score": 91.6,
+      "close": 3825,
+      "entry": 3200,
+      "stop": 2720,
+      "target1": 3825,
+      "target2": 3940,
+      "est_win_rate": 0.716,
+      "rr": 1.3,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/388790"
+    },
+    {
+      "rank": 2,
+      "code": "440110",
+      "name": "파두",
+      "route": "ATTACK",
+      "score": 69.6,
+      "close": 63700,
+      "entry": 57700,
+      "stop": 49050,
+      "target1": 74800,
+      "target2": 83500,
+      "est_win_rate": 0.496,
+      "rr": 2.0,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/440110"
+    },
+    {
+      "rank": 3,
+      "code": "322310",
+      "name": "오로스테크놀로지",
+      "route": "ARMED",
+      "score": 61.3,
+      "close": 27800,
+      "entry": 27400,
+      "stop": 23250,
+      "target1": 30600,
+      "target2": 37200,
+      "est_win_rate": 0.413,
+      "rr": 0.8,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/322310"
+    }
+  ]
+}

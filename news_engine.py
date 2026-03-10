@@ -2,115 +2,35 @@
 """
 news_engine.py — 뉴스 크롤링 + LLM 감성분석 + AI 코멘트
 ═══════════════════════════════════════════════════
-[v14] #9 collector.py 분할 — 뉴스/LLM 관련 함수
+[v15] retry 유틸 → llm_retry_utils.py로 분리
 """
 import os
 import re
 import logging
 from typing import List, Tuple, Optional
 
-import time
-import random
-
 logger = logging.getLogger(__name__)
 
+# Retry 유틸 — llm_retry_utils.py에서 re-export (하위 호환 유지)
+from llm_retry_utils import (
+    _extract_retry_after,
+    _is_retryable,
+    _llm_call_with_retry,
+)
 
-# ═══════════════════════════════════════════════════
-#  Retry 유틸 (429/RESOURCE_EXHAUSTED 방어)
-# ═══════════════════════════════════════════════════
-
-def _extract_retry_after(exc: Exception) -> Optional[float]:
-    """에러 객체에서 Retry-After 힌트 추출 (있으면 우선 사용)"""
-    # google.api_core.exceptions 스타일
-    if hasattr(exc, 'retry_after'):
-        return float(exc.retry_after)
-    # HTTP response 헤더 스타일
-    if hasattr(exc, 'response') and hasattr(exc.response, 'headers'):
-        ra = exc.response.headers.get('Retry-After')
-        if ra:
-            try:
-                return float(ra)
-            except ValueError:
-                pass
-    return None
-
-
-def _is_retryable(exc: Exception) -> bool:
-    """재시도 가능한 에러인지 판정 (status code 우선, 문자열 fallback)"""
-    # status_code 속성 (google, requests 등)
-    status = getattr(exc, 'code', None) or getattr(exc, 'status_code', None)
-    if status is not None:
-        try:
-            code = int(status)
-            return code in (429, 503, 529)
-        except (ValueError, TypeError):
-            pass
-    # grpc status
-    if hasattr(exc, 'grpc_status_code'):
-        grpc_code = str(exc.grpc_status_code)
-        if 'RESOURCE_EXHAUSTED' in grpc_code or 'UNAVAILABLE' in grpc_code:
-            return True
-    # 문자열 fallback (최후 수단)
-    msg = str(exc)
-    return any(kw in msg for kw in ('429', 'RESOURCE_EXHAUSTED', 'quota', 'rate limit'))
-
-
-def _llm_call_with_retry(
-    call_fn,
-    max_retries: int = 3,
-    base_delay: float = 2.0,
-    cap: float = 30.0,
-    total_timeout: float = 60.0,
-):
-    """
-    LLM API 호출 + exponential backoff + jitter + Retry-After.
-    - 429/RESOURCE_EXHAUSTED → 재시도
-    - 400/500 등 비재시도 에러 → 즉시 raise
-    - total_timeout: 전체 대기시간 상한 (초). 초과 시 마지막 에러 raise.
-    """
-    t_start = time.monotonic()
-    last_exc = None
-
-    for attempt in range(max_retries + 1):
-        try:
-            return call_fn()
-        except Exception as e:
-            last_exc = e
-            if not _is_retryable(e):
-                raise  # 비재시도 에러 → 즉시 전파
-
-            if attempt >= max_retries:
-                logger.warning(f"LLM 재시도 한도 초과 ({max_retries}회): {e}")
-                raise
-
-            # 총 대기시간 상한 체크
-            elapsed = time.monotonic() - t_start
-            remaining = total_timeout - elapsed
-            if remaining <= 0:
-                logger.warning(f"LLM 총 대기시간 상한 초과 ({total_timeout}s): {e}")
-                raise
-
-            # Retry-After 우선, 없으면 exponential backoff + jitter
-            retry_after = _extract_retry_after(e)
-            if retry_after and retry_after > 0:
-                wait = min(retry_after, cap)
-            else:
-                wait = min(cap, base_delay * (2 ** attempt))
-                wait *= (0.5 + random.random())  # jitter: 0.5x ~ 1.5x
-
-            # remaining으로 한번 더 클램프
-            wait = min(wait, remaining)
-
-            logger.info(f"LLM 429/재시도 {attempt+1}/{max_retries}: "
-                       f"wait={wait:.1f}s, elapsed={elapsed:.1f}s/{total_timeout}s")
-            time.sleep(wait)
-
-# LLM import (optional)
+# LLM import (optional) — 신규/구 SDK 자동 감지
+_USE_NEW_GENAI = False
 try:
-    import google.generativeai as genai
+    from google import genai as _genai_client
+    _USE_NEW_GENAI = True
     LLM_AVAILABLE = True
 except ImportError:
-    LLM_AVAILABLE = False
+    _genai_client = None
+    try:
+        import google.generativeai as genai
+        LLM_AVAILABLE = True
+    except ImportError:
+        LLM_AVAILABLE = False
 
 
 def fetch_naver_news_headlines(code: str, days: int = 2) -> List[str]:
@@ -155,9 +75,6 @@ def analyze_sentiment_llm(
         if not api_key:
             return (0.0, "")
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-
         prompt = f"""다음은 '{stock_name}'에 대한 최신 뉴스 헤드라인입니다.
 전체적인 투자 심리를 -1.0(매우 부정) ~ +1.0(매우 긍정) 사이 점수로 평가하고,
 한 줄 요약을 해주세요.
@@ -165,24 +82,66 @@ def analyze_sentiment_llm(
 헤드라인:
 {chr(10).join(f'- {h}' for h in headlines[:8])}
 
-응답 형식 (반드시 이 형식만):
-SCORE: [숫자]
-SUMMARY: [한줄요약]"""
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
+{{"score": 0.0, "summary": "한줄요약"}}"""
 
-        response = _llm_call_with_retry(lambda: model.generate_content(prompt))
+        # 신규/구 SDK 분기 호출
+        if _USE_NEW_GENAI:
+            from google.genai import types as _genai_types
+            client = _genai_client.Client(api_key=api_key)
+            response = _llm_call_with_retry(
+                lambda: client.models.generate_content(
+                    model="gemini-2.5-flash", contents=prompt,
+                    config=_genai_types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        max_output_tokens=1024,
+                    ),
+                )
+            )
+        else:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = _llm_call_with_retry(lambda: model.generate_content(prompt))
+
         text = response.text.strip()
 
         score = 0.0
         summary = ""
-        for line in text.split("\n"):
-            if line.startswith("SCORE:"):
-                try:
-                    score = float(line.replace("SCORE:", "").strip())
-                    score = max(-1.0, min(1.0, score))
-                except ValueError:
-                    pass
-            elif line.startswith("SUMMARY:"):
-                summary = line.replace("SUMMARY:", "").strip()
+
+        # 1차: JSON 파싱
+        try:
+            import json as _json
+            _cleaned = re.sub(r'```json\s*|```\s*', '', text).strip()
+            data = _json.loads(_cleaned)
+            score = max(-1.0, min(1.0, float(data.get("score", 0))))
+            summary = str(data.get("summary", ""))
+            return (score, summary)
+        except (ValueError, KeyError):
+            pass
+
+        # 2차: regex 폴백 (잘린 JSON 대응)
+        import re as _re
+        _sm = _re.search(r'"score"\s*:\s*(-?\d+\.?\d*)', text)
+        if _sm:
+            try:
+                score = max(-1.0, min(1.0, float(_sm.group(1))))
+            except ValueError:
+                pass
+        _rm = _re.search(r'"summary"\s*:\s*"([^"]*)', text)
+        if _rm:
+            summary = _rm.group(1)
+
+        # 3차: SCORE:/SUMMARY: 레거시 포맷 폴백
+        if score == 0.0:
+            for line in text.split("\n"):
+                if line.startswith("SCORE:"):
+                    try:
+                        score = float(line.replace("SCORE:", "").strip())
+                        score = max(-1.0, min(1.0, score))
+                    except ValueError:
+                        pass
+                elif line.startswith("SUMMARY:"):
+                    summary = line.replace("SUMMARY:", "").strip()
 
         return (score, summary)
     except Exception as e:
@@ -204,9 +163,6 @@ def generate_ai_comment(
         if not api_key:
             return ""
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-
         # 핵심 지표 요약
         rsi = row.get("RSI14", "N/A")
         timing = row.get("TIMING_SCORE", "N/A")
@@ -225,7 +181,17 @@ def generate_ai_comment(
 
 2~3문장으로 핵심만 간결하게. 매수/매도 추천이 아닌 객관적 분석만."""
 
-        response = _llm_call_with_retry(lambda: model.generate_content(prompt))
+        if _USE_NEW_GENAI:
+            client = _genai_client.Client(api_key=api_key)
+            response = _llm_call_with_retry(
+                lambda: client.models.generate_content(
+                    model="gemini-2.5-flash", contents=prompt
+                )
+            )
+        else:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = _llm_call_with_retry(lambda: model.generate_content(prompt))
         return response.text.strip()[:300]
     except Exception as e:
         logger.debug(f"AI 코멘트 생성 실패: {e}")
