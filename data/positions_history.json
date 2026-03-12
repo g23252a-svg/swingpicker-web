@@ -68,5 +68,129 @@
     "alerted_events": [
       "064400_20260227_STOP_HIT_20260303"
     ]
+  },
+  {
+    "code": "009240",
+    "name": "한샘",
+    "entry_ymd": "20260226",
+    "entry_px": 51400.0,
+    "qty": 0,
+    "stop_px": 48800.0,
+    "stop_px_initial": 48800.0,
+    "take_px1": 57900.0,
+    "take_px2": 59200.0,
+    "trailing_high": 52500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260312",
+    "last_close_px": 44550.0,
+    "unrealized_pnl_pct": -13.33,
+    "realized_pnl_pct": -13.33,
+    "close_ymd": "20260312",
+    "close_px": 44550.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "009240_20260226_STOP_HIT_20260312"
+    ]
+  },
+  {
+    "code": "307950",
+    "name": "현대오토에버",
+    "entry_ymd": "20260226",
+    "entry_px": 505000.0,
+    "qty": 0,
+    "stop_px": 484500.0,
+    "stop_px_initial": 484500.0,
+    "take_px1": 567000.0,
+    "take_px2": 577000.0,
+    "trailing_high": 513000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260312",
+    "last_close_px": 406500.0,
+    "unrealized_pnl_pct": -19.5,
+    "realized_pnl_pct": -19.5,
+    "close_ymd": "20260312",
+    "close_px": 406500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "307950_20260226_STOP_HIT_20260312"
+    ]
+  },
+  {
+    "code": "003670",
+    "name": "포스코퓨처엠",
+    "entry_ymd": "20260226",
+    "entry_px": 247000.0,
+    "qty": 0,
+    "stop_px": 237000.0,
+    "stop_px_initial": 237000.0,
+    "take_px1": 277000.0,
+    "take_px2": 282000.0,
+    "trailing_high": 250000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260312",
+    "last_close_px": 210500.0,
+    "unrealized_pnl_pct": -14.78,
+    "realized_pnl_pct": -14.78,
+    "close_ymd": "20260312",
+    "close_px": 210500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "003670_20260226_STOP_HIT_20260312"
+    ]
+  },
+  {
+    "code": "420770",
+    "name": "420770",
+    "entry_ymd": "20260227",
+    "entry_px": 63400.0,
+    "qty": 0,
+    "stop_px": 60200.0,
+    "stop_px_initial": 60200.0,
+    "take_px1": 73000.0,
+    "take_px2": 74600.0,
+    "trailing_high": 77100.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260312",
+    "last_close_px": 76500.0,
+    "unrealized_pnl_pct": 20.66,
+    "realized_pnl_pct": 20.66,
+    "close_ymd": "20260312",
+    "close_px": 76500.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "420770_20260227_TP1_HIT_20260312",
+      "420770_20260227_TP2_HIT_20260312"
+    ]
+  },
+  {
+    "code": "389470",
+    "name": "인벤티지랩",
+    "entry_ymd": "20260303",
+    "entry_px": 80300.0,
+    "qty": 0,
+    "stop_px": 76200.0,
+    "stop_px_initial": 76200.0,
+    "take_px1": 92600.0,
+    "take_px2": 94700.0,
+    "trailing_high": 99700.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260312",
+    "last_close_px": 99500.0,
+    "unrealized_pnl_pct": 23.91,
+    "realized_pnl_pct": 23.91,
+    "close_ymd": "20260312",
+    "close_px": 99500.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "389470_20260303_TP1_HIT_20260303",
+      "389470_20260303_TP1_HIT_20260304",
+      "389470_20260303_TP1_HIT_20260305",
+      "389470_20260303_TP1_HIT_20260306",
+      "389470_20260303_TP1_HIT_20260309",
+      "389470_20260303_TP1_HIT_20260310",
+      "389470_20260303_TP1_HIT_20260311",
+      "389470_20260303_TP1_HIT_20260312",
+      "389470_20260303_TP2_HIT_20260312"
+    ]
   }
 ]
