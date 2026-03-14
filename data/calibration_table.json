@@ -5,8 +5,48 @@
     "score_lo":0,
     "score_hi":50,
     "score_center":25.0,
-    "p_calibrated":0.4986,
-    "n_effective":12.5,
+    "p_calibrated":0.499,
+    "n_effective":12.7,
     "n_raw":14
+  },
+  {
+    "method":"DISPLAY_SCORE",
+    "horizon":1,
+    "score_lo":80,
+    "score_hi":90,
+    "score_center":85.0,
+    "p_calibrated":0.3885,
+    "n_effective":16.9,
+    "n_raw":19
+  },
+  {
+    "method":"FINAL_SCORE",
+    "horizon":1,
+    "score_lo":80,
+    "score_hi":90,
+    "score_center":85.0,
+    "p_calibrated":0.3885,
+    "n_effective":16.9,
+    "n_raw":19
+  },
+  {
+    "method":"AI_SCORE",
+    "horizon":1,
+    "score_lo":70,
+    "score_hi":80,
+    "score_center":75.0,
+    "p_calibrated":0.5835,
+    "n_effective":10.7,
+    "n_raw":12
+  },
+  {
+    "method":"AI_SCORE",
+    "horizon":1,
+    "score_lo":80,
+    "score_hi":90,
+    "score_center":85.0,
+    "p_calibrated":0.4789,
+    "n_effective":6.2,
+    "n_raw":7
   }
 ]
