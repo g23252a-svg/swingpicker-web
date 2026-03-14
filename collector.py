@@ -133,6 +133,7 @@ TG_ID = os.environ.get("TG_ID")
 
 # ------------------------------- 설정 (collector_config.py SSOT) -------------------------------
 from collector_config import CollectorConfig, DEFAULT_CONFIG as _CFG, Route, Market
+DEFAULT_CONFIG = _CFG  # [v20.6.5] rank validation 등 내부 참조용 alias
 
 RSI_LOW, RSI_HIGH = _CFG.rsi_low, _CFG.rsi_high
 PASS_EBS = _CFG.pass_ebs

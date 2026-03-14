@@ -66,6 +66,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("LDY_Collector")
 
+# [v20.6.5] pykrx 내부 JSON parse 에러 로그 억제 (FDR 폴백이 처리)
+logging.getLogger("pykrx").setLevel(logging.WARNING)
+
 
 def log(msg: str) -> None:
     """기존 호환성 유지 래퍼"""
