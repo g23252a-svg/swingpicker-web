@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260311",
+  "generated_at": "2026-03-11 19:00:07",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "402490",
+      "name": "그린리소스",
+      "route": "ATTACK",
+      "score": 94.8,
+      "close": 12970,
+      "entry": 10660,
+      "stop": 9050,
+      "target1": 13480,
+      "target2": 14580,
+      "est_win_rate": 0.748,
+      "rr": 1.8,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/402490"
+    },
+    {
+      "rank": 2,
+      "code": "417500",
+      "name": "제이아이테크",
+      "route": "ARMED",
+      "score": 86.2,
+      "close": 4910,
+      "entry": 4170,
+      "stop": 3540,
+      "target1": 5190,
+      "target2": 5810,
+      "est_win_rate": 0.662,
+      "rr": 1.6,
+      "sector": "화학·소재",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/417500"
+    },
+    {
+      "rank": 3,
+      "code": "304360",
+      "name": "에스바이오메딕스",
+      "route": "ARMED",
+      "score": 73.8,
+      "close": 38500,
+      "entry": 37900,
+      "stop": 32200,
+      "target1": 41250,
+      "target2": 49700,
+      "est_win_rate": 0.538,
+      "rr": 0.6,
+      "sector": "바이오·의약품",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/304360"
+    }
+  ]
+}

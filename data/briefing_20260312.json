@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260312",
+  "generated_at": "2026-03-12 19:08:14",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "056090",
+      "name": "시지메드텍",
+      "route": "ARMED",
+      "score": 83.6,
+      "close": 3095,
+      "entry": 2660,
+      "stop": 2260,
+      "target1": 3555,
+      "target2": 4280,
+      "est_win_rate": 0.636,
+      "rr": 2.2,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/056090"
+    },
+    {
+      "rank": 2,
+      "code": "017960",
+      "name": "한국카본",
+      "route": "ATTACK",
+      "score": 83.4,
+      "close": 47800,
+      "entry": 41700,
+      "stop": 35400,
+      "target1": 49000,
+      "target2": 55500,
+      "est_win_rate": 0.634,
+      "rr": 1.2,
+      "sector": "기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/017960"
+    },
+    {
+      "rank": 3,
+      "code": "402490",
+      "name": "그린리소스",
+      "route": "ATTACK",
+      "score": 81.1,
+      "close": 12670,
+      "entry": 10880,
+      "stop": 9250,
+      "target1": 13480,
+      "target2": 14840,
+      "est_win_rate": 0.611,
+      "rr": 1.6,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/402490"
+    }
+  ]
+}
