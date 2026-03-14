@@ -177,14 +177,16 @@ def _vec_timing_score(df: pd.DataFrame, config=None) -> pd.Series:
 #  외부에서 row 단위로 호출하는 코드가 있을 수 있으므로 유지
 # ═══════════════════════════════════════════════════
 
-def calculate_ebs_independent(row) -> int:
-    """[레거시 호환] 단일 row dict → EBS 점수"""
+def calculate_ebs_independent(row, config=None) -> int:
+    """[레거시 호환] 단일 row dict → EBS 점수 (v20.6.4: config SSOT)"""
+    cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
     score = 0
     if row.get('Low_Trend_PCT', 0) > 0: score += 2
-    if row.get('Vol_Quality', 0) >= 1.1: score += 2
+    if row.get('Vol_Quality', 0) >= cfg.indicator.vol_quality_min: score += 2
     if row.get('MACD_Slope_PCT', 0) > 0: score += 2
     rsi = row.get('RSI14', 50)
-    if 45 <= rsi <= 70: score += 2
+    rsi_lo, rsi_hi = cfg.indicator.rsi_range
+    if rsi_lo <= rsi <= rsi_hi: score += 2
     if row.get('TTM_SQUEEZE', 0) == 1 or row.get('BB_Expanding', 0) == 1: score += 2
     return score
 
@@ -285,14 +287,14 @@ def determine_state(row, RouteState=None, config=None):
         vol_qual = float(row.get('Vol_Quality', 1.0))
         range_pos = float(row.get('Range_Pos', 0))
 
-        if rsi >= cfg.indicator.rsi_overheat or r5 >= 20.0: return RouteState.OVERHEAT
+        if rsi >= cfg.indicator.rsi_overheat or r5 >= cfg.indicator.route_overheat_ret5d: return RouteState.OVERHEAT
         if (above_ma20 == 1 and slope > 0
                 and t_score >= cfg.indicator.timing_attack_threshold
                 and vol_qual >= cfg.indicator.vol_quality_attack
                 and range_pos >= 0.8):
             return RouteState.ATTACK
         if is_squeeze == 1 and above_ma20 == 1: return RouteState.ARMED
-        if vol_qual >= 2.0: return RouteState.ARMED
+        if vol_qual >= cfg.indicator.route_armed_vol_quality: return RouteState.ARMED
         if float(row.get('Low_Trend_PCT', 0)) > 0: return RouteState.WAIT
         return RouteState.NEUTRAL
     except Exception:
@@ -327,23 +329,24 @@ def determine_state_dynamic(row, thresholds: dict):
         frg_ratio = (frg_net / turnover * 100) if _turnover_valid else 0.0
         ant_ratio = (ind_net / turnover * 100) if _turnover_valid else 0.0
 
-        if _turnover_valid and r1 > 5.0 and frg_ratio < -20.0 and ant_ratio > 20.0:
+        _cfg_ind = DEFAULT_CONFIG.indicator
+        if _turnover_valid and r1 > _cfg_ind.route_exit_ret1d_flow and frg_ratio < _cfg_ind.route_exit_frg_ratio and ant_ratio > _cfg_ind.route_exit_ant_ratio:
             return "EXIT_WARNING"
-        if vol_z >= 10.0 and r1 >= 10.0:
+        if vol_z >= _cfg_ind.route_exit_vol_z and r1 >= _cfg_ind.route_exit_ret1d:
             return "EXIT_WARNING"
-        if rsi >= 75 or r5 >= 25.0:
+        if rsi >= _cfg_ind.rsi_overheat or r5 >= _cfg_ind.route_overheat_ret5d:
             return "OVERHEAT"
 
         vol_cut = thresholds.get('vol_q75', 1.2)
         range_cut = thresholds.get('range_q75', 0.8)
         if (slope > 0 and range_pos >= range_cut and vol_qual >= vol_cut
-                and t_score >= 60 and above_ma20 == 1):
-            if low_trend < -3.0: return "WAIT"
+                and t_score >= _cfg_ind.route_attack_timing_min and above_ma20 == 1):
+            if low_trend < _cfg_ind.route_attack_low_trend_floor: return "WAIT"
             return "ATTACK"
 
         is_squeeze = int(row.get('TTM_SQUEEZE', 0))
-        if (is_squeeze == 1 or vol_qual >= 2.0) and above_ma20 == 1:
-            if low_trend >= -3.0: return "ARMED"
+        if (is_squeeze == 1 or vol_qual >= _cfg_ind.route_armed_vol_quality) and above_ma20 == 1:
+            if low_trend >= _cfg_ind.route_attack_low_trend_floor: return "ARMED"
 
         if low_trend > 0 or r1 > 0:
             return "WAIT"
@@ -362,15 +365,20 @@ def _calc_ml_weight(ml_series: pd.Series, macro_risk: str,
     cfg = config if isinstance(config, CollectorConfig) else DEFAULT_CONFIG
 
     ml = ml_series.fillna(0)
-    ml_cov = float((ml > 0).mean())
+    # [v20.6.4] partial failure 방지: ML_SCORE가 정확히 0인 종목은
+    # '미계산'일 수 있으므로, 활성 종목만으로 coverage/center 산출
+    ml_active = ml[ml > 0]
+    ml_cov = float(len(ml_active) / max(len(ml), 1))
 
-    n = len(ml)
+    n = len(ml_active)
     if n >= 10:
         trim_k = max(1, int(n * cfg.trim_pct))
-        ml_sorted = ml.sort_values().values
+        ml_sorted = ml_active.sort_values().values
         ml_center = float(ml_sorted[trim_k:-trim_k].mean())
+    elif n > 0:
+        ml_center = float(ml_active.mean())
     else:
-        ml_center = float(ml.mean())
+        ml_center = 0.0
 
     if ml_center <= cfg.ml_low or ml_cov < cfg.ml_cov_gate:
         w_a = 0.0
@@ -500,30 +508,31 @@ def _vec_determine_state_dynamic(df: pd.DataFrame,
 
     # ARMED
     is_squeeze = _col('TTM_SQUEEZE').astype(int)
-    mask_armed = ((is_squeeze == 1) | (vol_qual >= 2.0)) & (above_ma20 == 1) & (low_trend >= -3.0)
+    _ci = DEFAULT_CONFIG.indicator
+    mask_armed = ((is_squeeze == 1) | (vol_qual >= _ci.route_armed_vol_quality)) & (above_ma20 == 1) & (low_trend >= _ci.route_attack_low_trend_floor)
     route = route.where(~mask_armed, "ARMED")
 
     # ATTACK (low_trend 조건은 별도 downgrade에서 처리)
     mask_attack_base = (
         (slope > 0) & (range_pos >= range_cut) & (vol_qual >= vol_cut)
-        & (t_score >= 60) & (above_ma20 == 1)
+        & (t_score >= _ci.route_attack_timing_min) & (above_ma20 == 1)
     )
     route = route.where(~mask_attack_base, "ATTACK")
 
     # ATTACK → WAIT 다운그레이드 (low_trend 악화 시)
-    mask_attack_downgrade = mask_attack_base & (low_trend < -3.0)
+    mask_attack_downgrade = mask_attack_base & (low_trend < _ci.route_attack_low_trend_floor)
     route = route.where(~mask_attack_downgrade, "WAIT")
 
     # OVERHEAT
-    mask_overheat = (rsi >= 75) | (r5 >= 25.0)
+    mask_overheat = (rsi >= _ci.rsi_overheat) | (r5 >= _ci.route_overheat_ret5d)
     route = route.where(~mask_overheat, "OVERHEAT")
 
     # EXIT_WARNING
-    mask_exit_vol = (vol_z >= 10.0) & (r1 >= 10.0)
+    mask_exit_vol = (vol_z >= _ci.route_exit_vol_z) & (r1 >= _ci.route_exit_ret1d)
     mask_exit_flow = (
-        _turnover_valid & (r1 > 5.0)
-        & (pd.Series(frg_ratio, index=df.index) < -20.0)
-        & (pd.Series(ant_ratio, index=df.index) > 20.0)
+        _turnover_valid & (r1 > _ci.route_exit_ret1d_flow)
+        & (pd.Series(frg_ratio, index=df.index) < _ci.route_exit_frg_ratio)
+        & (pd.Series(ant_ratio, index=df.index) > _ci.route_exit_ant_ratio)
     )
     mask_exit = mask_exit_vol | mask_exit_flow
     route = route.where(~mask_exit, "EXIT_WARNING")

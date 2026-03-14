@@ -83,7 +83,7 @@ def load_reference_data(trade_date: Optional[str] = None, top_n: Optional[int] =
     ctx.start_s, ctx.end_s = start_dt.strftime("%Y%m%d"), ctx.trade_ymd
     ctx.ohlcv_map = prepare_ohlcv_data(ctx.tickers, ctx.start_s, ctx.end_s, ctx.trade_ymd)
     try:
-        from collector import fetch_investor_net_buying as _fib
+        from investor_flow import fetch_investor_net_buying as _fib  # [v20.6.5] 직접 import
         map_frg, map_inst, map_ant = _fib(ctx.trade_ymd)
         ctx.inv_maps = {"frg": map_frg, "inst": map_inst, "ant": map_ant}
         log(f"📊 [수급] 조기 로드 완료: 외인 {len(map_frg)}건, 기관 {len(map_inst)}건")

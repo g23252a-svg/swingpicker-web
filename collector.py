@@ -171,6 +171,10 @@ from validation import (
     run_reality_check,
 )
 
+# [v20.6.5] 분리 모듈 재수출 (하위 호환)
+from trigger_engine import calculate_trigger_score, calc_volume_profile_v2
+from investor_flow import fetch_investor_net_buying
+
 # ------------------------------- 유틸 (shared_log에서 import) -------------------------------
 # log(), ensure_dir(), safe_quantile(), RunContext → shared_log.py (v20.2 SSOT)
 
@@ -1693,7 +1697,7 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
                     else:
                         name_map[code] = code
                     time.sleep(0.001) 
-            except:
+            except Exception:  # [v20.6.4] bare except → typed
                 pass
 
     # 3-1. 전부 실패 시 Naver API 병렬 조회 (최종 폴백)
@@ -1884,7 +1888,7 @@ def safe_quantile(s, q, fallback=0.0):
         v = s.quantile(q)
         # 결과가 NaN이면 fallback 반환, 아니면 float로 변환
         return fallback if pd.isna(v) else float(v)
-    except:
+    except Exception:  # [v20.6.4] bare except → typed
         return fallback
 
 def inv_dist_norm(dist: pd.Series, cap: float) -> pd.Series:
@@ -1973,260 +1977,11 @@ except ImportError as _ie:
 # [v14 REMOVED → get_naver_theme_tags moved to module] (26 lines deleted)
 
 # [v14 REMOVED → send_telegram_auto moved to module] (102 lines deleted)
-def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
-    """
-    해당 일자의 외국인, 기관, 개인 순매수금액(원)을 가져옵니다.
-    Returns: (외인_맵, 기관_맵, 개인_맵)
-    """
-    # ── KIS 캐시 우선 로드 ──────────────────────────────────
-    import json as _json, pathlib as _pl
-    _cp = _pl.Path(f"data/flow_{ymd}.json")
-    if not _cp.exists(): _cp = _pl.Path("data/flow_cache_latest.json")
-    if _cp.exists():
-        try:
-            _raw = _json.loads(_cp.read_text(encoding="utf-8"))
-            _mf  = {k: int(v) for k, v in _raw.get("frg", {}).items()}
-            _mi  = {k: int(v) for k, v in _raw.get("inst", {}).items()}
-            _ma  = {k: int(v) for k, v in _raw.get("ant", {}).items()}
-            logging.info(f"📊 [수급] 캐시 로드: 외인 {len(_mf)}건 기관 {len(_mi)}건")
-            return _mf, _mi, _ma
-        except Exception as _e:
-            logging.warning(f"flow 캐시 로드 실패: {_e}")
-    # ── 이하 기존 pykrx 로직 ────────────────────────────────
-    if (not PYKRX_OK) or (stock is None):
-        return {}, {}, {}
-
-    frg, inst, ant = {}, {}, {}
-    
-    try:
-        log(f"💰 수급 데이터(투자자별 매매동향) 수집 중... ({ymd})")
-        
-        # 1. 외국인
-        df_f = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "외국인")
-        if df_f is not None and '순매수거래대금' in df_f.columns:
-            # [v3.2] iterrows 제거 → 벡터화
-            codes_f = df_f.index.astype(str).str.zfill(6)
-            frg.update(dict(zip(codes_f, df_f['순매수거래대금'].astype(int))))
-        time.sleep(0.3) 
-
-        # 2. 기관
-        df_i = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "기관합계")
-        if df_i is not None and '순매수거래대금' in df_i.columns:
-            codes_i = df_i.index.astype(str).str.zfill(6)
-            inst.update(dict(zip(codes_i, df_i['순매수거래대금'].astype(int))))
-        time.sleep(0.3)
-
-        # 3. 개인
-        df_a = stock.get_market_net_purchases_of_equities_by_ticker(ymd, ymd, "ALL", "개인")
-        if df_a is not None and '순매수거래대금' in df_a.columns:
-            codes_a = df_a.index.astype(str).str.zfill(6)
-            ant.update(dict(zip(codes_a, df_a['순매수거래대금'].astype(int))))
-                
-    except Exception as e:
-        log(f"⚠️ 수급 데이터 수집 실패: {e}")
-    
-    return frg, inst, ant
+# [v20.6.5 MOVED → investor_flow.py] fetch_investor_net_buying (55줄 제거)
 
 # ------------------------------- Trigger Score Calculation -------------------------------
 
-def calculate_trigger_score(df: pd.DataFrame) -> float:
-    """
-    [v3.1 #3] 트리거 점수 — 사전 계산 최적화.
-    
-    이전 버전: _calc_raw_trigger(idx)마다 df.iloc[:idx+1]을 잘라 rolling/ewm을
-    밑바닥부터 재계산 → O(N²) 낭비.
-    
-    개선: 전체 df에 대해 rolling/ewm을 1회만 계산하고,
-    _calc_raw_trigger(idx)는 값만 인덱싱 → O(1).
-    """
-    if df is None or df.empty or len(df) < 30:
-        return 0.0
-
-    # ═══ 1. 전체 데이터에 대해 미리 계산 (1회만) ═══
-    close = pd.to_numeric(df['종가'], errors='coerce').fillna(0)
-    high = pd.to_numeric(df['고가'], errors='coerce').fillna(0)
-    low = pd.to_numeric(df['저가'], errors='coerce').fillna(0)
-    open_p = pd.to_numeric(df['시가'], errors='coerce').fillna(0)
-    vol = pd.to_numeric(df['거래량'], errors='coerce').fillna(0)
-
-    vol_ma20 = vol.rolling(20).mean().shift(1)
-    sma20 = close.rolling(20).mean()
-    std20 = close.rolling(20).std()
-
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    macd = ema12 - ema26
-    sig = macd.ewm(span=9, adjust=False).mean()
-    hist = macd - sig
-
-    # 외인 데이터 존재 여부
-    has_foreign = '외인순매수' in df.columns
-    if has_foreign:
-        foreign_net = pd.to_numeric(df['외인순매수'], errors='coerce').fillna(0)
-
-    def _calc_raw_trigger(idx):
-        if idx < 25:
-            return 0.0
-        try:
-            # ═══ 2. 값만 추출 — O(1) ═══
-            c_curr = float(close.iloc[idx])
-            h_curr = float(high.iloc[idx])
-            l_curr = float(low.iloc[idx])
-            o_curr = float(open_p.iloc[idx])
-            v_curr = float(vol.iloc[idx])
-            c_prev = float(close.iloc[idx - 1])
-
-            if c_prev == 0:
-                return 0.0
-
-            # 기초 지표
-            ret_pct = (c_curr / c_prev - 1) * 100
-            candle_len = h_curr - l_curr
-
-            upper_wick = h_curr - max(o_curr, c_curr)
-            wick_ratio = upper_wick / candle_len if candle_len > 0 else 0.0
-            range_pos = (c_curr - l_curr) / candle_len if candle_len > 0 else 0.5
-
-            # 거래량 비율 (사전 계산된 MA20 사용)
-            vm20 = float(vol_ma20.iloc[idx])
-            if pd.isna(vm20) or vm20 == 0:
-                vm20 = v_curr
-            vol_ratio = v_curr / vm20
-
-            # ---------------------------------------------------------
-            # [Base Score] 기본 점수 (Max 90)
-            # ---------------------------------------------------------
-
-            # (1) 거래량 점수
-            if vol_ratio < 0.5:
-                score_vol = 5.0
-            elif 0.5 <= vol_ratio < 1.2:
-                score_vol = 5.0 + (vol_ratio - 0.5) * 50.0
-            elif 1.2 <= vol_ratio <= 3.0:
-                score_vol = 40.0
-            elif 3.0 < vol_ratio <= 4.0:
-                score_vol = 40.0 - (vol_ratio - 3.0) * 20.0
-            else:
-                score_vol = 20.0
-
-            score_vol = max(0.0, min(40.0, score_vol))
-
-            # (2) 돌파/추세 점수 (사전 계산된 sma20, std20 사용)
-            s20 = float(sma20.iloc[idx])
-            sd20 = float(std20.iloc[idx])
-
-            score_breakout = 0.0
-            if not (pd.isna(s20) or pd.isna(sd20) or sd20 == 0):
-                bb_upper = s20 + (2 * sd20)
-                if c_curr >= bb_upper:
-                    score_breakout = 40.0
-                elif c_curr >= s20:
-                    score_breakout = 20.0
-
-            # (3) 모멘텀 가속 (사전 계산된 MACD 히스토그램 사용)
-            score_mom = 0.0
-            if idx >= 1 and hist.iloc[idx] > hist.iloc[idx - 1]:
-                score_mom = 10.0
-
-            base = score_vol + score_breakout + score_mom
-
-            # ---------------------------------------------------------
-            # [Penalty] 감점 로직 (Cap: 60)
-            # ---------------------------------------------------------
-            penalty = 0.0
-
-            if ret_pct >= 5.0:
-                if wick_ratio >= 0.35:
-                    penalty += 25.0
-                elif wick_ratio >= 0.25:
-                    penalty += 15.0
-
-            if ret_pct >= 3.0 and range_pos < 0.6:
-                penalty += 15.0
-
-            if vol_ratio >= 3.0:
-                if c_curr < o_curr:
-                    penalty += 25.0
-                elif wick_ratio > 0.3 or range_pos < 0.5:
-                    penalty += 20.0
-
-            if has_foreign:
-                try:
-                    frg_net = float(foreign_net.iloc[idx])
-                    if ret_pct >= 5.0 and frg_net < 0 and vol_ratio > 1.5:
-                        if range_pos < 0.6 or wick_ratio > 0.25:
-                            penalty += 20.0
-                except (IndexError, ValueError, TypeError):
-                    pass  # 외국인 데이터 없는 종목은 정상 — 패널티 미적용
-
-            penalty = min(penalty, 60.0)
-
-            return max(0.0, base - penalty)
-
-        except Exception:
-            return 0.0
-
-    last_idx = len(df) - 1
-    score_today = _calc_raw_trigger(last_idx)
-    score_yesterday = _calc_raw_trigger(last_idx - 1)
-
-    final_score = (score_today * 0.7) + (score_yesterday * 0.3)
-    return float(final_score)
-
-
-def calc_volume_profile_v2(df_120: pd.DataFrame):
-    """
-    [v8.7 최종 정밀 버전] 매물대 분석 로직
-    - Typical Price 사용 + 2~98% Percentile 컷
-    - 데이터 길이에 따른 가변 Bins (15~20) 반영
-    - 변동성(ATR%) 연동형 Near Resistance 범위 설정
-    """
-    if df_120.empty or len(df_120) < 15:
-        return None, 0.0, 0.0, 0.0
-
-    # 1. 기초 데이터 확보 (Typical Price)
-    typ_price = (df_120['고가'] + df_120['저가'] + df_120['종가']) / 3
-    curr_c = float(df_120['종가'].iloc[-1])
-    
-    # 2. 변동성(ATR%) 기반 근접 저항 범위 결정 (6% ~ 12% 가변)
-    tr = pd.concat([(df_120['고가'] - df_120['저가']), 
-                    (df_120['고가'] - df_120['종가'].shift(1)).abs(), 
-                    (df_120['저가'] - df_120['종가'].shift(1)).abs()], axis=1).max(axis=1)
-    atr_pct = (tr.rolling(14).mean().iloc[-1] / curr_c) if curr_c > 0 else 0.03
-    near_threshold = max(1.06, min(1.12, 1.0 + atr_pct * 2.0))
-
-    # 3. 범위 설정 및 안전장치 (Percentile + Safety Clamp)
-    l_min = typ_price.quantile(0.02)
-    h_max = typ_price.quantile(0.98)
-    l_min = min(l_min, curr_c * 0.97) # 현재가를 범위 안에 포함
-    h_max = max(h_max, curr_c * 1.03)
-    
-    if h_max <= l_min: return None, 0.0, 0.0, 0.0
-
-    # 4. 가변 Bins 설정 (해상도 조절)
-    bins = 20 if len(df_120) >= 100 else 15
-    bin_size = (h_max - l_min) / bins
-    bins_edges = [l_min + i * bin_size for i in range(bins + 1)]
-    
-    # 5. Histogram 생성
-    volume_hist, _ = np.histogram(typ_price, bins=bins_edges, weights=df_120['거래량'])
-    
-    # 6. POC 및 매물 비중 산출
-    max_bin_idx = np.argmax(volume_hist)
-    poc_p = (bins_edges[max_bin_idx] + bins_edges[max_bin_idx + 1]) / 2
-    
-    total_vol = volume_hist.sum() if volume_hist.sum() > 0 else 1
-    res_all_vol = 0.0
-    res_near_vol = 0.0
-    
-    for i in range(bins):
-        bin_center = (bins_edges[i] + bins_edges[i+1]) / 2
-        if bin_center > curr_c:
-            res_all_vol += volume_hist[i]
-            if bin_center <= curr_c * near_threshold:
-                res_near_vol += volume_hist[i]
-                
-    return poc_p, (res_all_vol / total_vol), (res_near_vol / total_vol), (near_threshold - 1.0) * 100
+# [v20.6.5 MOVED → trigger_engine.py] calculate_trigger_score + calc_volume_profile_v2 (198줄 제거)
 
 def analyze_ticker(
     t: str, ohlcv_df: pd.DataFrame, top_df: pd.DataFrame, mcap_map: Dict[str, float],

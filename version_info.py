@@ -15,6 +15,36 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "20.6.5",
+        "date": "2026-03-14",
+        "type": "minor",
+        "title": "Module Extraction + Pytest Migration — collector 구조 분할 시작",
+        "items": [
+            "🏗️ **trigger_engine.py 신규:** calculate_trigger_score + calc_volume_profile_v2 (198줄) collector.py에서 추출, pipeline_score.py 직접 import 전환",
+            "🏗️ **investor_flow.py 신규:** fetch_investor_net_buying (55줄) collector.py에서 추출, pipeline_score/pipeline_data 직접 import 전환",
+            "📉 **collector.py 경량화:** 2393줄 → 2148줄 (-245줄), 재수출로 하위 호환 유지",
+            "🔌 **순환 의존 해소:** pipeline_score.py/pipeline_data.py가 trigger_engine/investor_flow 직접 import → collector 경유 불필요",
+            "✅ **pytest 마이그레이션:** test_toxic_filter.py + test_stop_logic.py → pytest class 기반 (pytest -v / 스크립트 양방향 실행)",
+        ],
+        "schema_min": 5
+    },
+    {
+        "version": "20.6.4",
+        "date": "2026-03-14",
+        "type": "patch",
+        "title": "SSOT Hardening + Bare Except Purge + Stop Logic Tests",
+        "items": [
+            "🎯 **SSOT 강화:** scoring_engine.py 레거시+벡터 ROUTE 임계치 15건 → collector_config.IndicatorConfig로 통일 (행 단위/벡터 경로 모두 포함)",
+            "🎯 **레거시 EBS SSOT:** calculate_ebs_independent() RSI/Vol_Quality 하드코딩 → config 참조",
+            "🛡️ **bare except 정리:** 핵심 실행 경로 (collector/pipeline_calibrate/prefetch_flow/version_info/time_utils/strategy_lab) 16건 → 명시적 예외 타입",
+            "🧠 **ML 가중치 오염 완화:** _calc_ml_weight partial failure 시 0점 종목을 coverage 계산에서 분리",
+            "✅ **stop_logic 전용 테스트:** test_stop_logic.py 신규 — 6중 안전장치 + check_entry_filter API 정합성 검증 (25+ 케이스)",
+            "🐛 **회귀 수정:** determine_state_dynamic() _cfg_ind 초기화 순서 버그 → EXIT_WARNING 검출 복구",
+            "🧠 **ML center 완전 수정:** _calc_ml_weight() ml_center도 ml_active 기준 산출 (partial failure 보정 완성)",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "20.6.3",
         "date": "2026-03-10",
         "type": "minor",
@@ -134,12 +164,12 @@ def _get_conf(key: str, default: str = "") -> str:
         import streamlit as st
         if key in st.secrets: return str(st.secrets[key])
         if "core" in st.secrets and key in st.secrets["core"]: return str(st.secrets["core"][key])
-    except: pass
+    except Exception: pass  # [v20.6.4]
     return default
 
 def _parse_version(v_str: str) -> Tuple[int, ...]:
     try: return tuple(map(int, (v_str.split('.'))))
-    except: return (0, 0, 0)
+    except (ValueError, TypeError): return (0, 0, 0)  # [v20.6.4]
 
 # [📍 핵심 보급품] 앱 버전
 APP_VERSION = CHANGELOG[0]["version"] if CHANGELOG else "18.0.0"
@@ -171,7 +201,7 @@ def _hex_to_rgb(hex_color: str) -> str:
     h = hex_color.lstrip('#')
     try:
         return f"{int(h[0:2],16)},{int(h[2:4],16)},{int(h[4:6],16)}"
-    except:
+    except (ValueError, IndexError):  # [v20.6.4]
         return "100,100,100"
 
 # ----------------- 4. UI 렌더링 (Streamlit 기반) -----------------

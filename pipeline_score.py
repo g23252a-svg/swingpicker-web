@@ -47,7 +47,7 @@ def _batch_trigger_scores(df: pd.DataFrame, ohlcv_map: dict,
             return code, 0.0, None
         try:
             # [v20.6.3] lazy import: collector는 실제 계산이 필요할 때만 로드
-            from collector import calculate_trigger_score
+            from trigger_engine import calculate_trigger_score  # [v20.6.5] 직접 import
             return code, float(calculate_trigger_score(ohlcv_df)), None
         except Exception as e:
             return code, 0.0, str(e)
@@ -77,8 +77,10 @@ def _batch_trigger_scores(df: pd.DataFrame, ohlcv_map: dict,
 
 
 def run_scoring(ctx: PipelineContext) -> PipelineContext:
-    from collector import (fetch_investor_net_buying, classify_big_sector,
-        add_sector_momentum, ml_engine, calculate_trigger_score)
+    from collector import (classify_big_sector,
+        add_sector_momentum, ml_engine)
+    from investor_flow import fetch_investor_net_buying  # [v20.6.5] 직접 import
+    from trigger_engine import calculate_trigger_score    # [v20.6.5] 직접 import
     df_raw = ctx.df_out
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
