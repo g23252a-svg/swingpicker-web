@@ -101,6 +101,17 @@ class IndicatorConfig:
     timing_attack_threshold: float = 60.0    # ROUTE ATTACK 판정 TIMING_SCORE 기준
     vol_quality_attack: float = 1.3          # ROUTE ATTACK 판정 Vol_Quality 기준
 
+    # ROUTE 상태 머신 임계치 (v20.6.4 SSOT)
+    route_overheat_ret5d: float = 25.0       # OVERHEAT: 5일 수익률 기준
+    route_attack_timing_min: float = 60.0    # ATTACK: TIMING_SCORE 최소 (= timing_attack_threshold와 동일)
+    route_armed_vol_quality: float = 2.0     # ARMED: Vol_Quality 단독 충족 기준
+    route_attack_low_trend_floor: float = -3.0  # ATTACK→WAIT 다운그레이드 기준
+    route_exit_vol_z: float = 10.0           # EXIT_WARNING: 거래강도 기준
+    route_exit_ret1d: float = 10.0           # EXIT_WARNING: 1일 수익률 기준
+    route_exit_frg_ratio: float = -20.0      # EXIT_WARNING: 외인 비율 기준
+    route_exit_ant_ratio: float = 20.0       # EXIT_WARNING: 개인 비율 기준
+    route_exit_ret1d_flow: float = 5.0       # EXIT_WARNING: 수급 판정 1일 수익률 기준
+
     # 볼린저밴드 / TTM Squeeze
     bb_period: int = 20
     bb_std: float = 2.0
