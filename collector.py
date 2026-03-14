@@ -646,7 +646,18 @@ def make_rank_validation_report(
                     if dd:
                         mid_days.append(dd)
 
-                mid_price_maps = [(_d, _load_price_maps(out_dir, _d)) for _d in mid_days]
+                # [v20.6.5] _load_price_maps → {code: {close/high/low/open: val}}
+                # rank validation은 {close: {code: val}} 형태 필요 → 전치
+                def _transpose_pmaps(raw):
+                    out = {"close": {}, "high": {}, "low": {}, "open": {}}
+                    for code, fields in raw.items():
+                        if isinstance(fields, dict):
+                            for k in out:
+                                if k in fields:
+                                    out[k][code] = fields[k]
+                    return out
+
+                mid_price_maps = [(_d, _transpose_pmaps(_load_price_maps(out_dir, _d))) for _d in mid_days]
 
                 for method in methods:
                     if method not in df.columns:

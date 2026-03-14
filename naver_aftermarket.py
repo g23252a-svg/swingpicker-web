@@ -53,7 +53,14 @@ def update_csv_with_aftermarket(csv_path, snap_path=None):
         if snap_path and price_map:
             try:
                 snap = pd.read_csv(snap_path, dtype=str, encoding="utf-8-sig")
-                snap_code = snap.columns[1] if len(snap.columns) > 1 else snap.columns[0]
+                # [v20.6.5] 종목코드 컬럼 명시 탐색 (columns[1] 하드코딩 제거)
+                snap_code = None
+                for c in snap.columns:
+                    if '종목코드' in c or c == 'code':
+                        snap_code = c
+                        break
+                if not snap_code:
+                    snap_code = snap.columns[0]
                 snap_close = None
                 for c in snap.columns:
                     if c.encode('utf-8',errors='ignore') in [b'\xec\xa2\x85\xea\xb0\x80']:
