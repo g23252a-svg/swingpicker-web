@@ -5,8 +5,8 @@
     "score_lo":0,
     "score_hi":50,
     "score_center":25.0,
-    "p_calibrated":0.4307,
-    "n_effective":7.2,
-    "n_raw":8
+    "p_calibrated":0.4986,
+    "n_effective":12.5,
+    "n_raw":14
   }
 ]

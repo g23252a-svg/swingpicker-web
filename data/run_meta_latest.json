@@ -1,7 +1,7 @@
 {
   "trade_ymd": "20260313",
   "macro_risk": "CAUTION",
-  "macro_msg": "환율 1475원 [03/12] (주의)",
+  "macro_msg": "환율 1475원 [03/12] (주의) | 나스닥 -1.8% [03/12] (주의)",
   "market_breadth": 45.0,
   "pass_ebs": 5,
   "rec_limit": 5,
