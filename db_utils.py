@@ -222,6 +222,10 @@ class LDYDBManager:
             if cols and "snap_date" in cols and "trade_date" not in cols:
                 _logger.info(" 🔄 price_snapshots 스키마 마이그레이션: snap_date → trade_date")
                 self.execute_safe("ALTER TABLE price_snapshots RENAME COLUMN snap_date TO trade_date")
+            # [v20.6.5] 컬럼 수 불일치 → DROP+재생성
+            elif cols and len(cols) != 8:
+                _logger.info(f" 🔄 price_snapshots 컬럼 수 불일치: {len(cols)} → 8, DROP+재생성")
+                self.execute_safe("DROP TABLE IF EXISTS price_snapshots")
         except Exception as _mig_err:
             try:
                 self.execute_safe("DROP TABLE IF EXISTS price_snapshots")
@@ -666,9 +670,13 @@ class LDYDBManager:
         if df is None or df.empty:
             return
         try:
+            # [v20.6.5] 스키마 마이그레이션: 컬럼 수 불일치 시 DROP+재생성
+            _EXPECTED_COLS = ["trade_date", "code", "name", "market",
+                              "close_price", "open_price", "low_price", "high_price"]
             try:
                 cols = [r[1] for r in self.execute_safe("PRAGMA table_info(price_snapshots)").fetchall()]
-                if cols and "trade_date" not in cols:
+                if cols and (len(cols) != len(_EXPECTED_COLS) or "trade_date" not in cols):
+                    _logger.info(f" 🔄 price_snapshots 스키마 불일치: {len(cols)}컬럼 → {len(_EXPECTED_COLS)}컬럼, DROP+재생성")
                     self.execute_safe("DROP TABLE price_snapshots")
             except Exception:
                 pass
@@ -700,7 +708,13 @@ class LDYDBManager:
             self._duck.register("_tmp_snap", snap_db)
             try:
                 self.execute_safe("DELETE FROM price_snapshots WHERE trade_date = ?", [formatted])
-                self.execute_safe("INSERT INTO price_snapshots SELECT * FROM _tmp_snap")
+                # [v20.6.5] 명시 컬럼 INSERT — 스키마 불일치 방어
+                self.execute_safe("""
+                    INSERT INTO price_snapshots
+                        (trade_date, code, name, market, close_price, open_price, low_price, high_price)
+                    SELECT trade_date, code, name, market, close_price, open_price, low_price, high_price
+                    FROM _tmp_snap
+                """)
             finally:
                 self._duck.unregister("_tmp_snap")
 
