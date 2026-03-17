@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260316",
+  "generated_at": "2026-03-16 19:25:31",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "003000",
+      "name": "부광약품",
+      "route": "ATTACK",
+      "score": 79.4,
+      "close": 5940,
+      "entry": 5940,
+      "stop": 5040,
+      "target1": 6250,
+      "target2": 7890,
+      "est_win_rate": 0.594,
+      "rr": 0.3,
+      "sector": "바이오·의약품",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/003000"
+    },
+    {
+      "rank": 2,
+      "code": "003280",
+      "name": "흥아해운",
+      "route": "ARMED",
+      "score": 78.6,
+      "close": 3035,
+      "entry": 2280,
+      "stop": 1936,
+      "target1": 3290,
+      "target2": 3690,
+      "est_win_rate": 0.586,
+      "rr": 2.9,
+      "sector": "기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/003280"
+    },
+    {
+      "rank": 3,
+      "code": "056090",
+      "name": "시지메드텍",
+      "route": "ARMED",
+      "score": 74.3,
+      "close": 2835,
+      "entry": 2835,
+      "stop": 2405,
+      "target1": 3555,
+      "target2": 3710,
+      "est_win_rate": 0.543,
+      "rr": 1.7,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/056090"
+    }
+  ]
+}

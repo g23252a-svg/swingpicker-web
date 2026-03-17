@@ -339,5 +339,57 @@
       "425420_20260305_TP1_HIT_20260313",
       "425420_20260305_TP2_HIT_20260313"
     ]
+  },
+  {
+    "code": "304360",
+    "name": "304360",
+    "entry_ymd": "20260303",
+    "entry_px": 37350.0,
+    "qty": 0,
+    "stop_px": 35450.0,
+    "stop_px_initial": 35450.0,
+    "take_px1": 43050.0,
+    "take_px2": 44000.0,
+    "trailing_high": 38950.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260316",
+    "last_close_px": 34750.0,
+    "unrealized_pnl_pct": -6.96,
+    "realized_pnl_pct": -6.96,
+    "close_ymd": "20260316",
+    "close_px": 34750.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "304360_20260303_STOP_HIT_20260316"
+    ]
+  },
+  {
+    "code": "402490",
+    "name": "그린리소스",
+    "entry_ymd": "20260309",
+    "entry_px": 10340.0,
+    "qty": 0,
+    "stop_px": 8780.0,
+    "stop_px_initial": 8780.0,
+    "take_px1": 12900.0,
+    "take_px2": 13750.0,
+    "trailing_high": 13950.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260316",
+    "last_close_px": 13950.0,
+    "unrealized_pnl_pct": 34.91,
+    "realized_pnl_pct": 34.91,
+    "close_ymd": "20260316",
+    "close_px": 13950.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "402490_20260309_WARN_DRAWDOWN_20260309",
+      "402490_20260309_WARN_DRAWDOWN_20260310",
+      "402490_20260309_WARN_DRAWDOWN_20260311",
+      "402490_20260309_CORPORATE_ACTION_20260312",
+      "402490_20260309_TP1_HIT_20260313",
+      "402490_20260309_TP1_HIT_20260316",
+      "402490_20260309_TP2_HIT_20260316"
+    ]
   }
 ]
