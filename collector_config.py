@@ -334,11 +334,53 @@ class SecretsConfig:
 
 
 # ═══════════════════════════════════════════════════
+#  [v20.7] PolicyConfig — 정책 임계치 SSOT
+# ═══════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class PolicyConfig:
+    """모든 차단/진입 방어/분할 임계치의 단일 원천 (Single Source of Truth).
+
+    validation.py, stop_logic.py, trade_plan.py 등이 직접 숫자를 쓰지 않고
+    이 Config를 참조해야 함. 테스트도 이 값을 기준으로 경계값 검증.
+
+    [v20.7] 정책 일관성: 한 곳에서만 정의, 전부 참조.
+    """
+    # ── Hard Block 임계치 ──
+    hard_block_turnover_min_eok: float = 30.0    # 거래대금 미만 → 차단
+    hard_block_ret5d_max: float = 40.0           # 5일 수익률 초과 → 차단
+    hard_block_ret5d_min: float = -25.0          # 5일 수익률 미만 → 차단
+    hard_block_gap_max: float = 15.0             # 갭 초과 → 차단
+    hard_block_rsi_max: float = 85.0             # RSI 초과 → 차단
+    hard_block_data_min_days: int = 60           # OHLCV 일수 미만 → 차단
+    hard_block_consecutive_limit_up: int = 2     # 연속 상한가 이상 → 차단
+
+    # ── Entry Defense 임계치 ──
+    entry_gap_hold_pct: float = 12.0             # 갭 초과 → hold
+    entry_gap_split_pct: float = 7.0             # 갭 초과 (hold 미만) → split 50%
+    entry_surge_hold_pct: float = 15.0           # 당일 급등 초과 → hold
+    entry_surge_split_pct: float = 10.0          # 당일 급등 초과 (hold 미만) → split 50%
+    entry_turnover_hold_eok: float = 50.0        # 거래대금 미만 → hold
+    entry_rsi_split: float = 80.0                # RSI 초과 → split 50%
+    entry_consecutive_limit_up: int = 2          # 연속 상한가 이상 → hold
+
+    # ── 정책 버전 (변경 시 반드시 올림) ──
+    policy_version: str = "1.0.0"
+
+    def policy_hash(self) -> str:
+        """정책 임계치 해시 — 모든 필드 기반 변경 감지."""
+        import hashlib, dataclasses
+        vals = "|".join(f"{f.name}={getattr(self, f.name)}"
+                        for f in dataclasses.fields(self))
+        return hashlib.md5(vals.encode()).hexdigest()[:12]
+
+
+# ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
 
 class CollectorConfig:
-    """7개 도메인 Config의 조합 (Facade 패턴).
+    """8개 도메인 Config의 조합 (Facade 패턴).
     
     기존 코드 호환:
       _CFG.bb_period      → __getattr__ → indicator.bb_period
@@ -354,7 +396,7 @@ class CollectorConfig:
 
     __slots__ = (
         "data", "indicator", "scoring", "macro",
-        "slippage", "time_stop", "secrets",
+        "slippage", "time_stop", "secrets", "policy",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -368,8 +410,9 @@ class CollectorConfig:
         slippage: SlippageConfig = None,
         time_stop: TimeStopConfig = None,
         secrets: SecretsConfig = None,
+        policy: PolicyConfig = None,
         base_dir: str = None,
-        config_version: str = "2.0.0",
+        config_version: str = "2.1.0",
     ):
         self.data = data or DataConfig()
         self.indicator = indicator or IndicatorConfig()
@@ -378,6 +421,7 @@ class CollectorConfig:
         self.slippage = slippage or SlippageConfig()
         self.time_stop = time_stop or TimeStopConfig()
         self.secrets = secrets or SecretsConfig()
+        self.policy = policy or PolicyConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -385,7 +429,7 @@ class CollectorConfig:
         self._sub_configs = (
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
-            self.secrets,
+            self.policy, self.secrets,
         )
 
     def __getattr__(self, name: str):
@@ -420,7 +464,7 @@ class CollectorConfig:
         """전략 파라미터의 재현 가능한 스냅샷 (SecretsConfig, base_dir 배제)."""
         from datetime import datetime
         d = {}
-        for sub_name in ("data", "indicator", "scoring", "macro", "slippage", "time_stop"):
+        for sub_name in ("data", "indicator", "scoring", "macro", "slippage", "time_stop", "policy"):
             sub = getattr(self, sub_name)
             sub_dict = dataclasses.asdict(sub)
             d.update(sub_dict)

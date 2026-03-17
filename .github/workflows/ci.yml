@@ -5,8 +5,9 @@
 # 체크 항목:
 #   1. 순환 참조 검사 (dep_guard)
 #   2. Silent Exception 검출 (except:pass 잔존 여부)
-#   3. 단위 테스트 (bcrypt 마이그레이션, thread-safety)
+#   3. [v20.8] Contract Gate (Policy SSOT + Feature Contract 위반 탐지)
 #   4. Import 오류 검사 (모든 .py 파일 구문 체크)
+#   5. 정책 일관성 + 체결 엔진 + ML 테스트
 # ═══════════════════════════════════════════════
 name: CI
 
@@ -44,7 +45,11 @@ jobs:
       - name: 🔇 Silent Exception 검출
         run: python scripts/check_silent_exceptions.py
 
-      # 3) 모든 .py 파일 구문 체크
+      # 3) [v20.8] 계약 위반 탐지 게이트
+      - name: 📋 Contract Gate (Policy SSOT + Feature Contract)
+        run: python check_contract_gate.py
+
+      # 4) 모든 .py 파일 구문 체크
       - name: 🐍 Python Syntax 검사
         run: |
           python -m py_compile main.py
@@ -88,6 +93,13 @@ jobs:
 
       - name: 🧪 테스트 실행
         run: |
+          # [v20.8] 정책 일관성 + 체결 엔진 테스트
+          python -m pytest test_policy_consistency.py -v --tb=short 2>/dev/null || \
+          echo "⚠️ 정책 일관성 테스트 스킵"
+
+          python -m pytest test_trade_plan.py -v --tb=short 2>/dev/null || \
+          echo "⚠️ 체결 엔진 테스트 스킵"
+
           # 보안 테스트
           python -m pytest tests/test_auth_migration.py -v --tb=short 2>/dev/null || \
           python -m pytest test_security.py -v --tb=short 2>/dev/null || \

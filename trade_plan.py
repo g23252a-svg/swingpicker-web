@@ -213,31 +213,15 @@ def build_trade_plan(
     account_risk_pct: float = 1.0,
     account_value_krw: Optional[float] = None,
     exec_rule: Optional[ExecRule] = None,
+    # [v20.8] PolicyConfig end-to-end: 추가 방어 데이터
+    rsi14: float = 50.0,
+    consecutive_limit_up: int = 0,
 ) -> TradePlan:
     """
     ✅ SSOT: ENTRY/STOP/TP를 여기서만 만든다.
     collector의 analyze_ticker는 이 함수만 호출하면 됨.
 
-    Args:
-        buy: 기본 매수가 (종가 기반)
-        atr_val: ATR 값 (원)
-        last_c: 최종 종가 (원)
-        mcap: 시가총액 (억원)
-        tv_eok: 거래대금 (억원)
-        today_low: 금일 저가
-        gap_up_pct: 갭상승률 (%)
-        swing_low_10: 10일 Swing Low
-        dist_to_swing: Swing Low까지 거리 (%)
-        ret_1d: 당일 등락률 (%)
-        gap_pct: 갭 퍼센트 (%)
-        major_net: 메이저 순매수 (원)
-        major_ratio: 메이저 비중
-        is_vi_triggered: VI 발동 여부
-        account_risk_pct: 계좌 대비 1회 최대 손실 (%, 기본 1%)
-        exec_rule: 체결 규칙 (None이면 기본값)
-
-    Returns:
-        TradePlan (frozen, immutable)
+    [v20.8] check_entry_filter → check_entry_defense (PolicyConfig SSOT)
     """
     if exec_rule is None:
         exec_rule = ExecRule()
@@ -245,11 +229,16 @@ def build_trade_plan(
     cfg = SL.get_config()
     regime = getattr(cfg, "regime_name", "normal")
 
-    # ── (1) 진입 필터 ──
-    entry_filter = SL.check_entry_filter(
-        ret_1d=ret_1d, gap_pct=gap_pct,
-        is_vi_triggered=is_vi_triggered,
-    )
+    # ── (1) 진입 필터 — [v20.8] PolicyConfig SSOT 경로 ──
+    _ef_row = {
+        "ret_1d_%": ret_1d,
+        "gap_pct": gap_pct,
+        "is_vi_triggered": is_vi_triggered,
+        "거래대금(억원)": tv_eok if tv_eok is not None else 999,
+        "RSI14": rsi14,
+        "consecutive_limit_up": consecutive_limit_up,
+    }
+    entry_filter = SL.check_entry_defense(_ef_row)
     entry_action = entry_filter["action"]
     position_pct = entry_filter["position_pct"]
 

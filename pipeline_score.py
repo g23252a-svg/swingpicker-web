@@ -135,6 +135,24 @@ def run_scoring(ctx: PipelineContext) -> PipelineContext:
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     log("🧠 AI 엔진 동기화 및 통합 스코어링 시작...")
 
+    # [v20.8] Feature Contract 사전 검증 — 불일치 시 ML 비활성
+    _fc_ok = True
+    try:
+        from feature_contract import FEATURE_CONTRACT, validate_features
+        log(f"📋 Feature Contract: v={FEATURE_CONTRACT.schema_version}, "
+            f"n={FEATURE_CONTRACT.n_features}, hash={FEATURE_CONTRACT.schema_hash}")
+        # ml_engine의 FEATURE_COLS와 Contract 동기화 확인
+        from ml_engine import FEATURE_COLS as _ml_cols
+        _cols_ok, _cols_errs = validate_features(
+            pd.DataFrame(columns=_ml_cols), "pipeline_score→ml_engine"
+        )
+        if not _cols_ok:
+            logger.warning(f"⚠️ [AXIS:ML] Feature Contract 불일치: {_cols_errs}")
+            _fc_ok = False
+    except ImportError:
+        _fc_ok = True  # contract 없으면 기존 로직 유지
+        logger.debug("feature_contract not available — skipping pre-check")
+
     # ML Score
     try:
         df_out = ml_engine.apply_ml_score(df_raw, ctx.ohlcv_map)

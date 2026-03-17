@@ -242,7 +242,7 @@ r_vi = check_entry_defense({"is_vi_triggered": True})
 test("VI: hold", r_vi["action"] == "hold")
 
 r_low_liq = check_entry_defense({"거래대금(억)": 3})
-test("저유동(3억): split 30%", r_low_liq["action"] == "split" and r_low_liq["position_pct"] == 30)
+test("저유동(3억): hold", r_low_liq["action"] == "hold")  # [v20.8] PolicyConfig: 50억 미만 hold
 
 r_rsi80 = check_entry_defense({"RSI14": 85})
 test("RSI 85: split 50%", r_rsi80["action"] == "split" and r_rsi80["position_pct"] == 50)
@@ -311,14 +311,15 @@ df_rsi85_1 = pd.DataFrame({"RSI14": [85.01], "거래대금(억)": [50], "_data_l
 p851, b851 = apply_hard_blocks(df_rsi85_1)
 test("Hard Block RSI=85.01: 차단", len(b851) == 1)
 
-# 거래대금 정확히 3.0 → 차단 (lt 3.0)
-df_tv3 = pd.DataFrame({"거래대금(억)": [3.0], "RSI14": [50], "_data_length": [120], "ret_5d_%": [5], "gap_pct": [1]})
-p3, b3 = apply_hard_blocks(df_tv3)
-test("Hard Block 거래대금=3.0: 통과 (lt, not lte)", len(p3) == 1)
+# [v20.8] PolicyConfig SSOT: 거래대금 임계치 = 30.0억
+# 거래대금 정확히 30.0 → 통과 (lt 30.0이면 차단, 30.0은 통과)
+df_tv30 = pd.DataFrame({"거래대금(억)": [30.0], "RSI14": [50], "_data_length": [120], "ret_5d_%": [5], "gap_pct": [1]})
+p30, b30 = apply_hard_blocks(df_tv30)
+test("Hard Block 거래대금=30.0: 통과 (lt, not lte)", len(p30) == 1)
 
-df_tv29 = pd.DataFrame({"거래대금(억)": [2.99], "RSI14": [50], "_data_length": [120], "ret_5d_%": [5], "gap_pct": [1]})
-p29, b29 = apply_hard_blocks(df_tv29)
-test("Hard Block 거래대금=2.99: 차단", len(b29) == 1)
+df_tv299 = pd.DataFrame({"거래대금(억)": [29.99], "RSI14": [50], "_data_length": [120], "ret_5d_%": [5], "gap_pct": [1]})
+p299, b299 = apply_hard_blocks(df_tv299)
+test("Hard Block 거래대금=29.99: 차단", len(b299) == 1)
 
 # NaN 컬럼 처리
 df_nan = pd.DataFrame({"RSI14": [np.nan], "거래대금(억)": [np.nan], "_data_length": [np.nan], "ret_5d_%": [np.nan], "gap_pct": [np.nan]})

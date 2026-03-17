@@ -74,6 +74,20 @@ FEATURE_COLS = [
     "Upper_Shadow_Ratio",
 ]
 
+# [v20.8] Feature Contract 동기화 검증 (import 시점에 한 번)
+try:
+    from feature_contract import FEATURE_CONTRACT as _FC
+    if list(_FC.columns) != FEATURE_COLS:
+        import logging as _lg
+        _lg.getLogger(__name__).critical(
+            f"🚨 [ML] FEATURE_COLS ≠ Feature Contract! "
+            f"ml_engine={FEATURE_COLS}, contract={list(_FC.columns)}"
+        )
+    # [v20.8 Final] Contract가 있으면 Contract를 SSOT로 사용
+    FEATURE_COLS = list(_FC.columns)
+except ImportError:
+    pass  # feature_contract 미설치 환경 허용
+
 _model_lock = threading.Lock()
 
 
@@ -187,9 +201,18 @@ def save_feature_cache(cache_data):
     
     # Schema sidecar 저장
     try:
+        # [v20.8] Feature Contract에서 버전 참조 (하드코딩 제거)
+        try:
+            from feature_contract import FEATURE_CONTRACT as _fc
+            _schema_ver = _fc.schema_version
+            _schema_hash = _fc.schema_hash
+        except ImportError:
+            _schema_ver = "v20.8"
+            _schema_hash = _compute_feature_hash()
+
         schema = {
-            "schema_version": "v20.6",
-            "feature_cols_hash": _compute_feature_hash(),
+            "schema_version": _schema_ver,
+            "feature_cols_hash": _schema_hash,
             "feature_cols": list(FEATURE_COLS),
             "n_stocks": len(cache_data) if isinstance(cache_data, dict) else 0,
             "saved_at": datetime.now().isoformat(),
@@ -1186,6 +1209,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
     if _loaded_lstm_model is None or _loaded_scaler is None:
         print("⚠️ [ML] 모델 파일 없음. ML_SCORE=0 으로 진행.")
         current_df["ML_SCORE"] = 0.0
+        current_df["ML_STATUS"] = "MODEL_NOT_FOUND"
         return current_df
 
     seq_len = _loaded_seq_length
@@ -1248,7 +1272,31 @@ def apply_ml_score(current_df, full_ohlcv_map):
 
     if not valid_inputs:
         current_df["ML_SCORE"] = 0.0
+        current_df["ML_STATUS"] = "NO_VALID_INPUT"
         return current_df
+
+    # [v20.8] Feature Contract 검증 — 불일치 시 ML 비활성
+    try:
+        from feature_contract import FEATURE_CONTRACT
+        _data_dim = len(valid_inputs[0][0])
+        _fc_ok = (_data_dim == FEATURE_CONTRACT.n_features)
+        if not _fc_ok:
+            print(f"⚠️ [ML] Feature Contract 차원 불일치: "
+                  f"data={_data_dim}, contract={FEATURE_CONTRACT.n_features}. "
+                  f"ML_SCORE=0 폴백.")
+            current_df["ML_SCORE"] = 0.0
+            current_df["ML_STATUS"] = "FEATURE_MISMATCH"
+            return current_df
+        # [v20.8] schema_hash 검증 — FEATURE_COLS와 Contract 동기화 확인
+        from ml_engine import FEATURE_COLS as _ml_cols
+        _cols_ok, _cols_errs = FEATURE_CONTRACT.validate(list(_ml_cols), "ml_engine")
+        if not _cols_ok:
+            print(f"⚠️ [ML] Feature Contract 컬럼 불일치: {_cols_errs}. ML_SCORE=0 폴백.")
+            current_df["ML_SCORE"] = 0.0
+            current_df["ML_STATUS"] = "CONTRACT_MISMATCH"
+            return current_df
+    except ImportError:
+        pass  # feature_contract 없으면 기존 로직 유지
 
     X_raw = np.array(valid_inputs)
     n_feat = X_raw.shape[2]
@@ -1257,6 +1305,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
     if n_feat != scaler_dim:
         print(f"⚠️ [ML] 피처 차원 불일치 (데이터={n_feat}, 모델={scaler_dim}). ML_SCORE=0 폴백.")
         current_df["ML_SCORE"] = 0.0
+        current_df["ML_STATUS"] = "DIM_MISMATCH"
         return current_df
 
     # [Fix 5] 스케일링: v19 → Rolling Z-score, 하위 버전 → StandardScaler
@@ -1270,6 +1319,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
     except Exception as e:
         print(f"⚠️ [ML] 스케일링 실패: {e}. ML_SCORE=0 폴백.")
         current_df["ML_SCORE"] = 0.0
+        current_df["ML_STATUS"] = "SCALE_FAIL"
         return current_df
 
     # --- LSTM 추론 ---
@@ -1332,5 +1382,10 @@ def apply_ml_score(current_df, full_ohlcv_map):
             spread = top20_prob - bot20_prob
             print(f"   📐 변별력: top20%_prob={top20_prob:.1f}, "
                   f"bot20%_prob={bot20_prob:.1f}, spread={spread:.1f}")
+
+    # [v20.8] ML 상태 기록
+    current_df["ML_STATUS"] = current_df["종목코드"].map(
+        {c: "OK" for c in codes}
+    ).fillna("NO_DATA")
 
     return current_df

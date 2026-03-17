@@ -525,6 +525,45 @@ def auto_calibrate(
     """
     logger.info(f"🔄 자동 백테스트 캘리브레이션 시작 (as_of={as_of_ymd})")
 
+    # [v20.8] Feature Contract 강제 검증 — 스키마 불일치 시 경고 + 컬럼 검증
+    _bt_fc_status = "UNKNOWN"
+    try:
+        from feature_contract import FEATURE_CONTRACT, validate_features
+        _fc_hash = FEATURE_CONTRACT.schema_hash
+        _bt_fc_status = "OK"
+
+        # 1) 기존 캐시의 schema hash 비교
+        _schema_path = os.path.join(out_dir, "feature_cache_schema.json")
+        if os.path.exists(_schema_path):
+            with open(_schema_path) as _sf:
+                _saved = json.load(_sf)
+            _saved_hash = _saved.get("feature_cols_hash", "")
+            if _saved_hash and _saved_hash != _fc_hash:
+                logger.warning(
+                    f"⚠️ [BT] Feature schema hash mismatch: "
+                    f"cache={_saved_hash}, contract={_fc_hash}. "
+                    f"캘리브레이션 결과 신뢰도 저하 가능"
+                )
+                _bt_fc_status = "HASH_MISMATCH"
+
+            # 2) 캐시에 저장된 컬럼 이름/순서 검증
+            _saved_cols = _saved.get("feature_cols", [])
+            if _saved_cols:
+                import pandas as _pd
+                _ok, _errs = validate_features(
+                    _pd.DataFrame(columns=_saved_cols), "auto_backtest→cache"
+                )
+                if not _ok:
+                    logger.warning(f"⚠️ [BT] Feature cols mismatch: {_errs}")
+                    _bt_fc_status = "COLS_MISMATCH"
+    except ImportError:
+        _bt_fc_status = "CONTRACT_UNAVAILABLE"
+    except Exception as _e:
+        logger.debug(f"Feature contract check: {_e}")
+        _bt_fc_status = "CHECK_ERROR"
+
+    logger.info(f"📋 [BT] Feature Contract status: {_bt_fc_status}")
+
     # 1. 실현 수익률
     returns_df = compute_realized_returns(out_dir, as_of_ymd, config)
     if returns_df.empty:
@@ -535,8 +574,20 @@ def auto_calibrate(
     table = build_winrate_table(returns_df, config)
 
     # 3. 저장 (버전 태깅 포함)
+    # [v20.8] Feature Contract 메타 포함 — 백테스트-실전 정합성 추적
+    _fc_meta = {}
+    try:
+        from feature_contract import FEATURE_CONTRACT
+        _fc_meta = {
+            "feature_schema_version": FEATURE_CONTRACT.schema_version,
+            "feature_schema_hash": FEATURE_CONTRACT.schema_hash,
+            "feature_n_cols": FEATURE_CONTRACT.n_features,
+        }
+    except ImportError:
+        pass
+
     meta = {
-        "version": "v19.0",
+        "version": "v20.8",
         "as_of_ymd": as_of_ymd,
         "horizon_bdays": config.horizon_bdays,
         "entry_rule": config.entry_rule,
@@ -549,6 +600,7 @@ def auto_calibrate(
         "corporate_action_threshold_pct": config.corporate_action_threshold_pct,
         "n_trades": len(returns_df),
     }
+    meta.update(_fc_meta)  # [v20.8] Feature Contract 메타 병합
 
     # 테이블 + 메타를 하나의 JSON으로
     save_obj = {

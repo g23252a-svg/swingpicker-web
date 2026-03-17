@@ -493,6 +493,9 @@ def build_ticker_plan(
         ret_1d=ind.ret_1d, gap_pct=ind.gap_pct_val,
         major_net=major_net, major_ratio=major_ratio,
         exec_rule=_exec_rule,
+        # [v20.8] PolicyConfig end-to-end: 추가 방어 인자 전달
+        rsi14=ind.rsi,
+        consecutive_limit_up=ind.consecutive_limit_up,
     )
 
     # Time Stop

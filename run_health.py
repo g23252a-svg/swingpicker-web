@@ -36,6 +36,14 @@ class RunHealth:
     # [v20.6] macro 직접 저장 — Dashboard fallback 추론 불필요
     macro_risk: str = "NORMAL"
     market_breadth: float = 50.0
+    # [v20.7] 축별 상태 메타 — silent fallback 가시화
+    axis_status: Dict[str, str] = field(default_factory=lambda: {
+        "MCAP": "UNKNOWN", "BENCH": "UNKNOWN", "FLOW": "UNKNOWN",
+        "NEWS": "UNKNOWN", "SECTOR": "UNKNOWN", "ML": "UNKNOWN",
+        "TRIGGER": "UNKNOWN",
+    })
+    # 축 상태 값: OK | PARTIAL | FALLBACK_USED | DISABLED | FAILED_ZERO_FILLED | UNKNOWN
+    fallback_count: int = 0
 
     # 축별 신뢰 가중치 (결손 시 감점)
     _AXIS_WEIGHTS = {
@@ -88,6 +96,12 @@ class RunHealth:
         else:
             return "WAIT"
 
+    def set_axis(self, axis: str, status: str):
+        """[v20.7] 축별 상태 설정."""
+        self.axis_status[axis] = status
+        if status in ("FALLBACK_USED", "FAILED_ZERO_FILLED"):
+            self.fallback_count += 1
+
     def inject_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """CSV에 건강 상태 컬럼 주입"""
         df["RUN_STATUS"] = self.status
@@ -95,6 +109,12 @@ class RunHealth:
         df["DATA_FRESHNESS_OK"] = self.data_freshness_ok
         df["CONFIDENCE_SCORE"] = self.confidence_score
         df["MAX_ALLOWED_ROUTE"] = self.max_allowed_route
+
+        # [v20.7] 축별 상태
+        for axis, st in self.axis_status.items():
+            df[f"AXIS_{axis}"] = st
+        df["FALLBACK_COUNT"] = self.fallback_count
+        df["AXIS_QUALITY"] = sum(1 for v in self.axis_status.values() if v == "OK")
 
         # 데이터 유무 플래그
         df["HAS_NEWS"] = df.get("NEWS_SCORE", pd.Series(0, index=df.index)).fillna(0).astype(float).ne(0).any()
@@ -145,29 +165,35 @@ def check_run_health(
     # ── 1. 시가총액 ──
     if mcap_map is None or len(mcap_map) == 0:
         h.add_issue("MCAP_EMPTY")
+        h.set_axis("MCAP", "FAILED_ZERO_FILLED")
         logger.warning("⚠️ [Health] 시가총액 맵 비어있음 → 시총 기반 손절 캡 비활성")
     elif "시가총액(억원)" in df.columns:
         mcap_col = pd.to_numeric(df["시가총액(억원)"], errors="coerce").fillna(0)
         if (mcap_col == 0).all():
             h.add_issue("MCAP_ALL_ZERO")
+            h.set_axis("MCAP", "FAILED_ZERO_FILLED")
             logger.warning("⚠️ [Health] 시가총액 전행 0 → 폴백 필요")
         else:
             h.add_ok("MCAP")
+            h.set_axis("MCAP", "OK")
 
     # ── 2. 벤치마크 ──
     if bench_map is None or len(bench_map) == 0:
         h.add_issue("BENCH_FAIL")
+        h.set_axis("BENCH", "FAILED_ZERO_FILLED")
         logger.warning("⚠️ [Health] 벤치마크 맵 비어있음 → 상대강도 계산 불가")
     else:
-        # rel_60d_% 전부 NaN인지 체크
         if "rel_60d_%" in df.columns and df["rel_60d_%"].isna().all():
             h.add_issue("BENCH_NAN")
+            h.set_axis("BENCH", "PARTIAL")
         else:
             h.add_ok("BENCH")
+            h.set_axis("BENCH", "OK")
 
     # ── 3. 수급 ──
     if inv_maps is None:
         h.add_issue("FLOW_ZERO")
+        h.set_axis("FLOW", "FAILED_ZERO_FILLED")
     else:
         frg = inv_maps.get("frg", {})
         inst = inv_maps.get("inst", {})
@@ -175,12 +201,14 @@ def check_run_health(
         major_ok = len(frg) > 0 or len(inst) > 0
         if major_ok:
             h.add_ok("FLOW")
+            h.set_axis("FLOW", "OK")
         elif len(ant) > 0:
-            # 외인/기관 없지만 개인 데이터 있음 → 부분 결손
             h.add_issue("FLOW_PARTIAL")
+            h.set_axis("FLOW", "PARTIAL")
             logger.warning("⚠️ [Health] 외인/기관 수급 0건, 개인 수급만 있음 → 부분 보정")
         else:
             h.add_issue("FLOW_ZERO")
+            h.set_axis("FLOW", "FAILED_ZERO_FILLED")
             logger.warning("⚠️ [Health] 수급 데이터 0건 → 수급 보정 비활성")
 
     # ── 4. 뉴스 ──
@@ -188,19 +216,63 @@ def check_run_health(
         ns = pd.to_numeric(df["NEWS_SCORE"], errors="coerce").fillna(0)
         if (ns == 0).all():
             h.add_issue("NEWS_OFF")
+            h.set_axis("NEWS", "DISABLED")
         else:
             h.add_ok("NEWS")
+            h.set_axis("NEWS", "OK")
     else:
         h.add_issue("NEWS_OFF")
+        h.set_axis("NEWS", "DISABLED")
 
     # ── 5. 섹터 ──
     if "SECTOR_RANK" in df.columns:
         if df["SECTOR_RANK"].isna().all():
             h.add_issue("SECTOR_FAIL")
+            h.set_axis("SECTOR", "FAILED_ZERO_FILLED")
         else:
             h.add_ok("SECTOR")
+            h.set_axis("SECTOR", "OK")
     else:
         h.add_issue("SECTOR_FAIL")
+        h.set_axis("SECTOR", "FAILED_ZERO_FILLED")
+
+    # ── 5b. ML 축 상태 (ML_STATUS + AI_SCORE 통합 판정) ──
+    if "ML_STATUS" in df.columns:
+        # [v20.8] ML_STATUS가 있으면 직접 참조
+        ml_st = df["ML_STATUS"].astype(str).str.strip()
+        ml_ok_count = (ml_st == "OK").sum()
+        ml_fail_statuses = ml_st[~ml_st.isin(["OK", "NO_DATA", "nan", ""])].unique()
+        if ml_ok_count > 0:
+            h.set_axis("ML", "OK")
+        elif len(ml_fail_statuses) > 0:
+            # 구체적 실패 사유 기록
+            _ml_reason = str(ml_fail_statuses[0])
+            h.set_axis("ML", f"FAILED:{_ml_reason}")
+            h.warnings.append(f"ML_FAIL:{_ml_reason}")
+        else:
+            h.set_axis("ML", "DISABLED")
+    elif "AI_SCORE" in df.columns:
+        ai = pd.to_numeric(df["AI_SCORE"], errors="coerce").fillna(0)
+        if (ai == 0).all():
+            h.set_axis("ML", "DISABLED")
+        else:
+            h.set_axis("ML", "OK")
+    else:
+        h.set_axis("ML", "DISABLED")
+
+    # ── 5c. Trigger 축 상태 ──
+    if "TIMING_SCORE" in df.columns:
+        ts = pd.to_numeric(df["TIMING_SCORE"], errors="coerce").fillna(0)
+        if (ts == 0).all():
+            h.set_axis("TRIGGER", "FAILED_ZERO_FILLED")
+        else:
+            h.set_axis("TRIGGER", "OK")
+
+    # ── [v20.7] fallback 2개+ 시 MAX_ROUTE 자동 하향 ──
+    _fb = sum(1 for v in h.axis_status.values() if v in ("FALLBACK_USED", "FAILED_ZERO_FILLED"))
+    if _fb >= 3 and h.status == "OK":
+        h.status = "DEGRADED"
+        h.warnings.append(f"AUTO_DEGRADE: {_fb} axes failed/fallback")
 
     # ── 6. TP 단조성 검증 ──
     if "추천매도가1" in df.columns and "추천매도가2" in df.columns:
@@ -241,6 +313,8 @@ def save_health(health: RunHealth, out_dir: str, trade_ymd: str) -> str:
         "max_allowed_route": health.max_allowed_route,
         "macro_risk": health.macro_risk,
         "market_breadth": health.market_breadth,
+        "axis_status": health.axis_status,
+        "fallback_count": health.fallback_count,
     }
     try:
         with open(path, "w", encoding="utf-8") as f:

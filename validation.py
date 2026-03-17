@@ -15,6 +15,8 @@ from glob import glob
 
 import pandas as pd
 
+from collector_config import DEFAULT_CONFIG as _CFG
+
 logger = logging.getLogger(__name__)
 
 
@@ -144,17 +146,21 @@ class HardBlockRule:
     reason: str         # 차단 사유 (한글)
 
 
-HARD_BLOCK_RULES = [
-    HardBlockRule("연속급등",     "ret_5d_%",             "gt",  40.0,  "5일 수익률 40%+ 과열"),
-    HardBlockRule("거래대금부족", "거래대금(억)",          "lt",  30.0,  "거래대금 30억 미만"),  # [v4.0] 3→30억 상향
-    # [v4.0] scoring-overhaul: 거래대금(억원) 컬럼도 체크 (단위 혼재 대응)
-    HardBlockRule("거래대금부족2", "거래대금(억원)",        "lt",  30.0,  "거래대금 30억 미만"),
-    HardBlockRule("갭과대",       "gap_pct",              "gt",  15.0,  "갭 15%+ 비정상"),
-    HardBlockRule("RSI극단",      "RSI14",                "gt",  85.0,  "RSI 85+ 극단과열"),
-    HardBlockRule("데이터부족",   "_data_length",         "lt",  60,    "OHLCV 60일 미만"),
-    HardBlockRule("급락종목",     "ret_5d_%",             "lt",  -25.0, "5일 -25% 이하 급락"),
-    HardBlockRule("상한가연속",   "consecutive_limit_up", "gte", 2,     "연속 상한가 2회+"),
-]
+def _build_hard_block_rules(policy=None):
+    """[v20.7] PolicyConfig SSOT에서 Hard Block 규칙 생성."""
+    p = policy or _CFG.policy
+    return [
+        HardBlockRule("연속급등",     "ret_5d_%",             "gt",  p.hard_block_ret5d_max,           "5일 수익률 40%+ 과열"),
+        HardBlockRule("거래대금부족", "거래대금(억)",          "lt",  p.hard_block_turnover_min_eok,    "거래대금 30억 미만"),
+        HardBlockRule("거래대금부족2","거래대금(억원)",        "lt",  p.hard_block_turnover_min_eok,    "거래대금 30억 미만"),
+        HardBlockRule("갭과대",       "gap_pct",              "gt",  p.hard_block_gap_max,             "갭 15%+ 비정상"),
+        HardBlockRule("RSI극단",      "RSI14",                "gt",  p.hard_block_rsi_max,             "RSI 85+ 극단과열"),
+        HardBlockRule("데이터부족",   "_data_length",         "lt",  p.hard_block_data_min_days,       "OHLCV 60일 미만"),
+        HardBlockRule("급락종목",     "ret_5d_%",             "lt",  p.hard_block_ret5d_min,           "5일 -25% 이하 급락"),
+        HardBlockRule("상한가연속",   "consecutive_limit_up", "gte", p.hard_block_consecutive_limit_up,"연속 상한가 2회+"),
+    ]
+
+HARD_BLOCK_RULES = _build_hard_block_rules()
 
 
 def _eval_block_condition(col: pd.Series, op: str, threshold: float) -> pd.Series:

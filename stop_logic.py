@@ -22,6 +22,8 @@ from typing import Tuple, Optional, Dict, Any
 
 from dataclasses import dataclass, field
 
+from collector_config import DEFAULT_CONFIG as _CFG
+
 
 # ═══════════════════════════════════════════════════
 #  0. Config — 모든 파라미터를 한 곳에서 관리
@@ -1280,65 +1282,69 @@ def rolling_risk_kpi(
 #  [Phase 2-3] 표준화된 진입 방어 규칙
 # ═══════════════════════════════════════════════════
 
-ENTRY_DEFENSE_RULES = [
-    {
-        "name": "gap_12pct",
-        "condition": lambda row: float(row.get("gap_pct", 0) or 0) > 12,
-        "action": "hold",
-        "position_pct": 0,
-        "reason": "갭 12%+ 진입 보류",
-    },
-    {
-        "name": "gap_7pct",
-        "condition": lambda row: 7 < float(row.get("gap_pct", 0) or 0) <= 12,
-        "action": "split",
-        "position_pct": 50,
-        "reason": "갭 7%+ 분할 진입",
-    },
-    {
-        "name": "vi_triggered",
-        "condition": lambda row: bool(row.get("is_vi_triggered", False)),
-        "action": "hold",
-        "position_pct": 0,
-        "reason": "VI 발동 진입 보류",
-    },
-    {
-        "name": "consecutive_limit_up",
-        "condition": lambda row: int(row.get("consecutive_limit_up", 0) or 0) >= 2,
-        "action": "hold",
-        "position_pct": 0,
-        "reason": "연속 상한가 진입 보류",
-    },
-    {
-        "name": "extreme_surge",
-        "condition": lambda row: float(row.get("ret_1d_%", 0) or 0) > 15,
-        "action": "hold",
-        "position_pct": 0,
-        "reason": "당일 15%+ 급등 진입 보류",
-    },
-    {
-        "name": "moderate_surge",
-        "condition": lambda row: 10 < float(row.get("ret_1d_%", 0) or 0) <= 15,
-        "action": "split",
-        "position_pct": 50,
-        "reason": "당일 10%+ 급등 분할 진입",
-    },
-    # ── [Phase 2-3] 추가 방어 규칙 ──
-    {
-        "name": "very_low_liquidity",
-        "condition": lambda row: float(row.get("거래대금(억)", row.get("거래대금(억원)", 999)) or 999) < 50,
-        "action": "hold",
-        "position_pct": 0,
-        "reason": "거래대금 50억 미만 진입 차단",  # [v4.0] 5억split→50억block
-    },
-    {
-        "name": "rsi_overheat",
-        "condition": lambda row: float(row.get("RSI14", 50) or 50) > 80,
-        "action": "split",
-        "position_pct": 50,
-        "reason": "RSI 80+ 과열 분할 진입",
-    },
-]
+def _build_entry_defense_rules(policy=None):
+    """[v20.7] PolicyConfig SSOT에서 Entry Defense 규칙 생성."""
+    p = policy or _CFG.policy
+    return [
+        {
+            "name": "gap_hold",
+            "condition": lambda row, _th=p.entry_gap_hold_pct: float(row.get("gap_pct", 0) or 0) > _th,
+            "action": "hold",
+            "position_pct": 0,
+            "reason": f"갭 {p.entry_gap_hold_pct:.0f}%+ 진입 보류",
+        },
+        {
+            "name": "gap_split",
+            "condition": lambda row, _lo=p.entry_gap_split_pct, _hi=p.entry_gap_hold_pct: _lo < float(row.get("gap_pct", 0) or 0) <= _hi,
+            "action": "split",
+            "position_pct": 50,
+            "reason": f"갭 {p.entry_gap_split_pct:.0f}%+ 분할 진입",
+        },
+        {
+            "name": "vi_triggered",
+            "condition": lambda row: bool(row.get("is_vi_triggered", False)),
+            "action": "hold",
+            "position_pct": 0,
+            "reason": "VI 발동 진입 보류",
+        },
+        {
+            "name": "consecutive_limit_up",
+            "condition": lambda row, _th=p.entry_consecutive_limit_up: int(row.get("consecutive_limit_up", 0) or 0) >= _th,
+            "action": "hold",
+            "position_pct": 0,
+            "reason": "연속 상한가 진입 보류",
+        },
+        {
+            "name": "extreme_surge",
+            "condition": lambda row, _th=p.entry_surge_hold_pct: float(row.get("ret_1d_%", 0) or 0) > _th,
+            "action": "hold",
+            "position_pct": 0,
+            "reason": f"당일 {p.entry_surge_hold_pct:.0f}%+ 급등 진입 보류",
+        },
+        {
+            "name": "moderate_surge",
+            "condition": lambda row, _lo=p.entry_surge_split_pct, _hi=p.entry_surge_hold_pct: _lo < float(row.get("ret_1d_%", 0) or 0) <= _hi,
+            "action": "split",
+            "position_pct": 50,
+            "reason": f"당일 {p.entry_surge_split_pct:.0f}%+ 급등 분할 진입",
+        },
+        {
+            "name": "very_low_liquidity",
+            "condition": lambda row, _th=p.entry_turnover_hold_eok: float(row.get("거래대금(억)", row.get("거래대금(억원)", 999)) or 999) < _th,
+            "action": "hold",
+            "position_pct": 0,
+            "reason": f"거래대금 {p.entry_turnover_hold_eok:.0f}억 미만 진입 차단",
+        },
+        {
+            "name": "rsi_overheat",
+            "condition": lambda row, _th=p.entry_rsi_split: float(row.get("RSI14", 50) or 50) > _th,
+            "action": "split",
+            "position_pct": 50,
+            "reason": f"RSI {p.entry_rsi_split:.0f}+ 과열 분할 진입",
+        },
+    ]
+
+ENTRY_DEFENSE_RULES = _build_entry_defense_rules()
 
 
 def check_entry_defense(row: dict) -> dict:

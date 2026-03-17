@@ -14,6 +14,19 @@ import pickle  # ✅ [v7.0 추가] 데이터 직렬화/캐싱용
 from typing import Dict, Any, Optional, Callable, Tuple, List
 
 import ml_engine  # ✅ [v10.0 추가]
+
+# [v20.8] Feature Contract 사전 검증 — 수집 시작 전 스키마 일관성 확인
+try:
+    from feature_contract import FEATURE_CONTRACT as _FC
+    _fc_cols_ok = (list(_FC.columns) == ml_engine.FEATURE_COLS)
+    if not _fc_cols_ok:
+        import logging as _lg
+        _lg.getLogger("collector").warning(
+            f"⚠️ Feature Contract ≠ ml_engine.FEATURE_COLS! "
+            f"contract={_FC.n_features}cols, ml={len(ml_engine.FEATURE_COLS)}cols"
+        )
+except ImportError:
+    pass  # feature_contract 미설치 환경 허용
 import numpy as np
 import pandas as pd
 import requests
