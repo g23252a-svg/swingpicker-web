@@ -1,6 +1,6 @@
 {
-  "schema_version": "v20.6",
-  "feature_cols_hash": "200fa0e985ab",
+  "schema_version": "v20.8",
+  "feature_cols_hash": "a3a49ec92a61",
   "feature_cols": [
     "Log_Ret",
     "Volume_Norm",
@@ -20,6 +20,6 @@
     "Upper_Shadow_Ratio"
   ],
   "n_stocks": 666,
-  "saved_at": "2026-03-17T19:06:14.933374",
+  "saved_at": "2026-03-17T23:38:26.781109",
   "last_trade_date": "2026-03-17 00:00:00"
 }
