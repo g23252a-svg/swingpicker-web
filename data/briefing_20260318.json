@@ -1,6 +1,6 @@
 {
   "trade_date": "20260318",
-  "generated_at": "2026-03-18 19:12:47",
+  "generated_at": "2026-03-19 07:37:57",
   "count": 3,
   "stocks": [
     {
@@ -25,13 +25,13 @@
       "code": "027360",
       "name": "아주IB투자",
       "route": "ATTACK",
-      "score": 87.6,
+      "score": 86.7,
       "close": 7500,
       "entry": 5740,
       "stop": 4880,
       "target1": 7850,
       "target2": 8820,
-      "est_win_rate": 0.676,
+      "est_win_rate": 0.667,
       "rr": 2.5,
       "sector": "금융",
       "market": "KOSDAQ",
