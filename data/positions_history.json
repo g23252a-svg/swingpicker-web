@@ -391,5 +391,77 @@
       "402490_20260309_TP1_HIT_20260316",
       "402490_20260309_TP2_HIT_20260316"
     ]
+  },
+  {
+    "code": "322310",
+    "name": "322310",
+    "entry_ymd": "20260227",
+    "entry_px": 28500.0,
+    "qty": 0,
+    "stop_px": 27050.0,
+    "stop_px_initial": 27050.0,
+    "take_px1": 32850.0,
+    "take_px2": 33600.0,
+    "trailing_high": 34850.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260318",
+    "last_close_px": 33700.0,
+    "unrealized_pnl_pct": 18.25,
+    "realized_pnl_pct": 18.25,
+    "close_ymd": "20260318",
+    "close_px": 33700.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "322310_20260227_TP1_HIT_20260313",
+      "322310_20260227_TP1_HIT_20260318",
+      "322310_20260227_TP2_HIT_20260318"
+    ]
+  },
+  {
+    "code": "417500",
+    "name": "제이아이테크",
+    "entry_ymd": "20260304",
+    "entry_px": 4000.0,
+    "qty": 0,
+    "stop_px": 3505.0,
+    "stop_px_initial": 3505.0,
+    "take_px1": 5490.0,
+    "take_px2": 5740.0,
+    "trailing_high": 5900.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260318",
+    "last_close_px": 5780.0,
+    "unrealized_pnl_pct": 44.5,
+    "realized_pnl_pct": 44.5,
+    "close_ymd": "20260318",
+    "close_px": 5780.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "417500_20260304_TP1_HIT_20260318",
+      "417500_20260304_TP2_HIT_20260318"
+    ]
+  },
+  {
+    "code": "024060",
+    "name": "흥구석유",
+    "entry_ymd": "20260316",
+    "entry_px": 23550.0,
+    "qty": 0,
+    "stop_px": 21600.0,
+    "stop_px_initial": 21600.0,
+    "take_px1": 36200.0,
+    "take_px2": 42550.0,
+    "trailing_high": 25500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260318",
+    "last_close_px": 20050.0,
+    "unrealized_pnl_pct": -14.86,
+    "realized_pnl_pct": -14.86,
+    "close_ymd": "20260318",
+    "close_px": 20050.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "024060_20260316_STOP_HIT_20260318"
+    ]
   }
 ]
