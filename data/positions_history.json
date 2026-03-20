@@ -463,5 +463,53 @@
     "alerted_events": [
       "024060_20260316_STOP_HIT_20260318"
     ]
+  },
+  {
+    "code": "069540",
+    "name": "빛과전자",
+    "entry_ymd": "20260319",
+    "entry_px": 1275.0,
+    "qty": 0,
+    "stop_px": 1083.0,
+    "stop_px_initial": 1083.0,
+    "take_px1": 1808.0,
+    "take_px2": 1988.0,
+    "trailing_high": 2190.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260320",
+    "last_close_px": 2190.0,
+    "unrealized_pnl_pct": 71.76,
+    "realized_pnl_pct": 71.76,
+    "close_ymd": "20260320",
+    "close_px": 2190.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "069540_20260319_TP1_HIT_20260320",
+      "069540_20260319_TP2_HIT_20260320"
+    ]
+  },
+  {
+    "code": "001510",
+    "name": "SK증권",
+    "entry_ymd": "20260319",
+    "entry_px": 1913.0,
+    "qty": 0,
+    "stop_px": 1625.0,
+    "stop_px_initial": 1625.0,
+    "take_px1": 2360.0,
+    "take_px2": 2475.0,
+    "trailing_high": 2795.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260320",
+    "last_close_px": 2585.0,
+    "unrealized_pnl_pct": 35.13,
+    "realized_pnl_pct": 35.13,
+    "close_ymd": "20260320",
+    "close_px": 2585.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "001510_20260319_TP1_HIT_20260320",
+      "001510_20260319_TP2_HIT_20260320"
+    ]
   }
 ]
