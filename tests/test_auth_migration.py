@@ -13,11 +13,12 @@ import os
 import secrets
 import time
 import unittest
+import pytest
 
 # bcrypt cost를 테스트용으로 낮춤
 os.environ.setdefault("BCRYPT_COST", "4")
 
-import bcrypt
+bcrypt = pytest.importorskip("bcrypt", reason="bcrypt not installed (CI only)")
 
 
 class TestBcryptBasic(unittest.TestCase):

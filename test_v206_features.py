@@ -7,7 +7,10 @@ pytest -v test_v206_features.py
 import numpy as np
 import pandas as pd
 import pytest
-import json, os, tempfile
+import json, os, tempfile, importlib.util
+
+# ── torch 가용성 (ML 캐시 테스트에만 필요) ──
+_TORCH_OK = importlib.util.find_spec("torch") is not None
 
 # ── 테스트 대상 import ──
 from scoring_engine import (
@@ -222,6 +225,7 @@ class TestMacroSSoT:
 #  4. ML Cache Schema 검증
 # ═══════════════════════════════════════════════════
 
+@pytest.mark.skipif(not _TORCH_OK, reason="torch not installed")
 class TestMLCacheSchema:
     """Feature cache의 schema sidecar 검증."""
 

@@ -156,7 +156,3 @@ class TestNamedColumns:
         assert state == "EXIT_WARNING", f"state={state}"
 
 
-# ── 스크립트 실행 호환 ──
-if __name__ == "__main__":
-    exit_code = pytest.main([__file__, "-v", "--tb=short"])
-    sys.exit(exit_code)

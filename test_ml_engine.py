@@ -5,7 +5,9 @@ test_ml_engine.py — ml_engine v19+ 핵심 방어 로직 단위테스트
 import os, sys, json, tempfile, unittest
 import numpy as np
 import pandas as pd
-import torch
+import pytest
+
+torch = pytest.importorskip("torch", reason="torch not installed")
 from unittest.mock import patch
 from sklearn.preprocessing import StandardScaler
 
