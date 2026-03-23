@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260323",
+  "generated_at": "2026-03-23 19:19:00",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "105840",
+      "name": "우진",
+      "route": "ATTACK",
+      "score": 89.9,
+      "close": 27400,
+      "entry": 27400,
+      "stop": 23250,
+      "target1": 31700,
+      "target2": 37800,
+      "est_win_rate": 0.699,
+      "rr": 1.0,
+      "sector": "기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/105840"
+    },
+    {
+      "rank": 2,
+      "code": "039560",
+      "name": "다산네트웍스",
+      "route": "ATTACK",
+      "score": 87.3,
+      "close": 5110,
+      "entry": 4340,
+      "stop": 3685,
+      "target1": 5370,
+      "target2": 5900,
+      "est_win_rate": 0.673,
+      "rr": 1.6,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/039560"
+    },
+    {
+      "rank": 3,
+      "code": "035510",
+      "name": "신세계 I&C",
+      "route": "ARMED",
+      "score": 86.7,
+      "close": 21000,
+      "entry": 19070,
+      "stop": 16200,
+      "target1": 29300,
+      "target2": 33300,
+      "est_win_rate": 0.667,
+      "rr": 3.6,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/035510"
+    }
+  ]
+}
