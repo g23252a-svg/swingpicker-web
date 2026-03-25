@@ -535,5 +535,31 @@
       "006340_20260319_WARN_DRAWDOWN_20260323",
       "006340_20260319_STOP_HIT_20260324"
     ]
+  },
+  {
+    "code": "003000",
+    "name": "부광약품",
+    "entry_ymd": "20260312",
+    "entry_px": 5560.0,
+    "qty": 0,
+    "stop_px": 4725.0,
+    "stop_px_initial": 4725.0,
+    "take_px1": 6250.0,
+    "take_px2": 7470.0,
+    "trailing_high": 9240.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260325",
+    "last_close_px": 9240.0,
+    "unrealized_pnl_pct": 66.19,
+    "realized_pnl_pct": 66.19,
+    "close_ymd": "20260325",
+    "close_px": 9240.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "003000_20260312_TP1_HIT_20260318",
+      "003000_20260312_TP1_HIT_20260324",
+      "003000_20260312_TP1_HIT_20260325",
+      "003000_20260312_TP2_HIT_20260325"
+    ]
   }
 ]
