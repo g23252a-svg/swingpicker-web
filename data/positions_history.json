@@ -561,5 +561,56 @@
       "003000_20260312_TP1_HIT_20260325",
       "003000_20260312_TP2_HIT_20260325"
     ]
+  },
+  {
+    "code": "010780",
+    "name": "아이에스동서",
+    "entry_ymd": "20260312",
+    "entry_px": 32000.0,
+    "qty": 0,
+    "stop_px": 27800.0,
+    "stop_px_initial": 27800.0,
+    "take_px1": 33800.0,
+    "take_px2": 39750.0,
+    "trailing_high": 34450.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260326",
+    "last_close_px": 27600.0,
+    "unrealized_pnl_pct": -13.75,
+    "realized_pnl_pct": -13.75,
+    "close_ymd": "20260326",
+    "close_px": 27600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "010780_20260312_WARN_DRAWDOWN_20260323",
+      "010780_20260312_WARN_DRAWDOWN_20260324",
+      "010780_20260312_WARN_DRAWDOWN_20260325",
+      "010780_20260312_STOP_HIT_20260326"
+    ]
+  },
+  {
+    "code": "027360",
+    "name": "아주IB투자",
+    "entry_ymd": "20260318",
+    "entry_px": 5740.0,
+    "qty": 0,
+    "stop_px": 4880.0,
+    "stop_px_initial": 4880.0,
+    "take_px1": 7850.0,
+    "take_px2": 8820.0,
+    "trailing_high": 10200.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260326",
+    "last_close_px": 8920.0,
+    "unrealized_pnl_pct": 55.4,
+    "realized_pnl_pct": 55.4,
+    "close_ymd": "20260326",
+    "close_px": 8920.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "027360_20260318_TP1_HIT_20260325",
+      "027360_20260318_TP1_HIT_20260326",
+      "027360_20260318_TP2_HIT_20260326"
+    ]
   }
 ]
