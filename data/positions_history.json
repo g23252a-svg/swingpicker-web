@@ -612,5 +612,61 @@
       "027360_20260318_TP1_HIT_20260326",
       "027360_20260318_TP2_HIT_20260326"
     ]
+  },
+  {
+    "code": "465770",
+    "name": "STX그린로지스",
+    "entry_ymd": "20260309",
+    "entry_px": 7200.0,
+    "qty": 0,
+    "stop_px": 6120.0,
+    "stop_px_initial": 6120.0,
+    "take_px1": 9600.0,
+    "take_px2": 10200.0,
+    "trailing_high": 8640.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260327",
+    "last_close_px": 6000.0,
+    "unrealized_pnl_pct": -16.67,
+    "realized_pnl_pct": -16.67,
+    "close_ymd": "20260327",
+    "close_px": 6000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "465770_20260309_WARN_DRAWDOWN_20260312",
+      "465770_20260309_WARN_DRAWDOWN_20260313",
+      "465770_20260309_WARN_DRAWDOWN_20260323",
+      "465770_20260309_WARN_DRAWDOWN_20260324",
+      "465770_20260309_WARN_DRAWDOWN_20260325",
+      "465770_20260309_WARN_DRAWDOWN_20260326",
+      "465770_20260309_WARN_DRAWDOWN_20260327",
+      "465770_20260309_STOP_HIT_20260327"
+    ]
+  },
+  {
+    "code": "100790",
+    "name": "미래에셋벤처투자",
+    "entry_ymd": "20260325",
+    "entry_px": 23200.0,
+    "qty": 0,
+    "stop_px": 19690.0,
+    "stop_px_initial": 19690.0,
+    "take_px1": 27000.0,
+    "take_px2": 31000.0,
+    "trailing_high": 33050.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260327",
+    "last_close_px": 32550.0,
+    "unrealized_pnl_pct": 40.3,
+    "realized_pnl_pct": 40.3,
+    "close_ymd": "20260327",
+    "close_px": 32550.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "100790_20260325_TP1_HIT_20260325",
+      "100790_20260325_TP1_HIT_20260326",
+      "100790_20260325_TP1_HIT_20260327",
+      "100790_20260325_TP2_HIT_20260327"
+    ]
   }
 ]
