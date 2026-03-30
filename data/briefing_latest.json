@@ -1,6 +1,6 @@
 {
   "trade_date": "20260330",
-  "generated_at": "2026-03-30 19:38:19",
+  "generated_at": "2026-03-31 07:33:16",
   "count": 3,
   "stocks": [
     {
@@ -25,13 +25,13 @@
       "code": "425040",
       "name": "티이엠씨",
       "route": "ARMED",
-      "score": 87.3,
+      "score": 87.4,
       "close": 12970,
       "entry": 10460,
       "stop": 8890,
       "target1": 12970,
       "target2": 14470,
-      "est_win_rate": 0.673,
+      "est_win_rate": 0.674,
       "rr": 1.6,
       "sector": "화학·소재",
       "market": "KOSDAQ",
