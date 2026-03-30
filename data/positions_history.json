@@ -668,5 +668,61 @@
       "100790_20260325_TP1_HIT_20260327",
       "100790_20260325_TP2_HIT_20260327"
     ]
+  },
+  {
+    "code": "056090",
+    "name": "시지메드텍",
+    "entry_ymd": "20260313",
+    "entry_px": 2735.0,
+    "qty": 0,
+    "stop_px": 2320.0,
+    "stop_px_initial": 2320.0,
+    "take_px1": 3555.0,
+    "take_px2": 3660.0,
+    "trailing_high": 3310.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260330",
+    "last_close_px": 2225.0,
+    "unrealized_pnl_pct": -18.65,
+    "realized_pnl_pct": -18.65,
+    "close_ymd": "20260330",
+    "close_px": 2225.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "056090_20260313_WARN_DRAWDOWN_20260319",
+      "056090_20260313_WARN_DRAWDOWN_20260323",
+      "056090_20260313_WARN_DRAWDOWN_20260324",
+      "056090_20260313_WARN_DRAWDOWN_20260325",
+      "056090_20260313_WARN_DRAWDOWN_20260326",
+      "056090_20260313_WARN_DRAWDOWN_20260327",
+      "056090_20260313_STOP_HIT_20260330"
+    ]
+  },
+  {
+    "code": "097230",
+    "name": "HJ중공업",
+    "entry_ymd": "20260320",
+    "entry_px": 28450.0,
+    "qty": 0,
+    "stop_px": 24150.0,
+    "stop_px_initial": 24150.0,
+    "take_px1": 29450.0,
+    "take_px2": 37250.0,
+    "trailing_high": 29250.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260330",
+    "last_close_px": 22550.0,
+    "unrealized_pnl_pct": -20.74,
+    "realized_pnl_pct": -20.74,
+    "close_ymd": "20260330",
+    "close_px": 22550.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "097230_20260320_WARN_DRAWDOWN_20260323",
+      "097230_20260320_WARN_DRAWDOWN_20260325",
+      "097230_20260320_WARN_DRAWDOWN_20260326",
+      "097230_20260320_WARN_DRAWDOWN_20260327",
+      "097230_20260320_STOP_HIT_20260330"
+    ]
   }
 ]
