@@ -724,5 +724,108 @@
       "097230_20260320_WARN_DRAWDOWN_20260327",
       "097230_20260320_STOP_HIT_20260330"
     ]
+  },
+  {
+    "code": "003280",
+    "name": "흥아해운",
+    "entry_ymd": "20260316",
+    "entry_px": 2280.0,
+    "qty": 0,
+    "stop_px": 1936.0,
+    "stop_px_initial": 1936.0,
+    "take_px1": 3290.0,
+    "take_px2": 3690.0,
+    "trailing_high": 4345.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260331",
+    "last_close_px": 3980.0,
+    "unrealized_pnl_pct": 74.56,
+    "realized_pnl_pct": 74.56,
+    "close_ymd": "20260331",
+    "close_px": 3980.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "003280_20260316_TP1_HIT_20260317",
+      "003280_20260316_TP1_HIT_20260323",
+      "003280_20260316_TP1_HIT_20260324",
+      "003280_20260316_TP1_HIT_20260325",
+      "003280_20260316_TP1_HIT_20260331",
+      "003280_20260316_TP2_HIT_20260331"
+    ]
+  },
+  {
+    "code": "105840",
+    "name": "우진",
+    "entry_ymd": "20260320",
+    "entry_px": 27100.0,
+    "qty": 0,
+    "stop_px": 23000.0,
+    "stop_px_initial": 23000.0,
+    "take_px1": 31700.0,
+    "take_px2": 37150.0,
+    "trailing_high": 31700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260331",
+    "last_close_px": 22350.0,
+    "unrealized_pnl_pct": -17.53,
+    "realized_pnl_pct": -17.53,
+    "close_ymd": "20260331",
+    "close_px": 22350.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "105840_20260320_WARN_DRAWDOWN_20260326",
+      "105840_20260320_WARN_DRAWDOWN_20260327",
+      "105840_20260320_WARN_DRAWDOWN_20260330",
+      "105840_20260320_STOP_HIT_20260331"
+    ]
+  },
+  {
+    "code": "382800",
+    "name": "지앤비에스 에코",
+    "entry_ymd": "20260325",
+    "entry_px": 4225.0,
+    "qty": 0,
+    "stop_px": 3590.0,
+    "stop_px_initial": 3590.0,
+    "take_px1": 5060.0,
+    "take_px2": 5700.0,
+    "trailing_high": 6200.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260331",
+    "last_close_px": 5880.0,
+    "unrealized_pnl_pct": 39.17,
+    "realized_pnl_pct": 39.17,
+    "close_ymd": "20260331",
+    "close_px": 5880.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "382800_20260325_TP1_HIT_20260327",
+      "382800_20260325_TP1_HIT_20260330",
+      "382800_20260325_TP1_HIT_20260331",
+      "382800_20260325_TP2_HIT_20260331"
+    ]
+  },
+  {
+    "code": "181710",
+    "name": "NHN",
+    "entry_ymd": "20260330",
+    "entry_px": 41900.0,
+    "qty": 0,
+    "stop_px": 37750.0,
+    "stop_px_initial": 37750.0,
+    "take_px1": 48600.0,
+    "take_px2": 54000.0,
+    "trailing_high": 43150.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260331",
+    "last_close_px": 37600.0,
+    "unrealized_pnl_pct": -10.26,
+    "realized_pnl_pct": -10.26,
+    "close_ymd": "20260331",
+    "close_px": 37600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "181710_20260330_STOP_HIT_20260331"
+    ]
   }
 ]
