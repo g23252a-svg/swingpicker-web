@@ -827,5 +827,88 @@
     "alerted_events": [
       "181710_20260330_STOP_HIT_20260331"
     ]
+  },
+  {
+    "code": "125020",
+    "name": "티씨머티리얼즈",
+    "entry_ymd": "20260305",
+    "entry_px": 5310.0,
+    "qty": 0,
+    "stop_px": 4515.0,
+    "stop_px_initial": 4515.0,
+    "take_px1": 6840.0,
+    "take_px2": 7550.0,
+    "trailing_high": 7500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260402",
+    "last_close_px": 4490.0,
+    "unrealized_pnl_pct": -15.44,
+    "realized_pnl_pct": -15.44,
+    "close_ymd": "20260402",
+    "close_px": 4490.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "125020_20260305_TP1_HIT_20260312",
+      "125020_20260305_WARN_DRAWDOWN_20260323",
+      "125020_20260305_WARN_DRAWDOWN_20260324",
+      "125020_20260305_WARN_DRAWDOWN_20260326",
+      "125020_20260305_WARN_DRAWDOWN_20260327",
+      "125020_20260305_WARN_DRAWDOWN_20260330",
+      "125020_20260305_WARN_DRAWDOWN_20260331",
+      "125020_20260305_WARN_DRAWDOWN_20260401",
+      "125020_20260305_STOP_HIT_20260402"
+    ]
+  },
+  {
+    "code": "417010",
+    "name": "나노팀",
+    "entry_ymd": "20260326",
+    "entry_px": 11250.0,
+    "qty": 0,
+    "stop_px": 9560.0,
+    "stop_px_initial": 9560.0,
+    "take_px1": 12380.0,
+    "take_px2": 15250.0,
+    "trailing_high": 12170.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260402",
+    "last_close_px": 9270.0,
+    "unrealized_pnl_pct": -17.6,
+    "realized_pnl_pct": -17.6,
+    "close_ymd": "20260402",
+    "close_px": 9270.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "417010_20260326_WARN_DRAWDOWN_20260330",
+      "417010_20260326_WARN_DRAWDOWN_20260331",
+      "417010_20260326_WARN_DRAWDOWN_20260401",
+      "417010_20260326_STOP_HIT_20260402"
+    ]
+  },
+  {
+    "code": "078160",
+    "name": "메디포스트",
+    "entry_ymd": "20260327",
+    "entry_px": 24400.0,
+    "qty": 0,
+    "stop_px": 20700.0,
+    "stop_px_initial": 20700.0,
+    "take_px1": 25500.0,
+    "take_px2": 30300.0,
+    "trailing_high": 25500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260402",
+    "last_close_px": 19700.0,
+    "unrealized_pnl_pct": -19.26,
+    "realized_pnl_pct": -19.26,
+    "close_ymd": "20260402",
+    "close_px": 19700.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "078160_20260327_WARN_DRAWDOWN_20260330",
+      "078160_20260327_WARN_DRAWDOWN_20260331",
+      "078160_20260327_WARN_DRAWDOWN_20260401",
+      "078160_20260327_STOP_HIT_20260402"
+    ]
   }
 ]
