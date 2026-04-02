@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260402",
+  "generated_at": "2026-04-02 20:54:36",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "322000",
+      "name": "HD현대에너지솔루션",
+      "route": "ATTACK",
+      "score": 97.1,
+      "close": 147000,
+      "entry": 132800,
+      "stop": 112800,
+      "target1": 152500,
+      "target2": 168000,
+      "est_win_rate": 0.771,
+      "rr": 1.0,
+      "sector": "2차전지",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/322000"
+    },
+    {
+      "rank": 2,
+      "code": "138080",
+      "name": "오이솔루션",
+      "route": "ARMED",
+      "score": 92.8,
+      "close": 43000,
+      "entry": 35300,
+      "stop": 29950,
+      "target1": 45950,
+      "target2": 53400,
+      "est_win_rate": 0.728,
+      "rr": 2.0,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/138080"
+    },
+    {
+      "rank": 3,
+      "code": "001780",
+      "name": "알루코",
+      "route": "ATTACK",
+      "score": 92.2,
+      "close": 2385,
+      "entry": 2385,
+      "stop": 2075,
+      "target1": 2740,
+      "target2": 2945,
+      "est_win_rate": 0.722,
+      "rr": 1.1,
+      "sector": "철강·금속",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/001780"
+    }
+  ]
+}
