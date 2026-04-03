@@ -910,5 +910,29 @@
       "078160_20260327_WARN_DRAWDOWN_20260401",
       "078160_20260327_STOP_HIT_20260402"
     ]
+  },
+  {
+    "code": "010060",
+    "name": "OCI홀딩스",
+    "entry_ymd": "20260319",
+    "entry_px": 162000.0,
+    "qty": 0,
+    "stop_px": 137700.0,
+    "stop_px_initial": 137700.0,
+    "take_px1": 206000.0,
+    "take_px2": 223000.0,
+    "trailing_high": 235000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260403",
+    "last_close_px": 229500.0,
+    "unrealized_pnl_pct": 41.67,
+    "realized_pnl_pct": 41.67,
+    "close_ymd": "20260403",
+    "close_px": 229500.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "010060_20260319_TP1_HIT_20260403",
+      "010060_20260319_TP2_HIT_20260403"
+    ]
   }
 ]
