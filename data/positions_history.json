@@ -964,5 +964,30 @@
       "322000_20260313_TP1_HIT_20260403",
       "322000_20260313_TP2_HIT_20260403"
     ]
+  },
+  {
+    "code": "023160",
+    "name": "태광",
+    "entry_ymd": "20260324",
+    "entry_px": 30750.0,
+    "qty": 0,
+    "stop_px": 26100.0,
+    "stop_px_initial": 26100.0,
+    "take_px1": 38450.0,
+    "take_px2": 42250.0,
+    "trailing_high": 48600.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260406",
+    "last_close_px": 43800.0,
+    "unrealized_pnl_pct": 42.44,
+    "realized_pnl_pct": 42.44,
+    "close_ymd": "20260406",
+    "close_px": 43800.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "023160_20260324_TP1_HIT_20260403",
+      "023160_20260324_TP1_HIT_20260406",
+      "023160_20260324_TP2_HIT_20260406"
+    ]
   }
 ]
