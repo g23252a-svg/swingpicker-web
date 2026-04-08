@@ -989,5 +989,64 @@
       "023160_20260324_TP1_HIT_20260406",
       "023160_20260324_TP2_HIT_20260406"
     ]
+  },
+  {
+    "code": "033160",
+    "name": "엠케이전자",
+    "entry_ymd": "20260318",
+    "entry_px": 11660.0,
+    "qty": 0,
+    "stop_px": 9910.0,
+    "stop_px_initial": 9910.0,
+    "take_px1": 16430.0,
+    "take_px2": 18710.0,
+    "trailing_high": 20850.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260408",
+    "last_close_px": 20600.0,
+    "unrealized_pnl_pct": 76.67,
+    "realized_pnl_pct": 76.67,
+    "close_ymd": "20260408",
+    "close_px": 20600.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "033160_20260318_TP1_HIT_20260319",
+      "033160_20260318_TP1_HIT_20260320",
+      "033160_20260318_TP1_HIT_20260324",
+      "033160_20260318_TP1_HIT_20260325",
+      "033160_20260318_TP1_HIT_20260401",
+      "033160_20260318_TP1_HIT_20260402",
+      "033160_20260318_TP1_HIT_20260403",
+      "033160_20260318_TP1_HIT_20260406",
+      "033160_20260318_TP1_HIT_20260408",
+      "033160_20260318_TP2_HIT_20260408"
+    ]
+  },
+  {
+    "code": "006890",
+    "name": "태경케미컬",
+    "entry_ymd": "20260331",
+    "entry_px": 9890.0,
+    "qty": 0,
+    "stop_px": 8400.0,
+    "stop_px_initial": 8400.0,
+    "take_px1": 11640.0,
+    "take_px2": 13430.0,
+    "trailing_high": 10740.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260408",
+    "last_close_px": 8270.0,
+    "unrealized_pnl_pct": -16.38,
+    "realized_pnl_pct": -16.38,
+    "close_ymd": "20260408",
+    "close_px": 8270.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "006890_20260331_WARN_DRAWDOWN_20260401",
+      "006890_20260331_WARN_DRAWDOWN_20260403",
+      "006890_20260331_WARN_DRAWDOWN_20260406",
+      "006890_20260331_WARN_DRAWDOWN_20260407",
+      "006890_20260331_STOP_HIT_20260408"
+    ]
   }
 ]
