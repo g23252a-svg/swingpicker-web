@@ -55,6 +55,32 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
         logger.warning(f"⚠️ CARRY OHLCV 수집 실패: {e}")
         carry_ohlcv = {}
 
+    # [v20.3.5] carry 종목이 top_df에 없으면 임시 추가
+    # → analyze_ticker의 거래대금 필터(min_turnover_eok)에서 탈락 방지
+    _top_codes = set(ctx.top_df["종목코드"].astype(str).str.zfill(6)) if ctx.top_df is not None and not ctx.top_df.empty else set()
+    _missing_in_top = [c for c in carry_codes if c not in _top_codes]
+    if _missing_in_top and ctx.top_df is not None:
+        _patch_rows = []
+        for _mc in _missing_in_top:
+            _ohlcv = carry_ohlcv.get(_mc)
+            if _ohlcv is not None and not _ohlcv.empty:
+                _last_c = float(pd.to_numeric(_ohlcv["종가"], errors="coerce").iloc[-1])
+                _last_v = float(pd.to_numeric(_ohlcv["거래량"], errors="coerce").iloc[-1]) if "거래량" in _ohlcv.columns else 0
+                _tv_won = _last_c * _last_v
+                _patch_rows.append({
+                    "종목코드": _mc,
+                    "거래대금(원)": _tv_won,
+                    "시장": "KOSPI" if _mc in ctx.kospi_set else "KOSDAQ",
+                })
+        if _patch_rows:
+            _patch_df = pd.DataFrame(_patch_rows)
+            # top_df에 없는 컬럼은 NaN으로 채움
+            for _col in ctx.top_df.columns:
+                if _col not in _patch_df.columns:
+                    _patch_df[_col] = np.nan
+            ctx.top_df = pd.concat([ctx.top_df, _patch_df[ctx.top_df.columns]], ignore_index=True)
+            log(f"   📋 top_df 임시 보강: {len(_patch_rows)}건 추가")
+
     # 2) 종목별 재분석 — 실패 사유 추적
     rows = []
     legacy_codes = []
