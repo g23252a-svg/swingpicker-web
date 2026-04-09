@@ -19,14 +19,28 @@ logger = logging.getLogger(__name__)
 #  CARRY 재분석 핵심 함수 (P0 패치 #1)
 # ─────────────────────────────────────────────────────────────
 def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
-                        carry_codes: list) -> pd.DataFrame:
+                        carry_codes: list, *,
+                        analyze_fn=None, prepare_ohlcv_fn=None,
+                        trigger_fn=None, ml_apply_fn=None,
+                        build_score_fn=None, gen_reasons_fn=None,
+                        ) -> pd.DataFrame:
     """
     CARRY 대상 종목을 당일 OHLCV 기준으로 재분석한다.
     실패 시 legacy(기존 행 복사) 폴백.
+
+    의존성 주입: 테스트 시 mock 함수를 직접 넘길 수 있음.
+    기본값 None이면 실제 모듈에서 import.
     """
-    from collector import analyze_ticker, prepare_ohlcv_data
-    from scoring_engine import build_global_score, generate_score_reasons
-    from trigger_engine import calculate_trigger_score
+    if analyze_fn is None:
+        from collector import analyze_ticker as analyze_fn
+    if prepare_ohlcv_fn is None:
+        from collector import prepare_ohlcv_data as prepare_ohlcv_fn
+    if trigger_fn is None:
+        from trigger_engine import calculate_trigger_score as trigger_fn
+    if build_score_fn is None:
+        from scoring_engine import build_global_score as build_score_fn
+    if gen_reasons_fn is None:
+        from scoring_engine import generate_score_reasons as gen_reasons_fn
 
     if not carry_codes:
         return pd.DataFrame()
@@ -34,7 +48,7 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
     # 1) OHLCV 재수집 (carry 종목만)
     log(f"🔄 CARRY 재분석: {len(carry_codes)}건 OHLCV 수집 중...")
     try:
-        carry_ohlcv = prepare_ohlcv_data(
+        carry_ohlcv = prepare_ohlcv_fn(
             carry_codes, ctx.start_s, ctx.end_s, ctx.trade_ymd
         )
     except Exception as e:
@@ -50,7 +64,7 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
             legacy_codes.append(code)
             continue
         try:
-            row = analyze_ticker(
+            row = analyze_fn(
                 code, ohlcv_df, ctx.top_df, ctx.mcap_map,
                 ctx.kospi_set, ctx.kosdaq_set, ctx.name_map,
                 ctx.sector_map, ctx.bench_map, ctx.inv_maps,
@@ -60,7 +74,7 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
                 continue
 
             # Trigger Score
-            row["TRIGGER_SCORE"] = float(calculate_trigger_score(ohlcv_df))
+            row["TRIGGER_SCORE"] = float(trigger_fn(ohlcv_df))
             row["RAW_TRIGGER_SCORE"] = row["TRIGGER_SCORE"]
             row["ROW_BUILD_MODE"] = "CARRY_REFRESHED"
             rows.append(row)
@@ -74,8 +88,11 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
         refreshed_df = pd.DataFrame(rows)
         # ML Score
         try:
-            from collector import ml_engine
-            refreshed_df = ml_engine.apply_ml_score(refreshed_df, carry_ohlcv)
+            if ml_apply_fn is not None:
+                refreshed_df = ml_apply_fn(refreshed_df, carry_ohlcv)
+            else:
+                from collector import ml_engine
+                refreshed_df = ml_engine.apply_ml_score(refreshed_df, carry_ohlcv)
         except Exception as e:
             logger.warning(f"⚠️ CARRY ML 실패: {e}")
             refreshed_df["ML_SCORE"] = 0.0
@@ -85,8 +102,8 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
         ).fillna(0.0).clip(0, 100)
 
         # 통합 스코어 + 이유
-        refreshed_df = build_global_score(refreshed_df, ctx.macro_risk)
-        refreshed_df = generate_score_reasons(refreshed_df, macro_risk=ctx.macro_risk)
+        refreshed_df = build_score_fn(refreshed_df, ctx.macro_risk)
+        refreshed_df = gen_reasons_fn(refreshed_df, macro_risk=ctx.macro_risk)
 
         log(f"✅ CARRY 재분석 성공: {len(refreshed_df)}건")
 
@@ -295,12 +312,16 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
     ], ignore_index=True)
     df_out["LDY_RANK"] = np.arange(1, len(df_out)+1)
 
-    # [v20.3] DATA_FRESHNESS_OK 기본값
+    # [v20.3.1] DATA_FRESHNESS_OK / ROW_BUILD_MODE — NaN 확정 채움
+    # concat 후 NaN이 섞일 수 있으므로 항상 fillna 실행
     if "DATA_FRESHNESS_OK" not in df_out.columns:
         df_out["DATA_FRESHNESS_OK"] = True
-    # ROW_BUILD_MODE 기본값
+    else:
+        df_out["DATA_FRESHNESS_OK"] = df_out["DATA_FRESHNESS_OK"].fillna(True)
     if "ROW_BUILD_MODE" not in df_out.columns:
         df_out["ROW_BUILD_MODE"] = "FRESH"
+    else:
+        df_out["ROW_BUILD_MODE"] = df_out["ROW_BUILD_MODE"].fillna("FRESH")
 
     ctx.df_out = df_out
     return ctx

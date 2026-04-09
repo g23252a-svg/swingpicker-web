@@ -161,20 +161,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         else:
             log('After-market: no changes')
     except ImportError:
-        # 폴백: 기존 방식 (naver_aftermarket 구버전)
-        try:
-            from naver_aftermarket import update_csv_with_aftermarket
-            _snl = os.path.join(OUT_DIR, 'price_snapshot_latest.csv')
-            _ac = update_csv_with_aftermarket(op_l, _snl)
-            if _ac > 0:
-                import shutil; shutil.copy2(op_l, op_d)
-                log(f'After-market (legacy): {_ac} stocks updated')
-            else:
-                log('After-market: no changes')
-        except ImportError:
-            log('naver_aftermarket not found')
-        except Exception as e:
-            log(f'After-market failed: {e}')
+        # sidecar 함수 없으면 시간외 업데이트 스킵 (원본 보존 원칙)
+        log('After-market: sidecar 함수 없음 — 스킵 (recommend 원본 보존)')
     except Exception as e:
         log(f'After-market sidecar failed: {e}')
 

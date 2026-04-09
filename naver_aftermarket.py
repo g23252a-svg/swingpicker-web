@@ -36,9 +36,10 @@ def fetch_after_market_prices_sidecar(csv_path, sidecar_path, snap_path=None):
         logger.warning(f"CSV read fail: {e}")
         return 0
 
-    codes = df.iloc[:, 1].astype(str).str.zfill(6).tolist()
-    code_col = df.columns[1]
-    close_col = df.columns[5]
+    # [v20.3.2] 이름 기반 컬럼 탐색 — 위치 의존 제거
+    code_col = next((c for c in df.columns if '종목코드' in c or c == 'code'), df.columns[1])
+    close_col = next((c for c in df.columns if c == '종가' or 'close' in c.lower()), df.columns[5])
+    codes = df[code_col].astype(str).str.zfill(6).tolist()
     total = len(codes)
     logger.info(f"After-market update start ({total} stocks)")
 
@@ -90,8 +91,10 @@ def update_csv_with_aftermarket(csv_path, snap_path=None):
         df = pd.read_csv(csv_path, dtype=str, encoding="utf-8-sig")
     except Exception as e:
         logger.warning(f"CSV read fail: {e}"); return 0
-    codes = df.iloc[:, 1].astype(str).str.zfill(6).tolist()
-    code_col = df.columns[1]; close_col = df.columns[5]
+    # [v20.3.2] 이름 기반 컬럼 탐색
+    code_col = next((c for c in df.columns if '종목코드' in c or c == 'code'), df.columns[1])
+    close_col = next((c for c in df.columns if c == '종가' or 'close' in c.lower()), df.columns[5])
+    codes = df[code_col].astype(str).str.zfill(6).tolist()
     total = len(codes); updated = 0; price_map = {}
     logger.info(f"After-market update start ({total} stocks)")
     for i, code in enumerate(codes):
