@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20260330",
+  "macro_risk": "CRITICAL",
+  "macro_msg": "환율 1508원 [03/27] (CRITICAL) | 나스닥 -2.1% [03/27] (주의)",
+  "market_breadth": 23.3,
+  "pass_ebs": 6,
+  "rec_limit": 3,
+  "n_stocks": 445,
+  "run_status": "OK",
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK",
+  "scoring_axes": "STRUCT+TIMING+AI+SECTOR",
+  "w_struct": 0.55,
+  "w_timing": 0.25,
+  "w_ai": 0.2
+}

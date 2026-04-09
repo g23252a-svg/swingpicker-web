@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260325",
+  "generated_at": "2026-03-25 20:28:04",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "027360",
+      "name": "아주IB투자",
+      "route": "ARMED",
+      "score": 92.7,
+      "close": 8520,
+      "entry": 6370,
+      "stop": 5410,
+      "target1": 8520,
+      "target2": 9410,
+      "est_win_rate": 0.727,
+      "rr": 2.2,
+      "sector": "금융",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/027360"
+    },
+    {
+      "rank": 2,
+      "code": "432720",
+      "name": "퀄리타스반도체",
+      "route": "ATTACK",
+      "score": 88.3,
+      "close": 16920,
+      "entry": 14090,
+      "stop": 11970,
+      "target1": 16920,
+      "target2": 18930,
+      "est_win_rate": 0.683,
+      "rr": 1.3,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/432720"
+    },
+    {
+      "rank": 3,
+      "code": "382800",
+      "name": "지앤비에스 에코",
+      "route": "ATTACK",
+      "score": 87.8,
+      "close": 5030,
+      "entry": 4225,
+      "stop": 3590,
+      "target1": 5060,
+      "target2": 5700,
+      "est_win_rate": 0.678,
+      "rr": 1.3,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/382800"
+    }
+  ]
+}

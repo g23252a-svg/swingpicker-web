@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260326",
+  "generated_at": "2026-03-26 21:45:21",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "432720",
+      "name": "퀄리타스반도체",
+      "route": "ATTACK",
+      "score": 90.7,
+      "close": 15890,
+      "entry": 14240,
+      "stop": 12100,
+      "target1": 17880,
+      "target2": 19390,
+      "est_win_rate": 0.707,
+      "rr": 1.7,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/432720"
+    },
+    {
+      "rank": 2,
+      "code": "420770",
+      "name": "기가비스",
+      "route": "ARMED",
+      "score": 88.7,
+      "close": 76800,
+      "entry": 76800,
+      "stop": 65200,
+      "target1": 80900,
+      "target2": 101600,
+      "est_win_rate": 0.687,
+      "rr": 0.4,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/420770"
+    },
+    {
+      "rank": 3,
+      "code": "451760",
+      "name": "컨텍",
+      "route": "ATTACK",
+      "score": 88.1,
+      "close": 20000,
+      "entry": 20000,
+      "stop": 17000,
+      "target1": 20800,
+      "target2": 26350,
+      "est_win_rate": 0.681,
+      "rr": 0.3,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/451760"
+    }
+  ]
+}

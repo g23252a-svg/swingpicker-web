@@ -14,5 +14,15 @@
   "confidence_score": 100.0,
   "max_allowed_route": "ATTACK",
   "macro_risk": "CRITICAL",
-  "market_breadth": 59.7
+  "market_breadth": 59.7,
+  "axis_status": {
+    "MCAP": "OK",
+    "BENCH": "OK",
+    "FLOW": "OK",
+    "NEWS": "OK",
+    "SECTOR": "OK",
+    "ML": "OK",
+    "TRIGGER": "OK"
+  },
+  "fallback_count": 0
 }

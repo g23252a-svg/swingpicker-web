@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260318",
+  "generated_at": "2026-03-19 07:37:57",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "417500",
+      "name": "제이아이테크",
+      "route": "ATTACK",
+      "score": 91.3,
+      "close": 5780,
+      "entry": 4610,
+      "stop": 3915,
+      "target1": 5900,
+      "target2": 6820,
+      "est_win_rate": 0.713,
+      "rr": 1.9,
+      "sector": "화학·소재",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/417500"
+    },
+    {
+      "rank": 2,
+      "code": "027360",
+      "name": "아주IB투자",
+      "route": "ATTACK",
+      "score": 86.7,
+      "close": 7500,
+      "entry": 5740,
+      "stop": 4880,
+      "target1": 7850,
+      "target2": 8820,
+      "est_win_rate": 0.667,
+      "rr": 2.5,
+      "sector": "금융",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/027360"
+    },
+    {
+      "rank": 3,
+      "code": "033160",
+      "name": "엠케이전자",
+      "route": "ATTACK",
+      "score": 85.7,
+      "close": 14450,
+      "entry": 11660,
+      "stop": 9910,
+      "target1": 16430,
+      "target2": 18710,
+      "est_win_rate": 0.657,
+      "rr": 2.7,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/033160"
+    }
+  ]
+}

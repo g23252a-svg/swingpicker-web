@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260320",
+  "generated_at": "2026-03-21 23:53:19",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "097230",
+      "name": "HJ중공업",
+      "route": "ATTACK",
+      "score": 90.1,
+      "close": 28450,
+      "entry": 28450,
+      "stop": 24150,
+      "target1": 29450,
+      "target2": 37250,
+      "est_win_rate": 0.701,
+      "rr": 0.2,
+      "sector": "건설·부동산",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/097230"
+    },
+    {
+      "rank": 2,
+      "code": "425040",
+      "name": "티이엠씨",
+      "route": "ARMED",
+      "score": 86.6,
+      "close": 10880,
+      "entry": 10880,
+      "stop": 9240,
+      "target1": 12240,
+      "target2": 14530,
+      "est_win_rate": 0.666,
+      "rr": 0.8,
+      "sector": "화학·소재",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/425040"
+    },
+    {
+      "rank": 3,
+      "code": "003070",
+      "name": "코오롱글로벌",
+      "route": "ATTACK",
+      "score": 86.5,
+      "close": 11970,
+      "entry": 10680,
+      "stop": 9360,
+      "target1": 12300,
+      "target2": 13120,
+      "est_win_rate": 0.665,
+      "rr": 1.2,
+      "sector": "건설·부동산",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/003070"
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260324",
+  "generated_at": "2026-03-24 19:15:53",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "105840",
+      "name": "우진",
+      "route": "ARMED",
+      "score": 89.2,
+      "close": 25950,
+      "entry": 25950,
+      "stop": 24000,
+      "target1": 31700,
+      "target2": 36100,
+      "est_win_rate": 0.692,
+      "rr": 2.9,
+      "sector": "기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/105840"
+    },
+    {
+      "rank": 2,
+      "code": "012630",
+      "name": "HDC",
+      "route": "ARMED",
+      "score": 86.3,
+      "close": 26550,
+      "entry": 26550,
+      "stop": 22800,
+      "target1": 29300,
+      "target2": 32950,
+      "est_win_rate": 0.663,
+      "rr": 0.7,
+      "sector": "금융",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/012630"
+    },
+    {
+      "rank": 3,
+      "code": "023160",
+      "name": "태광",
+      "route": "ATTACK",
+      "score": 84.6,
+      "close": 34150,
+      "entry": 30750,
+      "stop": 26100,
+      "target1": 38450,
+      "target2": 42250,
+      "est_win_rate": 0.646,
+      "rr": 1.7,
+      "sector": "철강·금속",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/023160"
+    }
+  ]
+}

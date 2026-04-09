@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260319",
+  "generated_at": "2026-03-19 20:16:02",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "069540",
+      "name": "빛과전자",
+      "route": "ATTACK",
+      "score": 88.1,
+      "close": 1687,
+      "entry": 1275,
+      "stop": 1083,
+      "target1": 1808,
+      "target2": 1988,
+      "est_win_rate": 0.681,
+      "rr": 2.8,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/069540"
+    },
+    {
+      "rank": 2,
+      "code": "010060",
+      "name": "OCI홀딩스",
+      "route": "ATTACK",
+      "score": 86.9,
+      "close": 198200,
+      "entry": 162000,
+      "stop": 137700,
+      "target1": 206000,
+      "target2": 223000,
+      "est_win_rate": 0.669,
+      "rr": 1.8,
+      "sector": "금융",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/010060"
+    },
+    {
+      "rank": 3,
+      "code": "001510",
+      "name": "SK증권",
+      "route": "ATTACK",
+      "score": 85.4,
+      "close": 2180,
+      "entry": 1913,
+      "stop": 1625,
+      "target1": 2360,
+      "target2": 2475,
+      "est_win_rate": 0.654,
+      "rr": 1.6,
+      "sector": "서비스 기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/001510"
+    }
+  ]
+}
