@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""pipeline_finalize.py — Stage 6: 저장 + 발송 + 검증 [v20.6.3]
+"""pipeline_finalize.py — Stage 6: 저장 + 발송 + 검증 [v20.6.4]
 ═══════════════════════════════════════════════════════════════════
-[v20.6.3] MACRO_RISK/MARKET_BREADTH 직접 저장 + run_meta JSON sidecar
+[v20.6.4] After-market sidecar 분리 — 추천 CSV 원본 불변 보장
+ - recommend_latest.csv는 분석 시점 기준 불변
+ - 시간외 가격은 aftermarket_prices_latest.csv에 별도 저장
 """
 import os, logging, numpy as np, pandas as pd
 from pipeline_context import PipelineContext
@@ -29,9 +31,14 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         "MACRO_RISK","MARKET_BREADTH"]
     for c in must_cols:
         if c not in df_out.columns: df_out[c] = np.nan
-    for _cm in ["CARRY_FROM_DATE","CARRY_AGE_DAYS","IS_STALE_CARRY","STALE_PENALTY"]:
+    for _cm in ["CARRY_FROM_DATE","CARRY_AGE_DAYS","IS_STALE_CARRY","STALE_PENALTY",
+                "ROW_BUILD_MODE","DATA_FRESHNESS_OK"]:
         if _cm not in df_out.columns:
-            df_out[_cm] = np.nan if _cm=="CARRY_FROM_DATE" else (False if _cm=="IS_STALE_CARRY" else 0)
+            if _cm == "CARRY_FROM_DATE": df_out[_cm] = np.nan
+            elif _cm == "IS_STALE_CARRY": df_out[_cm] = False
+            elif _cm == "ROW_BUILD_MODE": df_out[_cm] = "FRESH"
+            elif _cm == "DATA_FRESHNESS_OK": df_out[_cm] = True
+            else: df_out[_cm] = 0
     df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]
     # Config Snapshot
     try:
@@ -39,7 +46,7 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         df_out["CONFIG_SNAPSHOT"]=_snap.snapshot_json(); df_out["CONFIG_VERSION"]=_snap.config_version
     except (ImportError,AttributeError) as e: logger.debug(f"CONFIG_SNAPSHOT 스킵: {e}")
     except Exception as e: logger.warning(f"⚠️ CONFIG_SNAPSHOT 오류: {e}")
-    # [v20.6] macro_risk 직접 저장 — Dashboard fallback 시 추론 불필요
+    # [v20.6] macro_risk 직접 저장
     df_out["MACRO_RISK"] = ctx.macro_risk
     df_out["MARKET_BREADTH"] = ctx.breadth.get("ALL", np.nan)
     # Run Health
@@ -48,7 +55,6 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         from run_health import check_run_health, save_health
         _health = check_run_health(df_out, mcap_map=ctx.mcap_map, bench_map=ctx.bench_map,
             inv_maps=ctx.inv_maps, trade_ymd=trade_ymd)
-        # [v20.6] macro 직접 저장 — Dashboard가 JSON에서 바로 읽음
         _health.macro_risk = ctx.macro_risk
         _health.market_breadth = ctx.breadth.get("ALL", 50.0)
         df_out = _health.inject_columns(df_out); save_health(_health, OUT_DIR, trade_ymd)
@@ -81,7 +87,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             df_out["IS_NOW_ENTRY"]=df_out["ROUTE"]==Route.ATTACK
             df_out["IS_WATCH"]=df_out["ROUTE"]==Route.WAIT
             df_out["ACTION_PRIORITY"]=df_out["ROUTE"].map(_am).fillna(7).astype(int)
-    # CSV 저장
+
+    # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
     op_d = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{ctx.tag}' if ctx.tag else ''}.csv")
     op_l = os.path.join(OUT_DIR, "recommend_latest.csv")
@@ -108,9 +115,11 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 _pat = r'^\d+$'
                 _remain = df_out.loc[df_out['종목명'].str.match(_pat), '종목코드'].tolist()[:5]
                 log(f"⚠️ 미복구 {_fc}건: {_remain}")
-    df_out.to_csv(op_d, index=False, encoding=UTF8); df_out.to_csv(op_l, index=False, encoding=UTF8)
+    df_out.to_csv(op_d, index=False, encoding=UTF8)
+    df_out.to_csv(op_l, index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건) → {op_d}")
-    # [v20.6.3] run_meta JSON sidecar — 레거시 CSV 메타 복원용
+
+    # ── [v20.6.3] run_meta JSON sidecar ──
     try:
         import json as _json
         _meta = {
@@ -137,15 +146,38 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"📋 run_meta 저장 완료 → {_meta_d}")
     except Exception as _me:
         logger.warning(f"⚠️ run_meta 저장 실패 (무해): {_me}")
-    # After-market
+
+    # ══════════════════════════════════════════════════════════
+    #  [v20.6.4] After-market → sidecar 파일로 분리
+    #  recommend_latest.csv는 절대 수정하지 않음 (원본 보존)
+    # ══════════════════════════════════════════════════════════
     try:
-        from naver_aftermarket import update_csv_with_aftermarket
+        from naver_aftermarket import fetch_after_market_prices_sidecar
         _snl = os.path.join(OUT_DIR, 'price_snapshot_latest.csv')
-        _ac = update_csv_with_aftermarket(op_l, _snl)
-        if _ac > 0: import shutil; shutil.copy2(op_l, op_d); log(f'After-market: {_ac} stocks updated')
-        else: log('After-market: no changes')
-    except ImportError: log('naver_aftermarket not found')
-    except Exception as e: log(f'After-market failed: {e}')
+        _sidecar_path = os.path.join(OUT_DIR, 'aftermarket_prices_latest.csv')
+        _ac = fetch_after_market_prices_sidecar(op_l, _sidecar_path, _snl)
+        if _ac > 0:
+            log(f'After-market sidecar: {_ac} stocks → {_sidecar_path}')
+        else:
+            log('After-market: no changes')
+    except ImportError:
+        # 폴백: 기존 방식 (naver_aftermarket 구버전)
+        try:
+            from naver_aftermarket import update_csv_with_aftermarket
+            _snl = os.path.join(OUT_DIR, 'price_snapshot_latest.csv')
+            _ac = update_csv_with_aftermarket(op_l, _snl)
+            if _ac > 0:
+                import shutil; shutil.copy2(op_l, op_d)
+                log(f'After-market (legacy): {_ac} stocks updated')
+            else:
+                log('After-market: no changes')
+        except ImportError:
+            log('naver_aftermarket not found')
+        except Exception as e:
+            log(f'After-market failed: {e}')
+    except Exception as e:
+        log(f'After-market sidecar failed: {e}')
+
     # 종목명 매핑
     try:
         _sp2 = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
