@@ -41,7 +41,7 @@ def update_csv_with_aftermarket(csv_path, snap_path=None):
         old = float(df.loc[df[code_col].str.zfill(6)==code, close_col].iloc[0])
         new = result["final"]
         if new > 0 and new != old:
-            df.loc[df[code_col].str.zfill(6)==code, close_col] = new
+            df.loc[df[code_col].str.zfill(6)==code, close_col] = str(new)
             price_map[code] = new
             updated += 1
             diff = (new/old-1)*100
@@ -75,7 +75,7 @@ def update_csv_with_aftermarket(csv_path, snap_path=None):
                     cnt = 0
                     for c, p in price_map.items():
                         m = snap[snap_code].astype(str).str.zfill(6)==c
-                        if m.any(): snap.loc[m, snap_close] = p; cnt += 1
+                        if m.any(): snap.loc[m, snap_close] = str(p); cnt += 1
                     snap.to_csv(snap_path, index=False, encoding="utf-8-sig")
                     logger.info(f"After-market snapshot: {cnt} -> {snap_path}")
             except Exception as e:
