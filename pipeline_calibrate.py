@@ -311,8 +311,25 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
                     log(f"📌 이전 추천 캐리오버: {_total_carry}건 "
                         f"(재분석 {_refreshed}건, legacy {_legacy}건, "
                         f"refresh_rate={_rate:.0f}%)")
+
+                    # [v20.3.4] refresh_rate 실질 반영
                     if _rate < 50:
-                        log(f"   ⚠️ CARRY refresh rate {_rate:.0f}% < 50% — 추천 신선도 주의")
+                        log(f"   ⚠️ CARRY refresh rate {_rate:.0f}% < 50% — legacy 추가 제한 적용")
+                        _is_leg = df_out["ROW_BUILD_MODE"] == "CARRY_LEGACY"
+                        if _is_leg.any():
+                            # 추가 패널티: rate에 비례 (0%→-10추가, 50%→-0)
+                            _extra = int(10 * (1 - _rate / 50))
+                            df_out.loc[_is_leg, "DISPLAY_SCORE"] = (
+                                pd.to_numeric(df_out.loc[_is_leg, "DISPLAY_SCORE"], errors="coerce")
+                                .fillna(0) - _extra
+                            ).clip(0, 100)
+                            log(f"   📉 legacy {_is_leg.sum()}건 DISPLAY_SCORE -{_extra} 추가 적용")
+
+                    # ctx에 저장 → Health/UI 연동 가능
+                    ctx.breadth["CARRY_REFRESH_RATE"] = round(_rate, 1)
+                    ctx.breadth["CARRY_TOTAL"] = int(_total_carry)
+                    ctx.breadth["CARRY_REFRESHED"] = int(_refreshed)
+                    ctx.breadth["CARRY_LEGACY"] = int(_legacy)
     except Exception as e:
         log(f"⚠️ 캐리오버 처리 실패: {e}")
         import traceback; logger.warning(traceback.format_exc())
