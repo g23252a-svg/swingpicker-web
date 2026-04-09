@@ -55,13 +55,19 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
         logger.warning(f"⚠️ CARRY OHLCV 수집 실패: {e}")
         carry_ohlcv = {}
 
-    # 2) 종목별 재분석
+    # 2) 종목별 재분석 — 실패 사유 추적
     rows = []
     legacy_codes = []
+    fail_reasons = {}  # code → reason
     for code in carry_codes:
         ohlcv_df = carry_ohlcv.get(code)
         if ohlcv_df is None or ohlcv_df.empty:
             legacy_codes.append(code)
+            fail_reasons[code] = "ohlcv_missing"
+            continue
+        if len(ohlcv_df) < 60:
+            legacy_codes.append(code)
+            fail_reasons[code] = f"ohlcv_short({len(ohlcv_df)}rows)"
             continue
         try:
             row = analyze_fn(
@@ -71,6 +77,7 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
             )
             if row is None:
                 legacy_codes.append(code)
+                fail_reasons[code] = "analyze_returned_none"
                 continue
 
             # Trigger Score
@@ -81,6 +88,14 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
         except Exception as e:
             logger.warning(f"⚠️ CARRY 재분석 실패 ({code}): {e}")
             legacy_codes.append(code)
+            fail_reasons[code] = f"exception:{type(e).__name__}"
+
+    # 실패 사유 집계 로그
+    if fail_reasons:
+        from collections import Counter
+        reason_counts = Counter(fail_reasons.values())
+        reason_str = ", ".join(f"{r}:{c}" for r, c in reason_counts.most_common())
+        log(f"   📋 CARRY 실패 상세: {reason_str}")
 
     # 3) 재분석 성공분: ML + 스코어링
     refreshed_df = pd.DataFrame()
@@ -120,12 +135,14 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
             legacy_df["종목코드"] = legacy_codes[:len(legacy_df)]
             legacy_df["ROW_BUILD_MODE"] = "CARRY_LEGACY"
             legacy_df["DATA_FRESHNESS_OK"] = False
-            # Legacy 패널티: DISPLAY_SCORE -10
+            # Legacy 패널티: DISPLAY_SCORE -15 (강화)
             if "DISPLAY_SCORE" in legacy_df.columns:
                 legacy_df["DISPLAY_SCORE"] = (
                     pd.to_numeric(legacy_df["DISPLAY_SCORE"], errors="coerce")
-                    .fillna(0) - 10
+                    .fillna(0) - 15
                 ).clip(0, 100)
+            # 실패 사유 컬럼 추가
+            legacy_df["CARRY_FAIL_REASON"] = legacy_df["종목코드"].map(fail_reasons).fillna("unknown")
             legacy_df["ROUTE_REASON"] = "캐리 재계산 실패: legacy snapshot"
             log(f"⚠️ CARRY legacy 폴백: {len(legacy_df)}건")
 
@@ -289,8 +306,13 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
 
                     _refreshed = (_cd["ROW_BUILD_MODE"] == "CARRY_REFRESHED").sum()
                     _legacy = (_cd["ROW_BUILD_MODE"] == "CARRY_LEGACY").sum()
-                    log(f"📌 이전 추천 캐리오버: {len(_cd)}건 "
-                        f"(재분석 {_refreshed}건, legacy {_legacy}건)")
+                    _total_carry = _refreshed + _legacy
+                    _rate = _refreshed / _total_carry * 100 if _total_carry > 0 else 0
+                    log(f"📌 이전 추천 캐리오버: {_total_carry}건 "
+                        f"(재분석 {_refreshed}건, legacy {_legacy}건, "
+                        f"refresh_rate={_rate:.0f}%)")
+                    if _rate < 50:
+                        log(f"   ⚠️ CARRY refresh rate {_rate:.0f}% < 50% — 추천 신선도 주의")
     except Exception as e:
         log(f"⚠️ 캐리오버 처리 실패: {e}")
         import traceback; logger.warning(traceback.format_exc())
