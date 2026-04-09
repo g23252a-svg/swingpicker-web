@@ -102,8 +102,15 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
                 ctx.sector_map, ctx.bench_map, ctx.inv_maps,
             )
             if row is None:
+                # [v20.3.5] 실패 진단: 왜 None인지 추적
+                _diag = f"ohlcv_len={len(ohlcv_df)}"
+                _mcap = ctx.mcap_map.get(code, 0)
+                _diag += f",mcap={_mcap:.0f}"
+                _in_top = code in set(ctx.top_df["종목코드"].astype(str).str.zfill(6))
+                _diag += f",in_top={_in_top}"
+                logger.info(f"   🔍 {code} analyze→None: {_diag}")
                 legacy_codes.append(code)
-                fail_reasons[code] = "analyze_returned_none"
+                fail_reasons[code] = f"analyze_returned_none({_diag})"
                 continue
 
             # Trigger Score
