@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260410",
+  "generated_at": "2026-04-10 21:11:28",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "175330",
+      "name": "JB금융지주",
+      "route": "ARMED",
+      "score": 84.8,
+      "close": 30950,
+      "entry": 30950,
+      "stop": 27750,
+      "target1": 38500,
+      "target2": 42750,
+      "est_win_rate": 0.648,
+      "rr": 2.4,
+      "sector": "금융",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/175330"
+    },
+    {
+      "rank": 2,
+      "code": "098120",
+      "name": "마이크로컨텍솔",
+      "route": "ATTACK",
+      "score": 83.6,
+      "close": 29850,
+      "entry": 29400,
+      "stop": 25550,
+      "target1": 30300,
+      "target2": 36550,
+      "est_win_rate": 0.636,
+      "rr": 0.2,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/098120"
+    },
+    {
+      "rank": 3,
+      "code": "041440",
+      "name": "현대에버다임",
+      "route": "ARMED",
+      "score": 83.6,
+      "close": 9200,
+      "entry": 9200,
+      "stop": 8330,
+      "target1": 9750,
+      "target2": 10890,
+      "est_win_rate": 0.636,
+      "rr": 0.6,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/041440"
+    }
+  ]
+}

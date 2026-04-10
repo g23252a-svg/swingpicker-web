@@ -5,8 +5,8 @@
     "score_lo":0,
     "score_hi":50.0,
     "score_center":25.0,
-    "p_calibrated":0.5021,
-    "n_effective":32.9,
+    "p_calibrated":0.502,
+    "n_effective":32.7,
     "n_raw":41
   },
   {
@@ -15,9 +15,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.6392,
-    "n_effective":231.6,
-    "n_raw":263
+    "p_calibrated":0.6495,
+    "n_effective":248.5,
+    "n_raw":282
   },
   {
     "method":"DISPLAY_SCORE",
@@ -25,8 +25,8 @@
     "score_lo":90,
     "score_hi":100.01,
     "score_center":95.005,
-    "p_calibrated":0.7843,
-    "n_effective":107.2,
+    "p_calibrated":0.7839,
+    "n_effective":106.4,
     "n_raw":120
   },
   {
@@ -35,9 +35,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.6567,
-    "n_effective":194.3,
-    "n_raw":225
+    "p_calibrated":0.6419,
+    "n_effective":211.3,
+    "n_raw":244
   },
   {
     "method":"DISPLAY_SCORE",
@@ -45,8 +45,8 @@
     "score_lo":90,
     "score_hi":100.01,
     "score_center":95.005,
-    "p_calibrated":0.8286,
-    "n_effective":107.2,
+    "p_calibrated":0.8281,
+    "n_effective":106.4,
     "n_raw":120
   },
   {
@@ -55,79 +55,79 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.6437,
-    "n_effective":177.2,
-    "n_raw":207
-  },
-  {
-    "method":"DISPLAY_SCORE",
-    "horizon":5,
-    "score_lo":90,
-    "score_hi":100.01,
-    "score_center":95.005,
-    "p_calibrated":0.7909,
-    "n_effective":87.3,
-    "n_raw":99
-  },
-  {
-    "method":"FINAL_SCORE",
-    "horizon":1,
-    "score_lo":80,
-    "score_hi":90.0,
-    "score_center":85.0,
-    "p_calibrated":0.6489,
-    "n_effective":241.8,
-    "n_raw":274
-  },
-  {
-    "method":"FINAL_SCORE",
-    "horizon":1,
-    "score_lo":90,
-    "score_hi":100.01,
-    "score_center":95.005,
-    "p_calibrated":0.7622,
-    "n_effective":95.3,
-    "n_raw":107
-  },
-  {
-    "method":"FINAL_SCORE",
-    "horizon":3,
-    "score_lo":80,
-    "score_hi":90.0,
-    "score_center":85.0,
-    "p_calibrated":0.6903,
-    "n_effective":203.5,
-    "n_raw":235
-  },
-  {
-    "method":"FINAL_SCORE",
-    "horizon":3,
-    "score_lo":90,
-    "score_hi":100.01,
-    "score_center":95.005,
-    "p_calibrated":0.8028,
-    "n_effective":95.3,
-    "n_raw":107
-  },
-  {
-    "method":"FINAL_SCORE",
-    "horizon":5,
-    "score_lo":80,
-    "score_hi":90.0,
-    "score_center":85.0,
-    "p_calibrated":0.669,
-    "n_effective":181.6,
+    "p_calibrated":0.6379,
+    "n_effective":180.5,
     "n_raw":212
   },
   {
+    "method":"DISPLAY_SCORE",
+    "horizon":5,
+    "score_lo":90,
+    "score_hi":100.01,
+    "score_center":95.005,
+    "p_calibrated":0.7977,
+    "n_effective":99.8,
+    "n_raw":113
+  },
+  {
+    "method":"FINAL_SCORE",
+    "horizon":1,
+    "score_lo":80,
+    "score_hi":90.0,
+    "score_center":85.0,
+    "p_calibrated":0.6582,
+    "n_effective":258.6,
+    "n_raw":293
+  },
+  {
+    "method":"FINAL_SCORE",
+    "horizon":1,
+    "score_lo":90,
+    "score_hi":100.01,
+    "score_center":95.005,
+    "p_calibrated":0.7617,
+    "n_effective":94.6,
+    "n_raw":107
+  },
+  {
+    "method":"FINAL_SCORE",
+    "horizon":3,
+    "score_lo":80,
+    "score_hi":90.0,
+    "score_center":85.0,
+    "p_calibrated":0.6736,
+    "n_effective":220.4,
+    "n_raw":254
+  },
+  {
+    "method":"FINAL_SCORE",
+    "horizon":3,
+    "score_lo":90,
+    "score_hi":100.01,
+    "score_center":95.005,
+    "p_calibrated":0.8024,
+    "n_effective":94.6,
+    "n_raw":107
+  },
+  {
+    "method":"FINAL_SCORE",
+    "horizon":5,
+    "score_lo":80,
+    "score_hi":90.0,
+    "score_center":85.0,
+    "p_calibrated":0.6657,
+    "n_effective":186.8,
+    "n_raw":219
+  },
+  {
     "method":"FINAL_SCORE",
     "horizon":5,
     "score_lo":90,
     "score_hi":100.01,
     "score_center":95.005,
-    "p_calibrated":0.7667,
-    "n_effective":80.1,
-    "n_raw":91
+    "p_calibrated":0.773,
+    "n_effective":90.8,
+    "n_raw":103
   },
   {
     "method":"AI_SCORE",
@@ -135,8 +135,8 @@
     "score_lo":70,
     "score_hi":80.0,
     "score_center":75.0,
-    "p_calibrated":0.566,
-    "n_effective":8.7,
+    "p_calibrated":0.5654,
+    "n_effective":8.6,
     "n_raw":12
   },
   {
@@ -145,9 +145,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.5831,
-    "n_effective":105.5,
-    "n_raw":121
+    "p_calibrated":0.5811,
+    "n_effective":113.6,
+    "n_raw":130
   },
   {
     "method":"AI_SCORE",
@@ -155,9 +155,9 @@
     "score_lo":90,
     "score_hi":100.01,
     "score_center":95.005,
-    "p_calibrated":0.5047,
-    "n_effective":221.7,
-    "n_raw":247
+    "p_calibrated":0.4966,
+    "n_effective":229.9,
+    "n_raw":257
   },
   {
     "method":"AI_SCORE",
@@ -165,8 +165,8 @@
     "score_lo":70,
     "score_hi":80.0,
     "score_center":75.0,
-    "p_calibrated":0.5408,
-    "n_effective":8.7,
+    "p_calibrated":0.5403,
+    "n_effective":8.6,
     "n_raw":12
   },
   {
@@ -175,9 +175,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.4803,
-    "n_effective":95.7,
-    "n_raw":111
+    "p_calibrated":0.4854,
+    "n_effective":101.8,
+    "n_raw":118
   },
   {
     "method":"AI_SCORE",
@@ -185,9 +185,9 @@
     "score_lo":90,
     "score_hi":100.01,
     "score_center":95.005,
-    "p_calibrated":0.4299,
-    "n_effective":194.2,
-    "n_raw":219
+    "p_calibrated":0.4206,
+    "n_effective":204.4,
+    "n_raw":231
   },
   {
     "method":"AI_SCORE",
@@ -195,8 +195,8 @@
     "score_lo":70,
     "score_hi":80.0,
     "score_center":75.0,
-    "p_calibrated":0.5156,
-    "n_effective":8.7,
+    "p_calibrated":0.5152,
+    "n_effective":8.6,
     "n_raw":12
   },
   {
@@ -205,9 +205,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.4807,
-    "n_effective":89.1,
-    "n_raw":104
+    "p_calibrated":0.4895,
+    "n_effective":90.3,
+    "n_raw":106
   },
   {
     "method":"AI_SCORE",
@@ -215,8 +215,8 @@
     "score_lo":90,
     "score_hi":100.01,
     "score_center":95.005,
-    "p_calibrated":0.3842,
-    "n_effective":164.8,
-    "n_raw":188
+    "p_calibrated":0.3959,
+    "n_effective":179.5,
+    "n_raw":205
   }
 ]
