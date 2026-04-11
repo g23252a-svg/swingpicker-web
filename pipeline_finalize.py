@@ -25,6 +25,7 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         "LDY_RANK","종목코드","종목명","시장","업종_대분류","종가","거래대금(억원)","시가총액(억원)",
         "켈리_수량","추천금액(만원)","상태","ROUTE","ACTION_PRIORITY","IS_ACTIVE","IS_NOW_ENTRY","IS_WATCH",
         "DISPLAY_SCORE","FINAL_SCORE","STRUCT_SCORE","TIMING_SCORE","AI_SCORE","NEWS_SCORE",
+        "ELITE_SCORE","AXIS_MEAN","AXIS_GAP","BALANCE_SCORE","RR_NOW_TP1","ENTRY_GAP_PCT","ELITE_REASON","TOP_PICK",
         "추천매수가","손절가","추천매도가1","추천매도가2","TRIGGER","V_POWER","거래강도",
         "VWAP","POC_GAP","NEWS_REASON","TTM_SQUEEZE_CNT","Low_Trend_PCT","RSI14","이격도",
         "SCORE_REASON_TOP1","SCORE_REASON_TOP2","SCORE_RISK","ROUTE_REASON",
@@ -87,6 +88,9 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             df_out["IS_NOW_ENTRY"]=df_out["ROUTE"]==Route.ATTACK
             df_out["IS_WATCH"]=df_out["ROUTE"]==Route.WAIT
             df_out["ACTION_PRIORITY"]=df_out["ROUTE"].map(_am).fillna(7).astype(int)
+
+    # ── [v21.1] ACTION_PRIORITY 항상 재계산 (SSOT 보장) ──
+    df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_am).fillna(7).astype(int)
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
@@ -187,7 +191,34 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e: log(f"⚠️ DB 저장 실패: {e}")
     # Reality Check + Rank Validation
     run_reality_check(OUT_DIR, trade_ymd)
-    make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd, methods=["DISPLAY_SCORE","FINAL_SCORE","AI_SCORE"])
+    make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd, methods=["ELITE_SCORE","DISPLAY_SCORE","FINAL_SCORE","AI_SCORE"])
+    # [v21.2] TOP_PICK 검증 리포트
+    try:
+        _tp_mask = df_out.get("TOP_PICK", pd.Series(0, index=df_out.index)).astype(int) == 1
+        _tp_count = _tp_mask.sum()
+        if _tp_count > 0:
+            _tp_df = df_out[_tp_mask].copy()
+            _tp_summary = {
+                "trade_ymd": trade_ymd,
+                "top_pick_count": int(_tp_count),
+                "avg_elite": round(float(_tp_df["ELITE_SCORE"].mean()), 1),
+                "avg_rr": round(float(_tp_df["RR_NOW_TP1"].mean()), 2),
+                "avg_balance": round(float(_tp_df["BALANCE_SCORE"].mean()), 1),
+                "avg_win_rate": round(float(_tp_df["EST_WIN_RATE"].mean()), 3),
+                "routes": _tp_df["ROUTE"].value_counts().to_dict(),
+                "picks": _tp_df[["종목코드","종목명","ELITE_SCORE","RR_NOW_TP1","BALANCE_SCORE","ROUTE","EST_WIN_RATE"]].to_dict("records"),
+            }
+            import json as _json2
+            _tp_path = os.path.join(OUT_DIR, f"top_pick_validation_{trade_ymd}.json")
+            _tp_latest = os.path.join(OUT_DIR, "top_pick_validation_latest.json")
+            for _p in [_tp_path, _tp_latest]:
+                with open(_p, 'w', encoding='utf-8') as _f:
+                    _json2.dump(_tp_summary, _f, ensure_ascii=False, indent=2, default=str)
+            log(f"🏆 TOP_PICK 검증: {_tp_count}종목 → {_tp_path}")
+        else:
+            log("🏆 TOP_PICK: 0종목 (게이트 미통과)")
+    except Exception as e:
+        logger.warning(f"⚠️ TOP_PICK 검증 실패: {e}")
     # 텔레그램
     if ctx.enable_telegram:
         mkt = label_market_temp(ctx.breadth.get("ALL", np.nan))

@@ -56,10 +56,20 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
         carry_ohlcv = {}
 
     # [v20.3.5] carry 종목이 top_df에 없으면 임시 추가
-    # → analyze_ticker의 거래대금 필터(min_turnover_eok)에서 탈락 방지
+    # + 이미 있어도 거래대금이 부족하면 보강 (min_turnover 필터 우회)
     _top_codes = set(ctx.top_df["종목코드"].astype(str).str.zfill(6)) if ctx.top_df is not None and not ctx.top_df.empty else set()
     _missing_in_top = [c for c in carry_codes if c not in _top_codes]
-    if _missing_in_top and ctx.top_df is not None:
+    if ctx.top_df is not None:
+        # (A) 이미 top_df에 있는 carry 종목의 거래대금 보강
+        _existing_carry = [c for c in carry_codes if c in _top_codes]
+        if _existing_carry and "거래대금(원)" in ctx.top_df.columns:
+            for _ec in _existing_carry:
+                _mask = ctx.top_df["종목코드"].astype(str).str.zfill(6) == _ec
+                _cur_tv = pd.to_numeric(ctx.top_df.loc[_mask, "거래대금(원)"], errors="coerce").fillna(0)
+                if (_cur_tv < 50e8).any():
+                    ctx.top_df.loc[_mask, "거래대금(원)"] = 50e8
+
+        # (B) top_df에 없는 carry 종목 임시 추가
         _patch_rows = []
         for _mc in _missing_in_top:
             _ohlcv = carry_ohlcv.get(_mc)
@@ -67,6 +77,9 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
                 _last_c = float(pd.to_numeric(_ohlcv["종가"], errors="coerce").iloc[-1])
                 _last_v = float(pd.to_numeric(_ohlcv["거래량"], errors="coerce").iloc[-1]) if "거래량" in _ohlcv.columns else 0
                 _tv_won = _last_c * _last_v
+                # CARRY 종목은 이미 추천된 종목 → 거래대금 필터 우회
+                # min_turnover_eok(약 30억) 이상 보장
+                _tv_won = max(_tv_won, 50e8)  # 최소 50억원 보장
                 _patch_rows.append({
                     "종목코드": _mc,
                     "거래대금(원)": _tv_won,
@@ -394,6 +407,16 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
         df_out["ROW_BUILD_MODE"] = "FRESH"
     else:
         df_out["ROW_BUILD_MODE"] = df_out["ROW_BUILD_MODE"].fillna("FRESH")
+
+    # [v21.0] ELITE_SCORE — 3축밸런스 + 현재가RR + 진입갭 공식 컬럼
+    try:
+        from scoring_engine import compute_elite_score
+        df_out = compute_elite_score(df_out)
+        _top3 = df_out.nlargest(3, "ELITE_SCORE")
+        _names = ", ".join(f"{r['종목명']}({r['ELITE_SCORE']:.0f})" for _, r in _top3.iterrows())
+        log(f"🏆 ELITE Top3: {_names}")
+    except Exception as e:
+        logger.warning(f"⚠️ ELITE_SCORE 계산 실패: {e}")
 
     ctx.df_out = df_out
     return ctx

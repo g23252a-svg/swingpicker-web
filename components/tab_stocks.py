@@ -367,6 +367,58 @@ def render_tab_stocks(df, auth, store=None):
         auth: "guest" | "free" | "pro" | "prime" | "admin"
         store: DataStore 인스턴스 (CSV 다운로드용)
     """
+    # [v21.2] 시간외 가격 오버레이 → LIVE RR + ELITE + TOP_PICK 전체 재계산
+    try:
+        _am_path = os.path.join(DATA_DIR, "aftermarket_prices_latest.csv")
+        if os.path.exists(_am_path):
+            _am = pd.read_csv(_am_path, dtype={"종목코드": str})
+            if "종목코드" in _am.columns and "시간외종가" in _am.columns:
+                _am["종목코드"] = _am["종목코드"].astype(str).str.zfill(6)
+                _price_map = dict(zip(_am["종목코드"], pd.to_numeric(_am["시간외종가"], errors="coerce")))
+                if _price_map:
+                    df = df.copy()
+                    df["LIVE_PRICE"] = df["종목코드"].map(_price_map)
+                    _has_live = df["LIVE_PRICE"].notna()
+                    if _has_live.any():
+                        _live = df.loc[_has_live, "LIVE_PRICE"]
+                        _stop = pd.to_numeric(df.loc[_has_live, "손절가"], errors="coerce").fillna(0)
+                        _tp1 = pd.to_numeric(df.loc[_has_live, "추천매도가1"], errors="coerce").fillna(0)
+                        _buy = pd.to_numeric(df.loc[_has_live, "추천매수가"], errors="coerce").fillna(0)
+                        _risk = (_live - _stop).clip(lower=1)
+                        _reward = (_tp1 - _live).clip(lower=0)
+                        # RR 재계산
+                        df.loc[_has_live, "RR_NOW_TP1"] = (_reward / _risk).round(2)
+                        # ENTRY_GAP 재계산
+                        df.loc[_has_live, "ENTRY_GAP_PCT"] = ((_live - _buy).abs() / _buy.clip(lower=1) * 100).round(1)
+                        # ELITE_SCORE 재계산
+                        _s = pd.to_numeric(df.loc[_has_live, "STRUCT_SCORE"], errors="coerce").fillna(0)
+                        _t = pd.to_numeric(df.loc[_has_live, "TIMING_SCORE"], errors="coerce").fillna(0)
+                        _m = pd.to_numeric(df.loc[_has_live, "AI_SCORE"], errors="coerce").fillna(0)
+                        _ax = ((_s + _t + _m) / 3)
+                        _gap = pd.concat([_s, _t, _m], axis=1).max(axis=1) - pd.concat([_s, _t, _m], axis=1).min(axis=1)
+                        _bal = (100 - _gap * 1.25).clip(0, 100)
+                        _rr_sc = (df.loc[_has_live, "RR_NOW_TP1"] / 3.0 * 100).clip(0, 100)
+                        _ent_sc = (100 - df.loc[_has_live, "ENTRY_GAP_PCT"] * 20).clip(0, 100)
+                        _rt_map = {"ATTACK":100,"ARMED":75,"WAIT":40,"NEUTRAL":30,"OVERHEAT":10,"CARRY":35}
+                        _rt_sc = df.loc[_has_live, "ROUTE"].astype(str).map(_rt_map).fillna(30)
+                        _elite_live = (_ax*0.40 + _bal*0.20 + _rr_sc*0.25 + _ent_sc*0.10 + _rt_sc*0.05).round(1)
+                        _elite_live = _elite_live.where(_live > _stop, 0).where(_live < _tp1, 0)
+                        df.loc[_has_live, "ELITE_SCORE"] = _elite_live
+                        df.loc[_has_live, "BALANCE_SCORE"] = _bal.round(1)
+                        # TOP_PICK 재판정
+                        _tp_mask = (
+                            (_elite_live >= 60)
+                            & df.loc[_has_live, "ROUTE"].isin(["ATTACK", "ARMED"])
+                            & (_live > _stop) & (_live < _tp1)
+                            & (_bal >= 50)
+                            & (df.loc[_has_live, "RR_NOW_TP1"] >= 0.5)
+                            & (df.loc[_has_live, "ENTRY_GAP_PCT"] <= 5.0)
+                        )
+                        df.loc[_has_live, "TOP_PICK"] = _tp_mask.astype(int)
+    except Exception as _live_err:
+        import logging as _lg
+        _lg.getLogger(__name__).warning(f"⚠️ LIVE price overlay 실패: {_live_err}")
+
     _section_title("🎯 AI 추천 종목")
 
     _tbl = None
@@ -374,7 +426,7 @@ def render_tab_stocks(df, auth, store=None):
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
         view_mode = ui.toggle(["📋 테이블", "🃏 칸반"], value="📋 테이블")
         route_filter = ui.select({"전체": "전체", "ATTACK": "🚀 매수 돌입", "ARMED": "🔫 매수 대기", "CARRY": "📌 보유 관찰", "WAIT": "👀 관망", "NEUTRAL": "⚪ 중립"}, value="전체", label="상태").classes("min-w-[140px]")
-        sort_mode = ui.toggle(["🔢 점수순", "🚦 상태순"], value="🔢 점수순")
+        sort_mode = ui.toggle(["🏆 ELITE순", "🔢 점수순", "🚦 상태순"], value="🏆 ELITE순")
 
         def _add_checked_to_journal():
             nonlocal _tbl
@@ -399,7 +451,7 @@ def render_tab_stocks(df, auth, store=None):
                     "route": str(r.get("ROUTE", sel_row.get("route", ""))),
                     "score": safe_float(r.get("DISPLAY_SCORE", 0)),
                     "recommend_price": nz_num(r.get("추천매수가", 0)),
-                    "actual_price": nz_num(r.get("추천매수가", 0)),
+                    "actual_price": nz_num(r.get("LIVE_PRICE", r.get("종가", r.get("추천매수가", 0)))),
                     "stop_price": nz_num(r.get("손절가", 0)),
                     "target_price": nz_num(r.get("추천매도가1", 0)),
                     "qty": 0,
@@ -420,6 +472,9 @@ def render_tab_stocks(df, auth, store=None):
         )
 
         if auth in ("prime", "admin"):
+            from services.auth import premium_guard
+
+            @premium_guard("CSV 다운로드")
             async def download_csv():
                 csv_path = os.path.join(DATA_DIR, "recommend_latest.csv")
                 if os.path.exists(csv_path):
@@ -436,8 +491,13 @@ def render_tab_stocks(df, auth, store=None):
         fdf = df.copy()
         if route_filter.value != "전체" and "ROUTE" in fdf.columns:
             fdf = fdf[fdf["ROUTE"].astype(str).str.contains(route_filter.value, na=False)]
-        if sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
+        if sort_mode.value == "🏆 ELITE순" and "ELITE_SCORE" in fdf.columns:
+            fdf = fdf.sort_values("ELITE_SCORE", ascending=False)
+        elif sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
+        elif sort_mode.value == "🚦 상태순" and "ACTION_PRIORITY" in fdf.columns:
+            _sc = "ELITE_SCORE" if "ELITE_SCORE" in fdf.columns else "DISPLAY_SCORE"
+            fdf = fdf.sort_values(["ACTION_PRIORITY", _sc], ascending=[True, False])
         if auth == "guest": fdf = fdf.head(3)
         elif auth == "free": fdf = fdf.head(5)
         else: fdf = fdf.head(50)
@@ -458,12 +518,16 @@ def render_tab_stocks(df, auth, store=None):
         columns = [
             {"name": "route", "label": "신호", "field": "route", "align": "center"},
             {"name": "name", "label": "종목명", "field": "name", "align": "left"},
-            {"name": "score", "label": "AI점수", "field": "score", "align": "center", "sortable": True},
+            {"name": "elite", "label": "ELITE", "field": "elite", "align": "center", "sortable": True},
+            {"name": "score", "label": "종합", "field": "score", "align": "center", "sortable": True},
+            {"name": "s", "label": "S", "field": "s", "align": "center"},
+            {"name": "t", "label": "T", "field": "t", "align": "center"},
+            {"name": "m", "label": "AI", "field": "m", "align": "center"},
+            {"name": "bal", "label": "균형", "field": "bal", "align": "center", "sortable": True},
+            {"name": "rr", "label": "RR", "field": "rr", "align": "center", "sortable": True},
             {"name": "close", "label": "현재가", "field": "close", "align": "right"},
-            {"name": "buy", "label": "매수", "field": "buy", "align": "right"},
-            {"name": "stop", "label": "손절", "field": "stop", "align": "right"},
             {"name": "t1", "label": "목표가", "field": "t1", "align": "right"},
-            {"name": "sector", "label": "업종", "field": "sector", "align": "left"},
+            {"name": "stop", "label": "손절", "field": "stop", "align": "right"},
         ]
         rows = []
         for _, r in show.iterrows():
@@ -471,12 +535,16 @@ def render_tab_stocks(df, auth, store=None):
                 "code": str(r.get("종목코드", "")).zfill(6),
                 "route": _route_kr(r.get("ROUTE", "—")),
                 "name": str(r.get("종목명", "—")),
+                "elite": f'{safe_float(r.get("ELITE_SCORE", 0)):.0f}',
                 "score": f'{safe_float(r.get("DISPLAY_SCORE", 0)):.0f}',
-                "close": f'{int(nz_num(r.get("종가", 0))):,}',
-                "buy": f'{int(nz_num(r.get("추천매수가", 0))):,}',
-                "stop": f'{int(nz_num(r.get("손절가", 0))):,}',
+                "s": f'{safe_float(r.get("STRUCT_SCORE", 0)):.0f}',
+                "t": f'{safe_float(r.get("TIMING_SCORE", 0)):.0f}',
+                "m": f'{safe_float(r.get("AI_SCORE", r.get("ML_SCORE", 0))):.0f}',
+                "bal": f'{safe_float(r.get("BALANCE_SCORE", 0)):.0f}',
+                "rr": f'{safe_float(r.get("RR_NOW_TP1", 0)):.1f}',
+                "close": f'{int(nz_num(r.get("LIVE_PRICE", r.get("종가", 0)))):,}',
                 "t1": f'{int(nz_num(r.get("추천매도가1", 0))):,}',
-                "sector": str(r.get("업종", "—")),
+                "stop": f'{int(nz_num(r.get("손절가", 0))):,}',
             })
         tbl = ui.table(columns=columns, rows=rows, row_key="code", selection="multiple",
                        pagination={"rowsPerPage": 15}).classes("w-full").props("dense dark flat bordered")
@@ -521,10 +589,25 @@ def render_tab_stocks(df, auth, store=None):
                 with ui.card().classes("p-3 mb-2 cursor-pointer bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-xl hover:bg-[rgba(255,255,255,0.08)]"):
                     with ui.row().classes("justify-between items-center"):
                         ui.label(f"{r.get('종목명', '')}").classes("text-white font-bold text-sm")
-                        ui.badge(f"{score:.0f}", color=sc).classes("text-xs")
+                        with ui.row().classes("gap-1"):
+                            if int(r.get("TOP_PICK", 0)) == 1:
+                                ui.badge("🏆", color="#FFD700").classes("text-xs")
+                            elite = safe_float(r.get("ELITE_SCORE", score))
+                            ec = "#10B981" if elite >= 80 else "#3B82F6" if elite >= 60 else "#94A3B8"
+                            ui.badge(f"E{elite:.0f}", color=ec).classes("text-xs")
+                    # 3축 미니
+                    _ss = safe_float(r.get("STRUCT_SCORE", 0))
+                    _ts = safe_float(r.get("TIMING_SCORE", 0))
+                    _ms = safe_float(r.get("AI_SCORE", r.get("ML_SCORE", 0)))
+                    bal = safe_float(r.get("BALANCE_SCORE", 0))
+                    ui.label(f"S{_ss:.0f} T{_ts:.0f} AI{_ms:.0f} | 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
+                    # ELITE_REASON 직접 노출
+                    _er = str(r.get("ELITE_REASON", ""))
+                    if _er:
+                        ui.label(_er).classes("text-xs text-cyan-400 mt-0.5")
                     if buy > 0:
                         ui.label(f"매수 {buy:,} · 손절 {stop:,} · 목표 {t1:,}").classes("text-xs text-gray-400 mt-1")
-                    rr = safe_float(r.get("RR1", 0))
+                    rr = safe_float(r.get("RR_NOW_TP1", safe_float(r.get("RR1", 0))))
                     if rr > 0:
                         rc = "#10B981" if rr >= 2 else "#F59E0B" if rr >= 1 else "#EF4444"
                         ui.label(f"손익비 {rr:.1f}:1").classes("text-xs mt-1").style(f"color:{rc}")
@@ -548,7 +631,7 @@ def render_tab_stocks(df, auth, store=None):
                     ui.button("↗ 새 탭", on_click=lambda u=_share_url: ui.navigate.to(u)
                               ).props("flat dense").classes("text-purple-400 text-xs")
 
-            _close = nz_num(row.get("종가", 0))
+            _close = nz_num(row.get("LIVE_PRICE", row.get("종가", 0)))
             _entry = nz_num(row.get("추천매수가", 0))
             _stop = nz_num(row.get("손절가", 0))
             _t1 = nz_num(row.get("추천매도가1", 0))
@@ -556,16 +639,17 @@ def render_tab_stocks(df, auth, store=None):
             _atr = nz_num(row.get("TARGET_ATR", 0))
 
             if _close > 0 and _entry > 0:
-                risk = _entry - _stop if _stop > 0 else 1
+                # [v21.0] RR은 현재가 기준으로 통일 (메인표와 일치)
+                risk_now = _close - _stop if _stop > 0 else 1
                 with ui.row().classes("w-full gap-3 flex-wrap"):
                     _metric_card("🔴 손절가", f"{int(_stop):,}", f"{(_stop/_close-1)*100:+.1f}%" if _close > 0 else "", False)
-                    _metric_card("🔵 매수가", f"{int(_entry):,}", "AI 추천가")
+                    _metric_card("🔵 매수가", f"{int(_entry):,}", f"현재가 갭 {(_close/_entry-1)*100:+.1f}%")
                     if _t1 > 0:
-                        rr1 = (_t1 - _entry) / risk if risk > 0 else 0
-                        _metric_card("🟢 목표가 1", f"{int(_t1):,}", f"+{(_t1/_close-1)*100:.1f}% (손익비 {rr1:.1f}:1)")
+                        rr1 = (_t1 - _close) / risk_now if risk_now > 0 else 0
+                        _metric_card("🟢 목표가 1", f"{int(_t1):,}", f"+{(_t1/_close-1)*100:.1f}% (RR {rr1:.1f}:1)")
                     if _t2 > 0 and _t2 != _t1:
-                        rr2 = (_t2 - _entry) / risk if risk > 0 else 0
-                        _metric_card("🟡 목표가 2", f"{int(_t2):,}", f"+{(_t2/_close-1)*100:.1f}% (손익비 {rr2:.1f}:1)")
+                        rr2 = (_t2 - _close) / risk_now if risk_now > 0 else 0
+                        _metric_card("🟡 목표가 2", f"{int(_t2):,}", f"+{(_t2/_close-1)*100:.1f}% (RR {rr2:.1f}:1)")
                     if _atr > 0 and _atr != _t1:
                         _metric_card("⚪ ATR 목표가", f"{int(_atr):,}", f"+{(_atr/_close-1)*100:.1f}%")
 
@@ -619,24 +703,32 @@ def render_tab_stocks(df, auth, store=None):
                     ui.label(f"⚡ 현재 신호: {kr_label}").classes("text-lg font-bold text-white").style(f"color:{rc}")
                 ui.label(kr_desc).classes("text-gray-300 text-sm mt-1")
 
-            # ── 추천 근거 요약 ──
+            # ── 추천 근거 요약 — [v21.0] ELITE 기반 ──
             score = safe_float(row.get("DISPLAY_SCORE", 0))
-            rr1 = safe_float(row.get("RR1", 0))
-            momentum = safe_float(row.get("MOMENTUM_SCORE", 0))
-            volume_s = safe_float(row.get("VOLUME_SCORE", 0))
-            trend_s = safe_float(row.get("TREND_SCORE", 0))
+            rr1 = safe_float(row.get("RR_NOW_TP1", safe_float(row.get("RR1", 0))))
+            elite = safe_float(row.get("ELITE_SCORE", 0))
+            bal = safe_float(row.get("BALANCE_SCORE", 0))
+            _ss = safe_float(row.get("STRUCT_SCORE", 0))
+            _ts = safe_float(row.get("TIMING_SCORE", 0))
+            _ms = safe_float(row.get("AI_SCORE", row.get("ML_SCORE", 0)))
+            elite_reason = str(row.get("ELITE_REASON", ""))
 
             reasons = []
-            if score >= 80: reasons.append("📊 AI 종합 점수 우수 (상위권)")
-            elif score >= 70: reasons.append("📊 AI 종합 점수 양호")
+            if int(row.get("TOP_PICK", 0)) == 1:
+                reasons.append("🏆 TOP PICK — 실전 매수 최우선 후보")
+            if elite >= 80: reasons.append(f"🏆 ELITE {elite:.0f}점 (최상위)")
+            elif elite >= 60: reasons.append(f"🏆 ELITE {elite:.0f}점 (양호)")
+            if bal >= 80: reasons.append(f"⚖️ 3축 밸런스 우수 (S{_ss:.0f}/T{_ts:.0f}/AI{_ms:.0f})")
+            elif bal >= 60: reasons.append(f"⚖️ 3축 밸런스 양호")
+            if score >= 80: reasons.append("📊 종합점수 상위권")
             if rr1 >= 3: reasons.append(f"💰 손익비 매우 우수 ({rr1:.1f}:1)")
             elif rr1 >= 2: reasons.append(f"💰 손익비 양호 ({rr1:.1f}:1)")
-            if momentum > 0: reasons.append("📈 모멘텀 상승 추세")
-            if volume_s > 0: reasons.append("📦 거래량 증가 감지")
-            if trend_s > 0: reasons.append("🔼 추세 지표 긍정적")
             if rv == "ATTACK": reasons.append("🚀 매수 진입 시그널 활성")
             elif rv == "ARMED": reasons.append("🔫 매수 조건 근접 (돌파 대기)")
             elif rv == "CARRY": reasons.append("📌 이전 추천 종목 — 손절/익절가 관찰 중")
+            # ELITE_REASON 직접 노출
+            if elite_reason:
+                reasons.append(f"📋 {elite_reason}")
 
             if reasons:
                 with ui.card().classes("w-full p-4 mt-2 bg-[#1a1a2e] border border-gray-700 rounded-xl"):
