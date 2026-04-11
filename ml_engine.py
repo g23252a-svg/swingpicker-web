@@ -140,9 +140,14 @@ def _check_feature_version(meta_path: str) -> dict:
 # ====================== 캐시 유틸 ======================
 
 def _compute_feature_hash():
-    """FEATURE_COLS 해시 → schema 불일치 감지용"""
-    import hashlib
-    return hashlib.md5(",".join(FEATURE_COLS).encode()).hexdigest()[:12]
+    """[v21.2] FEATURE_CONTRACT.schema_hash SSOT — 해시 불일치 근본 해결"""
+    try:
+        from feature_contract import FEATURE_CONTRACT
+        return FEATURE_CONTRACT.schema_hash
+    except ImportError:
+        # fallback: contract 없으면 컬럼만으로 해시
+        import hashlib
+        return hashlib.md5(",".join(FEATURE_COLS).encode()).hexdigest()[:12]
 
 
 def get_feature_cache():
