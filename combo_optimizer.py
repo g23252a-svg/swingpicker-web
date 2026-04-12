@@ -118,6 +118,15 @@ def run_combo_optimization(
 
         wr = sub["win"].mean() * 100
         avg_ret = sub["ret"].mean()
+
+        # [v21.3] EV = 승률 × 평균수익 - (1-승률) × 평균손실
+        wins = sub[sub["ret"] > 0]["ret"]
+        losses = sub[sub["ret"] <= 0]["ret"]
+        avg_win = wins.mean() if len(wins) > 0 else 0
+        avg_loss = abs(losses.mean()) if len(losses) > 0 else 0
+        wr_dec = wr / 100
+        ev = wr_dec * avg_win - (1 - wr_dec) * avg_loss
+
         results.append({
             "S_min": int(s_min),
             "T_min": int(t_min),
@@ -126,20 +135,30 @@ def run_combo_optimization(
             "n": int(n),
             "win_rate": round(wr, 1),
             "avg_ret": round(avg_ret, 2),
+            "avg_win": round(avg_win, 2),
+            "avg_loss": round(avg_loss, 2),
+            "ev": round(ev, 2),
         })
 
     if not results:
         logger.warning("combo_optimizer: 유효 조합 없음")
         return {}
 
-    # 3) 정렬 — 승률 우선, 동점 시 수익률
+    # 3) 정렬 — 승률 우선 + EV 우선 이중 랭킹
     results.sort(key=lambda x: (-x["win_rate"], -x["avg_ret"]))
-    best = results[0]
-    top_combos = results[:top_n]
+    best_wr = results[0]
+    top_by_wr = results[:top_n]
+
+    results_ev = sorted(results, key=lambda x: (-x["ev"], -x["win_rate"]))
+    best_ev = results_ev[0]
+    top_by_ev = results_ev[:top_n]
 
     output = {
-        "best": best,
-        "top_combos": top_combos,
+        "best_wr": best_wr,
+        "best_ev": best_ev,
+        "best": best_wr,  # 하위호환
+        "top_combos": top_by_wr,
+        "top_combos_ev": top_by_ev,
         "meta": {
             "total_trades": len(df),
             "total_win_rate": round(total_wr, 1),
@@ -158,8 +177,12 @@ def run_combo_optimization(
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2, default=str)
         logger.info(
-            f"🎯 최적 조합: S≥{best['S_min']} T≥{best['T_min']} AI≥{best['AI_min']} "
-            f"| {'+'.join(best['routes'])} | {best['n']}건 승률 {best['win_rate']}%"
+            f"🎯 최적(승률): S≥{best_wr['S_min']} T≥{best_wr['T_min']} AI≥{best_wr['AI_min']} "
+            f"| 승률 {best_wr['win_rate']}% | EV {best_wr['ev']:+.2f}"
+        )
+        logger.info(
+            f"🎯 최적(EV): S≥{best_ev['S_min']} T≥{best_ev['T_min']} AI≥{best_ev['AI_min']} "
+            f"| EV {best_ev['ev']:+.2f} | 승률 {best_ev['win_rate']}%"
         )
     except Exception as e:
         logger.warning(f"optimal_filter 저장 실패: {e}")
@@ -172,7 +195,12 @@ if __name__ == "__main__":
     data_dir = sys.argv[1] if len(sys.argv) > 1 else "data"
     result = run_combo_optimization(data_dir)
     if result:
-        b = result["best"]
-        print(f"\n🎯 최적 조합: S≥{b['S_min']} T≥{b['T_min']} AI≥{b['AI_min']}")
+        b = result["best_wr"]
+        print(f"\n🎯 최적(승률): S≥{b['S_min']} T≥{b['T_min']} AI≥{b['AI_min']}")
         print(f"   ROUTE: {'+'.join(b['routes'])}")
-        print(f"   {b['n']}건 | 승률 {b['win_rate']}% | 수익 {b['avg_ret']:+.2f}%")
+        print(f"   {b['n']}건 | 승률 {b['win_rate']}% | 수익 {b['avg_ret']:+.2f}% | EV {b['ev']:+.2f}")
+
+        e = result["best_ev"]
+        print(f"\n💎 최적(EV): S≥{e['S_min']} T≥{e['T_min']} AI≥{e['AI_min']}")
+        print(f"   ROUTE: {'+'.join(e['routes'])}")
+        print(f"   {e['n']}건 | 승률 {e['win_rate']}% | 수익 {e['avg_ret']:+.2f}% | EV {e['ev']:+.2f}")
