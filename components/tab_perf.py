@@ -31,26 +31,47 @@ def _now_kst():
 
 def _load_history() -> pd.DataFrame:
     """rank_validation_summary_*.csv 파일 병합"""
-    pattern = os.path.join(DATA_DIR, "rank_validation_summary_*.csv")
+    # [v21.3] DATA_DIR 폴백 — Railway Docker 대응
+    dirs_to_try = [
+        DATA_DIR,
+        os.path.join(os.getcwd(), "data"),
+        "data",
+    ]
+    target_dir = None
+    for d in dirs_to_try:
+        pattern = os.path.join(d, "rank_validation_summary_*.csv")
+        if glob.glob(pattern):
+            target_dir = d
+            break
+
+    if not target_dir:
+        _logger.warning(f"⚠️ rank_validation_summary 파일 없음 (검색: {dirs_to_try})")
+        return pd.DataFrame()
+
+    pattern = os.path.join(target_dir, "rank_validation_summary_*.csv")
     all_files = sorted(glob.glob(pattern))
+    _logger.info(f"📊 성과 데이터 {len(all_files)}개 파일 발견 ({target_dir})")
 
     dfs = []
     for f in all_files:
         try:
             base = os.path.basename(f)
             ds = base.replace("rank_validation_summary_", "").replace(".csv", "")
-            d = pd.read_csv(f)
+            # [v21.3] BOM 처리: encoding='utf-8-sig'
+            d = pd.read_csv(f, encoding='utf-8-sig')
             if "latest" in ds:
                 d['Date'] = pd.to_datetime(_now_kst().strftime("%Y-%m-%d"))
             else:
                 d['Date'] = pd.to_datetime(ds, format="%Y%m%d")
             dfs.append(d)
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning(f"⚠️ 성과 파일 읽기 실패: {f} → {e}")
 
     if not dfs:
         return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True).sort_values('Date')
+    result = pd.concat(dfs, ignore_index=True).sort_values('Date')
+    _logger.info(f"📊 성과 데이터 로드: {len(result)}행, 컬럼={list(result.columns)[:5]}")
+    return result
 
 
 def render_tab_perf():
@@ -61,6 +82,11 @@ def render_tab_perf():
 
     if history.empty:
         ui.label("축적된 성과 데이터가 부족합니다.").classes("text-gray-400 p-8")
+        # [v21.3] 디버그 정보
+        ui.label(f"검색 경로: {DATA_DIR}").classes("text-xs text-gray-600")
+        import glob as _g
+        _found = len(_g.glob(os.path.join(DATA_DIR, "rank_validation_summary_*.csv")))
+        ui.label(f"rank_validation_summary 파일 수: {_found}").classes("text-xs text-gray-600")
         return
 
     col_win, col_ret = 'WIN_RATE_%', 'AVG_RET_%'
@@ -71,7 +97,7 @@ def render_tab_perf():
     # ── 필터 ──
     with ui.row().classes("w-full gap-4 flex-wrap mb-4"):
         methods = sorted(history['METHOD'].unique()) if 'METHOD' in history.columns else []
-        def_m = 'RANK_SCORE' if 'RANK_SCORE' in methods else (methods[0] if methods else None)
+        def_m = next((m for m in ['ELITE_SCORE', 'DISPLAY_SCORE', 'RANK_SCORE'] if m in methods), methods[0] if methods else None)
         sel_m = ui.select(methods, value=def_m, label="Method").classes("min-w-[150px]") if methods else None
 
         topks = sorted(history['TOPK'].unique().tolist()) if 'TOPK' in history.columns else []
