@@ -332,23 +332,23 @@ def render_tab_market(df):
 
                         # 승률 최적
                         with ui.row().classes("w-full gap-4 flex-wrap items-center"):
-                            ui.label("📊 승률 최적:").classes("text-xs text-gray-400")
+                            ui.label("🛡️ 안정형 (자주 이기는 조합):").classes("text-xs text-gray-400")
                             ui.label(
                                 f"S≥{best.get('S_min', 0)} T≥{best.get('T_min', 0)} AI≥{best.get('AI_min', 0)} + {'+'.join(best.get('routes', []))}"
                             ).classes("text-sm font-bold text-white")
                             ui.badge(f"승률 {best.get('win_rate', 0)}%", color="#10B981").classes("text-sm px-2 py-1")
-                            ui.badge(f"EV {best.get('ev', 0):+.1f}", color="#6B7280").classes("text-sm px-2 py-1")
+                            ui.badge(f"기대수익 {best.get('ev', 0):+.1f}", color="#6B7280").classes("text-sm px-2 py-1")
                             ui.badge(f"{best.get('n', 0)}건", color="#6B7280").classes("text-sm px-2 py-1")
 
                         # EV 최적
                         best_ev = opt.get("best_ev", {})
                         if best_ev and best_ev != best:
                             with ui.row().classes("w-full gap-4 flex-wrap items-center mt-1"):
-                                ui.label("💎 EV 최적:").classes("text-xs text-gray-400")
+                                ui.label("💰 수익형 (크게 버는 조합):").classes("text-xs text-gray-400")
                                 ui.label(
                                     f"S≥{best_ev.get('S_min', 0)} T≥{best_ev.get('T_min', 0)} AI≥{best_ev.get('AI_min', 0)} + {'+'.join(best_ev.get('routes', []))}"
                                 ).classes("text-sm font-bold text-white")
-                                ui.badge(f"EV {best_ev.get('ev', 0):+.1f}", color="#F59E0B").classes("text-sm px-2 py-1")
+                                ui.badge(f"기대수익 {best_ev.get('ev', 0):+.1f}", color="#F59E0B").classes("text-sm px-2 py-1")
                                 ui.badge(f"승률 {best_ev.get('win_rate', 0)}%", color="#6B7280").classes("text-sm px-2 py-1")
                                 ui.badge(f"수익 {best_ev.get('avg_ret', 0):+.1f}%", color="#3B82F6").classes("text-sm px-2 py-1")
                                 ui.badge(f"{best_ev.get('n', 0)}건", color="#6B7280").classes("text-sm px-2 py-1")
@@ -358,62 +358,58 @@ def render_tab_market(df):
                             f"{meta.get('matched_days', 0)}일 × {meta.get('total_trades', 0):,}건 분석 | 보유 {meta.get('horizon', 3)}일"
                         ).classes("text-xs text-gray-500 mt-2")
 
-                    # Top 5 조합 테이블
-                    top_combos = opt.get("top_combos", [])[:5]
-                    if top_combos:
-                        combo_rows = []
-                        for i, c in enumerate(top_combos):
-                            combo_rows.append({
-                                "rank": f"{'🥇🥈🥉'[i] if i < 3 else f'{i+1}위'}",
-                                "combo": f"S≥{c['S_min']} T≥{c['T_min']} AI≥{c['AI_min']}",
-                                "route": "+".join(c.get("routes", [])),
-                                "n": f"{c['n']}건",
-                                "wr": f"{c['win_rate']}%",
-                                "ev": f"{c.get('ev', 0):+.1f}",
-                                "ret": f"{c['avg_ret']:+.2f}%",
-                            })
-                        ui.label("📊 승률 Top 5").classes("text-xs text-gray-400 mb-1")
-                        ui.table(
-                            columns=[
-                                {"name": "rank", "label": "#", "field": "rank", "align": "center"},
-                                {"name": "combo", "label": "조합", "field": "combo", "align": "left"},
-                                {"name": "route", "label": "ROUTE", "field": "route", "align": "center"},
-                                {"name": "n", "label": "샘플", "field": "n", "align": "center"},
-                                {"name": "wr", "label": "승률", "field": "wr", "align": "center"},
-                                {"name": "ev", "label": "EV", "field": "ev", "align": "center"},
-                                {"name": "ret", "label": "수익률", "field": "ret", "align": "center"},
-                            ],
-                            rows=combo_rows, row_key="rank",
-                        ).classes("w-full mb-2").props("dense dark flat bordered")
+                    # [v21.3] 통합 조합 성과 테이블
+                    wr_combos = opt.get("top_combos", [])[:5]
+                    ev_combos = opt.get("top_combos_ev", [])[:5]
 
-                    # EV Top 5
-                    top_ev = opt.get("top_combos_ev", [])[:5]
-                    if top_ev:
-                        ev_rows = []
-                        for i, c in enumerate(top_ev):
-                            ev_rows.append({
-                                "rank": f"{'🥇🥈🥉'[i] if i < 3 else f'{i+1}위'}",
+                    seen = set()
+                    merged = []
+                    for c in wr_combos + ev_combos:
+                        key = f"{c['S_min']}-{c['T_min']}-{c['AI_min']}-{'+'.join(c.get('routes',[]))}"
+                        if key not in seen:
+                            seen.add(key)
+                            merged.append(c)
+                    merged.sort(key=lambda x: -x.get("ev", 0))
+
+                    if merged:
+                        best_ev = opt.get("best_ev", {})
+                        best_wr_key = f"{best.get('S_min')}-{best.get('T_min')}-{best.get('AI_min')}"
+                        best_ev_key = f"{best_ev.get('S_min')}-{best_ev.get('T_min')}-{best_ev.get('AI_min')}"
+
+                        ui.label("📋 조합별 성과 비교").classes("text-sm font-bold text-white mb-2")
+                        combo_rows = []
+                        for c in merged[:8]:
+                            key = f"{c['S_min']}-{c['T_min']}-{c['AI_min']}"
+                            tag = ""
+                            if key == best_wr_key:
+                                tag = "🛡️"
+                            if key == best_ev_key:
+                                tag = "💰" if not tag else "🛡️💰"
+
+                            combo_rows.append({
+                                "tag": tag,
                                 "combo": f"S≥{c['S_min']} T≥{c['T_min']} AI≥{c['AI_min']}",
-                                "route": "+".join(c.get("routes", [])),
-                                "n": f"{c['n']}건",
-                                "wr": f"{c['win_rate']}%",
-                                "ev": f"{c.get('ev', 0):+.1f}",
-                                "ret": f"{c['avg_ret']:+.2f}%",
+                                "n": c["n"],
+                                "wr": f"{c['win_rate']:.0f}%",
+                                "avg_win": f"+{c.get('avg_win', 0):.1f}%",
+                                "avg_loss": f"-{c.get('avg_loss', 0):.1f}%",
+                                "ev": round(c.get("ev", 0), 1),
                             })
-                        ui.label("💎 기대값(EV) Top 5").classes("text-xs text-gray-400 mb-1 mt-2")
+
                         ui.table(
                             columns=[
-                                {"name": "rank", "label": "#", "field": "rank", "align": "center"},
-                                {"name": "combo", "label": "조합", "field": "combo", "align": "left"},
-                                {"name": "route", "label": "ROUTE", "field": "route", "align": "center"},
-                                {"name": "n", "label": "샘플", "field": "n", "align": "center"},
-                                {"name": "ev", "label": "EV", "field": "ev", "align": "center"},
+                                {"name": "tag", "label": "", "field": "tag", "align": "center"},
+                                {"name": "combo", "label": "조합 조건", "field": "combo", "align": "left"},
+                                {"name": "n", "label": "샘플", "field": "n", "align": "center", "sortable": True},
                                 {"name": "wr", "label": "승률", "field": "wr", "align": "center"},
-                                {"name": "ret", "label": "수익률", "field": "ret", "align": "center"},
+                                {"name": "avg_win", "label": "이길 때", "field": "avg_win", "align": "center"},
+                                {"name": "avg_loss", "label": "질 때", "field": "avg_loss", "align": "center"},
+                                {"name": "ev", "label": "기대수익", "field": "ev", "align": "center", "sortable": True},
                             ],
-                            rows=ev_rows, row_key="rank",
-                        ).classes("w-full mb-4").props("dense dark flat bordered")
-                        ui.label("💡 EV = 승률 × 평균수익 − (1−승률) × 평균손실 | 높을수록 1회 매매 기대 수익 큼").classes("text-xs text-gray-500")
+                            rows=combo_rows, row_key="combo",
+                        ).classes("w-full mb-2").props("dense dark flat bordered")
+                        ui.label("🛡️ = 가장 자주 이기는 조합 | 💰 = 1회당 기대수익 최대 조합").classes("text-xs text-gray-500")
+                        ui.label("💡 기대수익 = 승률 × 이길 때 − (1−승률) × 질 때").classes("text-xs text-gray-500")
 
                     # [v21.3] 최적 조합 매칭 종목 리스트 — 상위 조합 순서대로 시도
                     all_combos = opt.get("top_combos", [])
