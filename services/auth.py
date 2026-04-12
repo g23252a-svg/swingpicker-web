@@ -226,3 +226,43 @@ def premium_guard(action_name="이 기능"):
             return await fn(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def downgrade_expired_users():
+    """
+    [v21.3] 만료된 PRIME/PRO → FREE 자동 강등.
+    매일 실행 또는 관리자 수동 실행.
+
+    Returns: (downgraded_count, details_list)
+    """
+    db = get_db()
+    if not db:
+        return 0, ["DB 연결 실패"]
+
+    now = datetime.now()
+    users = db.get_all_users()
+    downgraded = []
+
+    for u in users:
+        role = u.get("role", "free")
+        if role not in ("prime", "pro"):
+            continue
+        if role == "admin":
+            continue
+
+        expire = u.get("prime_expire_date")
+        if not expire:
+            continue
+
+        try:
+            exp_dt = datetime.strptime(str(expire).split(" ")[0], "%Y-%m-%d")
+            if exp_dt.date() < now.date():
+                email = u.get("login_id") or u.get("id", "")
+                db.update_user_role(email, "free")
+                detail = f"⏰ {email}: {role}→free (만료 {expire})"
+                downgraded.append(detail)
+                _logger.info(detail)
+        except Exception as e:
+            _logger.warning(f"만료 체크 실패 ({u.get('login_id', '?')}): {e}")
+
+    return len(downgraded), downgraded
