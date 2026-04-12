@@ -537,7 +537,9 @@ def render_tab_portfolio(df, auth):
 
     # [v21.3] 종목 검색 기반 입력 UI
     code_map = _get_code_map(df)
-    stock_names = sorted(code_map.keys()) if code_map else []
+    _ensure_krx_map()
+    all_names = set(code_map.keys()) | set(_KRX_NAME_MAP.keys())
+    stock_names = sorted(all_names) if all_names else []
 
     ui.label("📌 보유 종목 추가").classes("text-sm font-bold text-white mb-2")
 
