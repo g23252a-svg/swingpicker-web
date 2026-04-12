@@ -235,6 +235,15 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         cs = auto_calibrate(OUT_DIR, trade_ymd)
         log(f"📊 캘리브레이션: {cs.get('n_trades',0)}건, 승률={cs.get('overall_winrate',0):.1%}")
     except Exception as e: log(f"⚠️ 자동 캘리브레이션 스킵: {e}")
+    # [v21.3] 조합 최적화
+    try:
+        from combo_optimizer import run_combo_optimization
+        opt = run_combo_optimization(OUT_DIR, horizon=3, min_samples=10)
+        if opt and opt.get("best"):
+            b = opt["best"]
+            log(f"🎯 최적 조합: S≥{b['S_min']} T≥{b['T_min']} AI≥{b['AI_min']} | 승률 {b['win_rate']}%")
+    except Exception as e:
+        log(f"⚠️ 조합 최적화 스킵: {e}")
     # 포지션
     try:
         from position_tracker import track_open_positions, register_from_recommendations

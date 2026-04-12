@@ -313,3 +313,120 @@ def render_tab_market(df):
         ui.plotly(_plotly_dark(fig_mom, 350)).classes("w-full")
     else:
         ui.label("모멘텀 데이터 부족").classes("text-gray-500")
+
+    # ── [v21.3] 지표별 승률 분석 ──
+    if "EST_WIN_RATE" in df.columns and len(df) >= 20:
+        _section_title("📊 지표별 승률 분석")
+
+        # 최적 조합 표시
+        try:
+            opt_path = os.path.join(DATA_DIR, "optimal_filter_latest.json")
+            if os.path.exists(opt_path):
+                with open(opt_path, 'r') as f:
+                    opt = json.load(f)
+                best = opt.get("best", {})
+                meta = opt.get("meta", {})
+                if best:
+                    with ui.card().classes("w-full p-4 bg-[#0a1628] border border-yellow-600/50 rounded-xl mb-4"):
+                        ui.label("🎯 데이터 기반 최적 조합 (자동 탐색)").classes("text-sm font-bold text-yellow-400 mb-2")
+                        with ui.row().classes("w-full gap-4 flex-wrap items-center"):
+                            ui.label(
+                                f"S≥{best.get('S_min', 0)} + T≥{best.get('T_min', 0)} + AI≥{best.get('AI_min', 0)} + {'+'.join(best.get('routes', []))}"
+                            ).classes("text-lg font-bold text-white")
+                            ui.badge(f"승률 {best.get('win_rate', 0)}%", color="#10B981").classes("text-sm px-3 py-1")
+                            ui.badge(f"수익 {best.get('avg_ret', 0):+.1f}%", color="#3B82F6").classes("text-sm px-3 py-1")
+                            ui.badge(f"{best.get('n', 0)}건", color="#6B7280").classes("text-sm px-3 py-1")
+                        ui.label(
+                            f"전체 승률 {meta.get('total_win_rate', 0)}% 대비 +{best.get('win_rate', 0) - meta.get('total_win_rate', 0):.1f}%p 초과 | "
+                            f"{meta.get('matched_days', 0)}일 × {meta.get('total_trades', 0):,}건 분석 | 보유 {meta.get('horizon', 3)}일"
+                        ).classes("text-xs text-gray-500 mt-1")
+
+                    # Top 5 조합 테이블
+                    top_combos = opt.get("top_combos", [])[:5]
+                    if top_combos:
+                        combo_rows = []
+                        for i, c in enumerate(top_combos):
+                            combo_rows.append({
+                                "rank": f"{'🥇🥈🥉'[i] if i < 3 else f'{i+1}위'}",
+                                "combo": f"S≥{c['S_min']} T≥{c['T_min']} AI≥{c['AI_min']}",
+                                "route": "+".join(c.get("routes", [])),
+                                "n": f"{c['n']}건",
+                                "wr": f"{c['win_rate']}%",
+                                "ret": f"{c['avg_ret']:+.2f}%",
+                            })
+                        ui.table(
+                            columns=[
+                                {"name": "rank", "label": "#", "field": "rank", "align": "center"},
+                                {"name": "combo", "label": "조합", "field": "combo", "align": "left"},
+                                {"name": "route", "label": "ROUTE", "field": "route", "align": "center"},
+                                {"name": "n", "label": "샘플", "field": "n", "align": "center"},
+                                {"name": "wr", "label": "승률", "field": "wr", "align": "center"},
+                                {"name": "ret", "label": "수익률", "field": "ret", "align": "center"},
+                            ],
+                            rows=combo_rows, row_key="rank",
+                        ).classes("w-full mb-4").props("dense dark flat bordered")
+        except Exception:
+            pass
+
+        with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
+            # ROUTE별 통계
+            ui.label("🚦 ROUTE별 승률").classes("text-sm font-bold text-white mb-2")
+            route_rows = []
+            for route in ["ATTACK", "ARMED", "WAIT", "NEUTRAL", "CARRY"]:
+                sub = df[df.get("ROUTE", pd.Series(dtype=str)) == route]
+                if sub.empty:
+                    continue
+                wr = sub["EST_WIN_RATE"].mean() * 100
+                elite = sub["ELITE_SCORE"].mean() if "ELITE_SCORE" in sub.columns else 0
+                rr = sub["RR_NOW_TP1"].mean() if "RR_NOW_TP1" in sub.columns else 0
+                route_rows.append({
+                    "route": route, "n": f"{len(sub)}종목",
+                    "wr": f"{wr:.1f}%", "elite": f"{elite:.0f}", "rr": f"{rr:.2f}"
+                })
+
+            if route_rows:
+                ui.table(
+                    columns=[
+                        {"name": "route", "label": "ROUTE", "field": "route", "align": "center"},
+                        {"name": "n", "label": "종목수", "field": "n", "align": "center"},
+                        {"name": "wr", "label": "평균 승률", "field": "wr", "align": "center"},
+                        {"name": "elite", "label": "평균 ELITE", "field": "elite", "align": "center"},
+                        {"name": "rr", "label": "평균 RR", "field": "rr", "align": "center"},
+                    ],
+                    rows=route_rows, row_key="route",
+                ).classes("w-full").props("dense dark flat bordered")
+
+        with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
+            ui.label("📈 지표별 승률 예측력 (상위20% vs 하위20%)").classes("text-sm font-bold text-white mb-2")
+            axes_check = [
+                ("DISPLAY_SCORE", "종합점수"), ("STRUCT_SCORE", "구조(S)"),
+                ("TIMING_SCORE", "타이밍(T)"), ("AI_SCORE", "AI"),
+                ("ELITE_SCORE", "ELITE"), ("BALANCE_SCORE", "밸런스"),
+                ("RR_NOW_TP1", "손익비(RR)"),
+            ]
+            ax_rows = []
+            n20 = max(1, int(len(df) * 0.2))
+            for col, name in axes_check:
+                if col not in df.columns:
+                    continue
+                top20 = df.nlargest(n20, col)
+                bot20 = df.nsmallest(n20, col)
+                top_wr = top20["EST_WIN_RATE"].mean() * 100
+                bot_wr = bot20["EST_WIN_RATE"].mean() * 100
+                spread = top_wr - bot_wr
+                ax_rows.append({
+                    "name": name, "top": f"{top_wr:.1f}%", "bot": f"{bot_wr:.1f}%",
+                    "spread": f"{spread:+.1f}%p"
+                })
+
+            if ax_rows:
+                ui.table(
+                    columns=[
+                        {"name": "name", "label": "지표", "field": "name", "align": "left"},
+                        {"name": "top", "label": "상위20% 승률", "field": "top", "align": "center"},
+                        {"name": "bot", "label": "하위20% 승률", "field": "bot", "align": "center"},
+                        {"name": "spread", "label": "차이", "field": "spread", "align": "center", "sortable": True},
+                    ],
+                    rows=ax_rows, row_key="name",
+                ).classes("w-full").props("dense dark flat bordered")
+                ui.label("💡 차이가 클수록 해당 지표의 승률 예측력이 강함").classes("text-xs text-gray-500 mt-1")
