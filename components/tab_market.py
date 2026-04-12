@@ -147,8 +147,9 @@ def _spark_card(label: str, ticker: str, color: str):
                     chart_slot.clear()
                     with chart_slot:
                         ui.plotly(fig).classes("w-full")
-            except Exception:
-                val_label.set_text(f"{label}: 조회 실패")
+            except Exception as e:
+                _logger.warning(f"⚠️ 매크로 조회 실패 ({ticker}): {e}")
+                val_label.set_text(f"{label}: —")
 
         async def _safe_load():
             await asyncio.sleep(0.5)
@@ -181,9 +182,84 @@ def _get_fear_greed(df):
 
 def render_tab_market(df):
     """Tab 1: 시장 현황"""
+    import os, json
+
     fg_score, fg_label = _get_fear_greed(df)
+    DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+
+    # run_meta 로드
+    meta = {}
+    try:
+        mp = os.path.join(DATA_DIR, "run_meta_latest.json")
+        if os.path.exists(mp):
+            with open(mp, 'r') as f:
+                meta = json.load(f)
+    except Exception:
+        pass
 
     _render_macro_sparklines()
+
+    # ── [v21.3] 엔진 상태 요약 ──
+    macro_risk = meta.get("macro_risk", "—")
+    breadth = meta.get("market_breadth", 0)
+    confidence = meta.get("confidence_score", 0)
+    max_route = meta.get("max_allowed_route", "—")
+    macro_msg = meta.get("macro_msg", "")
+
+    risk_color = {"NORMAL": "#10B981", "CAUTION": "#F59E0B", "WARNING": "#EF4444", "CRITICAL": "#DC2626"}.get(macro_risk, "#6B7280")
+    risk_kr = {"NORMAL": "정상", "CAUTION": "주의", "WARNING": "경고", "CRITICAL": "위험"}.get(macro_risk, macro_risk)
+
+    with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
+        ui.label("🛡️ 엔진 상태").classes("text-xs text-gray-400 mb-2")
+        with ui.row().classes("w-full gap-4 flex-wrap"):
+            with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
+                ui.label("매크로 리스크").classes("text-xs text-gray-400")
+                ui.label(f"{'🟢' if macro_risk == 'NORMAL' else '🟡' if macro_risk == 'CAUTION' else '🔴'} {risk_kr}").classes("text-lg font-bold").style(f"color:{risk_color}")
+                if macro_msg:
+                    ui.label(macro_msg).classes("text-xs text-gray-500")
+
+            with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
+                ui.label("시장 Breadth").classes("text-xs text-gray-400")
+                bc = "#10B981" if breadth >= 60 else "#F59E0B" if breadth >= 40 else "#EF4444"
+                ui.label(f"{breadth:.1f}%").classes("text-lg font-bold").style(f"color:{bc}")
+                ui.label("상승 종목 비율").classes("text-xs text-gray-500")
+
+            with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
+                ui.label("엔진 신뢰도").classes("text-xs text-gray-400")
+                cc = "#10B981" if confidence >= 80 else "#F59E0B" if confidence >= 50 else "#EF4444"
+                ui.label(f"{confidence:.0f}/100").classes("text-lg font-bold").style(f"color:{cc}")
+                ui.label(f"최대허용: {max_route}").classes("text-xs text-gray-500")
+
+            # ELITE/TOP_PICK 요약
+            if "ELITE_SCORE" in df.columns:
+                elite_avg = df["ELITE_SCORE"].mean()
+                tp_count = int(df.get("TOP_PICK", pd.Series(0)).sum()) if "TOP_PICK" in df.columns else 0
+                with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
+                    ui.label("오늘의 ELITE").classes("text-xs text-gray-400")
+                    ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
+                    ui.label(f"평균 ELITE {elite_avg:.0f}").classes("text-xs text-gray-500")
+
+    # ── 오늘의 브리핑 Top 3 ──
+    try:
+        bp = os.path.join(DATA_DIR, "briefing_latest.json")
+        if os.path.exists(bp):
+            with open(bp, 'r') as f:
+                briefing = json.load(f)
+            stocks = briefing.get("stocks", [])[:3]
+            if stocks:
+                with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
+                    ui.label("📋 오늘의 Top 추천").classes("text-xs text-gray-400 mb-2")
+                    with ui.row().classes("w-full gap-3 flex-wrap"):
+                        for s in stocks:
+                            route_icon = {"ATTACK": "🚀", "ARMED": "🔫", "CARRY": "📌"}.get(s.get("route", ""), "👀")
+                            with ui.card().classes("flex-1 min-w-[200px] p-3 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
+                                with ui.row().classes("items-center gap-2"):
+                                    ui.label(f"{route_icon} {s['name']}").classes("text-white font-bold text-sm")
+                                    ui.badge(f"{s.get('score', 0):.0f}", color="#3B82F6").classes("text-xs")
+                                ui.label(f"종가 {s.get('close', 0):,} → TP1 {s.get('target1', 0):,} ({(s.get('target1', 0) / s.get('close', 1) - 1) * 100:+.1f}%)").classes("text-xs text-gray-400 mt-1")
+                                ui.label(f"RR {s.get('rr', 0):.1f}:1 | 승률 {s.get('est_win_rate', 0) * 100:.0f}% | {s.get('sector', '')}").classes("text-xs text-cyan-400")
+    except Exception:
+        pass
 
     _section_title("📡 시장 현황")
     with ui.row().classes("w-full gap-4 flex-wrap"):
