@@ -58,6 +58,16 @@ from shared_utils import nz_num, safe_float, calc_hma as calc_hma_series
 from chart_components import plot_radar_chart, plot_score_waterfall
 
 _logger = logging.getLogger(__name__)
+
+def _si(v, default=0):
+    """Safe int — NaN/None/inf → default"""
+    try:
+        f = float(v)
+        if f != f or f == float('inf') or f == float('-inf'):  # NaN/inf check
+            return default
+        return int(f)
+    except (TypeError, ValueError):
+        return default
 # ── 상태 한글화 매핑 ──
 ROUTE_KR = {
     "ATTACK": "🚀 매수 돌입",
@@ -154,7 +164,7 @@ def _price_bar_html(stop, entry, close, t1, t2=0):
         html += (
             f'<div style="position:absolute;left:{pct}%;top:{dot_top};transform:translate(-50%,-50%);z-index:{"10" if is_cur else "5"};text-align:center;">'
             f'<div style="width:{sz};height:{sz};background:{color};border-radius:50%;border:{bdr};margin:0 auto;position:relative;">'
-            f'<div style="position:absolute;left:50%;transform:translateX(-50%);{label_style}font-size:10px;color:{color};white-space:nowrap;font-weight:{fw};line-height:1.2;">{label}<br>{int(price):,}</div>'
+            f'<div style="position:absolute;left:50%;transform:translateX(-50%);{label_style}font-size:10px;color:{color};white-space:nowrap;font-weight:{fw};line-height:1.2;">{label}<br>{_si(price):,}</div>'
             f'</div></div>'
         )
     html += '</div>'
@@ -542,9 +552,9 @@ def render_tab_stocks(df, auth, store=None):
                 "m": f'{safe_float(r.get("AI_SCORE", r.get("ML_SCORE", 0))):.0f}',
                 "bal": f'{safe_float(r.get("BALANCE_SCORE", 0)):.0f}',
                 "rr": f'{safe_float(r.get("RR_NOW_TP1", 0)):.1f}',
-                "close": f'{int(nz_num(r.get("LIVE_PRICE", r.get("종가", 0)))):,}',
-                "t1": f'{int(nz_num(r.get("추천매도가1", 0))):,}',
-                "stop": f'{int(nz_num(r.get("손절가", 0))):,}',
+                "close": f'{_si(nz_num(r.get("LIVE_PRICE", r.get("종가", 0)))):,}',
+                "t1": f'{_si(nz_num(r.get("추천매도가1", 0))):,}',
+                "stop": f'{_si(nz_num(r.get("손절가", 0))):,}',
             })
         tbl = ui.table(columns=columns, rows=rows, row_key="code", selection="multiple",
                        pagination={"rowsPerPage": 15}).classes("w-full").props("dense dark flat bordered")
@@ -580,9 +590,9 @@ def render_tab_stocks(df, auth, store=None):
                 ui.label("비어 있음").classes("text-gray-500 text-sm"); return
             for _, r in sub_df.iterrows():
                 score = safe_float(r.get("DISPLAY_SCORE", 0))
-                buy = int(nz_num(r.get("추천매수가", 0)))
-                stop = int(nz_num(r.get("손절가", 0)))
-                t1 = int(nz_num(r.get("추천매도가1", 0)))
+                buy = _si(nz_num(r.get("추천매수가", 0)))
+                stop = _si(nz_num(r.get("손절가", 0)))
+                t1 = _si(nz_num(r.get("추천매도가1", 0)))
                 sc = "#10B981" if score >= 80 else "#3B82F6" if score >= 60 else "#94A3B8"
                 code = str(r.get("종목코드", "")).zfill(6)
 
@@ -590,7 +600,7 @@ def render_tab_stocks(df, auth, store=None):
                     with ui.row().classes("justify-between items-center"):
                         ui.label(f"{r.get('종목명', '')}").classes("text-white font-bold text-sm")
                         with ui.row().classes("gap-1"):
-                            if int(r.get("TOP_PICK", 0)) == 1:
+                            if _si(r.get("TOP_PICK", 0)) == 1:
                                 ui.badge("🏆", color="#FFD700").classes("text-xs")
                             elite = safe_float(r.get("ELITE_SCORE", score))
                             ec = "#10B981" if elite >= 80 else "#3B82F6" if elite >= 60 else "#94A3B8"
@@ -642,16 +652,16 @@ def render_tab_stocks(df, auth, store=None):
                 # [v21.0] RR은 현재가 기준으로 통일 (메인표와 일치)
                 risk_now = _close - _stop if _stop > 0 else 1
                 with ui.row().classes("w-full gap-3 flex-wrap"):
-                    _metric_card("🔴 손절가", f"{int(_stop):,}", f"{(_stop/_close-1)*100:+.1f}%" if _close > 0 else "", False)
-                    _metric_card("🔵 매수가", f"{int(_entry):,}", f"현재가 갭 {(_close/_entry-1)*100:+.1f}%")
+                    _metric_card("🔴 손절가", f"{_si(_stop):,}", f"{(_stop/_close-1)*100:+.1f}%" if _close > 0 else "", False)
+                    _metric_card("🔵 매수가", f"{_si(_entry):,}", f"현재가 갭 {(_close/_entry-1)*100:+.1f}%")
                     if _t1 > 0:
                         rr1 = (_t1 - _close) / risk_now if risk_now > 0 else 0
-                        _metric_card("🟢 목표가 1", f"{int(_t1):,}", f"+{(_t1/_close-1)*100:.1f}% (RR {rr1:.1f}:1)")
+                        _metric_card("🟢 목표가 1", f"{_si(_t1):,}", f"+{(_t1/_close-1)*100:.1f}% (RR {rr1:.1f}:1)")
                     if _t2 > 0 and _t2 != _t1:
                         rr2 = (_t2 - _close) / risk_now if risk_now > 0 else 0
-                        _metric_card("🟡 목표가 2", f"{int(_t2):,}", f"+{(_t2/_close-1)*100:.1f}% (RR {rr2:.1f}:1)")
+                        _metric_card("🟡 목표가 2", f"{_si(_t2):,}", f"+{(_t2/_close-1)*100:.1f}% (RR {rr2:.1f}:1)")
                     if _atr > 0 and _atr != _t1:
-                        _metric_card("⚪ ATR 목표가", f"{int(_atr):,}", f"+{(_atr/_close-1)*100:.1f}%")
+                        _metric_card("⚪ ATR 목표가", f"{_si(_atr):,}", f"+{(_atr/_close-1)*100:.1f}%")
 
             if _close > 0 and _stop > 0 and _t1 > 0:
                 ui.html(_price_bar_html(_stop, _entry, _close, _t1, _t2))
@@ -714,7 +724,7 @@ def render_tab_stocks(df, auth, store=None):
             elite_reason = str(row.get("ELITE_REASON", ""))
 
             reasons = []
-            if int(row.get("TOP_PICK", 0)) == 1:
+            if _si(row.get("TOP_PICK", 0)) == 1:
                 reasons.append("🏆 TOP PICK — 실전 매수 최우선 후보")
             if elite >= 80: reasons.append(f"🏆 ELITE {elite:.0f}점 (최상위)")
             elif elite >= 60: reasons.append(f"🏆 ELITE {elite:.0f}점 (양호)")
