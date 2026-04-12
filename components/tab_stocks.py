@@ -68,6 +68,23 @@ def _si(v, default=0):
         return int(f)
     except (TypeError, ValueError):
         return default
+
+
+def _nz(row, *keys, default=0):
+    """NaN-aware fallback: 여러 키 중 유효한 첫 번째 값 반환"""
+    import math
+    for k in keys:
+        v = row.get(k)
+        if v is not None:
+            try:
+                f = float(v)
+                if not math.isnan(f) and f != 0:
+                    return f
+            except (TypeError, ValueError):
+                pass
+    return default
+
+
 # ── 상태 한글화 매핑 ──
 ROUTE_KR = {
     "ATTACK": "🚀 매수 돌입",
@@ -461,7 +478,7 @@ def render_tab_stocks(df, auth, store=None):
                     "route": str(r.get("ROUTE", sel_row.get("route", ""))),
                     "score": safe_float(r.get("DISPLAY_SCORE", 0)),
                     "recommend_price": nz_num(r.get("추천매수가", 0)),
-                    "actual_price": nz_num(r.get("LIVE_PRICE", r.get("종가", r.get("추천매수가", 0)))),
+                    "actual_price": _nz(r, "LIVE_PRICE", "종가", "추천매수가"),
                     "stop_price": nz_num(r.get("손절가", 0)),
                     "target_price": nz_num(r.get("추천매도가1", 0)),
                     "qty": 0,
@@ -552,7 +569,7 @@ def render_tab_stocks(df, auth, store=None):
                 "m": f'{safe_float(r.get("AI_SCORE", r.get("ML_SCORE", 0))):.0f}',
                 "bal": f'{safe_float(r.get("BALANCE_SCORE", 0)):.0f}',
                 "rr": f'{safe_float(r.get("RR_NOW_TP1", 0)):.1f}',
-                "close": f'{_si(nz_num(r.get("LIVE_PRICE", r.get("종가", 0)))):,}',
+                "close": f'{_si(_nz(r, "LIVE_PRICE", "종가")):,}',
                 "t1": f'{_si(nz_num(r.get("추천매도가1", 0))):,}',
                 "stop": f'{_si(nz_num(r.get("손절가", 0))):,}',
             })
@@ -641,7 +658,7 @@ def render_tab_stocks(df, auth, store=None):
                     ui.button("↗ 새 탭", on_click=lambda u=_share_url: ui.navigate.to(u)
                               ).props("flat dense").classes("text-purple-400 text-xs")
 
-            _close = nz_num(row.get("LIVE_PRICE", row.get("종가", 0)))
+            _close = _nz(row, "LIVE_PRICE", "종가")
             _entry = nz_num(row.get("추천매수가", 0))
             _stop = nz_num(row.get("손절가", 0))
             _t1 = nz_num(row.get("추천매도가1", 0))

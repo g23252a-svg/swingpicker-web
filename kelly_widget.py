@@ -193,7 +193,9 @@ def render_kelly_calculator(row_data: dict, container):
         )
 
         # [v21.3] 종목 정보 헤더
-        _close = row_data.get("LIVE_PRICE", row_data.get("종가", 0))
+        _close = row_data.get("LIVE_PRICE", None)
+        if _close is None or (isinstance(_close, float) and _close != _close):
+            _close = row_data.get("종가", 0)
         _tp1 = row_data.get("추천매도가1", 0)
         _stop = row_data.get("손절가", 0)
         try:
