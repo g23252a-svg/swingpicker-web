@@ -15,6 +15,33 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "21.3",
+        "date": "2026-04-12",
+        "type": "major",
+        "title": "ELITE Ranking System + Auth Hardening + Live Price Engine",
+        "items": [
+            "🏆 **ELITE_SCORE SSOT:** 3축 밸런스(40%) + 현재가 RR(25%) + 밸런스(20%) + 진입갭(10%) + ROUTE(5%) 공식 랭킹 지표 승격",
+            "🏆 **TOP_PICK 하드게이트:** ELITE≥60 + ARMED/ATTACK + RR≥0.5 + BAL≥50 + 거래대금≥50억 + 진입갭≤5% + 과열 제외 → 476→8종목 필터",
+            "📊 **종목 테이블 재설계:** AI점수 1칸 → ELITE/종합/S/T/AI/균형/RR 7컬럼, 🏆 ELITE순 기본 정렬",
+            "📊 **칸반 카드 강화:** TOP_PICK 🏆배지 + ELITE_REASON 직접 노출 + S/T/AI 미니 스코어",
+            "💰 **Kelly 자동 연동:** 종목 선택 시 EST_WIN_RATE + RR_NOW_TP1 자동 매핑, 금액만 조절",
+            "📡 **LIVE_PRICE 엔진:** 시간외 가격 → RR + ELITE + BALANCE + TOP_PICK 전체 실시간 재계산",
+            "🔐 **Auth SSOT 완성:** compute_access_status() 단일 함수 + require_premium() 서버측 강제 검증 + @premium_guard 데코레이터",
+            "⏰ **만료 자동 강등:** downgrade_expired_users() — 만료 PRIME→FREE 자동 전환 + 관리자 버튼",
+            "👑 **관리자 화면 개선:** 실제 접근 상태(✅활성/❌만료/⚪무료/🔑관리자) 컬럼 + 상단 요약 배지",
+            "🔧 **Feature Schema 통일:** _compute_feature_hash() → FEATURE_CONTRACT.schema_hash SSOT, 캐시 정상 로드",
+            "📈 **성과 탭 복구:** .dockerignore data/ 제외 → 무거운 파일만 제외, 22일치 성과 차트 정상 표시",
+            "📈 **성과 차트 툴팁:** 다크 테마 호버 스타일 수정 (hoverlabel bgcolor + font_color)",
+            "🏆 **TOP_PICK 검증 리포트:** top_pick_validation_YYYYMMDD.json 자동 생성 (종목수/평균ELITE/RR/승률)",
+            "📊 **CARRY 재분석:** 9%→96% refresh rate, DI패턴 top_df 보강, 진단 로그 강화",
+            "🛡️ **NaN 크래시 방어:** _si() Safe Int + _nz() NaN-aware 폴백 — LIVE_PRICE NaN 시 종가 자동 전환",
+            "🔓 **프리미엄 전체 표시:** prime/admin 50종목 제한 해제 → 전체 476종목 열람 가능",
+            "🚀 **Railway 자동 배포:** GitHub 연결 복구, push 시 자동 deploy 활성화",
+            "📱 **Google Play 등록:** 개발자 계정 생성 완료, 본인 확인 심사 중",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "20.6.5",
         "date": "2026-03-14",
         "type": "minor",
