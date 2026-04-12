@@ -36,6 +36,7 @@ except ImportError:
 from chart_components import (
     plot_fear_greed_gauge, plot_sector_treemap, plot_sector_momentum_bar,
 )
+from shared_utils import safe_float
 
 _logger = logging.getLogger(__name__)
 
@@ -239,27 +240,43 @@ def render_tab_market(df):
                     ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
                     ui.label(f"평균 ELITE {elite_avg:.0f}").classes("text-xs text-gray-500")
 
-    # ── 오늘의 브리핑 Top 3 ──
+    # ── [v21.3] 오늘의 Top 추천 — ELITE 기준 ──
     try:
-        bp = os.path.join(DATA_DIR, "briefing_latest.json")
-        if os.path.exists(bp):
-            with open(bp, 'r') as f:
-                briefing = json.load(f)
-            stocks = briefing.get("stocks", [])[:3]
-            if stocks:
+        if "ELITE_SCORE" in df.columns:
+            _top_df = df.copy()
+            # TOP_PICK 우선, 없으면 ELITE 상위
+            if "TOP_PICK" in _top_df.columns:
+                _picks = _top_df[_top_df["TOP_PICK"].astype(int) == 1].nlargest(3, "ELITE_SCORE")
+                if len(_picks) < 3:
+                    _extra = _top_df[~_top_df.index.isin(_picks.index)].nlargest(3 - len(_picks), "ELITE_SCORE")
+                    _picks = pd.concat([_picks, _extra])
+            else:
+                _picks = _top_df.nlargest(3, "ELITE_SCORE")
+
+            if not _picks.empty:
                 with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
-                    ui.label("📋 오늘의 Top 추천").classes("text-xs text-gray-400 mb-2")
+                    ui.label("🏆 오늘의 ELITE Top").classes("text-xs text-gray-400 mb-2")
                     with ui.row().classes("w-full gap-3 flex-wrap"):
-                        for s in stocks:
-                            route_icon = {"ATTACK": "🚀", "ARMED": "🔫", "CARRY": "📌"}.get(s.get("route", ""), "👀")
+                        for _, s in _picks.iterrows():
+                            route = str(s.get("ROUTE", ""))
+                            route_icon = {"ATTACK": "🚀", "ARMED": "🔫", "CARRY": "📌"}.get(route, "👀")
+                            elite = safe_float(s.get("ELITE_SCORE", 0))
+                            close = safe_float(s.get("종가", 0))
+                            tp1 = safe_float(s.get("추천매도가1", 0))
+                            rr = safe_float(s.get("RR_NOW_TP1", 0))
+                            wr = safe_float(s.get("EST_WIN_RATE", 0))
+                            bal = safe_float(s.get("BALANCE_SCORE", 0))
+                            tp_flag = "🏆 " if int(s.get("TOP_PICK", 0)) == 1 else ""
+                            tp1_pct = (tp1 / close - 1) * 100 if close > 0 else 0
+
                             with ui.card().classes("flex-1 min-w-[200px] p-3 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
                                 with ui.row().classes("items-center gap-2"):
-                                    ui.label(f"{route_icon} {s['name']}").classes("text-white font-bold text-sm")
-                                    ui.badge(f"{s.get('score', 0):.0f}", color="#3B82F6").classes("text-xs")
-                                ui.label(f"종가 {s.get('close', 0):,} → TP1 {s.get('target1', 0):,} ({(s.get('target1', 0) / s.get('close', 1) - 1) * 100:+.1f}%)").classes("text-xs text-gray-400 mt-1")
-                                ui.label(f"RR {s.get('rr', 0):.1f}:1 | 승률 {s.get('est_win_rate', 0) * 100:.0f}% | {s.get('sector', '')}").classes("text-xs text-cyan-400")
-    except Exception:
-        pass
+                                    ui.label(f"{route_icon} {tp_flag}{s.get('종목명', '')}").classes("text-white font-bold text-sm")
+                                    ui.badge(f"E{elite:.0f}", color="#10B981" if elite >= 80 else "#3B82F6").classes("text-xs")
+                                ui.label(f"S{safe_float(s.get('STRUCT_SCORE', 0)):.0f} T{safe_float(s.get('TIMING_SCORE', 0)):.0f} AI{safe_float(s.get('AI_SCORE', 0)):.0f} | 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
+                                ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | RR {rr:.1f}:1 | 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")
+    except Exception as _te:
+        _logger.warning(f"Top 추천 렌더 실패: {_te}")
 
     _section_title("📡 시장 현황")
     with ui.row().classes("w-full gap-4 flex-wrap"):
