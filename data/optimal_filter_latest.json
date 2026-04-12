@@ -1,0 +1,144 @@
+{
+  "best": {
+    "S_min": 90,
+    "T_min": 80,
+    "AI_min": 60,
+    "routes": [
+      "ATTACK",
+      "ARMED"
+    ],
+    "n": 33,
+    "win_rate": 78.8,
+    "avg_ret": 14.94
+  },
+  "top_combos": [
+    {
+      "S_min": 90,
+      "T_min": 80,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 33,
+      "win_rate": 78.8,
+      "avg_ret": 14.94
+    },
+    {
+      "S_min": 70,
+      "T_min": 80,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 43,
+      "win_rate": 76.7,
+      "avg_ret": 12.42
+    },
+    {
+      "S_min": 80,
+      "T_min": 80,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 43,
+      "win_rate": 76.7,
+      "avg_ret": 12.42
+    },
+    {
+      "S_min": 90,
+      "T_min": 80,
+      "AI_min": 50,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 46,
+      "win_rate": 76.1,
+      "avg_ret": 12.91
+    },
+    {
+      "S_min": 60,
+      "T_min": 80,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 46,
+      "win_rate": 76.1,
+      "avg_ret": 11.69
+    },
+    {
+      "S_min": 90,
+      "T_min": 70,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 75,
+      "win_rate": 76.0,
+      "avg_ret": 12.96
+    },
+    {
+      "S_min": 90,
+      "T_min": 80,
+      "AI_min": 70,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 24,
+      "win_rate": 75.0,
+      "avg_ret": 15.21
+    },
+    {
+      "S_min": 80,
+      "T_min": 70,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 90,
+      "win_rate": 74.4,
+      "avg_ret": 11.28
+    },
+    {
+      "S_min": 70,
+      "T_min": 80,
+      "AI_min": 70,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 27,
+      "win_rate": 74.1,
+      "avg_ret": 14.53
+    },
+    {
+      "S_min": 80,
+      "T_min": 80,
+      "AI_min": 70,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 27,
+      "win_rate": 74.1,
+      "avg_ret": 14.53
+    }
+  ],
+  "meta": {
+    "total_trades": 9380,
+    "total_win_rate": 51.8,
+    "matched_days": 20,
+    "horizon": 3,
+    "min_samples": 10
+  },
+  "generated_at": "2026-04-12T14:23:41.886189"
+}
