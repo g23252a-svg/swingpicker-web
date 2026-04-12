@@ -365,6 +365,64 @@ def render_tab_market(df):
                             ],
                             rows=combo_rows, row_key="rank",
                         ).classes("w-full mb-4").props("dense dark flat bordered")
+
+                    # [v21.3] 최적 조합 매칭 종목 리스트
+                    if best and not df.empty:
+                        s_min = best.get("S_min", 0)
+                        t_min = best.get("T_min", 0)
+                        ai_min = best.get("AI_min", 0)
+                        b_routes = best.get("routes", [])
+                        ai_col = "AI_SCORE" if "AI_SCORE" in df.columns else "ML_SCORE"
+
+                        matched = df[
+                            (df.get("STRUCT_SCORE", pd.Series(0, index=df.index)) >= s_min)
+                            & (df.get("TIMING_SCORE", pd.Series(0, index=df.index)) >= t_min)
+                            & (df.get(ai_col, pd.Series(0, index=df.index)) >= ai_min)
+                            & (df.get("ROUTE", pd.Series("", index=df.index)).isin(b_routes))
+                        ]
+
+                        if not matched.empty:
+                            elite_col = "ELITE_SCORE" if "ELITE_SCORE" in matched.columns else "DISPLAY_SCORE"
+                            matched = matched.sort_values(elite_col, ascending=False)
+
+                            ui.label(f"🎯 오늘 최적 조합 매칭 종목 ({len(matched)}개)").classes("text-sm font-bold text-yellow-400 mb-2")
+                            match_rows = []
+                            for _, s in matched.iterrows():
+                                _close = safe_float(s.get("종가", 0))
+                                _tp1 = safe_float(s.get("추천매도가1", 0))
+                                _tp1_pct = (_tp1 / _close - 1) * 100 if _close > 0 else 0
+                                _rr = safe_float(s.get("RR_NOW_TP1", 0))
+                                _wr = safe_float(s.get("EST_WIN_RATE", 0))
+                                _elite = safe_float(s.get("ELITE_SCORE", 0))
+                                match_rows.append({
+                                    "route": str(s.get("ROUTE", "")),
+                                    "name": str(s.get("종목명", "")),
+                                    "elite": f"{_elite:.0f}",
+                                    "s": f"{safe_float(s.get('STRUCT_SCORE', 0)):.0f}",
+                                    "t": f"{safe_float(s.get('TIMING_SCORE', 0)):.0f}",
+                                    "ai": f"{safe_float(s.get(ai_col, 0)):.0f}",
+                                    "rr": f"{_rr:.1f}",
+                                    "wr": f"{_wr * 100:.0f}%",
+                                    "close": f"{_close:,.0f}",
+                                    "tp1": f"{_tp1:,.0f} ({_tp1_pct:+.1f}%)",
+                                })
+                            ui.table(
+                                columns=[
+                                    {"name": "route", "label": "신호", "field": "route", "align": "center"},
+                                    {"name": "name", "label": "종목명", "field": "name", "align": "left"},
+                                    {"name": "elite", "label": "ELITE", "field": "elite", "align": "center"},
+                                    {"name": "s", "label": "S", "field": "s", "align": "center"},
+                                    {"name": "t", "label": "T", "field": "t", "align": "center"},
+                                    {"name": "ai", "label": "AI", "field": "ai", "align": "center"},
+                                    {"name": "rr", "label": "RR", "field": "rr", "align": "center"},
+                                    {"name": "wr", "label": "승률", "field": "wr", "align": "center"},
+                                    {"name": "close", "label": "현재가", "field": "close", "align": "right"},
+                                    {"name": "tp1", "label": "목표가", "field": "tp1", "align": "right"},
+                                ],
+                                rows=match_rows, row_key="name",
+                            ).classes("w-full").props("dense dark flat bordered")
+                        else:
+                            ui.label("⚠️ 오늘 최적 조합 매칭 종목 없음").classes("text-xs text-gray-500")
         except Exception:
             pass
 
