@@ -527,7 +527,7 @@ def render_tab_stocks(df, auth, store=None):
             fdf = fdf.sort_values(["ACTION_PRIORITY", _sc], ascending=[True, False])
         if auth == "guest": fdf = fdf.head(3)
         elif auth == "free": fdf = fdf.head(5)
-        else: fdf = fdf.head(50)
+        # prime/admin → 전체 표시
         return fdf
 
     def _build_view():
