@@ -131,9 +131,9 @@ def render_tab_perf():
 
             if PLOTLY_OK:
                 fig = make_subplots(specs=[[{"secondary_y": True}]])
-                fig.add_trace(go.Bar(x=cdf['Date'], y=cdf[col_win], name="승률(%)", marker_color='#FFA726', opacity=0.6), secondary_y=False)
-                fig.add_trace(go.Scatter(x=cdf['Date'], y=cdf[col_ret], name="수익률(%)", mode='lines+markers', line=dict(color='#29B6F6', width=3)), secondary_y=True)
-                fig.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white', hovermode="x unified", legend=dict(orientation="h", y=1.1))
+                fig.add_trace(go.Bar(x=cdf['Date'], y=cdf[col_win], name="승률(%)", marker_color='#FFA726', opacity=0.6, hovertemplate="%{x}<br>승률: %{y:.1f}%<extra></extra>"), secondary_y=False)
+                fig.add_trace(go.Scatter(x=cdf['Date'], y=cdf[col_ret], name="수익률(%)", mode='lines+markers', line=dict(color='#29B6F6', width=3), hovertemplate="%{x}<br>수익률: %{y:.2f}%<extra></extra>"), secondary_y=True)
+                fig.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white', hovermode="x unified", legend=dict(orientation="h", y=1.1), hoverlabel=dict(bgcolor="#1a1a2e", font_size=13, font_color="white", bordercolor="#444"))
                 fig.update_yaxes(title_text="승률(%)", range=[0, 100], secondary_y=False)
                 fig.update_yaxes(title_text="수익률(%)", secondary_y=True)
                 ui.plotly(fig).classes("w-full")
