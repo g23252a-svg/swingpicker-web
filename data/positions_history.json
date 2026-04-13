@@ -1048,5 +1048,29 @@
       "006890_20260331_WARN_DRAWDOWN_20260407",
       "006890_20260331_STOP_HIT_20260408"
     ]
+  },
+  {
+    "code": "474610",
+    "name": "RF시스템즈",
+    "entry_ymd": "20260409",
+    "entry_px": 11230.0,
+    "qty": 0,
+    "stop_px": 9540.0,
+    "stop_px_initial": 9540.0,
+    "take_px1": 13490.0,
+    "take_px2": 13990.0,
+    "trailing_high": 15090.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260413",
+    "last_close_px": 14400.0,
+    "unrealized_pnl_pct": 28.23,
+    "realized_pnl_pct": 28.23,
+    "close_ymd": "20260413",
+    "close_px": 14400.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "474610_20260409_TP1_HIT_20260413",
+      "474610_20260409_TP2_HIT_20260413"
+    ]
   }
 ]

@@ -1,85 +1,67 @@
 {
-  "trade_ymd": "20260410",
-  "top_pick_count": 8,
-  "avg_elite": 65.8,
-  "avg_rr": 1.0,
-  "avg_balance": 63.2,
-  "avg_win_rate": 0.592,
+  "trade_ymd": "20260413",
+  "top_pick_count": 6,
+  "avg_elite": 65.0,
+  "avg_rr": 1.01,
+  "avg_balance": 71.3,
+  "avg_win_rate": 0.546,
   "routes": {
-    "ARMED": 8
+    "ARMED": 6
   },
   "picks": [
     {
+      "종목코드": "178320",
+      "종목명": "서진시스템",
+      "ELITE_SCORE": 62.0,
+      "RR_NOW_TP1": 0.59,
+      "BALANCE_SCORE": 76.0,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.592
+    },
+    {
       "종목코드": "175330",
       "종목명": "JB금융지주",
-      "ELITE_SCORE": 84.6,
-      "RR_NOW_TP1": 2.36,
-      "BALANCE_SCORE": 85.5,
+      "ELITE_SCORE": 78.0,
+      "RR_NOW_TP1": 2.16,
+      "BALANCE_SCORE": 78.8,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.648
-    },
-    {
-      "종목코드": "041440",
-      "종목명": "현대에버다임",
-      "ELITE_SCORE": 62.9,
-      "RR_NOW_TP1": 0.63,
-      "BALANCE_SCORE": 59.0,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.636
-    },
-    {
-      "종목코드": "138080",
-      "종목명": "오이솔루션",
-      "ELITE_SCORE": 62.3,
-      "RR_NOW_TP1": 0.77,
-      "BALANCE_SCORE": 63.5,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.618
-    },
-    {
-      "종목코드": "123330",
-      "종목명": "제닉",
-      "ELITE_SCORE": 64.1,
-      "RR_NOW_TP1": 0.9,
-      "BALANCE_SCORE": 50.5,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.612
-    },
-    {
-      "종목코드": "013360",
-      "종목명": "일성건설",
-      "ELITE_SCORE": 64.5,
-      "RR_NOW_TP1": 1.03,
-      "BALANCE_SCORE": 57.7,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.583
+      "EST_WIN_RATE": 0.574
     },
     {
       "종목코드": "402490",
       "종목명": "그린리소스",
-      "ELITE_SCORE": 63.3,
-      "RR_NOW_TP1": 0.63,
-      "BALANCE_SCORE": 63.1,
+      "ELITE_SCORE": 64.3,
+      "RR_NOW_TP1": 0.76,
+      "BALANCE_SCORE": 65.9,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.581
+      "EST_WIN_RATE": 0.574
     },
     {
-      "종목코드": "009410",
-      "종목명": "태영건설",
-      "ELITE_SCORE": 63.2,
+      "종목코드": "019210",
+      "종목명": "와이지-원",
+      "ELITE_SCORE": 61.7,
+      "RR_NOW_TP1": 0.67,
+      "BALANCE_SCORE": 79.6,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.547
+    },
+    {
+      "종목코드": "388050",
+      "종목명": "지투파워",
+      "ELITE_SCORE": 60.3,
       "RR_NOW_TP1": 0.75,
-      "BALANCE_SCORE": 66.4,
+      "BALANCE_SCORE": 60.4,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.545
+      "EST_WIN_RATE": 0.534
     },
     {
-      "종목코드": "023530",
-      "종목명": "롯데쇼핑",
-      "ELITE_SCORE": 61.5,
-      "RR_NOW_TP1": 0.93,
-      "BALANCE_SCORE": 60.0,
+      "종목코드": "006800",
+      "종목명": "미래에셋증권",
+      "ELITE_SCORE": 63.4,
+      "RR_NOW_TP1": 1.14,
+      "BALANCE_SCORE": 66.9,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.51
+      "EST_WIN_RATE": 0.453
     }
   ]
 }
