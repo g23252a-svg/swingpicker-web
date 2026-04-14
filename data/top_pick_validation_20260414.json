@@ -1,0 +1,40 @@
+{
+  "trade_ymd": "20260414",
+  "top_pick_count": 3,
+  "avg_elite": 63.5,
+  "avg_rr": 0.92,
+  "avg_balance": 61.8,
+  "avg_win_rate": 0.529,
+  "routes": {
+    "ARMED": 3
+  },
+  "picks": [
+    {
+      "종목코드": "250060",
+      "종목명": "모비스",
+      "ELITE_SCORE": 64.5,
+      "RR_NOW_TP1": 0.64,
+      "BALANCE_SCORE": 72.5,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.553
+    },
+    {
+      "종목코드": "011280",
+      "종목명": "태림포장",
+      "ELITE_SCORE": 66.0,
+      "RR_NOW_TP1": 1.45,
+      "BALANCE_SCORE": 58.4,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.515
+    },
+    {
+      "종목코드": "064260",
+      "종목명": "다날",
+      "ELITE_SCORE": 60.1,
+      "RR_NOW_TP1": 0.67,
+      "BALANCE_SCORE": 54.6,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.518
+    }
+  ]
+}

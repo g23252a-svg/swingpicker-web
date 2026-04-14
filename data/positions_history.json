@@ -1072,5 +1072,30 @@
       "474610_20260409_TP1_HIT_20260413",
       "474610_20260409_TP2_HIT_20260413"
     ]
+  },
+  {
+    "code": "432720",
+    "name": "퀄리타스반도체",
+    "entry_ymd": "20260325",
+    "entry_px": 14090.0,
+    "qty": 0,
+    "stop_px": 11970.0,
+    "stop_px_initial": 11970.0,
+    "take_px1": 16920.0,
+    "take_px2": 18930.0,
+    "trailing_high": 20550.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260414",
+    "last_close_px": 20550.0,
+    "unrealized_pnl_pct": 45.85,
+    "realized_pnl_pct": 45.85,
+    "close_ymd": "20260414",
+    "close_px": 20550.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "432720_20260325_TP1_HIT_20260325",
+      "432720_20260325_TP1_HIT_20260414",
+      "432720_20260325_TP2_HIT_20260414"
+    ]
   }
 ]
