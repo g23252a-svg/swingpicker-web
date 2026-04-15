@@ -1,31 +1,85 @@
 {
-  "trade_ymd": "20260414",
-  "top_pick_count": 2,
-  "avg_elite": 68.8,
-  "avg_rr": 1.16,
-  "avg_balance": 56.4,
-  "avg_win_rate": 0.485,
+  "trade_ymd": "20260415",
+  "top_pick_count": 8,
+  "avg_elite": 73.9,
+  "avg_rr": 1.51,
+  "avg_balance": 54.8,
+  "avg_win_rate": 0.559,
   "routes": {
-    "ARMED": 2
+    "ARMED": 8
   },
   "picks": [
     {
-      "종목코드": "011280",
-      "종목명": "태림포장",
-      "ELITE_SCORE": 69.5,
-      "RR_NOW_TP1": 1.45,
-      "BALANCE_SCORE": 58.4,
+      "종목코드": "178320",
+      "종목명": "서진시스템",
+      "ELITE_SCORE": 88.0,
+      "RR_NOW_TP1": 1.65,
+      "BALANCE_SCORE": 53.4,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.515
+      "EST_WIN_RATE": 0.692
+    },
+    {
+      "종목코드": "368770",
+      "종목명": "파이버프로",
+      "ELITE_SCORE": 81.1,
+      "RR_NOW_TP1": 1.97,
+      "BALANCE_SCORE": 58.5,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.625
+    },
+    {
+      "종목코드": "001780",
+      "종목명": "알루코",
+      "ELITE_SCORE": 78.5,
+      "RR_NOW_TP1": 0.93,
+      "BALANCE_SCORE": 53.6,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.611
+    },
+    {
+      "종목코드": "078350",
+      "종목명": "한양디지텍",
+      "ELITE_SCORE": 72.3,
+      "RR_NOW_TP1": 1.45,
+      "BALANCE_SCORE": 62.3,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.521
+    },
+    {
+      "종목코드": "013580",
+      "종목명": "계룡건설",
+      "ELITE_SCORE": 71.1,
+      "RR_NOW_TP1": 0.84,
+      "BALANCE_SCORE": 51.1,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.539
     },
     {
       "종목코드": "259630",
       "종목명": "엠플러스",
-      "ELITE_SCORE": 68.2,
-      "RR_NOW_TP1": 0.86,
+      "ELITE_SCORE": 69.9,
+      "RR_NOW_TP1": 0.88,
+      "BALANCE_SCORE": 53.5,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.517
+    },
+    {
+      "종목코드": "012330",
+      "종목명": "현대모비스",
+      "ELITE_SCORE": 67.2,
+      "RR_NOW_TP1": 3.12,
       "BALANCE_SCORE": 54.4,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.455
+      "EST_WIN_RATE": 0.498
+    },
+    {
+      "종목코드": "077970",
+      "종목명": "STX엔진",
+      "ELITE_SCORE": 63.4,
+      "RR_NOW_TP1": 1.21,
+      "BALANCE_SCORE": 51.5,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.472
     }
   ]
 }

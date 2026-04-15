@@ -1097,5 +1097,58 @@
       "432720_20260325_TP1_HIT_20260414",
       "432720_20260325_TP2_HIT_20260414"
     ]
+  },
+  {
+    "code": "047040",
+    "name": "대우건설",
+    "entry_ymd": "20260408",
+    "entry_px": 16950.0,
+    "qty": 0,
+    "stop_px": 14400.0,
+    "stop_px_initial": 14400.0,
+    "take_px1": 22550.0,
+    "take_px2": 26000.0,
+    "trailing_high": 29450.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260415",
+    "last_close_px": 28500.0,
+    "unrealized_pnl_pct": 68.14,
+    "realized_pnl_pct": 68.14,
+    "close_ymd": "20260415",
+    "close_px": 28500.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "047040_20260408_TP1_HIT_20260408",
+      "047040_20260408_TP1_HIT_20260409",
+      "047040_20260408_TP1_HIT_20260410",
+      "047040_20260408_TP1_HIT_20260413",
+      "047040_20260408_TP1_HIT_20260414",
+      "047040_20260408_TP1_HIT_20260415",
+      "047040_20260408_TP2_HIT_20260415"
+    ]
+  },
+  {
+    "code": "066310",
+    "name": "큐에스아이",
+    "entry_ymd": "20260413",
+    "entry_px": 11920.0,
+    "qty": 0,
+    "stop_px": 10130.0,
+    "stop_px_initial": 10130.0,
+    "take_px1": 14250.0,
+    "take_px2": 16340.0,
+    "trailing_high": 17510.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260415",
+    "last_close_px": 17510.0,
+    "unrealized_pnl_pct": 46.9,
+    "realized_pnl_pct": 46.9,
+    "close_ymd": "20260415",
+    "close_px": 17510.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "066310_20260413_TP1_HIT_20260415",
+      "066310_20260413_TP2_HIT_20260415"
+    ]
   }
 ]
