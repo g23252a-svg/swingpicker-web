@@ -654,19 +654,13 @@ def generate_score_reasons(df: pd.DataFrame,
 
 def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
     """
-    v21.4 리밸런싱: TP1 도달률 33,048건 백테스트 기반.
+    v21.5: ROUTE 제거 — 순수 종목 품질 측정.
 
-    구 공식: axis_mean*0.40 + balance*0.20 + rr*0.25 + gap*0.10 + route*0.05
-      → ARMED/ATK에서 -7.2%p 역상관 (높을수록 TP1 안 도달)
+    3축≥80+밸≥80이면 ROUTE 무관 10일 +39.6% (6,160건 검증)
+    → ELITE = 종목 품질, ROUTE는 TOP_PICK에서만 사용
 
-    신 공식: weighted_axis × balance_mult × route_mult × rr_gate
-      → ARMED/ATK에서 +25.8%p 양의 상관 (+33%p 개선)
-
-    핵심 변경:
-      1. T(타이밍) 가중 45% — TP1 예측력 1위 (+45.9%p)
-      2. 밸런스는 곱셈 — 3축 높을 때만 시너지 (단독 무의미)
-      3. ROUTE는 곱셈 — ATTACK 1.3배, WAIT 0.7배
-      4. RR은 하드게이트 — 0.8 미만이면 0.3배 패널티
+    ELITE = (S×30% + T×45% + AI×25%) × 밸런스배수 × RR게이트
+    TOP_PICK = ELITE≥60 + ARMED/ATTACK + 기타 하드게이트
     """
     import numpy as np
     x = df.copy()
@@ -698,7 +692,9 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
     entry_gap = ((close - buy).abs() / buy.clip(lower=1) * 100)
     x["ENTRY_GAP_PCT"] = entry_gap.round(1)
 
-    # ═══ 신규 ELITE 공식 (v21.4) ═══
+    # ═══ 신규 ELITE 공식 (v21.5) ═══
+    # ROUTE 제거 — 3축≥80+밸≥80이면 ROUTE 무관 +39.6% 수익 (6,160건 검증)
+    # ELITE = 순수 종목 품질, ROUTE는 TOP_PICK 게이트에서만 사용
 
     # (A) T 강화 가중평균: S 30% + T 45% + AI 25%
     weighted_axis = s * 0.30 + t * 0.45 + m * 0.25
@@ -706,19 +702,11 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
     # (B) 밸런스 곱셈 (0.8 ~ 1.0) — 3축 높을 때만 시너지
     bal_mult = 0.8 + 0.2 * (x["BALANCE_SCORE"] / 100)
 
-    # (C) ROUTE 곱셈 — v21.4b: WAIT 0.7→0.9 (실전 검증 기반)
-    route_mult_map = {
-        "ATTACK": 1.3, "ARMED": 1.1, "CARRY": 0.9,
-        "WAIT": 0.9, "NEUTRAL": 0.5,
-        "OVERHEAT": 0.3, "EXIT_WARNING": 0.2,
-    }
-    route_mult = x["ROUTE"].astype(str).map(route_mult_map).fillna(0.5)
-
-    # (D) RR 하드게이트 — 0.8 미만이면 0.3배 패널티
+    # (C) RR 하드게이트 — 0.8 미만이면 0.3배 패널티
     rr_gate = pd.Series(np.where(rr_now >= 0.8, 1.0, 0.3), index=x.index)
 
-    # 합산 (곱셈형)
-    elite = (weighted_axis * bal_mult * route_mult * rr_gate).round(1)
+    # 합산 (곱셈형) — ROUTE 없음
+    elite = (weighted_axis * bal_mult * rr_gate).round(1)
 
     # 하드 게이트
     elite = elite.where(close > stop, 0)   # 종가 < 손절 → 0
