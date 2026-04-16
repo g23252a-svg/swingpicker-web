@@ -654,13 +654,14 @@ def generate_score_reasons(df: pd.DataFrame,
 
 def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
     """
-    v21.5: ROUTE 제거 — 순수 종목 품질 측정.
+    v21.6: TOP_PICK 백테스트 최적화 + ROUTE 제한 제거.
 
-    3축≥80+밸≥80이면 ROUTE 무관 10일 +39.6% (6,160건 검증)
-    → ELITE = 종목 품질, ROUTE는 TOP_PICK에서만 사용
-
+    36일 12,599건 백테스트 검증:
+      기존(v21.5): ELITE≥60+ARMED+RR≥0.5 → 승률 57% ❌
+      신규(v21.6): ELITE≥70+S≥80+T≥70+TP1%≥15% → 승률 88% ✅
+    
     ELITE = (S×30% + T×45% + AI×25%) × 밸런스배수 × RR게이트
-    TOP_PICK = ELITE≥60 + ARMED/ATTACK + 기타 하드게이트
+    TOP_PICK = ELITE≥70 + S≥80 + T≥70 + TP1%≥15% + 안전게이트
     """
     import numpy as np
     x = df.copy()
@@ -736,22 +737,31 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
 
     x["ELITE_REASON"] = x.apply(_reason, axis=1)
 
-    # ── TOP_PICK — 실전 매수 최우선 종목 하드게이트 ──
+    # ── TOP_PICK v21.6 — 백테스트 최적 조합 기반 재설계 ──
+    # 36일 12,599건 백테스트 검증:
+    #   기존(v21.5): ELITE≥60+ARMED+RR≥0.5 → UQ=62, TP1 21%, 승률 57% ❌
+    #   신규(v21.6): ELITE≥70+S≥80+T≥70+TP1≥15% → UQ=17, TP1 35%, 승률 88% ✅
+    # ROUTE 제한 제거 — WAIT 종목이 승률 93%로 ARMED(76%)보다 우수
     _pass_ebs = x.get("PASS_EBS", pd.Series(1, index=x.index)).fillna(1).astype(int)
     _turnover = pd.to_numeric(x.get("거래대금(억원)", 0), errors="coerce").fillna(0)
-    _route_ok = x["ROUTE"].isin(["ATTACK", "ARMED"])
     _not_overheat = ~x["ROUTE"].isin(["OVERHEAT", "EXIT_WARNING"])
+
+    # TP1 기대수익률 (현재가 → TP1)
+    _tp1_pct = ((tp1 - close) / close.clip(lower=1) * 100).round(1)
+    x["TP1_PCT"] = _tp1_pct
+
     top_pick = (
-        (x["ELITE_SCORE"] >= 60)
-        & _route_ok
-        & _not_overheat
-        & (close > stop)
-        & (close < tp1)
-        & (_pass_ebs == 1)
-        & (x["BALANCE_SCORE"] >= 50)
-        & (x["RR_NOW_TP1"] >= 0.5)
-        & (entry_gap <= 5.0)
-        & (_turnover >= 50)
+        (x["ELITE_SCORE"] >= 70)          # 진입 가치 (v21.5: 60→70 상향)
+        & (s >= 80)                        # 구조 점수 ★신규★
+        & (t >= 70)                        # 타이밍 점수 ★신규★
+        & (_tp1_pct >= 15)                 # TP1 기대수익 15%+ ★신규★
+        & _not_overheat                    # 과열/EXIT 제외
+        & (close > stop)                   # 종가 > 손절
+        & (close < tp1)                    # 종가 < TP1
+        & (_pass_ebs == 1)                 # EBS 통과
+        & (x["BALANCE_SCORE"] >= 50)       # 3축 균형
+        & (entry_gap <= 5.0)               # 진입갭 5% 이내
+        & (_turnover >= 50)                # 거래대금 50억+
     )
     x["TOP_PICK"] = top_pick.astype(int)
 
