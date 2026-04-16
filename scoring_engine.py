@@ -744,7 +744,7 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
     # ROUTE 제한 제거 — WAIT 종목이 승률 93%로 ARMED(76%)보다 우수
     _pass_ebs = x.get("PASS_EBS", pd.Series(1, index=x.index)).fillna(1).astype(int)
     _turnover = pd.to_numeric(x.get("거래대금(억원)", 0), errors="coerce").fillna(0)
-    _not_overheat = ~x["ROUTE"].isin(["OVERHEAT", "EXIT_WARNING"])
+    _route_ok = ~x["ROUTE"].isin(["OVERHEAT", "EXIT_WARNING", "CARRY"])
 
     # TP1 기대수익률 (현재가 → TP1)
     _tp1_pct = ((tp1 - close) / close.clip(lower=1) * 100).round(1)
@@ -755,7 +755,7 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
         & (s >= 80)                        # 구조 점수 ★신규★
         & (t >= 70)                        # 타이밍 점수 ★신규★
         & (_tp1_pct >= 15)                 # TP1 기대수익 15%+ ★신규★
-        & _not_overheat                    # 과열/EXIT 제외
+        & _route_ok                        # 과열/EXIT/CARRY 제외
         & (close > stop)                   # 종가 > 손절
         & (close < tp1)                    # 종가 < TP1
         & (_pass_ebs == 1)                 # EBS 통과
@@ -764,5 +764,23 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
         & (_turnover >= 50)                # 거래대금 50억+
     )
     x["TOP_PICK"] = top_pick.astype(int)
+
+    # ── TOP_PICK 내부 랭킹 (v21.6) ──
+    # 공식 C: ELITE + BAL×0.3 + RR×5 (36일 백테스트 Top3 수익 +5.4%p 차이)
+    _rank_score = (elite + x["BALANCE_SCORE"] * 0.3 + rr_now * 5).round(1)
+    x["TOP_PICK_RANK"] = np.where(top_pick, _rank_score, 0)
+
+    # 🥇🥈🥉 TIER 라벨 (TOP_PICK 내에서만)
+    _tp_mask = x["TOP_PICK"] == 1
+    _tier = pd.Series("", index=x.index)
+    if _tp_mask.any():
+        _tp_sorted = x.loc[_tp_mask].sort_values("TOP_PICK_RANK", ascending=False)
+        _tier_labels = ["🥇", "🥈", "🥉"]
+        for i, idx in enumerate(_tp_sorted.index):
+            if i < 3:
+                _tier.at[idx] = _tier_labels[i]
+            else:
+                _tier.at[idx] = "TOP"
+    x["TOP_PICK_TIER"] = _tier
 
     return x
