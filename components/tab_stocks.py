@@ -2,6 +2,13 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.5] (2026-04-17)
+  #1 page_stock.py / page_briefing.py 호환 공용 헬퍼 복원:
+     ROUTE_KR, ROUTE_COLOR, ROUTE_DESC (상수)
+     _route_kr, _route_desc, _route_color (조회 함수)
+     _section_title (섹션 타이틀 위젯)
+     _price_bar_html (손절/진입/목표 가격바 HTML)
+     _get_stock_chart_data, _plot_candle_chart (차트 별칭/래퍼)
 [v3.4] (2026-04-17)
   #1 함수명: render_tab2_stocks → render_tab_stocks (main.py 호출부와 정합)
   #2 시그니처: (df, auth) → (df, auth, store=None) (main.py의 3-인자 호출 대응)
@@ -356,3 +363,158 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         widget.on("update:model-value", lambda _: _build_view())
 
     _build_view()
+
+
+# ═══════════════════════════════════════════════════
+#  page_stock.py / page_briefing.py 호환 공용 헬퍼
+#  (v3.5 — 외부 모듈에서 import 하는 공개 심볼)
+# ═══════════════════════════════════════════════════
+
+# ── ROUTE 상수 ──
+ROUTE_KR = {
+    "ATTACK":   "매수 돌입",
+    "ARMED":    "매수 대기",
+    "WAIT":     "관망",
+    "OVERHEAT": "과열 주의",
+    "NEUTRAL":  "중립",
+}
+
+ROUTE_COLOR = {
+    "ATTACK":   "#FF4B4B",
+    "ARMED":    "#FFA726",
+    "WAIT":     "#29B6F6",
+    "OVERHEAT": "#757575",
+    "NEUTRAL":  "#BDBDBD",
+}
+
+ROUTE_DESC = {
+    "ATTACK":   "조건 충족 · 즉시 진입 검토",
+    "ARMED":    "트리거 임박 · 대기 포지션",
+    "WAIT":     "관망 · 신호 대기",
+    "OVERHEAT": "과열 구간 · 신규 진입 자제",
+    "NEUTRAL":  "중립 · 판단 보류",
+}
+
+
+def _route_key(route) -> str:
+    """ROUTE 문자열 정규화 + 부분일치 키 추출"""
+    r = str(route or "").upper()
+    for key in ROUTE_KR.keys():
+        if key in r:
+            return key
+    return "NEUTRAL"
+
+
+def _route_kr(route) -> str:
+    """ROUTE → 한글 라벨"""
+    return ROUTE_KR.get(_route_key(route), str(route or ""))
+
+
+def _route_desc(route) -> str:
+    """ROUTE → 설명 문구"""
+    return ROUTE_DESC.get(_route_key(route), "")
+
+
+def _route_color(route) -> str:
+    """ROUTE → HEX 색상"""
+    return ROUTE_COLOR.get(_route_key(route), "#BDBDBD")
+
+
+# ── UI 헬퍼 ──
+
+def _section_title(text: str):
+    """섹션 타이틀 (tab_market.py와 동일 스타일)"""
+    ui.label(text).classes(
+        "text-lg font-bold text-white mt-6 mb-2 border-b border-gray-700 pb-2"
+    )
+
+
+def _price_bar_html(stop, entry, close, t1, t2) -> str:
+    """손절/진입/현재가/목표1/목표2 가격바 HTML
+
+    단순 수평 바 + 각 가격 위치의 마커. 모든 인자는 숫자(0/None 허용).
+    """
+    try:
+        vals = [float(v) for v in (stop, entry, close, t1, t2) if v]
+    except Exception:
+        vals = []
+
+    if not vals:
+        return (
+            '<div style="padding:12px;color:#888;text-align:center;'
+            'background:rgba(255,255,255,0.03);border-radius:8px;">'
+            '가격 정보 없음</div>'
+        )
+
+    lo, hi = min(vals), max(vals)
+    span = max(hi - lo, 1.0)
+
+    def _pos(v):
+        try:
+            return max(0.0, min(100.0, (float(v) - lo) / span * 100.0))
+        except Exception:
+            return None
+
+    markers = [
+        ("손절",  stop,  "#FF4B4B"),
+        ("매수",  entry, "#29B6F6"),
+        ("현재",  close, "#FFFFFF"),
+        ("목표1", t1,    "#66BB6A"),
+        ("목표2", t2,    "#26A69A"),
+    ]
+
+    dots = []
+    labels = []
+    for label, val, color in markers:
+        pos = _pos(val)
+        if pos is None or not val:
+            continue
+        dots.append(
+            f'<div style="position:absolute;left:{pos}%;top:0;transform:translateX(-50%);'
+            f'width:10px;height:10px;border-radius:50%;background:{color};'
+            f'border:2px solid #0a0a1e;"></div>'
+        )
+        labels.append(
+            f'<div style="position:absolute;left:{pos}%;top:14px;transform:translateX(-50%);'
+            f'font-size:10px;color:{color};white-space:nowrap;">'
+            f'{label}<br><span style="color:#aaa;">{int(val):,}</span></div>'
+        )
+
+    return (
+        '<div style="position:relative;height:60px;margin:12px 0;padding:0 8px;">'
+        '<div style="position:absolute;left:0;right:0;top:4px;height:2px;'
+        'background:linear-gradient(90deg,#FF4B4B 0%,#FFA726 50%,#66BB6A 100%);'
+        'border-radius:2px;opacity:0.4;"></div>'
+        + "".join(dots) + "".join(labels) +
+        '</div>'
+    )
+
+
+# ── 차트 별칭/래퍼 ──
+# 기존 _get_chart_data / _plot_candle 에 외부 호출자가 기대하는 이름으로 다리를 놓는다.
+
+def _get_stock_chart_data(code: str):
+    """page_stock.py 호환 별칭 — 기존 _get_chart_data 위임"""
+    return _get_chart_data(code)
+
+
+def _plot_candle_chart(cdata, code: str, name: str, entry=None, stop=None, t1=None, t2=None):
+    """page_stock.py 호환 래퍼 — chart_components.plot_candle_chart 위임.
+
+    차트 모듈 부재 또는 실패 시 None 반환 (호출부가 None 체크함).
+    """
+    if _plot_candle is None or cdata is None:
+        return None
+    try:
+        # 위치 인자 기준 호출 (tab_stocks 내부에서도 동일 시그니처로 사용 중)
+        return _plot_candle(cdata, code, name, entry, stop, t1, t2)
+    except TypeError:
+        # 구버전 시그니처 폴백 (cdata, code, name 만 받는 경우)
+        try:
+            return _plot_candle(cdata, code, name)
+        except Exception as e:
+            _logger.warning(f"캔들차트 생성 실패 [{code}]: {e}")
+            return None
+    except Exception as e:
+        _logger.warning(f"캔들차트 생성 실패 [{code}]: {e}")
+        return None
