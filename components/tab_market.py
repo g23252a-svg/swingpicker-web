@@ -102,7 +102,7 @@ def _render_macro_sparklines():
         ("USD/KRW",    "USD/KRW",   "#F59E0B"),
         ("NASDAQ",     "IXIC",      "#3B82F6"),
         ("KOSPI",      "KS11",      "#10B981"),
-        ("US 10Y",     "US10YT=X",  "#E040FB"),
+        ("US 10Y",     "US10YT",    "#E040FB"),  # FDR 내부 매핑: US10YT → ^TNX
     ]
 
     with ui.card().classes("w-full p-3 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
