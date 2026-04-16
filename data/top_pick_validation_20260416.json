@@ -1,0 +1,49 @@
+{
+  "trade_ymd": "20260416",
+  "top_pick_count": 4,
+  "avg_elite": 72.5,
+  "avg_rr": 1.62,
+  "avg_balance": 63.5,
+  "avg_win_rate": 0.59,
+  "routes": {
+    "ARMED": 4
+  },
+  "picks": [
+    {
+      "종목코드": "368770",
+      "종목명": "파이버프로",
+      "ELITE_SCORE": 79.0,
+      "RR_NOW_TP1": 1.55,
+      "BALANCE_SCORE": 74.0,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.65
+    },
+    {
+      "종목코드": "013580",
+      "종목명": "계룡건설",
+      "ELITE_SCORE": 73.9,
+      "RR_NOW_TP1": 1.1,
+      "BALANCE_SCORE": 66.6,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.609
+    },
+    {
+      "종목코드": "050890",
+      "종목명": "쏠리드",
+      "ELITE_SCORE": 68.8,
+      "RR_NOW_TP1": 1.33,
+      "BALANCE_SCORE": 52.5,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.588
+    },
+    {
+      "종목코드": "175330",
+      "종목명": "JB금융지주",
+      "ELITE_SCORE": 68.5,
+      "RR_NOW_TP1": 2.48,
+      "BALANCE_SCORE": 60.8,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.514
+    }
+  ]
+}
