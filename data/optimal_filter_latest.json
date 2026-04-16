@@ -70,10 +70,10 @@
       ],
       "n": 49,
       "win_rate": 79.6,
-      "avg_ret": 12.65,
-      "avg_win": 18.44,
+      "avg_ret": 12.48,
+      "avg_win": 18.23,
       "avg_loss": 9.93,
-      "ev": 12.65
+      "ev": 12.48
     },
     {
       "S_min": 80,
@@ -85,10 +85,10 @@
       ],
       "n": 48,
       "win_rate": 79.2,
-      "avg_ret": 12.86,
-      "avg_win": 18.85,
+      "avg_ret": 12.64,
+      "avg_win": 18.58,
       "avg_loss": 9.93,
-      "ev": 12.86
+      "ev": 12.64
     },
     {
       "S_min": 60,
@@ -100,10 +100,25 @@
       ],
       "n": 53,
       "win_rate": 79.2,
-      "avg_ret": 11.86,
-      "avg_win": 17.47,
+      "avg_ret": 11.7,
+      "avg_win": 17.26,
       "avg_loss": 9.57,
-      "ev": 11.86
+      "ev": 11.7
+    },
+    {
+      "S_min": 90,
+      "T_min": 70,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 82,
+      "win_rate": 78.0,
+      "avg_ret": 14.04,
+      "avg_win": 20.19,
+      "avg_loss": 7.84,
+      "ev": 14.04
     },
     {
       "S_min": 90,
@@ -119,6 +134,21 @@
       "avg_win": 18.94,
       "avg_loss": 7.14,
       "ev": 13.2
+    },
+    {
+      "S_min": 80,
+      "T_min": 70,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 101,
+      "win_rate": 77.2,
+      "avg_ret": 12.22,
+      "avg_win": 18.63,
+      "avg_loss": 9.53,
+      "ev": 12.22
     },
     {
       "S_min": 90,
@@ -146,25 +176,10 @@
       ],
       "n": 39,
       "win_rate": 76.9,
-      "avg_ret": 12.68,
-      "avg_win": 19.09,
+      "avg_ret": 12.95,
+      "avg_win": 19.43,
       "avg_loss": 8.67,
-      "ev": 12.68
-    },
-    {
-      "S_min": 90,
-      "T_min": 70,
-      "AI_min": 60,
-      "routes": [
-        "ATTACK",
-        "ARMED"
-      ],
-      "n": 82,
-      "win_rate": 76.8,
-      "avg_ret": 14.03,
-      "avg_win": 20.51,
-      "avg_loss": 7.46,
-      "ev": 14.03
+      "ev": 12.95
     },
     {
       "S_min": 70,
@@ -176,25 +191,10 @@
       ],
       "n": 30,
       "win_rate": 76.7,
-      "avg_ret": 13.78,
-      "avg_win": 20.11,
+      "avg_ret": 13.86,
+      "avg_win": 20.22,
       "avg_loss": 7.02,
-      "ev": 13.78
-    },
-    {
-      "S_min": 80,
-      "T_min": 70,
-      "AI_min": 60,
-      "routes": [
-        "ATTACK",
-        "ARMED"
-      ],
-      "n": 101,
-      "win_rate": 76.2,
-      "avg_ret": 12.31,
-      "avg_win": 19.0,
-      "avg_loss": 9.16,
-      "ev": 12.31
+      "ev": 13.86
     }
   ],
   "top_combos_ev": [
@@ -252,11 +252,11 @@
         "ARMED"
       ],
       "n": 82,
-      "win_rate": 76.8,
-      "avg_ret": 14.03,
-      "avg_win": 20.51,
-      "avg_loss": 7.46,
-      "ev": 14.03
+      "win_rate": 78.0,
+      "avg_ret": 14.04,
+      "avg_win": 20.19,
+      "avg_loss": 7.84,
+      "ev": 14.04
     },
     {
       "S_min": 70,
@@ -268,10 +268,10 @@
       ],
       "n": 30,
       "win_rate": 76.7,
-      "avg_ret": 13.78,
-      "avg_win": 20.11,
+      "avg_ret": 13.86,
+      "avg_win": 20.22,
       "avg_loss": 7.02,
-      "ev": 13.78
+      "ev": 13.86
     },
     {
       "S_min": 90,
@@ -282,11 +282,11 @@
         "ARMED"
       ],
       "n": 54,
-      "win_rate": 74.1,
-      "avg_ret": 13.3,
-      "avg_win": 20.67,
-      "avg_loss": 7.76,
-      "ev": 13.3
+      "win_rate": 75.9,
+      "avg_ret": 13.32,
+      "avg_win": 20.18,
+      "avg_loss": 8.31,
+      "ev": 13.32
     },
     {
       "S_min": 90,
@@ -312,26 +312,11 @@
         "ARMED"
       ],
       "n": 88,
-      "win_rate": 73.9,
-      "avg_ret": 13.1,
-      "avg_win": 20.38,
-      "avg_loss": 7.47,
-      "ev": 13.1
-    },
-    {
-      "S_min": 80,
-      "T_min": 80,
-      "AI_min": 60,
-      "routes": [
-        "ATTACK",
-        "ARMED"
-      ],
-      "n": 48,
-      "win_rate": 79.2,
-      "avg_ret": 12.86,
-      "avg_win": 18.85,
-      "avg_loss": 9.93,
-      "ev": 12.86
+      "win_rate": 76.1,
+      "avg_ret": 13.07,
+      "avg_win": 19.7,
+      "avg_loss": 8.05,
+      "ev": 13.07
     },
     {
       "S_min": 90,
@@ -344,18 +329,33 @@
       ],
       "n": 39,
       "win_rate": 76.9,
-      "avg_ret": 12.68,
-      "avg_win": 19.09,
+      "avg_ret": 12.95,
+      "avg_win": 19.43,
       "avg_loss": 8.67,
-      "ev": 12.68
+      "ev": 12.95
+    },
+    {
+      "S_min": 60,
+      "T_min": 80,
+      "AI_min": 70,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "n": 33,
+      "win_rate": 75.8,
+      "avg_ret": 12.71,
+      "avg_win": 18.98,
+      "avg_loss": 6.88,
+      "ev": 12.71
     }
   ],
   "meta": {
     "total_trades": 10809,
-    "total_win_rate": 55.0,
+    "total_win_rate": 55.2,
     "matched_days": 23,
     "horizon": 3,
     "min_samples": 10
   },
-  "generated_at": "2026-04-15T21:09:24.507660"
+  "generated_at": "2026-04-16T17:09:03.964146"
 }
