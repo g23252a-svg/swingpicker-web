@@ -240,13 +240,18 @@ def render_tab_market(df):
                     ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
                     ui.label(f"평균 ELITE {elite_avg:.0f}").classes("text-xs text-gray-500")
 
-    # ── [v21.3] 오늘의 Top 추천 — ELITE 기준 ──
+    # ── [v21.6] 오늘의 TOP_PICK — 직관적 대시보드 ──
     try:
         if "ELITE_SCORE" in df.columns:
             _top_df = df.copy()
-            # TOP_PICK 우선, 없으면 ELITE 상위
+
+            # TOP_PICK 우선, 없으면 ELITE 상위 3
             if "TOP_PICK" in _top_df.columns:
-                _picks = _top_df[_top_df["TOP_PICK"].astype(int) == 1].nlargest(3, "ELITE_SCORE")
+                _picks = _top_df[_top_df["TOP_PICK"].astype(int) == 1]
+                if "TOP_PICK_RANK" in _picks.columns:
+                    _picks = _picks.nlargest(5, "TOP_PICK_RANK")
+                else:
+                    _picks = _picks.nlargest(5, "ELITE_SCORE")
                 if len(_picks) < 3:
                     _extra = _top_df[~_top_df.index.isin(_picks.index)].nlargest(3 - len(_picks), "ELITE_SCORE")
                     _picks = pd.concat([_picks, _extra])
@@ -254,27 +259,115 @@ def render_tab_market(df):
                 _picks = _top_df.nlargest(3, "ELITE_SCORE")
 
             if not _picks.empty:
-                with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
-                    ui.label("🏆 오늘의 ELITE Top").classes("text-xs text-gray-400 mb-2")
+                # 스코어바 HTML 생성 헬퍼
+                def _score_bar_html(label, value, max_val=100):
+                    pct = min(value / max_val * 100, 100)
+                    if value >= 90: color = "#22C55E"
+                    elif value >= 80: color = "#3B82F6"
+                    elif value >= 70: color = "#EAB308"
+                    elif value >= 60: color = "#F97316"
+                    else: color = "#EF4444"
+                    return f'''<div style="margin-bottom:4px">
+                        <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:1px">
+                            <span style="color:rgba(255,255,255,0.45);font-weight:600;letter-spacing:0.5px">{label}</span>
+                            <span style="color:{color};font-weight:700">{value:.0f}</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.06);border-radius:3px;height:5px;overflow:hidden">
+                            <div style="width:{pct}%;height:100%;border-radius:3px;background:linear-gradient(90deg,{color},{color}88)"></div>
+                        </div>
+                    </div>'''
+
+                # ROUTE 배지 색상
+                _route_styles = {
+                    "ARMED": ("#3B82F6", "rgba(59,130,246,0.15)"),
+                    "ATTACK": ("#EF4444", "rgba(239,68,68,0.15)"),
+                    "WAIT": ("#EAB308", "rgba(234,179,8,0.15)"),
+                    "CARRY": ("#10B981", "rgba(16,185,129,0.15)"),
+                    "OVERHEAT": ("#F97316", "rgba(249,115,22,0.15)"),
+                }
+
+                tp_count = int(_top_df.get("TOP_PICK", pd.Series(0)).sum()) if "TOP_PICK" in _top_df.columns else 0
+                with ui.card().classes("w-full p-4 bg-[#0a0a14] border border-gray-700/30 rounded-xl mb-4"):
+                    # 헤더
+                    with ui.row().classes("w-full items-center justify-between mb-1"):
+                        ui.label("🏆 오늘의 TOP PICK").classes("text-sm font-bold text-white")
+                        ui.badge(f"v21.6 · {tp_count}종목", color="#3B82F6").props("outline").classes("text-xs")
+                    ui.label("ELITE≥70 + S≥80 + T≥70 + TP1≥15% + 균형≥50").classes("text-[10px] text-gray-500 mb-3")
+
+                    # 카드들
                     with ui.row().classes("w-full gap-3 flex-wrap"):
-                        for _, s in _picks.iterrows():
+                        for rank, (_, s) in enumerate(_picks.iterrows(), 1):
                             route = str(s.get("ROUTE", ""))
-                            route_icon = {"ATTACK": "🚀", "ARMED": "🔫", "CARRY": "📌"}.get(route, "👀")
                             elite = safe_float(s.get("ELITE_SCORE", 0))
+                            sc = safe_float(s.get("STRUCT_SCORE", 0))
+                            tc = safe_float(s.get("TIMING_SCORE", 0))
+                            ai_val = safe_float(s.get("AI_SCORE", s.get("ML_SCORE", 0)))
                             close = safe_float(s.get("종가", 0))
                             tp1 = safe_float(s.get("추천매도가1", 0))
+                            stop_v = safe_float(s.get("손절가", 0))
                             rr = safe_float(s.get("RR_NOW_TP1", 0))
                             wr = safe_float(s.get("EST_WIN_RATE", 0))
                             bal = safe_float(s.get("BALANCE_SCORE", 0))
-                            tp_flag = "🏆 " if int(s.get("TOP_PICK", 0)) == 1 else ""
+                            is_tp = int(s.get("TOP_PICK", 0)) == 1
+                            tier_label = str(s.get("TOP_PICK_TIER", ""))
                             tp1_pct = (tp1 / close - 1) * 100 if close > 0 else 0
+                            ev_val = wr * tp1_pct - (1 - wr) * ((close - stop_v) / close * 100 if close > 0 and stop_v > 0 else 15)
 
-                            with ui.card().classes("flex-1 min-w-[200px] p-3 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
-                                with ui.row().classes("items-center gap-2"):
-                                    ui.label(f"{route_icon} {tp_flag}{s.get('종목명', '')}").classes("text-white font-bold text-sm")
-                                    ui.badge(f"E{elite:.0f}", color="#10B981" if elite >= 80 else "#3B82F6").classes("text-xs")
-                                ui.label(f"S{safe_float(s.get('STRUCT_SCORE', 0)):.0f} T{safe_float(s.get('TIMING_SCORE', 0)):.0f} AI{safe_float(s.get('AI_SCORE', 0)):.0f} | 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
-                                ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | RR {rr:.1f}:1 | 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")
+                            rc, rbg = _route_styles.get(route, ("#94A3B8", "rgba(148,163,184,0.15)"))
+                            border_color = f"{rc}66" if is_tp else "rgba(255,255,255,0.08)"
+                            card_bg = "#12121f" if is_tp else "#1a1a2e"
+
+                            with ui.card().classes("flex-1 min-w-[240px] max-w-[360px] rounded-xl overflow-hidden").style(
+                                f"background:{card_bg};border:1px solid {border_color};border-left:4px solid {rc};padding:14px 16px"
+                            ):
+                                # 상단: 종목명 + ELITE
+                                with ui.row().classes("w-full items-start justify-between"):
+                                    with ui.column().classes("gap-0.5"):
+                                        with ui.row().classes("items-center gap-2"):
+                                            ui.label(s.get("종목명", "")).classes("text-white font-bold text-sm")
+                                            if is_tp:
+                                                _tier_bg = {"🥇": "linear-gradient(135deg,#FFD700,#FFA500)", "🥈": "linear-gradient(135deg,#C0C0C0,#A0A0A0)", "🥉": "linear-gradient(135deg,#CD7F32,#A0522D)"}.get(tier_label, "linear-gradient(135deg,#3B82F6,#2563EB)")
+                                                _tier_text = {"🥇": "#000", "🥈": "#000", "🥉": "#FFF"}.get(tier_label, "#FFF")
+                                                _tier_display = {"🥇": "1st", "🥈": "2nd", "🥉": "3rd"}.get(tier_label, "TOP")
+                                                ui.html(f'<span style="background:{_tier_bg};color:{_tier_text};font-size:9px;font-weight:800;padding:1px 7px;border-radius:8px">{tier_label} {_tier_display}</span>')
+                                        # ROUTE 배지
+                                        ui.html(f'<span style="background:{rbg};color:{rc};border:1px solid {rc}33;padding:1px 8px;border-radius:12px;font-size:10px;font-weight:700">{route}</span>')
+                                    # ELITE 숫자
+                                    with ui.column().classes("items-end gap-0"):
+                                        ec = "#22C55E" if elite >= 80 else "#3B82F6" if elite >= 70 else "#EAB308"
+                                        ui.label(f"{elite:.0f}").style(f"color:{ec};font-size:24px;font-weight:800;line-height:1")
+                                        ui.label("ELITE").classes("text-[8px] text-gray-500")
+
+                                # 중단: 3축 스코어바 + TP1/RR
+                                with ui.row().classes("w-full gap-3 mt-3"):
+                                    # 좌측: 스코어바
+                                    with ui.column().classes("flex-1"):
+                                        ui.html(_score_bar_html("S 구조", sc))
+                                        ui.html(_score_bar_html("T 타이밍", tc))
+                                        ui.html(_score_bar_html("AI", ai_val))
+                                    # 우측: TP1% + RR + EV
+                                    with ui.column().classes("min-w-[90px] gap-1"):
+                                        with ui.card().classes("p-2 rounded-lg").style("background:rgba(255,255,255,0.04)"):
+                                            ui.label("TP1 기대수익").classes("text-[8px] text-gray-500")
+                                            tp1c = "#22C55E" if tp1_pct >= 20 else "#3B82F6" if tp1_pct >= 10 else "#EAB308"
+                                            ui.label(f"+{tp1_pct:.1f}%").style(f"color:{tp1c};font-size:18px;font-weight:800")
+                                        with ui.row().classes("gap-1"):
+                                            with ui.card().classes("flex-1 p-1 rounded-lg text-center").style("background:rgba(255,255,255,0.04)"):
+                                                ui.label("RR").classes("text-[7px] text-gray-500")
+                                                rrc = "#22C55E" if rr >= 1.5 else "#EAB308" if rr >= 1 else "#F97316"
+                                                ui.label(f"{rr:.1f}").style(f"color:{rrc};font-size:13px;font-weight:700")
+                                            with ui.card().classes("flex-1 p-1 rounded-lg text-center").style("background:rgba(255,255,255,0.04)"):
+                                                ui.label("EV").classes("text-[7px] text-gray-500")
+                                                evc = "#22C55E" if ev_val >= 10 else "#3B82F6" if ev_val >= 5 else "#F97316"
+                                                ui.label(f"{ev_val:+.0f}%").style(f"color:{evc};font-size:13px;font-weight:700")
+
+                                # 하단: 가격 정보
+                                with ui.row().classes("w-full mt-2 gap-2").style("background:rgba(255,255,255,0.03);border-radius:8px;padding:6px 10px"):
+                                    for lbl, val, clr in [("매수", f"{close:,.0f}", "#F1F5F9"), ("TP1", f"{tp1:,.0f}", "#22C55E"), ("손절", f"{stop_v:,.0f}", "#EF4444")]:
+                                        with ui.column().classes("flex-1 gap-0"):
+                                            ui.label(lbl).classes("text-[8px] text-gray-500")
+                                            ui.label(val).style(f"color:{clr};font-size:11px;font-weight:700")
+
     except Exception as _te:
         _logger.warning(f"Top 추천 렌더 실패: {_te}")
 
