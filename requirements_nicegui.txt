@@ -10,7 +10,7 @@
 setuptools
 
 # --- [Core UI] NiceGUI (Streamlit 대체) ---
-nicegui>=2.10.0
+nicegui>=2.10.0,<3.10.0
 plotly>=5.20.0
 
 # --- [Data Science & ML] ---
