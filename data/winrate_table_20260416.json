@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "version": "v20.8",
+    "as_of_ymd": "20260416",
+    "horizon_bdays": 5,
+    "entry_rule": "next_open",
+    "exit_rule": "horizon_close",
+    "min_n": 30,
+    "half_life_days": 90,
+    "round_trip_cost_pct": 0.41000000000000003,
+    "kelly_fraction_mult": 0.25,
+    "kelly_cap": 0.1,
+    "corporate_action_threshold_pct": 30.0,
+    "n_trades": 9162,
+    "feature_schema_version": "v20.8",
+    "feature_schema_hash": "a3a49ec92a61",
+    "feature_n_cols": 16
+  },
+  "table": [
+    {
+      "score_lo": 0,
+      "score_hi": 50.0,
+      "p_win": 0.4811,
+      "n_raw": 4949,
+      "n_effective": 4467.7,
+      "avg_ret_net_pct": -0.2276,
+      "avg_win_ret": 6.6786,
+      "avg_loss_ret": 6.3767,
+      "b_ratio": 1.0474,
+      "sufficient": true
+    },
+    {
+      "score_lo": 50,
+      "score_hi": 60.0,
+      "p_win": 0.4501,
+      "n_raw": 1040,
+      "n_effective": 939.1,
+      "avg_ret_net_pct": -1.0013,
+      "avg_win_ret": 7.8196,
+      "avg_loss_ret": 7.9429,
+      "b_ratio": 0.9845,
+      "sufficient": true
+    },
+    {
+      "score_lo": 60,
+      "score_hi": 70.0,
+      "p_win": 0.3706,
+      "n_raw": 1102,
+      "n_effective": 981.0,
+      "avg_ret_net_pct": -3.0322,
+      "avg_win_ret": 8.3214,
+      "avg_loss_ret": 9.5525,
+      "b_ratio": 0.8711,
+      "sufficient": true
+    },
+    {
+      "score_lo": 70,
+      "score_hi": 80.0,
+      "p_win": 0.4112,
+      "n_raw": 1368,
+      "n_effective": 1242.4,
+      "avg_ret_net_pct": -1.9108,
+      "avg_win_ret": 8.8285,
+      "avg_loss_ret": 9.1977,
+      "b_ratio": 0.9598,
+      "sufficient": true
+    },
+    {
+      "score_lo": 80,
+      "score_hi": 90.0,
+      "p_win": 0.4017,
+      "n_raw": 665,
+      "n_effective": 609.3,
+      "avg_ret_net_pct": -1.7306,
+      "avg_win_ret": 9.8079,
+      "avg_loss_ret": 9.3271,
+      "b_ratio": 1.0515,
+      "sufficient": true
+    },
+    {
+      "score_lo": 90,
+      "score_hi": 100.01,
+      "p_win": 0.384,
+      "n_raw": 38,
+      "n_effective": 34.2,
+      "avg_ret_net_pct": -5.1013,
+      "avg_win_ret": 10.3649,
+      "avg_loss_ret": 14.1233,
+      "b_ratio": 0.7339,
+      "sufficient": true
+    }
+  ]
+}
