@@ -2,6 +2,9 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.4] (2026-04-17)
+  #1 함수명: render_tab2_stocks → render_tab_stocks (main.py 호출부와 정합)
+  #2 시그니처: (df, auth) → (df, auth, store=None) (main.py의 3-인자 호출 대응)
 [v3.3]
   #1 ui.timer 제거 → asyncio.create_task 직접 실행
   #2 dialog.on_close → 유령 태스크 취소 (생명주기 관리)
@@ -87,8 +90,14 @@ def _metric_card(icon: str, value: str, sub: str = "", positive: bool = True):
 #  메인 렌더
 # ═══════════════════════════════════════════════════
 
-def render_tab2_stocks(df: pd.DataFrame, auth: str):
-    """Tab 2: AI & Quant 추천 종목"""
+def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
+    """Tab 2: AI & Quant 추천 종목
+
+    Args:
+        df: 스코어링된 종목 DataFrame
+        auth: 사용자 권한 ("admin" / "premium" / "free" / ...)
+        store: services.data_store.store 인스턴스 (현재 미사용, 장래 확장용)
+    """
 
     ui.label("🎯 AI & Quant 추천 종목").classes(
         "text-xl font-bold text-white mb-4"
