@@ -47,6 +47,28 @@ _MACRO_CACHE_TIME: dict = {}
 
 # ── UI 유틸 ──
 
+def _hex_to_rgba(hex_color: str, alpha: float = 0.13) -> str:
+    """#RRGGBB → rgba(r,g,b,alpha). Plotly가 8자리 hex를 거부하므로 변환 필요.
+
+    기존 `#10B98122` 같은 8자리 hex (뒤 2자리가 알파) 도 허용하여 알파를 추출한다.
+    파싱 실패 시 원문 그대로 반환 (Plotly가 named color로 처리하도록).
+    """
+    try:
+        h = (hex_color or "").lstrip("#")
+        if len(h) == 8:
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            alpha = int(h[6:8], 16) / 255.0
+        elif len(h) == 6:
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        elif len(h) == 3:
+            r = int(h[0] * 2, 16); g = int(h[1] * 2, 16); b = int(h[2] * 2, 16)
+        else:
+            return hex_color
+        return f"rgba({r},{g},{b},{alpha:.3f})"
+    except Exception:
+        return hex_color
+
+
 def _section_title(text):
     ui.label(text).classes("text-lg font-bold text-white mt-6 mb-2 border-b border-gray-700 pb-2")
 
@@ -80,7 +102,7 @@ def _render_macro_sparklines():
         ("USD/KRW",    "USD/KRW",   "#F59E0B"),
         ("NASDAQ",     "IXIC",      "#3B82F6"),
         ("KOSPI",      "KS11",      "#10B981"),
-        ("US 10Y",     "US10YT=RR", "#E040FB"),
+        ("US 10Y",     "US10YT=X",  "#E040FB"),
     ]
 
     with ui.card().classes("w-full p-3 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
@@ -135,7 +157,7 @@ def _spark_card(label: str, ticker: str, color: str):
                         mode="lines",
                         line=dict(color=color, width=1.5),
                         fill="tozeroy",
-                        fillcolor=f"{color}22",
+                        fillcolor=_hex_to_rgba(color, alpha=0.13),
                         showlegend=False,
                     ))
                     fig.update_layout(
