@@ -11,7 +11,7 @@ setuptools
 
 # --- [Core UI] NiceGUI (Streamlit 대체) ---
 nicegui>=2.10.0,<3.10.0
-plotly>=5.20.0
+plotly>=5.20.0,<6.0.0
 
 # --- [Data Science & ML] ---
 pandas>=2.2.0
