@@ -1188,5 +1188,31 @@
       "090460_20260319_TP1_HIT_20260415",
       "090460_20260319_TP2_HIT_20260415"
     ]
+  },
+  {
+    "code": "089890",
+    "name": "코세스",
+    "entry_ymd": "20260415",
+    "entry_px": 24300.0,
+    "qty": 0,
+    "stop_px": 20600.0,
+    "stop_px_initial": 20600.0,
+    "take_px1": 28650.0,
+    "take_px2": 30300.0,
+    "trailing_high": 32150.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260417",
+    "last_close_px": 32000.0,
+    "unrealized_pnl_pct": 31.69,
+    "realized_pnl_pct": 31.69,
+    "close_ymd": "20260417",
+    "close_px": 32000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "089890_20260415_TP1_HIT_20260415",
+      "089890_20260415_TP1_HIT_20260416",
+      "089890_20260415_TP1_HIT_20260417",
+      "089890_20260415_TP2_HIT_20260417"
+    ]
   }
 ]
