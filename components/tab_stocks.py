@@ -2,6 +2,16 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.20] (2026-04-18) — CSV 다운로드 기능 복구
+  #1 CSV 다운로드 버튼 복구 (Streamlit→NiceGUI 마이그레이션 시 누락됐던 기능)
+     - backup_v205c_20260310/dashboard.py 라인 3759-3760에 원본 존재 확인
+     - NiceGUI ui.download() API로 마이그레이션
+  #2 두 가지 다운로드 옵션 제공:
+     - "현재 필터 결과": 라벨/상태/정렬 적용된 결과만
+     - "전체 종목": df 전체 다운로드
+  #3 파일명 자동 생성: swingpicker_{scope}_{N개}_{YYYYMMDD_HHMM}.csv
+  #4 UTF-8 BOM 인코딩 (엑셀에서 한글 깨짐 방지)
+  #5 컬럼 순서 재정렬: 중요 컬럼(종목명/라벨/점수/가격) 앞쪽으로
 [v3.7.19] (2026-04-18) — 가격 범위 바 + 프로그레스 바 렌더링 수정
   #1 가격 범위 바 라벨 잘림 수정
      - v3.7.18은 position:absolute + translateX(-50%)로 가장자리(0%/100%)에서
@@ -1440,6 +1450,69 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ).classes("text-xs text-orange-400")
             if n_none > 0:
                 ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
+
+    # [v3.7.20] CSV 다운로드 기능 복구 (Streamlit 버전에서 마이그레이션 시 누락됨)
+    # 오늘 필터링된 결과 + 전체 결과 두 가지 옵션 제공
+    def _download_csv(scope: str = "filtered"):
+        """CSV 다운로드 트리거.
+        
+        scope='filtered': 현재 필터/정렬 적용된 결과만
+        scope='all': df 전체 (필터 무시)
+        """
+        try:
+            from datetime import datetime
+            import io
+            
+            source_df = _filtered() if scope == "filtered" else df
+            if source_df.empty:
+                ui.notify("다운로드할 종목이 없습니다", type="warning")
+                return
+            
+            # 다운로드용 컬럼 선별 (너무 많으면 가독성 떨어짐)
+            download_cols = [c for c in [
+                "종목코드", "종목명", "업종", "ELITE_LABEL", "ROUTE",
+                "DISPLAY_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE",
+                "BALANCE_CALC", "AXIS_MEAN", "ELITE_RANK_SCORE",
+                "GAP_PCT", "RR_NOW_TP1",
+                "종가", "추천매수가", "손절가", "추천매도가1", "추천매도가2",
+                "RSI14", "V_POWER", "거래대금(억원)",
+            ] if c in source_df.columns]
+            
+            # 누락 컬럼은 나머지에서 추가 (사용자가 원할 수 있음)
+            for c in source_df.columns:
+                if c not in download_cols:
+                    download_cols.append(c)
+            
+            out_df = source_df[download_cols].copy()
+            
+            # UTF-8 BOM 포함 (한글 엑셀 호환)
+            csv_bytes = out_df.to_csv(index=False).encode("utf-8-sig")
+            
+            # 파일명
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            scope_tag = "전체" if scope == "all" else "필터"
+            filename = f"swingpicker_{scope_tag}_{len(out_df)}개_{ts}.csv"
+            
+            # NiceGUI download 트리거
+            ui.download(csv_bytes, filename)
+            ui.notify(f"✅ {len(out_df)}개 종목 다운로드", type="positive")
+        except Exception as e:
+            ui.notify(f"❌ 다운로드 실패: {e}", type="negative")
+
+    # 다운로드 버튼 바 (라벨 기준 카드 바로 아래)
+    with ui.row().classes("w-full gap-2 items-center mb-3 flex-wrap"):
+        ui.label("📥 CSV 다운로드:").classes("text-xs text-gray-400 font-bold")
+        ui.button(
+            "현재 필터 결과",
+            on_click=lambda: _download_csv("filtered"),
+        ).props("size=sm flat color=primary").classes("text-xs")
+        ui.button(
+            "전체 종목",
+            on_click=lambda: _download_csv("all"),
+        ).props("size=sm flat color=secondary").classes("text-xs")
+        ui.label("(UTF-8 BOM · 엑셀 한글 호환)").classes(
+            "text-[10px] text-gray-500 ml-2"
+        )
 
     table_area = ui.column().classes("w-full")
     detail_area = ui.column().classes("w-full mt-4")
