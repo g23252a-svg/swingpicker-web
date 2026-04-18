@@ -2,6 +2,18 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.18] (2026-04-18) — UX 개선 3종 + 시각 임팩트 강화
+  #1 전체 CSV 접근 허용 — admin/premium은 이제 CSV 전체 노출 (이전 50개 제한 해제)
+  #2 테이블 페이지당 옵션 [15, 30, 50, 100, 전체] + 기본 30
+  #3 라벨 기준 투명 공개 카드 + 라벨 필터 드롭다운
+     "🏆 최강 (N): 평균≥70·밸런스≥70·갭≤3%·RR≥0.8"
+     "✅ 즉시진입 (N): 최소≥50·밸런스≥70·갭≤5%"
+     "⚠️ 추격 (N): 갭>5%·평균≥60"
+  #4 상세 영역 종합 요약 배너 — 라벨별 그라데이션 배경 + 제목 크게
+  #5 점수 게이지 3개 (종합/검증/RR) — 프로그레스 바 + glow shadow
+  #6 가격 범위 바 — 손절~매수~현재~T1~T2를 하나의 바에 시각화
+     손실 구간(빨강), 1차 보상(초록), 연장 보상(금색) + 현재가 흰색 마커
+  #7 핵심 지표 카드에 프로그레스 바 추가 (9개 미니 메트릭 전부)
 [v3.7.17] (2026-04-18) — 상세 종목탭 최강 시각화 패키지
   #1 캔들차트 한국식 색상 (상승 🔴 / 하락 🔵)
   #2 캔들차트에 거래량 바 하단 subplot 추가 (7:3 비율)
@@ -618,6 +630,140 @@ def _metric_card(icon: str, value: str, sub: str = "", positive: bool = True):
             ui.label(sub).classes("text-xs text-gray-500")
 
 
+def _score_gauge(label: str, value: float, max_val: float = 100,
+                 display_text: str = None):
+    """[v3.7.18] 점수 게이지 바 컴포넌트 — 시각적 임팩트 강화.
+
+    구조:
+      라벨 (작게)
+      큰 숫자 (점수별 색상)
+      수평 프로그레스 바 (한국식 색상)
+    """
+    pct = max(0, min(100, (value / max_val) * 100)) if max_val > 0 else 0
+    # 한국식 점수 색상: 70+ 빨강(강함), 50-69 주황, 50- 파랑(약함)
+    if pct >= 70:
+        bar_color = "#EF5350"; text_color = "text-red-400"
+    elif pct >= 50:
+        bar_color = "#FFA726"; text_color = "text-yellow-400"
+    else:
+        bar_color = "#3B82F6"; text_color = "text-blue-400"
+
+    txt = display_text if display_text else f"{value:.0f}"
+
+    with ui.column().classes("gap-1 min-w-[110px] flex-1"):
+        ui.label(label).classes("text-[10px] text-gray-400 uppercase tracking-wider")
+        ui.label(txt).classes(f"text-2xl font-black {text_color}")
+        # 프로그레스 바 — HTML로 그라데이션 효과
+        ui.html(
+            f'<div style="width:100%; height:6px; background:rgba(255,255,255,0.08); '
+            f'border-radius:3px; overflow:hidden;">'
+            f'<div style="width:{pct:.1f}%; height:100%; background:{bar_color}; '
+            f'border-radius:3px; box-shadow:0 0 8px {bar_color}80;"></div>'
+            f'</div>'
+        )
+
+
+def _price_range_bar(stop: float, entry: float, close: float,
+                     t1: float, t2: float = 0):
+    """[v3.7.18] 가격대 시각 게이지 — 손절/매수/현재/T1/T2를 하나의 바에.
+
+    구조:
+      [손절 ═════ 매수 ═════ 현재 ═════ T1 ═════ T2]
+      아래 각 위치에 라벨과 가격.
+
+    손실 구간(손절~매수) 빨강, 수익 구간(매수~T1) 초록, 연장(T1~T2) 금색.
+    현재가 위치에 세로 마커.
+    """
+    # 전체 범위
+    lo = min(stop, entry, close, t1) if t2 <= 0 else min(stop, entry, close, t1, t2)
+    hi = max(stop, entry, close, t1, t2) if t2 > 0 else max(stop, entry, close, t1)
+    span = hi - lo
+    if span <= 0:
+        return
+
+    def pos(v):
+        return (v - lo) / span * 100
+
+    p_stop = pos(stop)
+    p_entry = pos(entry)
+    p_close = pos(close)
+    p_t1 = pos(t1)
+    p_t2 = pos(t2) if t2 > 0 else None
+
+    # HTML로 가로 바 + 마커들
+    html_parts = [
+        '<div style="width:100%; margin:10px 0 5px 0;">',
+        # 메인 바 (각 구간 색)
+        '<div style="position:relative; width:100%; height:14px; '
+        'background:rgba(255,255,255,0.05); border-radius:7px; overflow:hidden;">',
+    ]
+    # 손절~매수 구간 (빨강 그라데이션 = 리스크)
+    html_parts.append(
+        f'<div style="position:absolute; left:{p_stop:.1f}%; width:{p_entry - p_stop:.1f}%; '
+        f'height:100%; background:linear-gradient(to right, rgba(239,83,80,0.5), rgba(239,83,80,0.2));"></div>'
+    )
+    # 매수~T1 구간 (초록 = 1차 보상)
+    html_parts.append(
+        f'<div style="position:absolute; left:{p_entry:.1f}%; width:{p_t1 - p_entry:.1f}%; '
+        f'height:100%; background:linear-gradient(to right, rgba(102,187,106,0.2), rgba(102,187,106,0.5));"></div>'
+    )
+    # T1~T2 구간 (금색 = 연장 보상)
+    if p_t2 is not None and p_t2 > p_t1:
+        html_parts.append(
+            f'<div style="position:absolute; left:{p_t1:.1f}%; width:{p_t2 - p_t1:.1f}%; '
+            f'height:100%; background:linear-gradient(to right, rgba(255,202,40,0.3), rgba(255,202,40,0.5));"></div>'
+        )
+    # 세로 마커: 손절
+    html_parts.append(
+        f'<div style="position:absolute; left:{p_stop:.1f}%; width:2px; height:100%; '
+        f'background:#EF5350;"></div>'
+    )
+    # 매수
+    html_parts.append(
+        f'<div style="position:absolute; left:{p_entry:.1f}%; width:2px; height:100%; '
+        f'background:#4FC3F7;"></div>'
+    )
+    # T1
+    html_parts.append(
+        f'<div style="position:absolute; left:{p_t1:.1f}%; width:2px; height:100%; '
+        f'background:#66BB6A;"></div>'
+    )
+    # T2 (있으면)
+    if p_t2 is not None:
+        html_parts.append(
+            f'<div style="position:absolute; left:{p_t2:.1f}%; width:2px; height:100%; '
+            f'background:#FFCA28;"></div>'
+        )
+    # 현재가 (강조 마커: 흰색 세로선 + 빛)
+    html_parts.append(
+        f'<div style="position:absolute; left:{p_close:.1f}%; width:3px; height:100%; '
+        f'background:#FFFFFF; box-shadow:0 0 8px rgba(255,255,255,0.8);"></div>'
+    )
+    html_parts.append('</div>')  # close main bar
+
+    # 라벨 행 (각 위치)
+    html_parts.append(
+        '<div style="position:relative; width:100%; height:34px; margin-top:4px;">'
+    )
+    labels = [
+        (p_stop, f"🔴 손절<br>{stop:,.0f}", "#EF5350"),
+        (p_entry, f"🔵 매수<br>{entry:,.0f}", "#4FC3F7"),
+        (p_close, f"⚪ 현재<br>{close:,.0f}", "#FFFFFF"),
+        (p_t1, f"🟢 T1<br>{t1:,.0f}", "#66BB6A"),
+    ]
+    if t2 > 0 and t2 != t1:
+        labels.append((p_t2, f"🟡 T2<br>{t2:,.0f}", "#FFCA28"))
+    for p, txt, clr in labels:
+        html_parts.append(
+            f'<div style="position:absolute; left:{p:.1f}%; transform:translateX(-50%); '
+            f'font-size:9px; color:{clr}; text-align:center; line-height:1.2; '
+            f'white-space:nowrap;">{txt}</div>'
+        )
+    html_parts.append('</div>')
+    html_parts.append('</div>')
+    ui.html("".join(html_parts))
+
+
 # ═══════════════════════════════════════════════════
 #  메인 렌더
 # ═══════════════════════════════════════════════════
@@ -1196,7 +1342,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     _render_top3_card(df, top3_codes)
 
     # ── 뷰모드 + 필터 ──
-    with ui.row().classes("w-full gap-4 items-center flex-wrap mb-4"):
+    with ui.row().classes("w-full gap-4 items-center flex-wrap mb-2"):
         view_mode = ui.toggle(
             ["📋 테이블", "🃏 칸반"], value="📋 테이블"
         )
@@ -1204,11 +1350,44 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ["전체", "ATTACK", "ARMED", "WAIT", "NEUTRAL"],
             value="전체", label="상태",
         ).classes("min-w-[120px]")
+        # [v3.7.18] 라벨 필터 추가 - 즉시진입 너무 많을 때 최강만 보기 등
+        label_filter = ui.select(
+            ["전체", "🏆 최강", "✅ 즉시진입", "⚠️ 추격"],
+            value="전체", label="라벨",
+        ).classes("min-w-[130px]")
         # [v3.7] "⚖️ 밸런스순" 추가
         sort_mode = ui.toggle(
             ["🔢 점수순", "⚖️ 밸런스순", "🏆 검증순", "🚦 상태순"],
             value="🏆 검증순",
         )
+
+    # [v3.7.18] 라벨 기준 투명 공개 (사용자 혼란 방지)
+    # 라벨별 종목 수도 함께 표시
+    if "ELITE_LABEL" in df.columns:
+        n_strong = int((df["ELITE_LABEL"] == "🏆 최강").sum())
+        n_instant = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
+        n_chase = int((df["ELITE_LABEL"] == "⚠️ 추격").sum())
+        n_none = int(df["ELITE_LABEL"].fillna("").eq("").sum())
+    else:
+        n_strong = n_instant = n_chase = n_none = 0
+
+    with ui.card().classes(
+        "w-full p-2 mb-3 bg-[rgba(255,255,255,0.02)] "
+        "border border-[rgba(255,255,255,0.05)] rounded"
+    ):
+        with ui.row().classes("w-full gap-6 items-center flex-wrap"):
+            ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
+            ui.label(
+                f"🏆 최강 ({n_strong}): 평균≥70 · 밸런스≥70 · 갭≤3% · RR≥0.8"
+            ).classes("text-xs text-yellow-400")
+            ui.label(
+                f"✅ 즉시진입 ({n_instant}): 최소≥50 · 밸런스≥70 · 갭≤5%"
+            ).classes("text-xs text-green-400")
+            ui.label(
+                f"⚠️ 추격 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
+            ).classes("text-xs text-orange-400")
+            if n_none > 0:
+                ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
 
     table_area = ui.column().classes("w-full")
     detail_area = ui.column().classes("w-full mt-4")
@@ -1219,6 +1398,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             fdf = fdf[fdf["ROUTE"].astype(str).str.contains(
                 route_filter.value, na=False
             )]
+        # [v3.7.18] 라벨 필터 적용
+        if label_filter.value != "전체" and "ELITE_LABEL" in fdf.columns:
+            fdf = fdf[fdf["ELITE_LABEL"] == label_filter.value]
         # [v3.7] 정렬 로직 확장
         if sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
@@ -1251,9 +1433,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             else:
                 fdf = fdf.sort_values("_route_rank")
             fdf = fdf.drop(columns=["_route_rank"])
-        # 접근 제한
-        limits = {"guest": 3, "free": 5, "pro": 20}
-        fdf = fdf.head(limits.get(auth, 50))
+        # [v3.7.18] 접근 제한 — admin/premium은 전체 CSV (이전엔 50개 제한)
+        # guest/free만 미리보기 제한, 나머지는 CSV 전체 노출
+        limits = {"guest": 3, "free": 5}
+        max_rows = limits.get(auth)
+        if max_rows is not None:
+            fdf = fdf.head(max_rows)
+        # admin/premium/pro는 제한 없음 → 전체 df 반환
         return fdf
 
     def _build_view():
@@ -1313,10 +1499,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "t1": f'{int(_nz(r.get("추천매도가1", 0))):,}',
                 "sector": str(r.get("업종", "—")),
             })
+        # [v3.7.18] 페이지당 행 수 확장: 기본 30, 옵션 [15, 30, 50, 100, 전체]
+        # Quasar 테이블에서 rowsPerPageOptions로 사용자가 직접 선택 가능
         tbl = ui.table(
             columns=columns, rows=rows, row_key="code",
-            selection="single", pagination={"rowsPerPage": 15},
-        ).classes("w-full").props("dense dark flat bordered")
+            selection="single",
+            pagination={"rowsPerPage": 30, "sortBy": None, "descending": True},
+        ).classes("w-full").props(
+            'dense dark flat bordered :rows-per-page-options="[15, 30, 50, 100, 0]"'
+        )
         tbl.on("selection", lambda e: _on_stock_select(e, full_df))
 
     def _render_kanban(show: pd.DataFrame, full_df: pd.DataFrame):
@@ -1408,9 +1599,70 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         _t2 = _nz(row.get("추천매도가2", 0))
 
         with detail_area:
-            ui.label(
-                f"🔍 {name} ({code}) 상세 분석"
-            ).classes("text-lg font-bold text-white mb-3")
+            # ═══════════════════════════════════════════════════
+            # [v3.7.18] 종합 요약 배너 — 라벨 + 점수 + 가격 게이지 한눈에
+            # ═══════════════════════════════════════════════════
+            elite_lbl = str(row.get("ELITE_LABEL", "") or "")
+            elite_color_hex = str(row.get("ELITE_LABEL_COLOR", "") or "#6B7280")
+            display_score = _nz(row.get("DISPLAY_SCORE", 0))
+            elite_rank = _nz(row.get("ELITE_RANK_SCORE", 0))
+            route = str(row.get("ROUTE", "—"))
+            sector = str(row.get("업종", ""))
+
+            # 배경 그라데이션: 라벨별 색상
+            if "최강" in elite_lbl:
+                grad = "from-yellow-900/40 via-orange-900/30 to-red-900/20"
+                border_clr = "border-yellow-500/40"
+            elif "즉시" in elite_lbl:
+                grad = "from-green-900/40 via-emerald-900/30 to-teal-900/20"
+                border_clr = "border-green-500/40"
+            elif "추격" in elite_lbl:
+                grad = "from-orange-900/40 via-amber-900/30 to-yellow-900/20"
+                border_clr = "border-orange-500/40"
+            else:
+                grad = "from-slate-900/40 via-slate-800/30 to-slate-900/20"
+                border_clr = "border-slate-500/30"
+
+            with ui.card().classes(
+                f"w-full p-4 mb-3 bg-gradient-to-br {grad} "
+                f"border {border_clr} rounded-2xl"
+            ):
+                # 1행: 제목 + 라벨 + 상태
+                with ui.row().classes("w-full items-center gap-3 mb-3 flex-wrap"):
+                    ui.label(f"🔍 {name}").classes(
+                        "text-2xl font-black text-white"
+                    )
+                    ui.label(f"({code})").classes("text-sm text-gray-400")
+                    if elite_lbl:
+                        ui.badge(elite_lbl, color=elite_color_hex).classes(
+                            "text-sm font-bold px-3 py-1"
+                        )
+                    route_color = {
+                        "ATTACK": "#EF4444", "ARMED": "#F59E0B",
+                        "WAIT": "#3B82F6", "NEUTRAL": "#6B7280",
+                        "OVERHEAT": "#DC2626", "CARRY": "#8B5CF6",
+                    }.get(route, "#6B7280")
+                    ui.badge(route, color=route_color).classes("text-xs")
+                    if sector:
+                        ui.label(f"· {sector}").classes("text-xs text-gray-400")
+
+                # 2행: 핵심 점수 게이지 3개
+                with ui.row().classes("w-full gap-4 mb-2 flex-wrap"):
+                    _score_gauge("종합 점수", display_score, max_val=100)
+                    _score_gauge("검증 점수", elite_rank, max_val=100)
+                    # RR 목표 게이지 (현재가 → T1)
+                    if _close > 0 and _entry > 0 and _t1 > _entry:
+                        risk = max(_entry - _stop, 1) if _stop > 0 else 1
+                        reward = _t1 - _entry
+                        rr = reward / risk
+                        _score_gauge(
+                            "RR (T1:손절)", min(rr * 20, 100),  # RR 5배면 100점
+                            max_val=100, display_text=f"{rr:.1f}:1",
+                        )
+
+                # 3행: 가격 게이지 바 (손절 ──── 매수 ──── 현재 ──── T1 ──── T2)
+                if _close > 0 and _entry > 0 and _stop > 0 and _t1 > 0:
+                    _price_range_bar(_stop, _entry, _close, _t1, _t2)
 
             # 목표가 카드
             if _close > 0 and _entry > 0:
@@ -1435,13 +1687,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                             f"+{(_t2/_close-1)*100:.1f}% (RR {rr2:.1f}:1)",
                         )
 
-            # [v3.7.17] 핵심 지표 요약 패널 — 분석에 필요한 정보 한눈에
+            # [v3.7.17/18] 핵심 지표 요약 패널 — 프로그레스 바 포함 (시각 임팩트)
             with ui.card().classes(
                 "w-full p-3 mt-2 bg-[rgba(255,255,255,0.03)] "
                 "border border-[rgba(255,255,255,0.08)] rounded-xl"
             ):
                 ui.label("📊 핵심 지표").classes("text-xs text-gray-400 mb-2")
-                with ui.row().classes("w-full gap-4 flex-wrap"):
+                with ui.row().classes("w-full gap-3 flex-wrap"):
                     # 3축 점수
                     s_val = _nz(row.get("STRUCT_SCORE", row.get("S_SCORE", 0)))
                     t_val = _nz(row.get("TIMING_SCORE", row.get("T_SCORE", 0)))
@@ -1453,34 +1705,58 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     vp = _nz(row.get("V_POWER", 0))
                     turnover = _nz(row.get("거래대금(억원)", 0))
 
-                    def _mini(label, val, clr="text-white"):
-                        with ui.column().classes("gap-0 min-w-[75px]"):
-                            ui.label(label).classes("text-[10px] text-gray-500")
-                            ui.label(val).classes(f"text-sm font-bold {clr}")
+                    def _mini_bar(label, val_txt, pct, bar_color, text_color):
+                        """[v3.7.18] 프로그레스 바 포함 미니 메트릭."""
+                        pct = max(0, min(100, pct))
+                        with ui.column().classes("gap-1 min-w-[88px] flex-1"):
+                            ui.label(label).classes("text-[10px] text-gray-400 uppercase")
+                            ui.label(val_txt).classes(f"text-base font-bold {text_color}")
+                            ui.html(
+                                f'<div style="width:100%; height:4px; '
+                                f'background:rgba(255,255,255,0.06); border-radius:2px; '
+                                f'overflow:hidden;">'
+                                f'<div style="width:{pct:.1f}%; height:100%; '
+                                f'background:{bar_color};"></div>'
+                                f'</div>'
+                            )
 
-                    # 한국식 색상: 높으면 빨강, 낮으면 파랑
-                    def _clr(v, good=70, bad=40):
-                        if v >= good: return "text-red-400"
-                        elif v >= bad: return "text-yellow-400"
-                        else: return "text-blue-400"
+                    def _clr_hex(v, good=70, bad=40):
+                        if v >= good: return ("#EF5350", "text-red-400")
+                        elif v >= bad: return ("#FFA726", "text-yellow-400")
+                        else: return ("#3B82F6", "text-blue-400")
 
-                    _mini("S 구조", f"{s_val:.0f}", _clr(s_val))
-                    _mini("T 타이밍", f"{t_val:.0f}", _clr(t_val))
-                    _mini("AI", f"{ai_val:.0f}", _clr(ai_val))
-                    _mini("균형", f"{bal:.0f}", _clr(bal))
-                    _mini("검증점수", f"{elite:.0f}", _clr(elite, good=60, bad=30))
-                    # RSI: 70↑ 과매수(빨강), 30↓ 과매도(파랑)
-                    rsi_clr = "text-red-400" if rsi >= 70 else "text-blue-400" if rsi <= 30 else "text-gray-300"
-                    _mini("RSI14", f"{rsi:.0f}", rsi_clr)
-                    # V_POWER: 세력강도 (-1~3)
-                    vp_clr = "text-red-400" if vp >= 1.5 else "text-yellow-400" if vp >= 0 else "text-blue-400"
-                    _mini("세력(V)", f"{vp:+.2f}", vp_clr)
-                    # 갭: 5% 초과면 추격 경고
-                    gap_clr = "text-red-400" if gap > 5 else "text-yellow-400" if gap > 2 else "text-gray-300"
-                    _mini("갭%", f"{gap:.1f}%", gap_clr)
-                    # 거래대금: 1000억+ 빨강
-                    to_clr = "text-red-400" if turnover >= 1000 else "text-yellow-400" if turnover >= 300 else "text-gray-400"
-                    _mini("거래대금", f"{turnover:.0f}억", to_clr)
+                    for lbl, val in [("S 구조", s_val), ("T 타이밍", t_val),
+                                      ("AI", ai_val), ("균형", bal)]:
+                        bc, tc = _clr_hex(val)
+                        _mini_bar(lbl, f"{val:.0f}", val, bc, tc)
+                    bc, tc = _clr_hex(elite, good=60, bad=30)
+                    _mini_bar("검증점수", f"{elite:.0f}", elite, bc, tc)
+
+                    # RSI: 70+ 과매수 빨강, 30- 과매도 파랑, 중간 회색
+                    if rsi >= 70:
+                        rsi_bar = "#EF5350"; rsi_tc = "text-red-400"
+                    elif rsi <= 30:
+                        rsi_bar = "#3B82F6"; rsi_tc = "text-blue-400"
+                    else:
+                        rsi_bar = "#9CA3AF"; rsi_tc = "text-gray-300"
+                    _mini_bar("RSI14", f"{rsi:.0f}", rsi, rsi_bar, rsi_tc)
+
+                    vp_pct = max(0, min(100, (vp + 1) / 4 * 100))
+                    vp_bar, vp_tc = _clr_hex(vp_pct)
+                    _mini_bar("세력(V)", f"{vp:+.2f}", vp_pct, vp_bar, vp_tc)
+
+                    gap_pct_bar = min(gap * 10, 100)
+                    if gap > 5:
+                        gap_bar = "#EF5350"; gap_tc = "text-red-400"
+                    elif gap > 2:
+                        gap_bar = "#FFA726"; gap_tc = "text-yellow-400"
+                    else:
+                        gap_bar = "#66BB6A"; gap_tc = "text-green-400"
+                    _mini_bar("갭%", f"{gap:.1f}%", gap_pct_bar, gap_bar, gap_tc)
+
+                    to_pct = min(turnover / 20, 100)
+                    to_bar, to_tc = _clr_hex(to_pct, good=50, bad=15)
+                    _mini_bar("거래대금", f"{turnover:.0f}억", to_pct, to_bar, to_tc)
 
             # ── 캔들차트 (비동기 로드 + 태스크 생명주기 관리) ──
             with ui.card().classes("w-full p-2 bg-[#1a1a2e] mt-2"):
@@ -1561,7 +1837,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ui.badge(rv, color=rc).classes("mt-2")
 
     # ── 이벤트 바인딩 ──
-    for widget in [view_mode, route_filter, sort_mode]:
+    for widget in [view_mode, route_filter, label_filter, sort_mode]:
         widget.on("update:model-value", lambda _: _build_view())
 
     _build_view()
