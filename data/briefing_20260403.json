@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260403",
+  "generated_at": "2026-04-05 19:36:08",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "001780",
+      "name": "알루코",
+      "route": "ARMED",
+      "score": 90.6,
+      "close": 2440,
+      "entry": 2440,
+      "stop": 2130,
+      "target1": 2740,
+      "target2": 3025,
+      "est_win_rate": 0.706,
+      "rr": 1.0,
+      "sector": "철강·금속",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/001780"
+    },
+    {
+      "rank": 2,
+      "code": "289930",
+      "name": "웨이비스",
+      "route": "ARMED",
+      "score": 89.2,
+      "close": 19600,
+      "entry": 19600,
+      "stop": 16660,
+      "target1": 21300,
+      "target2": 25750,
+      "est_win_rate": 0.692,
+      "rr": 0.6,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/289930"
+    },
+    {
+      "rank": 3,
+      "code": "388050",
+      "name": "지투파워",
+      "route": "ATTACK",
+      "score": 88.9,
+      "close": 12520,
+      "entry": 11970,
+      "stop": 10170,
+      "target1": 13940,
+      "target2": 16190,
+      "est_win_rate": 0.689,
+      "rr": 1.1,
+      "sector": "인프라·에너지",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/388050"
+    }
+  ]
+}

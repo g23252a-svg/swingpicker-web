@@ -646,3 +646,115 @@ def generate_score_reasons(df: pd.DataFrame,
     x["REASON_THRESHOLD"]  = strength_th  # [v20.6.3] 장세별 임계치 기록
 
     return x
+
+
+# ═══════════════════════════════════════════════════
+#  [v21.4] ELITE_SCORE — 곱셈형 공식 (TP1 도달률 기반 리밸런싱)
+# ═══════════════════════════════════════════════════
+
+def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    v21.5: ROUTE 제거 — 순수 종목 품질 측정.
+
+    3축≥80+밸≥80이면 ROUTE 무관 10일 +39.6% (6,160건 검증)
+    → ELITE = 종목 품질, ROUTE는 TOP_PICK에서만 사용
+
+    ELITE = (S×30% + T×45% + AI×25%) × 밸런스배수 × RR게이트
+    TOP_PICK = ELITE≥60 + ARMED/ATTACK + 기타 하드게이트
+    """
+    import numpy as np
+    x = df.copy()
+
+    s = x["STRUCT_SCORE"].fillna(0)
+    t = x["TIMING_SCORE"].fillna(0)
+    m = x["AI_SCORE"].fillna(x.get("ML_SCORE", pd.Series(0, index=x.index)).fillna(0))
+
+    # (1) 3축 평균 (호환용)
+    x["AXIS_MEAN"] = ((s + t + m) / 3).round(1)
+
+    # (2) 3축 편차 → 밸런스 점수
+    axis_gap = pd.concat([s, t, m], axis=1).max(axis=1) - pd.concat([s, t, m], axis=1).min(axis=1)
+    x["AXIS_GAP"] = axis_gap.round(1)
+    x["BALANCE_SCORE"] = (100 - axis_gap * 1.25).clip(0, 100).round(1)
+
+    # (3) 현재가 기준 RR
+    close = pd.to_numeric(x.get("종가", 0), errors="coerce").fillna(0)
+    stop = pd.to_numeric(x.get("손절가", 0), errors="coerce").fillna(0)
+    tp1 = pd.to_numeric(x.get("추천매도가1", 0), errors="coerce").fillna(0)
+    buy = pd.to_numeric(x.get("추천매수가", 0), errors="coerce").fillna(0)
+
+    risk = (close - stop).clip(lower=1)
+    reward = (tp1 - close).clip(lower=0)
+    rr_now = reward / risk
+    x["RR_NOW_TP1"] = rr_now.round(2)
+
+    # (4) 진입갭
+    entry_gap = ((close - buy).abs() / buy.clip(lower=1) * 100)
+    x["ENTRY_GAP_PCT"] = entry_gap.round(1)
+
+    # ═══ 신규 ELITE 공식 (v21.5) ═══
+    # ROUTE 제거 — 3축≥80+밸≥80이면 ROUTE 무관 +39.6% 수익 (6,160건 검증)
+    # ELITE = 순수 종목 품질, ROUTE는 TOP_PICK 게이트에서만 사용
+
+    # (A) T 강화 가중평균: S 30% + T 45% + AI 25%
+    weighted_axis = s * 0.30 + t * 0.45 + m * 0.25
+
+    # (B) 밸런스 곱셈 (0.8 ~ 1.0) — 3축 높을 때만 시너지
+    bal_mult = 0.8 + 0.2 * (x["BALANCE_SCORE"] / 100)
+
+    # (C) RR 하드게이트 — 0.8 미만이면 0.3배 패널티
+    rr_gate = pd.Series(np.where(rr_now >= 0.8, 1.0, 0.3), index=x.index)
+
+    # 합산 (곱셈형) — ROUTE 없음
+    elite = (weighted_axis * bal_mult * rr_gate).round(1)
+
+    # 하드 게이트
+    elite = elite.where(close > stop, 0)   # 종가 < 손절 → 0
+    elite = elite.where(close < tp1, 0)    # 종가 > TP1 → 0
+
+    x["ELITE_SCORE"] = elite
+
+    # ELITE 사유
+    def _reason(row):
+        parts = []
+        if row.get("BALANCE_SCORE", 0) >= 80:
+            parts.append("밸런스우수")
+        if row.get("RR_NOW_TP1", 0) >= 2.0:
+            parts.append(f"RR{row['RR_NOW_TP1']:.1f}")
+        elif row.get("RR_NOW_TP1", 0) >= 1.0:
+            parts.append(f"RR{row['RR_NOW_TP1']:.1f}")
+        if row.get("ENTRY_GAP_PCT", 99) <= 2.0:
+            parts.append("진입적정")
+        if row.get("AXIS_MEAN", 0) >= 80:
+            parts.append("3축고점")
+        r = row.get("ROUTE", "")
+        if r == "ATTACK":
+            parts.append("돌입")
+        elif r == "ARMED":
+            parts.append("대기")
+        return " + ".join(parts) if parts else ""
+
+    x["ELITE_REASON"] = x.apply(_reason, axis=1)
+
+    # ── TOP_PICK v21.6 — 백테스트 최적 조합 ──
+    _pass_ebs = x.get("PASS_EBS", pd.Series(1, index=x.index)).fillna(1).astype(int)
+    _turnover = pd.to_numeric(x.get("거래대금(억원)", 0), errors="coerce").fillna(0)
+    _route_block = ~x["ROUTE"].isin(["OVERHEAT", "EXIT_WARNING", "CARRY"])
+    _tp1_pct = ((tp1 - close) / close.clip(lower=1) * 100).round(1)
+    x["TP1_PCT"] = _tp1_pct
+    top_pick = (
+        (x["ELITE_SCORE"] >= 70)
+        & (s >= 80)
+        & (t >= 70)
+        & (_tp1_pct >= 15)
+        & _route_block
+        & (close > stop)
+        & (close < tp1)
+        & (_pass_ebs == 1)
+        & (x["BALANCE_SCORE"] >= 50)
+        & (entry_gap <= 5.0)
+        & (_turnover >= 50)
+    )
+    x["TOP_PICK"] = top_pick.astype(int)
+
+    return x

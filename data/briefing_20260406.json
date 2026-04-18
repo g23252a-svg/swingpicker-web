@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260406",
+  "generated_at": "2026-04-06 21:03:21",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "297090",
+      "name": "씨에스베어링",
+      "route": "ATTACK",
+      "score": 89.4,
+      "close": 8330,
+      "entry": 8330,
+      "stop": 7080,
+      "target1": 9600,
+      "target2": 11150,
+      "est_win_rate": 0.694,
+      "rr": 1.0,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/297090"
+    },
+    {
+      "rank": 2,
+      "code": "475150",
+      "name": "SK이터닉스",
+      "route": "ATTACK",
+      "score": 87.0,
+      "close": 62000,
+      "entry": 52000,
+      "stop": 44150,
+      "target1": 69300,
+      "target2": 71300,
+      "est_win_rate": 0.67,
+      "rr": 2.2,
+      "sector": "건설·부동산",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/475150"
+    },
+    {
+      "rank": 3,
+      "code": "033160",
+      "name": "엠케이전자",
+      "route": "ARMED",
+      "score": 85.0,
+      "close": 17160,
+      "entry": 17160,
+      "stop": 14580,
+      "target1": 19790,
+      "target2": 23850,
+      "est_win_rate": 0.65,
+      "rr": 1.0,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/033160"
+    }
+  ]
+}

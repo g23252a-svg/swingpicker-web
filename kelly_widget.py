@@ -164,8 +164,8 @@ def kelly_summary(
 # ────────────────────────────────────────────────
 def render_kelly_calculator(row_data: dict, container):
     """
-    종목 row_data + NiceGUI container를 받아 Kelly 계산기 UI를 그린다.
-    row_data keys: 종목명, WIN_RATE, RR1, DISPLAY_SCORE
+    [v21.3] 종목 선택 시 승률·손익비 자동 반영.
+    row_data keys: 종목명, EST_WIN_RATE, RR_NOW_TP1, DISPLAY_SCORE
     """
     try:
         from nicegui import ui
@@ -173,10 +173,15 @@ def render_kelly_calculator(row_data: dict, container):
         return
 
     name     = row_data.get("종목명", "이 종목")
-    win_rate = float(row_data.get("WIN_RATE", row_data.get("win_rate", 0.55)))
-    rr       = float(row_data.get("RR1",      row_data.get("rr1",      2.0)))
 
-    # WIN_RATE가 0이면 기본값 사용
+    # [v21.3] EST_WIN_RATE → RR_NOW_TP1 자동 매핑 (현재가 기준)
+    win_rate = float(row_data.get("EST_WIN_RATE",
+                     row_data.get("WIN_RATE",
+                     row_data.get("win_rate", 0.55))))
+    rr       = float(row_data.get("RR_NOW_TP1",
+                     row_data.get("RR1",
+                     row_data.get("rr1", 2.0))))
+
     if win_rate <= 0 or win_rate > 1:
         win_rate = 0.55
     if rr <= 0:
@@ -187,6 +192,22 @@ def render_kelly_calculator(row_data: dict, container):
             "text-sm font-bold text-yellow-400 mb-2"
         )
 
+        # [v21.3] 종목 정보 헤더
+        _close = row_data.get("LIVE_PRICE", None)
+        if _close is None or (isinstance(_close, float) and _close != _close):
+            _close = row_data.get("종가", 0)
+        _tp1 = row_data.get("추천매도가1", 0)
+        _stop = row_data.get("손절가", 0)
+        try:
+            _close, _tp1, _stop = float(_close), float(_tp1), float(_stop)
+        except (TypeError, ValueError):
+            _close, _tp1, _stop = 0, 0, 0
+
+        ui.label(
+            f"📌 {name} | 승률 {win_rate*100:.1f}% | "
+            f"현재가→TP1 RR {rr:.2f}:1"
+        ).classes("text-xs text-cyan-400 mb-2")
+
         with ui.row().classes("w-full gap-4 items-end flex-wrap"):
             capital_input = ui.number(
                 "총 투자 가능 금액 (원)",
@@ -196,17 +217,16 @@ def render_kelly_calculator(row_data: dict, container):
                 format="%.0f",
             ).classes("flex-1 min-w-[200px]")
 
-            wr_input = ui.number(
+            # 승률·손익비는 자동 세팅, 읽기전용 표시
+            wr_display = ui.number(
                 "시스템 승률 (%)",
                 value=round(win_rate * 100, 1),
-                min=1, max=99, step=0.5,
-            ).classes("min-w-[130px]")
+            ).classes("min-w-[130px]").props("readonly outlined")
 
-            rr_input = ui.number(
-                "손익비 (RR)",
+            rr_display = ui.number(
+                "현재가 RR (TP1)",
                 value=round(rr, 2),
-                min=0.1, step=0.1,
-            ).classes("min-w-[110px]")
+            ).classes("min-w-[110px]").props("readonly outlined")
 
         result_area = ui.column().classes("w-full mt-2")
         use_real = ui.checkbox("📓 매매 일지 실전 승률 반영", value=True).classes("text-xs text-gray-300")
@@ -215,8 +235,8 @@ def render_kelly_calculator(row_data: dict, container):
             result_area.clear()
             try:
                 cap = float(str(capital_input.value).replace(",", ""))
-                wr  = float(wr_input.value) / 100
-                rr_ = float(rr_input.value)
+                wr  = win_rate  # [v21.3] 종목 자동 세팅값 사용
+                rr_ = rr
             except (TypeError, ValueError):
                 return
 
@@ -281,6 +301,7 @@ def render_kelly_calculator(row_data: dict, container):
         ui.button("📐 계산", on_click=_calc).props("dense flat").classes(
             "mt-2 text-yellow-400 border border-yellow-700"
         )
+        capital_input.on("update:model-value", lambda _: _calc())  # [v21.3] 금액 변경 시 자동 재계산
         _calc()   # 초기 계산
 
 

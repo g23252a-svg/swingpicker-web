@@ -1,0 +1,41 @@
+{
+  "trade_ymd": "20260416",
+  "top_pick_count": 3,
+  "avg_elite": 73.5,
+  "avg_rr": 1.38,
+  "avg_balance": 65.3,
+  "avg_win_rate": 0.611,
+  "routes": {
+    "WAIT": 2,
+    "ARMED": 1
+  },
+  "picks": [
+    {
+      "종목코드": "368770",
+      "종목명": "파이버프로",
+      "ELITE_SCORE": 79.0,
+      "RR_NOW_TP1": 1.55,
+      "BALANCE_SCORE": 74.0,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.65
+    },
+    {
+      "종목코드": "230240",
+      "종목명": "에치에프알",
+      "ELITE_SCORE": 70.1,
+      "RR_NOW_TP1": 1.63,
+      "BALANCE_SCORE": 54.3,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.6
+    },
+    {
+      "종목코드": "129920",
+      "종목명": "대성하이텍",
+      "ELITE_SCORE": 71.3,
+      "RR_NOW_TP1": 0.97,
+      "BALANCE_SCORE": 67.7,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.583
+    }
+  ]
+}

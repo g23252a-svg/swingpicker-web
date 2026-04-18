@@ -305,20 +305,126 @@ def render_tab_portfolio(df, auth):
         return
 
     _section_title("💼 내 자산: AI 리밸런싱 & 진단")
-    ui.label("👇 보유 종목을 입력하세요 (종목명:평단가:수량)").classes("text-xs text-gray-400 mb-2")
 
+    # [v21.3] 종목 검색 기반 입력 UI
     saved_local = app.storage.user.get("portfolio_text", "")
     saved_gist = _load_portfolio_file() if not saved_local else ""
     saved = saved_local or saved_gist or ""
 
-    pf_input = ui.textarea("포트폴리오 입력", value=saved,
-                           placeholder="종목명:평단가:수량 (줄바꿈 구분)\n예) 에코프로머티:67341:60").classes("w-full").props("rows=6")
+    # 종목명 목록 (추천 CSV + KRX)
+    code_map = _get_code_map(df)
+    stock_names = sorted(code_map.keys()) if code_map else []
+
+    ui.label("📌 보유 종목 추가").classes("text-sm font-bold text-white mb-2")
+
+    with ui.row().classes("w-full gap-3 items-end flex-wrap"):
+        stock_select = ui.select(
+            stock_names, with_input=True, label="종목명 검색",
+            value=None,
+        ).classes("min-w-[200px] flex-1").props("clearable use-input")
+
+        avg_price_input = ui.number(
+            "평단가 (원)", value=None, min=0, step=100, format="%.0f"
+        ).classes("min-w-[130px]")
+
+        qty_input = ui.number(
+            "수량 (주)", value=None, min=1, step=1, format="%.0f"
+        ).classes("min-w-[100px]")
+
+        def _add_stock():
+            name = stock_select.value
+            avg = avg_price_input.value
+            qty = qty_input.value
+            if not name:
+                ui.notify("종목명을 선택하세요", type="warning"); return
+            if not avg or avg <= 0:
+                ui.notify("평단가를 입력하세요", type="warning"); return
+            if not qty or qty <= 0:
+                ui.notify("수량을 입력하세요", type="warning"); return
+
+            new_line = f"{name}:{int(avg)}:{int(qty)}"
+            current = pf_input.value.strip()
+            # 중복 체크
+            existing_names = [l.split(":")[0] for l in current.split("\n") if ":" in l]
+            if name in existing_names:
+                # 기존 종목 업데이트
+                lines = current.split("\n")
+                updated = []
+                for l in lines:
+                    if l.startswith(f"{name}:"):
+                        updated.append(new_line)
+                    else:
+                        updated.append(l)
+                pf_input.value = "\n".join(updated)
+                ui.notify(f"✏️ {name} 업데이트 완료", type="positive")
+            else:
+                pf_input.value = f"{current}\n{new_line}" if current else new_line
+                ui.notify(f"✅ {name} 추가 완료", type="positive")
+
+            app.storage.user["portfolio_text"] = pf_input.value
+            # 입력 초기화
+            stock_select.value = None
+            avg_price_input.value = None
+            qty_input.value = None
+
+        ui.button("➕ 추가", on_click=_add_stock).props("color=primary dense").classes("h-10")
+
+    # 현재 보유 목록 미니 테이블
+    holding_area = ui.column().classes("w-full mt-2 mb-2")
+
+    def _refresh_holdings():
+        holding_area.clear()
+        text = pf_input.value.strip()
+        if not text:
+            return
+        items = []
+        for line in text.split("\n"):
+            if ":" not in line:
+                continue
+            parts = line.split(":")
+            if len(parts) < 3:
+                continue
+            try:
+                items.append({"name": parts[0].strip(), "avg": int(parts[1]), "qty": int(parts[2])})
+            except (ValueError, IndexError):
+                pass
+
+        if not items:
+            return
+
+        with holding_area:
+            with ui.row().classes("w-full gap-2 flex-wrap"):
+                for item in items:
+                    with ui.card().classes("p-2 bg-[#0d0d1a] border border-gray-700 rounded-lg"):
+                        with ui.row().classes("items-center gap-2"):
+                            ui.label(f"{item['name']}").classes("text-white text-sm font-bold")
+                            ui.label(f"{item['avg']:,}원 × {item['qty']}주").classes("text-xs text-gray-400")
+                            val = item['avg'] * item['qty']
+                            ui.label(f"= {val:,}원").classes("text-xs text-cyan-400")
+
+                            def _remove(n=item['name']):
+                                lines = [l for l in pf_input.value.strip().split("\n")
+                                         if not l.startswith(f"{n}:")]
+                                pf_input.value = "\n".join(lines)
+                                app.storage.user["portfolio_text"] = pf_input.value
+                                ui.notify(f"🗑️ {n} 제거", type="info")
+                                _refresh_holdings()
+
+                            ui.button("✕", on_click=_remove).props("flat dense size=xs color=red")
+
+    # 기존 textarea (숨김 — 데이터 저장용)
+    with ui.expansion("📋 텍스트 직접 편집 (고급)", value=False).classes("w-full text-xs text-gray-500"):
+        pf_input = ui.textarea("포트폴리오 데이터", value=saved,
+                               placeholder="종목명:평단가:수량 (줄바꿈 구분)\n예) 에코프로머티:67341:60").classes("w-full").props("rows=4")
+
     result_area = ui.column().classes("w-full mt-4")
 
     def _auto_save():
         app.storage.user["portfolio_text"] = pf_input.value
+        _refresh_holdings()
 
     pf_input.on("blur", lambda _: _auto_save())
+    _refresh_holdings()
 
     async def analyze():
         result_area.clear()

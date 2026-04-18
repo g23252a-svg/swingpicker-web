@@ -114,16 +114,155 @@ def set_current_user(profile):
 
 
 def get_auth_status():
+    """[v21.1] 세션 + DB 재검증 기반 권한 판정 (SSOT)."""
     user = get_current_user()
-    if not user: return "guest"
-    role = user.get("role", "free")
-    if role == "admin": return "admin"
-    expire = user.get("prime_expire_date")
-    if expire:
+    if not user:
+        return "guest"
+    # DB에서 최신 상태 재조회
+    db = get_db()
+    if db:
+        fresh = db.get_user_by_id(user.get("email", user.get("id", "")))
+        if fresh:
+            user = fresh
+    role, allowed, reason = compute_access_status(user)
+    return role
+
+
+def compute_access_status(user_row, now=None):
+    """
+    [v21.1] 권한 판정 SSOT — 앱 전체가 이 함수만 보게 한다.
+
+    Returns: (role, allowed, reason)
+        role: "admin" / "prime" / "pro" / "free" / "banned" / "guest"
+        allowed: True/False (프리미엄 기능 접근 가능 여부)
+        reason: "active_subscription" / "expired" / "banned" / "admin" / "free"
+    """
+    if now is None:
+        now = datetime.now()
+
+    if not user_row:
+        return "guest", False, "no_user"
+
+    # 차단
+    if str(user_row.get("is_banned", "")).upper() in ("Y", "TRUE", "1"):
+        return "banned", False, "banned"
+
+    role = user_row.get("role", "free")
+
+    # 관리자
+    if role == "admin":
+        return "admin", True, "admin"
+
+    # 구독 만료 체크
+    expire = user_row.get("prime_expire_date")
+    if role in ("prime", "pro") and expire:
         try:
             exp_dt = datetime.strptime(str(expire).split(" ")[0], "%Y-%m-%d")
-            if exp_dt.date() >= datetime.now().date():
-                return role
+            if exp_dt.date() >= now.date():
+                return role, True, "active_subscription"
+            else:
+                return "free", False, "expired"
         except Exception as e:
             _logger.warning(f"구독 만료일 파싱 실패: {expire} → {e}")
-    return "free" if role in ("pro", "prime") else role
+            return "free", False, "expire_parse_error"
+
+    return "free", False, "free"
+
+
+def require_premium(action_name="이 기능"):
+    """
+    [v21.1] 서버측 프리미엄 권한 강제 검증.
+    민감 기능(CSV 다운, 백테스트 등) 앞에서 호출.
+
+    Returns: (allowed, role, reason)
+    """
+    user = get_current_user()
+    if not user:
+        return False, "guest", f"{action_name}은 로그인 후 이용 가능합니다."
+
+    # DB에서 최신 상태 재조회 (세션 캐시 무시)
+    db = get_db()
+    if db:
+        fresh_user = db.get_user_by_id(user.get("email", user.get("id", "")))
+        if fresh_user:
+            user = fresh_user  # 최신 DB 기준
+
+    role, allowed, reason = compute_access_status(user)
+
+    if not allowed:
+        if reason == "banned":
+            return False, role, "🚫 차단된 계정입니다."
+        elif reason == "expired":
+            return False, role, f"구독이 만료되었습니다. {action_name}은 Prime 전용입니다."
+        else:
+            return False, role, f"{action_name}은 Prime 구독 후 이용 가능합니다."
+
+    return True, role, "ok"
+
+
+def premium_guard(action_name="이 기능"):
+    """
+    [v21.2] 유니버설 프리미엄 데코레이터.
+    모든 premium 엔드포인트에 동일한 가드 적용.
+
+    Usage:
+        @premium_guard("CSV 다운로드")
+        async def download_csv():
+            ...
+    """
+    from functools import wraps
+
+    def decorator(fn):
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            allowed, role, msg = require_premium(action_name)
+            if not allowed:
+                try:
+                    from nicegui import ui
+                    ui.notify(msg, type="warning")
+                except Exception:
+                    pass
+                return None
+            return await fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def downgrade_expired_users():
+    """
+    [v21.3] 만료된 PRIME/PRO → FREE 자동 강등.
+    매일 실행 또는 관리자 수동 실행.
+
+    Returns: (downgraded_count, details_list)
+    """
+    db = get_db()
+    if not db:
+        return 0, ["DB 연결 실패"]
+
+    now = datetime.now()
+    users = db.get_all_users()
+    downgraded = []
+
+    for u in users:
+        role = u.get("role", "free")
+        if role not in ("prime", "pro"):
+            continue
+        if role == "admin":
+            continue
+
+        expire = u.get("prime_expire_date")
+        if not expire:
+            continue
+
+        try:
+            exp_dt = datetime.strptime(str(expire).split(" ")[0], "%Y-%m-%d")
+            if exp_dt.date() < now.date():
+                email = u.get("login_id") or u.get("id", "")
+                db.update_user_role(email, "free")
+                detail = f"⏰ {email}: {role}→free (만료 {expire})"
+                downgraded.append(detail)
+                _logger.info(detail)
+        except Exception as e:
+            _logger.warning(f"만료 체크 실패 ({u.get('login_id', '?')}): {e}")
+
+    return len(downgraded), downgraded

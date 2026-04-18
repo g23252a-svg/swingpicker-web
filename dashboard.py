@@ -482,17 +482,11 @@ def calc_bollinger(close: pd.Series, window: int = 20, n_std: float = 2.0) -> Tu
 
 def calc_rsi_series(close: pd.Series, period: int = 14) -> pd.Series:
     """
-    RSI(14) 시리즈
+    RSI(14) 시리즈 — [v20.3] indicators.calc_rsi() SSOT 통일
+    엔진/대시보드/차트 모두 동일한 Wilder RMA 기반 RSI 사용.
     """
-    s = pd.to_numeric(close, errors="coerce")
-    delta = s.diff()
-    up = delta.clip(lower=0)
-    down = (-delta.clip(upper=0))
-    roll_up = up.rolling(period).mean()
-    roll_down = down.rolling(period).mean()
-    rs = roll_up / roll_down
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    from indicators import calc_rsi
+    return calc_rsi(pd.to_numeric(close, errors="coerce"), period)
 
 # ---------------------------
 # 오픈베타 영구 PRIME 사용자
@@ -1391,11 +1385,7 @@ def get_fear_greed_index(scored_df: pd.DataFrame):
         if FDR_OK:
             df = fdr.DataReader("KS11")
             if df is not None and not df.empty:
-                delta = df["Close"].diff()
-                up = delta.clip(lower=0)
-                down = (-delta.clip(upper=0))
-                rs = up.rolling(14).mean() / down.rolling(14).mean()
-                rsi = 100 - (100 / (1 + rs))
+                rsi = calc_rsi_series(df["Close"], 14)
                 current_rsi = float(rsi.iloc[-1])
 
                 ma20 = df["Close"].rolling(20).mean()
@@ -1591,12 +1581,8 @@ def get_stock_chart_data(code):
         df['KC_UPPER'] = df['MA20'] + (1.5 * atr20)
         df['KC_LOWER'] = df['MA20'] - (1.5 * atr20)
 
-        # 🔹 RSI(14)
-        delta = df['Close'].diff()
-        up = delta.clip(lower=0)
-        down = -delta.clip(upper=0)
-        rs = up.rolling(14).mean() / down.rolling(14).mean()
-        df['RSI14_CHART'] = 100 - (100 / (1 + rs))
+        # 🔹 RSI(14) — [v20.3] indicators.calc_rsi SSOT 통일
+        df['RSI14_CHART'] = calc_rsi_series(df['Close'], 14)
         # -------------------- [v9.0 HMA 추가] --------------------
         # HMA 20일선 계산 (캔들 차트에 표시용)
         df['HMA20'] = calc_hma_series(df['Close'], 20)

@@ -1,0 +1,69 @@
+{
+  "trade_ymd": "20260417",
+  "top_pick_count": 6,
+  "avg_elite": 77.1,
+  "avg_rr": 1.8,
+  "avg_balance": 62.7,
+  "avg_win_rate": 0.653,
+  "routes": {
+    "WAIT": 4,
+    "ATTACK": 1,
+    "ARMED": 1
+  },
+  "picks": [
+    {
+      "종목코드": "005380",
+      "종목명": "현대차",
+      "ELITE_SCORE": 77.0,
+      "RR_NOW_TP1": 2.87,
+      "BALANCE_SCORE": 65.1,
+      "ROUTE": "ATTACK",
+      "EST_WIN_RATE": 0.651
+    },
+    {
+      "종목코드": "001430",
+      "종목명": "세아베스틸지주",
+      "ELITE_SCORE": 80.1,
+      "RR_NOW_TP1": 1.41,
+      "BALANCE_SCORE": 51.9,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.7
+    },
+    {
+      "종목코드": "060370",
+      "종목명": "LS마린솔루션",
+      "ELITE_SCORE": 79.2,
+      "RR_NOW_TP1": 1.75,
+      "BALANCE_SCORE": 50.0,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.702
+    },
+    {
+      "종목코드": "129920",
+      "종목명": "대성하이텍",
+      "ELITE_SCORE": 76.3,
+      "RR_NOW_TP1": 1.48,
+      "BALANCE_SCORE": 74.5,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.622
+    },
+    {
+      "종목코드": "230240",
+      "종목명": "에치에프알",
+      "ELITE_SCORE": 72.8,
+      "RR_NOW_TP1": 1.54,
+      "BALANCE_SCORE": 58.5,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.621
+    },
+    {
+      "종목코드": "096770",
+      "종목명": "SK이노베이션",
+      "ELITE_SCORE": 77.2,
+      "RR_NOW_TP1": 1.72,
+      "BALANCE_SCORE": 76.4,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.624
+    }
+  ]
+}

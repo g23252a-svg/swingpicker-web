@@ -1,0 +1,31 @@
+{
+  "trade_ymd": "20260414",
+  "top_pick_count": 2,
+  "avg_elite": 68.8,
+  "avg_rr": 1.16,
+  "avg_balance": 56.4,
+  "avg_win_rate": 0.485,
+  "routes": {
+    "ARMED": 2
+  },
+  "picks": [
+    {
+      "종목코드": "011280",
+      "종목명": "태림포장",
+      "ELITE_SCORE": 69.5,
+      "RR_NOW_TP1": 1.45,
+      "BALANCE_SCORE": 58.4,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.515
+    },
+    {
+      "종목코드": "259630",
+      "종목명": "엠플러스",
+      "ELITE_SCORE": 68.2,
+      "RR_NOW_TP1": 0.86,
+      "BALANCE_SCORE": 54.4,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.455
+    }
+  ]
+}

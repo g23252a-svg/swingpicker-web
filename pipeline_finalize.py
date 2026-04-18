@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""pipeline_finalize.py — Stage 6: 저장 + 발송 + 검증 [v20.6.3]
+"""pipeline_finalize.py — Stage 6: 저장 + 발송 + 검증 [v20.6.4]
 ═══════════════════════════════════════════════════════════════════
-[v20.6.3] MACRO_RISK/MARKET_BREADTH 직접 저장 + run_meta JSON sidecar
+[v20.6.4] After-market sidecar 분리 — 추천 CSV 원본 불변 보장
+ - recommend_latest.csv는 분석 시점 기준 불변
+ - 시간외 가격은 aftermarket_prices_latest.csv에 별도 저장
 """
 import os, logging, numpy as np, pandas as pd
 from pipeline_context import PipelineContext
@@ -23,15 +25,21 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         "LDY_RANK","종목코드","종목명","시장","업종_대분류","종가","거래대금(억원)","시가총액(억원)",
         "켈리_수량","추천금액(만원)","상태","ROUTE","ACTION_PRIORITY","IS_ACTIVE","IS_NOW_ENTRY","IS_WATCH",
         "DISPLAY_SCORE","FINAL_SCORE","STRUCT_SCORE","TIMING_SCORE","AI_SCORE","NEWS_SCORE",
+        "ELITE_SCORE","AXIS_MEAN","AXIS_GAP","BALANCE_SCORE","RR_NOW_TP1","ENTRY_GAP_PCT","ELITE_REASON","TOP_PICK",
         "추천매수가","손절가","추천매도가1","추천매도가2","TRIGGER","V_POWER","거래강도",
         "VWAP","POC_GAP","NEWS_REASON","TTM_SQUEEZE_CNT","Low_Trend_PCT","RSI14","이격도",
         "SCORE_REASON_TOP1","SCORE_REASON_TOP2","SCORE_RISK","ROUTE_REASON",
         "MACRO_RISK","MARKET_BREADTH"]
     for c in must_cols:
         if c not in df_out.columns: df_out[c] = np.nan
-    for _cm in ["CARRY_FROM_DATE","CARRY_AGE_DAYS","IS_STALE_CARRY","STALE_PENALTY"]:
+    for _cm in ["CARRY_FROM_DATE","CARRY_AGE_DAYS","IS_STALE_CARRY","STALE_PENALTY",
+                "ROW_BUILD_MODE","DATA_FRESHNESS_OK"]:
         if _cm not in df_out.columns:
-            df_out[_cm] = np.nan if _cm=="CARRY_FROM_DATE" else (False if _cm=="IS_STALE_CARRY" else 0)
+            if _cm == "CARRY_FROM_DATE": df_out[_cm] = np.nan
+            elif _cm == "IS_STALE_CARRY": df_out[_cm] = False
+            elif _cm == "ROW_BUILD_MODE": df_out[_cm] = "FRESH"
+            elif _cm == "DATA_FRESHNESS_OK": df_out[_cm] = True
+            else: df_out[_cm] = 0
     df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]
     # Config Snapshot
     try:
@@ -39,7 +47,7 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         df_out["CONFIG_SNAPSHOT"]=_snap.snapshot_json(); df_out["CONFIG_VERSION"]=_snap.config_version
     except (ImportError,AttributeError) as e: logger.debug(f"CONFIG_SNAPSHOT 스킵: {e}")
     except Exception as e: logger.warning(f"⚠️ CONFIG_SNAPSHOT 오류: {e}")
-    # [v20.6] macro_risk 직접 저장 — Dashboard fallback 시 추론 불필요
+    # [v20.6] macro_risk 직접 저장
     df_out["MACRO_RISK"] = ctx.macro_risk
     df_out["MARKET_BREADTH"] = ctx.breadth.get("ALL", np.nan)
     # Run Health
@@ -48,7 +56,6 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         from run_health import check_run_health, save_health
         _health = check_run_health(df_out, mcap_map=ctx.mcap_map, bench_map=ctx.bench_map,
             inv_maps=ctx.inv_maps, trade_ymd=trade_ymd)
-        # [v20.6] macro 직접 저장 — Dashboard가 JSON에서 바로 읽음
         _health.macro_risk = ctx.macro_risk
         _health.market_breadth = ctx.breadth.get("ALL", 50.0)
         df_out = _health.inject_columns(df_out); save_health(_health, OUT_DIR, trade_ymd)
@@ -81,7 +88,11 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             df_out["IS_NOW_ENTRY"]=df_out["ROUTE"]==Route.ATTACK
             df_out["IS_WATCH"]=df_out["ROUTE"]==Route.WAIT
             df_out["ACTION_PRIORITY"]=df_out["ROUTE"].map(_am).fillna(7).astype(int)
-    # CSV 저장
+
+    # ── [v21.1] ACTION_PRIORITY 항상 재계산 (SSOT 보장) ──
+    df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_am).fillna(7).astype(int)
+
+    # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
     op_d = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{ctx.tag}' if ctx.tag else ''}.csv")
     op_l = os.path.join(OUT_DIR, "recommend_latest.csv")
@@ -108,9 +119,11 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 _pat = r'^\d+$'
                 _remain = df_out.loc[df_out['종목명'].str.match(_pat), '종목코드'].tolist()[:5]
                 log(f"⚠️ 미복구 {_fc}건: {_remain}")
-    df_out.to_csv(op_d, index=False, encoding=UTF8); df_out.to_csv(op_l, index=False, encoding=UTF8)
+    df_out.to_csv(op_d, index=False, encoding=UTF8)
+    df_out.to_csv(op_l, index=False, encoding=UTF8)
     log(f"💾 저장 완료 ({len(df_out)}건) → {op_d}")
-    # [v20.6.3] run_meta JSON sidecar — 레거시 CSV 메타 복원용
+
+    # ── [v20.6.3] run_meta JSON sidecar ──
     try:
         import json as _json
         _meta = {
@@ -137,15 +150,26 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"📋 run_meta 저장 완료 → {_meta_d}")
     except Exception as _me:
         logger.warning(f"⚠️ run_meta 저장 실패 (무해): {_me}")
-    # After-market
+
+    # ══════════════════════════════════════════════════════════
+    #  [v20.6.4] After-market → sidecar 파일로 분리
+    #  recommend_latest.csv는 절대 수정하지 않음 (원본 보존)
+    # ══════════════════════════════════════════════════════════
     try:
-        from naver_aftermarket import update_csv_with_aftermarket
+        from naver_aftermarket import fetch_after_market_prices_sidecar
         _snl = os.path.join(OUT_DIR, 'price_snapshot_latest.csv')
-        _ac = update_csv_with_aftermarket(op_l, _snl)
-        if _ac > 0: import shutil; shutil.copy2(op_l, op_d); log(f'After-market: {_ac} stocks updated')
-        else: log('After-market: no changes')
-    except ImportError: log('naver_aftermarket not found')
-    except Exception as e: log(f'After-market failed: {e}')
+        _sidecar_path = os.path.join(OUT_DIR, 'aftermarket_prices_latest.csv')
+        _ac = fetch_after_market_prices_sidecar(op_l, _sidecar_path, _snl)
+        if _ac > 0:
+            log(f'After-market sidecar: {_ac} stocks → {_sidecar_path}')
+        else:
+            log('After-market: no changes')
+    except ImportError:
+        # sidecar 함수 없으면 시간외 업데이트 스킵 (원본 보존 원칙)
+        log('After-market: sidecar 함수 없음 — 스킵 (recommend 원본 보존)')
+    except Exception as e:
+        log(f'After-market sidecar failed: {e}')
+
     # 종목명 매핑
     try:
         _sp2 = os.path.join(OUT_DIR, "price_snapshot_latest.csv")
@@ -167,7 +191,34 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e: log(f"⚠️ DB 저장 실패: {e}")
     # Reality Check + Rank Validation
     run_reality_check(OUT_DIR, trade_ymd)
-    make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd, methods=["DISPLAY_SCORE","FINAL_SCORE","AI_SCORE"])
+    make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd, methods=["ELITE_SCORE","DISPLAY_SCORE","FINAL_SCORE","AI_SCORE"])
+    # [v21.2] TOP_PICK 검증 리포트
+    try:
+        _tp_mask = df_out.get("TOP_PICK", pd.Series(0, index=df_out.index)).astype(int) == 1
+        _tp_count = _tp_mask.sum()
+        if _tp_count > 0:
+            _tp_df = df_out[_tp_mask].copy()
+            _tp_summary = {
+                "trade_ymd": trade_ymd,
+                "top_pick_count": int(_tp_count),
+                "avg_elite": round(float(_tp_df["ELITE_SCORE"].mean()), 1),
+                "avg_rr": round(float(_tp_df["RR_NOW_TP1"].mean()), 2),
+                "avg_balance": round(float(_tp_df["BALANCE_SCORE"].mean()), 1),
+                "avg_win_rate": round(float(_tp_df["EST_WIN_RATE"].mean()), 3),
+                "routes": _tp_df["ROUTE"].value_counts().to_dict(),
+                "picks": _tp_df[["종목코드","종목명","ELITE_SCORE","RR_NOW_TP1","BALANCE_SCORE","ROUTE","EST_WIN_RATE"]].to_dict("records"),
+            }
+            import json as _json2
+            _tp_path = os.path.join(OUT_DIR, f"top_pick_validation_{trade_ymd}.json")
+            _tp_latest = os.path.join(OUT_DIR, "top_pick_validation_latest.json")
+            for _p in [_tp_path, _tp_latest]:
+                with open(_p, 'w', encoding='utf-8') as _f:
+                    _json2.dump(_tp_summary, _f, ensure_ascii=False, indent=2, default=str)
+            log(f"🏆 TOP_PICK 검증: {_tp_count}종목 → {_tp_path}")
+        else:
+            log("🏆 TOP_PICK: 0종목 (게이트 미통과)")
+    except Exception as e:
+        logger.warning(f"⚠️ TOP_PICK 검증 실패: {e}")
     # 텔레그램
     if ctx.enable_telegram:
         mkt = label_market_temp(ctx.breadth.get("ALL", np.nan))
@@ -184,6 +235,15 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         cs = auto_calibrate(OUT_DIR, trade_ymd)
         log(f"📊 캘리브레이션: {cs.get('n_trades',0)}건, 승률={cs.get('overall_winrate',0):.1%}")
     except Exception as e: log(f"⚠️ 자동 캘리브레이션 스킵: {e}")
+    # [v21.3] 조합 최적화
+    try:
+        from combo_optimizer import run_combo_optimization
+        opt = run_combo_optimization(OUT_DIR, horizon=3, min_samples=10)
+        if opt and opt.get("best"):
+            b = opt["best"]
+            log(f"🎯 최적 조합: S≥{b['S_min']} T≥{b['T_min']} AI≥{b['AI_min']} | 승률 {b['win_rate']}%")
+    except Exception as e:
+        log(f"⚠️ 조합 최적화 스킵: {e}")
     # 포지션
     try:
         from position_tracker import track_open_positions, register_from_recommendations

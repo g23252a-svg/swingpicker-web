@@ -41,7 +41,6 @@ def _to_kst_str(value, fmt="%Y-%m-%d %H:%M:%S"):
 
 def render_tab_admin():
     """Tab 8: 회원 관리 (Admin)"""
-    ui.label("👑 회원 관리").classes("text-2xl font-bold mb-4 text-white")
 
     db = _get_db()
     if not db:
@@ -50,32 +49,63 @@ def render_tab_admin():
 
     users = db.get_all_users()
 
-    ui.label(f"👥 총 가입자: {len(users)}명").classes("text-white mb-4")
-
     if not users:
+        ui.label("👥 총 가입자: 0명").classes("text-white mb-4")
         ui.label("등록된 회원 없음").classes("text-gray-400")
+        return
 
-    # ── 회원 테이블 ──
+    # ── 회원 데이터 빌드 (실제 접근 상태 판정) ──
+    from services.auth import compute_access_status
+
     columns = [
         {"name": "email", "label": "이메일", "field": "email", "align": "left"},
         {"name": "nick", "label": "닉네임", "field": "nick"},
-        {"name": "role", "label": "권한", "field": "role"},
+        {"name": "role", "label": "DB권한", "field": "role"},
+        {"name": "access", "label": "실제상태", "field": "access"},
         {"name": "expire", "label": "구독만료", "field": "expire"},
-        {"name": "status", "label": "상태", "field": "status"},
+        {"name": "status", "label": "차단", "field": "status"},
         {"name": "joined", "label": "가입일", "field": "joined"},
         {"name": "last", "label": "최근접속", "field": "last"},
     ]
     rows = []
     for u in users:
+        role_raw = u.get("role", "free").upper()
+        _, allowed, reason = compute_access_status(u)
+
+        if reason == "admin":
+            access_label = "🔑관리자"
+        elif reason == "active_subscription":
+            access_label = "✅활성"
+        elif reason == "expired":
+            access_label = "❌만료"
+        elif reason == "banned":
+            access_label = "🚫차단"
+        else:
+            access_label = "⚪무료"
+
         rows.append({
             "email": u.get("login_id") or u.get("id", ""),
             "nick": u.get("nickname", ""),
-            "role": u.get("role", "free").upper(),
+            "role": role_raw,
+            "access": access_label,
             "expire": _to_kst_str(u.get("prime_expire_date"), "%Y-%m-%d") if u.get("prime_expire_date") else "-",
             "status": "🚫차단" if u.get("is_banned") else "✅",
             "joined": _to_kst_str(u.get("join_date"), "%Y-%m-%d"),
             "last": _to_kst_str(u.get("last_login")),
         })
+
+    # ── 상단 요약 ──
+    ui.label(f"👑 회원 관리").classes("text-2xl font-bold mb-2 text-white")
+    ui.label(f"👥 총 가입자: {len(users)}명").classes("text-white mb-2")
+    _active = sum(1 for r in rows if r.get("access") == "✅활성")
+    _expired = sum(1 for r in rows if r.get("access") == "❌만료")
+    _free = sum(1 for r in rows if r.get("access") == "⚪무료")
+    _admin = sum(1 for r in rows if r.get("access") == "🔑관리자")
+    with ui.row().classes("gap-4 mb-4"):
+        ui.badge(f"✅ 활성 {_active}", color="#10B981").classes("text-sm px-3 py-1")
+        ui.badge(f"❌ 만료 {_expired}", color="#EF4444").classes("text-sm px-3 py-1")
+        ui.badge(f"⚪ 무료 {_free}", color="#6B7280").classes("text-sm px-3 py-1")
+        ui.badge(f"🔑 관리자 {_admin}", color="#3B82F6").classes("text-sm px-3 py-1")
 
     if rows:
         ui.table(columns=columns, rows=rows, row_key="email",
@@ -150,6 +180,25 @@ def render_tab_admin():
                 ui.notify(f"{'🎁 ' + msg if ok else '❌ ' + msg}")
 
             ui.button("🎁 전원 14일 Prime 지급", on_click=grant_trial).props("color=positive")
+
+            ui.separator().classes("my-3")
+            ui.label("⏰ 만료 관리").classes("text-yellow-400 font-bold mb-2")
+            ui.label("만료된 PRIME 회원을 FREE로 자동 강등합니다.").classes("text-gray-400 text-sm mb-2")
+
+            async def run_downgrade():
+                def _do():
+                    from services.auth import downgrade_expired_users
+                    return downgrade_expired_users()
+
+                count, details = await asyncio.to_thread(_do)
+                if count > 0:
+                    ui.notify(f"⏰ {count}명 만료 강등 완료!", type="warning")
+                    for d in details:
+                        ui.notify(d, type="info")
+                else:
+                    ui.notify("✅ 만료된 회원 없음", type="positive")
+
+            ui.button("⏰ 만료 회원 강등", on_click=run_downgrade).props("color=warning outlined")
 
             ui.separator().classes("my-3")
             ui.label("⚠️ 위험 구역").classes("text-red-400 font-bold mb-2")

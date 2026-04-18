@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260416",
+  "generated_at": "2026-04-17 06:08:03",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "060370",
+      "name": "LS마린솔루션",
+      "route": "ARMED",
+      "score": 95.0,
+      "close": 32300,
+      "entry": 32300,
+      "stop": 28700,
+      "target1": 34350,
+      "target2": 38500,
+      "est_win_rate": 0.75,
+      "rr": 0.6,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/060370"
+    },
+    {
+      "rank": 2,
+      "code": "307930",
+      "name": "컴퍼니케이",
+      "route": "ARMED",
+      "score": 88.9,
+      "close": 9370,
+      "entry": 8240,
+      "stop": 7000,
+      "target1": 9830,
+      "target2": 11080,
+      "est_win_rate": 0.689,
+      "rr": 1.3,
+      "sector": "금융",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/307930"
+    },
+    {
+      "rank": 3,
+      "code": "178320",
+      "name": "서진시스템",
+      "route": "ARMED",
+      "score": 88.8,
+      "close": 50200,
+      "entry": 50200,
+      "stop": 42650,
+      "target1": 53700,
+      "target2": 63100,
+      "est_win_rate": 0.688,
+      "rr": 0.5,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/178320"
+    }
+  ]
+}

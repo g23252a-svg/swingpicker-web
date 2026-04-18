@@ -1,0 +1,30 @@
+{
+  "status": "DEGRADED",
+  "reasons": [
+    "NEWS_OFF"
+  ],
+  "warnings": [],
+  "data_freshness_ok": true,
+  "checks": {
+    "MCAP": true,
+    "BENCH": true,
+    "FLOW": true,
+    "NEWS_OFF": false,
+    "SECTOR": true,
+    "TP_MONOTONIC": true
+  },
+  "confidence_score": 90.0,
+  "max_allowed_route": "ARMED",
+  "macro_risk": "CAUTION",
+  "market_breadth": 70.0,
+  "axis_status": {
+    "MCAP": "OK",
+    "BENCH": "OK",
+    "FLOW": "OK",
+    "NEWS": "DISABLED",
+    "SECTOR": "OK",
+    "ML": "OK",
+    "TRIGGER": "OK"
+  },
+  "fallback_count": 0
+}

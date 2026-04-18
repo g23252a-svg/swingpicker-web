@@ -25,7 +25,12 @@ env/
 .streamlit/secrets.toml
 
 # ─── Local Data & DB (Railway Volume으로 마운트) ───
-data/
+data/*.parquet
+data/*.joblib
+data/*.pkl
+data/ohlcv_cache_*
+data/feature_cache_*
+data/per_trade_log.csv
 docs_cache/
 *.db
 *.db-journal
