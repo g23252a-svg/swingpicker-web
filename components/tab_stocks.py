@@ -2,6 +2,16 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.19] (2026-04-18) — 가격 범위 바 + 프로그레스 바 렌더링 수정
+  #1 가격 범위 바 라벨 잘림 수정
+     - v3.7.18은 position:absolute + translateX(-50%)로 가장자리(0%/100%)에서
+       라벨 절반이 화면 밖으로 잘림 + 가까운 포인트끼리 겹침
+     - v3.7.19: flex row justify-between으로 균등 배치 (절대위치 제거)
+     - 라벨에 현재가 대비 변동률 (+/-%) 추가 표시
+     - 외부 container로 감싸서 nicegui ui.html의 wrapper div와 격리
+  #2 _score_gauge / _mini_bar 프로그레스 바 렌더링 보장
+     - ui.html에 .classes("w-full") 추가 → nicegui q-field wrapper 폭 0 방지
+     - inner div에 display:block 명시
 [v3.7.18] (2026-04-18) — UX 개선 3종 + 시각 임팩트 강화
   #1 전체 CSV 접근 허용 — admin/premium은 이제 CSV 전체 노출 (이전 50개 제한 해제)
   #2 테이블 페이지당 옵션 [15, 30, 50, 100, 전체] + 기본 30
@@ -653,30 +663,35 @@ def _score_gauge(label: str, value: float, max_val: float = 100,
     with ui.column().classes("gap-1 min-w-[110px] flex-1"):
         ui.label(label).classes("text-[10px] text-gray-400 uppercase tracking-wider")
         ui.label(txt).classes(f"text-2xl font-black {text_color}")
-        # 프로그레스 바 — HTML로 그라데이션 효과
+        # [v3.7.19] 프로그레스 바 — nicegui ui.html wrapper 대응 w-full 필수
         ui.html(
-            f'<div style="width:100%; height:6px; background:rgba(255,255,255,0.08); '
-            f'border-radius:3px; overflow:hidden;">'
-            f'<div style="width:{pct:.1f}%; height:100%; background:{bar_color}; '
-            f'border-radius:3px; box-shadow:0 0 8px {bar_color}80;"></div>'
+            f'<div style="display:block; width:100%; height:6px; '
+            f'background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden;">'
+            f'<div style="display:block; width:{pct:.1f}%; height:100%; '
+            f'background:{bar_color}; border-radius:3px; '
+            f'box-shadow:0 0 8px {bar_color}80;"></div>'
             f'</div>'
-        )
+        ).classes("w-full")
 
 
 def _price_range_bar(stop: float, entry: float, close: float,
                      t1: float, t2: float = 0):
-    """[v3.7.18] 가격대 시각 게이지 — 손절/매수/현재/T1/T2를 하나의 바에.
+    """[v3.7.19] 가격대 시각 게이지 — 손절/매수/현재/T1/T2를 하나의 바에.
 
-    구조:
-      [손절 ═════ 매수 ═════ 현재 ═════ T1 ═════ T2]
-      아래 각 위치에 라벨과 가격.
-
-    손실 구간(손절~매수) 빨강, 수익 구간(매수~T1) 초록, 연장(T1~T2) 금색.
-    현재가 위치에 세로 마커.
+    v3.7.18 문제: 라벨이 0%/100% 가장자리에서 translateX(-50%)로 화면 밖 잘림,
+                 가까운 마커들끼리 겹침.
+    v3.7.19 수정:
+     - 전체를 단일 <div>로 감싸서 position:relative 보장
+     - 라벨 가장자리 padding 10% 여유 (clamp)
+     - 표시는 그리드 아이템 줄바꿈으로 변경 (절대 위치 X → 문제 최소화)
+     - 바 자체는 유지, 라벨은 별도 flex row로 분리
     """
     # 전체 범위
-    lo = min(stop, entry, close, t1) if t2 <= 0 else min(stop, entry, close, t1, t2)
-    hi = max(stop, entry, close, t1, t2) if t2 > 0 else max(stop, entry, close, t1)
+    vals = [v for v in [stop, entry, close, t1, t2] if v and v > 0]
+    if len(vals) < 2:
+        return
+    lo = min(vals)
+    hi = max(vals)
     span = hi - lo
     if span <= 0:
         return
@@ -684,84 +699,121 @@ def _price_range_bar(stop: float, entry: float, close: float,
     def pos(v):
         return (v - lo) / span * 100
 
-    p_stop = pos(stop)
-    p_entry = pos(entry)
-    p_close = pos(close)
-    p_t1 = pos(t1)
+    p_stop = pos(stop) if stop > 0 else None
+    p_entry = pos(entry) if entry > 0 else None
+    p_close = pos(close) if close > 0 else None
+    p_t1 = pos(t1) if t1 > 0 else None
     p_t2 = pos(t2) if t2 > 0 else None
 
-    # HTML로 가로 바 + 마커들
-    html_parts = [
-        '<div style="width:100%; margin:10px 0 5px 0;">',
-        # 메인 바 (각 구간 색)
-        '<div style="position:relative; width:100%; height:14px; '
-        'background:rgba(255,255,255,0.05); border-radius:7px; overflow:hidden;">',
-    ]
-    # 손절~매수 구간 (빨강 그라데이션 = 리스크)
-    html_parts.append(
-        f'<div style="position:absolute; left:{p_stop:.1f}%; width:{p_entry - p_stop:.1f}%; '
-        f'height:100%; background:linear-gradient(to right, rgba(239,83,80,0.5), rgba(239,83,80,0.2));"></div>'
-    )
-    # 매수~T1 구간 (초록 = 1차 보상)
-    html_parts.append(
-        f'<div style="position:absolute; left:{p_entry:.1f}%; width:{p_t1 - p_entry:.1f}%; '
-        f'height:100%; background:linear-gradient(to right, rgba(102,187,106,0.2), rgba(102,187,106,0.5));"></div>'
-    )
-    # T1~T2 구간 (금색 = 연장 보상)
-    if p_t2 is not None and p_t2 > p_t1:
-        html_parts.append(
-            f'<div style="position:absolute; left:{p_t1:.1f}%; width:{p_t2 - p_t1:.1f}%; '
-            f'height:100%; background:linear-gradient(to right, rgba(255,202,40,0.3), rgba(255,202,40,0.5));"></div>'
-        )
-    # 세로 마커: 손절
-    html_parts.append(
-        f'<div style="position:absolute; left:{p_stop:.1f}%; width:2px; height:100%; '
-        f'background:#EF5350;"></div>'
-    )
-    # 매수
-    html_parts.append(
-        f'<div style="position:absolute; left:{p_entry:.1f}%; width:2px; height:100%; '
-        f'background:#4FC3F7;"></div>'
-    )
-    # T1
-    html_parts.append(
-        f'<div style="position:absolute; left:{p_t1:.1f}%; width:2px; height:100%; '
-        f'background:#66BB6A;"></div>'
-    )
-    # T2 (있으면)
-    if p_t2 is not None:
-        html_parts.append(
-            f'<div style="position:absolute; left:{p_t2:.1f}%; width:2px; height:100%; '
-            f'background:#FFCA28;"></div>'
-        )
-    # 현재가 (강조 마커: 흰색 세로선 + 빛)
-    html_parts.append(
-        f'<div style="position:absolute; left:{p_close:.1f}%; width:3px; height:100%; '
-        f'background:#FFFFFF; box-shadow:0 0 8px rgba(255,255,255,0.8);"></div>'
-    )
-    html_parts.append('</div>')  # close main bar
+    # ═══════════════════════════════════════════
+    # PART 1: 가로 바 (컬러 구간 + 세로 마커)
+    # ═══════════════════════════════════════════
+    bar_html = ['<div style="position:relative; width:100%; height:16px; '
+                'background:rgba(255,255,255,0.05); border-radius:8px; '
+                'overflow:hidden; margin:8px 0 6px 0;">']
 
-    # 라벨 행 (각 위치)
-    html_parts.append(
-        '<div style="position:relative; width:100%; height:34px; margin-top:4px;">'
-    )
-    labels = [
-        (p_stop, f"🔴 손절<br>{stop:,.0f}", "#EF5350"),
-        (p_entry, f"🔵 매수<br>{entry:,.0f}", "#4FC3F7"),
-        (p_close, f"⚪ 현재<br>{close:,.0f}", "#FFFFFF"),
-        (p_t1, f"🟢 T1<br>{t1:,.0f}", "#66BB6A"),
-    ]
-    if t2 > 0 and t2 != t1:
-        labels.append((p_t2, f"🟡 T2<br>{t2:,.0f}", "#FFCA28"))
-    for p, txt, clr in labels:
-        html_parts.append(
-            f'<div style="position:absolute; left:{p:.1f}%; transform:translateX(-50%); '
-            f'font-size:9px; color:{clr}; text-align:center; line-height:1.2; '
-            f'white-space:nowrap;">{txt}</div>'
+    # 손절~매수 구간 (빨강 = 리스크)
+    if p_stop is not None and p_entry is not None and p_entry > p_stop:
+        bar_html.append(
+            f'<div style="position:absolute; left:{p_stop:.1f}%; '
+            f'width:{p_entry - p_stop:.1f}%; height:100%; '
+            f'background:linear-gradient(to right, rgba(239,83,80,0.5), rgba(239,83,80,0.2));"></div>'
         )
-    html_parts.append('</div>')
-    html_parts.append('</div>')
-    ui.html("".join(html_parts))
+    # 매수~T1 구간 (초록 = 1차 보상)
+    if p_entry is not None and p_t1 is not None and p_t1 > p_entry:
+        bar_html.append(
+            f'<div style="position:absolute; left:{p_entry:.1f}%; '
+            f'width:{p_t1 - p_entry:.1f}%; height:100%; '
+            f'background:linear-gradient(to right, rgba(102,187,106,0.2), rgba(102,187,106,0.5));"></div>'
+        )
+    # T1~T2 구간 (금색 = 연장 보상)
+    if p_t1 is not None and p_t2 is not None and p_t2 > p_t1:
+        bar_html.append(
+            f'<div style="position:absolute; left:{p_t1:.1f}%; '
+            f'width:{p_t2 - p_t1:.1f}%; height:100%; '
+            f'background:linear-gradient(to right, rgba(255,202,40,0.3), rgba(255,202,40,0.5));"></div>'
+        )
+
+    # 세로 마커들
+    markers = [
+        (p_stop, "#EF5350", 2),
+        (p_entry, "#4FC3F7", 2),
+        (p_t1, "#66BB6A", 2),
+        (p_t2, "#FFCA28", 2),
+    ]
+    for p, clr, w in markers:
+        if p is not None:
+            bar_html.append(
+                f'<div style="position:absolute; left:calc({p:.1f}% - {w/2}px); '
+                f'width:{w}px; height:100%; background:{clr};"></div>'
+            )
+    # 현재가 (흰색 강조 + glow)
+    if p_close is not None:
+        bar_html.append(
+            f'<div style="position:absolute; left:calc({p_close:.1f}% - 1.5px); '
+            f'width:3px; height:100%; background:#FFFFFF; '
+            f'box-shadow:0 0 6px rgba(255,255,255,0.9), 0 0 12px rgba(255,255,255,0.4);"></div>'
+        )
+    bar_html.append('</div>')
+
+    # ═══════════════════════════════════════════
+    # PART 2: 라벨을 flex row로 균등 배치 (겹침 없음)
+    # ═══════════════════════════════════════════
+    label_items = []
+    if p_stop is not None:
+        label_items.append(
+            (p_stop, "🔴 손절", f"{stop:,.0f}", "#EF5350", f"{(stop/close-1)*100:+.1f}%" if close > 0 else "")
+        )
+    if p_entry is not None:
+        label_items.append(
+            (p_entry, "🔵 매수", f"{entry:,.0f}", "#4FC3F7", "" if close == entry else f"{(entry/close-1)*100:+.1f}%")
+        )
+    if p_close is not None:
+        label_items.append(
+            (p_close, "⚪ 현재", f"{close:,.0f}", "#FFFFFF", "")
+        )
+    if p_t1 is not None:
+        label_items.append(
+            (p_t1, "🟢 T1", f"{t1:,.0f}", "#66BB6A", f"{(t1/close-1)*100:+.1f}%" if close > 0 else "")
+        )
+    if p_t2 is not None and t2 != t1:
+        label_items.append(
+            (p_t2, "🟡 T2", f"{t2:,.0f}", "#FFCA28", f"{(t2/close-1)*100:+.1f}%" if close > 0 else "")
+        )
+
+    # position 기준 정렬
+    label_items.sort(key=lambda x: x[0])
+
+    # flex row로 균등 배치 (가장 안전)
+    labels_html = [
+        '<div style="display:flex; justify-content:space-between; '
+        'gap:8px; margin-top:2px; flex-wrap:wrap;">'
+    ]
+    for p, emoji_label, price_txt, clr, chg in label_items:
+        labels_html.append(
+            f'<div style="text-align:center; min-width:60px; flex:1;">'
+            f'<div style="font-size:10px; color:{clr}; font-weight:bold; white-space:nowrap;">'
+            f'{emoji_label}</div>'
+            f'<div style="font-size:11px; color:{clr}; font-weight:bold; white-space:nowrap;">'
+            f'{price_txt}</div>'
+        )
+        if chg:
+            chg_clr = "#9CA3AF"
+            labels_html.append(
+                f'<div style="font-size:9px; color:{chg_clr}; white-space:nowrap;">'
+                f'{chg}</div>'
+            )
+        labels_html.append('</div>')
+    labels_html.append('</div>')
+
+    # 최종 — 외부 container로 감싸서 nicegui 격리
+    full_html = (
+        '<div style="width:100%;">'
+        + "".join(bar_html)
+        + "".join(labels_html)
+        + '</div>'
+    )
+    ui.html(full_html).classes("w-full")
 
 
 # ═══════════════════════════════════════════════════
@@ -1706,19 +1758,19 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     turnover = _nz(row.get("거래대금(억원)", 0))
 
                     def _mini_bar(label, val_txt, pct, bar_color, text_color):
-                        """[v3.7.18] 프로그레스 바 포함 미니 메트릭."""
+                        """[v3.7.19] 프로그레스 바 포함 미니 메트릭."""
                         pct = max(0, min(100, pct))
                         with ui.column().classes("gap-1 min-w-[88px] flex-1"):
                             ui.label(label).classes("text-[10px] text-gray-400 uppercase")
                             ui.label(val_txt).classes(f"text-base font-bold {text_color}")
                             ui.html(
-                                f'<div style="width:100%; height:4px; '
+                                f'<div style="display:block; width:100%; height:4px; '
                                 f'background:rgba(255,255,255,0.06); border-radius:2px; '
                                 f'overflow:hidden;">'
-                                f'<div style="width:{pct:.1f}%; height:100%; '
-                                f'background:{bar_color};"></div>'
+                                f'<div style="display:block; width:{pct:.1f}%; '
+                                f'height:100%; background:{bar_color};"></div>'
                                 f'</div>'
-                            )
+                            ).classes("w-full")
 
                     def _clr_hex(v, good=70, bad=40):
                         if v >= good: return ("#EF5350", "text-red-400")
