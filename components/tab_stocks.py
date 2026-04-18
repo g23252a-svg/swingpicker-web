@@ -2,6 +2,19 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.17] (2026-04-18) — 상세 종목탭 최강 시각화 패키지
+  #1 캔들차트 한국식 색상 (상승 🔴 / 하락 🔵)
+  #2 캔들차트에 거래량 바 하단 subplot 추가 (7:3 비율)
+  #3 이동평균선 MA20 (주황) / MA60 (자주) 오버레이
+  #4 매수~손절 리스크 영역 파란 반투명 밴드
+  #5 매수~T1 보상 영역 초록 반투명 밴드
+  #6 레이더 차트 내장 fallback (chart_components 실패해도 7축 방사형 표시)
+  #7 워터폴 내장 fallback (S/T/AI/평균/밸런스 막대)
+  #8 "📊 핵심 지표" 요약 카드 신설
+     - 3축 점수 / 균형 / 검증점수 / RSI14 / 세력(V) / 갭% / 거래대금
+     - 한국식 색상 규칙 (높음=빨강, 낮음=파랑, 중간=회색)
+  #9 chart_components import를 함수별 분리
+     plot_candle_chart 없어도 radar/waterfall은 살아남도록
 [v3.7.16] (2026-04-18) — 차트 렌더러 미로드 긴급 수정
   #1 chart_components.py에 plot_candle_chart 함수가 없어서 _plot_candle=None
      → 프로덕션에서 "📉 차트 렌더러 미로드" 표시됐음
@@ -189,14 +202,25 @@ from nicegui import ui, run, app
 _logger = logging.getLogger(__name__)
 
 # ── 외부 모듈 (지연 임포트) ──
+# [v3.7.17] chart_components import를 함수별로 분리
+# 이전엔 하나의 try에서 세 함수 묶어 import → plot_candle_chart 없으면 radar/waterfall도 죽음
+_plot_candle = None
+plot_radar_chart = None
+plot_score_waterfall = None
+
 try:
-    from chart_components import (
-        plot_candle_chart as _plot_candle,
-        plot_radar_chart, plot_score_waterfall,
-    )
-except ImportError:
+    from chart_components import plot_candle_chart as _plot_candle
+except (ImportError, Exception):
     _plot_candle = None
+
+try:
+    from chart_components import plot_radar_chart
+except (ImportError, Exception):
     plot_radar_chart = None
+
+try:
+    from chart_components import plot_score_waterfall
+except (ImportError, Exception):
     plot_score_waterfall = None
 
 # [v3.7.16] chart_components에 plot_candle_chart가 없으면 내장 구현 사용
@@ -204,17 +228,25 @@ except ImportError:
 if _plot_candle is None:
     try:
         import plotly.graph_objects as _go
+        from plotly.subplots import make_subplots as _make_subplots
 
         def _plot_candle(cdata, code, name="", entry=None, stop=None, t1=None, t2=None):
-            """내장 캔들차트 — chart_components.plot_candle_chart 부재 시 fallback.
+            """[v3.7.17] 최강 캔들차트 — 한국식 색상 + 볼륨 + MA20/60 + 매수영역 + 수평 라인.
 
-            cdata: OHLCV DataFrame with columns [시가, 고가, 저가, 종가, 거래량]
-                   and DatetimeIndex.
+            한국식 상승/하락:
+              - 상승봉: 빨강 (#EF5350)
+              - 하락봉: 파랑 (#3B82F6)
+
+            추가 레이어:
+              - 거래량 바 (하단 subplot)
+              - 이동평균선 MA20 (주황), MA60 (자주)
+              - 매수가 영역 (entry~stop 사이 파란 반투명 밴드)
+              - T1 목표 영역 (entry~t1 사이 초록 반투명 밴드)
+              - 매수/손절/T1/T2 수평선 + 우측 라벨
             """
             if cdata is None or cdata.empty:
                 return None
 
-            # 컬럼 존재 확인 (데이터 소스 따라 시가/Open 혼재 가능성)
             col_map = {}
             for ko, en in [("시가", "Open"), ("고가", "High"),
                            ("저가", "Low"), ("종가", "Close"),
@@ -227,7 +259,14 @@ if _plot_candle is None:
             if not all(k in col_map for k in ("시가", "고가", "저가", "종가")):
                 return None
 
-            fig = _go.Figure()
+            # 2-row subplot: 가격(상) + 거래량(하) 7:3 비율
+            fig = _make_subplots(
+                rows=2, cols=1, shared_xaxes=True,
+                vertical_spacing=0.03,
+                row_heights=[0.75, 0.25],
+            )
+
+            # ── 캔들스틱 (한국식 색상) ──
             fig.add_trace(_go.Candlestick(
                 x=cdata.index,
                 open=cdata[col_map["시가"]],
@@ -235,13 +274,65 @@ if _plot_candle is None:
                 low=cdata[col_map["저가"]],
                 close=cdata[col_map["종가"]],
                 name="OHLC",
-                increasing_line_color="#26a69a",
-                decreasing_line_color="#ef5350",
-            ))
+                increasing=dict(line=dict(color="#EF5350"), fillcolor="#EF5350"),
+                decreasing=dict(line=dict(color="#3B82F6"), fillcolor="#3B82F6"),
+                showlegend=False,
+            ), row=1, col=1)
 
-            # 매수/손절/목표 수평선
+            # ── 이동평균선 MA20 / MA60 ──
+            close_series = cdata[col_map["종가"]]
+            if len(close_series) >= 20:
+                ma20 = close_series.rolling(20).mean()
+                fig.add_trace(_go.Scatter(
+                    x=cdata.index, y=ma20, name="MA20",
+                    line=dict(color="#FFA726", width=1.5),
+                    showlegend=True,
+                ), row=1, col=1)
+            if len(close_series) >= 60:
+                ma60 = close_series.rolling(60).mean()
+                fig.add_trace(_go.Scatter(
+                    x=cdata.index, y=ma60, name="MA60",
+                    line=dict(color="#AB47BC", width=1.5),
+                    showlegend=True,
+                ), row=1, col=1)
+
+            # ── 거래량 바 (상승/하락 색 통일) ──
+            if "거래량" in col_map:
+                vol = cdata[col_map["거래량"]]
+                opens = cdata[col_map["시가"]]
+                closes = cdata[col_map["종가"]]
+                colors = ["#EF5350" if c >= o else "#3B82F6"
+                          for c, o in zip(closes, opens)]
+                fig.add_trace(_go.Bar(
+                    x=cdata.index, y=vol, name="거래량",
+                    marker_color=colors, showlegend=False,
+                    opacity=0.6,
+                ), row=2, col=1)
+
+            # ── 매수~손절 리스크 영역 (파란 반투명) ──
             shapes = []
             annotations = []
+            if entry and stop and entry > stop > 0:
+                shapes.append(dict(
+                    type="rect", xref="paper", x0=0, x1=1,
+                    y0=stop, y1=entry,
+                    fillcolor="rgba(59, 130, 246, 0.08)",
+                    line=dict(width=0),
+                    layer="below",
+                    yref="y",
+                ))
+            # ── 매수~T1 보상 영역 (초록 반투명) ──
+            if entry and t1 and t1 > entry > 0:
+                shapes.append(dict(
+                    type="rect", xref="paper", x0=0, x1=1,
+                    y0=entry, y1=t1,
+                    fillcolor="rgba(102, 187, 106, 0.08)",
+                    line=dict(width=0),
+                    layer="below",
+                    yref="y",
+                ))
+
+            # ── 매수/손절/T1/T2 수평선 + 우측 라벨 ──
             for val, label, color in [
                 (entry, "매수", "#4FC3F7"),
                 (stop,  "손절", "#EF5350"),
@@ -251,7 +342,9 @@ if _plot_candle is None:
                 if val and val > 0:
                     shapes.append(dict(
                         type="line", xref="paper", x0=0, x1=1,
-                        y0=val, y1=val, line=dict(color=color, width=1.2, dash="dash"),
+                        y0=val, y1=val,
+                        line=dict(color=color, width=1.2, dash="dash"),
+                        yref="y",
                     ))
                     annotations.append(dict(
                         xref="paper", yref="y", x=1.005, y=val,
@@ -264,15 +357,173 @@ if _plot_candle is None:
             title_txt = f"{name} ({code})" if name else code
             fig.update_layout(
                 title=title_txt,
-                xaxis_rangeslider_visible=False,
                 shapes=shapes,
                 annotations=annotations,
-                margin=dict(l=10, r=80, t=30, b=10),
+                margin=dict(l=10, r=80, t=40, b=10),
+                legend=dict(
+                    orientation="h", yanchor="bottom",
+                    y=1.02, xanchor="right", x=1,
+                ),
+                hovermode="x unified",
             )
+            # 각 subplot의 rangeslider 끄기 + x축 라벨 하단만
+            fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
+            fig.update_xaxes(rangeslider_visible=False, row=2, col=1)
+            fig.update_yaxes(title_text="가격", row=1, col=1)
+            fig.update_yaxes(title_text="거래량", row=2, col=1)
             return fig
     except ImportError:
         # plotly도 없으면 포기
         pass
+
+# [v3.7.17] 레이더 차트 내장 fallback (chart_components.plot_radar_chart 부재 시)
+if plot_radar_chart is None:
+    try:
+        import plotly.graph_objects as _go_r
+
+        def plot_radar_chart(row):
+            """[v3.7.17] 7-Factor 방사형 레이더 차트 (한국식).
+
+            축: 모멘텀(RSI) / 가성비(RR) / 상승여력 / 안전마진 / 타이밍 / 유동성 / 세력강도
+            """
+            try:
+                import pandas as _pd
+            except ImportError:
+                return None
+
+            def _safe(key, default=0.0):
+                try:
+                    v = _pd.to_numeric(row.get(key), errors="coerce")
+                    return float(v) if _pd.notna(v) else default
+                except Exception:
+                    return default
+
+            def _clamp(v, lo=0, hi=100):
+                return max(lo, min(hi, v))
+
+            close = _safe("종가")
+            entry = _safe("추천매수가")
+            stop = _safe("손절가")
+            t1 = _safe("추천매도가1")
+
+            # 1) 모멘텀 (RSI14)
+            momentum = _clamp(_safe("RSI14", 50))
+            # 2) 가성비 (RR, 4:1이면 100점)
+            risk = entry - stop if entry > stop else 1
+            reward = t1 - entry if t1 > entry else 0
+            rr_ratio = reward / risk if risk > 0 else 0
+            rr_score = _clamp(rr_ratio / 4 * 100)
+            # 3) 상승여력 (T1까지 %, 20%면 100점)
+            upside_pct = ((t1 / close) - 1) * 100 if close > 0 and t1 > 0 else 0
+            upside_score = _clamp(upside_pct / 20 * 100)
+            # 4) 안전마진 (손절 거리 %, 10%면 100점)
+            sl_dist_pct = ((close - stop) / close) * 100 if close > 0 and stop > 0 else 0
+            safety_score = _clamp(sl_dist_pct / 10 * 100)
+            # 5) 타이밍
+            timing = _clamp(_safe("TIMING_SCORE", _safe("T_SCORE", 50)))
+            # 6) 유동성 (거래대금 억원, 2000억이면 100점)
+            liquidity_raw = _safe("거래대금(억원)", _safe("거래대금", 0) / 1e8)
+            liquidity = _clamp(liquidity_raw / 2000 * 100)
+            # 7) 세력강도 (V_POWER -1~3 → 0~100)
+            vp = _safe("V_POWER", 0)
+            tech_score = _clamp((vp + 1) / 4 * 100)
+
+            keys = ["모멘텀", "가성비", "상승여력", "안전마진", "타이밍", "유동성", "세력강도"]
+            vals = [momentum, rr_score, upside_score, safety_score,
+                    timing, liquidity, tech_score]
+            # 방사형이므로 닫힌 루프로
+            keys_closed = keys + [keys[0]]
+            vals_closed = vals + [vals[0]]
+
+            fig = _go_r.Figure()
+            fig.add_trace(_go_r.Scatterpolar(
+                r=vals_closed,
+                theta=keys_closed,
+                fill="toself",
+                fillcolor="rgba(239, 83, 80, 0.25)",  # 한국식 상승 빨강 반투명
+                line=dict(color="#EF5350", width=2),
+                name="현재 종목",
+                showlegend=False,
+            ))
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True, range=[0, 100],
+                        tickfont=dict(size=9, color="#888"),
+                        gridcolor="rgba(255,255,255,0.1)",
+                    ),
+                    angularaxis=dict(
+                        tickfont=dict(size=11, color="#DDD"),
+                        gridcolor="rgba(255,255,255,0.1)",
+                    ),
+                    bgcolor="rgba(0,0,0,0)",
+                ),
+                title=dict(text="🎯 7-Factor 분석", font=dict(size=13)),
+                margin=dict(l=40, r=40, t=50, b=30),
+            )
+            return fig
+    except (ImportError, Exception):
+        pass
+
+
+# [v3.7.17] 워터폴(점수 기여) 내장 fallback
+if plot_score_waterfall is None:
+    try:
+        import plotly.graph_objects as _go_w
+
+        def plot_score_waterfall(row):
+            """[v3.7.17] 3축 점수 기여 워터폴 (S / T / AI → 평균 / 밸런스)."""
+            try:
+                import pandas as _pd
+            except ImportError:
+                return None
+
+            def _safe(key, default=0.0):
+                try:
+                    v = _pd.to_numeric(row.get(key), errors="coerce")
+                    return float(v) if _pd.notna(v) else default
+                except Exception:
+                    return default
+
+            s = _safe("S_SCORE", _safe("STRUCT_SCORE", 0))
+            t = _safe("T_SCORE", _safe("TIMING_SCORE", 0))
+            ai = _safe("AI_SCORE", 0)
+            mean = (s + t + ai) / 3 if (s or t or ai) else 0
+            # 밸런스: 세 축의 균형도 (편차 작을수록 높음)
+            scores = [s, t, ai]
+            if any(scores):
+                spread = max(scores) - min(scores)
+                balance = max(0, 100 - spread * 2)  # 편차 50이면 0점
+            else:
+                balance = 0
+
+            # 한국식: 높을수록 빨강
+            def _clr(v):
+                if v >= 70: return "#EF5350"  # 빨강
+                elif v >= 50: return "#FFA726"  # 주황
+                else: return "#3B82F6"  # 파랑
+
+            labels = ["S (구조)", "T (타이밍)", "AI", "평균", "밸런스"]
+            values = [s, t, ai, mean, balance]
+            colors = [_clr(v) for v in values]
+
+            fig = _go_w.Figure(data=[_go_w.Bar(
+                x=labels, y=values,
+                marker_color=colors,
+                text=[f"{v:.0f}" for v in values],
+                textposition="outside",
+                showlegend=False,
+            )])
+            fig.update_layout(
+                title=dict(text="📊 축별 점수 기여", font=dict(size=13)),
+                yaxis=dict(range=[0, 110], gridcolor="rgba(255,255,255,0.1)"),
+                xaxis=dict(tickfont=dict(size=10)),
+                margin=dict(l=40, r=20, t=50, b=30),
+            )
+            return fig
+    except (ImportError, Exception):
+        pass
+
 
 try:
     from data_source import get_data_source
@@ -1183,6 +1434,53 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                             "🟡 T2 목표", f"{int(_t2):,}",
                             f"+{(_t2/_close-1)*100:.1f}% (RR {rr2:.1f}:1)",
                         )
+
+            # [v3.7.17] 핵심 지표 요약 패널 — 분석에 필요한 정보 한눈에
+            with ui.card().classes(
+                "w-full p-3 mt-2 bg-[rgba(255,255,255,0.03)] "
+                "border border-[rgba(255,255,255,0.08)] rounded-xl"
+            ):
+                ui.label("📊 핵심 지표").classes("text-xs text-gray-400 mb-2")
+                with ui.row().classes("w-full gap-4 flex-wrap"):
+                    # 3축 점수
+                    s_val = _nz(row.get("STRUCT_SCORE", row.get("S_SCORE", 0)))
+                    t_val = _nz(row.get("TIMING_SCORE", row.get("T_SCORE", 0)))
+                    ai_val = _nz(row.get("AI_SCORE", 0))
+                    bal = _nz(row.get("BALANCE_CALC", row.get("BALANCE_SCORE", 0)))
+                    elite = _nz(row.get("ELITE_RANK_SCORE", 0))
+                    gap = _nz(row.get("GAP_PCT", 0))
+                    rsi = _nz(row.get("RSI14", 0))
+                    vp = _nz(row.get("V_POWER", 0))
+                    turnover = _nz(row.get("거래대금(억원)", 0))
+
+                    def _mini(label, val, clr="text-white"):
+                        with ui.column().classes("gap-0 min-w-[75px]"):
+                            ui.label(label).classes("text-[10px] text-gray-500")
+                            ui.label(val).classes(f"text-sm font-bold {clr}")
+
+                    # 한국식 색상: 높으면 빨강, 낮으면 파랑
+                    def _clr(v, good=70, bad=40):
+                        if v >= good: return "text-red-400"
+                        elif v >= bad: return "text-yellow-400"
+                        else: return "text-blue-400"
+
+                    _mini("S 구조", f"{s_val:.0f}", _clr(s_val))
+                    _mini("T 타이밍", f"{t_val:.0f}", _clr(t_val))
+                    _mini("AI", f"{ai_val:.0f}", _clr(ai_val))
+                    _mini("균형", f"{bal:.0f}", _clr(bal))
+                    _mini("검증점수", f"{elite:.0f}", _clr(elite, good=60, bad=30))
+                    # RSI: 70↑ 과매수(빨강), 30↓ 과매도(파랑)
+                    rsi_clr = "text-red-400" if rsi >= 70 else "text-blue-400" if rsi <= 30 else "text-gray-300"
+                    _mini("RSI14", f"{rsi:.0f}", rsi_clr)
+                    # V_POWER: 세력강도 (-1~3)
+                    vp_clr = "text-red-400" if vp >= 1.5 else "text-yellow-400" if vp >= 0 else "text-blue-400"
+                    _mini("세력(V)", f"{vp:+.2f}", vp_clr)
+                    # 갭: 5% 초과면 추격 경고
+                    gap_clr = "text-red-400" if gap > 5 else "text-yellow-400" if gap > 2 else "text-gray-300"
+                    _mini("갭%", f"{gap:.1f}%", gap_clr)
+                    # 거래대금: 1000억+ 빨강
+                    to_clr = "text-red-400" if turnover >= 1000 else "text-yellow-400" if turnover >= 300 else "text-gray-400"
+                    _mini("거래대금", f"{turnover:.0f}억", to_clr)
 
             # ── 캔들차트 (비동기 로드 + 태스크 생명주기 관리) ──
             with ui.card().classes("w-full p-2 bg-[#1a1a2e] mt-2"):
