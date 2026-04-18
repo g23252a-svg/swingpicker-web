@@ -74,6 +74,19 @@ jobs:
           python collector.py
           echo ">>> Collector 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
+      # [v3.7.21] 매일 백테스트 검증 자동 재실행
+      # ┌─ 이전엔 수동으로만 돌려서 backtest_validation_latest.json이 정체됨
+      # │  (매일 같은 통계가 Tab 2에 표시됨 — 'wf capital 0/5', '실집행 5건' 고착)
+      # └─ Collector 직후 자동 실행 → 어제 장 마감까지 반영된 최신 통계로 갱신
+      - name: Run Backtest Validation
+        run: |
+          echo ">>> Backtest validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+          python backtest_validation.py || {
+            echo "⚠️ backtest_validation 실패 — 기존 JSON 유지하고 계속 진행"
+            exit 0
+          }
+          echo ">>> Backtest validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+
       - name: Show outputs
         run: |
           ls -alh data || true
