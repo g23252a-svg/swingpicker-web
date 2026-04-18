@@ -2,6 +2,34 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.23] (2026-04-18) — 헤더 카드 읽기 순서 최적화 + 제목 정확화
+  사용자 리뷰어 지적 3가지 전부 반영:
+  #1 제목: "🏆 오늘의 검증 Top 3" → "🏆 오늘의 실전 Top Pick"
+     - 실제 모드는 top1_first_then_top3_fallback (Top1 우선)
+     - "Top 3"는 예전 철학 흔적 → "Top Pick"이 정확
+     - 뱃지: "1/3" → "🎯 Top1" (1개 성공) / "Top3 폴백 N/3" (fallback)
+  #2 정보 우선순위 재배치 — 메인/보조 구분
+     ┌ [메인 블록] (font-semibold, 눈에 띄게)
+     │   💰 실집행 성과 (가장 중요 — 실전 운용)
+     │   📡 신호 성과 (알파 품질)
+     │   🏅 Confidence (실행 판단 기준)
+     └ [보조 블록] (font-normal, 참고용)
+         ✅ Walk-forward
+         🔁 Rolling
+         (참고) 일평균 3종목 포트
+         (참고) Top3 모드 자본시뮬
+  #3 "TP1 21% vs EV +1.47%" 해석 문구 추가
+     - TP1 <40% + EV>0: "승리 폭 > 패배 폭 + 미도달 종가 마감 포함"
+     - TP1 >=40% + EV>0: "높은 승률 기반 수익 구조"
+     - EV<=0: "알파 약화 상태 (임계값 재조정 검토)"
+[v3.7.22] (2026-04-18) — CSV 다운로드 Prime 회원 제한
+  #1 사용자 지적: "무료회원 다운로드 권한 있으면 안 됨 — Prime만 가능해야"
+     v3.7.20에서 모두에게 다운로드 허용 → 수익 모델 훼손
+  #2 권한 정책:
+     · guest/free : 🔒 버튼 비활성 + "👑 Prime 회원 전용" 안내
+     · prime      : 👑 정상 다운로드
+     · admin      : 🛠️ 정상 다운로드
+  #3 이중 방어 — UI disabled + 함수 내부 권한 체크 (백엔드 차단)
 [v3.7.21] (2026-04-18) — 매일 백테스트 자동 갱신 + 데이터 신선도 표시
   #1 auto_collect.yml에 backtest_validation 실행 단계 추가
      - 평일 20:05 KST Collector 후 자동으로 backtest_validation.py 실행
@@ -1168,58 +1196,72 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
     ):
         with ui.row().classes("w-full items-center justify-between mb-2"):
             with ui.row().classes("items-center gap-2"):
-                ui.label("🏆 오늘의 검증 Top 3").classes(
+                # [v3.7.23] 제목 — "Top 3" → "Top Pick" (실제 모드는 Top1 우선)
+                # 실제 selection_mode가 top1_first_then_top3_fallback이므로
+                # "오늘의 실전 1순위"가 정확한 표현. Top3는 fallback일 뿐.
+                ui.label("🏆 오늘의 실전 Top Pick").classes(
                     "text-lg font-bold text-white"
                 )
-                # [v3.7.1] 희소성 뱃지 — 실제 선별된 개수 표기
+                # [v3.7.1→v3.7.23] 뱃지 의미 명확화
                 n_picked = len(top3_codes)
-                badge_color = "#10B981" if n_picked >= 3 else "#F59E0B" if n_picked >= 1 else "#6B7280"
-                ui.badge(f"{n_picked}/3", color=badge_color).classes("text-xs")
+                if n_picked == 1:
+                    # Top1 모드 성공 (진짜 1순위 발굴)
+                    badge_txt = "🎯 Top1"
+                    badge_color = "#F59E0B"  # 금색 - 최고 상태
+                elif n_picked >= 2:
+                    # Top3 fallback (Top1 없을 때만)
+                    badge_txt = f"Top3 폴백 {n_picked}/3"
+                    badge_color = "#10B981"
+                else:
+                    badge_txt = "0/3"
+                    badge_color = "#6B7280"
+                ui.badge(badge_txt, color=badge_color).classes("text-xs")
             ui.label(summary_text).classes("text-xs text-gray-500")
 
-        # [v3.7.7] Walk-forward 일반화 증거 표시 — 주장이 아닌 숫자
-        wf_results = wf_stats.get("results") if isinstance(wf_stats, dict) else None
-        if wf_results and len(wf_results) > 0:
-            generalizes_n = sum(1 for r in wf_results if r.get("generalizes"))
-            total_n = len(wf_results)
-            horizon = wf_stats.get("horizon_used", "?")
-            if generalizes_n == total_n:
-                mark = "✅"
-                color = "text-green-400"
-            elif generalizes_n >= total_n // 2:
-                mark = "⚠️"
-                color = "text-yellow-400"
-            else:
-                mark = "❌"
-                color = "text-red-400"
-            # 대표 조합 1개의 IS/OOS
-            top = wf_results[0]
-            is_ev = top.get("is_summary", {}).get("ev", 0)
-            oos_ev = top.get("oos_summary", {}).get("ev", 0)
-            ui.label(
-                f"{mark} Walk-forward(horizon {horizon}일): "
-                f"IS Top 5 중 {generalizes_n}/{total_n} 일반화 · "
-                f"대표조합 IS {is_ev:+.2f}% → OOS {oos_ev:+.2f}%"
-            ).classes(f"text-xs {color} mb-1")
-
-        # [v3.7.7] 일자별 포트폴리오 요약 — "하루 3종목 묶음 실제 수익"
-        if port_stats and port_stats.get("n_days", 0) >= 5:
-            avg_daily = port_stats["avg_daily_portfolio_ret"]
-            pos_rate = port_stats.get("positive_rate", 0) * 100
-            n_days = port_stats["n_days"]
-            n_pos = port_stats.get("n_positive_days", 0)
-            p_mark = "📈" if avg_daily > 0 else "📉"
-            p_color = "text-green-400" if avg_daily > 0 else "text-red-400"
-            ui.label(
-                f"{p_mark} 일평균 3종목 포트폴리오 수익 {avg_daily:+.2f}% · "
-                f"플러스 마감 {n_pos}/{n_days}일 ({pos_rate:.0f}%)"
-            ).classes(f"text-xs {p_color} mb-1")
-
         # ═══════════════════════════════════════════════════
-        # [v3.7.14] 신호 성과 vs 실집행 성과 완전 분리 (리뷰어 최우선 지적)
+        # [v3.7.23] 정보 재배치 — 사용자 읽기 순서 최적화
+        # ─────────────────────────────────────────────────
+        # Before: WF → 3종목 포트 → 신호 → 실집행 → 신뢰도 → Top3 → Rolling
+        #         (정보 우선순위 섞임 → 메인이 뭔지 흐림)
+        # After: 메인 블록 (실집행/신호/신뢰도) → 보조 블록 (WF/Rolling/Top3/3종목)
+        #         → 메타 (조건/갱신시각)
         # ═══════════════════════════════════════════════════
 
-        # 📡 1줄차: 신호 성과 (알파 품질) — 자본 제약 없이 순수 시그널
+        # ───────────────────────────────────────────
+        # 🎯 메인 블록 — 실전 의사결정에 직접 쓰는 숫자 3개
+        # ───────────────────────────────────────────
+
+        # 💰 #1 실집행 성과 (가장 중요 — 실제 운용 가능성)
+        if capital_top1 and capital_top1.get("n_trades_filled", 0) > 0:
+            t1_ret = capital_top1.get("total_return_pct", 0)
+            t1_mdd = capital_top1.get("max_drawdown_pct", 0)
+            t1_n = capital_top1["n_trades_filled"]
+            t1_init = capital_top1.get("initial_capital", 10_000_000)
+
+            gap = capital_top1.get("signal_vs_capital_gap", {})
+            exec_rate = gap.get("execution_rate", 1.0) * 100 if gap else 100
+            m = "💰" if t1_ret > 0 else "💸"
+            clr = "text-green-400" if t1_ret > 0 else "text-red-400"
+            ui.label(
+                f"{m} 실집행 성과 (실전 운용): "
+                f"{t1_n}건 ({int(t1_init/1e4):,}만원 동시1포지션) · "
+                f"{t1_ret:+.2f}% · MDD {t1_mdd:.1f}% · 실행률 {exec_rate:.0f}%"
+            ).classes(f"text-sm {clr} mb-1 font-semibold")
+
+            # 스킵 이유별 분해 (audit 있으면)
+            skip = capital_top1.get("skip_reasons_summary", {})
+            if skip:
+                sk_exec = skip.get("EXECUTED", 0)
+                sk_nf = skip.get("NOT_FILLED", 0)
+                sk_held = skip.get("SAME_TICKER_ALREADY_HELD", 0)
+                sk_full = skip.get("SLOT_FULL", 0)
+                sk_total = skip.get("total_signals", 0)
+                ui.label(
+                    f"  └ 신호 {sk_total} → 실행 {sk_exec} · "
+                    f"미체결 {sk_nf} · 기보유 {sk_held} · 슬롯풀 {sk_full}"
+                ).classes("text-xs text-gray-500 mb-1 ml-4")
+
+        # 📡 #2 신호 성과 (알파 품질)
         sig_src = signal_top1 if signal_top1 else daily_top1
         if sig_src and sig_src.get("n_filled" if signal_top1 else "n", 0) > 0:
             if signal_top1:
@@ -1239,39 +1281,27 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                 f"📡 신호 성과 (알파 품질): "
                 f"{n_total}신호 / {n_filled_s}체결 ({fill_s:.0f}%) · "
                 f"TP1 {tp1_s:.1f}% · EV {ev_s:+.2f}%"
-            ).classes(f"text-xs {sig_clr} mb-1 font-semibold")
+            ).classes(f"text-sm {sig_clr} mb-1 font-semibold")
 
-        # 💰 2줄차: 실집행 성과 (실전 운용 가능성) — 자본 시뮬 기준
-        if capital_top1 and capital_top1.get("n_trades_filled", 0) > 0:
-            t1_ret = capital_top1.get("total_return_pct", 0)
-            t1_mdd = capital_top1.get("max_drawdown_pct", 0)
-            t1_n = capital_top1["n_trades_filled"]
-            t1_init = capital_top1.get("initial_capital", 10_000_000)
-
-            gap = capital_top1.get("signal_vs_capital_gap", {})
-            exec_rate = gap.get("execution_rate", 1.0) * 100 if gap else 100
-            m = "💰" if t1_ret > 0 else "💸"
-            clr = "text-green-400" if t1_ret > 0 else "text-red-400"
-            ui.label(
-                f"{m} 실집행 성과 (실전 운용): "
-                f"{t1_n}건 ({int(t1_init/1e4):,}만원 동시1포지션) · "
-                f"{t1_ret:+.2f}% · MDD {t1_mdd:.1f}% · 실행률 {exec_rate:.0f}%"
-            ).classes(f"text-xs {clr} mb-1 font-semibold")
-
-            # 스킵 이유별 분해 (audit 있으면)
-            skip = capital_top1.get("skip_reasons_summary", {})
-            if skip:
-                sk_exec = skip.get("EXECUTED", 0)
-                sk_nf = skip.get("NOT_FILLED", 0)
-                sk_held = skip.get("SAME_TICKER_ALREADY_HELD", 0)
-                sk_full = skip.get("SLOT_FULL", 0)
-                sk_total = skip.get("total_signals", 0)
+            # [v3.7.23] TP1 vs EV 해석 한 줄 — 사용자가 숫자 의미를 바로 이해하게
+            # 예: "TP1 21%"는 낮아 보이지만 EV +1.47%인 이유 = 승리 폭 > 패배 폭
+            if tp1_s > 0 and ev_s > 0 and tp1_s < 40:
+                # 낮은 hit rate + 양수 EV 조합 설명
                 ui.label(
-                    f"  └ 신호 {sk_total} → 실행 {sk_exec} · "
-                    f"미체결 {sk_nf} · 기보유 {sk_held} · 슬롯풀 {sk_full}"
-                ).classes("text-xs text-gray-500 mb-1 ml-4")
+                    f"  ℹ️ TP1 hit rate({tp1_s:.0f}%)는 낮지만, 승리 폭 > 패배 폭 "
+                    f"+ 미도달 종가 마감까지 포함하여 기대수익 EV는 양수"
+                ).classes("text-[11px] text-blue-300 mb-1 ml-4 italic")
+            elif tp1_s >= 40 and ev_s > 0:
+                ui.label(
+                    f"  ℹ️ TP1 hit rate({tp1_s:.0f}%) + 양수 EV = 높은 승률 기반 수익 구조"
+                ).classes("text-[11px] text-green-300 mb-1 ml-4 italic")
+            elif ev_s <= 0:
+                ui.label(
+                    f"  ℹ️ EV가 음수 — 현재 시그널의 알파 약화 상태 "
+                    f"(임계값 재조정 검토 필요)"
+                ).classes("text-[11px] text-red-300 mb-1 ml-4 italic")
 
-        # 🏅 3줄차: Confidence badge (과신 방지 핵심)
+        # 🏅 #3 Confidence badge (실행 판단의 기준점)
         if confidence:
             lvl = confidence.get("level", "LOW")
             reason = confidence.get("reason", "")
@@ -1283,24 +1313,40 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                 badge_txt, badge_clr = "🏅 LOW", "text-red-400"
             ui.label(
                 f"{badge_txt} 실집행 신뢰도 — {reason}"
-            ).classes(f"text-xs {badge_clr} mb-1 font-bold")
+            ).classes(f"text-sm {badge_clr} mb-2 font-bold")
 
-        # [v3.7.8→v3.7.11] Top3 자본 시뮬 (참고용)
-        if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
-            total_ret = capital_stats.get("total_return_pct", 0)
-            mdd = capital_stats.get("max_drawdown_pct", 0)
-            n_filled = capital_stats["n_trades_filled"]
-            n_nf = capital_stats.get("n_skipped_not_filled", 0)
-            n_dup = capital_stats.get("n_skipped_duplicate", 0)
-            init_cap = capital_stats.get("initial_capital", 10_000_000)
-            c_mark = "·" if total_ret > 0 else "·"
-            c_color = "text-gray-500"  # 참고용이므로 회색
+        # ───────────────────────────────────────────
+        # 📊 보조 블록 — 검증 증거 (회색 톤으로 구분)
+        # ───────────────────────────────────────────
+        ui.label("📊 보조 검증 (참고)").classes(
+            "text-[11px] text-gray-400 font-bold mt-2 mb-1 uppercase tracking-wider"
+        )
+
+        # Walk-forward 일반화
+        wf_results = wf_stats.get("results") if isinstance(wf_stats, dict) else None
+        if wf_results and len(wf_results) > 0:
+            generalizes_n = sum(1 for r in wf_results if r.get("generalizes"))
+            total_n = len(wf_results)
+            horizon = wf_stats.get("horizon_used", "?")
+            if generalizes_n == total_n:
+                mark = "✅"
+                color = "text-green-400"
+            elif generalizes_n >= total_n // 2:
+                mark = "⚠️"
+                color = "text-yellow-400"
+            else:
+                mark = "❌"
+                color = "text-red-400"
+            top = wf_results[0]
+            is_ev = top.get("is_summary", {}).get("ev", 0)
+            oos_ev = top.get("oos_summary", {}).get("ev", 0)
             ui.label(
-                f"{c_mark} (참고) [Top3 모드] 자본시뮬: "
-                f"기간수익 {total_ret:+.2f}% · MDD {mdd:.1f}% · 체결 {n_filled}건"
-            ).classes(f"text-xs {c_color} mb-1")
+                f"{mark} Walk-forward(h={horizon}일): "
+                f"IS Top 5 중 {generalizes_n}/{total_n} 일반화 · "
+                f"대표조합 IS {is_ev:+.2f}% → OOS {oos_ev:+.2f}%"
+            ).classes(f"text-xs {color} mb-1")
 
-        # [v3.7.8] Rolling walk-forward 종합
+        # Rolling walk-forward
         if rolling_stats and rolling_stats.get("n_valid", 0) > 0:
             n_gen = rolling_stats.get("n_generalizes", 0)
             n_val = rolling_stats.get("n_valid", 0)
@@ -1313,6 +1359,33 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                 f"{r_mark} Rolling {n_gen}/{n_val} 폴드 일반화 · "
                 f"평균 IS {avg_is:+.2f}% → OOS {avg_oos:+.2f}%"
             ).classes(f"text-xs {r_color} mb-1")
+
+        # 일자별 3종목 포트폴리오 (참고 수치)
+        if port_stats and port_stats.get("n_days", 0) >= 5:
+            avg_daily = port_stats["avg_daily_portfolio_ret"]
+            pos_rate = port_stats.get("positive_rate", 0) * 100
+            n_days = port_stats["n_days"]
+            n_pos = port_stats.get("n_positive_days", 0)
+            p_mark = "📈" if avg_daily > 0 else "📉"
+            p_color = "text-green-500" if avg_daily > 0 else "text-gray-500"
+            ui.label(
+                f"{p_mark} (참고) 일평균 3종목 포트폴리오: {avg_daily:+.2f}% · "
+                f"플러스 마감 {n_pos}/{n_days}일 ({pos_rate:.0f}%)"
+            ).classes(f"text-xs {p_color} mb-1")
+
+        # Top3 자본 시뮬 (참고)
+        if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
+            total_ret = capital_stats.get("total_return_pct", 0)
+            mdd = capital_stats.get("max_drawdown_pct", 0)
+            n_filled = capital_stats["n_trades_filled"]
+            ui.label(
+                f"· (참고) Top3 모드 자본시뮬: "
+                f"기간수익 {total_ret:+.2f}% · MDD {mdd:.1f}% · 체결 {n_filled}건"
+            ).classes("text-xs text-gray-500 mb-1")
+
+        # ───────────────────────────────────────────
+        # 🔧 메타 블록 — 검증 조건 + 갱신 시각
+        # ───────────────────────────────────────────
 
         # [v3.7.15] methodology 메타 한 줄 — 검증 조건 완전 투명화
         methodology = bt.get("methodology")
@@ -1500,23 +1573,37 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             if n_none > 0:
                 ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
 
-    # [v3.7.20] CSV 다운로드 기능 복구 (Streamlit 버전에서 마이그레이션 시 누락됨)
-    # 오늘 필터링된 결과 + 전체 결과 두 가지 옵션 제공
+    # [v3.7.22] CSV 다운로드 권한 제어 — prime/admin만 허용
+    # - guest/free: 다운로드 버튼 비활성 (잠금 상태 + Prime 안내)
+    # - prime/admin: 전체 종목 다운로드 가능
+    # 권한 정책:
+    #   · guest  : 체험 — 다운로드 불가
+    #   · free   : 무료 회원 — 다운로드 불가 (Prime 유도)
+    #   · prime  : 유료 회원 — 전체 다운로드 가능
+    #   · admin  : 관리자 — 전체 다운로드 가능
+    can_download = auth in ("prime", "admin")
+
     def _download_csv(scope: str = "filtered"):
         """CSV 다운로드 트리거.
-        
+
         scope='filtered': 현재 필터/정렬 적용된 결과만
         scope='all': df 전체 (필터 무시)
         """
+        # [v3.7.22] 이중 권한 체크 - 버튼이 disabled여도 안전하게 차단
+        if not can_download:
+            ui.notify(
+                "👑 CSV 다운로드는 Prime 회원 전용입니다",
+                type="warning",
+            )
+            return
         try:
             from datetime import datetime
-            import io
-            
+
             source_df = _filtered() if scope == "filtered" else df
             if source_df.empty:
                 ui.notify("다운로드할 종목이 없습니다", type="warning")
                 return
-            
+
             # 다운로드용 컬럼 선별 (너무 많으면 가독성 떨어짐)
             download_cols = [c for c in [
                 "종목코드", "종목명", "업종", "ELITE_LABEL", "ROUTE",
@@ -1526,42 +1613,64 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "종가", "추천매수가", "손절가", "추천매도가1", "추천매도가2",
                 "RSI14", "V_POWER", "거래대금(억원)",
             ] if c in source_df.columns]
-            
+
             # 누락 컬럼은 나머지에서 추가 (사용자가 원할 수 있음)
             for c in source_df.columns:
                 if c not in download_cols:
                     download_cols.append(c)
-            
+
             out_df = source_df[download_cols].copy()
-            
+
             # UTF-8 BOM 포함 (한글 엑셀 호환)
             csv_bytes = out_df.to_csv(index=False).encode("utf-8-sig")
-            
+
             # 파일명
             ts = datetime.now().strftime("%Y%m%d_%H%M")
             scope_tag = "전체" if scope == "all" else "필터"
             filename = f"swingpicker_{scope_tag}_{len(out_df)}개_{ts}.csv"
-            
+
             # NiceGUI download 트리거
             ui.download(csv_bytes, filename)
             ui.notify(f"✅ {len(out_df)}개 종목 다운로드", type="positive")
         except Exception as e:
             ui.notify(f"❌ 다운로드 실패: {e}", type="negative")
 
-    # 다운로드 버튼 바 (라벨 기준 카드 바로 아래)
+    # [v3.7.22] 다운로드 버튼 바 — 권한별 다른 UI
     with ui.row().classes("w-full gap-2 items-center mb-3 flex-wrap"):
-        ui.label("📥 CSV 다운로드:").classes("text-xs text-gray-400 font-bold")
-        ui.button(
-            "현재 필터 결과",
-            on_click=lambda: _download_csv("filtered"),
-        ).props("size=sm flat color=primary").classes("text-xs")
-        ui.button(
-            "전체 종목",
-            on_click=lambda: _download_csv("all"),
-        ).props("size=sm flat color=secondary").classes("text-xs")
-        ui.label("(UTF-8 BOM · 엑셀 한글 호환)").classes(
-            "text-[10px] text-gray-500 ml-2"
-        )
+        if can_download:
+            # ─── Prime / Admin: 정상 다운로드 버튼 ───
+            tier_icon = "🛠️" if auth == "admin" else "👑"
+            ui.label(
+                f"📥 CSV 다운로드 {tier_icon}:"
+            ).classes("text-xs text-gray-400 font-bold")
+            ui.button(
+                "현재 필터 결과",
+                on_click=lambda: _download_csv("filtered"),
+            ).props("size=sm flat color=primary").classes("text-xs")
+            ui.button(
+                "전체 종목",
+                on_click=lambda: _download_csv("all"),
+            ).props("size=sm flat color=secondary").classes("text-xs")
+            ui.label("(UTF-8 BOM · 엑셀 한글 호환)").classes(
+                "text-[10px] text-gray-500 ml-2"
+            )
+        else:
+            # ─── Guest / Free: 비활성 버튼 + Prime 안내 ───
+            ui.label("🔒 CSV 다운로드:").classes("text-xs text-gray-500 font-bold")
+            ui.button(
+                "현재 필터 결과",
+                on_click=lambda: _download_csv("filtered"),
+            ).props("size=sm flat color=grey disable").classes("text-xs opacity-50")
+            ui.button(
+                "전체 종목",
+                on_click=lambda: _download_csv("all"),
+            ).props("size=sm flat color=grey disable").classes("text-xs opacity-50")
+            ui.label(
+                "👑 Prime 회원 전용 기능"
+            ).classes("text-[11px] text-yellow-500 ml-2 font-bold")
+            ui.label(
+                "(업그레이드하고 엑셀로 자유롭게 분석하세요)"
+            ).classes("text-[10px] text-gray-500")
 
     table_area = ui.column().classes("w-full")
     detail_area = ui.column().classes("w-full mt-4")
