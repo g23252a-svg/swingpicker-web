@@ -43,3 +43,8 @@ Thumbs.db
 !data/backtest_walkforward_latest.json
 !data/backtest_rolling_latest.json
 *.pyc
+!data/backtest_top1_execution_audit_latest.csv
+!data/backtest_top1_trades_latest.csv
+!data/backtest_top1_capital_curve_latest.csv
+!data/backtest_walkforward_latest.json
+!data/backtest_rolling_latest.json

@@ -6,7 +6,7 @@ v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
   (1) 일자별 Top3 실제 백테스트
       매일 compute_elite_labels → pick_top3() 을 돌려 실제 3종목을 뽑고,
-      그 3종목만 horizon 20일 추적하여 성능 집계.
+      그 종목들만 horizon 10일 추적하여 성능 집계. (v3.7.10 이후 horizon 20→10 축소)
 
   (2) OHLC 기반 TP1/Stop 터치 판정
       ohlcv_cache_*.parquet 에서 장중 고가/저가를 읽어 정확한 터치 판정.
@@ -132,6 +132,39 @@ def rank_score(stats: dict, label: str) -> float:
     elif label == "⚠️ 추격":     label_mult = 0.70
     else:                         label_mult = 0.50
     return base * rr_mult * label_mult
+
+
+def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
+                    min_rank: float = 40.0) -> list:
+    """[v3.7.11] 하루치 recommend rows → Top 1 (🏆 최강 중 rank_score 1위).
+
+    백테스트 +11.49% (36일)를 달성한 전략의 핵심 함수.
+    pick_top3_codes와 달리 "rank 1위 1종목"만 반환.
+    """
+    candidates = []
+    for row in day_csv_rows:
+        stats = compute_axis_stats(row)
+        lbl = elite_label(stats, thresholds)
+        if lbl != "🏆 최강":
+            continue
+        score = rank_score(stats, lbl)
+        if score < min_rank:
+            continue
+        candidates.append({
+            "code":   str(row.get("종목코드", "")).zfill(6),
+            "name":   str(row.get("종목명", "")),
+            "sector": str(row.get("업종", "")),
+            "label":  lbl,
+            "score":  score,
+            "entry":  _fnum(row.get("추천매수가", 0)),
+            "tp1":    _fnum(row.get("추천매도가1", 0)),
+            "stop":   _fnum(row.get("손절가", 0)),
+            "close":  _fnum(row.get("종가", 0)),
+        })
+    if not candidates:
+        return []
+    candidates.sort(key=lambda r: -r["score"])
+    return [candidates[0]]
 
 
 def pick_top3_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
@@ -384,6 +417,69 @@ HORIZON = 10
 COST_PCT = 0.22
 
 
+def daily_top1_backtest(days: list, ohlc_df: pd.DataFrame,
+                         thresholds: Optional[dict] = None,
+                         min_rank: float = 40.0) -> dict:
+    """[v3.7.11] 매일 🏆 최강 Top1만 추적. 백테스트 검증용 메인 루프.
+
+    daily_top3_backtest와 동일 구조지만 pick_top1_codes 사용.
+    이 함수가 README에서 말하는 '+11.49%'의 증거.
+    """
+    trades = []
+    daily_picks_log = []
+    days_dict_seq = [(d[0], d[2]) for d in days]
+
+    for i in range(1, len(days)):
+        ymd, rows_list, rows_dict = days[i]
+        top1 = pick_top1_codes(rows_list, thresholds, min_rank)
+        daily_picks_log.append({
+            "date": ymd, "n_picked": len(top1),
+            "codes": [c["code"] for c in top1],
+        })
+        if not top1:
+            continue
+
+        entry_date = pd.Timestamp(ymd[:4] + "-" + ymd[4:6] + "-" + ymd[6:])
+        for pick in top1:
+            code = pick["code"]
+            result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
+                                   pick["stop"], HORIZON, ohlc_df)
+            if result["outcome"] == "NODATA":
+                result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
+                                             pick["stop"], HORIZON, days_dict_seq)
+            if result["outcome"] == "NODATA":
+                continue
+
+            if result["outcome"] == "NOT_FILLED":
+                trades.append({
+                    "date": ymd, "code": code, "name": pick["name"],
+                    "sector": pick["sector"], "label": pick["label"],
+                    "rank_score": round(pick["score"], 2),
+                    "entry": pick["entry"], "tp1": pick["tp1"], "stop": pick["stop"],
+                    "outcome": "NOT_FILLED", "exit_price": 0.0, "days_held": 0,
+                    "method": result["method"], "fill_date": "",
+                    "ret_pct": 0.0, "net_pct": 0.0,
+                })
+                continue
+
+            ret_pct = (result["exit_price"] / pick["entry"] - 1) * 100
+            trades.append({
+                "date": ymd, "code": code, "name": pick["name"],
+                "sector": pick["sector"], "label": pick["label"],
+                "rank_score": round(pick["score"], 2),
+                "entry": pick["entry"], "tp1": pick["tp1"], "stop": pick["stop"],
+                "outcome": result["outcome"],
+                "exit_price": result["exit_price"],
+                "days_held": result["days_held"],
+                "method": result["method"],
+                "fill_date": result.get("fill_date", "") or "",
+                "ret_pct": round(ret_pct, 2),
+                "net_pct": round(ret_pct - COST_PCT, 2),
+            })
+
+    return {"trades": trades, "daily_picks": daily_picks_log}
+
+
 def daily_top3_backtest(days: list, ohlc_df: pd.DataFrame,
                         thresholds: Optional[dict] = None,
                         min_rank: float = 40.0) -> dict:
@@ -486,14 +582,14 @@ def simulate_capital_portfolio(trades: list, initial_capital: float = 10_000_000
     if not trades:
         return None
 
-    # 거래를 체결일 기준으로 정렬
+    # 거래를 체결일 기준으로 정렬 (원본 오염 방지 위해 복사)
     import pandas as pd
     valid_trades = []
-    for t in trades:
-        if t["outcome"] == "NOT_FILLED":
+    for t_orig in trades:
+        if t_orig["outcome"] == "NOT_FILLED":
             continue
+        t = dict(t_orig)  # 얕은 복사
         if not t.get("fill_date"):
-            # 체결일 없으면 recommend 다음날로 근사
             fd = pd.Timestamp(t["date"][:4] + "-" + t["date"][4:6] + "-" + t["date"][6:])
             fd = fd + pd.tseries.offsets.BDay(1)
             t["_fill_date_ts"] = fd
@@ -508,10 +604,27 @@ def simulate_capital_portfolio(trades: list, initial_capital: float = 10_000_000
     open_positions = {}  # code → {...}
     capital = initial_capital
     curve = []
+    audit_log = []  # [v3.7.14] 신호별 skip/execute 이유 상세 기록
     n_filled = 0
     n_skipped_duplicate = 0
     n_skipped_not_filled = sum(1 for t in trades if t["outcome"] == "NOT_FILLED")
     n_skipped_full = 0
+
+    # [v3.7.14] NOT_FILLED 건도 audit에 기록 (왜 배제됐는지 보여주기)
+    for t in trades:
+        if t["outcome"] == "NOT_FILLED":
+            audit_log.append({
+                "signal_date": t["date"],
+                "code": t["code"],
+                "name": t["name"],
+                "label": t["label"],
+                "action": "SKIP",
+                "skip_reason": "NOT_FILLED",
+                "skip_reason_detail": "추천매수가 gap-up으로 체결 불가",
+                "fill_date": "",
+                "open_positions_count": 0,
+                "held_codes": "",
+            })
 
     for t in valid_trades:
         fill_date = t["_fill_date_ts"]
@@ -543,17 +656,42 @@ def simulate_capital_portfolio(trades: list, initial_capital: float = 10_000_000
                 "open_positions": len(open_positions),
             })
 
+        # [v3.7.14] 현재 시점 열린 포지션 스냅샷 (audit용)
+        held_now = ",".join(sorted(open_positions.keys()))
+        open_count = len(open_positions)
+
         # 중복 보유 체크
-        # [v3.7.9] 중복 보유 체크:
-        # 이미 보유 중인 종목이면 스킵 (실전에서도 동일 종목 자본 2배 투입은 하지 않음).
-        # 단, Exit 후 다른 날 재추천되면 open_positions에서 빠졌으므로 재진입 가능.
         if code in open_positions:
             n_skipped_duplicate += 1
+            audit_log.append({
+                "signal_date": t["date"],
+                "code": code,
+                "name": t["name"],
+                "label": t["label"],
+                "action": "SKIP",
+                "skip_reason": "SAME_TICKER_ALREADY_HELD",
+                "skip_reason_detail": "이미 보유 중",
+                "fill_date": str(fill_date)[:10],
+                "open_positions_count": open_count,
+                "held_codes": held_now,
+            })
             continue
 
         # 슬롯 풀 체크 — 최대 max_positions개 동시 보유
         if len(open_positions) >= max_positions:
             n_skipped_full += 1
+            audit_log.append({
+                "signal_date": t["date"],
+                "code": code,
+                "name": t["name"],
+                "label": t["label"],
+                "action": "SKIP",
+                "skip_reason": "SLOT_FULL",
+                "skip_reason_detail": f"최대 {max_positions}포지션 다 찼음",
+                "fill_date": str(fill_date)[:10],
+                "open_positions_count": open_count,
+                "held_codes": held_now,
+            })
             continue
 
         # [v3.7.10 버그 수정] 투자금 = 총자산 / max_positions
@@ -588,6 +726,19 @@ def simulate_capital_portfolio(trades: list, initial_capital: float = 10_000_000
             "invested_total": round(total_invested, 0),
             "total_assets": round(capital + total_invested, 0),
             "open_positions": len(open_positions),
+        })
+        # [v3.7.14] audit 로그에 EXECUTE 기록
+        audit_log.append({
+            "signal_date": t["date"],
+            "code": code,
+            "name": t["name"],
+            "label": t["label"],
+            "action": "EXECUTE",
+            "skip_reason": "EXECUTED",
+            "skip_reason_detail": "",
+            "fill_date": str(fill_date)[:10],
+            "open_positions_count": open_count,
+            "held_codes": held_now,
         })
 
     # 남은 포지션 최종 청산 (horizon 종가 기준)
@@ -652,6 +803,15 @@ def simulate_capital_portfolio(trades: list, initial_capital: float = 10_000_000
         "n_skipped_slot_full": n_skipped_full,
         "positive_day_rate": round(n_pos_days / n_all_days, 4) if n_all_days > 0 else 0,
         "curve": curve,
+        # [v3.7.14] 감사 로그 및 스킵 이유 집계
+        "audit_log": audit_log,
+        "skip_reasons_summary": {
+            "NOT_FILLED": n_skipped_not_filled,
+            "SAME_TICKER_ALREADY_HELD": n_skipped_duplicate,
+            "SLOT_FULL": n_skipped_full,
+            "EXECUTED": n_filled,
+            "total_signals": len(trades),
+        },
     }
 
 
@@ -789,13 +949,30 @@ def walk_forward_validate(days: list, ohlc_df: pd.DataFrame,
             is_ev = candidate["top3_summary"].get("ev", 0)
             oos_ev = oos_summary.get("ev", 0)
             oos_n = oos_summary.get("n", 0)
+
+            # [v3.7.14] OOS도 자본 시뮬로 재측정 — 실전 운용 가능성 관점
+            oos_capital = simulate_capital_portfolio(
+                oos_result["trades"], initial_capital=10_000_000, max_positions=3
+            )
+            oos_capital_return = oos_capital.get("total_return_pct", 0) if oos_capital else 0
+            oos_capital_mdd = oos_capital.get("max_drawdown_pct", 0) if oos_capital else 0
+            oos_capital_n_exec = oos_capital.get("n_filled", 0) if oos_capital else 0
+
             wf_results.append({
                 "rank_in_is": i + 1,
                 "thresholds": is_th,
+                # 신호 기준 (알파 품질)
                 "is_summary": candidate["top3_summary"],
                 "oos_summary": oos_summary,
                 "generalizes": (oos_n >= 5 and oos_ev > 0),
                 "decay": round(is_ev - oos_ev, 2),
+                # [v3.7.14] 자본 기준 (실전 운용 가능성)
+                "oos_capital": {
+                    "total_return_pct": oos_capital_return,
+                    "max_drawdown_pct": oos_capital_mdd,
+                    "n_executed": oos_capital_n_exec,
+                },
+                "capital_generalizes": (oos_capital_n_exec >= 3 and oos_capital_return > 0),
             })
 
         return {
@@ -805,6 +982,28 @@ def walk_forward_validate(days: list, ohlc_df: pd.DataFrame,
             "oos_days": len(oos_days),
             "horizon_used": HORIZON,
             "results": wf_results,
+            # [v3.7.14] 최상단 요약 — 신호/자본 둘 다
+            "walkforward_signal_summary": {
+                "n_results": len(wf_results),
+                "n_generalizes_signal": sum(1 for r in wf_results if r.get("generalizes")),
+                "avg_oos_ev": round(
+                    sum(r["oos_summary"].get("ev", 0) for r in wf_results) / len(wf_results), 2
+                ) if wf_results else 0,
+            },
+            "walkforward_capital_summary": {
+                "n_results": len(wf_results),
+                "n_generalizes_capital": sum(
+                    1 for r in wf_results if r.get("capital_generalizes")
+                ),
+                "avg_oos_return": round(
+                    sum(r["oos_capital"].get("total_return_pct", 0) for r in wf_results)
+                    / len(wf_results), 2
+                ) if wf_results else 0,
+                "avg_oos_mdd": round(
+                    sum(r["oos_capital"].get("max_drawdown_pct", 0) for r in wf_results)
+                    / len(wf_results), 2
+                ) if wf_results else 0,
+            },
         }
     finally:
         HORIZON = original_horizon
@@ -932,9 +1131,12 @@ def rolling_walk_forward(days: list, ohlc_df: pd.DataFrame,
 
 def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
                  walkforward: bool = False, rolling: bool = False) -> dict:
+    date_range = [days[0][0][:4] + "-" + days[0][0][4:6] + "-" + days[0][0][6:],
+                  days[-1][0][:4] + "-" + days[-1][0][4:6] + "-" + days[-1][0][6:]] if days else ["", ""]
+
     out: dict[str, Any] = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "version": "v2",
+        "version": "v3.7.14",
         "horizon_bdays": HORIZON,
         "trade_cost_pct": COST_PCT,
         "days_covered": len(days),
@@ -943,11 +1145,23 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
             f"{ohlc_df['종목코드'].nunique() if not ohlc_df.empty else 0} — "
             f"이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백"
         ),
-        "methodology": (
-            "v2: 매일 pick_top3()로 실제 3종목 선별 → OHLC 기반 TP1/Stop 터치 판정 "
-            "(장중 고가/저가) → horizon 20일 미도달시 종가 마감. "
-            "OHLC 없는 종목은 종가 폴백 (method 필드로 구분)."
-        ),
+        # [v3.7.14] 구조화된 methodology 블록 (모든 검증에 공통 적용)
+        "methodology": {
+            "horizon_days": HORIZON,
+            "fill_window_days": 3,
+            "fee_pct_roundtrip": COST_PCT,
+            "max_positions_top1": 1,
+            "max_positions_top3": 3,
+            "dedup_same_ticker": True,
+            "reentry_after_exit": True,
+            "selection_mode": "top1_first_then_top3_fallback",
+            "date_range": date_range,
+            "description": (
+                "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 "
+                "→ OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. "
+                "자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
+            ),
+        },
     }
 
     print("  ▶ 기본 threshold로 일자별 Top3 백테스트...")
@@ -961,6 +1175,33 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
         by_label[t["label"]].append(t)
     out["by_label_top3"] = {
         lbl: summarize_trades(sub) for lbl, sub in by_label.items()
+    }
+
+    # [v3.7.14] Top1 백테스트 — 신호 성과 vs 실집행 성과 완전 분리
+    # signal_top1 = "알파 품질"   (백테스트 trades 기준)
+    # capital_top1 = "실전 운용 가능성" (simulate_capital_portfolio 기준)
+    print("  ▶ [Top1] 신호 성과 백테스트 (pick_top1 기반)...")
+    bt1 = daily_top1_backtest(days, ohlc_df, thresholds=None, min_rank=40.0)
+
+    # 기존 키도 유지 (하위호환)
+    out["daily_top1_backtest"] = summarize_trades(bt1["trades"])
+    out["all_trades_top1"] = bt1["trades"]
+    out["daily_picks_log_top1"] = bt1["daily_picks"]
+
+    # [v3.7.14] 명시적 signal_top1 블록 — 신호 품질 지표만
+    t1_summary = summarize_trades(bt1["trades"])
+    out["signal_top1"] = {
+        "label": "신호 성과 (알파 품질)",
+        "description": "pick_top1로 뽑힌 모든 추천을 독립적으로 horizon 추적한 결과. "
+                        "자본 제약 없음 — 순수 시그널 품질 측정용.",
+        "n_signals_total": t1_summary.get("n_all_picks", 0),
+        "n_filled": t1_summary.get("n", 0),
+        "fill_rate": t1_summary.get("fill_rate", 0),
+        "tp1_rate": t1_summary.get("tp1_rate", 0),
+        "stop_rate": t1_summary.get("stop_rate", 0),
+        "open_rate": t1_summary.get("open_rate", 0),
+        "avg_all_pct": t1_summary.get("avg_all", 0),
+        "ev_net_pct": t1_summary.get("ev", 0),
     }
 
     if tune:
@@ -988,9 +1229,10 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
         out["walk_forward"] = wf
 
     if rolling:
-        print("  ▶ Rolling walk-forward (3 folds)...")
+        print("  ▶ Rolling walk-forward (3 folds, horizon 10)...")
+        # [v3.7.13] 메인/walk-forward와 horizon 일관성 유지 (이전엔 5로 축소돼있었음)
         rwf = rolling_walk_forward(days, ohlc_df, n_folds=3,
-                                     horizon_override=5)
+                                     horizon_override=10)
         out["rolling_walk_forward"] = rwf
 
     return out
@@ -1014,6 +1256,18 @@ def save_report(report: dict, data_dir: Path):
             w.writerows(report["all_trades"])
         print(f"  · {trades_path.name} ({len(report['all_trades'])}건)")
 
+    # [v3.7.11] Top1 거래 로그 별도 CSV
+    if report.get("all_trades_top1"):
+        trades1_path = data_dir / f"backtest_top1_trades_{today}.csv"
+        trades1_latest = data_dir / "backtest_top1_trades_latest.csv"
+        keys = list(report["all_trades_top1"][0].keys())
+        for p in (trades1_path, trades1_latest):
+            with open(p, "w", encoding="utf-8", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=keys)
+                w.writeheader()
+                w.writerows(report["all_trades_top1"])
+        print(f"  · {trades1_path.name} ({len(report['all_trades_top1'])}건)")
+
     if report.get("tuning_results"):
         tune_path = data_dir / f"backtest_tuning_{today}.json"
         with open(tune_path, "w", encoding="utf-8") as f:
@@ -1029,13 +1283,17 @@ def save_report(report: dict, data_dir: Path):
     if wf and wf.get("results"):
         wf_path = data_dir / f"backtest_walkforward_{today}.json"
         wf_latest = data_dir / "backtest_walkforward_latest.json"
+        # [v3.7.15] 메인과 동일한 구조화 methodology dict 재사용 + 기법 설명 추가
+        main_methodology = report.get("methodology", {})
+        wf_methodology = dict(main_methodology) if isinstance(main_methodology, dict) else {}
+        wf_methodology["validation_type"] = "walk_forward_single_split"
+        wf_methodology["validation_description"] = (
+            "전체 기간을 시간순 2등분: IS(앞절반) 튜닝 → OOS(뒤절반) 재측정. "
+            "IS Top 5 조합이 OOS에서 EV+ 유지하면 일반화, EV 음수로 뒤집히면 오버피팅 증거."
+        )
         out = {
             "generated_at": report["generated_at"],
-            "methodology": (
-                "전체 기간을 시간순 2등분: IS(앞절반) 튜닝 → OOS(뒤절반) 재측정. "
-                "IS Top 5 조합이 OOS에서 EV+ 유지하면 일반화, "
-                "EV 음수로 뒤집히면 오버피팅 증거."
-            ),
+            "methodology": wf_methodology,
             **wf,
         }
         for p in (wf_path, wf_latest):
@@ -1050,13 +1308,20 @@ def save_report(report: dict, data_dir: Path):
     if rwf and rwf.get("folds"):
         rwf_path = data_dir / f"backtest_rolling_{today}.json"
         rwf_latest = data_dir / "backtest_rolling_latest.json"
+        # [v3.7.15] 메인과 동일한 구조화 methodology dict 재사용
+        main_methodology = report.get("methodology", {})
+        rwf_methodology = dict(main_methodology) if isinstance(main_methodology, dict) else {}
+        rwf_methodology["validation_type"] = "rolling_walk_forward_expanding"
+        rwf_methodology["n_folds_target"] = rwf.get("n_folds_requested", 3)
+        rwf_methodology["is_ratio"] = rwf.get("is_ratio", 0.6)
+        rwf_methodology["validation_description"] = (
+            "Expanding rolling walk-forward: 전체 기간을 n_folds 구간으로 나누고, "
+            "각 폴드마다 이전 전체 구간을 IS로 튜닝 → 다음 구간에서 OOS 측정. "
+            "여러 장세에 걸친 robust 엔진인지 확인."
+        )
         rwf_out = {
             "generated_at": report["generated_at"],
-            "methodology": (
-                "Expanding rolling walk-forward: 전체 기간을 n_folds 구간으로 나누고, "
-                "각 폴드마다 이전 전체 구간을 IS로 튜닝 → 다음 구간에서 OOS 측정. "
-                "여러 장세에 걸친 robust 엔진인지 확인."
-            ),
+            "methodology": rwf_methodology,
             **rwf,
         }
         for p in (rwf_path, rwf_latest):
@@ -1145,9 +1410,8 @@ def save_report(report: dict, data_dir: Path):
                         w.writeheader()
                         w.writerows(cap_sim["curve"])
                 print(f"  · {cap_path.name} ({len(cap_sim['curve'])}일)")
-                print(f"    → 기간 수익률 {cap_sim['total_return_pct']:+.2f}% · "
-                      f"MDD {cap_sim['max_drawdown_pct']:.2f}% · "
-                      f"일승률 {cap_sim['positive_day_rate']*100:.1f}%")
+                print(f"    → [Top3] 기간수익 {cap_sim['total_return_pct']:+.2f}% · "
+                      f"MDD {cap_sim['max_drawdown_pct']:.2f}%")
                 light["capital_portfolio"] = {
                     "initial_capital": cap_sim["initial_capital"],
                     "final_capital": cap_sim["final_capital"],
@@ -1157,14 +1421,140 @@ def save_report(report: dict, data_dir: Path):
                     "n_skipped_duplicate": cap_sim["n_skipped_duplicate"],
                     "n_skipped_not_filled": cap_sim["n_skipped_not_filled"],
                     "positive_day_rate": cap_sim["positive_day_rate"],
-                    "cost_basis": f"net (거래당 {COST_PCT}% 차감)",  # [v3.7.9]
+                    "cost_basis": f"net (거래당 {COST_PCT}% 차감)",
                 }
+
+    # [v3.7.11] Top1 전용 자본 시뮬 — README "+11.49%" 의 증거
+    if report.get("all_trades_top1"):
+        cap1 = simulate_capital_portfolio(report["all_trades_top1"],
+                                           initial_capital=10_000_000,
+                                           max_positions=1)  # Top1은 동시 1포지션
+        if cap1 and cap1.get("curve"):
+            cap1_path = data_dir / f"backtest_top1_capital_curve_{today}.csv"
+            cap1_latest = data_dir / "backtest_top1_capital_curve_latest.csv"
+            keys = list(cap1["curve"][0].keys())
+            for p in (cap1_path, cap1_latest):
+                with open(p, "w", encoding="utf-8", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=keys)
+                    w.writeheader()
+                    w.writerows(cap1["curve"])
+            print(f"  · {cap1_path.name} ({len(cap1['curve'])}이벤트)")
+            print(f"    → [Top1] 기간수익 {cap1['total_return_pct']:+.2f}% · "
+                  f"MDD {cap1['max_drawdown_pct']:.2f}% · "
+                  f"체결 {cap1['n_filled']}건")
+
+            # [v3.7.14] audit log CSV 별도 저장 (왜 스킵됐는지 이유별)
+            if cap1.get("audit_log"):
+                audit_path = data_dir / f"backtest_top1_execution_audit_{today}.csv"
+                audit_latest = data_dir / "backtest_top1_execution_audit_latest.csv"
+                keys = list(cap1["audit_log"][0].keys())
+                for p in (audit_path, audit_latest):
+                    with open(p, "w", encoding="utf-8", newline="") as f:
+                        w = csv.DictWriter(f, fieldnames=keys)
+                        w.writeheader()
+                        w.writerows(cap1["audit_log"])
+                print(f"  · {audit_path.name} ({len(cap1['audit_log'])}이벤트)")
+                # 스킵 이유 요약 출력
+                sr = cap1.get("skip_reasons_summary", {})
+                print(f"    → EXECUTED {sr.get('EXECUTED',0)} · "
+                      f"NOT_FILLED {sr.get('NOT_FILLED',0)} · "
+                      f"SAME_TICKER_HELD {sr.get('SAME_TICKER_ALREADY_HELD',0)} · "
+                      f"SLOT_FULL {sr.get('SLOT_FULL',0)}")
+
+            # [v3.7.13] 신호 vs 실체결 차이 — 과신 방지 리포트
+            daily_top1 = report.get("daily_top1_backtest", {})
+            n_signal_all = daily_top1.get("n_all_picks", daily_top1.get("n", 0))
+            n_signal_filled = daily_top1.get("n", 0)
+            n_capital_filled = cap1["n_filled"]
+            n_slot_full = cap1.get("n_skipped_slot_full", 0)
+            gap_reason = (
+                f"신호 {n_signal_filled}건 → 자본시뮬 {n_capital_filled}건 "
+                f"(슬롯풀 {n_slot_full}건 · 미체결 {cap1['n_skipped_not_filled']}건)"
+            )
+            print(f"    → [Top1 체결 차이] {gap_reason}")
+            light["capital_portfolio_top1"] = {
+                "label": "실집행 성과 (실전 운용 가능성)",
+                "description": "Top1 신호를 max_positions=1 자본 시뮬에 실제 적용한 결과. "
+                                "겹치는 시그널과 미체결 때문에 신호보다 표본이 작음.",
+                "initial_capital": cap1["initial_capital"],
+                "final_capital": cap1["final_capital"],
+                "total_return_pct": cap1["total_return_pct"],
+                "max_drawdown_pct": cap1["max_drawdown_pct"],
+                "n_trades_filled": cap1["n_filled"],
+                "n_skipped_not_filled": cap1["n_skipped_not_filled"],
+                "n_skipped_slot_full": n_slot_full,
+                "positive_day_rate": cap1["positive_day_rate"],
+                "cost_basis": f"net (거래당 {COST_PCT}% 차감)",
+                "note": "Top1 전용 - 동시 1포지션, 자본 100% 투자",
+                # [v3.7.13] 신호 vs 실체결 gap
+                "signal_vs_capital_gap": {
+                    "n_signals_total": n_signal_all,
+                    "n_signals_filled_ok": n_signal_filled,
+                    "n_capital_executed": n_capital_filled,
+                    "execution_rate": (
+                        round(n_capital_filled / n_signal_filled, 3)
+                        if n_signal_filled > 0 else 0
+                    ),
+                    "explanation": gap_reason,
+                },
+                # [v3.7.14] 스킵 이유별 집계
+                "skip_reasons_summary": cap1.get("skip_reasons_summary", {}),
+            }
 
     # [v3.7.8] rolling walk-forward 요약을 latest JSON에도 포함 (UI 표시용)
     if report.get("rolling_walk_forward"):
         rwf = report["rolling_walk_forward"]
         if rwf.get("summary"):
             light["rolling_summary"] = rwf["summary"]
+
+    # [v3.7.14] Confidence badge 자동 판정 — 과신 방지 핵심
+    # HIGH: 실행표본 30+ AND rolling robust
+    # MEDIUM: 실행표본 10+ AND rolling 폴드 3+
+    # LOW: 그 이하 (표본 부족)
+    cap1_light = light.get("capital_portfolio_top1", {})
+    rwf_summary = light.get("rolling_summary", {})
+    wf_cap_summary = None
+    if report.get("walk_forward") and isinstance(report["walk_forward"], dict):
+        wf_cap_summary = report["walk_forward"].get("walkforward_capital_summary", {})
+
+    n_exec = cap1_light.get("n_trades_filled", 0)
+    n_valid_folds = rwf_summary.get("n_valid", 0)
+    robust = rwf_summary.get("robust", False)
+    wf_cap_generalizes = (wf_cap_summary or {}).get("n_generalizes_capital", 0)
+
+    if n_exec >= 30 and robust:
+        conf_level = "HIGH"
+        conf_color = "green"
+    elif n_exec >= 10 and n_valid_folds >= 3:
+        conf_level = "MEDIUM"
+        conf_color = "yellow"
+    else:
+        conf_level = "LOW"
+        conf_color = "red"
+
+    reason_parts = [f"실집행 표본 {n_exec}건"]
+    if robust:
+        reason_parts.append("rolling robust ✅")
+    else:
+        reason_parts.append(f"rolling 미확정 ({n_valid_folds}폴드)")
+    if wf_cap_summary:
+        reason_parts.append(f"wf capital 일반화 {wf_cap_generalizes}/5")
+
+    light["confidence"] = {
+        "level": conf_level,
+        "color": conf_color,
+        "reason": " · ".join(reason_parts),
+        "executed_trades": n_exec,
+        "rolling_robust": robust,
+        "rolling_valid_folds": n_valid_folds,
+        "walkforward_capital_generalizes": wf_cap_generalizes,
+        "threshold_rule": {
+            "HIGH": "executed >= 30 AND rolling robust",
+            "MEDIUM": "executed >= 10 AND rolling folds >= 3",
+            "LOW": "else (표본 부족)",
+        },
+    }
+    print(f"  · confidence: {conf_level} — {light['confidence']['reason']}")
 
     # latest JSON 최종 업데이트
     if daily_port or report.get("all_trades") or report.get("rolling_walk_forward"):

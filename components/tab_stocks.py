@@ -2,6 +2,54 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.15] (2026-04-18) — 94→95: methodology 전체 통일 + 스키마 정합
+  #1 backtest_walkforward_latest.json, backtest_rolling_latest.json에도
+     구조화된 methodology 블록 삽입 (메인 JSON과 동일 dict 공유 + validation_type 추가)
+  #2 tab_stocks.py 헤더 하단에 "🔧 검증조건" 한 줄 추가
+     "horizon 10일 · fill 3일 · fee 0.22% · max_pos 1 · dedup ✓ · reentry ✓ · ..."
+  #3 audit CSV의 skip_reason 필드를 JSON skip_reasons_summary 키와 1:1 매칭
+     - "NOT_FILLED (설명문)" → skip_reason="NOT_FILLED" / skip_reason_detail="설명문"
+     - pandas groupby 등 집계가 깔끔해짐
+[v3.7.14] (2026-04-18) — 93→95: 신호/실집행 완전 분리 + 신뢰도 배지
+  #1 신호 성과 (signal_top1) vs 실집행 성과 (capital_portfolio_top1) 완전 분리
+     헤더 2줄 구조:
+       📡 신호: 23신호 / 19체결 / TP1 21% / EV +1.47%
+       💰 실집행: 5건 / +8.35% / MDD 19.83% / 실행률 26%
+  #2 Skip reason audit CSV (backtest_top1_execution_audit_latest.csv)
+     신호별 EXECUTE / SKIP (NOT_FILLED/HELD/SLOT_FULL) 이유 상세 로그
+  #3 Walk-forward dual measurement: signal 기준 + capital 기준 둘 다 저장
+     walkforward_signal_summary / walkforward_capital_summary 필드 분리
+  #4 methodology 블록 구조화 (horizon/fill/fee/dedup/reentry 등 공통 메타)
+  #5 Confidence badge 자동 판정:
+     HIGH  = 실행표본 30+ AND rolling robust
+     MEDIUM = 실행표본 10+ AND rolling 폴드 3+
+     LOW   = 그 이하 (현재 v3.7.14는 5건 → LOW)
+[v3.7.13] (2026-04-18) — 91→94: 리뷰어 과신 방지 지적 해소
+  #1 Rolling horizon 5 → 10 (메인/walk-forward와 통일)
+     이전엔 rolling만 horizon 5라 비교 일관성 깨짐
+  #2 Top1 자본시뮬 JSON에 signal_vs_capital_gap 필드 신설
+     신호 대비 실체결 차이 정량화 (슬롯풀 / 미체결 세부)
+  #3 헤더 카드에 실행률 gap 명시 — "신호 19→실체결 5건 (실행률 26%)"
+     50% 미만이면 노란색 경고, 이상이면 회색 안내
+     과신 방지: +8.35%만 크게 보지 말고 실제 집행 가능성 같이 보기
+[v3.7.12] (2026-04-18) — 차트 로드 버그 수정 (프로덕션 UX 버그)
+  #1 _get_chart_data가 _ds.get_ohlcv(code, period=120) 호출했는데
+     실제 시그니처는 (code, start_ymd, end_ymd) — 매번 TypeError로 None 반환
+     → 사용자가 SK이노베이션 등 종목 클릭 시 "📉 차트 데이터 로드 실패" 표시됐음
+  #2 로컬 parquet (data/ohlcv_cache_*.parquet) 우선 사용으로 전환
+     - Railway overseas IP가 pykrx/FDR 차단해도 작동
+     - 이전 세션에서 업로드한 1,036종목 × 400영업일 데이터 활용
+     - data_source fallback은 개발 환경 전용으로 유지
+  검증: SK이노베이션/현대엘리베이터/두산로보틱스 모두 120행 정상 로드
+[v3.7.11] (2026-04-18) — 정합성 마감 (리뷰어 4개 지적 해소)
+  #1 render_tab_stocks() 기본 경로를 Top1 우선으로 전환 (pick_top1 → pick_top3 폴백)
+  #2 backtest_validation.py에 daily_top1_backtest() 메인 루프 추가
+  #3 Top1 자본 시뮬 (simulate_capital_portfolio with max_positions=1) 별도 실행
+  #4 methodology 문구 "horizon 20" → "horizon 10"로 교정
+  #5 헤더 카드: summary_text를 Top1 기준으로, Top1 자본시뮬 강조 표시
+  실측 (36일, 1,000만원 자본 시뮬):
+    Top1: EV +1.47% · 자본 +8.35% · MDD 19.83% · 체결 82.6%  ✅
+    Top3: EV +0.33% · 자본 -8.00% · MDD 22.62% · 체결 75.9%  ❌
 [v3.7.10] (2026-04-17) — 🔥 진짜 수익 나는 모드 (버그 3개 수정 + Top1 전환)
   #1 자본시뮬 버그 수정: invested = capital / empty_slots (×)
      → invested = total_assets / max_positions (○)
@@ -178,14 +226,52 @@ def _plotly_dark(fig, height=300):
     return fig
 
 
-def _get_chart_data(code: str):
-    """캔들차트 데이터 (동기 — run.io_bound로 호출)"""
+def _get_chart_data(code: str, days: int = 120):
+    """캔들차트 데이터 (동기 — run.io_bound로 호출).
+
+    [v3.7.12 버그 수정] data_source.get_ohlcv 시그니처는 (code, start_ymd, end_ymd).
+    이전엔 period=120 키워드로 호출해서 TypeError → 항상 "데이터 로드 실패" 뜨고 있었음.
+
+    우선순위:
+      1) data/ohlcv_cache_*.parquet (가장 최신, Railway에서도 작동 — pykrx 불필요)
+      2) data_source.get_ohlcv() (pykrx → FDR fallback)
+    """
+    import os, glob, pandas as pd
+    from datetime import datetime, timedelta
+
+    # ── 1) 로컬 parquet 우선 (Railway IP 차단 회피) ──
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(here, "..", "data")
+        # 가장 최신 parquet 파일 1개만 읽으면 누적된 전체 과거분이 들어있음
+        files = sorted(glob.glob(os.path.join(data_dir, "ohlcv_cache_*.parquet")),
+                       reverse=True)
+        if files:
+            df = pd.read_parquet(files[0]).reset_index()
+            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+            sub = df[df["종목코드"] == code].copy()
+            if not sub.empty:
+                # 최근 `days` 영업일만
+                sub = sub.sort_values("Date").tail(days)
+                sub = sub.set_index("Date")
+                # pykrx 호환 컬럼명 (시가/고가/저가/종가/거래량)
+                if "시가" in sub.columns:
+                    return sub[["시가", "고가", "저가", "종가", "거래량"]].copy()
+                return sub
+    except Exception as e:
+        _logger.debug(f"parquet 차트 로드 실패 [{code}]: {e}")
+
+    # ── 2) data_source fallback (개발 환경) ──
     if _ds is None:
         return None
     try:
-        return _ds.get_ohlcv(code, period=120)
+        end = datetime.now()
+        start = end - timedelta(days=int(days * 1.7))  # 영업일 고려 여유분
+        end_ymd = end.strftime("%Y%m%d")
+        start_ymd = start.strftime("%Y%m%d")
+        return _ds.get_ohlcv(code, start_ymd, end_ymd)
     except Exception as e:
-        _logger.warning(f"차트 데이터 로드 실패 [{code}]: {e}")
+        _logger.warning(f"data_source 차트 로드 실패 [{code}]: {e}")
         return None
 
 
@@ -392,8 +478,12 @@ def compute_elite_labels(df: pd.DataFrame) -> pd.DataFrame:
 def pick_top1(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
     """[v3.7.10] 🏆 최강 중 RANK_SCORE 1위 1종목만.
 
-    백테스트 결과 매일 Top1만 뽑는 게 Top3보다 훨씬 성과 좋음 (+11.49% vs +1.10%).
-    이유: 2~3등은 1등 대비 품질이 떨어져 수익 희석.
+    [v3.7.11 정정] 실제 자본 시뮬 기준 (simulate_capital_portfolio):
+      - Top1 기간수익 +8.35%, MDD 19.83% (36일, 1,000만원 시뮬)
+      - Top3 기간수익 -8.00%, MDD 22.62% (동일 조건)
+      → Top1이 유일하게 자본 시뮬에서 플러스.
+
+    (이전 v3.7.10 README의 +11.49%는 엉성한 단일-포지션 추정. 이제 정식 자본 시뮬 숫자 사용.)
     """
     if df is None or df.empty or "ELITE_RANK_SCORE" not in df.columns:
         return []
@@ -480,9 +570,15 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
     #   by_label_top3         — 라벨별 Top3 세부
     #   walk_forward          — 단일 split IS/OOS 검증
     #   rolling_summary       — 여러 폴드 rolling 검증 요약
-    #   capital_portfolio     — 자본 기반 포트폴리오 시뮬 (MDD 포함)
+    #   capital_portfolio     — Top3 자본 시뮬 (참고용)
+    #   daily_top1_backtest   — [v3.7.11] Top1 전용 백테스트 (메인 지표)
+    #   capital_portfolio_top1 — [v3.7.11] Top1 자본 시뮬 (메인 지표)
+    #   signal_top1           — [v3.7.14] 신호 성과 명시 블록
+    #   confidence            — [v3.7.14] HIGH/MEDIUM/LOW 뱃지
     bt = _load_backtest_stats()
     daily_stats = bt.get("daily_top3_backtest") or {}
+    daily_top1 = bt.get("daily_top1_backtest") or {}  # [v3.7.11]
+    signal_top1 = bt.get("signal_top1") or {}  # [v3.7.14] 알파 품질
     by_label_stats = bt.get("by_label_top3") or {}
     strong_stats = by_label_stats.get("🏆 최강") or {}
     instant_stats = by_label_stats.get("✅ 즉시진입") or {}
@@ -490,16 +586,26 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
     rolling_stats = bt.get("rolling_summary") or {}
     port_stats = bt.get("daily_portfolio_summary") or {}
     capital_stats = bt.get("capital_portfolio") or {}
+    capital_top1 = bt.get("capital_portfolio_top1") or {}  # [v3.7.11]
+    confidence = bt.get("confidence") or {}  # [v3.7.14]
     days_covered = bt.get("days_covered", 0)
 
-    # 헤더 우측 요약 — 체결률 포함 (v3.7.8)
-    if daily_stats and daily_stats.get("n", 0) >= 10:
+    # [v3.7.14] 헤더 summary_text — 신호 성과만 담기 (실집행은 아래 줄에서 별도)
+    if daily_top1 and daily_top1.get("n", 0) >= 5:
+        tp1_pct = daily_top1["tp1_rate"] * 100
+        ev_pct = daily_top1["ev"]
+        fill_rate = daily_top1.get("fill_rate", 1.0) * 100
+        summary_text = (
+            f"{days_covered}일 · 📡신호 {daily_top1['n']}/{daily_top1.get('n_all_picks', daily_top1['n'])}건 "
+            f"({fill_rate:.0f}%) · TP1 {tp1_pct:.1f}% · EV {ev_pct:+.2f}%"
+        )
+    elif daily_stats and daily_stats.get("n", 0) >= 10:
         tp1_pct = daily_stats["tp1_rate"] * 100
         ev_pct = daily_stats["ev"]
         ohlc_pct = daily_stats.get("ohlc_coverage", 0) * 100
         fill_rate = daily_stats.get("fill_rate", 1.0) * 100
         summary_text = (
-            f"{days_covered}일 · 체결 {daily_stats['n']}/{daily_stats.get('n_all_picks', daily_stats['n'])}건 "
+            f"{days_covered}일 · [Top3] 체결 {daily_stats['n']}/{daily_stats.get('n_all_picks', daily_stats['n'])}건 "
             f"({fill_rate:.0f}%) · TP1 {tp1_pct:.1f}% · EV {ev_pct:+.2f}% · OHLC {ohlc_pct:.0f}%"
         )
     else:
@@ -558,7 +664,77 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                 f"플러스 마감 {n_pos}/{n_days}일 ({pos_rate:.0f}%)"
             ).classes(f"text-xs {p_color} mb-1")
 
-        # [v3.7.8] 자본 기반 포트폴리오 시뮬 (MDD 포함)
+        # ═══════════════════════════════════════════════════
+        # [v3.7.14] 신호 성과 vs 실집행 성과 완전 분리 (리뷰어 최우선 지적)
+        # ═══════════════════════════════════════════════════
+
+        # 📡 1줄차: 신호 성과 (알파 품질) — 자본 제약 없이 순수 시그널
+        sig_src = signal_top1 if signal_top1 else daily_top1
+        if sig_src and sig_src.get("n_filled" if signal_top1 else "n", 0) > 0:
+            if signal_top1:
+                n_total = signal_top1.get("n_signals_total", 0)
+                n_filled_s = signal_top1.get("n_filled", 0)
+                ev_s = signal_top1.get("ev_net_pct", 0)
+                tp1_s = signal_top1.get("tp1_rate", 0) * 100
+                fill_s = signal_top1.get("fill_rate", 0) * 100
+            else:
+                n_total = daily_top1.get("n_all_picks", 0)
+                n_filled_s = daily_top1.get("n", 0)
+                ev_s = daily_top1.get("ev", 0)
+                tp1_s = daily_top1.get("tp1_rate", 0) * 100
+                fill_s = daily_top1.get("fill_rate", 0) * 100
+            sig_clr = "text-blue-400" if ev_s > 0 else "text-red-400"
+            ui.label(
+                f"📡 신호 성과 (알파 품질): "
+                f"{n_total}신호 / {n_filled_s}체결 ({fill_s:.0f}%) · "
+                f"TP1 {tp1_s:.1f}% · EV {ev_s:+.2f}%"
+            ).classes(f"text-xs {sig_clr} mb-1 font-semibold")
+
+        # 💰 2줄차: 실집행 성과 (실전 운용 가능성) — 자본 시뮬 기준
+        if capital_top1 and capital_top1.get("n_trades_filled", 0) > 0:
+            t1_ret = capital_top1.get("total_return_pct", 0)
+            t1_mdd = capital_top1.get("max_drawdown_pct", 0)
+            t1_n = capital_top1["n_trades_filled"]
+            t1_init = capital_top1.get("initial_capital", 10_000_000)
+
+            gap = capital_top1.get("signal_vs_capital_gap", {})
+            exec_rate = gap.get("execution_rate", 1.0) * 100 if gap else 100
+            m = "💰" if t1_ret > 0 else "💸"
+            clr = "text-green-400" if t1_ret > 0 else "text-red-400"
+            ui.label(
+                f"{m} 실집행 성과 (실전 운용): "
+                f"{t1_n}건 ({int(t1_init/1e4):,}만원 동시1포지션) · "
+                f"{t1_ret:+.2f}% · MDD {t1_mdd:.1f}% · 실행률 {exec_rate:.0f}%"
+            ).classes(f"text-xs {clr} mb-1 font-semibold")
+
+            # 스킵 이유별 분해 (audit 있으면)
+            skip = capital_top1.get("skip_reasons_summary", {})
+            if skip:
+                sk_exec = skip.get("EXECUTED", 0)
+                sk_nf = skip.get("NOT_FILLED", 0)
+                sk_held = skip.get("SAME_TICKER_ALREADY_HELD", 0)
+                sk_full = skip.get("SLOT_FULL", 0)
+                sk_total = skip.get("total_signals", 0)
+                ui.label(
+                    f"  └ 신호 {sk_total} → 실행 {sk_exec} · "
+                    f"미체결 {sk_nf} · 기보유 {sk_held} · 슬롯풀 {sk_full}"
+                ).classes("text-xs text-gray-500 mb-1 ml-4")
+
+        # 🏅 3줄차: Confidence badge (과신 방지 핵심)
+        if confidence:
+            lvl = confidence.get("level", "LOW")
+            reason = confidence.get("reason", "")
+            if lvl == "HIGH":
+                badge_txt, badge_clr = "🏅 HIGH", "text-green-400"
+            elif lvl == "MEDIUM":
+                badge_txt, badge_clr = "🏅 MEDIUM", "text-yellow-400"
+            else:
+                badge_txt, badge_clr = "🏅 LOW", "text-red-400"
+            ui.label(
+                f"{badge_txt} 실집행 신뢰도 — {reason}"
+            ).classes(f"text-xs {badge_clr} mb-1 font-bold")
+
+        # [v3.7.8→v3.7.11] Top3 자본 시뮬 (참고용)
         if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
             total_ret = capital_stats.get("total_return_pct", 0)
             mdd = capital_stats.get("max_drawdown_pct", 0)
@@ -566,13 +742,11 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
             n_nf = capital_stats.get("n_skipped_not_filled", 0)
             n_dup = capital_stats.get("n_skipped_duplicate", 0)
             init_cap = capital_stats.get("initial_capital", 10_000_000)
-            fin_cap = capital_stats.get("final_capital", init_cap)
-            c_mark = "💰" if total_ret > 0 else "💸"
-            c_color = "text-green-400" if total_ret > 0 else "text-red-400"
+            c_mark = "·" if total_ret > 0 else "·"
+            c_color = "text-gray-500"  # 참고용이므로 회색
             ui.label(
-                f"{c_mark} 자본시뮬 (초기 {int(init_cap/1e4):,}만원 · 최대3포지션): "
-                f"기간수익 {total_ret:+.2f}% · MDD {mdd:.1f}% · "
-                f"체결 {n_filled}건 · 중복스킵 {n_dup}건 · 미체결 {n_nf}건"
+                f"{c_mark} (참고) [Top3 모드] 자본시뮬: "
+                f"기간수익 {total_ret:+.2f}% · MDD {mdd:.1f}% · 체결 {n_filled}건"
             ).classes(f"text-xs {c_color} mb-1")
 
         # [v3.7.8] Rolling walk-forward 종합
@@ -588,6 +762,23 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                 f"{r_mark} Rolling {n_gen}/{n_val} 폴드 일반화 · "
                 f"평균 IS {avg_is:+.2f}% → OOS {avg_oos:+.2f}%"
             ).classes(f"text-xs {r_color} mb-1")
+
+        # [v3.7.15] methodology 메타 한 줄 — 검증 조건 완전 투명화
+        methodology = bt.get("methodology")
+        if isinstance(methodology, dict):
+            mh = methodology.get("horizon_days", "?")
+            mf = methodology.get("fill_window_days", "?")
+            mc = methodology.get("fee_pct_roundtrip", "?")
+            mp = methodology.get("max_positions_top1", "?")
+            mdedup = "✓" if methodology.get("dedup_same_ticker") else "✗"
+            mreentry = "✓" if methodology.get("reentry_after_exit") else "✗"
+            msel = methodology.get("selection_mode", "?")
+            mdate = methodology.get("date_range", ["", ""])
+            ui.label(
+                f"🔧 검증조건: horizon {mh}일 · fill {mf}일 · fee {mc}% · "
+                f"max_pos {mp} · dedup {mdedup} · reentry {mreentry} · "
+                f"{msel} · {mdate[0]}~{mdate[1]}"
+            ).classes("text-[10px] text-gray-500 mb-1 italic")
 
         if not top3_codes:
             # [v3.7.2] 빈 상태에도 백테스트 실측을 표시 — 데이터의 정직함 우선
@@ -655,9 +846,14 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         store: services.data_store.store 인스턴스 (현재 미사용, 장래 확장용)
     """
 
-    # ── [v3.7] 라벨링 한 번만 적용 (DataFrame 전체) ──
+    # ── [v3.7.11] 라벨링 + Top1 우선 선별 (pick_top3은 fallback) ──
+    # Top1이 "진짜 수익 나는" 기본 모드. 🏆 최강이 없으면 pick_top3으로 폴백.
+    # (UI에선 헤더 카드에 Top1을 강조 표시, 테이블엔 여러 종목도 함께 표시)
     df = compute_elite_labels(df)
-    top3_codes = pick_top3(df)
+    top1_codes = pick_top1(df)
+    top3_fallback = pick_top3(df) if not top1_codes else []
+    # 헤더 카드에 표시할 종목들: Top1이 있으면 Top1만, 없으면 폴백 Top3
+    top3_codes = top1_codes if top1_codes else top3_fallback
 
     ui.label("🎯 AI & Quant 추천 종목").classes(
         "text-xl font-bold text-white mb-4"
