@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-04-17T23:50:28",
+  "version": "v2",
+  "horizon_bdays": 10,
+  "trade_cost_pct": 0.22,
+  "days_covered": 36,
+  "ohlc_coverage_note": "OHLC parquet 종목수: 1036 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
+  "methodology": "v2: 매일 pick_top3()로 실제 3종목 선별 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 20일 미도달시 종가 마감. OHLC 없는 종목은 종가 폴백 (method 필드로 구분).",
+  "daily_top3_backtest": {
+    "n": 44,
+    "n_all_picks": 55,
+    "n_not_filled": 11,
+    "fill_rate": 0.8,
+    "tp1_rate": 0.25,
+    "stop_rate": 0.4091,
+    "open_rate": 0.3409,
+    "avg_tp1": 19.0,
+    "avg_stop": -10.66,
+    "avg_open": 0.49,
+    "avg_all": 0.55,
+    "ev": 0.33,
+    "ohlc_coverage": 1.0
+  },
+  "by_label_top3": {
+    "🏆 최강": {
+      "n": 44,
+      "n_all_picks": 55,
+      "n_not_filled": 11,
+      "fill_rate": 0.8,
+      "tp1_rate": 0.25,
+      "stop_rate": 0.4091,
+      "open_rate": 0.3409,
+      "avg_tp1": 19.0,
+      "avg_stop": -10.66,
+      "avg_open": 0.49,
+      "avg_all": 0.55,
+      "ev": 0.33,
+      "ohlc_coverage": 1.0
+    }
+  },
+  "daily_portfolio_summary": {
+    "n_days": 23,
+    "avg_daily_portfolio_ret_gross": -0.54,
+    "avg_daily_portfolio_ret_net": -0.73,
+    "avg_daily_portfolio_ret": -0.73,
+    "n_positive_days": 12,
+    "n_positive_days_gross": 12,
+    "positive_rate": 0.5217,
+    "cost_basis": "net (비용 차감 후)"
+  },
+  "capital_portfolio": {
+    "initial_capital": 10000000,
+    "final_capital": 9200129.0,
+    "total_return_pct": -8.0,
+    "max_drawdown_pct": 22.62,
+    "n_trades_filled": 16,
+    "n_skipped_duplicate": 8,
+    "n_skipped_not_filled": 11,
+    "positive_day_rate": 0.3333,
+    "cost_basis": "net (거래당 0.22% 차감)"
+  }
+}

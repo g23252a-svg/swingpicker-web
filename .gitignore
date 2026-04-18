@@ -34,3 +34,12 @@ docs_cache/
 .DS_Store
 Thumbs.db
 .env
+
+# v3.7.10: 백테스트 산출물은 UI가 읽어야 하므로 포함
+!data/backtest_validation_latest.json
+!data/backtest_top3_trades_*.csv
+!data/backtest_daily_portfolio_latest.csv
+!data/backtest_capital_curve_latest.csv
+!data/backtest_walkforward_latest.json
+!data/backtest_rolling_latest.json
+*.pyc
