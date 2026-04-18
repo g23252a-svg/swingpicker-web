@@ -2,6 +2,16 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.21] (2026-04-18) — 매일 백테스트 자동 갱신 + 데이터 신선도 표시
+  #1 auto_collect.yml에 backtest_validation 실행 단계 추가
+     - 평일 20:05 KST Collector 후 자동으로 backtest_validation.py 실행
+     - 매일 장 마감 데이터까지 반영된 최신 검증 JSON 생성
+     - 이전엔 수동으로만 돌려서 wf capital 0/5 · 실집행 5건 고착 상태
+  #2 실패 시 기존 JSON 유지하고 계속 진행 (|| exit 0 안전장치)
+  #3 Tab 2 상단에 "마지막 검증 갱신" 시각 표시
+     - 신선도 색상: 🟢 24h 이내 / 🟡 3일 이내 / 🔴 3일 초과
+     - 예: "🟢 마지막 검증 갱신: 2026-04-18 20:15 (2시간 전) · 버전 v3.7.15"
+  #4 사용자가 숫자 기준 시점을 즉시 알 수 있음 (freshness 투명화)
 [v3.7.20] (2026-04-18) — CSV 다운로드 기능 복구
   #1 CSV 다운로드 버튼 복구 (Streamlit→NiceGUI 마이그레이션 시 누락됐던 기능)
      - backup_v205c_20260310/dashboard.py 라인 3759-3760에 원본 존재 확인
@@ -1320,6 +1330,45 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                 f"max_pos {mp} · dedup {mdedup} · reentry {mreentry} · "
                 f"{msel} · {mdate[0]}~{mdate[1]}"
             ).classes("text-[10px] text-gray-500 mb-1 italic")
+
+        # [v3.7.21] 검증 JSON 생성 시각 표시 — 데이터 신선도(Freshness) 투명화
+        # 이전엔 generated_at이 전혀 표시 안 돼서 사용자가 숫자 기준 시점 모름
+        # auto_collect.yml에서 매일 백테스트 자동 실행 후 여기에 갱신 시각 반영
+        generated_at = bt.get("generated_at", "")
+        if generated_at:
+            # "2026-04-18T01:08:10" → "2026-04-18 01:08"
+            gen_display = generated_at.replace("T", " ")[:16]
+            # 얼마나 오래됐는지 계산 (UI 색상으로 신선도 표시)
+            try:
+                from datetime import datetime, timezone
+                gen_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+                if gen_dt.tzinfo is None:
+                    gen_dt = gen_dt.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                age_hours = (now - gen_dt).total_seconds() / 3600
+                if age_hours < 24:
+                    freshness = "🟢"  # 24시간 이내 (fresh)
+                    fresh_cls = "text-green-500"
+                elif age_hours < 72:
+                    freshness = "🟡"  # 3일 이내 (stale)
+                    fresh_cls = "text-yellow-500"
+                else:
+                    freshness = "🔴"  # 3일 초과 (outdated)
+                    fresh_cls = "text-red-500"
+                age_txt = (
+                    f"{int(age_hours)}시간 전" if age_hours < 48
+                    else f"{int(age_hours/24)}일 전"
+                )
+            except Exception:
+                freshness = "📅"
+                fresh_cls = "text-gray-500"
+                age_txt = ""
+            ver = bt.get("version", "")
+            ui.label(
+                f"{freshness} 마지막 검증 갱신: {gen_display}"
+                + (f" ({age_txt})" if age_txt else "")
+                + (f" · 버전 {ver}" if ver else "")
+            ).classes(f"text-[10px] {fresh_cls} mb-2 italic")
 
         if not top3_codes:
             # [v3.7.2] 빈 상태에도 백테스트 실측을 표시 — 데이터의 정직함 우선
