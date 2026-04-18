@@ -2,6 +2,13 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.16] (2026-04-18) — 차트 렌더러 미로드 긴급 수정
+  #1 chart_components.py에 plot_candle_chart 함수가 없어서 _plot_candle=None
+     → 프로덕션에서 "📉 차트 렌더러 미로드" 표시됐음
+  #2 tab_stocks.py 내부에 내장 캔들차트 fallback 추가
+     - chart_components import 실패해도 plotly로 직접 캔들차트 생성
+     - 컬럼명 자동 매핑 (시가/Open, 고가/High 등)
+     - 매수/손절/T1/T2 수평선 + 라벨 표시
 [v3.7.15] (2026-04-18) — 94→95: methodology 전체 통일 + 스키마 정합
   #1 backtest_walkforward_latest.json, backtest_rolling_latest.json에도
      구조화된 methodology 블록 삽입 (메인 JSON과 동일 dict 공유 + validation_type 추가)
@@ -191,6 +198,81 @@ except ImportError:
     _plot_candle = None
     plot_radar_chart = None
     plot_score_waterfall = None
+
+# [v3.7.16] chart_components에 plot_candle_chart가 없으면 내장 구현 사용
+# 프로덕션에서 "차트 렌더러 미로드" 에러 방지
+if _plot_candle is None:
+    try:
+        import plotly.graph_objects as _go
+
+        def _plot_candle(cdata, code, name="", entry=None, stop=None, t1=None, t2=None):
+            """내장 캔들차트 — chart_components.plot_candle_chart 부재 시 fallback.
+
+            cdata: OHLCV DataFrame with columns [시가, 고가, 저가, 종가, 거래량]
+                   and DatetimeIndex.
+            """
+            if cdata is None or cdata.empty:
+                return None
+
+            # 컬럼 존재 확인 (데이터 소스 따라 시가/Open 혼재 가능성)
+            col_map = {}
+            for ko, en in [("시가", "Open"), ("고가", "High"),
+                           ("저가", "Low"), ("종가", "Close"),
+                           ("거래량", "Volume")]:
+                if ko in cdata.columns:
+                    col_map[ko] = ko
+                elif en in cdata.columns:
+                    col_map[ko] = en
+
+            if not all(k in col_map for k in ("시가", "고가", "저가", "종가")):
+                return None
+
+            fig = _go.Figure()
+            fig.add_trace(_go.Candlestick(
+                x=cdata.index,
+                open=cdata[col_map["시가"]],
+                high=cdata[col_map["고가"]],
+                low=cdata[col_map["저가"]],
+                close=cdata[col_map["종가"]],
+                name="OHLC",
+                increasing_line_color="#26a69a",
+                decreasing_line_color="#ef5350",
+            ))
+
+            # 매수/손절/목표 수평선
+            shapes = []
+            annotations = []
+            for val, label, color in [
+                (entry, "매수", "#4FC3F7"),
+                (stop,  "손절", "#EF5350"),
+                (t1,    "T1",   "#66BB6A"),
+                (t2,    "T2",   "#FFCA28"),
+            ]:
+                if val and val > 0:
+                    shapes.append(dict(
+                        type="line", xref="paper", x0=0, x1=1,
+                        y0=val, y1=val, line=dict(color=color, width=1.2, dash="dash"),
+                    ))
+                    annotations.append(dict(
+                        xref="paper", yref="y", x=1.005, y=val,
+                        xanchor="left", yanchor="middle",
+                        text=f"{label} {val:,.0f}",
+                        showarrow=False,
+                        font=dict(color=color, size=11),
+                    ))
+
+            title_txt = f"{name} ({code})" if name else code
+            fig.update_layout(
+                title=title_txt,
+                xaxis_rangeslider_visible=False,
+                shapes=shapes,
+                annotations=annotations,
+                margin=dict(l=10, r=80, t=30, b=10),
+            )
+            return fig
+    except ImportError:
+        # plotly도 없으면 포기
+        pass
 
 try:
     from data_source import get_data_source
