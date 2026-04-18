@@ -1,0 +1,273 @@
+{
+  "generated_at": "2026-04-18T01:08:10",
+  "methodology": {
+    "horizon_days": 10,
+    "fill_window_days": 3,
+    "fee_pct_roundtrip": 0.22,
+    "max_positions_top1": 1,
+    "max_positions_top3": 3,
+    "dedup_same_ticker": true,
+    "reentry_after_exit": true,
+    "selection_mode": "top1_first_then_top3_fallback",
+    "date_range": [
+      "2026-02-26",
+      "2026-04-16"
+    ],
+    "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능.",
+    "validation_type": "walk_forward_single_split",
+    "validation_description": "전체 기간을 시간순 2등분: IS(앞절반) 튜닝 → OOS(뒤절반) 재측정. IS Top 5 조합이 OOS에서 EV+ 유지하면 일반화, EV 음수로 뒤집히면 오버피팅 증거."
+  },
+  "is_period": "20260226 ~ 20260323",
+  "oos_period": "20260324 ~ 20260416",
+  "is_days": 18,
+  "oos_days": 18,
+  "horizon_used": 10,
+  "results": [
+    {
+      "rank_in_is": 1,
+      "thresholds": {
+        "strong_mean": 65,
+        "strong_bal": 70,
+        "strong_gap": 5,
+        "strong_rr": 0.8
+      },
+      "is_summary": {
+        "n": 20,
+        "n_all_picks": 23,
+        "n_not_filled": 3,
+        "fill_rate": 0.8696,
+        "tp1_rate": 0.15,
+        "stop_rate": 0.7,
+        "open_rate": 0.15,
+        "avg_tp1": 20.33,
+        "avg_stop": -9.82,
+        "avg_open": -6.61,
+        "avg_all": -4.81,
+        "ev": -5.03,
+        "ohlc_coverage": 1.0
+      },
+      "oos_summary": {
+        "n": 31,
+        "n_all_picks": 41,
+        "n_not_filled": 10,
+        "fill_rate": 0.7561,
+        "tp1_rate": 0.2903,
+        "stop_rate": 0.1935,
+        "open_rate": 0.5161,
+        "avg_tp1": 19.24,
+        "avg_stop": -14.27,
+        "avg_open": 1.22,
+        "avg_all": 3.45,
+        "ev": 3.23,
+        "ohlc_coverage": 1.0
+      },
+      "generalizes": true,
+      "decay": -8.26,
+      "oos_capital": {
+        "total_return_pct": -0.58,
+        "max_drawdown_pct": 11.53,
+        "n_executed": 8
+      },
+      "capital_generalizes": false
+    },
+    {
+      "rank_in_is": 2,
+      "thresholds": {
+        "strong_mean": 70,
+        "strong_bal": 70,
+        "strong_gap": 10,
+        "strong_rr": 0.8
+      },
+      "is_summary": {
+        "n": 20,
+        "n_all_picks": 22,
+        "n_not_filled": 2,
+        "fill_rate": 0.9091,
+        "tp1_rate": 0.15,
+        "stop_rate": 0.75,
+        "open_rate": 0.1,
+        "avg_tp1": 20.33,
+        "avg_stop": -10.16,
+        "avg_open": -6.42,
+        "avg_all": -5.22,
+        "ev": -5.44,
+        "ohlc_coverage": 1.0
+      },
+      "oos_summary": {
+        "n": 27,
+        "n_all_picks": 38,
+        "n_not_filled": 11,
+        "fill_rate": 0.7105,
+        "tp1_rate": 0.2963,
+        "stop_rate": 0.2222,
+        "open_rate": 0.4815,
+        "avg_tp1": 20.78,
+        "avg_stop": -14.1,
+        "avg_open": 0.47,
+        "avg_all": 3.25,
+        "ev": 3.03,
+        "ohlc_coverage": 1.0
+      },
+      "generalizes": true,
+      "decay": -8.47,
+      "oos_capital": {
+        "total_return_pct": -9.46,
+        "max_drawdown_pct": 17.53,
+        "n_executed": 10
+      },
+      "capital_generalizes": false
+    },
+    {
+      "rank_in_is": 3,
+      "thresholds": {
+        "strong_mean": 65,
+        "strong_bal": 70,
+        "strong_gap": 7,
+        "strong_rr": 0.8
+      },
+      "is_summary": {
+        "n": 21,
+        "n_all_picks": 24,
+        "n_not_filled": 3,
+        "fill_rate": 0.875,
+        "tp1_rate": 0.1429,
+        "stop_rate": 0.7143,
+        "open_rate": 0.1429,
+        "avg_tp1": 20.33,
+        "avg_stop": -10.17,
+        "avg_open": -6.61,
+        "avg_all": -5.3,
+        "ev": -5.52,
+        "ohlc_coverage": 1.0
+      },
+      "oos_summary": {
+        "n": 33,
+        "n_all_picks": 43,
+        "n_not_filled": 10,
+        "fill_rate": 0.7674,
+        "tp1_rate": 0.303,
+        "stop_rate": 0.2424,
+        "open_rate": 0.4545,
+        "avg_tp1": 19.71,
+        "avg_stop": -14.48,
+        "avg_open": 1.6,
+        "avg_all": 3.19,
+        "ev": 2.97,
+        "ohlc_coverage": 1.0
+      },
+      "generalizes": true,
+      "decay": -8.49,
+      "oos_capital": {
+        "total_return_pct": -3.27,
+        "max_drawdown_pct": 17.85,
+        "n_executed": 10
+      },
+      "capital_generalizes": false
+    },
+    {
+      "rank_in_is": 4,
+      "thresholds": {
+        "strong_mean": 65,
+        "strong_bal": 70,
+        "strong_gap": 10,
+        "strong_rr": 0.8
+      },
+      "is_summary": {
+        "n": 22,
+        "n_all_picks": 25,
+        "n_not_filled": 3,
+        "fill_rate": 0.88,
+        "tp1_rate": 0.1364,
+        "stop_rate": 0.7273,
+        "open_rate": 0.1364,
+        "avg_tp1": 20.33,
+        "avg_stop": -10.47,
+        "avg_open": -6.61,
+        "avg_all": -5.74,
+        "ev": -5.96,
+        "ohlc_coverage": 1.0
+      },
+      "oos_summary": {
+        "n": 32,
+        "n_all_picks": 43,
+        "n_not_filled": 11,
+        "fill_rate": 0.7442,
+        "tp1_rate": 0.2812,
+        "stop_rate": 0.25,
+        "open_rate": 0.4688,
+        "avg_tp1": 20.37,
+        "avg_stop": -14.48,
+        "avg_open": 1.6,
+        "avg_all": 2.86,
+        "ev": 2.64,
+        "ohlc_coverage": 1.0
+      },
+      "generalizes": true,
+      "decay": -8.6,
+      "oos_capital": {
+        "total_return_pct": -6.05,
+        "max_drawdown_pct": 17.53,
+        "n_executed": 10
+      },
+      "capital_generalizes": false
+    },
+    {
+      "rank_in_is": 5,
+      "thresholds": {
+        "strong_mean": 65,
+        "strong_bal": 70,
+        "strong_gap": 7,
+        "strong_rr": 1.0
+      },
+      "is_summary": {
+        "n": 20,
+        "n_all_picks": 23,
+        "n_not_filled": 3,
+        "fill_rate": 0.8696,
+        "tp1_rate": 0.1,
+        "stop_rate": 0.75,
+        "open_rate": 0.15,
+        "avg_tp1": 25.89,
+        "avg_stop": -10.17,
+        "avg_open": -6.61,
+        "avg_all": -6.03,
+        "ev": -6.25,
+        "ohlc_coverage": 1.0
+      },
+      "oos_summary": {
+        "n": 32,
+        "n_all_picks": 41,
+        "n_not_filled": 9,
+        "fill_rate": 0.7805,
+        "tp1_rate": 0.2812,
+        "stop_rate": 0.25,
+        "open_rate": 0.4688,
+        "avg_tp1": 20.48,
+        "avg_stop": -14.48,
+        "avg_open": 1.6,
+        "avg_all": 2.89,
+        "ev": 2.67,
+        "ohlc_coverage": 1.0
+      },
+      "generalizes": true,
+      "decay": -8.92,
+      "oos_capital": {
+        "total_return_pct": -3.27,
+        "max_drawdown_pct": 17.85,
+        "n_executed": 10
+      },
+      "capital_generalizes": false
+    }
+  ],
+  "walkforward_signal_summary": {
+    "n_results": 5,
+    "n_generalizes_signal": 5,
+    "avg_oos_ev": 2.91
+  },
+  "walkforward_capital_summary": {
+    "n_results": 5,
+    "n_generalizes_capital": 0,
+    "avg_oos_return": -4.53,
+    "avg_oos_mdd": 16.46
+  }
+}

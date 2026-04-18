@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-04-18T01:08:10",
+  "methodology": {
+    "horizon_days": 10,
+    "fill_window_days": 3,
+    "fee_pct_roundtrip": 0.22,
+    "max_positions_top1": 1,
+    "max_positions_top3": 3,
+    "dedup_same_ticker": true,
+    "reentry_after_exit": true,
+    "selection_mode": "top1_first_then_top3_fallback",
+    "date_range": [
+      "2026-02-26",
+      "2026-04-16"
+    ],
+    "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능.",
+    "validation_type": "rolling_walk_forward_expanding",
+    "n_folds_target": 3,
+    "is_ratio": 0.6,
+    "validation_description": "Expanding rolling walk-forward: 전체 기간을 n_folds 구간으로 나누고, 각 폴드마다 이전 전체 구간을 IS로 튜닝 → 다음 구간에서 OOS 측정. 여러 장세에 걸친 robust 엔진인지 확인."
+  },
+  "horizon_used": 10,
+  "n_folds_requested": 3,
+  "is_ratio": 0.6,
+  "summary": {
+    "n_folds": 3,
+    "n_valid": 2,
+    "n_generalizes": 1,
+    "avg_is_ev": -1.55,
+    "avg_oos_ev": 1.93,
+    "robust": false
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "is_period": "20260226~20260310",
+      "oos_period": "20260311~20260323",
+      "error": "IS 샘플 부족"
+    },
+    {
+      "fold": 2,
+      "is_period": "20260226~20260323",
+      "oos_period": "20260324~20260403",
+      "best_thresholds": {
+        "strong_mean": 65,
+        "strong_bal": 70,
+        "strong_gap": 5,
+        "strong_rr": 0.8
+      },
+      "is_ev": -5.03,
+      "oos_ev": -0.53,
+      "oos_n": 16,
+      "generalizes": false,
+      "decay": -4.5
+    },
+    {
+      "fold": 3,
+      "is_period": "20260226~20260403",
+      "oos_period": "20260406~20260416",
+      "best_thresholds": {
+        "strong_mean": 75,
+        "strong_bal": 75,
+        "strong_gap": 3,
+        "strong_rr": 0.8
+      },
+      "is_ev": 1.94,
+      "oos_ev": 4.39,
+      "oos_n": 5,
+      "generalizes": true,
+      "decay": -2.45
+    }
+  ]
+}
