@@ -2,6 +2,19 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.24] (2026-04-18) — 검증점수 표시 통일 + 명칭 명확화
+  사용자 지적: "같은 '검증점수' 라벨인데 테이블과 상세영역 값이 다름 (80 vs 22)"
+  원인:
+    · 테이블: ELITE_SCORE > ELITE_RANK_SCORE 폴백 → 세아 80
+    · 상세영역: ELITE_RANK_SCORE만 → 세아 22
+    · + "검증"이라는 단어가 walk-forward 검증과 무관인데 오해 유발
+  #1 테이블 컬럼 분리: "검증점수" 하나 → "종합" + "랭크" 2개
+     - 종합 (ELITE_SCORE) : 파이프라인 최종 스코어
+     - 랭크 (ELITE_RANK_SCORE): 내부 Top 선별용 (라벨/밸런스/RR 보정)
+  #2 상세영역도 테이블과 동일하게 "종합" + "랭크" 2개 미니바 표시
+     - 같은 종목에서 두 값 일관되게 매치
+  #3 정렬 옵션: "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준임을 명확화)
+  #4 "검증"이라는 혼동 용어 제거 (walk-forward와 무관한 점수)
 [v3.7.23] (2026-04-18) — 헤더 카드 읽기 순서 최적화 + 제목 정확화
   사용자 리뷰어 지적 3가지 전부 반영:
   #1 제목: "🏆 오늘의 검증 Top 3" → "🏆 오늘의 실전 Top Pick"
@@ -1539,10 +1552,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ["전체", "🏆 최강", "✅ 즉시진입", "⚠️ 추격"],
             value="전체", label="라벨",
         ).classes("min-w-[130px]")
-        # [v3.7] "⚖️ 밸런스순" 추가
+        # [v3.7.24] "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준 명확화)
         sort_mode = ui.toggle(
-            ["🔢 점수순", "⚖️ 밸런스순", "🏆 검증순", "🚦 상태순"],
-            value="🏆 검증순",
+            ["🔢 점수순", "⚖️ 밸런스순", "🏆 랭크순", "🚦 상태순"],
+            value="🏆 랭크순",
         )
 
     # [v3.7.18] 라벨 기준 투명 공개 (사용자 혼란 방지)
@@ -1694,7 +1707,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             a_col = fdf["AI_SCORE"].fillna(0)     if "AI_SCORE"     in fdf.columns else 0
             fdf = fdf.assign(_axis_min=pd.concat([s_col, t_col, a_col], axis=1).min(axis=1))
             fdf = fdf.sort_values("_axis_min", ascending=False).drop(columns=["_axis_min"])
-        elif sort_mode.value == "🏆 검증순" and "ELITE_RANK_SCORE" in fdf.columns:
+        elif sort_mode.value == "🏆 랭크순" and "ELITE_RANK_SCORE" in fdf.columns:
             fdf = fdf.sort_values("ELITE_RANK_SCORE", ascending=False)
         elif sort_mode.value == "🚦 상태순" and "ROUTE" in fdf.columns:
             # ATTACK → ARMED → WAIT → NEUTRAL → OVERHEAT → CARRY → 기타
@@ -1749,7 +1762,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
              "align": "center", "sortable": True},
             {"name": "ai", "label": "AI", "field": "ai",
              "align": "center", "sortable": True},
-            {"name": "elite", "label": "검증점수", "field": "elite",
+            # [v3.7.24] "검증점수" → "종합"으로 명확화
+            # ELITE_SCORE는 파이프라인 최종 스코어 (walk-forward 검증과 무관)
+            # "검증"이라는 단어가 오해를 유발해서 "종합"으로 변경
+            {"name": "elite", "label": "종합", "field": "elite",
+             "align": "center", "sortable": True},
+            # [v3.7.24] 랭크 스코어 별도 컬럼 추가 (내부 Top 선별용)
+            {"name": "rank", "label": "랭크", "field": "rank",
              "align": "center", "sortable": True},
             {"name": "bal", "label": "균형", "field": "bal",
              "align": "center", "sortable": True},
@@ -1772,8 +1791,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
                 "t":     f'{_nz(r.get("TIMING_SCORE",  0)):.0f}',
                 "ai":    f'{_nz(r.get("AI_SCORE",      0)):.0f}',
-                # [v3.7.1] ELITE_SCORE 없으면 ELITE_RANK_SCORE 폴백 (정합성)
+                # [v3.7.24] 검증점수 → 종합/랭크 2개 분리 (구분 명확화)
+                # 종합 (elite): ELITE_SCORE (파이프라인 최종) > ELITE_RANK_SCORE 폴백
                 "elite": f'{_nz(r.get("ELITE_SCORE", r.get("ELITE_RANK_SCORE", 0))):.0f}',
+                # 랭크 (rank): ELITE_RANK_SCORE (내부 Top 선별용)
+                "rank":  f'{_nz(r.get("ELITE_RANK_SCORE", 0)):.0f}',
                 "bal":   f'{_nz(r.get("BALANCE_CALC",  r.get("BALANCE_SCORE", 0))):.0f}',
                 "gap":   f'{_nz(r.get("GAP_PCT", 0)):.1f}',
                 "close": f'{int(_nz(r.get("종가", 0))):,}',
@@ -1982,7 +2004,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     t_val = _nz(row.get("TIMING_SCORE", row.get("T_SCORE", 0)))
                     ai_val = _nz(row.get("AI_SCORE", 0))
                     bal = _nz(row.get("BALANCE_CALC", row.get("BALANCE_SCORE", 0)))
-                    elite = _nz(row.get("ELITE_RANK_SCORE", 0))
+                    # [v3.7.24] 테이블과 동일한 로직으로 통일
+                    # 종합 = ELITE_SCORE 우선 (없으면 ELITE_RANK_SCORE 폴백)
+                    # 랭크 = ELITE_RANK_SCORE (Top 선별용 내부 점수)
+                    elite = _nz(row.get("ELITE_SCORE", row.get("ELITE_RANK_SCORE", 0)))
+                    rank_val = _nz(row.get("ELITE_RANK_SCORE", 0))
                     gap = _nz(row.get("GAP_PCT", 0))
                     rsi = _nz(row.get("RSI14", 0))
                     vp = _nz(row.get("V_POWER", 0))
@@ -2012,8 +2038,12 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                                       ("AI", ai_val), ("균형", bal)]:
                         bc, tc = _clr_hex(val)
                         _mini_bar(lbl, f"{val:.0f}", val, bc, tc)
+                    # [v3.7.24] 종합 (파이프라인 최종 점수)
                     bc, tc = _clr_hex(elite, good=60, bad=30)
-                    _mini_bar("검증점수", f"{elite:.0f}", elite, bc, tc)
+                    _mini_bar("종합", f"{elite:.0f}", elite, bc, tc)
+                    # [v3.7.24] 랭크 (Top 선별용 내부 점수 — 라벨 보정 + 밸런스 페널티 반영)
+                    bc, tc = _clr_hex(rank_val, good=40, bad=20)
+                    _mini_bar("랭크", f"{rank_val:.0f}", rank_val, bc, tc)
 
                     # RSI: 70+ 과매수 빨강, 30- 과매도 파랑, 중간 회색
                     if rsi >= 70:
