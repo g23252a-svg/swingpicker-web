@@ -2,6 +2,28 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.25] (2026-04-19) — 🛡️ 콤보 정식 승격 + 🏆 최강 관찰 모드 전환
+  사용자 결정 2가지:
+    · "콤보를 제1 매수종목으로 가자"
+    · "최강은 표본도 부족하고 실질 검증도 안되니까 매매에서 제외"
+  배경:
+    · combo_optimizer: S≥90 T≥80 AI≥60 ATTACK/ARMED → n=112, EV +25.77%, 승률 83.9%
+    · 즉석 walk-forward: IS 64.3% → OOS 92.0% (매우 robust)
+    · 🏆 최강: n=6 표본부족 → 통계 신뢰 LOW → 관찰만
+  #1 🛡️ 콤보 라벨 정식 승격 (보라 #8B5CF6)
+     · _compute_axis_stats()에 S/T/AI/ROUTE 추가 필드
+     · _elite_label() 최상위 판정 → 🛡️ > 🏆 > ✅ > ⚠️
+     · _rank_score() 가중치 ×1.50 (최고)
+  #2 🏆 최강 관찰 모드로 전환 (매매 풀에서 배제)
+     · pick_top1/top3에서 🏆 최강 fallback 제거 (콤보만)
+     · _rank_score 가중치 1.00 → 0.50 (페널티)
+     · 라벨 설명: "👁️ 관찰중 · 매매 제외 · 표본 n=6 · 통계 축적 대기"
+     · UI 기준 카드: 회색 + 취소선 + opacity-60
+  #3 pick_top1: 콤보 없으면 빈 결과 ("오늘 매매 없음")
+  #4 pick_top3: 콤보만 사용 (🏆 최강 포함 X)
+  #5 라벨 필터 드롭다운에 🛡️ 콤보 추가
+  #6 복구 경로: pick_top1 docstring에 주석 처리된 fallback 블록
+     → 2~3개월 실집행 표본 100건+ 쌓이면 주석 풀어서 부활 가능
 [v3.7.24] (2026-04-18) — 검증점수 표시 통일 + 명칭 명확화
   사용자 지적: "같은 '검증점수' 라벨인데 테이블과 상세영역 값이 다름 (80 vs 22)"
   원인:
@@ -921,6 +943,8 @@ def _compute_axis_stats(row) -> dict:
     stop  = _nz(row.get("손절가",     0))
     tp1   = _nz(row.get("추천매도가1",0))
     rr    = _nz(row.get("RR_NOW_TP1", 0))
+    # [v3.7.25] 🛡️ 콤보 라벨 판정용 — ROUTE 포함
+    route = str(row.get("ROUTE", "") or "")
 
     # [v3.7.3] RR이 CSV에 없거나 0이면 종가 기준으로 즉석 재계산
     # (과거 파이프라인에서 ELITE 공식 적용 이전 종목 호환)
@@ -943,6 +967,9 @@ def _compute_axis_stats(row) -> dict:
         "axis_mean": axis_mean, "axis_min": axis_min,
         "balance":   balance,   "gap_pct":  gap_pct,
         "rr_now":    rr,        "valid":    valid,
+        # [v3.7.25] 🛡️ 콤보 판정용 추가 필드
+        "s_raw":     s,         "t_raw":    t,
+        "ai_raw":    a,         "route":    route,
     }
 
 
@@ -950,17 +977,20 @@ def _elite_label(stats: dict) -> tuple:
     """투 트랙 라벨링 — (뱃지문자, CSS색상, 짧은 설명) 반환.
 
     ─── 완전한 OHLC + Horizon 20일 Walk-forward 검증 ───
+    🛡️ 콤보   : S≥90 AND T≥80 AND AI≥60 AND ROUTE ∈ {ATTACK, ARMED}
+                → [v3.7.25 신설] 실성능 최고 (n=112, EV +25.77%, 승률 83.9%)
+                → 즉석 Walk-forward: IS 64.3% → OOS 92.0% (매우 robust)
+                → 콤보_optimizer 기반 지표 조합 최적화 결과
     🏆 최강   : AXIS_MEAN≥70 AND BAL≥70 AND 갭≤3% AND RR≥0.8
-                → Walk-forward 20일 IS +2.97% / OOS +4.38% (OOS가 더 좋음! 매우 robust)
-                → 전체 기간 32종목 Top3 백테스트: N=30, TP1 33%, EV +1.98%
+                → Walk-forward 20일 IS +2.97% / OOS +4.38%
+                → ⚠️ 현재 표본 매우 적음 (n=6). 통계 신뢰 낮음.
     ✅ 즉시진입: AXIS_MIN≥50 AND BAL≥70 AND 갭≤5%
-                → 전체 N=57, TP1 47%, EV +3.01% (가장 많은 표본, 가장 안정적)
+                → ⚠️ 최근 재검증 결과 EV -0.05% (주의 필요)
     ⚠️ 추격  : 갭 > 5% AND 평균≥60
 
-    [v3.7.6] 완전 데이터(1,036종목 · 400영업일 OHLC) 기반 최종 임계값
-             - 평균 65 → 70 (walk-forward OOS Top 5 모두 평균 ≥ 70에 수렴)
-             - 87건 표본 · OHLC 100% · 루프 축소 제거 → 통계 안정화
-             - OOS EV가 IS EV보다 높음 = 오버피팅 의심 완전 해소
+    라벨 우선순위 (같은 종목이 여러 조건 만족 시):
+      🛡️ 콤보 > 🏆 최강 > ✅ 즉시진입 > ⚠️ 추격
+    콤보가 최상위 — 실성능 최고이기 때문.
     """
     if not stats["valid"]:
         return ("", "", "")
@@ -970,13 +1000,29 @@ def _elite_label(stats: dict) -> tuple:
     bal = stats["balance"]
     gap = stats["gap_pct"]
     rr  = stats["rr_now"]
+    # [v3.7.25] 콤보 판정용
+    s   = stats.get("s_raw",  0)
+    t   = stats.get("t_raw",  0)
+    ai  = stats.get("ai_raw", 0)
+    rt  = stats.get("route",  "")
 
-    # ── 🏆 최강 (v3.7.6: walk-forward 20일 Top #1) ──
+    # ── 🛡️ 콤보 (v3.7.25: 실성능 최고 · 제1 매수 종목) ──
+    # combo_optimizer.py 그리드 서치 결과 반영
+    # 즉석 walk-forward: IS 64% → OOS 92% (오버피팅 아님)
+    if s >= 90 and t >= 80 and ai >= 60 and rt in ("ATTACK", "ARMED"):
+        return (
+            "🛡️ 콤보",
+            "#8B5CF6",  # 보라색 (프리미엄 느낌)
+            f"실성능 1위 (n=112, EV +25.77%, 승률 83.9%) · S{s:.0f} T{t:.0f} AI{ai:.0f}",
+        )
+
+    # ── 🏆 최강 (v3.7.6 기준 · v3.7.25 관찰 모드로 전환) ──
+    # ⚠️ 표본 n=6 · 매매 풀에서 제외 · 관찰용으로만 표시
     if am >= 70 and bal >= 70 and gap <= 3.0 and rr >= 0.8:
         return (
             "🏆 최강",
             "#F59E0B",  # 금색
-            f"Walk-forward 검증 ✅ · 실전 TP1 33% · EV +2.0%",
+            f"👁️ 관찰중 · 매매 제외 · 표본 n=6 (신뢰 LOW) · 통계 축적 대기",
         )
 
     # ── ✅ 즉시 진입 가능 (실제 주력 · 최다 표본) ──
@@ -1008,15 +1054,16 @@ def _rank_score(stats: dict, label: str = "") -> float:
       0.5 ≤ RR < 1.0  → ×0.7
       RR < 0.5  → ×0.3
 
-    라벨 보정 (v3.7.5: 실성능 EV 기반 재조정):
+    라벨 보정 (v3.7.25 관찰 모드):
+      🛡️ 콤보     → ×1.50  (실성능 최고 · EV +25.77% · n=112 · 제1 매수)
       ✅ 즉시진입  → ×1.30  (OHLC 검증 EV +9.40% · 실전 주력)
-      🏆 최강     → ×1.00  (품질 표지, 실전 EV -2.45%)
+      🏆 최강     → ×0.50  (👁️ 관찰중 · 매매 제외 · 표본부족 n=6)
       ⚠️ 추격     → ×0.70  (경고)
       기타        → ×0.50
 
-    이전 v3.7.4까지는 🏆×1.2로 최강을 Top에 올렸으나,
-    OHLC 정밀판정 백테스트에서 ✅이 실전 주력(N=13 TP1 77%)으로 밝혀짐.
-    따라서 Top 3 선별에서 ✅을 우선시하는 게 실성능과 정합.
+    [v3.7.25] 🏆 최강 가중치 1.00 → 0.50 (관찰 모드)
+      - 매매 풀에서 실질적으로 배제 (pick_top1/top3에서 이미 제외)
+      - rank_score 순위도 낮춤 → 사용자가 테이블에서 정렬해도 상위 안 뜨도록
     """
     if not stats["valid"]:
         return -999.0
@@ -1028,8 +1075,10 @@ def _rank_score(stats: dict, label: str = "") -> float:
     elif rr < 1.0: rr_mult = 0.7
     else:          rr_mult = 1.0
 
-    if   label == "✅ 즉시진입": label_mult = 1.30
-    elif label == "🏆 최강":     label_mult = 1.00
+    # [v3.7.25] 🛡️ 콤보 최상위 · 🏆 최강 관찰 모드로 페널티
+    if   label == "🛡️ 콤보":    label_mult = 1.50
+    elif label == "✅ 즉시진입": label_mult = 1.30
+    elif label == "🏆 최강":     label_mult = 0.50  # 관찰 모드 (이전 1.00)
     elif label == "⚠️ 추격":     label_mult = 0.70
     else:                         label_mult = 0.50
 
@@ -1068,49 +1117,64 @@ def compute_elite_labels(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def pick_top1(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
-    """[v3.7.10] 🏆 최강 중 RANK_SCORE 1위 1종목만.
+    """[v3.7.25] 🛡️ 콤보만 사용. 🏆 최강은 관찰 모드 (매매 제외).
 
-    [v3.7.11 정정] 실제 자본 시뮬 기준 (simulate_capital_portfolio):
-      - Top1 기간수익 +8.35%, MDD 19.83% (36일, 1,000만원 시뮬)
-      - Top3 기간수익 -8.00%, MDD 22.62% (동일 조건)
-      → Top1이 유일하게 자본 시뮬에서 플러스.
+    선별 규칙:
+      · 🛡️ 콤보 중 RANK_SCORE 1위 1종목만
+      · 콤보 없으면 빈 리스트 → "오늘 매매 없음"
 
-    (이전 v3.7.10 README의 +11.49%는 엉성한 단일-포지션 추정. 이제 정식 자본 시뮬 숫자 사용.)
+    [v3.7.25 방안1 — 관찰 모드]
+      🏆 최강 라벨은 UI/통계에서는 표시하되 매매 풀에서 완전 배제.
+      사유:
+        - 표본 n=6로 통계적 신뢰 매우 낮음
+        - 실성능 EV +6.79% (콤보 +25.77% 대비 열위)
+        - 2~3개월 실집행 표본 축적 후 재평가 예정
+      사용자 결정: "최강은 표본도 부족하고 실질 검증도 안되니까 매매에서 제외"
+
+    복구 방법 (표본 축적 후):
+      아래 주석 처리된 fallback 블록을 활성화하면 됨.
     """
     if df is None or df.empty or "ELITE_RANK_SCORE" not in df.columns:
         return []
-    pool = df[df["ELITE_LABEL"] == "🏆 최강"].copy()
-    if pool.empty:
+
+    # [v3.7.25] 🛡️ 콤보만 — 🏆 최강 fallback 제거 (관찰 모드)
+    combo_pool = df[df["ELITE_LABEL"] == "🛡️ 콤보"].copy()
+    combo_pool = combo_pool[combo_pool["ELITE_RANK_SCORE"] >= min_rank_score]
+    if combo_pool.empty:
         return []
-    pool = pool[pool["ELITE_RANK_SCORE"] >= min_rank_score]
-    if pool.empty:
-        return []
-    pool = pool.sort_values("ELITE_RANK_SCORE", ascending=False)
-    top = pool.iloc[0]
+    combo_pool = combo_pool.sort_values("ELITE_RANK_SCORE", ascending=False)
+    top = combo_pool.iloc[0]
     return [str(top.get("종목코드", "")).zfill(6)]
+
+    # [관찰 모드 해제 시 복구 — 실집행 표본 100건+ 축적 후 활성화]
+    # pool = df[df["ELITE_LABEL"] == "🏆 최강"].copy()
+    # pool = pool[pool["ELITE_RANK_SCORE"] >= min_rank_score]
+    # if pool.empty:
+    #     return []
+    # pool = pool.sort_values("ELITE_RANK_SCORE", ascending=False)
+    # top = pool.iloc[0]
+    # return [str(top.get("종목코드", "")).zfill(6)]
 
 
 def pick_top3(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
     """오늘의 유니크한 Top 3 종목코드 반환.
 
-    [v3.7.10] 🏆 최강 전용 모드
-      백테스트에서 ✅ 즉시진입은 net 기준 마이너스 (-0.22%)로 확인됨.
-      오직 🏆 최강(EV +1.28%)만 사용. 없으면 빈 리스트 → 현금 보유.
+    [v3.7.25] 🛡️ 콤보 전용. 🏆 최강 관찰 모드 (매매 제외).
 
     선별 규칙:
-      1) 라벨 풀: 🏆 최강만
+      1) 라벨 풀: 🛡️ 콤보만 (🏆 최강은 배제)
       2) ELITE_RANK_SCORE ≥ min_rank_score 컷오프
       3) 섹터 중복 제거
       4) ELITE_RANK_SCORE 내림차순 Top 3
 
-    결과적으로 🏆 조건을 만족하는 종목이 없으면 빈 리스트.
-    빈 리스트 = "오늘은 매매 안 함, 현금 유지".
+    콤보 없으면 빈 리스트 → 현금 보유.
+    (🏆 최강 복구 시 방법은 pick_top1() docstring 참조)
     """
     if df is None or df.empty or "ELITE_RANK_SCORE" not in df.columns:
         return []
 
-    # (1) 🏆 최강 라벨만 — ✅ 즉시진입은 제외 (백테스트 net -0.22%)
-    pool = df[df["ELITE_LABEL"] == "🏆 최강"].copy()
+    # [v3.7.25] 🛡️ 콤보만 (🏆 최강 관찰 모드로 배제)
+    pool = df[df["ELITE_LABEL"] == "🛡️ 콤보"].copy()
     if pool.empty:
         return []
 
@@ -1548,8 +1612,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             value="전체", label="상태",
         ).classes("min-w-[120px]")
         # [v3.7.18] 라벨 필터 추가 - 즉시진입 너무 많을 때 최강만 보기 등
+        # [v3.7.25] 🛡️ 콤보 필터 추가 (제1 매수 종목)
         label_filter = ui.select(
-            ["전체", "🏆 최강", "✅ 즉시진입", "⚠️ 추격"],
+            ["전체", "🛡️ 콤보", "🏆 최강", "✅ 즉시진입", "⚠️ 추격"],
             value="전체", label="라벨",
         ).classes("min-w-[130px]")
         # [v3.7.24] "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준 명확화)
@@ -1560,13 +1625,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # [v3.7.18] 라벨 기준 투명 공개 (사용자 혼란 방지)
     # 라벨별 종목 수도 함께 표시
+    # [v3.7.25] 🛡️ 콤보 카운트 추가
     if "ELITE_LABEL" in df.columns:
+        n_combo = int((df["ELITE_LABEL"] == "🛡️ 콤보").sum())
         n_strong = int((df["ELITE_LABEL"] == "🏆 최강").sum())
         n_instant = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
         n_chase = int((df["ELITE_LABEL"] == "⚠️ 추격").sum())
         n_none = int(df["ELITE_LABEL"].fillna("").eq("").sum())
     else:
-        n_strong = n_instant = n_chase = n_none = 0
+        n_combo = n_strong = n_instant = n_chase = n_none = 0
 
     with ui.card().classes(
         "w-full p-2 mb-3 bg-[rgba(255,255,255,0.02)] "
@@ -1574,9 +1641,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     ):
         with ui.row().classes("w-full gap-6 items-center flex-wrap"):
             ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
+            # [v3.7.25] 🛡️ 콤보 최우선 표시 (제1 매수 · 실성능 1위)
             ui.label(
-                f"🏆 최강 ({n_strong}): 평균≥70 · 밸런스≥70 · 갭≤3% · RR≥0.8"
-            ).classes("text-xs text-yellow-400")
+                f"🛡️ 콤보 ({n_combo}): S≥90 · T≥80 · AI≥60 · ATTACK/ARMED "
+                f"[n=112 EV +25.77% 승률 83.9%]"
+            ).classes("text-xs text-purple-400 font-bold")
+            ui.label(
+                f"🏆 최강 ({n_strong}): 평균≥70 · 밸런스≥70 · 갭≤3% · RR≥0.8 "
+                f"[n=6 · 👁️ 관찰중 · 매매 제외]"
+            ).classes("text-xs text-gray-500 line-through opacity-60")
             ui.label(
                 f"✅ 즉시진입 ({n_instant}): 최소≥50 · 밸런스≥70 · 갭≤5%"
             ).classes("text-xs text-green-400")
