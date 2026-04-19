@@ -2,6 +2,28 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.26] (2026-04-19) — 스코어 체계 UI 정리 (페이즈 1) + 차트 툴팁 수정
+  사용자 지적 2가지:
+    1. "스코어들이 너무 많은데 로직들좀 설명해봐"
+    2. "차트의 흰 팝업이 너무 쎄서 정보가 안보여"
+  원칙: 엔진(collector/pipeline)은 건드리지 않고 UI 레이어만 정리
+       → 리스크 0, 롤백 즉시 가능
+  #1 테이블 보기 모드 토글 추가 — 🎯 기본 / 🔬 고급
+     · 기본: label·상태·종목명·점수·S·T·AI·갭%·RR·가격·업종 (11개)
+     · 고급: 기본 + 종합·랭크·균형 (14개)
+  #2 테이블에 RR 컬럼 신규 추가 (실전 매매 핵심 지표)
+  #3 상세 패널 2단 구조로 재편
+     · 🎯 핵심 지표 (항상): S·T·AI·갭%·RR·종합 (6개)
+     · 🔬 기타 지표 (접이식): 균형·랭크·RSI·세력(V)·거래대금
+  #4 스코어 용어집 접이식 카드 신규
+     · 각 스코어 공식 + 라벨 가중치 + 실전 팁 한 곳에
+  #5 캔들차트 툴팁 가독성 수정 (⭐ 사용자 즉각 피드백)
+     · hoverlabel bgcolor: 흰색(plotly 기본) → rgba(26,26,46,0.95) 다크 반투명
+     · font color: 회색 → #FFFFFF 흰색
+     · border: 보라 (#8B5CF6) 브랜드 컬러
+     · font family: monospace (OHLC 숫자 정렬)
+     · 내장 캔들차트 + _plotly_dark 헬퍼 모두 적용
+  복구: view_table_mode 기본값 변경 또는 hoverlabel 제거로 즉시 가능.
 [v3.7.25] (2026-04-19) — 🛡️ 콤보 정식 승격 + 🏆 최강 관찰 모드 전환
   사용자 결정 2가지:
     · "콤보를 제1 매수종목으로 가자"
@@ -470,6 +492,22 @@ if _plot_candle is None:
                     y=1.02, xanchor="right", x=1,
                 ),
                 hovermode="x unified",
+                # [v3.7.26] 차트 전체 다크 테마 통일 + 툴팁 가독성 수정
+                # 사용자 지적: "차트의 흰 팝업이 너무 쎄서 정보가 안보임"
+                # 해결: hoverlabel bgcolor/font_color/border 명시
+                template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                hoverlabel=dict(
+                    bgcolor="rgba(26, 26, 46, 0.95)",  # 다크 반투명 (#1a1a2e 계열)
+                    bordercolor="#8B5CF6",              # 보라 테두리 (브랜드 컬러)
+                    font=dict(
+                        color="#FFFFFF",                # 흰 텍스트
+                        size=12,
+                        family="monospace",             # OHLC 숫자 정렬용
+                    ),
+                    align="left",
+                ),
             )
             # 각 subplot의 rangeslider 끄기 + x축 라벨 하단만
             fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
@@ -651,7 +689,11 @@ def _nz(val, default=0):
 
 
 def _plotly_dark(fig, height=300):
-    """Plotly 차트 다크 테마"""
+    """Plotly 차트 다크 테마 + 툴팁 가독성
+
+    [v3.7.26] hoverlabel 어두운 배경 + 흰 텍스트 통일.
+    이전엔 plotly 기본 흰색 배경이 적용돼 다크 UI에서 가독성 0이었음.
+    """
     if fig is None:
         return fig
     fig.update_layout(
@@ -660,6 +702,13 @@ def _plotly_dark(fig, height=300):
         plot_bgcolor="rgba(0,0,0,0)",
         height=height,
         margin=dict(l=20, r=20, t=30, b=20),
+        # [v3.7.26] 툴팁 가독성 — 다크 반투명 배경 + 흰 텍스트
+        hoverlabel=dict(
+            bgcolor="rgba(26, 26, 46, 0.95)",
+            bordercolor="#8B5CF6",
+            font=dict(color="#FFFFFF", size=12, family="monospace"),
+            align="left",
+        ),
     )
     return fig
 
@@ -1622,6 +1671,14 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ["🔢 점수순", "⚖️ 밸런스순", "🏆 랭크순", "🚦 상태순"],
             value="🏆 랭크순",
         )
+        # [v3.7.26] 테이블 보기 모드 — 기본(핵심만) vs 고급(전체)
+        # 사용자 지적: "스코어들이 너무 많은데 로직들좀 설명해봐"
+        # 해결: 기본 보기 = 실전 매매에 필요한 컬럼만 (7개)
+        #       고급 보기 = 기존 전체 (11개)
+        view_table_mode = ui.toggle(
+            ["🎯 기본", "🔬 고급"],
+            value="🎯 기본",
+        )
 
     # [v3.7.18] 라벨 기준 투명 공개 (사용자 혼란 방지)
     # 라벨별 종목 수도 함께 표시
@@ -1658,6 +1715,84 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ).classes("text-xs text-orange-400")
             if n_none > 0:
                 ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
+
+    # [v3.7.26] 스코어 용어집 (접이식) — 사용자 지적: "스코어 너무 많음" 해결
+    # 기본 닫힘 · 펼치면 각 스코어의 정체 + 공식을 한눈에
+    with ui.expansion(
+        "📖 스코어 용어집 — 각 스코어가 뭘 의미하는지 (클릭하면 펼침)",
+        icon="help_outline",
+    ).classes(
+        "w-full mb-3 bg-[rgba(139,92,246,0.05)] "
+        "border border-[rgba(139,92,246,0.2)] rounded"
+    ).props("dense"):
+        with ui.column().classes("w-full gap-1 p-2"):
+            # ── 핵심 스코어 3축 ──
+            ui.label("🧱 핵심 3축 (실전 매매 기본)").classes(
+                "text-xs text-purple-300 font-bold mt-1"
+            )
+            ui.label(
+                "  · S (구조): 추세·정배열·VWAP 위치 등 기본기 — 0~100"
+            ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "  · T (타이밍): RSI·MACD·거래량·TRIGGER 등 진입 시점 — 0~100"
+            ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "  · AI (=ML): 머신러닝 예측값 — 약 7~91 범위"
+            ).classes("text-[11px] text-gray-400")
+
+            # ── 파생 통계 ──
+            ui.label("🔢 파생 통계 (3축에서 계산)").classes(
+                "text-xs text-purple-300 font-bold mt-2"
+            )
+            ui.label(
+                "  · 평균: (S + T + AI) / 3"
+            ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "  · 균형: 100 - (MAX - MIN) × 1.25  "
+                "(3축 편차 적을수록 높음)"
+            ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "  · 갭%: |종가 - 매수가| / 매수가 × 100  (지정가 진입 가능성)"
+            ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "  · RR: (T1 - 매수가) / (매수가 - 손절가)  "
+                "(리스크 대비 리워드 비율)"
+            ).classes("text-[11px] text-gray-400")
+
+            # ── 종합 점수 ──
+            ui.label("🏭 종합 점수 (파이프라인 산출)").classes(
+                "text-xs text-purple-300 font-bold mt-2"
+            )
+            ui.label(
+                "  · 점수 (DISPLAY): S×40% + T×40% + AI×20% + 보너스 − 페널티"
+            ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "  · 종합 (ELITE): 안정 진입 품질 등급 (갭 작을수록 높음)"
+            ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "  · 랭크 (ELITE_RANK): 평균×(균형/100)×RR보정×라벨보정 "
+                "(Top 선별용 내부 점수)"
+            ).classes("text-[11px] text-gray-400")
+
+            # ── 라벨 가중치 ──
+            ui.label("🏷️ 라벨 가중치 (랭크 계산에 곱해지는 배수)").classes(
+                "text-xs text-purple-300 font-bold mt-2"
+            )
+            ui.label(
+                "  · 🛡️ 콤보 ×1.50 (실성능 1위)  "
+                "· ✅ 즉시진입 ×1.30  "
+                "· 🏆 최강 ×0.50 (관찰 모드)  "
+                "· ⚠️ 추격 ×0.70"
+            ).classes("text-[11px] text-gray-400")
+
+            # ── 실전 팁 ──
+            ui.label("💡 실전 매매 시 우선 확인 순서").classes(
+                "text-xs text-yellow-400 font-bold mt-2"
+            )
+            ui.label(
+                "  ① 라벨 (🛡️/✅/⚠️)  → ② 점수(DISPLAY) 70+  "
+                "→ ③ RR 1.0+  → ④ 갭 5% 이하  → ⑤ S/T/AI 세부 확인"
+            ).classes("text-[11px] text-gray-300")
 
     # [v3.7.22] CSV 다운로드 권한 제어 — prime/admin만 허용
     # - guest/free: 다운로드 버튼 비활성 (잠금 상태 + Prime 안내)
@@ -1821,31 +1956,27 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 _render_table(show, df)
 
     def _render_table(show: pd.DataFrame, full_df: pd.DataFrame):
-        columns = [
-            # [v3.7] 라벨 뱃지 (최강/관심/추격)
+        # [v3.7.26] 보기 모드별 컬럼 구성 — 기본: 핵심만 / 고급: 전체
+        is_advanced = view_table_mode.value == "🔬 고급"
+
+        # 공통 컬럼 (항상 표시)
+        base_cols = [
             {"name": "label", "label": "라벨", "field": "label", "align": "center"},
             {"name": "route", "label": "상태", "field": "route", "align": "center"},
             {"name": "name", "label": "종목명", "field": "name", "align": "left"},
+            # 점수 = DISPLAY_SCORE (파이프라인 최종, 화면 메인 숫자)
             {"name": "score", "label": "점수", "field": "score",
              "align": "center", "sortable": True},
-            # ── 3축 점수 + ELITE/BALANCE (v3.6 복원) ──
             {"name": "s", "label": "S", "field": "s",
              "align": "center", "sortable": True},
             {"name": "t", "label": "T", "field": "t",
              "align": "center", "sortable": True},
             {"name": "ai", "label": "AI", "field": "ai",
              "align": "center", "sortable": True},
-            # [v3.7.24] "검증점수" → "종합"으로 명확화
-            # ELITE_SCORE는 파이프라인 최종 스코어 (walk-forward 검증과 무관)
-            # "검증"이라는 단어가 오해를 유발해서 "종합"으로 변경
-            {"name": "elite", "label": "종합", "field": "elite",
-             "align": "center", "sortable": True},
-            # [v3.7.24] 랭크 스코어 별도 컬럼 추가 (내부 Top 선별용)
-            {"name": "rank", "label": "랭크", "field": "rank",
-             "align": "center", "sortable": True},
-            {"name": "bal", "label": "균형", "field": "bal",
-             "align": "center", "sortable": True},
             {"name": "gap", "label": "갭%", "field": "gap",
+             "align": "center", "sortable": True},
+            # [v3.7.26] RR 컬럼 추가 — 실전 매매 의사결정의 핵심 지표
+            {"name": "rr", "label": "RR", "field": "rr",
              "align": "center", "sortable": True},
             {"name": "close", "label": "현재가", "field": "close", "align": "right"},
             {"name": "buy", "label": "매수", "field": "buy", "align": "right"},
@@ -1853,6 +1984,29 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             {"name": "t1", "label": "T1목표", "field": "t1", "align": "right"},
             {"name": "sector", "label": "업종", "field": "sector", "align": "left"},
         ]
+
+        # [v3.7.26] 고급 모드 전용 컬럼 — 내부 스코어들
+        # 기본 모드에서는 숨김 (사용자 혼란 방지)
+        advanced_cols = [
+            # 종합 = ELITE_SCORE (파이프라인 품질 등급)
+            {"name": "elite", "label": "종합", "field": "elite",
+             "align": "center", "sortable": True},
+            # 랭크 = ELITE_RANK_SCORE (Top 선별용 내부 점수)
+            {"name": "rank", "label": "랭크", "field": "rank",
+             "align": "center", "sortable": True},
+            # 균형 = BALANCE_CALC (3축 편차)
+            {"name": "bal", "label": "균형", "field": "bal",
+             "align": "center", "sortable": True},
+        ]
+
+        # 기본 모드: base만, 고급 모드: base + advanced (업종 앞에 추가)
+        if is_advanced:
+            # 업종을 마지막으로 빼고 고급 컬럼을 그 앞에 끼움
+            sector_col = [c for c in base_cols if c["name"] == "sector"]
+            non_sector = [c for c in base_cols if c["name"] != "sector"]
+            columns = non_sector + advanced_cols + sector_col
+        else:
+            columns = base_cols
         rows = []
         for _, r in show.iterrows():
             rows.append({
@@ -1871,6 +2025,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "rank":  f'{_nz(r.get("ELITE_RANK_SCORE", 0)):.0f}',
                 "bal":   f'{_nz(r.get("BALANCE_CALC",  r.get("BALANCE_SCORE", 0))):.0f}',
                 "gap":   f'{_nz(r.get("GAP_PCT", 0)):.1f}',
+                # [v3.7.26] RR 값 추가 (실전 핵심 지표)
+                "rr":    f'{_nz(r.get("RR_NOW_TP1", 0)):.2f}',
                 "close": f'{int(_nz(r.get("종가", 0))):,}',
                 "buy": f'{int(_nz(r.get("추천매수가", 0))):,}',
                 "stop": f'{int(_nz(r.get("손절가", 0))):,}',
@@ -2107,30 +2263,19 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                         elif v >= bad: return ("#FFA726", "text-yellow-400")
                         else: return ("#3B82F6", "text-blue-400")
 
+                    # [v3.7.26] 상세 패널 2단 구조 — 핵심 지표 / 기타 지표
+                    # 사용자 지적: "스코어들이 너무 많은데"
+                    # 해결: 실전 의사결정 핵심 6개만 먼저 표시, 나머지는 접이식
+
+                    # ─── 🎯 핵심 지표 (항상 표시, 실전 매매 직접 활용) ───
+                    # S / T / AI (3축) · 갭% · RR · 종합
+                    rr_val = _nz(row.get("RR_NOW_TP1", 0))
                     for lbl, val in [("S 구조", s_val), ("T 타이밍", t_val),
-                                      ("AI", ai_val), ("균형", bal)]:
+                                      ("AI", ai_val)]:
                         bc, tc = _clr_hex(val)
                         _mini_bar(lbl, f"{val:.0f}", val, bc, tc)
-                    # [v3.7.24] 종합 (파이프라인 최종 점수)
-                    bc, tc = _clr_hex(elite, good=60, bad=30)
-                    _mini_bar("종합", f"{elite:.0f}", elite, bc, tc)
-                    # [v3.7.24] 랭크 (Top 선별용 내부 점수 — 라벨 보정 + 밸런스 페널티 반영)
-                    bc, tc = _clr_hex(rank_val, good=40, bad=20)
-                    _mini_bar("랭크", f"{rank_val:.0f}", rank_val, bc, tc)
 
-                    # RSI: 70+ 과매수 빨강, 30- 과매도 파랑, 중간 회색
-                    if rsi >= 70:
-                        rsi_bar = "#EF5350"; rsi_tc = "text-red-400"
-                    elif rsi <= 30:
-                        rsi_bar = "#3B82F6"; rsi_tc = "text-blue-400"
-                    else:
-                        rsi_bar = "#9CA3AF"; rsi_tc = "text-gray-300"
-                    _mini_bar("RSI14", f"{rsi:.0f}", rsi, rsi_bar, rsi_tc)
-
-                    vp_pct = max(0, min(100, (vp + 1) / 4 * 100))
-                    vp_bar, vp_tc = _clr_hex(vp_pct)
-                    _mini_bar("세력(V)", f"{vp:+.2f}", vp_pct, vp_bar, vp_tc)
-
+                    # 갭% (실전 진입 핵심)
                     gap_pct_bar = min(gap * 10, 100)
                     if gap > 5:
                         gap_bar = "#EF5350"; gap_tc = "text-red-400"
@@ -2140,9 +2285,51 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                         gap_bar = "#66BB6A"; gap_tc = "text-green-400"
                     _mini_bar("갭%", f"{gap:.1f}%", gap_pct_bar, gap_bar, gap_tc)
 
-                    to_pct = min(turnover / 20, 100)
-                    to_bar, to_tc = _clr_hex(to_pct, good=50, bad=15)
-                    _mini_bar("거래대금", f"{turnover:.0f}억", to_pct, to_bar, to_tc)
+                    # [v3.7.26] RR 미니바 신규 — 실전 매매 핵심 지표
+                    # RR 1.0 이상 양호, 2.0 이상 우수
+                    rr_pct = max(0, min(100, rr_val * 33.33))  # 3.0 기준 100%
+                    if rr_val >= 2.0:
+                        rr_bar = "#10B981"; rr_tc = "text-green-400"
+                    elif rr_val >= 1.0:
+                        rr_bar = "#FFA726"; rr_tc = "text-yellow-400"
+                    else:
+                        rr_bar = "#EF5350"; rr_tc = "text-red-400"
+                    _mini_bar("RR", f"{rr_val:.2f}", rr_pct, rr_bar, rr_tc)
+
+                    # 종합 (파이프라인 최종 점수)
+                    bc, tc = _clr_hex(elite, good=60, bad=30)
+                    _mini_bar("종합", f"{elite:.0f}", elite, bc, tc)
+
+                # ─── 🔬 기타 지표 (접이식 · 필요 시만 확장) ───
+                # 균형 / 랭크 / RSI / 세력(V) / 거래대금 등 상세 분석용
+                with ui.expansion(
+                    "🔬 기타 지표 (균형/랭크/RSI/세력/거래대금)",
+                    icon="expand_more",
+                ).classes("w-full text-xs text-gray-400").props("dense"):
+                    with ui.row().classes("w-full gap-3 flex-wrap pt-2"):
+                        # 균형
+                        bc, tc = _clr_hex(bal)
+                        _mini_bar("균형", f"{bal:.0f}", bal, bc, tc)
+                        # 랭크 (내부 Top 선별용)
+                        bc, tc = _clr_hex(rank_val, good=40, bad=20)
+                        _mini_bar("랭크", f"{rank_val:.0f}", rank_val, bc, tc)
+
+                        # RSI: 70+ 과매수 빨강, 30- 과매도 파랑, 중간 회색
+                        if rsi >= 70:
+                            rsi_bar = "#EF5350"; rsi_tc = "text-red-400"
+                        elif rsi <= 30:
+                            rsi_bar = "#3B82F6"; rsi_tc = "text-blue-400"
+                        else:
+                            rsi_bar = "#9CA3AF"; rsi_tc = "text-gray-300"
+                        _mini_bar("RSI14", f"{rsi:.0f}", rsi, rsi_bar, rsi_tc)
+
+                        vp_pct = max(0, min(100, (vp + 1) / 4 * 100))
+                        vp_bar, vp_tc = _clr_hex(vp_pct)
+                        _mini_bar("세력(V)", f"{vp:+.2f}", vp_pct, vp_bar, vp_tc)
+
+                        to_pct = min(turnover / 20, 100)
+                        to_bar, to_tc = _clr_hex(to_pct, good=50, bad=15)
+                        _mini_bar("거래대금", f"{turnover:.0f}억", to_pct, to_bar, to_tc)
 
             # ── 캔들차트 (비동기 로드 + 태스크 생명주기 관리) ──
             with ui.card().classes("w-full p-2 bg-[#1a1a2e] mt-2"):
@@ -2223,7 +2410,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ui.badge(rv, color=rc).classes("mt-2")
 
     # ── 이벤트 바인딩 ──
-    for widget in [view_mode, route_filter, label_filter, sort_mode]:
+    # [v3.7.26] view_table_mode 추가 — 기본/고급 전환 시 테이블 재구성
+    for widget in [view_mode, route_filter, label_filter, sort_mode, view_table_mode]:
         widget.on("update:model-value", lambda _: _build_view())
 
     _build_view()
