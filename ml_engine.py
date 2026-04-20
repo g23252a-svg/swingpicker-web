@@ -19,6 +19,7 @@ v18.3 → v19.0 주요 변경:
 """
 
 import os, joblib, glob, re, pickle, threading, json
+import logging
 import numpy as np
 import pandas as pd
 import torch
@@ -29,6 +30,11 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
 from datetime import datetime
+
+# [v3.7.27 Phase 1] print → logger 전환 (운영 로그 집약)
+# - 이전엔 print 42회 · logger 0회 → 프로덕션 로그 제어 불가
+# - 이후엔 표준 logger 사용 → 레벨 조정/파일 기록 가능
+logger = logging.getLogger(__name__)
 
 # --- XGBoost (optional) ---
 try:
@@ -132,15 +138,19 @@ def _check_feature_version(meta_path: str) -> dict:
         result["match"] = (current_set == model_set)
 
     except (json.JSONDecodeError, KeyError, IOError) as e:
-        print(f"⚠️ [ML] 메타 파일 파싱 실패 ({meta_path}): {e}")
+        logger.error(f"⚠️ [ML] 메타 파일 파싱 실패 ({meta_path}): {e}")
 
     return result
 
 
 # ====================== 캐시 유틸 ======================
 
-def _compute_feature_hash():
-    """[v21.2] FEATURE_CONTRACT.schema_hash SSOT — 해시 불일치 근본 해결"""
+def _compute_feature_hash() -> str:
+    """[v21.2] FEATURE_CONTRACT.schema_hash SSOT — 해시 불일치 근본 해결.
+
+    Returns:
+        str: 12자리 해시 문자열 (feature_contract의 schema_hash 또는 fallback MD5)
+    """
     try:
         from feature_contract import FEATURE_CONTRACT
         return FEATURE_CONTRACT.schema_hash
@@ -150,10 +160,13 @@ def _compute_feature_hash():
         return hashlib.md5(",".join(FEATURE_COLS).encode()).hexdigest()[:12]
 
 
-def get_feature_cache():
+def get_feature_cache() -> dict:
     """
     [v20.6] Joblib 우선 → pickle fallback.
     Schema sidecar 검증: feature_cols 불일치 시 캐시 무시.
+
+    Returns:
+        dict: 캐시된 피처 딕셔너리 {code: features_df}, 실패 시 빈 dict
     """
     # 1. Schema 검증
     if os.path.exists(FEATURE_CACHE_SCHEMA_PATH):
@@ -163,7 +176,7 @@ def get_feature_cache():
             saved_hash = schema.get("feature_cols_hash", "")
             current_hash = _compute_feature_hash()
             if saved_hash and saved_hash != current_hash:
-                print(f"⚠️ [ML] Feature schema mismatch: "
+                logger.warning(f"⚠️ [ML] Feature schema mismatch: "
                       f"cache={saved_hash}, current={current_hash} → 캐시 무시")
                 return {}
         except Exception:
@@ -186,7 +199,7 @@ def get_feature_cache():
                     # 구버전 pkl → 새 joblib 자동 마이그레이션
                     try:
                         save_feature_cache(data)
-                        print(f"✅ [ML] Cache migrated: {path} → {FEATURE_CACHE_PATH}")
+                        logger.info(f"✅ [ML] Cache migrated: {path} → {FEATURE_CACHE_PATH}")
                     except Exception:
                         pass
                     return data
@@ -195,11 +208,14 @@ def get_feature_cache():
     return {}
 
 
-def save_feature_cache(cache_data):
+def save_feature_cache(cache_data: dict) -> None:
     """
     [v20.6] Joblib 저장 + Schema sidecar.
     - joblib: pickle 대비 numpy 배열 압축 효율 ~3x
     - schema: feature_cols_hash, last_trade_date 기록
+
+    Args:
+        cache_data: {code: features_df} 형태 캐시 딕셔너리
     """
     os.makedirs(os.path.dirname(FEATURE_CACHE_PATH) or "data", exist_ok=True)
     joblib.dump(cache_data, FEATURE_CACHE_PATH, compress=3)
@@ -231,10 +247,18 @@ def save_feature_cache(cache_data):
         with open(FEATURE_CACHE_SCHEMA_PATH, 'w') as f:
             json.dump(schema, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        print(f"⚠️ [ML] Schema sidecar 저장 실패 (무해): {e}")
+        logger.error(f"⚠️ [ML] Schema sidecar 저장 실패 (무해): {e}")
 
 
-def is_trained_today(force=False):
+def is_trained_today(force: bool = False) -> bool:
+    """오늘 학습된 모델이 있는지 확인.
+
+    Args:
+        force: True면 항상 False 반환 (강제 재학습 유도)
+
+    Returns:
+        bool: 모델 파일 mtime이 오늘 날짜와 같으면 True
+    """
     if force:
         return False
     if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
@@ -245,8 +269,15 @@ def is_trained_today(force=False):
 
 # ====================== 데이터 정제 ======================
 
-def clean_ohlcv(df):
-    """한글 컬럼 리네임 및 정합성 확보"""
+def clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """한글 컬럼 리네임 및 정합성 확보.
+
+    Args:
+        df: 한글 OHLCV (시가/고가/저가/종가/거래량) DataFrame
+
+    Returns:
+        pd.DataFrame: 영문 컬럼(Open/High/Low/Close/Volume) + 중복 제거된 DataFrame
+    """
     df = df.rename(columns={
         "시가": "Open", "고가": "High", "저가": "Low",
         "종가": "Close", "거래량": "Volume"
@@ -567,7 +598,7 @@ class SoftTargetLoss(nn.Module):
         super().__init__()
         self.smooth_l1 = nn.SmoothL1Loss(beta=beta, reduction='none')
         self.pos_weight = max(1.0, min(5.0, (1 - pos_ratio) / max(pos_ratio, 0.1)))
-        print(f"   📐 SoftTargetLoss v19: beta={beta}, "
+        logger.info(f"   📐 SoftTargetLoss v19: beta={beta}, "
               f"pos_weight={self.pos_weight:.2f} (pos_ratio={pos_ratio:.2%})")
 
     def forward(self, logits, targets):
@@ -639,7 +670,13 @@ _loaded_seq_length = SEQ_LENGTH
 _loaded_use_rolling_zscore = False  # [Fix 5] 플래그
 
 
-def load_model():
+def load_model() -> None:
+    """LSTM + XGBoost 모델 로드 (전역 상태로 저장, Thread-safe).
+
+    우선순위: v19 → v18.3 → v18.2 → v18 → v17 → v15.6 순 fallback.
+    feature_contract와 메타 버전 일치 여부 확인 후 로드.
+    실패 시 모든 전역 변수 None 유지 (apply_ml_score에서 fallback 처리).
+    """
     global _loaded_lstm_model, _loaded_scaler, _loaded_xgb_model
     global _loaded_seq_length, _loaded_use_rolling_zscore
 
@@ -650,10 +687,12 @@ def load_model():
         # [Fix 4] 메타 검증: 현재 FEATURE_COLS와 모델 feature_cols 일치 확인
         _meta_check = _check_feature_version(META_PATH)
         if _meta_check["model_features"] and not _meta_check["match"]:
-            print(f"⚠️ [ML] Feature mismatch! "
-                  f"missing={_meta_check['missing_in_model']}, "
-                  f"extra={_meta_check['extra_in_model']}")
-            print(f"   → 모델은 로드하되, 예측 정확도가 저하될 수 있음")
+            logger.warning(
+                f"⚠️ [ML] Feature mismatch! "
+                f"missing={_meta_check['missing_in_model']}, "
+                f"extra={_meta_check['extra_in_model']}"
+            )
+            logger.info(f"   → 모델은 로드하되, 예측 정확도가 저하될 수 있음")
 
         candidates = [
             (MODEL_PATH, SCALER_PATH, XGB_MODEL_PATH, SEQ_LENGTH, True),
@@ -679,7 +718,7 @@ def load_model():
                 _loaded_scaler = scaler
                 _loaded_seq_length = seq_len
                 _loaded_use_rolling_zscore = use_rolling
-                print(f"✅ [ML] LSTM 로드: {model_path} "
+                logger.info(f"✅ [ML] LSTM 로드: {model_path} "
                       f"(features={in_dim}, seq={seq_len}, rolling_z={use_rolling})")
 
                 # [Fix 4] 로드 성공 시 메타 정보 로그
@@ -687,7 +726,7 @@ def load_model():
                     try:
                         with open(META_PATH, 'r') as f:
                             _meta = json.load(f)
-                        print(f"   → meta: version={_meta.get('version', '?')}, "
+                        logger.info(f"   → meta: version={_meta.get('version', '?')}, "
                               f"features={len(_meta.get('feature_cols', []))}")
                     except Exception:
                         pass
@@ -695,18 +734,18 @@ def load_model():
                 if xgb_path and XGB_OK and os.path.exists(xgb_path):
                     try:
                         _loaded_xgb_model = joblib.load(xgb_path)
-                        print(f"✅ [ML] XGBoost 로드: {xgb_path}")
+                        logger.info(f"✅ [ML] XGBoost 로드: {xgb_path}")
                     except Exception as e:
-                        print(f"⚠️ [ML] XGBoost 로드 실패: {e}")
+                        logger.error(f"⚠️ [ML] XGBoost 로드 실패: {e}")
                         _loaded_xgb_model = None
 
                 return
 
             except Exception as e:
-                print(f"⚠️ [ML] {model_path} 로드 실패: {e}")
+                logger.error(f"⚠️ [ML] {model_path} 로드 실패: {e}")
                 continue
 
-        print("⚠️ [ML] 사용 가능한 모델이 없습니다.")
+        logger.warning("⚠️ [ML] 사용 가능한 모델이 없습니다.")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -781,11 +820,11 @@ def _load_ohlcv_cache_file(f_path: str) -> dict:
             data_map[clean_code] = group.drop(columns=["종목코드"])
         return data_map
     except Exception as e:
-        print(f"⚠️ [ML] 캐시 로드 실패 ({f_path}): {e}")
+        logger.error(f"⚠️ [ML] 캐시 로드 실패 ({f_path}): {e}")
         return {}
 
 
-def build_master_dataset(data_dir="data"):
+def build_master_dataset(data_dir: str = "data") -> tuple:
     """
     [v19.5] First-touch Labeling + Rolling Z-score
 
@@ -809,10 +848,10 @@ def build_master_dataset(data_dir="data"):
     files = unique_files
 
     if not files:
-        print(f"⚠️ [ML] {data_dir}/ohlcv_cache_* 파일이 없습니다. (pkl/parquet/csv 모두 탐색)")
+        logger.warning(f"⚠️ [ML] {data_dir}/ohlcv_cache_* 파일이 없습니다. (pkl/parquet/csv 모두 탐색)")
         return None
 
-    print(f"📂 [ML] 학습 데이터 {len(files)}개 파일 발견 ({', '.join(os.path.splitext(f)[1] for f in files[:3])}...)")
+    logger.info(f"📂 [ML] 학습 데이터 {len(files)}개 파일 발견 ({', '.join(os.path.splitext(f)[1] for f in files[:3])}...)")
     all_samples = []
 
     for f_path in files:
@@ -880,7 +919,7 @@ def build_master_dataset(data_dir="data"):
     val_df = df_samples[df_samples['date'] >= split_date]
 
     if len(train_df) < 100 or len(val_df) < 50:
-        print(f"⚠️ [ML] 데이터 부족: train={len(train_df)}, val={len(val_df)}")
+        logger.warning(f"⚠️ [ML] 데이터 부족: train={len(train_df)}, val={len(val_df)}")
         return None
 
     X_train = np.stack(train_df['X'].values)
@@ -905,10 +944,10 @@ def build_master_dataset(data_dir="data"):
         '0.67 (5%+)': ((y_train > 0.34) & (y_train <= 0.68)).mean(),
         '1.0 (7%+)': (y_train > 0.68).mean(),
     }
-    print(f"📊 [ML] Soft Label 분포 (train={len(y_train)}, val={len(y_val)}):")
+    logger.info(f"📊 [ML] Soft Label 분포 (train={len(y_train)}, val={len(y_val)}):")
     for k, v in tier_dist.items():
-        print(f"   {k}: {v:.1%}")
-    print(f"   양성 비율(>0): {pos_ratio:.2%}")
+        logger.info(f"   {k}: {v:.1%}")
+    logger.info(f"   양성 비율(>0): {pos_ratio:.2%}")
 
     return X_train_s, y_train, X_val_s, y_val, val_df[['date', 'code']], n_feat, pos_ratio
 
@@ -965,7 +1004,7 @@ def _compute_dynamic_weights(lstm_probs, xgb_probs, y_val):
     w_lstm = max(0.2, min(0.8, w_lstm))
     w_xgb = 1.0 - w_lstm
 
-    print(f"   ⚖️ Dynamic Weights: LSTM={w_lstm:.2f}, XGB={w_xgb:.2f} "
+    logger.info(f"   ⚖️ Dynamic Weights: LSTM={w_lstm:.2f}, XGB={w_xgb:.2f} "
           f"(MAE: LSTM={mae_lstm:.4f}, XGB={mae_xgb:.4f})")
 
     return w_lstm, w_xgb
@@ -998,7 +1037,7 @@ def _save_ensemble_weights(w_lstm, w_xgb):
 
 # ====================== 학습 ======================
 
-def train_model(force=False):
+def train_model(force: bool = False) -> bool:
     """
     [v19.0] 5-Fix 통합 학습 파이프라인
 
@@ -1009,14 +1048,14 @@ def train_model(force=False):
     - [Fix 5] Rolling Z-score 스케일링 (build_master_dataset 내)
     """
     if is_trained_today(force):
-        print("✅ [SKIP] 오늘 이미 v19.0 모델 학습이 완료되었습니다.")
+        logger.info("✅ [SKIP] 오늘 이미 v19.0 모델 학습이 완료되었습니다.")
         return
 
-    print("🤖 AI 모델 v19.0 학습 시작 (First-touch + Log-weight + Dynamic Ensemble)...")
+    logger.info("🤖 AI 모델 v19.0 학습 시작 (First-touch + Log-weight + Dynamic Ensemble)...")
 
     data = build_master_dataset()
     if data is None:
-        print("⚠️ [ML] 학습 데이터 부족으로 중단합니다.")
+        logger.warning("⚠️ [ML] 학습 데이터 부족으로 중단합니다.")
         return
 
     X_tr, y_tr, X_val, y_val, meta_val, in_dim, pos_ratio = data
@@ -1095,7 +1134,7 @@ def train_model(force=False):
 
         avg_loss = epoch_loss / max(n_batches, 1)
         if epoch % 5 == 0 or kpi > best_kpi:
-            print(f"  Epoch {epoch:2d} | Loss: {avg_loss:.4f} | KPI: {kpi:.4f} "
+            logger.info(f"  Epoch {epoch:2d} | Loss: {avg_loss:.4f} | KPI: {kpi:.4f} "
                   f"(AUC: {auc:.3f}, Hit: {avg_precision:.2%}, "
                   f"Strong: {strong_hit:.2%}, SoftTop20: {top20_soft_avg:.3f})")
 
@@ -1107,17 +1146,17 @@ def train_model(force=False):
             patience_counter += 1
 
         if patience_counter >= PATIENCE:
-            print(f"🛑 [Early Stop] {PATIENCE}에폭 연속 개선 없음. "
+            logger.error(f"🛑 [Early Stop] {PATIENCE}에폭 연속 개선 없음. "
                   f"Best KPI: {best_kpi:.4f} (epoch {epoch - PATIENCE})")
             break
 
-    print(f"✅ [LSTM] 학습 완료 (Best KPI: {best_kpi:.4f})")
+    logger.info(f"✅ [LSTM] 학습 완료 (Best KPI: {best_kpi:.4f})")
 
     # ============= (2) XGBoost 학습 =============
     lstm_val_probs = all_probs.copy()  # [Fix 4] 나중에 동적 가중치 계산용
 
     if XGB_OK:
-        print("🌲 XGBoost 앙상블 학습 시작...")
+        logger.info("🌲 XGBoost 앙상블 학습 시작...")
         X_tr_xgb = X_tr[:, -1, :]
         X_val_xgb = X_val[:, -1, :]
 
@@ -1150,11 +1189,11 @@ def train_model(force=False):
             xgb_auc = roc_auc_score(y_val_binary, xgb_val_probs)
         except ValueError:
             xgb_auc = 0.5
-        print(f"✅ [XGBoost] 학습 완료 (AUC: {xgb_auc:.3f})")
+        logger.info(f"✅ [XGBoost] 학습 완료 (AUC: {xgb_auc:.3f})")
 
         importance = dict(zip(FEATURE_COLS[:in_dim], xgb_model.feature_importances_))
         top5 = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:5]
-        print(f"   Top 피처: {', '.join(f'{k}({v:.2f})' for k, v in top5)}")
+        logger.info(f"   Top 피처: {', '.join(f'{k}({v:.2f})' for k, v in top5)}")
 
         # [Fix 4] Dynamic Ensemble 가중치 산출
         w_lstm, w_xgb = _compute_dynamic_weights(
@@ -1170,7 +1209,7 @@ def train_model(force=False):
     _loaded_lstm_model = None
     _loaded_scaler = None
     load_model()
-    print("✅ [ML] v19.0 전체 학습 파이프라인 완료!")
+    logger.info("✅ [ML] v19.0 전체 학습 파이프라인 완료!")
 
 
 def _save_meta(in_dim, pos_ratio, best_kpi):
@@ -1196,7 +1235,7 @@ def _save_meta(in_dim, pos_ratio, best_kpi):
 
 # ====================== 추론 ======================
 
-def apply_ml_score(current_df, full_ohlcv_map):
+def apply_ml_score(current_df: pd.DataFrame, full_ohlcv_map: dict) -> pd.DataFrame:
     """
     [v19.0] 5-Fix 통합 추론
 
@@ -1212,7 +1251,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
         load_model()
 
     if _loaded_lstm_model is None or _loaded_scaler is None:
-        print("⚠️ [ML] 모델 파일 없음. ML_SCORE=0 으로 진행.")
+        logger.warning("⚠️ [ML] 모델 파일 없음. ML_SCORE=0 으로 진행.")
         current_df["ML_SCORE"] = 0.0
         current_df["ML_STATUS"] = "MODEL_NOT_FOUND"
         return current_df
@@ -1286,7 +1325,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
         _data_dim = len(valid_inputs[0][0])
         _fc_ok = (_data_dim == FEATURE_CONTRACT.n_features)
         if not _fc_ok:
-            print(f"⚠️ [ML] Feature Contract 차원 불일치: "
+            logger.warning(f"⚠️ [ML] Feature Contract 차원 불일치: "
                   f"data={_data_dim}, contract={FEATURE_CONTRACT.n_features}. "
                   f"ML_SCORE=0 폴백.")
             current_df["ML_SCORE"] = 0.0
@@ -1296,7 +1335,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
         from ml_engine import FEATURE_COLS as _ml_cols
         _cols_ok, _cols_errs = FEATURE_CONTRACT.validate(list(_ml_cols), "ml_engine")
         if not _cols_ok:
-            print(f"⚠️ [ML] Feature Contract 컬럼 불일치: {_cols_errs}. ML_SCORE=0 폴백.")
+            logger.warning(f"⚠️ [ML] Feature Contract 컬럼 불일치: {_cols_errs}. ML_SCORE=0 폴백.")
             current_df["ML_SCORE"] = 0.0
             current_df["ML_STATUS"] = "CONTRACT_MISMATCH"
             return current_df
@@ -1308,7 +1347,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
     scaler_dim = getattr(_loaded_scaler, 'n_features_in_', n_feat)
 
     if n_feat != scaler_dim:
-        print(f"⚠️ [ML] 피처 차원 불일치 (데이터={n_feat}, 모델={scaler_dim}). ML_SCORE=0 폴백.")
+        logger.warning(f"⚠️ [ML] 피처 차원 불일치 (데이터={n_feat}, 모델={scaler_dim}). ML_SCORE=0 폴백.")
         current_df["ML_SCORE"] = 0.0
         current_df["ML_STATUS"] = "DIM_MISMATCH"
         return current_df
@@ -1322,7 +1361,7 @@ def apply_ml_score(current_df, full_ohlcv_map):
                 X_raw.reshape(-1, n_feat)
             ).reshape(-1, seq_len, n_feat)
     except Exception as e:
-        print(f"⚠️ [ML] 스케일링 실패: {e}. ML_SCORE=0 폴백.")
+        logger.error(f"⚠️ [ML] 스케일링 실패: {e}. ML_SCORE=0 폴백.")
         current_df["ML_SCORE"] = 0.0
         current_df["ML_STATUS"] = "SCALE_FAIL"
         return current_df
@@ -1343,9 +1382,9 @@ def apply_ml_score(current_df, full_ohlcv_map):
             # [Fix 4] 동적 가중치 로드
             w_lstm, w_xgb = _load_ensemble_weights()
             final_probs = lstm_probs * w_lstm + xgb_probs * w_xgb
-            print(f"   ⚖️ Ensemble: LSTM×{w_lstm:.2f} + XGB×{w_xgb:.2f}")
+            logger.info(f"   ⚖️ Ensemble: LSTM×{w_lstm:.2f} + XGB×{w_xgb:.2f}")
         except Exception as e:
-            print(f"⚠️ [ML] XGBoost 추론 실패, LSTM 단독: {e}")
+            logger.error(f"⚠️ [ML] XGBoost 추론 실패, LSTM 단독: {e}")
 
     # ─────────────────────────────────────────────
     # 하이브리드 스코어링 (자신감 적응형)
@@ -1371,21 +1410,21 @@ def apply_ml_score(current_df, full_ohlcv_map):
     if codes:
         all_scores = np.array(list(score_map.values()))
         prob_mean = prob_scores.mean()
-        print(f"🧠 [ML] 분포: prob_avg={prob_mean:.1f}, prob_std={prob_std:.3f}, "
+        logger.info(f"🧠 [ML] 분포: prob_avg={prob_mean:.1f}, prob_std={prob_std:.3f}, "
               f"w_prob={w_prob:.2f}/w_pct={w_pct:.2f}")
-        print(f"   hybrid: min={all_scores.min():.1f} / "
+        logger.info(f"   hybrid: min={all_scores.min():.1f} / "
               f"med={np.median(all_scores):.1f} / "
               f"max={all_scores.max():.1f}")
 
         top5 = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:5]
-        print(f"🧠 [ML] Top5: {', '.join(f'{c}({s})' for c, s in top5)}")
+        logger.info(f"🧠 [ML] Top5: {', '.join(f'{c}({s})' for c, s in top5)}")
 
         n = len(all_scores)
         if n >= 10:
             top20_prob = np.sort(prob_scores)[-max(n // 5, 1):].mean()
             bot20_prob = np.sort(prob_scores)[:max(n // 5, 1)].mean()
             spread = top20_prob - bot20_prob
-            print(f"   📐 변별력: top20%_prob={top20_prob:.1f}, "
+            logger.info(f"   📐 변별력: top20%_prob={top20_prob:.1f}, "
                   f"bot20%_prob={bot20_prob:.1f}, spread={spread:.1f}")
 
     # [v20.8] ML 상태 기록

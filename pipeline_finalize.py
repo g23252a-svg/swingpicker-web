@@ -15,6 +15,64 @@ from validation import run_reality_check
 
 logger = logging.getLogger(__name__)
 
+
+# [v3.7.27 추가 · v3.7.29 강화] CONFIG_SNAPSHOT 로드 유틸
+# Single source of truth: config는 JSON 파일에서만 읽는다.
+# CSV에는 CONFIG_VERSION 문자열만 남기므로, 전체 snapshot이 필요하면 이 함수 사용.
+def load_config_snapshot(trade_ymd: str = None) -> dict:
+    """CONFIG_SNAPSHOT을 JSON 파일에서 로드 (fallback 체인 적용).
+
+    Args:
+        trade_ymd: YYYYMMDD 문자열. None이면 latest 파일 사용.
+
+    Returns:
+        dict: 설정 스냅샷. 모든 fallback 실패 시 빈 dict (참조 코드가 안전하게 계속 진행 가능).
+
+    Fallback 순서:
+      1) data/config_snapshot_{trade_ymd}.json (지정일)
+      2) data/config_snapshot_latest.json      (최신)
+      3) collector_config.DEFAULT_CONFIG.snapshot_json() (런타임)
+      4) {} 빈 dict
+
+    예전 CSV 호환 코드를 바꿀 때 사용:
+        # Before (v3.7.26):
+        #   snapshot = json.loads(df.iloc[0]["CONFIG_SNAPSHOT"])
+        # After (v3.7.27+):
+        #   from pipeline_finalize import load_config_snapshot
+        #   snapshot = load_config_snapshot(trade_ymd)
+    """
+    import json
+    from pathlib import Path
+
+    # 1) 지정일 파일
+    if trade_ymd:
+        try:
+            path = Path(OUT_DIR) / f"config_snapshot_{trade_ymd}.json"
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.debug(f"CONFIG_SNAPSHOT dated 로드 실패 ({trade_ymd}): {e}")
+
+    # 2) latest alias
+    try:
+        path_latest = Path(OUT_DIR) / "config_snapshot_latest.json"
+        if path_latest.exists():
+            return json.loads(path_latest.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.debug(f"CONFIG_SNAPSHOT latest 로드 실패: {e}")
+
+    # 3) 런타임 재생성 (collector_config에서 직접)
+    try:
+        from collector_config import DEFAULT_CONFIG as _snap
+        return json.loads(_snap.snapshot_json())
+    except Exception as e:
+        logger.debug(f"CONFIG_SNAPSHOT 런타임 생성 실패: {e}")
+
+    # 4) 빈 dict
+    logger.info("CONFIG_SNAPSHOT 사용 불가 — 빈 dict 반환 (참조 코드는 계속 진행)")
+    return {}
+
+
 def finalize_outputs(ctx: PipelineContext) -> None:
     from collector import make_rank_validation_report  # 아직 collector에만 있음
     df_out = ctx.df_out; trade_ymd = ctx.trade_ymd
@@ -41,12 +99,39 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             elif _cm == "DATA_FRESHNESS_OK": df_out[_cm] = True
             else: df_out[_cm] = 0
     df_out = df_out[must_cols + [c for c in df_out.columns if c not in must_cols]]
-    # Config Snapshot
+    # ══════════════════════════════════════════════════
+    #  CONFIG_SNAPSHOT 저장 (v3.7.27에서 JSON 분리 · v3.7.29에서 migration 완료)
+    # ══════════════════════════════════════════════════
+    # 정책 — single source of truth:
+    #   · CSV 행 데이터:  경량 (CONFIG_VERSION 문자열만)
+    #   · JSON 파일:     config 스냅샷 전용
+    #                    data/config_snapshot_{trade_ymd}.json (일자별)
+    #                    data/config_snapshot_latest.json      (최신 alias)
+    # 읽기:
+    #   · 모든 참조 코드는 load_config_snapshot(trade_ymd) 헬퍼를 사용한다.
+    #   · 예: snapshot = load_config_snapshot("20260420")
+    #   · Fallback: 파일이 없으면 빈 dict 반환 (예외 없음) — 참조 코드가 그냥 계속 돌 수 있도록.
+    # 주변 참조 (v3.7.29 기준 전부 이관 완료):
+    #   · test_shadow_analyze.py → SKIP_KEYS에 포함 (비교에서 제외)
     try:
         from collector_config import DEFAULT_CONFIG as _snap
-        df_out["CONFIG_SNAPSHOT"]=_snap.snapshot_json(); df_out["CONFIG_VERSION"]=_snap.config_version
-    except (ImportError,AttributeError) as e: logger.debug(f"CONFIG_SNAPSHOT 스킵: {e}")
-    except Exception as e: logger.warning(f"⚠️ CONFIG_SNAPSHOT 오류: {e}")
+        # CSV에는 버전 문자열만 (작은 값, 호환성 유지)
+        df_out["CONFIG_VERSION"] = _snap.config_version
+        # 전체 스냅샷은 별도 JSON 파일로 — 일자별 1회 덮어쓰기
+        try:
+            from pathlib import Path as _P
+            _snap_path = _P(OUT_DIR) / f"config_snapshot_{trade_ymd}.json"
+            _snap_latest = _P(OUT_DIR) / "config_snapshot_latest.json"
+            _snap_json_str = _snap.snapshot_json()
+            _snap_path.write_text(_snap_json_str, encoding="utf-8")
+            _snap_latest.write_text(_snap_json_str, encoding="utf-8")
+            logger.info(f"✅ CONFIG_SNAPSHOT → {_snap_path.name}")
+        except Exception as _ef:
+            logger.warning(f"⚠️ CONFIG_SNAPSHOT JSON 저장 실패: {_ef}")
+    except (ImportError, AttributeError) as e:
+        logger.debug(f"CONFIG_SNAPSHOT 스킵 (구성 없음): {e}")
+    except Exception as e:
+        logger.warning(f"⚠️ CONFIG_SNAPSHOT 오류: {e}")
     # [v20.6] macro_risk 직접 저장
     df_out["MACRO_RISK"] = ctx.macro_risk
     df_out["MARKET_BREADTH"] = ctx.breadth.get("ALL", np.nan)
