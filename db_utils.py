@@ -139,39 +139,82 @@ class LDYDBManager:
     # ═══════════════════════════════════════════
 
     def _exec_sqlite(self, query: str, params=None, fetch=False):
-        """SQLite Thread-safe 실행 (WAL이라 읽기 동시성 ↑)"""
+        """SQLite Thread-safe 실행 (WAL이라 읽기 동시성 ↑).
+
+        [v3.7.27 Phase 1] 트랜잭션 안전성 강화:
+          - 쓰기 실패 시 자동 rollback (이전엔 커밋 반쯤 된 채 raise)
+          - finally에서 커서 명시적 close
+          - DB 부분 손상 방지
+        """
         with self._sqlite_lock:
             cur = self._sqlite.cursor()
             try:
                 cur.execute(query, params or [])
                 if fetch:
-                    return cur.fetchall()
+                    result = cur.fetchall()
+                    return result
                 self._sqlite.commit()
                 return cur
             except sqlite3.OperationalError as e:
+                # [v3.7.27] rollback으로 부분 쓰기 방지
+                try:
+                    self._sqlite.rollback()
+                except Exception as _re:
+                    _logger.warning(f"SQLite rollback 실패: {_re}")
                 _logger.warning(f"SQLite 에러: {e}, 쿼리: {query[:80]}")
                 raise
+            except Exception as e:
+                # [v3.7.27] 일반 예외에도 rollback
+                try:
+                    self._sqlite.rollback()
+                except Exception as _re:
+                    _logger.warning(f"SQLite rollback 실패: {_re}")
+                _logger.error(f"SQLite 예상외 에러: {e}, 쿼리: {query[:80]}")
+                raise
+            finally:
+                # [v3.7.27] 커서 누수 방지 (fetch 모드에서만 close 필요)
+                if fetch:
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
 
     def _exec_sqlite_one(self, query: str, params=None):
-        """단일 행 조회"""
+        """단일 행 조회 (읽기 전용).
+
+        [v3.7.27] 커서 명시적 close로 누수 방지.
+        """
         with self._sqlite_lock:
             cur = self._sqlite.cursor()
-            cur.execute(query, params or [])
-            return cur.fetchone()
+            try:
+                cur.execute(query, params or [])
+                return cur.fetchone()
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
 
     def execute_safe(self, query, params=None):
-        """DuckDB Thread-safe 실행 (OLAP용)"""
+        """DuckDB Thread-safe 실행 (OLAP용).
+
+        [v3.7.27] 에러 경로 정리 + 재연결 시 로깅 강화.
+        """
         with self._duck_lock:
             try:
                 return self._duck.execute(query, params) if params else self._duck.execute(query)
             except (duckdb.ConnectionException, duckdb.IOException) as e:
-                _logger.warning(f"DuckDB 재연결: {e}")
+                _logger.warning(f"DuckDB 재연결 시도: {e}")
                 try:
                     self._duck.close()
                 except Exception:
                     pass
-                self._duck = duckdb.connect(self._DUCKDB_PATH)
-                return self._duck.execute(query, params) if params else self._duck.execute(query)
+                try:
+                    self._duck = duckdb.connect(self._DUCKDB_PATH)
+                    return self._duck.execute(query, params) if params else self._duck.execute(query)
+                except Exception as _re:
+                    _logger.error(f"DuckDB 재연결 실패: {_re}")
+                    raise
 
     # ═══════════════════════════════════════════
     #  테이블 초기화

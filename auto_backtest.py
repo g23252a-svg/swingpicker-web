@@ -49,7 +49,12 @@ class BacktestConfig:
     # ── 비용 ──
     fee_oneway_pct: float = 0.015    # 수수료 편도 0.015%
     tax_sell_pct: float = 0.18       # 매도세 0.18% (코스피) — 2026 기준
-    slippage_pct: float = 0.10       # 슬리피지 추정 0.10%
+    # [v3.7.27 Phase 1] 슬리피지 0.10 → 0.25 보수적 재설정
+    # - 실제 개인투자자 시장가 주문 시 호가 2~3틱 slip 흔함
+    # - 중소형주/저유동 종목은 0.5% 이상 slip 발생
+    # - 보수적 추정이 백테스트 과신 방지에 안전 (under-promise, over-deliver)
+    # 왕복 비용: 기존 0.41% → 0.71%로 70bps 증가
+    slippage_pct: float = 0.25       # 슬리피지 추정 0.25% (이전 0.10%)
 
     @property
     def round_trip_cost_pct(self) -> float:

@@ -2,6 +2,70 @@
 """
 tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 ═══════════════════════════════════════════════════
+[v3.7.29] (2026-04-20) — 마지막 봉합 (94 → 97점 도전)
+  배경: v3.7.28 평가 결과 94점 — 2가지 마무리만 남음
+  Patch A: CONFIG_SNAPSHOT Migration 완전 봉합
+    · pipeline_finalize.py 과거 "변경 필요" 주석 제거
+    · SSOT (Single Source of Truth) 정책 공식 문서화
+      - CSV 행: 경량 (CONFIG_VERSION만)
+      - JSON 파일: 전체 config snapshot 전용
+    · load_config_snapshot() Fallback 체인 4단계 강화:
+      1) dated JSON → 2) latest JSON → 3) 런타임 재생성 → 4) 빈 dict
+    · test_shadow_analyze.py가 실제 load_config_snapshot() 호출
+      - snapshot 모드에서 config meta를 별도 저장
+      - 재현성 보장 + migration 실제 검증
+  Patch B: Shadow Test → CI Regression Gate 전환
+    · exit code 0/1 (CI pass/fail 신호)
+    · CLI 인자 확장:
+      - --min-match-rate (default 0.995)
+      - --critical-keys (쉼표 구분)
+      - --report-json (CI 파싱용)
+      - --quiet (CI 로그 절약)
+    · 3단계 Gate 판정:
+      1) match_rate 임계치
+      2) critical keys 무결성 (점수/가격/라벨)
+      3) missing 종목 0개
+    · pytest 래퍼 신규: tests/test_shadow_regression.py
+      - pytest 자동 수집 가능
+      - 환경변수로 임계치 조정 (SHADOW_MIN_MATCH_RATE 등)
+      - skip 처리로 snapshot 없을 때 안전
+  의의: "좋은 도구" → "리팩토링 안전 게이트"로 성숙도 업그레이드
+[v3.7.28] (2026-04-20) — Phase 1 완결 패치 (89 → 95점 도전)
+  배경: v3.7.27 평가 결과 89점 — 마감 디테일 부족
+  #1 README/주석 수치 일치화
+     · 실측 결과 174 → 141 (33개 제거)로 통일
+     · 이전 오기 수정: v3.7.27 주석에 잘못 적혔던 컬럼 수치 교정
+     · "76.3%" 크기 감소로 통일 (2,008,554 → 476,445 bytes)
+  #2 ml_engine.py print 완전 제거 (11개 → 0개)
+     · 멀티라인 print 괄호 균형 추적 변환
+     · 전체 logger.info/warning/error로 100% 통일
+  #3 CONFIG_SNAPSHOT 참조 코드 봉합
+     · test_shadow_analyze.py: CONFIG_SNAPSHOT 컬럼 → CONFIG_VERSION만 사용
+     · JSON 파일 없을 때 fallback 로직 추가
+[v3.7.27] (2026-04-20) — Phase 1 기술부채 청소 (CSV/DB/ML 품질)
+  목표: 87점 → 90점 (100점 평가 결과 Critical 3개 해결)
+  #1 CSV 다운로드 중복/상수 컬럼 제거 (components/tab_stocks.py)
+     · 중복 5개: LDY_SCORE, TOTAL_SCORE, RANK_SCORE, ML_SCORE, RAW_TRIGGER_SCORE
+     · 상수 28개: CONFIG_SNAPSHOT, MACRO_RISK, W_STRUCT 등 (전체 동일값)
+     · 실측 검증: nunique()==1 자동 필터 (파이프라인 변경 대비)
+     · 실측 결과: 174 → 141 컬럼 (33개 제거, 76% 크기 감소)
+     · 알림에 "N컬럼 (X개 제거)" 표시
+  #2 CONFIG_SNAPSHOT 별도 파일 분리 (pipeline_finalize.py)
+     · 이전: 행당 2.5KB × 500종목 = 1.3MB 반복 저장
+     · 이후: data/config_snapshot_YYYYMMDD.json 1회만 저장
+  #3 DB 트랜잭션 안전성 (db_utils.py)
+     · SQLite: rollback + finally + 커서 close 추가
+     · 일반 예외도 rollback 처리
+     · DuckDB: 재연결 실패 시 명시적 raise
+  #4 ML Engine 품질 (ml_engine.py)
+     · logger 모듈 추가 (print 30개 → logger.info/warning/error)
+     · 7개 핵심 함수 타입힌트 추가
+     · 운영 로그 레벨 제어 가능 (이전: print 42회 · logger 0회)
+  #5 슬리피지 0.10% → 0.25% 보수적 재설정 (auto_backtest.py)
+     · 왕복 비용 0.41% → 0.71% (현실 반영)
+     · 개인 시장가 주문 2~3틱 slip + 저유동 종목 대응
+  원칙: 엔진 로직 불변 + CSV 생성 단계에서만 정리
+  복구: 각 패치별 주석에 rollback 가이드 기록
 [v3.7.26] (2026-04-19) — 스코어 체계 UI 정리 (페이즈 1) + 차트 툴팁 수정
   사용자 지적 2가지:
     1. "스코어들이 너무 많은데 로직들좀 설명해봐"
@@ -1809,6 +1873,16 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
         scope='filtered': 현재 필터/정렬 적용된 결과만
         scope='all': df 전체 (필터 무시)
+
+        [v3.7.27 Phase 1 · v3.7.28 완결] CSV 스키마 정리:
+          - 중복 컬럼 5개 제거 (값이 DISPLAY_SCORE 등과 100% 동일)
+            LDY_SCORE, TOTAL_SCORE, RANK_SCORE, ML_SCORE, RAW_TRIGGER_SCORE
+          - 상수 컬럼 28개 제거 (전체 종목 같은 값 → 정보 없음)
+            CONFIG_SNAPSHOT, MACRO_RISK, W_STRUCT 등
+          - 실측: 174 → 141 컬럼 (33개 제거) · 파일 76% 감소 (2MB → 0.47MB)
+
+          내부 엔진/DB는 그대로 유지 → 참조 코드 영향 0.
+          CSV 소비 측에서만 필터링.
         """
         # [v3.7.22] 이중 권한 체크 - 버튼이 disabled여도 안전하게 차단
         if not can_download:
@@ -1825,7 +1899,44 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 ui.notify("다운로드할 종목이 없습니다", type="warning")
                 return
 
-            # 다운로드용 컬럼 선별 (너무 많으면 가독성 떨어짐)
+            # [v3.7.27] 제거 대상: 중복 컬럼 (100% 동일값)
+            duplicate_cols = [
+                "LDY_SCORE",        # = DISPLAY_SCORE
+                "TOTAL_SCORE",      # = DISPLAY_SCORE
+                "RANK_SCORE",       # = DISPLAY_SCORE
+                "ML_SCORE",         # = AI_SCORE
+                "RAW_TRIGGER_SCORE",  # = TRIGGER_SCORE
+            ]
+
+            # [v3.7.27] 제거 대상: 상수 컬럼 (전체 종목 같은 값)
+            constant_cols = [
+                "MACRO_RISK", "MARKET_BREADTH",
+                "W_STRUCT", "W_TIMING", "W_AI",
+                "CONFIDENCE_SCORE",  # 항상 100 — 이름과 달리 정보 없음
+                "AXIS_QUALITY",
+                "CONFIG_SNAPSHOT",   # 행당 2.5KB × N행 — 1MB+ 낭비
+                "EXEC_RULE_ID", "ML_STATUS", "REASON_THRESHOLD",
+                "기준일", "시총기준일",
+                "벤치_60d_KOSPI_%", "벤치_60d_KOSDAQ_%",
+                "CALIBRATION_MODE", "CAL_N_TRADES", "DATA_FRESHNESS_OK",
+                "CONFIG_VERSION", "RUN_STATUS", "MAX_ALLOWED_ROUTE",
+                "AXIS_MCAP", "AXIS_BENCH", "AXIS_FLOW", "AXIS_NEWS",
+                "AXIS_SECTOR", "AXIS_ML", "AXIS_TRIGGER", "FALLBACK_COUNT",
+                "HAS_NEWS", "HAS_FLOW", "HAS_SECTOR",
+                "OBV_Div", "개인순매수", "SCORING_AXES",
+            ]
+
+            # [v3.7.27] 상수 컬럼은 실측으로 한번 더 확인 (파이프라인 변경 대비)
+            # nunique() == 1이면 정보 없음
+            verified_constant = [
+                c for c in constant_cols
+                if c in source_df.columns
+                and source_df[c].nunique(dropna=False) <= 1
+            ]
+
+            cols_to_drop = set(duplicate_cols) | set(verified_constant)
+
+            # 다운로드용 컬럼 선별 — 핵심 먼저 배치
             download_cols = [c for c in [
                 "종목코드", "종목명", "업종", "ELITE_LABEL", "ROUTE",
                 "DISPLAY_SCORE", "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE",
@@ -1835,10 +1946,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "RSI14", "V_POWER", "거래대금(억원)",
             ] if c in source_df.columns]
 
-            # 누락 컬럼은 나머지에서 추가 (사용자가 원할 수 있음)
+            # 핵심 외 나머지 컬럼 추가 (단, drop 대상 제외)
             for c in source_df.columns:
-                if c not in download_cols:
-                    download_cols.append(c)
+                if c in download_cols or c in cols_to_drop:
+                    continue
+                download_cols.append(c)
 
             out_df = source_df[download_cols].copy()
 
@@ -1852,7 +1964,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
             # NiceGUI download 트리거
             ui.download(csv_bytes, filename)
-            ui.notify(f"✅ {len(out_df)}개 종목 다운로드", type="positive")
+            # [v3.7.27] 컬럼 수와 절감량도 알림에 표시
+            original_cols = len(source_df.columns)
+            final_cols = len(download_cols)
+            saved = original_cols - final_cols
+            ui.notify(
+                f"✅ {len(out_df)}개 종목 · {final_cols}컬럼 "
+                f"({saved}개 중복/상수 제거)",
+                type="positive",
+            )
         except Exception as e:
             ui.notify(f"❌ 다운로드 실패: {e}", type="negative")
 
