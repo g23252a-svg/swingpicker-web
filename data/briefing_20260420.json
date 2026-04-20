@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260420",
+  "generated_at": "2026-04-20 21:31:12",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "373220",
+      "name": "LG에너지솔루션",
+      "route": "ARMED",
+      "score": 91.4,
+      "close": 429000,
+      "entry": 429000,
+      "stop": 392000,
+      "target1": 527000,
+      "target2": 559000,
+      "est_win_rate": 0.714,
+      "rr": 2.6,
+      "sector": "2차전지",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/373220"
+    },
+    {
+      "rank": 2,
+      "code": "450080",
+      "name": "에코프로머티",
+      "route": "ARMED",
+      "score": 89.0,
+      "close": 77100,
+      "entry": 75900,
+      "stop": 66000,
+      "target1": 80000,
+      "target2": 92100,
+      "est_win_rate": 0.69,
+      "rr": 0.4,
+      "sector": "2차전지",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/450080"
+    },
+    {
+      "rank": 3,
+      "code": "474610",
+      "name": "RF시스템즈",
+      "route": "ARMED",
+      "score": 86.6,
+      "close": 15770,
+      "entry": 12720,
+      "stop": 10810,
+      "target1": 16480,
+      "target2": 18410,
+      "est_win_rate": 0.666,
+      "rr": 2.0,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/474610"
+    }
+  ]
+}
