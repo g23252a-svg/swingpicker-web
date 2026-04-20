@@ -1,0 +1,32 @@
+{
+  "trade_ymd": "20260420",
+  "top_pick_count": 2,
+  "avg_elite": 80.7,
+  "avg_rr": 2.12,
+  "avg_balance": 57.2,
+  "avg_win_rate": 0.696,
+  "routes": {
+    "ARMED": 1,
+    "WAIT": 1
+  },
+  "picks": [
+    {
+      "종목코드": "373220",
+      "종목명": "LG에너지솔루션",
+      "ELITE_SCORE": 83.6,
+      "RR_NOW_TP1": 2.65,
+      "BALANCE_SCORE": 62.1,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.714
+    },
+    {
+      "종목코드": "036810",
+      "종목명": "에프에스티",
+      "ELITE_SCORE": 77.7,
+      "RR_NOW_TP1": 1.59,
+      "BALANCE_SCORE": 52.4,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.677
+    }
+  ]
+}

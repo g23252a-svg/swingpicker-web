@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-04-18T01:08:10",
+  "generated_at": "2026-04-20T21:15:14",
   "version": "v3.7.14",
   "horizon_bdays": 10,
   "trade_cost_pct": 0.22,
-  "days_covered": 36,
-  "ohlc_coverage_note": "OHLC parquet 종목수: 1036 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
+  "days_covered": 38,
+  "ohlc_coverage_note": "OHLC parquet 종목수: 1449 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
   "methodology": {
     "horizon_days": 10,
     "fill_window_days": 3,
@@ -16,55 +16,55 @@
     "selection_mode": "top1_first_then_top3_fallback",
     "date_range": [
       "2026-02-26",
-      "2026-04-16"
+      "2026-04-20"
     ],
     "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
   },
   "daily_top3_backtest": {
-    "n": 44,
-    "n_all_picks": 55,
-    "n_not_filled": 11,
+    "n": 48,
+    "n_all_picks": 60,
+    "n_not_filled": 12,
     "fill_rate": 0.8,
     "tp1_rate": 0.25,
-    "stop_rate": 0.4091,
-    "open_rate": 0.3409,
-    "avg_tp1": 19.0,
+    "stop_rate": 0.375,
+    "open_rate": 0.375,
+    "avg_tp1": 19.26,
     "avg_stop": -10.66,
-    "avg_open": 0.49,
-    "avg_all": 0.55,
-    "ev": 0.33,
+    "avg_open": 0.65,
+    "avg_all": 1.06,
+    "ev": 0.84,
     "ohlc_coverage": 1.0
   },
   "by_label_top3": {
     "🏆 최강": {
-      "n": 44,
-      "n_all_picks": 55,
-      "n_not_filled": 11,
+      "n": 48,
+      "n_all_picks": 60,
+      "n_not_filled": 12,
       "fill_rate": 0.8,
       "tp1_rate": 0.25,
-      "stop_rate": 0.4091,
-      "open_rate": 0.3409,
-      "avg_tp1": 19.0,
+      "stop_rate": 0.375,
+      "open_rate": 0.375,
+      "avg_tp1": 19.26,
       "avg_stop": -10.66,
-      "avg_open": 0.49,
-      "avg_all": 0.55,
-      "ev": 0.33,
+      "avg_open": 0.65,
+      "avg_all": 1.06,
+      "ev": 0.84,
       "ohlc_coverage": 1.0
     }
   },
   "daily_top1_backtest": {
-    "n": 19,
-    "n_all_picks": 23,
+    "n": 21,
+    "n_all_picks": 25,
     "n_not_filled": 4,
-    "fill_rate": 0.8261,
-    "tp1_rate": 0.2105,
-    "stop_rate": 0.3158,
-    "open_rate": 0.4737,
-    "avg_tp1": 24.91,
+    "fill_rate": 0.84,
+    "tp1_rate": 0.2381,
+    "stop_rate": 0.2857,
+    "open_rate": 0.4762,
+    "avg_tp1": 24.36,
     "avg_stop": -10.78,
-    "avg_open": -0.31,
-    "avg_all": 1.69,
-    "ev": 1.47,
+    "avg_open": 0.78,
+    "avg_all": 3.09,
+    "ev": 2.87,
     "ohlc_coverage": 1.0
   },
   "all_trades_top1": [
@@ -367,12 +367,12 @@
       "tp1": 21300.0,
       "stop": 16660.0,
       "outcome": "OPEN",
-      "exit_price": 17740.0,
-      "days_held": 3,
+      "exit_price": 19020.0,
+      "days_held": 10,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-07",
-      "ret_pct": -9.49,
-      "net_pct": -9.71
+      "ret_pct": -2.96,
+      "net_pct": -3.18
     },
     {
       "date": "20260408",
@@ -403,12 +403,12 @@
       "tp1": 491000.0,
       "stop": 376500.0,
       "outcome": "OPEN",
-      "exit_price": 416000.0,
-      "days_held": 5,
+      "exit_price": 429000.0,
+      "days_held": 7,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-10",
-      "ret_pct": 0.36,
-      "net_pct": 0.14
+      "ret_pct": 3.5,
+      "net_pct": 3.28
     },
     {
       "date": "20260410",
@@ -421,12 +421,12 @@
       "tp1": 38500.0,
       "stop": 27750.0,
       "outcome": "OPEN",
-      "exit_price": 31050.0,
-      "days_held": 4,
+      "exit_price": 31300.0,
+      "days_held": 6,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-13",
-      "ret_pct": 0.32,
-      "net_pct": 0.1
+      "ret_pct": 1.13,
+      "net_pct": 0.91
     },
     {
       "date": "20260413",
@@ -439,12 +439,12 @@
       "tp1": 38500.0,
       "stop": 27750.0,
       "outcome": "OPEN",
-      "exit_price": 31050.0,
-      "days_held": 3,
+      "exit_price": 31300.0,
+      "days_held": 5,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-14",
-      "ret_pct": -0.32,
-      "net_pct": -0.54
+      "ret_pct": 0.48,
+      "net_pct": 0.26
     },
     {
       "date": "20260414",
@@ -457,12 +457,12 @@
       "tp1": 22000.0,
       "stop": 16900.0,
       "outcome": "OPEN",
-      "exit_price": 18710.0,
-      "days_held": 2,
+      "exit_price": 19120.0,
+      "days_held": 4,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-15",
-      "ret_pct": 2.3,
-      "net_pct": 2.08
+      "ret_pct": 4.54,
+      "net_pct": 4.32
     },
     {
       "date": "20260415",
@@ -474,13 +474,49 @@
       "entry": 10650.0,
       "tp1": 13010.0,
       "stop": 9260.0,
+      "outcome": "WIN",
+      "exit_price": 13010.0,
+      "days_held": 3,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-04-16",
+      "ret_pct": 22.16,
+      "net_pct": 21.94
+    },
+    {
+      "date": "20260416",
+      "code": "017800",
+      "name": "현대엘리베이터",
+      "sector": "일반 목적용 기계 제조업",
+      "label": "🏆 최강",
+      "rank_score": 76.39,
+      "entry": 99500.0,
+      "tp1": 113400.0,
+      "stop": 92000.0,
       "outcome": "OPEN",
-      "exit_price": 11200.0,
+      "exit_price": 102200.0,
+      "days_held": 2,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-17",
+      "ret_pct": 2.71,
+      "net_pct": 2.49
+    },
+    {
+      "date": "20260417",
+      "code": "096770",
+      "name": "SK이노베이션",
+      "sector": "석유 정제품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 61.48,
+      "entry": 129400.0,
+      "tp1": 149000.0,
+      "stop": 118000.0,
+      "outcome": "OPEN",
+      "exit_price": 128800.0,
       "days_held": 1,
       "method": "ohlc_horizon_close",
-      "fill_date": "2026-04-16",
-      "ret_pct": 5.16,
-      "net_pct": 4.94
+      "fill_date": "2026-04-20",
+      "ret_pct": -0.46,
+      "net_pct": -0.68
     }
   ],
   "daily_picks_log_top1": [
@@ -706,346 +742,52 @@
       "codes": [
         "017800"
       ]
+    },
+    {
+      "date": "20260417",
+      "n_picked": 1,
+      "codes": [
+        "096770"
+      ]
+    },
+    {
+      "date": "20260420",
+      "n_picked": 1,
+      "codes": [
+        "017800"
+      ]
     }
   ],
   "signal_top1": {
     "label": "신호 성과 (알파 품질)",
     "description": "pick_top1로 뽑힌 모든 추천을 독립적으로 horizon 추적한 결과. 자본 제약 없음 — 순수 시그널 품질 측정용.",
-    "n_signals_total": 23,
-    "n_filled": 19,
-    "fill_rate": 0.8261,
-    "tp1_rate": 0.2105,
-    "stop_rate": 0.3158,
-    "open_rate": 0.4737,
-    "avg_all_pct": 1.69,
-    "ev_net_pct": 1.47
-  },
-  "walk_forward": {
-    "is_period": "20260226 ~ 20260323",
-    "oos_period": "20260324 ~ 20260416",
-    "is_days": 18,
-    "oos_days": 18,
-    "horizon_used": 10,
-    "results": [
-      {
-        "rank_in_is": 1,
-        "thresholds": {
-          "strong_mean": 65,
-          "strong_bal": 70,
-          "strong_gap": 5,
-          "strong_rr": 0.8
-        },
-        "is_summary": {
-          "n": 20,
-          "n_all_picks": 23,
-          "n_not_filled": 3,
-          "fill_rate": 0.8696,
-          "tp1_rate": 0.15,
-          "stop_rate": 0.7,
-          "open_rate": 0.15,
-          "avg_tp1": 20.33,
-          "avg_stop": -9.82,
-          "avg_open": -6.61,
-          "avg_all": -4.81,
-          "ev": -5.03,
-          "ohlc_coverage": 1.0
-        },
-        "oos_summary": {
-          "n": 31,
-          "n_all_picks": 41,
-          "n_not_filled": 10,
-          "fill_rate": 0.7561,
-          "tp1_rate": 0.2903,
-          "stop_rate": 0.1935,
-          "open_rate": 0.5161,
-          "avg_tp1": 19.24,
-          "avg_stop": -14.27,
-          "avg_open": 1.22,
-          "avg_all": 3.45,
-          "ev": 3.23,
-          "ohlc_coverage": 1.0
-        },
-        "generalizes": true,
-        "decay": -8.26,
-        "oos_capital": {
-          "total_return_pct": -0.58,
-          "max_drawdown_pct": 11.53,
-          "n_executed": 8
-        },
-        "capital_generalizes": false
-      },
-      {
-        "rank_in_is": 2,
-        "thresholds": {
-          "strong_mean": 70,
-          "strong_bal": 70,
-          "strong_gap": 10,
-          "strong_rr": 0.8
-        },
-        "is_summary": {
-          "n": 20,
-          "n_all_picks": 22,
-          "n_not_filled": 2,
-          "fill_rate": 0.9091,
-          "tp1_rate": 0.15,
-          "stop_rate": 0.75,
-          "open_rate": 0.1,
-          "avg_tp1": 20.33,
-          "avg_stop": -10.16,
-          "avg_open": -6.42,
-          "avg_all": -5.22,
-          "ev": -5.44,
-          "ohlc_coverage": 1.0
-        },
-        "oos_summary": {
-          "n": 27,
-          "n_all_picks": 38,
-          "n_not_filled": 11,
-          "fill_rate": 0.7105,
-          "tp1_rate": 0.2963,
-          "stop_rate": 0.2222,
-          "open_rate": 0.4815,
-          "avg_tp1": 20.78,
-          "avg_stop": -14.1,
-          "avg_open": 0.47,
-          "avg_all": 3.25,
-          "ev": 3.03,
-          "ohlc_coverage": 1.0
-        },
-        "generalizes": true,
-        "decay": -8.47,
-        "oos_capital": {
-          "total_return_pct": -9.46,
-          "max_drawdown_pct": 17.53,
-          "n_executed": 10
-        },
-        "capital_generalizes": false
-      },
-      {
-        "rank_in_is": 3,
-        "thresholds": {
-          "strong_mean": 65,
-          "strong_bal": 70,
-          "strong_gap": 7,
-          "strong_rr": 0.8
-        },
-        "is_summary": {
-          "n": 21,
-          "n_all_picks": 24,
-          "n_not_filled": 3,
-          "fill_rate": 0.875,
-          "tp1_rate": 0.1429,
-          "stop_rate": 0.7143,
-          "open_rate": 0.1429,
-          "avg_tp1": 20.33,
-          "avg_stop": -10.17,
-          "avg_open": -6.61,
-          "avg_all": -5.3,
-          "ev": -5.52,
-          "ohlc_coverage": 1.0
-        },
-        "oos_summary": {
-          "n": 33,
-          "n_all_picks": 43,
-          "n_not_filled": 10,
-          "fill_rate": 0.7674,
-          "tp1_rate": 0.303,
-          "stop_rate": 0.2424,
-          "open_rate": 0.4545,
-          "avg_tp1": 19.71,
-          "avg_stop": -14.48,
-          "avg_open": 1.6,
-          "avg_all": 3.19,
-          "ev": 2.97,
-          "ohlc_coverage": 1.0
-        },
-        "generalizes": true,
-        "decay": -8.49,
-        "oos_capital": {
-          "total_return_pct": -3.27,
-          "max_drawdown_pct": 17.85,
-          "n_executed": 10
-        },
-        "capital_generalizes": false
-      },
-      {
-        "rank_in_is": 4,
-        "thresholds": {
-          "strong_mean": 65,
-          "strong_bal": 70,
-          "strong_gap": 10,
-          "strong_rr": 0.8
-        },
-        "is_summary": {
-          "n": 22,
-          "n_all_picks": 25,
-          "n_not_filled": 3,
-          "fill_rate": 0.88,
-          "tp1_rate": 0.1364,
-          "stop_rate": 0.7273,
-          "open_rate": 0.1364,
-          "avg_tp1": 20.33,
-          "avg_stop": -10.47,
-          "avg_open": -6.61,
-          "avg_all": -5.74,
-          "ev": -5.96,
-          "ohlc_coverage": 1.0
-        },
-        "oos_summary": {
-          "n": 32,
-          "n_all_picks": 43,
-          "n_not_filled": 11,
-          "fill_rate": 0.7442,
-          "tp1_rate": 0.2812,
-          "stop_rate": 0.25,
-          "open_rate": 0.4688,
-          "avg_tp1": 20.37,
-          "avg_stop": -14.48,
-          "avg_open": 1.6,
-          "avg_all": 2.86,
-          "ev": 2.64,
-          "ohlc_coverage": 1.0
-        },
-        "generalizes": true,
-        "decay": -8.6,
-        "oos_capital": {
-          "total_return_pct": -6.05,
-          "max_drawdown_pct": 17.53,
-          "n_executed": 10
-        },
-        "capital_generalizes": false
-      },
-      {
-        "rank_in_is": 5,
-        "thresholds": {
-          "strong_mean": 65,
-          "strong_bal": 70,
-          "strong_gap": 7,
-          "strong_rr": 1.0
-        },
-        "is_summary": {
-          "n": 20,
-          "n_all_picks": 23,
-          "n_not_filled": 3,
-          "fill_rate": 0.8696,
-          "tp1_rate": 0.1,
-          "stop_rate": 0.75,
-          "open_rate": 0.15,
-          "avg_tp1": 25.89,
-          "avg_stop": -10.17,
-          "avg_open": -6.61,
-          "avg_all": -6.03,
-          "ev": -6.25,
-          "ohlc_coverage": 1.0
-        },
-        "oos_summary": {
-          "n": 32,
-          "n_all_picks": 41,
-          "n_not_filled": 9,
-          "fill_rate": 0.7805,
-          "tp1_rate": 0.2812,
-          "stop_rate": 0.25,
-          "open_rate": 0.4688,
-          "avg_tp1": 20.48,
-          "avg_stop": -14.48,
-          "avg_open": 1.6,
-          "avg_all": 2.89,
-          "ev": 2.67,
-          "ohlc_coverage": 1.0
-        },
-        "generalizes": true,
-        "decay": -8.92,
-        "oos_capital": {
-          "total_return_pct": -3.27,
-          "max_drawdown_pct": 17.85,
-          "n_executed": 10
-        },
-        "capital_generalizes": false
-      }
-    ],
-    "walkforward_signal_summary": {
-      "n_results": 5,
-      "n_generalizes_signal": 5,
-      "avg_oos_ev": 2.91
-    },
-    "walkforward_capital_summary": {
-      "n_results": 5,
-      "n_generalizes_capital": 0,
-      "avg_oos_return": -4.53,
-      "avg_oos_mdd": 16.46
-    }
-  },
-  "rolling_walk_forward": {
-    "horizon_used": 10,
-    "n_folds_requested": 3,
-    "is_ratio": 0.6,
-    "summary": {
-      "n_folds": 3,
-      "n_valid": 2,
-      "n_generalizes": 1,
-      "avg_is_ev": -1.55,
-      "avg_oos_ev": 1.93,
-      "robust": false
-    },
-    "folds": [
-      {
-        "fold": 1,
-        "is_period": "20260226~20260310",
-        "oos_period": "20260311~20260323",
-        "error": "IS 샘플 부족"
-      },
-      {
-        "fold": 2,
-        "is_period": "20260226~20260323",
-        "oos_period": "20260324~20260403",
-        "best_thresholds": {
-          "strong_mean": 65,
-          "strong_bal": 70,
-          "strong_gap": 5,
-          "strong_rr": 0.8
-        },
-        "is_ev": -5.03,
-        "oos_ev": -0.53,
-        "oos_n": 16,
-        "generalizes": false,
-        "decay": -4.5
-      },
-      {
-        "fold": 3,
-        "is_period": "20260226~20260403",
-        "oos_period": "20260406~20260416",
-        "best_thresholds": {
-          "strong_mean": 75,
-          "strong_bal": 75,
-          "strong_gap": 3,
-          "strong_rr": 0.8
-        },
-        "is_ev": 1.94,
-        "oos_ev": 4.39,
-        "oos_n": 5,
-        "generalizes": true,
-        "decay": -2.45
-      }
-    ]
+    "n_signals_total": 25,
+    "n_filled": 21,
+    "fill_rate": 0.84,
+    "tp1_rate": 0.2381,
+    "stop_rate": 0.2857,
+    "open_rate": 0.4762,
+    "avg_all_pct": 3.09,
+    "ev_net_pct": 2.87
   },
   "daily_portfolio_summary": {
-    "n_days": 23,
-    "avg_daily_portfolio_ret_gross": -0.54,
-    "avg_daily_portfolio_ret_net": -0.73,
-    "avg_daily_portfolio_ret": -0.73,
-    "n_positive_days": 12,
-    "n_positive_days_gross": 12,
-    "positive_rate": 0.5217,
+    "n_days": 25,
+    "avg_daily_portfolio_ret_gross": 0.11,
+    "avg_daily_portfolio_ret_net": -0.07,
+    "avg_daily_portfolio_ret": -0.07,
+    "n_positive_days": 13,
+    "n_positive_days_gross": 13,
+    "positive_rate": 0.52,
     "cost_basis": "net (비용 차감 후)"
   },
   "capital_portfolio": {
     "initial_capital": 10000000,
-    "final_capital": 9200129.0,
-    "total_return_pct": -8.0,
+    "final_capital": 9823447.0,
+    "total_return_pct": -1.77,
     "max_drawdown_pct": 22.62,
     "n_trades_filled": 16,
     "n_skipped_duplicate": 8,
-    "n_skipped_not_filled": 11,
+    "n_skipped_not_filled": 12,
     "positive_day_rate": 0.3333,
     "cost_basis": "net (거래당 0.22% 차감)"
   },
@@ -1053,45 +795,37 @@
     "label": "실집행 성과 (실전 운용 가능성)",
     "description": "Top1 신호를 max_positions=1 자본 시뮬에 실제 적용한 결과. 겹치는 시그널과 미체결 때문에 신호보다 표본이 작음.",
     "initial_capital": 10000000,
-    "final_capital": 10835230.0,
-    "total_return_pct": 8.35,
+    "final_capital": 12590509.0,
+    "total_return_pct": 25.91,
     "max_drawdown_pct": 19.83,
     "n_trades_filled": 5,
     "n_skipped_not_filled": 4,
-    "n_skipped_slot_full": 13,
+    "n_skipped_slot_full": 15,
     "positive_day_rate": 0.4286,
     "cost_basis": "net (거래당 0.22% 차감)",
     "note": "Top1 전용 - 동시 1포지션, 자본 100% 투자",
     "signal_vs_capital_gap": {
-      "n_signals_total": 23,
-      "n_signals_filled_ok": 19,
+      "n_signals_total": 25,
+      "n_signals_filled_ok": 21,
       "n_capital_executed": 5,
-      "execution_rate": 0.263,
-      "explanation": "신호 19건 → 자본시뮬 5건 (슬롯풀 13건 · 미체결 4건)"
+      "execution_rate": 0.238,
+      "explanation": "신호 21건 → 자본시뮬 5건 (슬롯풀 15건 · 미체결 4건)"
     },
     "skip_reasons_summary": {
       "NOT_FILLED": 4,
       "SAME_TICKER_ALREADY_HELD": 1,
-      "SLOT_FULL": 13,
+      "SLOT_FULL": 15,
       "EXECUTED": 5,
-      "total_signals": 23
+      "total_signals": 25
     }
-  },
-  "rolling_summary": {
-    "n_folds": 3,
-    "n_valid": 2,
-    "n_generalizes": 1,
-    "avg_is_ev": -1.55,
-    "avg_oos_ev": 1.93,
-    "robust": false
   },
   "confidence": {
     "level": "LOW",
     "color": "red",
-    "reason": "실집행 표본 5건 · rolling 미확정 (2폴드) · wf capital 일반화 0/5",
+    "reason": "실집행 표본 5건 · rolling 미확정 (0폴드)",
     "executed_trades": 5,
     "rolling_robust": false,
-    "rolling_valid_folds": 2,
+    "rolling_valid_folds": 0,
     "walkforward_capital_generalizes": 0,
     "threshold_rule": {
       "HIGH": "executed >= 30 AND rolling robust",
