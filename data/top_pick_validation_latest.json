@@ -1,32 +1,40 @@
 {
-  "trade_ymd": "20260420",
-  "top_pick_count": 2,
-  "avg_elite": 80.7,
-  "avg_rr": 2.12,
-  "avg_balance": 57.2,
-  "avg_win_rate": 0.696,
+  "trade_ymd": "20260421",
+  "top_pick_count": 3,
+  "avg_elite": 73.6,
+  "avg_rr": 1.67,
+  "avg_balance": 58.7,
+  "avg_win_rate": 0.625,
   "routes": {
-    "ARMED": 1,
-    "WAIT": 1
+    "WAIT": 3
   },
   "picks": [
     {
-      "종목코드": "373220",
-      "종목명": "LG에너지솔루션",
-      "ELITE_SCORE": 83.6,
-      "RR_NOW_TP1": 2.65,
-      "BALANCE_SCORE": 62.1,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.714
+      "종목코드": "060370",
+      "종목명": "LS마린솔루션",
+      "ELITE_SCORE": 79.2,
+      "RR_NOW_TP1": 1.42,
+      "BALANCE_SCORE": 66.9,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.666
     },
     {
-      "종목코드": "036810",
-      "종목명": "에프에스티",
-      "ELITE_SCORE": 77.7,
-      "RR_NOW_TP1": 1.59,
-      "BALANCE_SCORE": 52.4,
+      "종목코드": "005380",
+      "종목명": "현대차",
+      "ELITE_SCORE": 71.1,
+      "RR_NOW_TP1": 2.43,
+      "BALANCE_SCORE": 50.4,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.677
+      "EST_WIN_RATE": 0.618
+    },
+    {
+      "종목코드": "052400",
+      "종목명": "코나아이",
+      "ELITE_SCORE": 70.6,
+      "RR_NOW_TP1": 1.16,
+      "BALANCE_SCORE": 58.8,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.592
     }
   ]
 }

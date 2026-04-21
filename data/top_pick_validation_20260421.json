@@ -1,0 +1,40 @@
+{
+  "trade_ymd": "20260421",
+  "top_pick_count": 3,
+  "avg_elite": 73.6,
+  "avg_rr": 1.67,
+  "avg_balance": 58.7,
+  "avg_win_rate": 0.625,
+  "routes": {
+    "WAIT": 3
+  },
+  "picks": [
+    {
+      "종목코드": "060370",
+      "종목명": "LS마린솔루션",
+      "ELITE_SCORE": 79.2,
+      "RR_NOW_TP1": 1.42,
+      "BALANCE_SCORE": 66.9,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.666
+    },
+    {
+      "종목코드": "005380",
+      "종목명": "현대차",
+      "ELITE_SCORE": 71.1,
+      "RR_NOW_TP1": 2.43,
+      "BALANCE_SCORE": 50.4,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.618
+    },
+    {
+      "종목코드": "052400",
+      "종목명": "코나아이",
+      "ELITE_SCORE": 70.6,
+      "RR_NOW_TP1": 1.16,
+      "BALANCE_SCORE": 58.8,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.592
+    }
+  ]
+}

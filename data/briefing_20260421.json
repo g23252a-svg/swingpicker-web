@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260421",
+  "generated_at": "2026-04-21 20:45:20",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "161580",
+      "name": "필옵틱스",
+      "route": "ATTACK",
+      "score": 91.5,
+      "close": 49400,
+      "entry": 42350,
+      "stop": 36950,
+      "target1": 49800,
+      "target2": 60300,
+      "est_win_rate": 0.715,
+      "rr": 1.4,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/161580"
+    },
+    {
+      "rank": 2,
+      "code": "138080",
+      "name": "오이솔루션",
+      "route": "ATTACK",
+      "score": 88.1,
+      "close": 46200,
+      "entry": 46200,
+      "stop": 39250,
+      "target1": 48000,
+      "target2": 61100,
+      "est_win_rate": 0.681,
+      "rr": 0.3,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/138080"
+    },
+    {
+      "rank": 3,
+      "code": "033160",
+      "name": "엠케이전자",
+      "route": "ATTACK",
+      "score": 87.3,
+      "close": 26750,
+      "entry": 20750,
+      "stop": 17650,
+      "target1": 27900,
+      "target2": 30300,
+      "est_win_rate": 0.673,
+      "rr": 2.3,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/033160"
+    }
+  ]
+}

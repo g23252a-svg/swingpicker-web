@@ -24,3 +24,4 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260415,252990,샘씨엔에스,🏆 최강,EXECUTE,EXECUTED,,2026-04-16,0,
 20260416,017800,현대엘리베이터,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-04-17,1,252990
 20260417,096770,SK이노베이션,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-04-20,1,252990
+20260420,017800,현대엘리베이터,🏆 최강,EXECUTE,EXECUTED,,2026-04-21,0,
