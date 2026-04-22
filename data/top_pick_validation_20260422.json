@@ -1,0 +1,31 @@
+{
+  "trade_ymd": "20260422",
+  "top_pick_count": 2,
+  "avg_elite": 75.2,
+  "avg_rr": 1.5,
+  "avg_balance": 60.4,
+  "avg_win_rate": 0.636,
+  "routes": {
+    "WAIT": 2
+  },
+  "picks": [
+    {
+      "종목코드": "060370",
+      "종목명": "LS마린솔루션",
+      "ELITE_SCORE": 77.9,
+      "RR_NOW_TP1": 1.69,
+      "BALANCE_SCORE": 64.0,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.659
+    },
+    {
+      "종목코드": "052400",
+      "종목명": "코나아이",
+      "ELITE_SCORE": 72.4,
+      "RR_NOW_TP1": 1.32,
+      "BALANCE_SCORE": 56.8,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.613
+    }
+  ]
+}

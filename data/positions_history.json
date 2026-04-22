@@ -1314,5 +1314,29 @@
       "020150_20260331_TP1_HIT_20260421",
       "020150_20260331_TP2_HIT_20260421"
     ]
+  },
+  {
+    "code": "278280",
+    "name": "천보",
+    "entry_ymd": "20260417",
+    "entry_px": 56500.0,
+    "qty": 0,
+    "stop_px": 49050.0,
+    "stop_px_initial": 49050.0,
+    "take_px1": 68100.0,
+    "take_px2": 69800.0,
+    "trailing_high": 70400.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260422",
+    "last_close_px": 70000.0,
+    "unrealized_pnl_pct": 23.89,
+    "realized_pnl_pct": 23.89,
+    "close_ymd": "20260422",
+    "close_px": 70000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "278280_20260417_TP1_HIT_20260422",
+      "278280_20260417_TP2_HIT_20260422"
+    ]
   }
 ]
