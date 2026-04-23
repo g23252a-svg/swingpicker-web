@@ -1,31 +1,68 @@
 {
-  "trade_ymd": "20260422",
-  "top_pick_count": 2,
-  "avg_elite": 75.2,
-  "avg_rr": 1.5,
-  "avg_balance": 60.4,
-  "avg_win_rate": 0.636,
+  "trade_ymd": "20260423",
+  "top_pick_count": 6,
+  "avg_elite": 76.4,
+  "avg_rr": 1.43,
+  "avg_balance": 71.6,
+  "avg_win_rate": 0.627,
   "routes": {
-    "WAIT": 2
+    "WAIT": 4,
+    "ARMED": 2
   },
   "picks": [
     {
-      "종목코드": "060370",
-      "종목명": "LS마린솔루션",
-      "ELITE_SCORE": 77.9,
-      "RR_NOW_TP1": 1.69,
-      "BALANCE_SCORE": 64.0,
-      "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.659
+      "종목코드": "011930",
+      "종목명": "신성이엔지",
+      "ELITE_SCORE": 81.3,
+      "RR_NOW_TP1": 1.62,
+      "BALANCE_SCORE": 78.4,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.664
     },
     {
-      "종목코드": "052400",
-      "종목명": "코나아이",
-      "ELITE_SCORE": 72.4,
-      "RR_NOW_TP1": 1.32,
-      "BALANCE_SCORE": 56.8,
+      "종목코드": "388050",
+      "종목명": "지투파워",
+      "ELITE_SCORE": 71.8,
+      "RR_NOW_TP1": 1.16,
+      "BALANCE_SCORE": 55.7,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.619
+    },
+    {
+      "종목코드": "307180",
+      "종목명": "아이엘",
+      "ELITE_SCORE": 89.0,
+      "RR_NOW_TP1": 1.06,
+      "BALANCE_SCORE": 93.4,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.613
+      "EST_WIN_RATE": 0.699
+    },
+    {
+      "종목코드": "083310",
+      "종목명": "엘오티베큠",
+      "ELITE_SCORE": 72.6,
+      "RR_NOW_TP1": 1.33,
+      "BALANCE_SCORE": 66.4,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.594
+    },
+    {
+      "종목코드": "031980",
+      "종목명": "피에스케이홀딩스",
+      "ELITE_SCORE": 70.9,
+      "RR_NOW_TP1": 1.41,
+      "BALANCE_SCORE": 62.2,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.594
+    },
+    {
+      "종목코드": "327260",
+      "종목명": "RF머트리얼즈",
+      "ELITE_SCORE": 73.0,
+      "RR_NOW_TP1": 2.03,
+      "BALANCE_SCORE": 73.6,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.591
     }
   ]
 }

@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260423",
+  "generated_at": "2026-04-23 21:20:04",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "019210",
+      "name": "와이지-원",
+      "route": "ARMED",
+      "score": 89.0,
+      "close": 14880,
+      "entry": 14360,
+      "stop": 12200,
+      "target1": 15300,
+      "target2": 18540,
+      "est_win_rate": 0.69,
+      "rr": 0.4,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/019210"
+    },
+    {
+      "rank": 2,
+      "code": "091580",
+      "name": "상신이디피",
+      "route": "ARMED",
+      "score": 87.5,
+      "close": 27300,
+      "entry": 23700,
+      "stop": 20150,
+      "target1": 31550,
+      "target2": 36650,
+      "est_win_rate": 0.675,
+      "rr": 2.2,
+      "sector": "2차전지",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/091580"
+    },
+    {
+      "rank": 3,
+      "code": "011930",
+      "name": "신성이엔지",
+      "route": "ARMED",
+      "score": 86.4,
+      "close": 3995,
+      "entry": 3995,
+      "stop": 3395,
+      "target1": 4970,
+      "target2": 5750,
+      "est_win_rate": 0.664,
+      "rr": 1.6,
+      "sector": "반도체",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/011930"
+    }
+  ]
+}
