@@ -1,22 +1,14 @@
 {
   "trade_ymd": "20260424",
-  "top_pick_count": 1,
-  "avg_elite": 75.7,
-  "avg_rr": 1.67,
-  "avg_balance": 53.7,
-  "avg_win_rate": 0.657,
-  "routes": {
-    "WAIT": 1
-  },
-  "picks": [
-    {
-      "종목코드": "052690",
-      "종목명": "한전기술",
-      "ELITE_SCORE": 75.7,
-      "RR_NOW_TP1": 1.67,
-      "BALANCE_SCORE": 53.7,
-      "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.657
-    }
-  ]
+  "top_pick_count": 0,
+  "top_pick_by_type": {},
+  "avg_elite": null,
+  "avg_rr": null,
+  "avg_balance": null,
+  "avg_win_rate": null,
+  "est_win_rate_method": "ELITE_SCORE",
+  "est_win_rate_mode": "MATURE",
+  "est_win_rate_n": 3900,
+  "routes": {},
+  "picks": []
 }

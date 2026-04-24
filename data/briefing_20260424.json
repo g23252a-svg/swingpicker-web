@@ -1,6 +1,6 @@
 {
   "trade_date": "20260424",
-  "generated_at": "2026-04-24 21:17:48",
+  "generated_at": "2026-04-25 07:57:42",
   "count": 3,
   "stocks": [
     {
@@ -14,7 +14,7 @@
       "stop": 54200,
       "target1": 67000,
       "target2": 80600,
-      "est_win_rate": 0.673,
+      "est_win_rate": 0.629,
       "rr": 0.3,
       "sector": "IT/전기전자",
       "market": "KOSDAQ",
@@ -31,7 +31,7 @@
       "stop": 13600,
       "target1": 19840,
       "target2": 20350,
-      "est_win_rate": 0.638,
+      "est_win_rate": 0.702,
       "rr": 1.6,
       "sector": "기타",
       "market": "KOSDAQ",
@@ -48,7 +48,7 @@
       "stop": 4290,
       "target1": 6890,
       "target2": 7810,
-      "est_win_rate": 0.626,
+      "est_win_rate": 0.629,
       "rr": 2.4,
       "sector": "반도체",
       "market": "KOSDAQ",
