@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260424",
+  "generated_at": "2026-04-24 21:17:48",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "425420",
+      "name": "티에프이",
+      "route": "ARMED",
+      "score": 87.3,
+      "close": 63800,
+      "entry": 63800,
+      "stop": 54200,
+      "target1": 67000,
+      "target2": 80600,
+      "est_win_rate": 0.673,
+      "rr": 0.3,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/425420"
+    },
+    {
+      "rank": 2,
+      "code": "331920",
+      "name": "셀레믹스",
+      "route": "ARMED",
+      "score": 83.8,
+      "close": 16000,
+      "entry": 16000,
+      "stop": 13600,
+      "target1": 19840,
+      "target2": 20350,
+      "est_win_rate": 0.638,
+      "rr": 1.6,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/331920"
+    },
+    {
+      "rank": 3,
+      "code": "088280",
+      "name": "쏘닉스",
+      "route": "ARMED",
+      "score": 82.6,
+      "close": 6140,
+      "entry": 5050,
+      "stop": 4290,
+      "target1": 6890,
+      "target2": 7810,
+      "est_win_rate": 0.626,
+      "rr": 2.4,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/088280"
+    }
+  ]
+}

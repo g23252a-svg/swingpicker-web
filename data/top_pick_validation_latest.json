@@ -1,68 +1,22 @@
 {
-  "trade_ymd": "20260423",
-  "top_pick_count": 6,
-  "avg_elite": 76.4,
-  "avg_rr": 1.43,
-  "avg_balance": 71.6,
-  "avg_win_rate": 0.627,
+  "trade_ymd": "20260424",
+  "top_pick_count": 1,
+  "avg_elite": 75.7,
+  "avg_rr": 1.67,
+  "avg_balance": 53.7,
+  "avg_win_rate": 0.657,
   "routes": {
-    "WAIT": 4,
-    "ARMED": 2
+    "WAIT": 1
   },
   "picks": [
     {
-      "종목코드": "011930",
-      "종목명": "신성이엔지",
-      "ELITE_SCORE": 81.3,
-      "RR_NOW_TP1": 1.62,
-      "BALANCE_SCORE": 78.4,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.664
-    },
-    {
-      "종목코드": "388050",
-      "종목명": "지투파워",
-      "ELITE_SCORE": 71.8,
-      "RR_NOW_TP1": 1.16,
-      "BALANCE_SCORE": 55.7,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.619
-    },
-    {
-      "종목코드": "307180",
-      "종목명": "아이엘",
-      "ELITE_SCORE": 89.0,
-      "RR_NOW_TP1": 1.06,
-      "BALANCE_SCORE": 93.4,
+      "종목코드": "052690",
+      "종목명": "한전기술",
+      "ELITE_SCORE": 75.7,
+      "RR_NOW_TP1": 1.67,
+      "BALANCE_SCORE": 53.7,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.699
-    },
-    {
-      "종목코드": "083310",
-      "종목명": "엘오티베큠",
-      "ELITE_SCORE": 72.6,
-      "RR_NOW_TP1": 1.33,
-      "BALANCE_SCORE": 66.4,
-      "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.594
-    },
-    {
-      "종목코드": "031980",
-      "종목명": "피에스케이홀딩스",
-      "ELITE_SCORE": 70.9,
-      "RR_NOW_TP1": 1.41,
-      "BALANCE_SCORE": 62.2,
-      "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.594
-    },
-    {
-      "종목코드": "327260",
-      "종목명": "RF머트리얼즈",
-      "ELITE_SCORE": 73.0,
-      "RR_NOW_TP1": 2.03,
-      "BALANCE_SCORE": 73.6,
-      "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.591
+      "EST_WIN_RATE": 0.657
     }
   ]
 }
