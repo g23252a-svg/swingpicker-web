@@ -32,35 +32,112 @@ PER_TRADE_COLS = [
 ]
 
 
+# ═══════════════════════════════════════════════════
+#  [v22] 5-method 확장 — winrate_table_by_{method} 분리 학습
+#  ─ 참조: SwingPicker_v22_Final_Consolidated.md §2.2.5
+# ═══════════════════════════════════════════════════
+# 거래 1건 → method별 최대 5 row로 확장.
+# 각 method는 같은 거래의 결과(win/ret)를 공유하되 score만 다른 축으로.
+# 이로써 kelly_calibrator가 method별 독립 winrate_table 학습 가능.
+
+METHOD_EXTRACTORS = [
+    ("ELITE_SCORE",  lambda r: r.get("ELITE_SCORE")),
+    ("RANK_SCORE",   lambda r: (r.get("DISPLAY_SCORE") 
+                                or r.get("TOTAL_SCORE") 
+                                or r.get("RANK_SCORE"))),
+    ("AI_SCORE",     lambda r: r.get("AI_SCORE")),
+    ("ROUTE_ARMED",  lambda r: r.get("ELITE_SCORE") 
+                                if r.get("ROUTE") == "ARMED" else None),
+    ("ROUTE_ATTACK", lambda r: r.get("ELITE_SCORE") 
+                                if r.get("ROUTE") == "ATTACK" else None),
+]
+
+
+def _expand_trade_to_methods(trade: Dict) -> List[Dict]:
+    """거래 1건 → method별 row 리스트.
+    
+    원본 score/method는 무시하고 METHOD_EXTRACTORS로 재생성.
+    추출 결과가 None이거나 유효하지 않으면 해당 method row는 생성 안 함.
+    """
+    out = []
+    for method_name, extractor in METHOD_EXTRACTORS:
+        try:
+            score = extractor(trade)
+        except Exception:
+            continue
+        if score is None:
+            continue
+        try:
+            score_f = float(score)
+            if not np.isfinite(score_f):
+                continue
+        except (TypeError, ValueError):
+            continue
+        # 원본 trade 복제 + method/score 덮어쓰기
+        expanded = dict(trade)
+        expanded["method"] = method_name
+        expanded["score"] = round(score_f, 2)
+        out.append(expanded)
+    return out
+
+
+def expand_trade_to_method_rows(trade: Dict) -> List[Dict]:
+    """외부 공개용 alias"""
+    return _expand_trade_to_methods(trade)
+
+
+def expand_trades_batch(trades: List[Dict]) -> List[Dict]:
+    """여러 거래 → 전체 method별 row 리스트"""
+    out = []
+    for t in trades:
+        out.extend(_expand_trade_to_methods(t))
+    return out
+
+
 def save_per_trade_log(
     out_dir: str,
     trades: List[Dict],
     asof_ymd: str,
 ) -> str:
-    """[v2.4] per-trade 히스토리 Append-only 저장
+    """[v22] per-trade 히스토리 저장 — 5-method 자동 확장.
+    
+    v22 변경:
+      - 입력 trade가 ELITE_SCORE/DISPLAY_SCORE 등 다중 축 점수를 포함하면
+        자동으로 method별 최대 5 row 확장 후 저장.
+      - Backward-compat: method 컬럼이 이미 지정되어 있고 단일 축 점수만
+        있으면 기존 동작 유지 (legacy caller 호환).
 
     v2.4 #1: 신규 행만 파일 끝에 append (O(k) I/O)
     v2.4 #2: filelock으로 멀티프로세스 CSV 충돌 방어
-
-    Note: filelock 미설치 시 graceful fallback (락 없이 동작)
     """
     if not trades:
         return ""
 
-    # [v2.4 #4] 디렉토리 미존재 시 자동 생성 (배포 첫날 방어)
+    # [v22] 5-method 확장 가능 여부 판정 — 
+    # ELITE_SCORE 또는 AI_SCORE 등 점수 축 컬럼이 보이면 auto-expand
+    _first = trades[0]
+    _auto_expand = any(
+        _first.get(k) is not None
+        for k in ["ELITE_SCORE", "AI_SCORE", "DISPLAY_SCORE", "TOTAL_SCORE"]
+    )
+    # method 컬럼이 이미 명시적으로 세팅된 legacy 호출은 그대로 보존
+    _has_explicit_method = _first.get("method") in (
+        "ELITE_SCORE", "RANK_SCORE", "AI_SCORE", "ROUTE_ARMED", "ROUTE_ATTACK"
+    )
+    if _auto_expand and not _has_explicit_method:
+        trades = expand_trades_batch(trades)
+        if not trades:
+            return ""
+
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "per_trade_log.csv")
     df_new = pd.DataFrame(trades)
 
-    # [v3.2 #4] Strict Schema: PER_TRADE_COLS만 허용 (extra_cols 제거)
-    # Before: extra_cols 허용 → 날마다 다른 컬럼 유입 → CSV 구조 깨짐
-    # After:  PER_TRADE_COLS 14열만 강제, 미지 컬럼은 로그 경고 후 삭제
     unknown_cols = [c for c in df_new.columns if c not in PER_TRADE_COLS]
     if unknown_cols:
-        _logger.warning(f"미지 컬럼 {unknown_cols} 삭제됨 (Strict Schema)")
+        _logger.debug(f"미지 컬럼 {unknown_cols} 삭제됨 (Strict Schema)")
     df_new = df_new.reindex(columns=PER_TRADE_COLS)
 
-    # 컬럼 타입 정규화
     if "rec_date" in df_new.columns:
         df_new["rec_date"] = df_new["rec_date"].astype(str)
     if "code" in df_new.columns:
@@ -70,7 +147,6 @@ def save_per_trade_log(
 
     write_header = not os.path.exists(path)
 
-    # [v2.4 #2] 파일 락: 멀티프로세스 동시 쓰기 방어
     lock = _acquire_filelock(path)
     try:
         if lock:
@@ -413,14 +489,17 @@ def calibrated_win_rate(
     scores_arr = np.atleast_1d(np.asarray(score, dtype=float))
 
     if cal.empty:
-        result = _fallback_linear(scores_arr, fallback, base_score=base_score)
+        # [v22] empirical base + softened slope (fallback 인자 무시 — base=None 전달)
+        result = _fallback_linear(scores_arr, base_score=base_score,
+                                  out_dir=out_dir, method=method)
     else:
         interp_data = _get_interp_arrays(cal, method, horizon)
         if interp_data is not None:
             centers, probs = interp_data
             result = np.interp(scores_arr, centers, probs)
         else:
-            result = _fallback_linear(scores_arr, fallback, base_score=base_score)
+            result = _fallback_linear(scores_arr, base_score=base_score,
+                                      out_dir=out_dir, method=method)
 
     if is_scalar:
         return float(result[0])
@@ -434,23 +513,38 @@ MIN_EMPIRICAL_TRADES = 20   # 최소 20건 이상이어야 EMPIRICAL
 def get_calibration_mode(out_dir: str, asof_ymd: Optional[str] = None) -> dict:
     """
     캘리브레이션 테이블 상태 진단
+    
+    [v22] n_trades는 method 확장 전 실거래 수 (drop_duplicates 기준).
+    per_trade_log는 5-method 확장으로 1거래당 최대 5 row를 가지므로
+    row 수를 그대로 쓰면 FALLBACK → MATURE 전환이 5배 빨라짐.
 
     Returns:
         {
             "mode": "NO_DATA" | "FALLBACK" | "LIGHT" | "MATURE",
-            "n_trades": int,
+            "n_trades": int,  # 유니크 거래 수 (method 확장 전)
+            "n_rows": int,    # 실제 row 수 (method 확장 후)
             "n_bins": int,
             "table_date": str,
         }
     """
-    result = {"mode": "NO_DATA", "n_trades": 0, "n_bins": 0, "table_date": ""}
+    result = {"mode": "NO_DATA", "n_trades": 0, "n_rows": 0,
+              "n_bins": 0, "table_date": ""}
 
     # per_trade_log 건수 확인
     ptl_path = os.path.join(out_dir, "per_trade_log.csv")
     if os.path.exists(ptl_path):
         try:
             ptl = pd.read_csv(ptl_path)
-            result["n_trades"] = len(ptl)
+            result["n_rows"] = len(ptl)
+            # [v22] 유니크 거래 수 = (rec_date, code, topk, horizon) 조합
+            # method 확장 전 실제 거래 단위. 일부 컬럼이 없는 레거시 로그도 관용.
+            key_cols = [c for c in ["rec_date", "code", "topk", "horizon"]
+                        if c in ptl.columns]
+            if key_cols:
+                result["n_trades"] = int(ptl.drop_duplicates(key_cols).shape[0])
+            else:
+                # key 컬럼 전무 — 보수적으로 row 수 사용
+                result["n_trades"] = len(ptl)
         except Exception:
             pass
 
@@ -459,7 +553,7 @@ def get_calibration_mode(out_dir: str, asof_ymd: Optional[str] = None) -> dict:
     if not cal.empty:
         result["n_bins"] = len(cal)
 
-    # 모드 판정
+    # 모드 판정 — n_trades (유니크) 기준
     n = result["n_trades"]
     if n == 0:
         result["mode"] = "NO_DATA"
@@ -473,16 +567,181 @@ def get_calibration_mode(out_dir: str, asof_ymd: Optional[str] = None) -> dict:
     return result
 
 
-def _fallback_linear(score, base: float = 0.45, base_score: float = 60.0):
-    """[v2.5 #3] 유니버설 fallback — base 파라미터 실제 반영
+# ═══════════════════════════════════════════════════
+#  [v22] Empirical 기반 보수화 헬퍼
+#  ─ 참조: SwingPicker_v22_Final_Consolidated.md §2.2.3, §2.2.4
+# ═══════════════════════════════════════════════════
 
-    np.maximum, np.clip은 ufunc → 스칼라 입력이면 스칼라 반환.
-    base_score: 기준 점수, base: 기준 점수에서의 사전 승률
-    공식: p = (base - 0.05) + (max(score, 0) - base_score) * 0.01
-    base=0.45 → base_score=60에서 p=0.40 (기존 호환)
+@lru_cache(maxsize=8)
+def _get_empirical_base(out_dir: str, method: str = "RANK_SCORE",
+                         target_bin_lo: float = 0.0, target_bin_hi: float = 50.0,
+                         min_n: int = 100) -> Optional[float]:
+    """winrate_table에서 기준 구간 (기본 0-50 bin)의 empirical p_win 조회.
+    
+    설계 §2.2.3: _fallback_linear의 base를 하드코딩 0.45 대신 실측 값으로.
     """
-    p = (base - 0.05) + (np.maximum(score, 0.0) - base_score) * 0.01
-    return np.clip(p, 0.30, 0.85)
+    # winrate_table (auto_backtest 생성) 우선
+    for fname in [f"winrate_table_by_{method}_latest.json",
+                  "winrate_table_latest.json"]:
+        p = os.path.join(out_dir, fname)
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            table = data.get("table", data) if isinstance(data, dict) else data
+            if not isinstance(table, list):
+                continue
+            for row in table:
+                lo = row.get("score_lo")
+                hi = row.get("score_hi")
+                n = row.get("n_raw", 0)
+                p_win = row.get("p_win")
+                if (lo == target_bin_lo and hi == target_bin_hi
+                    and n >= min_n and p_win is not None):
+                    return float(p_win)
+        except (OSError, json.JSONDecodeError, KeyError, ValueError):
+            continue
+    return None
+
+
+def _fallback_linear(score, base: Optional[float] = None,
+                     base_score: float = 60.0,
+                     out_dir: Optional[str] = None,
+                     method: str = "RANK_SCORE"):
+    """[v22] 유니버설 fallback — empirical base 동적 조회 + slope 완화
+    
+    설계 결정:
+      - base=None이면 _get_empirical_base로 조회 (실측), 없으면 0.45 하드폴백
+      - slope 0.01 → 0.008 (과격한 선형 증가 완화)
+      - 상한 0.85 → 0.75 (fallback이 MATURE처럼 낙관 표시되는 과대추정 방지)
+    
+    공식: p = (base - 0.05) + (max(score, 0) - base_score) * 0.008
+    하한/상한: [0.30, 0.75]
+    """
+    if base is None:
+        if out_dir is not None:
+            empirical = _get_empirical_base(out_dir, method=method)
+            base = empirical if empirical is not None else 0.45
+        else:
+            base = 0.45
+    p = (base - 0.05) + (np.maximum(score, 0.0) - base_score) * 0.008
+    return np.clip(p, 0.30, 0.75)
+
+
+def _get_winrate_table_mtime(out_dir: str, method: str = "RANK_SCORE") -> int:
+    """가장 최신 winrate_table 파일의 mtime (캐시 키)"""
+    mtimes = []
+    for fname in [f"winrate_table_by_{method}_latest.json",
+                  "winrate_table_latest.json"]:
+        p = os.path.join(out_dir, fname)
+        if os.path.exists(p):
+            try:
+                mtimes.append(int(os.path.getmtime(p)))
+            except OSError:
+                pass
+    return max(mtimes) if mtimes else 0
+
+
+@lru_cache(maxsize=16)
+def _load_winrate_table_impl(out_dir: str, method: str,
+                               _mtime_key: int) -> Optional[pd.DataFrame]:
+    """winrate_table 캐시 로드 (내부 impl). mtime_key는 cache invalidation용."""
+    for fname in [f"winrate_table_by_{method}_latest.json",
+                  "winrate_table_latest.json"]:
+        p = os.path.join(out_dir, fname)
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            table = data.get("table", data) if isinstance(data, dict) else data
+            if isinstance(table, list) and len(table) > 0:
+                return pd.DataFrame(table)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
+def _load_winrate_table_cached(out_dir: str,
+                                 method: str = "RANK_SCORE") -> Optional[pd.DataFrame]:
+    """winrate_table 캐시 로드 — mtime 기반 자동 무효화."""
+    mtime_key = _get_winrate_table_mtime(out_dir, method)
+    return _load_winrate_table_impl(out_dir, method, mtime_key)
+
+
+# 외부에서 `_load_winrate_table_cached.cache_clear()` 호출 가능하도록 proxy 부여
+_load_winrate_table_cached.cache_clear = _load_winrate_table_impl.cache_clear
+_load_winrate_table_cached.cache_info = _load_winrate_table_impl.cache_info
+
+
+def _get_empirical_b(scores, out_dir: str, method: str = "RANK_SCORE",
+                      min_n: int = 200) -> Optional[np.ndarray]:
+    """점수별 empirical b_ratio 보간.
+    
+    설계 §2.2.4: Kelly 과대 배팅 방지.
+    planned_b(선언)와 empirical_b(실측) 중 min 취함.
+    """
+    wt = _load_winrate_table_cached(out_dir, method=method)
+    if wt is None or wt.empty:
+        return None
+    
+    if "n_raw" in wt.columns:
+        valid = wt[wt["n_raw"] >= min_n].copy()
+    else:
+        valid = wt.copy()
+    if len(valid) < 2:
+        return None
+    if "b_ratio" not in valid.columns or "score_lo" not in valid.columns:
+        return None
+    
+    centers = ((valid["score_lo"] + valid["score_hi"]) / 2).values.astype(float)
+    b_vals = valid["b_ratio"].values.astype(float)
+    order = np.argsort(centers)
+    centers = centers[order]
+    b_vals = b_vals[order]
+    
+    scores_arr = np.atleast_1d(np.asarray(scores, dtype=float))
+    return np.interp(scores_arr, centers, b_vals)
+
+
+# ═══════════════════════════════════════════════════
+#  [v22] compute_est_win_rate — SSOT 함수
+# ═══════════════════════════════════════════════════
+
+def compute_est_win_rate(df: pd.DataFrame, out_dir: str,
+                          asof_ymd: Optional[str] = None,
+                          horizon: int = 5) -> pd.DataFrame:
+    """ELITE_SCORE 기반 EST_WIN_RATE 계산 + v22 SSOT 메타 컬럼 주입.
+    
+    설계 §2.2.2: 랭킹 축 = 승률 추정 축 = ELITE_SCORE.
+    
+    입력 전제: df에 'ELITE_SCORE' 컬럼 존재 (compute_elite_score 후 호출).
+    
+    주입 컬럼:
+      - EST_WIN_RATE
+      - EST_WIN_RATE_METHOD: "ELITE_SCORE"
+      - EST_WIN_RATE_MODE: "MATURE" | "LIGHT" | "FALLBACK" | "NO_DATA"
+      - EST_WIN_RATE_N
+    """
+    if "ELITE_SCORE" not in df.columns:
+        raise ValueError("compute_est_win_rate: 'ELITE_SCORE' 컬럼 필요 "
+                        "(compute_elite_score 먼저 실행)")
+    
+    df = df.copy()
+    mode_info = get_calibration_mode(out_dir, asof_ymd=asof_ymd)
+    
+    scores = pd.to_numeric(df["ELITE_SCORE"], errors="coerce").fillna(0).values
+    wr = calibrated_win_rate(scores, out_dir, method="ELITE_SCORE",
+                             horizon=horizon, asof_ymd=asof_ymd)
+    wr = np.asarray(wr, dtype=float)
+    
+    df["EST_WIN_RATE"] = np.round(wr, 3)
+    df["EST_WIN_RATE_METHOD"] = "ELITE_SCORE"
+    df["EST_WIN_RATE_MODE"] = mode_info["mode"]
+    df["EST_WIN_RATE_N"] = mode_info["n_trades"]
+    
+    return df
 
 
 # ═══════════════════════════════════════════════════
@@ -508,30 +767,44 @@ def apply_kelly_calibrated(
     df: pd.DataFrame,
     out_dir: str,
     total_capital: int = 10_000_000,
-    method: str = "RANK_SCORE",
+    method: str = "ELITE_SCORE",
     horizon: int = 5,
     kelly_multiplier: float = 0.5,
     max_allocation: float = 0.25,
     min_score_threshold: float = 60.0,
     asof_ymd: Optional[str] = None,
 ) -> pd.DataFrame:
-    """[v2.4] 벡터화 Kelly 배팅 — 프로덕션 안정성 강화
-
-    v2.3: 순수 numpy 중간 연산
-    v2.4 #2: min_score_threshold 파라미터화 (매직넘버 60 제거)
-    v2.4 #3: pd.to_numeric(errors='coerce') 안전 캐스팅
-             → "N/A", "-", "" 등 문자열 쓰레기 → NaN → 0 (ValueError 방지)
+    """[v22] 벡터화 Kelly 배팅 + empirical b_ratio 병용
+    
+    v22 변경점:
+      - 점수 축 ELITE_SCORE 우선 (설계 §2.2.4: 랭킹=승률=Kelly 축 일치)
+      - 기본 method="ELITE_SCORE" (기존 RANK_SCORE 호환 fallback)
+      - `_get_empirical_b`로 실측 b_ratio 보간, planned_b와 `min` 취해 과대배팅 방지
+      - 관측 컬럼 4종 추가: KELLY_PLANNED_B/EMPIRICAL_B/FINAL_B/FRACTION
+      - empirical 미가용 시 planned_b * 0.6 보수화
     """
     df = df.copy()
 
-    # 점수 컬럼 결정
-    score_col = "TOTAL_SCORE" if "TOTAL_SCORE" in df.columns else "RANK_SCORE"
-    if score_col not in df.columns:
+    # [v22] 점수 컬럼 우선순위: ELITE_SCORE > TOTAL_SCORE > RANK_SCORE
+    score_col = None
+    for _sc in ["ELITE_SCORE", "TOTAL_SCORE", "RANK_SCORE"]:
+        if _sc in df.columns:
+            score_col = _sc
+            break
+    if score_col is None:
         df["켈리_수량"] = 0
         df["켈리_금액(원)"] = 0
         return df
 
-    # [v2.4 #3] 안전 캐스팅: to_numeric(coerce) → 문자열 쓰레기 방어
+    # [v22] method 자동 동기화 — score_col과 calibration table을 일치시킴
+    # 양방향 처리:
+    # - method가 기본값(RANK_SCORE)이고 df에 ELITE_SCORE가 있으면 ELITE로 승격
+    # - method가 ELITE_SCORE인데 실제 score_col은 다른 축이면 score_col에 맞춤
+    if method == "RANK_SCORE" and score_col == "ELITE_SCORE":
+        method = "ELITE_SCORE"
+    elif method == "ELITE_SCORE" and score_col != "ELITE_SCORE":
+        method = score_col
+
     def _safe_values(series: pd.Series, default: float = 0.0) -> np.ndarray:
         return pd.to_numeric(series, errors="coerce").fillna(default).values.astype(float)
 
@@ -540,31 +813,45 @@ def apply_kelly_calibrated(
     stop = _safe_values(df.get("손절가", pd.Series(0, index=df.index)))
     target = _safe_values(df.get("추천매도가1", pd.Series(0, index=df.index)))
 
-    # ── 승률 (유니버설 함수, ndarray 반환) ──
+    # 승률 (유니버설 함수)
     p = calibrated_win_rate(scores, out_dir, method=method,
                             horizon=horizon, base_score=min_score_threshold,
                             asof_ymd=asof_ymd)
     p = np.asarray(p, dtype=float)
 
-    # ── 손익비 (순수 numpy) ──
+    # 손익비: planned (선언) vs empirical (실측)
     risk = buy - stop
     reward = target - buy
-    b_ratio = np.where(risk > 0, reward / risk, 0.0)
+    planned_b = np.where(risk > 0, reward / risk, 0.0)
 
-    # ── Kelly fraction (순수 numpy) ──
+    empirical_b = _get_empirical_b(scores, out_dir, method=method)
+    if empirical_b is not None:
+        # [v22] min(planned, empirical) — 보수적 선택
+        b_ratio = np.minimum(planned_b, empirical_b)
+    else:
+        # empirical 미가용: planned의 60%만 반영 (보수화)
+        b_ratio = planned_b * 0.6
+
+    # Kelly fraction
     q = 1.0 - p
     f_raw = np.where(b_ratio > 0, p - (q / b_ratio), 0.0)
     f_safe = np.clip(f_raw * kelly_multiplier, 0.0, max_allocation)
 
-    # [v2.4 #2] 유효 조건 필터 — 매직넘버 → 파라미터 주입
     valid = (scores >= min_score_threshold) & (buy > 0) & (stop > 0) & (target > 0) & (risk > 0)
     f_safe = np.where(valid, f_safe, 0.0)
 
-    # ── 수량/금액 (순수 numpy) ──
+    # [v22] 관측 컬럼
+    df["KELLY_PLANNED_B"] = np.round(planned_b, 3)
+    df["KELLY_EMPIRICAL_B"] = (
+        np.round(empirical_b, 3) if empirical_b is not None
+        else np.full(len(df), np.nan)
+    )
+    df["KELLY_FINAL_B"] = np.round(b_ratio, 3)
+    df["KELLY_FRACTION"] = np.round(f_safe, 4)
+
     kelly_amt = (total_capital * f_safe).astype(int)
     kelly_qty = np.where(buy > 0, kelly_amt / buy, 0).astype(int)
 
-    # ── 최종 대입: 여기서만 pandas 개입 ──
     df["켈리_수량"] = kelly_qty
     df["켈리_금액(원)"] = kelly_amt
 

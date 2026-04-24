@@ -252,9 +252,14 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
         df_out["ROW_BUILD_MODE"] = "FRESH"
 
     # ──── 캘리브레이션 ────
+    # [v22] Legacy RANK_SCORE 기반 계산은 '기록만'.
+    # ROUTE 강등은 ELITE 기반 EST_WIN_RATE 재계산 후 진행 (아래 2-pass 블록).
     try:
         from kelly_calibrator import calibrated_win_rate as _cwr, get_calibration_mode as _gcm
         df_out["EST_WIN_RATE"]=np.nan; df_out["CAL_HOLD_REASON"]=""; df_out["LOW_WR_FLAG"]=False
+        # [v22] legacy 기록용 별도 컬럼
+        df_out["LEGACY_EST_WIN_RATE"] = np.nan
+        df_out["LEGACY_LOW_WR_FLAG"] = False
         _cm = _gcm(OUT_DIR, asof_ymd=ctx.trade_ymd)
         df_out["CALIBRATION_MODE"]=_cm["mode"]; df_out["CAL_N_TRADES"]=_cm["n_trades"]
         _is_emp = _cm["mode"] in ("LIGHT","MATURE")
@@ -264,21 +269,19 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
             _s = float(df_out.at[_i, _sc2]) if pd.notna(df_out.at[_i, _sc2]) else 0
             try:
                 _w = _cwr(_s, OUT_DIR, method="RANK_SCORE", horizon=5, asof_ymd=ctx.trade_ymd)
+                # [v22] 초기엔 EST_WIN_RATE에도 seed 값 (ELITE 재계산에서 덮어씀),
+                # LEGACY_* 컬럼엔 RANK_SCORE 기준 값 영구 기록
                 df_out.at[_i,"EST_WIN_RATE"] = round(_w, 3)
+                df_out.at[_i,"LEGACY_EST_WIN_RATE"] = round(_w, 3)
                 if _w < 0.45:
                     df_out.at[_i,"LOW_WR_FLAG"] = True
-                    if _is_emp and df_out.at[_i,"ROUTE"] in (Route.ATTACK,Route.ARMED):
-                        df_out.at[_i,"ROUTE"]=Route.WAIT; df_out.at[_i,"상태"]=Route.WAIT
-                        df_out.at[_i,"CAL_HOLD_REASON"]=f"low_wr_{_w:.2f}"
-                    elif not _is_emp and df_out.at[_i,"ROUTE"] in (Route.ATTACK,Route.ARMED):
-                        df_out.at[_i,"CAL_HOLD_REASON"]=f"fallback_wr_{_w:.2f}"
+                    df_out.at[_i,"LEGACY_LOW_WR_FLAG"] = True
+                    # [v22] ROUTE 강등은 ELITE 기반 재계산 후에만 — 여기서는 금지
             except (KeyError,ValueError,FileNotFoundError): pass
             except Exception as e: logging.warning(f"⚠️ 캘리브레이션 오류 ({_i}): {e}")
-        _dc = (df_out["CAL_HOLD_REASON"].str.startswith("low_wr")).sum()
-        _lt = df_out["LOW_WR_FLAG"].sum()
+        _lt = int(df_out["LEGACY_LOW_WR_FLAG"].sum())
         if _lt > 0:
-            _fc = (df_out["CAL_HOLD_REASON"].str.startswith("fallback")).sum()
-            log(f"📊 캘리브레이션: 승률 45%미만 {_lt}건 중 {_dc}건 실제 격하, {_fc}건 fallback(격하 안 함)")
+            log(f"📊 [v22] RANK_SCORE 기준 승률 45%미만 {_lt}건 기록됨 (ROUTE 강등은 ELITE 재계산 후)")
     except ImportError: log("ℹ️ kelly_calibrator 미설치, 캘리브레이션 연동 스킵")
     except Exception as e: log(f"⚠️ 캘리브레이션 연동 에러: {e}")
 
@@ -329,17 +332,28 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
                     if _sc2 > 0:
                         log(f"   ⏳ stale carry {_sc2}건 (7일+ 경과)")
 
-                    # 캘리브레이션 적용 (CARRY 재분석분에도)
+                    # [v22] 캘리브레이션 적용 (CARRY 재분석분) — LEGACY 기록만
+                    # 이 시점엔 ELITE_SCORE가 없으므로 RANK_SCORE 기반으로 seed 값만 기록.
+                    # 이후 ELITE 2-pass에서 compute_est_win_rate()로 덮어씀 (SSOT 일관성).
                     try:
                         from kelly_calibrator import calibrated_win_rate as _cwr2, get_calibration_mode as _gcm2
                         _cm3 = _gcm2(OUT_DIR, asof_ymd=ctx.trade_ymd)
                         _sc_col = "DISPLAY_SCORE" if "DISPLAY_SCORE" in _cd.columns else "FINAL_SCORE"
+                        # LEGACY 기록용 컬럼 초기화
+                        if "LEGACY_EST_WIN_RATE" not in _cd.columns:
+                            _cd["LEGACY_EST_WIN_RATE"] = np.nan
+                        if "LEGACY_LOW_WR_FLAG" not in _cd.columns:
+                            _cd["LEGACY_LOW_WR_FLAG"] = False
                         for _j in _cd.index:
                             _s = float(_cd.at[_j, _sc_col]) if pd.notna(_cd.at[_j, _sc_col]) else 0
                             try:
                                 _w = _cwr2(_s, OUT_DIR, method="RANK_SCORE", horizon=5, asof_ymd=ctx.trade_ymd)
+                                # seed 값 + LEGACY 기록 (ELITE 2-pass에서 덮어씀)
                                 _cd.at[_j, "EST_WIN_RATE"] = round(_w, 3)
-                                _cd.at[_j, "LOW_WR_FLAG"] = _w < 0.45
+                                _cd.at[_j, "LEGACY_EST_WIN_RATE"] = round(_w, 3)
+                                if _w < 0.45:
+                                    _cd.at[_j, "LEGACY_LOW_WR_FLAG"] = True
+                                # [v22] LOW_WR_FLAG는 ELITE 기반 재계산이 세팅 — 여기선 건드리지 않음
                             except Exception:
                                 pass
                     except Exception:
@@ -380,25 +394,15 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
         log(f"⚠️ 캐리오버 처리 실패: {e}")
         import traceback; logger.warning(traceback.format_exc())
 
-    # ──── 재동기화 + 최종 정렬 ────
+    # ──── 재동기화 ────
+    # [v22] IS_NOW_ENTRY는 pipeline_finalize.finalize_sort에서 adaptive로 재계산됨.
+    # 여기선 IS_ACTIVE/IS_WATCH만 설정 (ROUTE 의미 보존).
+    # 중간 concat 정렬은 제거 — finalize_sort가 최종 순서 결정 (SORT_SPEC SSOT).
     df_out["IS_ACTIVE"] = df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED])
-    df_out["IS_NOW_ENTRY"] = df_out["ROUTE"] == Route.ATTACK
     df_out["IS_WATCH"] = df_out["ROUTE"] == Route.WAIT
     df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_am).fillna(7).astype(int)
-    _fsc = "DISPLAY_SCORE" if "DISPLAY_SCORE" in df_out.columns else "FINAL_SCORE"
-    _fk, _fa = ["ACTION_PRIORITY", _fsc], [True, False]
-    _cm3 = df_out["ACTION_PRIORITY"] == 7
-    _nc = df_out[~_cm3]; _cp = df_out[_cm3].sort_values(_fk, ascending=_fa)
-    _p = _nc.head(min(120, len(_nc))); _n = _nc.iloc[len(_p):]
-    df_out = pd.concat([
-        _p.sort_values(_fk, ascending=_fa),
-        _n.sort_values(_fk, ascending=_fa),
-        _cp
-    ], ignore_index=True)
-    df_out["LDY_RANK"] = np.arange(1, len(df_out)+1)
 
     # [v20.3.1] DATA_FRESHNESS_OK / ROW_BUILD_MODE — NaN 확정 채움
-    # concat 후 NaN이 섞일 수 있으므로 항상 fillna 실행
     if "DATA_FRESHNESS_OK" not in df_out.columns:
         df_out["DATA_FRESHNESS_OK"] = True
     else:
@@ -408,15 +412,80 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
     else:
         df_out["ROW_BUILD_MODE"] = df_out["ROW_BUILD_MODE"].fillna("FRESH")
 
-    # [v21.0] ELITE_SCORE — 3축밸런스 + 현재가RR + 진입갭 공식 컬럼
+    # ═══════════════════════════════════════════════════
+    # [v22] ELITE_SCORE 2-pass: 랭킹 축 = 승률 축 일치
+    # ═══════════════════════════════════════════════════
+    # Pass 1: compute_elite_score → ELITE_SCORE 산출
+    # compute_est_win_rate (SSOT) → ELITE 기반 EST_WIN_RATE + 메타 주입
+    # LOW_WR_FLAG / CAL_HOLD_REASON 리셋 → ELITE 기준 재평가
+    # ROUTE 강등 (MATURE/LIGHT만) → 상태 동기화
+    # Pass 2: compute_elite_score 재호출 → TOP_PICK/STABLE 최종 판정
     try:
         from scoring_engine import compute_elite_score
-        df_out = compute_elite_score(df_out)
+        from kelly_calibrator import compute_est_win_rate, get_calibration_mode
+
+        # [v22] _cm2 독립 조회 — 앞 legacy try가 실패해도 작동
+        _cm2 = get_calibration_mode(OUT_DIR, asof_ymd=ctx.trade_ymd)
+
+        # ── Pass 1 ── ELITE_SCORE 먼저 계산
+        df_out, _elite_meta = compute_elite_score(
+            df_out, out_dir=OUT_DIR, trade_ymd=ctx.trade_ymd
+        )
+
+        # ── [v22] ELITE_SCORE 기반 EST_WIN_RATE + 메타 주입 (SSOT 함수) ──
+        df_out = compute_est_win_rate(df_out, OUT_DIR, asof_ymd=ctx.trade_ymd)
+
+        # ── [v22] LOW_WR_FLAG / CAL_HOLD_REASON 리셋 ──
+        # RANK_SCORE 기반 판정 결과 제거 — ELITE 기반으로만 다시 세팅.
+        # LEGACY_LOW_WR_FLAG / LEGACY_EST_WIN_RATE는 기록용으로 보존.
+        df_out["LOW_WR_FLAG"] = False
+        df_out["CAL_HOLD_REASON"] = ""
+
+        # ── [v22] ROUTE 강등: ELITE 기반 EST_WIN_RATE가 낮은 종목 HOLD ──
+        _is_emp2 = _cm2["mode"] in ("LIGHT", "MATURE")
+        _low_elite_wr = (
+            (df_out["EST_WIN_RATE"].fillna(0) < 0.45)
+            & df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED])
+        )
+        if _is_emp2 and _low_elite_wr.any():
+            _demote_n = int(_low_elite_wr.sum())
+            _wr_vals = df_out.loc[_low_elite_wr, "EST_WIN_RATE"].round(2).astype(str)
+            df_out.loc[_low_elite_wr, "ROUTE"] = Route.WAIT
+            df_out.loc[_low_elite_wr, "상태"] = Route.WAIT
+            df_out.loc[_low_elite_wr, "CAL_HOLD_REASON"] = "elite_low_wr_" + _wr_vals
+            df_out.loc[_low_elite_wr, "LOW_WR_FLAG"] = True
+            log(f"📊 [v22] ELITE 기반 강등: {_demote_n}건 ATTACK/ARMED → WAIT (wr<0.45)")
+        elif not _is_emp2:
+            # FALLBACK 모드에서는 강등 대신 메모만 (표본 부족 → 보수적)
+            _fallback_low = (
+                (df_out["EST_WIN_RATE"].fillna(0) < 0.45)
+                & df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED])
+            )
+            if _fallback_low.any():
+                _wr_vals = df_out.loc[_fallback_low, "EST_WIN_RATE"].round(2).astype(str)
+                df_out.loc[_fallback_low, "CAL_HOLD_REASON"] = "fallback_elite_wr_" + _wr_vals
+                df_out.loc[_fallback_low, "LOW_WR_FLAG"] = True
+
+        # ── [v22] ROUTE 변경 이후 상태 컬럼 동기화 ──
+        df_out["IS_ACTIVE"] = df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED, "ATTACK", "ARMED"])
+        df_out["IS_WATCH"] = df_out["ROUTE"].isin([Route.WAIT, "WAIT"])
+        df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_am).fillna(7).astype(int)
+
+        # ── Pass 2 ── EST_WIN_RATE_MODE 주입된 상태에서 TOP_PICK/STABLE 재평가
+        df_out, _elite_meta = compute_elite_score(
+            df_out, out_dir=OUT_DIR, trade_ymd=ctx.trade_ymd
+        )
+
+        # funnel 메타를 breadth에 노출 (daily_briefing이 참조)
+        ctx.breadth["stable_funnel"] = _elite_meta.get("stable_funnel", {})
+        ctx.breadth["aggressive_funnel"] = _elite_meta.get("aggressive_funnel", {})
+
         _top3 = df_out.nlargest(3, "ELITE_SCORE")
         _names = ", ".join(f"{r['종목명']}({r['ELITE_SCORE']:.0f})" for _, r in _top3.iterrows())
         log(f"🏆 ELITE Top3: {_names}")
+        log(f"📊 [v22] EST_WIN_RATE (ELITE 기반): mode={_cm2['mode']}, n={_cm2['n_trades']}")
     except Exception as e:
-        logger.warning(f"⚠️ ELITE_SCORE 계산 실패: {e}")
+        logger.warning(f"⚠️ ELITE_SCORE 2-pass 실패: {e}")
 
     ctx.df_out = df_out
     return ctx

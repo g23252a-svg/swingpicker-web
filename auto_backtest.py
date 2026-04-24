@@ -25,6 +25,7 @@ import logging
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, field
 from glob import glob
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -32,6 +33,41 @@ import pandas as pd
 from collector_config import DEFAULT_CONFIG
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════
+#  [v22] 벤치마크 초과수익 헬퍼
+#  ─ 참조: SwingPicker_v22_Final_Consolidated.md §2.4
+# ═══════════════════════════════════════════════════
+
+@lru_cache(maxsize=512)
+def _get_bench_ret_cached(exit_ymd: str, horizon: int, index: str) -> float:
+    """벤치마크 N일 수익률. (exit_ymd, horizon, index) 기반 캐시.
+    
+    하루 수백 종목 처리해도 (KOSPI, KOSDAQ) 각 1번씩만 실제 호출됨.
+    
+    [v22] API shape 방어: get_benchmark_returns가 nested dict
+    ({"KOSPI": {5: -1.2}}) 또는 flat dict ({"KOSPI": -1.2}) 어느 쪽이든 대응.
+    """
+    try:
+        from macro_filter import get_benchmark_returns
+        bench = get_benchmark_returns(exit_ymd)
+        v = bench.get(index, 0.0)
+        if isinstance(v, dict):
+            return float(v.get(horizon, 0.0))
+        return float(v)
+    except Exception as e:
+        logger.debug(f"벤치마크 조회 실패 ({index} @ {exit_ymd}, h={horizon}): {e}")
+        return 0.0
+
+
+def _get_bench_index(code: str) -> str:
+    """종목코드 → KOSPI/KOSDAQ (shared_utils 위임, lazy import 순환 방지)"""
+    try:
+        from shared_utils import get_benchmark_index
+        return get_benchmark_index(code)
+    except Exception:
+        return "KOSPI"   # 안전 기본값
 
 
 # ═══════════════════════════════════════════════════
@@ -267,9 +303,10 @@ def compute_realized_returns(
         if not entry_prices or not exit_prices:
             continue
 
-        # 점수 컬럼 결정
+        # [v22] 점수 컬럼 결정 — ELITE_SCORE 우선 (랭킹 축 일치)
         score_col = None
-        for c in ["DISPLAY_SCORE", "FINAL_SCORE", "RANK_SCORE", "TOTAL_SCORE"]:
+        for c in ["ELITE_SCORE", "DISPLAY_SCORE", "FINAL_SCORE",
+                  "RANK_SCORE", "TOTAL_SCORE"]:
             if c in rec_df.columns:
                 score_col = c
                 break
@@ -294,15 +331,24 @@ def compute_realized_returns(
                     f"🚨 {code}: 청산일({exit_ymd}) 데이터 없음 → "
                     f"거래정지/상폐 간주 (-100% 손실)"
                 )
+                # [v22] 벤치 필드 (상폐 종목도 excess 기록)
+                _bi = _get_bench_index(code)
+                _br = _get_bench_ret_cached(exit_ymd, config.horizon_bdays, _bi)
+                _re = -100.0 - _br
                 results.append({
                     "rec_date": rec_ymd,
                     "code": code,
                     "score": float(row.get(score_col, 0)),
+                    "score_method": score_col,
                     "entry_price": entry_p,
                     "exit_price": 0.0,
                     "ret_gross_pct": -100.0,
                     "ret_net_pct": -100.0,
                     "win": 0,
+                    "benchmark_index": _bi,
+                    "benchmark_ret_pct": round(_br, 4),
+                    "ret_excess_pct": round(_re, 4),
+                    "win_excess": 0,
                 })
                 continue
 
@@ -310,15 +356,24 @@ def compute_realized_returns(
             if exit_p <= 0:
                 # 종가가 0 → 역시 거래정지/상폐 취급
                 logger.warning(f"🚨 {code}: 청산일 종가=0 → 거래정지/상폐 간주")
+                # [v22] 벤치 필드
+                _bi = _get_bench_index(code)
+                _br = _get_bench_ret_cached(exit_ymd, config.horizon_bdays, _bi)
+                _re = -100.0 - _br
                 results.append({
                     "rec_date": rec_ymd,
                     "code": code,
                     "score": float(row.get(score_col, 0)),
+                    "score_method": score_col,
                     "entry_price": entry_p,
                     "exit_price": 0.0,
                     "ret_gross_pct": -100.0,
                     "ret_net_pct": -100.0,
                     "win": 0,
+                    "benchmark_index": _bi,
+                    "benchmark_ret_pct": round(_br, 4),
+                    "ret_excess_pct": round(_re, 4),
+                    "win_excess": 0,
                 })
                 continue
 
@@ -342,15 +397,26 @@ def compute_realized_returns(
             ret_gross = (actual_exit / entry_p - 1) * 100
             ret_net = ret_gross - config.round_trip_cost_pct
 
+            # [v22] 벤치마크 초과수익 필드
+            bench_index = _get_bench_index(code)
+            bench_ret = _get_bench_ret_cached(exit_ymd, config.horizon_bdays, bench_index)
+            ret_excess = ret_net - bench_ret
+
             results.append({
                 "rec_date": rec_ymd,
                 "code": code,
                 "score": float(row.get(score_col, 0)),
+                "score_method": score_col,
                 "entry_price": entry_p,
                 "exit_price": actual_exit,
                 "ret_gross_pct": round(ret_gross, 4),
                 "ret_net_pct": round(ret_net, 4),
                 "win": 1 if ret_net > 0 else 0,
+                # [v22] 벤치 초과수익
+                "benchmark_index": bench_index,
+                "benchmark_ret_pct": round(bench_ret, 4),
+                "ret_excess_pct": round(ret_excess, 4),
+                "win_excess": 1 if ret_excess > 0 else 0,
             })
 
     return pd.DataFrame(results)
@@ -388,6 +454,9 @@ def build_winrate_table(
         weights = np.ones(len(returns_df))
 
     rows = []
+    # [v22] 벤치마크 컬럼 존재 여부 (backward compat — 옛 returns_df는 없을 수 있음)
+    _has_bench = "ret_excess_pct" in returns_df.columns
+
     for lo, hi in config.score_bins:
         mask = (returns_df["score"] >= lo) & (returns_df["score"] < hi)
         sub = returns_df[mask]
@@ -409,13 +478,38 @@ def build_winrate_table(
         else:
             avg_win_ret, avg_loss_ret, empiric_b_ratio = 0.0, 0.0, 2.0
 
+        # [v22] 벤치 초과수익 집계 (있으면)
+        if _has_bench and n_raw > 0:
+            _bench_avg = float(sub["benchmark_ret_pct"].mean())
+            _excess_avg = float(sub["ret_excess_pct"].mean())
+            if "win_excess" in sub.columns:
+                _we = sub["win_excess"].values.astype(float)
+                _alpha_bw = config.laplace_alpha
+                _w_we = float(np.sum(w_sub * _we))
+                _p_we_raw = ((_w_we + _alpha_bw) / (n_eff + 2 * _alpha_bw)
+                             if n_eff > 0 else 0.45)
+                _p_win_excess = round(_p_we_raw, 4)
+            else:
+                _p_win_excess = None
+            _bench_fields = {
+                "benchmark_avg_pct": round(_bench_avg, 4),
+                "avg_ret_excess_pct": round(_excess_avg, 4),
+                "p_win_excess": _p_win_excess,
+            }
+        else:
+            _bench_fields = {
+                "benchmark_avg_pct": None,
+                "avg_ret_excess_pct": None,
+                "p_win_excess": None,
+            }
+
         # ✅ 안전장치 4: 표본 부족 시 건너뜀
         if n_raw < config.min_n or n_eff < config.min_effective_n:
             # 라플라스만 적용한 보수적 fallback
             alpha = config.laplace_alpha
             wins_raw = int(sub["win"].sum()) if n_raw > 0 else 0
             p_laplace = (wins_raw + alpha) / (n_raw + 2 * alpha) if n_raw > 0 else 0.45
-            rows.append({
+            _row = {
                 "score_lo": lo,
                 "score_hi": hi,
                 "p_win": round(p_laplace, 4),
@@ -426,7 +520,9 @@ def build_winrate_table(
                 "avg_loss_ret": round(avg_loss_ret, 4),
                 "b_ratio": round(empiric_b_ratio, 4),
                 "sufficient": False,
-            })
+            }
+            _row.update(_bench_fields)
+            rows.append(_row)
             continue
 
         # 가중 승률 + 라플라스
@@ -434,7 +530,7 @@ def build_winrate_table(
         w_wins = float(np.sum(w_sub * sub["win"].values))
         p_weighted = (w_wins + alpha) / (n_eff + 2 * alpha)
 
-        rows.append({
+        _row = {
             "score_lo": lo,
             "score_hi": hi,
             "p_win": round(p_weighted, 4),
@@ -445,7 +541,9 @@ def build_winrate_table(
             "avg_loss_ret": round(avg_loss_ret, 4),
             "b_ratio": round(empiric_b_ratio, 4),
             "sufficient": True,
-        })
+        }
+        _row.update(_bench_fields)
+        rows.append(_row)
 
     return pd.DataFrame(rows)
 
@@ -627,6 +725,55 @@ def auto_calibrate(
             json.dump(save_obj, f, indent=2, ensure_ascii=False)
     except Exception:
         pass
+
+    # [v22] Per-method winrate_table 저장 (kelly_calibrator._get_empirical_b가 참조)
+    # `_get_empirical_b(method="ELITE_SCORE")` → winrate_table_by_ELITE_SCORE_*.json 우선 탐색.
+    # score_method 컬럼(compute_realized_returns에서 기록) 기준 분리.
+    # [v22 stale-guard] 표본 부족이어도 latest를 갱신 (빈 테이블/sufficient=False 저장)
+    # → 이전 날짜의 stale latest가 캐시에 남아서 잘못 참조되는 것을 방지.
+    if "score_method" in returns_df.columns:
+        for method_name in returns_df["score_method"].dropna().unique():
+            method_subset = returns_df[returns_df["score_method"] == method_name]
+            n_method = len(method_subset)
+            
+            # 표본 부족이어도 build (sufficient=False 행만 생성됨)
+            method_table = build_winrate_table(method_subset, config)
+            
+            method_meta = dict(meta)
+            method_meta["score_method"] = method_name
+            method_meta["n_trades"] = n_method
+            method_meta["is_sufficient"] = bool(
+                n_method >= config.min_n
+                and ("sufficient" in method_table.columns
+                     and method_table["sufficient"].any())
+            )
+            method_save_obj = {
+                "meta": method_meta,
+                "table": (json.loads(method_table.to_json(orient="records"))
+                          if not method_table.empty else []),
+            }
+            safe_name = str(method_name).replace(" ", "_").replace("/", "_")
+            dated_path = os.path.join(out_dir, f"winrate_table_by_{safe_name}_{as_of_ymd}.json")
+            by_latest_path = os.path.join(out_dir, f"winrate_table_by_{safe_name}_latest.json")
+            for _p in [dated_path, by_latest_path]:
+                try:
+                    with open(_p, "w", encoding="utf-8") as f:
+                        json.dump(method_save_obj, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    logger.warning(f"per-method 테이블 저장 실패 ({safe_name}): {e}")
+            if not method_meta["is_sufficient"]:
+                logger.info(
+                    f"ℹ️ {safe_name} 표본 부족 ({n_method} < {config.min_n}) — "
+                    f"latest는 sufficient=False로 갱신 (stale 방지)"
+                )
+        
+        # [v22] kelly_calibrator의 winrate_table 캐시 무효화
+        try:
+            from kelly_calibrator import _load_winrate_table_cached, _get_empirical_base
+            _load_winrate_table_cached.cache_clear()
+            _get_empirical_base.cache_clear()
+        except (ImportError, AttributeError):
+            pass
 
     # 4. 요약
     n_sufficient = int(table["sufficient"].sum()) if "sufficient" in table.columns else 0
