@@ -15,6 +15,31 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.0",
+        "date": "2026-04-25",
+        "type": "major",
+        "title": "v22 — 추천 신뢰도 일치 + 자동 검증 시스템 (4개 축 통일)",
+        "items": [
+            "🎯 **TOP_PICK 누출 차단:** ROUTE=WAIT인데 TOP_PICK=1 모순 케이스 완전 제거 — ARMED/ATTACK만 통과 (positive gate)",
+            "🏆 **TOP_PICK 이원화:** AGGRESSIVE(TP1 15%+ 손익비 우선) / STABLE(TP1 7~15% 승률·밸런스 우선) 분리 — 장 상황별 맞춤 추천",
+            "📊 **선언 승률 = 실제 승률:** 랭킹·승률·Kelly·백테스트 4개 축을 ELITE_SCORE 하나로 통일 (선언-실현 갭 20%p → 5%p 이내 목표)",
+            "💰 **Kelly 과대배팅 방지:** 계획 손익비와 실측 손익비 중 작은 값 사용 — 베팅 비중 최대 40% 감축으로 안전마진 확보",
+            "📉 **승률 추정 보수화:** 점수 90점 → 승률 70%(과대) → 64%(보수) — 사용자 기대치와 실제 결과 갭 축소",
+            "🧮 **점수 구간별 실측 학습:** 누적되는 거래 결과로 ELITE 점수 구간별 실제 손익비/승률 자동 학습 — 시간 지날수록 정확도 향상",
+            "🌍 **벤치마크 초과수익 측정:** KOSPI/KOSDAQ 대비 초과 알파 자동 계산 — 단순 절대수익 → '시장 대비 진짜 잘했는가' 측정",
+            "🚦 **자동 CI 검증:** GitHub Actions로 매일 16:30 누출/갭/단조성 점검 (HARD 3개 + SOFT 4개 게이트)",
+            "📋 **일일 단조성 리포트:** 점수 구간별 Wilson 신뢰하한 + 시장 매핑 커버리지 + 7일 STABLE 평균 자동 기록",
+            "🎯 **적응형 진입 판정:** 시총·변동성(ATR) 기반 IS_NOW_ENTRY 임계값 동적 조정 — 대형주 0.3% / 중형 0.5% / 소형 0.8%",
+            "📈 **5-method 학습 확장:** 한 거래당 ELITE/RANK/AI/ROUTE_ARMED/ROUTE_ATTACK 5개 축으로 자동 기록 — 어느 축이 가장 잘 맞는지 비교 학습",
+            "🛡️ **종목코드 정규화:** float/공백/None/NaN 모두 안전 처리 — 시장 매핑 정확도 향상으로 벤치마크 신뢰도 ↑",
+            "📦 **8축 정렬 SSOT:** TOP_PICK × 진입타이밍 × ROUTE × ELITE × RR × 밸런스 × 진입갭 × 종합점수 일관 정렬",
+            "🔧 **0건 날도 검증 갱신:** TOP_PICK 0건이어도 latest.json 갱신 — 어제 데이터 잔존 차단",
+            "🧪 **테스트 14건 추가:** Route 계약 6 + 단조성 리포트 smoke 8 (기존 72건 회귀 모두 PASS)",
+            "🚀 **production 안착:** 11 files changed, +2,211 lines — 첫 CI 실행에서 즉시 main의 누출 1건(한전기술) 자동 감지",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "21.6",
         "date": "2026-04-17",
         "type": "major",
