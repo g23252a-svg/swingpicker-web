@@ -649,18 +649,34 @@ def generate_score_reasons(df: pd.DataFrame,
 
 
 # ═══════════════════════════════════════════════════
-#  [v21.4] ELITE_SCORE — 곱셈형 공식 (TP1 도달률 기반 리밸런싱)
+#  [v22] ELITE_SCORE — TOP_PICK 이원화 (AGGRESSIVE/STABLE)
+#  ─ 참조: SwingPicker_v22_Final_Consolidated.md §2.2.1
 # ═══════════════════════════════════════════════════
 
-def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
+# TOP_PICK positive gate — ROUTE가 이 집합에 있어야만 TOP_PICK 가능
+# (기존 negative mask는 WAIT 통과를 허용해 누출 발생 — v22에서 차단)
+TOP_PICK_ROUTES = frozenset({"ARMED", "ATTACK"})
+
+
+def compute_elite_score(df: pd.DataFrame,
+                         out_dir: str = None,
+                         trade_ymd: str = None):
     """
-    v21.5: ROUTE 제거 — 순수 종목 품질 측정.
-
-    3축≥80+밸≥80이면 ROUTE 무관 10일 +39.6% (6,160건 검증)
-    → ELITE = 종목 품질, ROUTE는 TOP_PICK에서만 사용
-
-    ELITE = (S×30% + T×45% + AI×25%) × 밸런스배수 × RR게이트
-    TOP_PICK = ELITE≥60 + ARMED/ATTACK + 기타 하드게이트
+    [v22] ELITE_SCORE + TOP_PICK 이원화.
+    
+    반환: (df_out, meta) 튜플.
+      - meta.stable_funnel: STABLE 분기 단계별 통과 수
+      - meta.aggressive_funnel: AGGRESSIVE 분기 단계별 통과 수
+      - meta.sidecar_path: top_pick_funnel_{ymd}.json 경로 (저장 시)
+    
+    v21.5 공식 유지:
+      ELITE = (S×30% + T×45% + AI×25%) × 밸런스배수 × RR게이트
+    
+    v22 추가:
+      - TOP_PICK positive gate: ROUTE ∈ {ARMED, ATTACK} 필수
+      - AGGRESSIVE: ELITE≥75 AND TP1_PCT≥15 (손익비 우선)
+      - STABLE: ELITE≥70 AND 7≤TP1<15 AND BALANCE≥70 AND EST_WIN_RATE≥0.55 AND EST_WIN_RATE_MODE=="MATURE"
+      - EST_WIN_RATE_MODE 없으면 CALIBRATION_MODE fallback (legacy 호환)
     """
     import numpy as np
     x = df.copy()
@@ -692,26 +708,15 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
     entry_gap = ((close - buy).abs() / buy.clip(lower=1) * 100)
     x["ENTRY_GAP_PCT"] = entry_gap.round(1)
 
-    # ═══ 신규 ELITE 공식 (v21.5) ═══
-    # ROUTE 제거 — 3축≥80+밸≥80이면 ROUTE 무관 +39.6% 수익 (6,160건 검증)
-    # ELITE = 순수 종목 품질, ROUTE는 TOP_PICK 게이트에서만 사용
-
-    # (A) T 강화 가중평균: S 30% + T 45% + AI 25%
+    # ═══ ELITE 공식 (v21.5) — 유지 ═══
     weighted_axis = s * 0.30 + t * 0.45 + m * 0.25
-
-    # (B) 밸런스 곱셈 (0.8 ~ 1.0) — 3축 높을 때만 시너지
     bal_mult = 0.8 + 0.2 * (x["BALANCE_SCORE"] / 100)
-
-    # (C) RR 하드게이트 — 0.8 미만이면 0.3배 패널티
     rr_gate = pd.Series(np.where(rr_now >= 0.8, 1.0, 0.3), index=x.index)
-
-    # 합산 (곱셈형) — ROUTE 없음
     elite = (weighted_axis * bal_mult * rr_gate).round(1)
 
     # 하드 게이트
-    elite = elite.where(close > stop, 0)   # 종가 < 손절 → 0
-    elite = elite.where(close < tp1, 0)    # 종가 > TP1 → 0
-
+    elite = elite.where(close > stop, 0)
+    elite = elite.where(close < tp1, 0)
     x["ELITE_SCORE"] = elite
 
     # ELITE 사유
@@ -736,25 +741,114 @@ def compute_elite_score(df: pd.DataFrame) -> pd.DataFrame:
 
     x["ELITE_REASON"] = x.apply(_reason, axis=1)
 
-    # ── TOP_PICK v21.6 — 백테스트 최적 조합 ──
+    # ═══ TOP_PICK — v22 이원화 ═══
     _pass_ebs = x.get("PASS_EBS", pd.Series(1, index=x.index)).fillna(1).astype(int)
     _turnover = pd.to_numeric(x.get("거래대금(억원)", 0), errors="coerce").fillna(0)
-    _route_block = ~x["ROUTE"].isin(["OVERHEAT", "EXIT_WARNING", "CARRY"])
     _tp1_pct = ((tp1 - close) / close.clip(lower=1) * 100).round(1)
     x["TP1_PCT"] = _tp1_pct
-    top_pick = (
-        (x["ELITE_SCORE"] >= 70)
-        & (s >= 80)
-        & (t >= 70)
-        & (_tp1_pct >= 15)
-        & _route_block
+
+    # [v22] ROUTE positive gate — WAIT/OVERHEAT/CARRY 등 자동 탈락
+    _route_active = x["ROUTE"].isin(TOP_PICK_ROUTES)
+
+    # 캘리브레이션 성숙도 — STABLE 활성화 조건
+    # 우선순위: EST_WIN_RATE_MODE (v22 정식) → CALIBRATION_MODE (legacy) → "FALLBACK"
+    _cal_mode = x.get(
+        "EST_WIN_RATE_MODE",
+        x.get("CALIBRATION_MODE", pd.Series("FALLBACK", index=x.index))
+    )
+    _cal_mature = (_cal_mode == "MATURE")
+
+    # EST_WIN_RATE (누락이면 0 — STABLE 조건 자동 실패)
+    _est_wr = pd.to_numeric(
+        x.get("EST_WIN_RATE", pd.Series(0, index=x.index)),
+        errors="coerce"
+    ).fillna(0)
+
+    # 공통 하드게이트
+    _hard_gate = (
+        _route_active
         & (close > stop)
         & (close < tp1)
         & (_pass_ebs == 1)
-        & (x["BALANCE_SCORE"] >= 50)
-        & (entry_gap <= 5.0)
         & (_turnover >= 50)
+        & (entry_gap <= 5.0)
     )
-    x["TOP_PICK"] = top_pick.astype(int)
 
-    return x
+    # AGGRESSIVE: 손익비 우선 (TP1 15%+)
+    _aggressive = (
+        _hard_gate
+        & (x["ELITE_SCORE"] >= 75)
+        & (s >= 80)
+        & (t >= 70)
+        & (_tp1_pct >= 15)
+        & (x["BALANCE_SCORE"] >= 50)
+    )
+
+    # STABLE: 승률·밸런스 우선 (TP1 7~15, MATURE만)
+    _stable = (
+        _hard_gate
+        & (x["ELITE_SCORE"] >= 70)
+        & (_tp1_pct >= 7) & (_tp1_pct < 15)
+        & (x["BALANCE_SCORE"] >= 70)
+        & (_est_wr >= 0.55)
+        & _cal_mature
+    )
+
+    # TOP_PICK = AGGRESSIVE OR STABLE (겹치면 AGGRESSIVE 우선)
+    x["TOP_PICK"] = (_aggressive | _stable).astype(int)
+    x["TOP_PICK_TYPE"] = np.where(
+        _aggressive, "AGGRESSIVE",
+        np.where(_stable, "STABLE", "")
+    )
+
+    # funnel 메타 (단계별 통과 수 — 디버깅/튜닝용)
+    def _funnel(masks_dict):
+        return {k: int(v.sum()) for k, v in masks_dict.items()}
+
+    aggressive_funnel = _funnel({
+        "total": pd.Series(True, index=x.index),
+        "route_active": _route_active,
+        "hard_gate": _hard_gate,
+        "elite_75": _hard_gate & (x["ELITE_SCORE"] >= 75),
+        "struct_80": _hard_gate & (x["ELITE_SCORE"] >= 75) & (s >= 80),
+        "timing_70": _hard_gate & (x["ELITE_SCORE"] >= 75) & (s >= 80) & (t >= 70),
+        "tp1_15": _hard_gate & (x["ELITE_SCORE"] >= 75) & (s >= 80) & (t >= 70) & (_tp1_pct >= 15),
+        "final": _aggressive,
+    })
+    stable_funnel = _funnel({
+        "total": pd.Series(True, index=x.index),
+        "route_active": _route_active,
+        "hard_gate": _hard_gate,
+        "elite_70": _hard_gate & (x["ELITE_SCORE"] >= 70),
+        "tp1_7_15": _hard_gate & (x["ELITE_SCORE"] >= 70) & (_tp1_pct >= 7) & (_tp1_pct < 15),
+        "balance_70": _hard_gate & (x["ELITE_SCORE"] >= 70) & (_tp1_pct >= 7) & (_tp1_pct < 15) & (x["BALANCE_SCORE"] >= 70),
+        "wr_55": _hard_gate & (x["ELITE_SCORE"] >= 70) & (_tp1_pct >= 7) & (_tp1_pct < 15) & (x["BALANCE_SCORE"] >= 70) & (_est_wr >= 0.55),
+        "mature": _hard_gate & (x["ELITE_SCORE"] >= 70) & (_tp1_pct >= 7) & (_tp1_pct < 15) & (x["BALANCE_SCORE"] >= 70) & (_est_wr >= 0.55) & _cal_mature,
+        "final": _stable,
+    })
+
+    meta = {
+        "aggressive_funnel": aggressive_funnel,
+        "stable_funnel": stable_funnel,
+        "top_pick_count": int(x["TOP_PICK"].sum()),
+        "aggressive_count": int(_aggressive.sum()),
+        "stable_count": int(_stable.sum()),
+    }
+
+    # funnel sidecar 저장 (trade_ymd + out_dir 제공 시)
+    if out_dir and trade_ymd:
+        try:
+            import os, json
+            sidecar = {
+                "trade_ymd": trade_ymd,
+                "total": len(x),
+                **meta,
+            }
+            sidecar_path = os.path.join(out_dir, f"top_pick_funnel_{trade_ymd}.json")
+            with open(sidecar_path, "w", encoding="utf-8") as f:
+                json.dump(sidecar, f, indent=2, ensure_ascii=False, default=str)
+            meta["sidecar_path"] = sidecar_path
+        except Exception:
+            pass   # sidecar 실패는 무해
+
+    return x, meta

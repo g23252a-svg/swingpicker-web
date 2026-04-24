@@ -73,6 +73,94 @@ def load_config_snapshot(trade_ymd: str = None) -> dict:
     return {}
 
 
+# ═══════════════════════════════════════════════════
+#  [v22] finalize_sort SSOT + adaptive IS_NOW_ENTRY
+#  ─ 참조: SwingPicker_v22_Final_Consolidated.md §2.2.6
+# ═══════════════════════════════════════════════════
+
+# SORT_SPEC — 8축 정렬의 단일 소스
+# TOP_PICK × IS_NOW_ENTRY × ROUTE_PRIORITY × ELITE × RR × BALANCE × ENTRY_GAP × DISPLAY_SCORE
+_SORT_ROUTE_PRIORITY = {
+    "ATTACK": 1, "ARMED": 2, "WAIT": 3, "NEUTRAL": 4,
+    "OVERHEAT": 5, "EXIT_WARNING": 6, "CARRY": 7,
+}
+
+
+def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
+    """IS_NOW_ENTRY — shared_utils.compute_is_now_entry 벡터 적용.
+    
+    ATR_Pct(decimal, ml_engine) 우선, 없으면 ATR_PCT(percentage, stop_logic) 허용.
+    """
+    try:
+        from shared_utils import compute_is_now_entry as _cine
+    except ImportError:
+        # v22 신규 함수 미탑재 환경 — fallback: ROUTE==ATTACK
+        route = df.get("ROUTE", pd.Series("", index=df.index))
+        return (route.isin(["ATTACK"])).astype(int)
+    
+    close = pd.to_numeric(df.get("종가", 0), errors="coerce").fillna(0)
+    entry = pd.to_numeric(df.get("추천매수가", 0), errors="coerce").fillna(0)
+    # ATR_Pct(decimal) 우선, ATR_PCT(percentage)도 허용 — 내부 정규화
+    atr = df.get("ATR_Pct", df.get("ATR_PCT", pd.Series(0.02, index=df.index)))
+    mcap = pd.to_numeric(df.get("시가총액(억원)", 0), errors="coerce").fillna(0)
+    
+    return pd.Series(
+        [_cine(c, e, a, m) for c, e, a, m in zip(close, entry, atr, mcap)],
+        index=df.index,
+        dtype=int,
+    )
+
+
+def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
+    """[v22] SORT_SPEC — 8축 정렬 SSOT.
+    
+    정렬 우선순위 (내림차순 기준, 낮은 ROUTE_PRIORITY가 먼저):
+      1. TOP_PICK (1 먼저)
+      2. IS_NOW_ENTRY (1 먼저, adaptive 기반)
+      3. ROUTE_PRIORITY (낮을수록 먼저: ATTACK=1 → CARRY=7)
+      4. ELITE_SCORE (높을수록)
+      5. RR_NOW_TP1 (높을수록)
+      6. BALANCE_SCORE (높을수록)
+      7. ENTRY_GAP_PCT (낮을수록)
+      8. DISPLAY_SCORE (높을수록)
+    
+    다른 단계에서 IS_NOW_ENTRY를 ROUTE==ATTACK으로 세팅했어도 
+    여기서 adaptive로 덮어쓴다. 순서가 SSOT.
+    """
+    df = df.copy()
+
+    # IS_NOW_ENTRY adaptive 재계산 (항상 덮어쓰기 — 이전 단계의 단순 ROUTE==ATTACK 치환)
+    df["IS_NOW_ENTRY"] = _compute_is_now_entry_vectorized(df)
+
+    # ROUTE_PRIORITY (정렬용 임시 컬럼)
+    route = df.get("ROUTE", pd.Series("", index=df.index)).astype(str)
+    df["_ROUTE_PRIORITY"] = route.map(_SORT_ROUTE_PRIORITY).fillna(99).astype(int)
+
+    # 정렬 축 모두 존재 확인 (없으면 중립 값으로 채움)
+    for col, default in [
+        ("TOP_PICK", 0), ("IS_NOW_ENTRY", 0),
+        ("ELITE_SCORE", 0), ("RR_NOW_TP1", 0),
+        ("BALANCE_SCORE", 0), ("ENTRY_GAP_PCT", 99),
+        ("DISPLAY_SCORE", 0),
+    ]:
+        if col not in df.columns:
+            df[col] = default
+        else:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default)
+
+    # SORT_SPEC 적용
+    df = df.sort_values(
+        by=["TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "ELITE_SCORE",
+            "RR_NOW_TP1", "BALANCE_SCORE", "ENTRY_GAP_PCT", "DISPLAY_SCORE"],
+        ascending=[False, False, True, False, False, False, True, False],
+        kind="mergesort",   # 안정 정렬 (동점 시 원래 순서 유지)
+    ).reset_index(drop=True)
+
+    # 임시 컬럼 제거
+    df = df.drop(columns=["_ROUTE_PRIORITY"], errors="ignore")
+    return df
+
+
 def finalize_outputs(ctx: PipelineContext) -> None:
     from collector import make_rank_validation_report  # 아직 collector에만 있음
     df_out = ctx.df_out; trade_ymd = ctx.trade_ymd
@@ -170,12 +258,42 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             _cr = f"RUN_STATUS={_health.status}" if _health.status!="OK" else f"confidence={_health.confidence_score:.0f}"
             log(f"🛡️ [v20.0.2] 행동 상한 제어: {_cr} → 최대허용 {_mx}, {_dc}건 route_capped")
             df_out["IS_ACTIVE"]=df_out["ROUTE"].isin([Route.ATTACK,Route.ARMED])
-            df_out["IS_NOW_ENTRY"]=df_out["ROUTE"]==Route.ATTACK
+            # [v22] IS_NOW_ENTRY는 finalize_sort에서 adaptive로 재계산되므로 여기선 건드리지 않음
             df_out["IS_WATCH"]=df_out["ROUTE"]==Route.WAIT
             df_out["ACTION_PRIORITY"]=df_out["ROUTE"].map(_am).fillna(7).astype(int)
 
+            # [v22] route cap 이후 TOP_PICK positive gate 재적용
+            # ATTACK→WAIT/ARMED→WAIT capped 종목은 TOP_PICK에서 탈락시켜야
+            # "TOP_PICK=1 but ROUTE=WAIT" 누출 재발 차단.
+            _active_mask = df_out["ROUTE"].isin([Route.ATTACK, Route.ARMED, "ATTACK", "ARMED"])
+            _leaked = (df_out.get("TOP_PICK", pd.Series(0, index=df_out.index)) == 1) & (~_active_mask)
+            if _leaked.any():
+                _leak_n = int(_leaked.sum())
+                df_out.loc[_leaked, "TOP_PICK"] = 0
+                if "TOP_PICK_TYPE" in df_out.columns:
+                    df_out.loc[_leaked, "TOP_PICK_TYPE"] = ""
+                log(f"🎯 [v22] route cap 후 TOP_PICK 정리: {_leak_n}건 탈락")
+            # [v22] route cap 발생 시 누출 여부와 무관하게 재정렬
+            # (ROUTE_PRIORITY 바뀌었으므로 순서 영향)
+            # finalize_sort는 아래 CSV 저장 직전에 한 번 더 호출되지만,
+            # 여기서 한 번 정리해두는 게 중간 단계 일관성에 좋음.
+            try:
+                df_out = finalize_sort(df_out)
+            except Exception as e:
+                logger.warning(f"⚠️ route cap 후 재정렬 실패 (무해): {e}")
+
     # ── [v21.1] ACTION_PRIORITY 항상 재계산 (SSOT 보장) ──
     df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_am).fillna(7).astype(int)
+
+    # ── [v22] 최종 정렬 SSOT 적용 (SORT_SPEC) ──
+    # TOP_PICK × IS_NOW_ENTRY(adaptive) × ROUTE × ELITE × RR × BALANCE × ENTRY_GAP × DISPLAY_SCORE
+    # 정렬 직후 LDY_RANK 재부여 (stale 방지)
+    try:
+        df_out = finalize_sort(df_out)
+        df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+        log(f"🎯 [v22] SORT_SPEC 적용 완료 (TOP_PICK × IS_NOW_ENTRY × ELITE × RR ...)")
+    except Exception as e:
+        logger.warning(f"⚠️ finalize_sort 실패 (무해 — 기존 순서 유지): {e}")
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
@@ -277,31 +395,82 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     # Reality Check + Rank Validation
     run_reality_check(OUT_DIR, trade_ymd)
     make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd, methods=["ELITE_SCORE","DISPLAY_SCORE","FINAL_SCORE","AI_SCORE"])
-    # [v21.2] TOP_PICK 검증 리포트
+    # [v21.2+v22] TOP_PICK 검증 리포트 — 0건에도 latest 갱신 (CI 오독 차단)
     try:
+        import json as _json2
         _tp_mask = df_out.get("TOP_PICK", pd.Series(0, index=df_out.index)).astype(int) == 1
-        _tp_count = _tp_mask.sum()
+        _tp_count = int(_tp_mask.sum())
+        _tp_path = os.path.join(OUT_DIR, f"top_pick_validation_{trade_ymd}.json")
+        _tp_latest = os.path.join(OUT_DIR, "top_pick_validation_latest.json")
+
         if _tp_count > 0:
             _tp_df = df_out[_tp_mask].copy()
+            # [v22] AGGRESSIVE/STABLE 분리 집계
+            _by_type = (_tp_df["TOP_PICK_TYPE"].value_counts().to_dict()
+                        if "TOP_PICK_TYPE" in _tp_df.columns else {})
             _tp_summary = {
                 "trade_ymd": trade_ymd,
-                "top_pick_count": int(_tp_count),
+                "top_pick_count": _tp_count,
+                "top_pick_by_type": _by_type,
                 "avg_elite": round(float(_tp_df["ELITE_SCORE"].mean()), 1),
                 "avg_rr": round(float(_tp_df["RR_NOW_TP1"].mean()), 2),
                 "avg_balance": round(float(_tp_df["BALANCE_SCORE"].mean()), 1),
                 "avg_win_rate": round(float(_tp_df["EST_WIN_RATE"].mean()), 3),
+                "est_win_rate_method": (_tp_df["EST_WIN_RATE_METHOD"].iloc[0]
+                                         if "EST_WIN_RATE_METHOD" in _tp_df.columns else "UNKNOWN"),
+                "est_win_rate_mode": (_tp_df["EST_WIN_RATE_MODE"].iloc[0]
+                                       if "EST_WIN_RATE_MODE" in _tp_df.columns else "UNKNOWN"),
+                "est_win_rate_n": (int(_tp_df["EST_WIN_RATE_N"].iloc[0])
+                                    if "EST_WIN_RATE_N" in _tp_df.columns else 0),
                 "routes": _tp_df["ROUTE"].value_counts().to_dict(),
-                "picks": _tp_df[["종목코드","종목명","ELITE_SCORE","RR_NOW_TP1","BALANCE_SCORE","ROUTE","EST_WIN_RATE"]].to_dict("records"),
+                "picks": _tp_df[[
+                    c for c in [
+                        "종목코드", "종목명",
+                        "TOP_PICK_TYPE",
+                        "ELITE_SCORE", "RR_NOW_TP1", "BALANCE_SCORE",
+                        "ENTRY_GAP_PCT", "TP1_PCT",
+                        "ROUTE",
+                        "EST_WIN_RATE", "EST_WIN_RATE_METHOD",
+                        "EST_WIN_RATE_MODE", "EST_WIN_RATE_N",
+                    ] if c in _tp_df.columns
+                ]].to_dict("records"),
             }
-            import json as _json2
-            _tp_path = os.path.join(OUT_DIR, f"top_pick_validation_{trade_ymd}.json")
-            _tp_latest = os.path.join(OUT_DIR, "top_pick_validation_latest.json")
-            for _p in [_tp_path, _tp_latest]:
-                with open(_p, 'w', encoding='utf-8') as _f:
-                    _json2.dump(_tp_summary, _f, ensure_ascii=False, indent=2, default=str)
-            log(f"🏆 TOP_PICK 검증: {_tp_count}종목 → {_tp_path}")
+            _type_msg = (f" (AGGR={_by_type.get('AGGRESSIVE',0)}, "
+                         f"STBL={_by_type.get('STABLE',0)})" if _by_type else "")
+            log(f"🏆 TOP_PICK 검증: {_tp_count}종목{_type_msg} → {_tp_path}")
         else:
-            log("🏆 TOP_PICK: 0종목 (게이트 미통과)")
+            # [v22] 0건 날에도 latest 갱신 — stale 방지
+            _meta_method = "NONE"
+            _meta_mode = "NONE"
+            _meta_n = 0
+            if "EST_WIN_RATE_METHOD" in df_out.columns and len(df_out) > 0:
+                _meta_method = str(df_out["EST_WIN_RATE_METHOD"].iloc[0])
+            if "EST_WIN_RATE_MODE" in df_out.columns and len(df_out) > 0:
+                _meta_mode = str(df_out["EST_WIN_RATE_MODE"].iloc[0])
+            if "EST_WIN_RATE_N" in df_out.columns and len(df_out) > 0:
+                try:
+                    _meta_n = int(df_out["EST_WIN_RATE_N"].iloc[0])
+                except Exception:
+                    _meta_n = 0
+            _tp_summary = {
+                "trade_ymd": trade_ymd,
+                "top_pick_count": 0,
+                "top_pick_by_type": {},
+                "avg_elite": None,
+                "avg_rr": None,
+                "avg_balance": None,
+                "avg_win_rate": None,
+                "est_win_rate_method": _meta_method,
+                "est_win_rate_mode": _meta_mode,
+                "est_win_rate_n": _meta_n,
+                "routes": {},
+                "picks": [],
+            }
+            log(f"🏆 TOP_PICK: 0종목 (게이트 미통과) — latest.json 갱신")
+
+        for _p in [_tp_path, _tp_latest]:
+            with open(_p, 'w', encoding='utf-8') as _f:
+                _json2.dump(_tp_summary, _f, ensure_ascii=False, indent=2, default=str)
     except Exception as e:
         logger.warning(f"⚠️ TOP_PICK 검증 실패: {e}")
     # 텔레그램

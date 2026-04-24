@@ -304,6 +304,351 @@ def generate_daily_briefing(
 
 
 # ═══════════════════════════════════════════════════
+#  [v22] monotonicity_report + CI HARD/SOFT Gate
+#  ─ 참조: SwingPicker_v22_Final_Consolidated.md §3
+# ═══════════════════════════════════════════════════
+
+def _load_json_safe(path: str) -> Optional[dict]:
+    """JSON 파일 안전 로드 — 미존재/파싱 실패 시 None"""
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _compute_monotonicity(winrate_table: list) -> dict:
+    """winrate_table bin별 p_win / avg_ret_excess 단조성 판정.
+    
+    단조성: 점수 ↑ → 성과 ↑ 이상적. Wilson LCB로 표본 흔들림 방어.
+    """
+    try:
+        from shared_utils import wilson_lcb
+    except ImportError:
+        return {"valid": False, "reason": "wilson_lcb 미탑재"}
+    
+    if not winrate_table or len(winrate_table) < 2:
+        return {"valid": False, "reason": "bin 2개 미만"}
+    
+    # score_lo 오름차순 정렬 보장
+    bins = sorted(winrate_table, key=lambda r: r.get("score_lo", 0))
+    
+    p_wins = []
+    p_wins_lcb = []
+    avg_rets = []
+    avg_excess = []
+    for b in bins:
+        n = int(b.get("n_raw", 0))
+        p = b.get("p_win")
+        if n > 0 and p is not None:
+            # Wilson LCB — raw p_win이 아닌 신뢰하한으로 단조성 판정
+            wins = int(round(float(p) * n))
+            p_wins_lcb.append(round(wilson_lcb(wins, n), 4))
+            p_wins.append(round(float(p), 4))
+            avg_rets.append(b.get("avg_ret_net_pct"))
+            avg_excess.append(b.get("avg_ret_excess_pct"))
+        else:
+            p_wins_lcb.append(None)
+            p_wins.append(None)
+            avg_rets.append(None)
+            avg_excess.append(None)
+    
+    # 단조성 체크 — None 제외, 유효값만 비교
+    def _is_monotone_nondec(seq):
+        vals = [v for v in seq if v is not None]
+        if len(vals) < 2:
+            return None   # 판정 불가
+        return all(vals[i] <= vals[i+1] + 0.05 for i in range(len(vals)-1))
+    
+    return {
+        "valid": True,
+        "bins": [
+            {
+                "score_lo": b.get("score_lo"),
+                "score_hi": b.get("score_hi"),
+                "n_raw": int(b.get("n_raw", 0)),
+                "p_win": p,
+                "p_win_lcb": lcb,
+                "avg_ret_net_pct": r,
+                "avg_ret_excess_pct": e,
+            }
+            for b, p, lcb, r, e in zip(bins, p_wins, p_wins_lcb, avg_rets, avg_excess)
+        ],
+        "monotone_p_win_lcb": _is_monotone_nondec(p_wins_lcb),
+        "monotone_avg_ret": _is_monotone_nondec(avg_rets),
+        "monotone_avg_ret_excess": _is_monotone_nondec(avg_excess),
+    }
+
+
+def _avg_stable_7day(out_dir: str, asof_ymd: str) -> Optional[float]:
+    """최근 7영업일 STABLE TOP_PICK 평균 개수 — top_pick_validation_*.json 집계.
+    
+    휴장일 파일 없으면 skip, 3개 이상 파일 있으면 평균, 그 미만은 None.
+    """
+    from glob import glob
+    files = sorted(glob(os.path.join(out_dir, "top_pick_validation_2*.json")), reverse=True)[:7]
+    if len(files) < 3:
+        return None
+    
+    stable_counts = []
+    for f in files:
+        data = _load_json_safe(f)
+        if not data:
+            continue
+        by_type = data.get("top_pick_by_type", {})
+        if isinstance(by_type, dict):
+            stable_counts.append(int(by_type.get("STABLE", 0)))
+    
+    if len(stable_counts) < 3:
+        return None
+    return round(sum(stable_counts) / len(stable_counts), 2)
+
+
+def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
+    """[v22] 일일 단조성/커버리지/갭 리포트.
+    
+    출력:
+      - data/monotonicity_report_{YYYYMMDD}.json
+      - data/monotonicity_report_latest.json
+    
+    포함 필드:
+      - market_map_coverage (+ benchmark_mapping_warning)
+      - ELITE_SCORE bin별 Wilson LCB + 단조성 판정
+      - avg_ret_excess_pct 집계
+      - declared_vs_realized_gap (선언 vs 실현 승률 차이)
+      - top_pick_funnel (오늘)
+      - top_pick_stable_7day_avg
+      - ci_checks (HARD/SOFT 게이트 결과)
+    """
+    try:
+        from shared_utils import compute_market_map_coverage
+    except ImportError:
+        compute_market_map_coverage = None
+    
+    report = {
+        "asof_ymd": asof_ymd,
+        "generated_at": datetime.now().isoformat(),
+    }
+    
+    # 1. recommend_latest → market map coverage + 선언 승률
+    rec_path = os.path.join(out_dir, "recommend_latest.csv")
+    declared_wr_active = None
+    declared_wr_top_pick = None
+    tp1_neg_count = 0
+    top_pick_wait_count = 0
+    top_pick_count = 0
+    
+    if os.path.exists(rec_path):
+        try:
+            rec = pd.read_csv(rec_path, dtype={"종목코드": str})
+            # market coverage
+            if compute_market_map_coverage is not None:
+                codes = rec["종목코드"] if "종목코드" in rec.columns else []
+                coverage = compute_market_map_coverage(codes)
+                report.update(coverage)
+            
+            # 선언 승률 — Active(ATTACK/ARMED) 평균
+            if "EST_WIN_RATE" in rec.columns and "ROUTE" in rec.columns:
+                active = rec[rec["ROUTE"].astype(str).isin(["ATTACK", "ARMED"])]
+                if len(active) > 0:
+                    _wr_a = active["EST_WIN_RATE"].dropna()
+                    if len(_wr_a) > 0:
+                        declared_wr_active = round(float(_wr_a.mean()), 4)
+            
+            # [v22 v4] 선언 승률 — TOP_PICK 평균 (HARD gate에 더 적합)
+            if "EST_WIN_RATE" in rec.columns and "TOP_PICK" in rec.columns:
+                tp_for_wr = rec[rec["TOP_PICK"].astype(int) == 1]
+                if len(tp_for_wr) > 0:
+                    _wr_t = tp_for_wr["EST_WIN_RATE"].dropna()
+                    if len(_wr_t) > 0:
+                        declared_wr_top_pick = round(float(_wr_t.mean()), 4)
+            
+            # TOP_PICK HARD 검증
+            if "TOP_PICK" in rec.columns:
+                tp = rec[rec["TOP_PICK"].astype(int) == 1]
+                top_pick_count = len(tp)
+                if "ROUTE" in tp.columns:
+                    top_pick_wait_count = int(
+                        (~tp["ROUTE"].astype(str).isin(["ATTACK", "ARMED"])).sum()
+                    )
+                if "TP1_PCT" in tp.columns:
+                    tp1_neg_count = int(
+                        (pd.to_numeric(tp["TP1_PCT"], errors="coerce") <= 0).sum()
+                    )
+        except Exception as e:
+            report["recommend_parse_error"] = str(e)
+    
+    # 두 기준 모두 report에 기록
+    report["declared_wr_active"] = declared_wr_active
+    report["declared_wr_top_pick"] = declared_wr_top_pick
+    
+    # 2. winrate_table_by_ELITE_SCORE_latest → bin 단조성
+    wt_elite = _load_json_safe(os.path.join(out_dir, "winrate_table_by_ELITE_SCORE_latest.json"))
+    if wt_elite and "table" in wt_elite:
+        mono = _compute_monotonicity(wt_elite["table"])
+        report["elite_monotonicity"] = mono
+        
+        # 실현 승률 평균 (top bin n_raw 가중)
+        realized_wr = None
+        total_n = 0
+        w_sum = 0.0
+        for b in wt_elite["table"]:
+            n = int(b.get("n_raw", 0))
+            p = b.get("p_win")
+            if n > 0 and p is not None and b.get("sufficient"):
+                total_n += n
+                w_sum += n * float(p)
+        if total_n > 0:
+            realized_wr = round(w_sum / total_n, 4)
+        report["realized_wr"] = realized_wr
+        
+        # 3. 선언 vs 실현 갭 — 두 축 모두 계산
+        gap_active = None
+        gap_top_pick = None
+        if realized_wr is not None:
+            if declared_wr_active is not None:
+                gap_active = round(declared_wr_active - realized_wr, 4)
+            if declared_wr_top_pick is not None:
+                gap_top_pick = round(declared_wr_top_pick - realized_wr, 4)
+        report["declared_vs_realized_gap_active"] = gap_active
+        report["declared_vs_realized_gap_top_pick"] = gap_top_pick
+        # 호환용 alias (기존 키도 유지) — TOP_PICK 우선, 없으면 active
+        report["declared_vs_realized_gap"] = (
+            gap_top_pick if gap_top_pick is not None else gap_active
+        )
+        
+        # avg_ret_excess 집계 (전체 bin 가중평균)
+        total_n2 = 0
+        e_sum = 0.0
+        for b in wt_elite["table"]:
+            n = int(b.get("n_raw", 0))
+            e = b.get("avg_ret_excess_pct")
+            if n > 0 and e is not None:
+                total_n2 += n
+                e_sum += n * float(e)
+        if total_n2 > 0:
+            report["avg_ret_excess_pct"] = round(e_sum / total_n2, 4)
+    else:
+        report["elite_monotonicity"] = {"valid": False, "reason": "winrate_table_by_ELITE_SCORE 없음"}
+    
+    # 4. top_pick_funnel (오늘)
+    funnel = _load_json_safe(os.path.join(out_dir, f"top_pick_funnel_{asof_ymd}.json"))
+    if funnel:
+        report["top_pick_funnel"] = funnel
+    
+    # 5. STABLE 7일 평균
+    report["top_pick_stable_7day_avg"] = _avg_stable_7day(out_dir, asof_ymd)
+    
+    # 6. CI Gate 검증
+    ci_hard = []
+    ci_soft = []
+    
+    # HARD 1: TOP_PICK에 WAIT/NEUTRAL 없음
+    if top_pick_wait_count > 0:
+        ci_hard.append({
+            "gate": "top_pick_route_positive",
+            "status": "FAIL",
+            "detail": f"TOP_PICK {top_pick_wait_count}건이 ATTACK/ARMED 아님",
+        })
+    else:
+        ci_hard.append({"gate": "top_pick_route_positive", "status": "PASS"})
+    
+    # HARD 2: TOP_PICK인데 TP1_PCT <= 0 없음
+    if tp1_neg_count > 0:
+        ci_hard.append({
+            "gate": "top_pick_tp1_positive",
+            "status": "FAIL",
+            "detail": f"TOP_PICK {tp1_neg_count}건이 TP1_PCT <= 0",
+        })
+    else:
+        ci_hard.append({"gate": "top_pick_tp1_positive", "status": "PASS"})
+    
+    # HARD 3: 선언-실현 갭 15%p 이하 (TOP_PICK 우선, 없으면 active)
+    gap = report.get("declared_vs_realized_gap_top_pick")
+    gap_basis = "top_pick"
+    if gap is None:
+        gap = report.get("declared_vs_realized_gap_active")
+        gap_basis = "active"
+    if gap is not None and gap > 0.15:
+        ci_hard.append({
+            "gate": "declared_vs_realized_gap_15pp",
+            "status": "FAIL",
+            "detail": f"gap_{gap_basis}={gap:.1%} > 15%p",
+        })
+    elif gap is not None:
+        ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "PASS",
+                        "detail": f"gap_{gap_basis}={gap:.1%}"})
+    else:
+        ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
+                        "detail": "실현 승률 또는 선언 승률 데이터 부족"})
+    
+    # SOFT 1: Wilson LCB 단조성
+    mono = report.get("elite_monotonicity", {})
+    if mono.get("valid") and mono.get("monotone_p_win_lcb") is False:
+        ci_soft.append({"gate": "wilson_monotonicity",
+                        "status": "WARN",
+                        "detail": "ELITE_SCORE bin별 p_win LCB 단조성 깨짐"})
+    else:
+        ci_soft.append({"gate": "wilson_monotonicity", "status": "OK"})
+    
+    # SOFT 2: avg_ret_excess 음수
+    excess = report.get("avg_ret_excess_pct")
+    if excess is not None and excess < 0:
+        ci_soft.append({"gate": "avg_ret_excess_positive",
+                        "status": "WARN",
+                        "detail": f"avg_ret_excess={excess:.2f}%"})
+    elif excess is not None:
+        ci_soft.append({"gate": "avg_ret_excess_positive", "status": "OK",
+                        "detail": f"{excess:.2f}%"})
+    
+    # SOFT 3: market_map_coverage 낮음
+    cov = report.get("market_map_coverage", 1.0)
+    if cov < 0.95:
+        ci_soft.append({"gate": "market_map_coverage_95",
+                        "status": "WARN",
+                        "detail": f"coverage={cov:.1%}"})
+    else:
+        ci_soft.append({"gate": "market_map_coverage_95", "status": "OK"})
+    
+    # SOFT 4: STABLE 7일 평균 부족
+    stable_avg = report.get("top_pick_stable_7day_avg")
+    if stable_avg is not None and stable_avg < 1.0:
+        ci_soft.append({"gate": "stable_7day_avg_1",
+                        "status": "WARN",
+                        "detail": f"평균 {stable_avg}개"})
+    elif stable_avg is not None:
+        ci_soft.append({"gate": "stable_7day_avg_1", "status": "OK",
+                        "detail": f"평균 {stable_avg}개"})
+    
+    report["ci_hard"] = ci_hard
+    report["ci_soft"] = ci_soft
+    report["ci_hard_all_pass"] = all(c["status"] in ("PASS", "SKIP") for c in ci_hard)
+    report["ci_soft_any_warn"] = any(c["status"] == "WARN" for c in ci_soft)
+    report["top_pick_count"] = top_pick_count
+    
+    # 저장
+    dated = os.path.join(out_dir, f"monotonicity_report_{asof_ymd}.json")
+    latest = os.path.join(out_dir, "monotonicity_report_latest.json")
+    for p in [dated, latest]:
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+        except Exception as e:
+            logger.warning(f"monotonicity_report 저장 실패: {e}")
+    
+    logger.info(
+        f"📊 [v22] monotonicity_report: "
+        f"HARD={'PASS' if report['ci_hard_all_pass'] else 'FAIL'}, "
+        f"SOFT={'WARN' if report['ci_soft_any_warn'] else 'OK'}, "
+        f"gap={gap}, excess={excess}, coverage={cov}"
+    )
+    
+    return report
+
+
+# ═══════════════════════════════════════════════════
 #  standalone 실행
 # ═══════════════════════════════════════════════════
 if __name__ == "__main__":
@@ -319,3 +664,15 @@ if __name__ == "__main__":
             print(f"\n{f.read()}")
     else:
         print("❌ 브리핑 대상 종목 없음")
+    
+    # [v22] monotonicity_report 별도 생성 (브리핑 대상 유무와 무관)
+    print("\n" + "=" * 50)
+    print("📊 [v22] monotonicity_report 생성 중...")
+    mono = generate_monotonicity_report(_dir, _ymd)
+    print(f"   HARD: {'✅ PASS' if mono['ci_hard_all_pass'] else '❌ FAIL'}")
+    print(f"   SOFT: {'⚠️ WARN' if mono['ci_soft_any_warn'] else '✅ OK'}")
+    if mono.get("declared_vs_realized_gap") is not None:
+        print(f"   선언-실현 갭: {mono['declared_vs_realized_gap']:.1%}")
+    if mono.get("avg_ret_excess_pct") is not None:
+        print(f"   avg_ret_excess: {mono['avg_ret_excess_pct']:+.2f}%")
+    print(f"   → {os.path.join(_dir, f'monotonicity_report_{_ymd}.json')}")
