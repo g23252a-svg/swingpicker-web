@@ -248,11 +248,11 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
     [v22 UI Step D] meta 인자 추가 — macro risk 기반 verdict
     
     Verdict 매트릭스:
-      NORMAL  + TOP_PICK + IS_NOW_ENTRY → 🟢 오늘 신규 진입 가능
-      CAUTION + TOP_PICK              → 🟠 보수적 분할 진입 (50% 비중)
-      WARNING/CRITICAL                → 🔴 신규 진입 금지 (관찰만)
-      NORMAL/CAUTION + TOP_PICK 0 + 활성 후보 → ⏸️ 관찰 모드
-      활성 후보도 0                   → 🔴 매수 신호 없음
+      NORMAL  + TOP_PICK + IS_NOW_ENTRY → 🟢 오늘 매수 OK
+      CAUTION + TOP_PICK              → 🟠 절반만 매수 권장 (50% 비중)
+      WARNING/CRITICAL                → 🔴 오늘 매수 금지 (관찰만)
+      NORMAL/CAUTION + TOP_PICK 0 + 관찰 후보 → ⏸️ 관찰 모드
+      관찰 후보도 0                   → 🔴 매수 신호 없음
     
     안전 설계:
       - try/except로 에러 시 카드만 안 띄우고 진행
@@ -319,10 +319,10 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             if is_macro_dangerous:
                 # 🔴 매크로 위험 — TOP_PICK 있어도 신규 진입 금지
                 verdict_emoji = "🔴"
-                verdict_text = "신규 진입 금지 (매크로 위험)"
+                verdict_text = "오늘 매수 금지 (시장 위험)"
                 verdict_subtitle = (
-                    f"TOP_PICK {n_top}개  ·  하지만 매크로 위험 "
-                    f"({macro_risk}) — 관찰만 권장"
+                    f"TOP_PICK {n_top}개  ·  하지만 시장 위험 "
+                    f"({macro_risk}) — 지켜보기만 권장"
                 )
                 gradient_from = "#3d0a0a"
                 gradient_via = "#541313"
@@ -333,10 +333,10 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             elif is_route_blocked:
                 # [Step E1] 🟠 엔진이 ROUTE 제한 — 매크로는 정상이지만 신규 진입 X
                 verdict_emoji = "🟠"
-                verdict_text = "신규 진입 제한 (엔진)"
+                verdict_text = "신규 매수 자제 (엔진 제한)"
                 verdict_subtitle = (
                     f"TOP_PICK {n_top}개  ·  엔진 최대 허용 ROUTE={max_route} "
-                    f"— 관찰만 권장"
+                    f"— 지켜보기만 권장"
                 )
                 gradient_from = "#3d2a0a"
                 gradient_via = "#544013"
@@ -345,12 +345,12 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 text_sub = "text-orange-100"
                 count_color = "text-orange-300"
             elif is_macro_caution:
-                # 🟠 매크로 주의 — 보수적 분할 진입
+                # 🟠 시장 주의 — 보수적 분할 진입
                 verdict_emoji = "🟠"
-                verdict_text = "보수적 분할 진입 권장"
+                verdict_text = "절반만 매수 권장"
                 verdict_subtitle = (
-                    f"TOP_PICK {n_top}개  ·  매크로 주의 "
-                    f"({macro_risk}) — 비중 50%로 축소"
+                    f"TOP_PICK {n_top}개  ·  시장 주의 "
+                    f"({macro_risk}) — 비중 절반으로 축소"
                 )
                 gradient_from = "#3d2a0a"
                 gradient_via = "#544013"
@@ -361,7 +361,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             else:
                 # 🟢 정상 — 신규 진입 가능
                 verdict_emoji = "🟢"
-                verdict_text = "오늘 신규 진입 가능"
+                verdict_text = "오늘 매수 OK"
                 type_summary = []
                 if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
                 if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
@@ -456,21 +456,21 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         else:
                             gap_desc = "현재가 낮음"
                         ui.label(
-                            f"{type_label}  ·  RR {rr:.1f}:1  ·  진입갭 {gap:+.1f}% ({gap_desc})"
+                            f"{type_label}  ·  수익:손실 {rr:.1f}:1  ·  추천가 차이 {gap:+.1f}% ({gap_desc})"
                         ).classes("text-xs text-gray-400 mb-2")
                         
                         # [v22 UI Step C] 3축 + 밸런스 한 줄
                         ui.label(
-                            f"S{struct:.0f} / T{timing:.0f} / AI{ai_sc:.0f}  ·  균형 {balance:.0f}"
+                            f"구조 {struct:.0f} · 타이밍 {timing:.0f} · AI {ai_sc:.0f}  ·  3축 균형 {balance:.0f}"
                         ).classes("text-xs text-purple-300 mb-1")
                         
                         # [v22 UI Step C] IS_NOW_ENTRY 배지
                         if is_now_entry:
-                            ui.label("✅ 지금 진입 가능").classes(
+                            ui.label("✅ 지금 매수 OK").classes(
                                 "text-xs text-emerald-400 font-bold mb-1"
                             )
                         else:
-                            ui.label("⏳ 진입가 대기").classes(
+                            ui.label("⏳ 추천가 도달 대기").classes(
                                 "text-xs text-amber-400 mb-1"
                             )
                         
@@ -494,9 +494,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                                         f"⛔ 신규매수 0원  ·  기준 {amt:.0f}만원은 관찰용"
                                     ).classes("text-sm font-bold text-red-300")
                                 elif is_macro_caution:
-                                    # 🟠 매크로 주의 — 50% 비중 권장
+                                    # 🟠 시장 주의 — 50% 비중 권장
                                     ui.label(
-                                        f"💰 기준 {amt:.0f}만원  ·  주의장 권장 {amt*0.5:.0f}만원"
+                                        f"💰 기준 {amt:.0f}만원  ·  주의 시 권장 {amt*0.5:.0f}만원"
                                     ).classes("text-sm font-bold text-amber-300")
                                 else:
                                     # 🟢 정상 — 기준값 그대로
@@ -511,7 +511,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         # [Step E4 + F3] Kelly engine 표시 (운영 신뢰)
                         if kelly_engine:
                             if 'fallback' in kelly_engine.lower():
-                                ui.label(f"⚠️ Kelly fallback ({kelly_engine})").classes(
+                                ui.label(f"⚠️ 매수금액 모델 보수모드 ({kelly_engine})").classes(
                                     "text-xs text-red-300 mt-1"
                                 )
                                 # [F3] KELLY_ERROR 요약 (있을 때만, 80자로 잘라서)
@@ -523,7 +523,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                                         "text-[10px] text-red-400/70"
                                     )
                             else:
-                                ui.label(f"Kelly {kelly_engine}").classes(
+                                ui.label(f"매수금액 모델 정상 ({kelly_engine})").classes(
                                     "text-xs text-gray-500 mt-1"
                                 )
             return
@@ -560,11 +560,11 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             # 부족한 점수 진단 (변수 재사용 — 위에서 추출했으므로 그대로)
             shortfall_msg = ""
             if cand_struct > 0 and cand_struct < 80:
-                shortfall_msg = f"STRUCT {80 - cand_struct:.1f}점 부족 (80↑ 필요)"
+                shortfall_msg = f"구조 점수 {80 - cand_struct:.1f}점 부족 (80↑ 필요)"
             elif cand_score < 75:
-                shortfall_msg = f"ELITE {75 - cand_score:.1f}점 부족 (75↑ 필요)"
+                shortfall_msg = f"종합 점수 {75 - cand_score:.1f}점 부족 (75↑ 필요)"
             elif cand_timing > 0 and cand_timing < 70:
-                shortfall_msg = f"TIMING {70 - cand_timing:.1f}점 부족"
+                shortfall_msg = f"타이밍 점수 {70 - cand_timing:.1f}점 부족 (70↑ 필요)"
             else:
                 shortfall_msg = "조건 일부 미달"
             
@@ -572,9 +572,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             # [Step D + E1] macro risk + route_blocked 통합 분기
             if is_macro_dangerous:
                 _hdr_emoji = "🔴"
-                _hdr_text = "신규 진입 금지 (매크로 위험)"
+                _hdr_text = "오늘 매수 금지 (시장 위험)"
                 _hdr_subtitle = (
-                    f"활성 후보 {len(active)}종목 있지만 "
+                    f"관찰 후보 {len(active)}종목 있지만 "
                     f"매크로 위험 ({macro_risk}) — 관찰만"
                 )
                 _hdr_g_from = "#3d0a0a"; _hdr_g_via = "#541313"
@@ -584,9 +584,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             elif is_route_blocked:
                 # [Step E1] 엔진 ROUTE 제한 — 신규 진입 X
                 _hdr_emoji = "🟠"
-                _hdr_text = "신규 진입 제한 (엔진)"
+                _hdr_text = "신규 매수 자제 (엔진 제한)"
                 _hdr_subtitle = (
-                    f"활성 후보 {len(active)}종목 있지만 "
+                    f"관찰 후보 {len(active)}종목 있지만 "
                     f"엔진 최대 허용 ROUTE={max_route} — 관찰만"
                 )
                 _hdr_g_from = "#3d2a0a"; _hdr_g_via = "#544013"
@@ -595,9 +595,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 _hdr_text_sub = "text-orange-100"
             else:
                 _hdr_emoji = "⏸️"
-                _hdr_text = "오늘은 관찰 모드"
-                _suffix = f" · 매크로 주의({macro_risk})" if is_macro_caution else ""
-                _hdr_subtitle = f"정식 추천 0건  ·  활성 후보 {len(active)}종목{_suffix}"
+                _hdr_text = "오늘은 지켜보세요"
+                _suffix = f" · 시장 주의({macro_risk})" if is_macro_caution else ""
+                _hdr_subtitle = f"오늘의 추천 0개  ·  관찰 후보 {len(active)}종목{_suffix}"
                 _hdr_g_from = "#3d2a0a"; _hdr_g_via = "#544013"
                 _hdr_border = "border-amber-500/50"
                 _hdr_text_main = "text-amber-300"
@@ -625,7 +625,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 "w-full p-4 mb-4 rounded-xl "
                 "bg-[#1a1a2e] border border-amber-700/40"
             ):
-                ui.label(f"💡 가장 가까운 후보").classes("text-xs text-gray-400 mb-2")
+                ui.label(f"💡 가장 가까운 종목 (왜 통과 못했나?)").classes("text-xs text-gray-400 mb-2")
                 
                 with ui.row().classes("w-full items-center gap-3 mb-2"):
                     ui.label(f"👀 {cand_name}").classes(
@@ -634,10 +634,10 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                     ui.badge(f"E{cand_score:.1f}", color="#F59E0B").classes("text-xs")
                     ui.badge(cand_route, color="#3B82F6").classes("text-xs")
                 
-                # [Step D3] 3축 + 밸런스
+                # [Step D3] 3축 + 밸런스 (한국어 풀어쓰기)
                 ui.label(
-                    f"S{cand_struct:.0f} / T{cand_timing:.0f} / AI{cand_ai:.0f}  "
-                    f"·  균형 {cand_balance:.0f}"
+                    f"구조 {cand_struct:.0f} · 타이밍 {cand_timing:.0f} · AI {cand_ai:.0f}  "
+                    f"·  3축 균형 {cand_balance:.0f}"
                 ).classes("text-xs text-purple-300 mb-1")
                 
                 # [Step D3] RR + 진입갭 (Step E3 방향성 추가)
@@ -648,16 +648,16 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 else:
                     _cand_gap_desc = "현재가 낮음"
                 ui.label(
-                    f"RR {cand_rr:.1f}:1  ·  진입갭 {cand_gap:+.1f}% ({_cand_gap_desc})"
+                    f"수익:손실 {cand_rr:.1f}:1  ·  추천가 차이 {cand_gap:+.1f}% ({_cand_gap_desc})"
                 ).classes("text-xs text-gray-400 mb-1")
                 
                 # [Step D3] IS_NOW_ENTRY 배지 (관찰모드는 보통 ⏳)
                 if cand_is_now:
-                    ui.label("✅ 지금 진입 가능 (조건 미달이지만 가격은 OK)").classes(
+                    ui.label("✅ 지금 매수 OK (조건 미달이지만 가격은 OK)").classes(
                         "text-xs text-emerald-400 mb-1"
                     )
                 else:
-                    ui.label("⏳ 진입가 대기").classes(
+                    ui.label("⏳ 추천가 도달 대기").classes(
                         "text-xs text-amber-400 mb-1"
                     )
                 
@@ -813,8 +813,8 @@ def render_tab_market(df):
                                     with ui.row().classes("items-center gap-2"):
                                         ui.label(f"{route_icon} {tp_flag}{s.get('종목명', '')}").classes("text-white font-bold text-sm")
                                         ui.badge(f"E{elite:.0f}", color="#10B981" if elite >= 80 else "#3B82F6").classes("text-xs")
-                                    ui.label(f"S{safe_float(s.get('STRUCT_SCORE', 0)):.0f} T{safe_float(s.get('TIMING_SCORE', 0)):.0f} AI{safe_float(s.get('AI_SCORE', 0)):.0f} | 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
-                                    ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | RR {rr:.1f}:1 | 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")
+                                    ui.label(f"구조 {safe_float(s.get('STRUCT_SCORE', 0)):.0f} · 타이밍 {safe_float(s.get('TIMING_SCORE', 0)):.0f} · AI {safe_float(s.get('AI_SCORE', 0)):.0f} | 3축 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
+                                    ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | 수익:손실 {rr:.1f}:1 | 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")
         except Exception as _te:
             _logger.warning(f"Top 추천 렌더 실패: {_te}")
 

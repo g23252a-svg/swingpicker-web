@@ -121,11 +121,11 @@ tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
      - 랭크 (ELITE_RANK_SCORE): 내부 Top 선별용 (라벨/밸런스/RR 보정)
   #2 상세영역도 테이블과 동일하게 "종합" + "랭크" 2개 미니바 표시
      - 같은 종목에서 두 값 일관되게 매치
-  #3 정렬 옵션: "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준임을 명확화)
+  #3 정렬 옵션: "🏆 검증순" → "🎯 추천순" (ELITE_RANK_SCORE 기준임을 명확화)
   #4 "검증"이라는 혼동 용어 제거 (walk-forward와 무관한 점수)
 [v3.7.23] (2026-04-18) — 헤더 카드 읽기 순서 최적화 + 제목 정확화
   사용자 리뷰어 지적 3가지 전부 반영:
-  #1 제목: "🏆 오늘의 검증 Top 3" → "🏆 오늘의 실전 Top Pick"
+  #1 제목: "🏆 오늘의 검증 Top 3" → "🏆 오늘의 추천 검증"
      - 실제 모드는 top1_first_then_top3_fallback (Top1 우선)
      - "Top 3"는 예전 철학 흔적 → "Top Pick"이 정확
      - 뱃지: "1/3" → "🎯 Top1" (1개 성공) / "Top3 폴백 N/3" (fallback)
@@ -361,7 +361,7 @@ tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
                 (진입 가능군에서 유일한 EV+ 조합)
      - ⚠️ 추격 : 갭 > 5% (품질 있어도 추격 비추)
   #2 Top 3 헤더 카드 ─ 🏆 + ✅ 풀에서 ELITE_RANK_SCORE Top 3 선별
-  #3 정렬 토글 확장: 🔢 점수순 / ⚖️ 밸런스순 / 🏆 검증순 / 🚦 상태순
+  #3 정렬 토글 확장: 🔢 점수순 / ⚖️ 균형순 / 🏆 검증순 / 🚦 상태순
   #4 테이블에 🏷️ 라벨 / 갭% 컬럼 추가
   #5 칸반 카드에 라벨 뱃지 + 갭% 정보 추가
 [v3.6] (2026-04-17)
@@ -1389,7 +1389,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                 # [v3.7.23] 제목 — "Top 3" → "Top Pick" (실제 모드는 Top1 우선)
                 # 실제 selection_mode가 top1_first_then_top3_fallback이므로
                 # "오늘의 실전 1순위"가 정확한 표현. Top3는 fallback일 뿐.
-                ui.label("🏆 오늘의 실전 Top Pick").classes(
+                ui.label("🏆 오늘의 추천 검증").classes(
                     "text-lg font-bold text-white"
                 )
                 # [v3.7.1→v3.7.23] 뱃지 의미 명확화
@@ -1511,7 +1511,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
         # 클릭: WF/Rolling/3종목/Top3 + 검증조건 + 갱신시각 펼침
         # ───────────────────────────────────────────
         with ui.expansion(
-            "📊 백테스트 검증 상세 보기 (Walk-forward · Rolling · 검증조건)",
+            "📊 백테스트 과거 성과 상세 보기 (Walk-forward · Rolling · 검증조건)",
             icon="science"
         ).classes(
             "w-full mt-2 mb-2 bg-[rgba(255,255,255,0.02)] "
@@ -1698,171 +1698,204 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
 
 
 def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
-    """[v22 UI Phase 1] 종목 분석 탭 Hero 카드 — 첫 화면 1초 답변
+    """[v22 UI Phase 4 #1] 종목 분석 탭 Hero — v22 TOP_PICK 중심으로 재구성
+    
+    시장 탭과 같은 언어로 통일:
+      - TOP_PICK / TOP_PICK_TYPE (AGGRESSIVE/STABLE) 우선
+      - IS_NOW_ENTRY 배지
+      - RR_NOW_TP1, ENTRY_GAP_PCT, BALANCE_SCORE
+      - 한국어 직관 용어 (오늘 매수 OK, 지금 매수 OK 등)
     
     3가지 시나리오:
-      A) 콤보/최강/즉시진입 라벨 종목 ≥1   → 🟢 진입 가능 라벨 + 카드 Top 3
-      B) ⚠️ 추격 라벨만 있음                → 🟠 추격 비추 + 추격 라벨 통계
-      C) 라벨 통과 종목 0건                  → 🔴 매수 신호 없음
+      A) TOP_PICK ≥ 1                            → 🟢 오늘 매수 OK
+      B) TOP_PICK = 0, ELITE_LABEL 통과 ≥ 1       → ⏸️ 오늘은 지켜보세요
+      C) 모두 0                                   → 🔴 오늘 매수 금지
     
-    안전 설계:
-      - try/except로 에러 시 카드만 안 띄우고 진행
-      - top3_codes가 있으면 그 종목들 카드, 없으면 라벨 통계만
+    안전: try/except, 컬럼 누락 graceful, fallback 정렬
     """
     try:
         if df is None or df.empty:
             return
         
-        # 라벨 카운트
-        if "ELITE_LABEL" not in df.columns:
-            return
+        # ─── TOP_PICK 강건 파서 (v22 1순위) ───
+        top_picks = pd.DataFrame()
+        if 'TOP_PICK' in df.columns:
+            tp_str = df['TOP_PICK'].astype(str).str.strip().str.upper()
+            tp_mask = tp_str.isin(['1', '1.0', 'TRUE', 'Y', 'YES'])
+            top_picks = df[tp_mask].copy()
+        n_top = len(top_picks)
         
-        n_combo = int((df["ELITE_LABEL"] == "🛡️ 콤보").sum())
-        n_strong = int((df["ELITE_LABEL"] == "🏆 최강").sum())
-        n_instant = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
-        n_chase = int((df["ELITE_LABEL"] == "⚠️ 추격").sum())
+        # ─── ELITE_LABEL 카운트 (v3.7 호환) ───
+        n_combo = n_strong = n_instant = n_chase = 0
+        if "ELITE_LABEL" in df.columns:
+            n_combo = int((df["ELITE_LABEL"] == "🛡️ 콤보").sum())
+            n_strong = int((df["ELITE_LABEL"] == "🏆 최강").sum())
+            n_instant = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
+            n_chase = int((df["ELITE_LABEL"] == "⚠️ 추격").sum())
+        n_label_actionable = n_combo + n_instant   # 라벨 기준 진입 가능
         
-        # 진입 가능 (콤보 + 즉시진입 = 실전 매매 가능)
-        # 최강은 v3.7.25 기준 관찰 모드 (매매 제외)
-        n_actionable = n_combo + n_instant
-        n_total = n_combo + n_strong + n_instant + n_chase
-        
-        # ─────────────────────────────────────────────
-        # 시나리오 A: 진입 가능 라벨 ≥ 1
-        # ─────────────────────────────────────────────
-        if n_actionable >= 1:
+        # ═══════════════════════════════════════════════════
+        # 시나리오 A: TOP_PICK ≥ 1 (v22 우선)
+        # ═══════════════════════════════════════════════════
+        if n_top >= 1:
+            # AGGRESSIVE / STABLE 분류
+            n_agg = n_stb = 0
+            if 'TOP_PICK_TYPE' in top_picks.columns:
+                tp_type_str = top_picks['TOP_PICK_TYPE'].astype(str).str.upper()
+                n_agg = int((tp_type_str == 'AGGRESSIVE').sum())
+                n_stb = int((tp_type_str == 'STABLE').sum())
+            
+            # 헤더 카드 — 결론 한 줄
             with ui.card().classes(
-                "w-full p-5 mb-4 rounded-xl "
-                "border-2 border-emerald-500/50"
+                "w-full p-5 mb-4 rounded-xl border-2 border-emerald-500/50"
             ).style(
                 "background: linear-gradient(to right, #0a3d2a, #0d5440, #0a3d2a)"
             ):
                 with ui.row().classes("w-full items-center justify-between"):
                     with ui.column().classes("gap-1"):
-                        ui.label(f"🟢 오늘 진입 가능 종목 {n_actionable}개").classes(
+                        ui.label(f"🟢 오늘 매수 OK").classes(
                             "text-lg font-bold text-emerald-300"
                         )
-                        # 라벨별 분해
                         type_summary = []
-                        if n_combo > 0: type_summary.append(f"🛡️ 콤보 {n_combo}")
-                        if n_instant > 0: type_summary.append(f"✅ 즉시 {n_instant}")
-                        if n_strong > 0: type_summary.append(f"🏆 최강 {n_strong} (관찰)")
-                        ui.label(" · ".join(type_summary)).classes(
-                            "text-sm text-emerald-100"
-                        )
-                    ui.label(f"{n_actionable}").classes(
+                        if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
+                        if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
+                        if not type_summary: type_summary.append(f"⭐ 추천 {n_top}")
+                        ui.label(
+                            f"오늘의 추천 {n_top}개  ·  " + " / ".join(type_summary)
+                        ).classes("text-sm text-emerald-100")
+                    ui.label(f"{n_top}").classes(
                         "text-5xl font-black text-emerald-300"
                     )
             
-            # Top 3 카드 (top3_codes 사용 또는 즉시진입/콤보 우선)
-            display_codes = list(top3_codes) if top3_codes else []
-            if not display_codes:
-                # top3_codes 비어있으면 콤보 + 즉시진입 중 ELITE_RANK_SCORE 상위 3
-                actionable_df = df[df["ELITE_LABEL"].isin(["🛡️ 콤보", "✅ 즉시진입"])]
-                if not actionable_df.empty and "ELITE_RANK_SCORE" in actionable_df.columns:
-                    top_actionable = actionable_df.nlargest(3, "ELITE_RANK_SCORE")
-                    display_codes = [
-                        str(c).zfill(6) for c in top_actionable["종목코드"].tolist()
-                    ]
+            # TOP_PICK 다축 정렬 (시장 탭과 동일 로직 인라인)
+            x = top_picks.copy()
+            x["_is_now"] = (
+                x.get("IS_NOW_ENTRY", "0").astype(str).str.strip().str.upper()
+                .isin(["1","1.0","TRUE","Y","YES"]).astype(int)
+            )
+            x["_rr"] = pd.to_numeric(x.get("RR_NOW_TP1", 0), errors="coerce").fillna(0)
+            x["_bal"] = pd.to_numeric(x.get("BALANCE_SCORE", 0), errors="coerce").fillna(0)
+            x["_gap"] = pd.to_numeric(x.get("ENTRY_GAP_PCT", 999), errors="coerce").abs().fillna(999)
+            x["_elite"] = pd.to_numeric(x.get("ELITE_SCORE", 0), errors="coerce").fillna(0)
+            top_sorted = x.sort_values(
+                ["_is_now", "_rr", "_bal", "_gap", "_elite"],
+                ascending=[False, False, False, True, False]
+            ).head(3)
             
-            if display_codes:
-                with ui.row().classes("w-full gap-3 flex-wrap mb-4"):
-                    for rank, code in enumerate(display_codes[:3], 1):
-                        match = df[df["종목코드"].astype(str).str.zfill(6) == code]
-                        if match.empty:
-                            continue
-                        r = match.iloc[0]
+            with ui.row().classes("w-full gap-3 flex-wrap mb-4"):
+                for rank, (_, row) in enumerate(top_sorted.iterrows(), 1):
+                    name = str(row.get("종목명", "?"))
+                    tp_type = str(row.get("TOP_PICK_TYPE", "")).upper()
+                    
+                    if tp_type == "AGGRESSIVE":
+                        emoji = "🔥"
+                        type_label = "공격형"
+                        accent = "#EF4444"
+                    elif tp_type == "STABLE":
+                        emoji = "💎"
+                        type_label = "안정형"
+                        accent = "#10B981"
+                    else:
+                        emoji = "⭐"
+                        type_label = "추천"
+                        accent = "#F59E0B"
+                    
+                    elite = _nz(row.get("ELITE_SCORE", 0))
+                    rr = _nz(row.get("RR_NOW_TP1", 0))
+                    gap = _nz(row.get("ENTRY_GAP_PCT", 0))
+                    amt = _nz(row.get("추천금액(만원)", 0))
+                    ewr = _nz(row.get("EST_WIN_RATE", 0))
+                    s_v = _nz(row.get("STRUCT_SCORE", 0))
+                    t_v = _nz(row.get("TIMING_SCORE", 0))
+                    a_v = _nz(row.get("AI_SCORE", row.get("ML_SCORE", 0)))
+                    bal = _nz(row.get("BALANCE_SCORE", 0))
+                    is_now = str(row.get("IS_NOW_ENTRY", "0")).strip().upper() in [
+                        "1","1.0","TRUE","Y","YES"
+                    ]
+                    kelly_engine = str(row.get("KELLY_ENGINE", "")).strip()
+                    
+                    buy = int(_nz(row.get("추천매수가", 0)))
+                    tp1 = int(_nz(row.get("추천매도가1", 0)))
+                    stop = int(_nz(row.get("손절가", 0)))
+                    tp1_pct = (tp1 / buy - 1) * 100 if buy > 0 else 0
+                    stop_pct = (stop / buy - 1) * 100 if buy > 0 else 0
+                    
+                    # 진입갭 방향성
+                    if abs(gap) < 0.05:
+                        gap_desc = "현재가 일치"
+                    elif gap > 0:
+                        gap_desc = "현재가 높음"
+                    else:
+                        gap_desc = "현재가 낮음"
+                    
+                    with ui.card().classes(
+                        "flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
+                        "border-l-4 rounded-xl"
+                    ).style(f"border-left-color: {accent}"):
+                        with ui.row().classes("w-full items-center gap-2 mb-2"):
+                            ui.label(f"{emoji} {rank}순위 · {name}").classes(
+                                "text-base font-bold text-white"
+                            )
+                            ui.badge(f"점수 {elite:.0f}", color="#3B82F6").classes("text-xs")
                         
-                        name = str(r.get("종목명", "?"))
-                        lbl = str(r.get("ELITE_LABEL", ""))
-                        lbl_color = str(r.get("ELITE_LABEL_COLOR", "#3B82F6"))
-                        s_v = _nz(r.get("STRUCT_SCORE", 0))
-                        t_v = _nz(r.get("TIMING_SCORE", 0))
-                        a_v = _nz(r.get("AI_SCORE", 0))
-                        bal = _nz(r.get("BALANCE_CALC", r.get("BALANCE_SCORE", 0)))
-                        gap = _nz(r.get("GAP_PCT", 0))
-                        rr = _nz(r.get("RR_NOW_TP1", 0))
-                        ewr = _nz(r.get("EST_WIN_RATE", 0))
-                        elite_score = _nz(r.get("ELITE_SCORE", 
-                                                r.get("ELITE_RANK_SCORE", 0)))
+                        ui.label(
+                            f"{type_label}  ·  수익:손실 {rr:.1f}:1  "
+                            f"·  추천가 차이 {gap:+.1f}% ({gap_desc})"
+                        ).classes("text-xs text-gray-400 mb-2")
                         
-                        buy = int(_nz(r.get("추천매수가", 0)))
-                        tp1 = int(_nz(r.get("추천매도가1", 0)))
-                        stop = int(_nz(r.get("손절가", 0)))
-                        close = int(_nz(r.get("종가", 0)))
+                        # 3축 + 균형 (한국어)
+                        ui.label(
+                            f"구조 {s_v:.0f} · 타이밍 {t_v:.0f} · AI {a_v:.0f}  "
+                            f"·  3축 균형 {bal:.0f}"
+                        ).classes("text-xs text-purple-300 mb-1")
                         
-                        tp1_pct = (tp1 / buy - 1) * 100 if buy > 0 else 0
-                        stop_pct = (stop / buy - 1) * 100 if buy > 0 else 0
-                        
-                        # 진입갭 방향 (시장 탭 Step E3 적용)
-                        if abs(gap) < 0.05:
-                            gap_desc = "현재가 일치"
-                        elif gap > 0:
-                            gap_desc = "현재가 높음"
+                        # 지금 매수 OK 배지
+                        if is_now:
+                            ui.label("✅ 지금 매수 OK").classes(
+                                "text-xs text-emerald-400 font-bold mb-1"
+                            )
                         else:
-                            gap_desc = "현재가 낮음"
+                            ui.label("⏳ 추천가 도달 대기").classes(
+                                "text-xs text-amber-400 mb-1"
+                            )
                         
-                        # 라벨에 따른 강조 색상
-                        if "콤보" in lbl:
-                            accent = "#8B5CF6"  # purple
-                        elif "최강" in lbl:
-                            accent = "#F59E0B"  # amber
-                        elif "즉시" in lbl:
-                            accent = "#10B981"  # green
-                        else:
-                            accent = "#3B82F6"  # blue
+                        # 가격
+                        if buy > 0 and tp1 > 0:
+                            ui.label(
+                                f"매수 {buy:,} → 목표 {tp1:,}  ({tp1_pct:+.1f}%)"
+                            ).classes("text-sm text-cyan-300")
+                        if stop > 0 and buy > 0:
+                            ui.label(
+                                f"손절 {stop:,}원  ({stop_pct:+.1f}%)"
+                            ).classes("text-xs text-red-300")
                         
-                        with ui.card().classes(
-                            "flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
-                            "border-l-4 rounded-xl"
-                        ).style(f"border-left-color: {accent}"):
-                            # 라벨 + 순위 + 종목명
-                            with ui.row().classes("w-full items-center gap-2 mb-2"):
-                                ui.label(f"#{rank}").classes(
-                                    "text-sm text-gray-500"
+                        # 추천금액 + 승률
+                        with ui.row().classes("w-full gap-3 mt-2 items-center"):
+                            if amt > 0:
+                                ui.label(f"💰 {amt:.0f}만원").classes(
+                                    "text-sm font-bold text-amber-300"
                                 )
-                                ui.badge(lbl, color=lbl_color).classes("text-xs")
-                                ui.label(name).classes(
-                                    "text-base font-bold text-white"
+                            if ewr > 0:
+                                ui.label(f"승률 {ewr*100:.0f}%").classes(
+                                    "text-xs text-gray-400"
                                 )
-                            
-                            # 3축 + 밸런스
-                            ui.label(
-                                f"S{s_v:.0f} / T{t_v:.0f} / AI{a_v:.0f}  ·  "
-                                f"균형 {bal:.0f}"
-                            ).classes("text-xs text-purple-300 mb-1")
-                            
-                            # RR + 진입갭 방향성
-                            ui.label(
-                                f"RR {rr:.2f}:1  ·  진입갭 {gap:+.1f}% ({gap_desc})"
-                            ).classes("text-xs text-gray-400 mb-1")
-                            
-                            # 가격 (매수 → 목표 + 손절)
-                            if buy > 0 and tp1 > 0:
+                        
+                        # 매수금액 모델 (Kelly engine)
+                        if kelly_engine:
+                            if "fallback" in kelly_engine.lower():
                                 ui.label(
-                                    f"매수 {buy:,} → 목표 {tp1:,}  ({tp1_pct:+.1f}%)"
-                                ).classes("text-sm text-cyan-300")
-                            if stop > 0 and buy > 0:
+                                    f"⚠️ 매수금액 모델 보수모드 ({kelly_engine})"
+                                ).classes("text-xs text-red-300 mt-1")
+                            else:
                                 ui.label(
-                                    f"손절 {stop:,}원  ({stop_pct:+.1f}%)"
-                                ).classes("text-xs text-red-300")
-                            
-                            # 추가 정보 (점수 / 승률)
-                            with ui.row().classes("w-full gap-3 mt-2 items-center"):
-                                if elite_score > 0:
-                                    ui.label(f"점수 {elite_score:.0f}").classes(
-                                        "text-xs text-amber-300"
-                                    )
-                                if ewr > 0:
-                                    ui.label(f"승률 {ewr*100:.0f}%").classes(
-                                        "text-xs text-gray-400"
-                                    )
+                                    f"매수금액 모델 정상 ({kelly_engine})"
+                                ).classes("text-xs text-gray-500 mt-1")
             return
         
-        # ─────────────────────────────────────────────
-        # 시나리오 B: 추격 라벨만 (진입 가능 0)
-        # ─────────────────────────────────────────────
-        if n_chase > 0:
+        # ═══════════════════════════════════════════════════
+        # 시나리오 B: TOP_PICK 0 + 라벨 통과 ≥ 1 → 지켜보세요
+        # ═══════════════════════════════════════════════════
+        if n_label_actionable >= 1 or n_strong > 0:
             with ui.card().classes(
                 "w-full p-5 mb-4 rounded-xl border-2 border-amber-500/50"
             ).style(
@@ -1870,14 +1903,16 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
             ):
                 with ui.row().classes("w-full items-center justify-between"):
                     with ui.column().classes("gap-1"):
-                        ui.label("⏸️ 오늘은 관찰 모드 (추격 비추)").classes(
+                        ui.label("⏸️ 오늘은 지켜보세요").classes(
                             "text-lg font-bold text-amber-300"
                         )
-                        msg_parts = ["진입 가능 종목 0건"]
-                        if n_chase > 0:
-                            msg_parts.append(f"⚠️ 추격 후보 {n_chase}개")
+                        msg_parts = [f"오늘의 추천 0개"]
+                        if n_label_actionable > 0:
+                            msg_parts.append(f"✅ 진입 가능 라벨 {n_label_actionable}개")
                         if n_strong > 0:
-                            msg_parts.append(f"🏆 최강(관찰) {n_strong}개")
+                            msg_parts.append(f"🏆 강력 후보 · 관찰 {n_strong}개")
+                        if n_chase > 0:
+                            msg_parts.append(f"⚠️ 추격 매수 위험 {n_chase}개")
                         ui.label("  ·  ".join(msg_parts)).classes(
                             "text-sm text-amber-100"
                         )
@@ -1886,14 +1921,14 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
                     )
             
             ui.label(
-                "💡 추격은 갭이 5%를 넘어선 종목입니다. "
-                "이미 늦었을 가능성이 크니 무리하지 마세요."
+                "💡 시스템이 신중하게 골라서 오늘은 정식 추천 종목이 없습니다. "
+                "아래 후보들은 참고용이며, 무리한 매수는 자제하세요."
             ).classes("text-xs text-gray-500 italic mb-4")
             return
         
-        # ─────────────────────────────────────────────
-        # 시나리오 C: 라벨 통과 0건
-        # ─────────────────────────────────────────────
+        # ═══════════════════════════════════════════════════
+        # 시나리오 C: 모든 조건 0 → 매수 금지
+        # ═══════════════════════════════════════════════════
         with ui.card().classes(
             "w-full p-5 mb-4 rounded-xl border-2 border-red-500/50"
         ).style(
@@ -1901,16 +1936,15 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
         ):
             with ui.row().classes("w-full items-center justify-between"):
                 with ui.column().classes("gap-1"):
-                    ui.label("🔴 오늘은 매수 신호 없음").classes(
+                    ui.label("🔴 오늘 매수 금지").classes(
                         "text-lg font-bold text-red-300"
                     )
                     ui.label(
-                        "라벨 조건을 통과한 종목이 없습니다. 다음 거래일 대기 권장."
+                        "추천 종목도 후보도 없습니다. 다음 거래일 대기 권장."
                     ).classes("text-sm text-red-100")
                 ui.icon("warning", size="48px").classes("text-red-400")
     
     except Exception as _e:
-        # Hero 카드 실패해도 나머지 화면은 정상 표시
         try:
             from utils.logger import get_logger
             get_logger().warning(f"종목 Hero 카드 렌더 실패: {_e}")
@@ -1941,13 +1975,23 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     )
 
     # ═══════════════════════════════════════════════════
-    # [v22 UI Phase 1] Hero 카드 — 첫 화면 1초 답변
+    # [v22 UI Phase 1+4] Hero 카드 — 첫 화면 1초 답변
     # 시장 탭과 같은 패턴: 결론 → 카드 → 상세
     # ═══════════════════════════════════════════════════
     _render_stocks_hero(df, top3_codes)
 
-    # ── [v3.7] Top 3 헤더 카드 (백테스트 검증 기반) ──
-    _render_top3_card(df, top3_codes)
+    # ═══════════════════════════════════════════════════
+    # [v22 UI Phase 4 #2] 백테스트 검증 카드를 expansion으로 접기
+    # Hero가 결론, 검증 카드는 근거 — 역할 분리
+    # ═══════════════════════════════════════════════════
+    with ui.expansion(
+        "📈 백테스트 검증 성과 자세히 보기 (실집행/신호/신뢰도)",
+        icon="insights"
+    ).classes(
+        "w-full mb-4 bg-[rgba(255,255,255,0.02)] "
+        "border border-[rgba(255,255,255,0.05)] rounded"
+    ).props("dense"):
+        _render_top3_card(df, top3_codes)
 
     # ── 뷰모드 + 필터 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-2"):
@@ -1961,20 +2005,20 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         # [v3.7.18] 라벨 필터 추가 - 즉시진입 너무 많을 때 최강만 보기 등
         # [v3.7.25] 🛡️ 콤보 필터 추가 (제1 매수 종목)
         label_filter = ui.select(
-            ["전체", "🛡️ 콤보", "🏆 최강", "✅ 즉시진입", "⚠️ 추격"],
+            ["전체", "🎯 최우선 추천", "🏆 강력 후보 · 관찰", "✅ 지금 매수 가능", "⚠️ 추격 매수 위험"],
             value="전체", label="라벨",
         ).classes("min-w-[130px]")
-        # [v3.7.24] "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준 명확화)
+        # [v3.7.24] "🏆 검증순" → "🎯 추천순" (ELITE_RANK_SCORE 기준 명확화)
         sort_mode = ui.toggle(
-            ["🔢 점수순", "⚖️ 밸런스순", "🏆 랭크순", "🚦 상태순"],
-            value="🏆 랭크순",
+            ["🔢 점수순", "⚖️ 균형순", "🎯 추천순", "🚦 상태순"],
+            value="🎯 추천순",
         )
         # [v3.7.26] 테이블 보기 모드 — 기본(핵심만) vs 고급(전체)
         # 사용자 지적: "스코어들이 너무 많은데 로직들좀 설명해봐"
         # 해결: 기본 보기 = 실전 매매에 필요한 컬럼만 (7개)
         #       고급 보기 = 기존 전체 (11개)
         view_table_mode = ui.toggle(
-            ["🎯 기본", "🔬 고급"],
+            ["🎯 기본", "🔬 상세"],
             value="🎯 기본",
         )
 
@@ -1990,11 +2034,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     else:
         n_combo = n_strong = n_instant = n_chase = n_none = 0
 
-    # [v22 UI Phase 3] 라벨 기준 안내 → expansion으로 접기 (기본 닫힘)
+    # [v22 UI Phase 3 + 4] 라벨 기준 안내 → expansion으로 접기 (기본 닫힘) + 한국어
     # 헤더 텍스트에 카운트 요약 표시 → 펼치지 않아도 전체 통계 파악 가능
     _label_summary = (
-        f"🛡️ 콤보 {n_combo}  ·  🏆 최강 {n_strong}  ·  "
-        f"✅ 즉시진입 {n_instant}  ·  ⚠️ 추격 {n_chase}"
+        f"🎯 최우선 {n_combo}  ·  🏆 강력 후보 {n_strong}  ·  "
+        f"✅ 매수 가능 {n_instant}  ·  ⚠️ 추격 위험 {n_chase}"
     )
     with ui.expansion(
         f"🏷️ 라벨 기준 보기  ({_label_summary})",
@@ -2006,18 +2050,18 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         with ui.column().classes("w-full gap-1 p-2"):
             # [v3.7.25] 🛡️ 콤보 최우선 표시 (제1 매수 · 실성능 1위)
             ui.label(
-                f"🛡️ 콤보 ({n_combo}): S≥90 · T≥80 · AI≥60 · ATTACK/ARMED "
+                f"🎯 최우선 추천 ({n_combo}): 구조≥90 · 타이밍≥80 · AI≥60 · 적극매수/매수준비 "
                 f"[n=112 EV +25.77% 승률 83.9%]"
             ).classes("text-xs text-purple-400 font-bold")
             ui.label(
-                f"🏆 최강 ({n_strong}): 평균≥70 · 밸런스≥70 · 갭≤3% · RR≥0.8 "
-                f"[n=6 · 👁️ 관찰중 · 매매 제외]"
+                f"🏆 강력 후보 · 관찰 ({n_strong}): 평균≥70 · 균형≥70 · 갭≤3% · 수익:손실≥0.8 "
+                f"[관찰 중 · 직접 매매 제외]"
             ).classes("text-xs text-gray-500 line-through opacity-60")
             ui.label(
-                f"✅ 즉시진입 ({n_instant}): 최소≥50 · 밸런스≥70 · 갭≤5%"
+                f"✅ 지금 매수 가능 ({n_instant}): 최소≥50 · 균형≥70 · 갭≤5%"
             ).classes("text-xs text-green-400")
             ui.label(
-                f"⚠️ 추격 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
+                f"⚠️ 추격 매수 위험 ({n_chase}): 갭>5% · 평균≥60 (이미 늦음)"
             ).classes("text-xs text-orange-400")
             if n_none > 0:
                 ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
@@ -2264,20 +2308,28 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             fdf = fdf[fdf["ROUTE"].astype(str).str.contains(
                 route_filter.value, na=False
             )]
-        # [v3.7.18] 라벨 필터 적용
+        # [v3.7.18 + v22 한국어] 라벨 필터 적용 — 한국어 표시 → 내부 라벨 매핑
+        # 사용자에게 보이는 라벨은 한국어, 데이터의 ELITE_LABEL은 기존 라벨 유지
+        _LABEL_DISPLAY_TO_INTERNAL = {
+            "🎯 최우선 추천": "🛡️ 콤보",
+            "🏆 강력 후보 · 관찰": "🏆 최강",
+            "✅ 지금 매수 가능": "✅ 즉시진입",
+            "⚠️ 추격 매수 위험": "⚠️ 추격",
+        }
         if label_filter.value != "전체" and "ELITE_LABEL" in fdf.columns:
-            fdf = fdf[fdf["ELITE_LABEL"] == label_filter.value]
+            _internal = _LABEL_DISPLAY_TO_INTERNAL.get(label_filter.value, label_filter.value)
+            fdf = fdf[fdf["ELITE_LABEL"] == _internal]
         # [v3.7] 정렬 로직 확장
         if sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
-        elif sort_mode.value == "⚖️ 밸런스순":
+        elif sort_mode.value == "⚖️ 균형순":
             # min(S, T, AI) 내림차순 → 3축 모두 높은 종목 우선
             s_col = fdf["STRUCT_SCORE"].fillna(0) if "STRUCT_SCORE" in fdf.columns else 0
             t_col = fdf["TIMING_SCORE"].fillna(0) if "TIMING_SCORE" in fdf.columns else 0
             a_col = fdf["AI_SCORE"].fillna(0)     if "AI_SCORE"     in fdf.columns else 0
             fdf = fdf.assign(_axis_min=pd.concat([s_col, t_col, a_col], axis=1).min(axis=1))
             fdf = fdf.sort_values("_axis_min", ascending=False).drop(columns=["_axis_min"])
-        elif sort_mode.value == "🏆 랭크순" and "ELITE_RANK_SCORE" in fdf.columns:
+        elif sort_mode.value == "🎯 추천순" and "ELITE_RANK_SCORE" in fdf.columns:
             fdf = fdf.sort_values("ELITE_RANK_SCORE", ascending=False)
         elif sort_mode.value == "🚦 상태순" and "ROUTE" in fdf.columns:
             # ATTACK → ARMED → WAIT → NEUTRAL → OVERHEAT → CARRY → 기타
@@ -2319,7 +2371,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     def _render_table(show: pd.DataFrame, full_df: pd.DataFrame):
         # [v3.7.26] 보기 모드별 컬럼 구성 — 기본: 핵심만 / 고급: 전체
-        is_advanced = view_table_mode.value == "🔬 고급"
+        is_advanced = view_table_mode.value == "🔬 상세"
+
+        # [v22 한국어] 내부 ELITE_LABEL → 화면 표시용 한국어 라벨
+        _LABEL_INTERNAL_TO_DISPLAY = {
+            "🛡️ 콤보": "🎯 최우선",
+            "🏆 최강": "🏆 강력 후보",
+            "✅ 즉시진입": "✅ 매수 가능",
+            "⚠️ 추격": "⚠️ 추격 위험",
+        }
 
         # 공통 컬럼 (항상 표시)
         base_cols = [
@@ -2373,7 +2433,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         for _, r in show.iterrows():
             rows.append({
                 "code": str(r.get("종목코드", "")).zfill(6),
-                "label": str(r.get("ELITE_LABEL", "") or "—"),
+                "label": _LABEL_INTERNAL_TO_DISPLAY.get(
+                    str(r.get("ELITE_LABEL", "") or ""),
+                    str(r.get("ELITE_LABEL", "") or "—")
+                ),
                 "route": str(r.get("ROUTE", "—")),
                 "name": str(r.get("종목명", "—")),
                 "score": f'{_nz(r.get("DISPLAY_SCORE", 0)):.0f}',
@@ -2445,8 +2508,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     "border border-[rgba(255,255,255,0.1)] rounded-xl "
                     "hover:bg-[rgba(255,255,255,0.08)]"
                 ):
-                    # [v3.7] 라벨 뱃지 (최강/관심/추격) — 종목명 위
-                    elite_lbl = str(r.get("ELITE_LABEL", "") or "")
+                    # [v3.7 + v22 한국어] 라벨 뱃지 — 한국어 표시
+                    _kanban_label_map = {
+                        "🛡️ 콤보": "🎯 최우선",
+                        "🏆 최강": "🏆 강력 후보",
+                        "✅ 즉시진입": "✅ 매수 가능",
+                        "⚠️ 추격": "⚠️ 추격 위험",
+                    }
+                    elite_lbl_internal = str(r.get("ELITE_LABEL", "") or "")
+                    elite_lbl = _kanban_label_map.get(elite_lbl_internal, elite_lbl_internal)
                     elite_color = str(r.get("ELITE_LABEL_COLOR", "") or "")
                     if elite_lbl:
                         ui.badge(elite_lbl, color=elite_color).classes("text-[10px] mb-1")
