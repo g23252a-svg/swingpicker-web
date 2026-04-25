@@ -257,15 +257,66 @@ class LDYDBManager:
                 lock_until TEXT
             )
         """)
+        # [v22 Step Y] inquiries 테이블 마이그레이션 — 기존 컬럼 5개 → 9개
+        # PRIMARY KEY 추가 (중복 방지) + 답변/상태/카테고리 컬럼
+        try:
+            existing_cols = [r[1] for r in self._exec_sqlite(
+                "PRAGMA table_info(inquiries)").fetchall()]
+            if existing_cols and "inquiry_id" not in existing_cols:
+                _logger.info(" 🔄 inquiries 스키마 마이그레이션: 컬럼 4개 추가")
+                # 기존 데이터 백업
+                old_rows = self._exec_sqlite(
+                    "SELECT id, nickname, title, content, created_at FROM inquiries",
+                    fetch=True
+                ) or []
+                # 기존 테이블 DROP
+                self._exec_sqlite("DROP TABLE IF EXISTS inquiries")
+        except Exception as _e:
+            _logger.debug(f"inquiries 마이그레이션 체크 실패 (무시): {_e}")
+            old_rows = []
+
         self._exec_sqlite("""
             CREATE TABLE IF NOT EXISTS inquiries (
+                inquiry_id TEXT PRIMARY KEY,
                 id TEXT,
                 nickname TEXT,
                 title TEXT,
                 content TEXT,
-                created_at TEXT
+                created_at TEXT,
+                category TEXT DEFAULT 'general',
+                status TEXT DEFAULT 'open',
+                admin_reply TEXT DEFAULT '',
+                admin_reply_at TEXT DEFAULT ''
             )
         """)
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_inq_email ON inquiries (id)"
+        )
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_inq_status ON inquiries (status)"
+        )
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_inq_created ON inquiries (created_at)"
+        )
+
+        # 마이그레이션 데이터 복원 (created_at + content 해시로 inquiry_id 생성)
+        try:
+            if 'old_rows' in dir() and old_rows:
+                import hashlib
+                for r in old_rows:
+                    email, nickname, title, content, created_at = r
+                    # 안정적인 inquiry_id 생성: created_at + content 해시
+                    seed = f"{created_at}|{title}|{content}|{email}"
+                    inquiry_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
+                    self._exec_sqlite(
+                        """INSERT OR IGNORE INTO inquiries
+                        (inquiry_id, id, nickname, title, content, created_at, category, status)
+                        VALUES (?, ?, ?, ?, ?, ?, 'general', 'open')""",
+                        (inquiry_id, email, nickname, title, content, created_at)
+                    )
+                _logger.info(f"  ✅ inquiries 마이그레이션 완료: {len(old_rows)}건 → 중복 자동 제거")
+        except Exception as _mig_e:
+            _logger.warning(f"inquiries 마이그레이션 실패 (무시 가능): {_mig_e}")
 
         # [v22 Step W] 결제 기록 테이블 — orderId UNIQUE로 중복 방지
         # status: success / failed / amount_mismatch / duplicate / refunded
@@ -430,18 +481,50 @@ class LDYDBManager:
         """, vals)
 
     def _insert_gist_inquiries(self, data):
+        """[v22 Step Y] inquiries Gist 데이터 적용 (UPSERT — inquiry_id PK).
+        
+        기존 INSERT INTO 방식은 동일 row 매번 추가되어 중복 폭발 발생 (Step Y 이전 버그).
+        INSERT OR REPLACE로 변경하여 inquiry_id 기준 UPSERT.
+        하위 호환: 기존 데이터 (inquiry_id 없음)는 created_at+content 해시로 자동 생성.
+        """
         if not data or not isinstance(data, list):
             return
         try:
+            import hashlib
             for item in data:
+                # inquiry_id 추출 또는 생성 (하위 호환)
+                inquiry_id = item.get('inquiry_id', '')
+                if not inquiry_id:
+                    # 기존 데이터: created_at + title + content + email 해시
+                    seed = (
+                        f"{item.get('created_at', '')}|"
+                        f"{item.get('title', '')}|"
+                        f"{item.get('content', '')}|"
+                        f"{item.get('id') or item.get('email', '')}"
+                    )
+                    inquiry_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
+                
                 self._exec_sqlite(
-                    "INSERT INTO inquiries VALUES (?,?,?,?,?)",
-                    (item.get('id'), item.get('nickname'), item.get('title'),
-                     item.get('content'), item.get('created_at'))
+                    """INSERT OR REPLACE INTO inquiries
+                    (inquiry_id, id, nickname, title, content, created_at,
+                     category, status, admin_reply, admin_reply_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        inquiry_id,
+                        item.get('id') or item.get('email', ''),
+                        item.get('nickname', '익명'),
+                        item.get('title', ''),
+                        item.get('content', ''),
+                        item.get('created_at', ''),
+                        item.get('category', 'general'),
+                        item.get('status', 'open'),
+                        item.get('admin_reply', ''),
+                        item.get('admin_reply_at', ''),
+                    )
                 )
-            _logger.info(f" inquiries 적용 완료 ({len(data)}건)")
+            _logger.info(f" inquiries 적용 완료 ({len(data)}건, UPSERT)")
         except Exception as e:
-            _logger.warning(f" inquiries INSERT 실패: {e}")
+            _logger.warning(f" inquiries INSERT 실패: {e}", exc_info=True)
 
     def _insert_gist_payments(self, data):
         """[v22 Step X] payments 테이블 Gist 데이터 적용 (UPSERT — order_id PK)"""
@@ -534,13 +617,15 @@ class LDYDBManager:
         try:
             rows = self._exec_sqlite(f"SELECT * FROM {tablename}", fetch=True)
             
-            # [v22 Step X] 테이블별 컬럼 정확한 분기
+            # [v22 Step X+Y] 테이블별 컬럼 정확한 분기
             if tablename == "users":
                 cols = ["id", "password", "salt", "nickname", "role", "join_date",
                         "last_login", "is_banned", "security_q_idx", "security_a_hash",
                         "session_token", "prime_expire_date", "login_fail_count", "lock_until"]
             elif tablename == "inquiries":
-                cols = ["id", "nickname", "title", "content", "created_at"]
+                # [Step Y] inquiry_id PRIMARY KEY + 답변/상태/카테고리 컬럼
+                cols = ["inquiry_id", "id", "nickname", "title", "content",
+                        "created_at", "category", "status", "admin_reply", "admin_reply_at"]
             elif tablename == "payments":
                 # CREATE TABLE 컬럼 순서와 일치 (db 패치 1)
                 cols = ["order_id", "payment_key", "email", "plan", "amount",
@@ -848,12 +933,22 @@ class LDYDBManager:
             return False, f"DB Error: {e}"
 
     # --- Inquiry Methods ---
+    # ═══════════════════════════════════════════
+    #  [v22 Step Y] 문의 함수 — UPSERT 기반 (중복 방지)
+    # ═══════════════════════════════════════════
     def get_all_inquiries(self):
+        """[Step Y] 모든 문의 조회 (최근순)"""
         try:
-            cols = ["id", "nickname", "title", "content", "created_at"]
-            rows = self._exec_sqlite("SELECT * FROM inquiries", fetch=True)
+            cols = ["inquiry_id", "id", "nickname", "title", "content",
+                    "created_at", "category", "status", "admin_reply", "admin_reply_at"]
+            rows = self._exec_sqlite(
+                "SELECT inquiry_id, id, nickname, title, content, created_at, "
+                "category, status, admin_reply, admin_reply_at "
+                "FROM inquiries ORDER BY created_at DESC",
+                fetch=True
+            )
             result = []
-            for r in rows:
+            for r in rows or []:
                 d = dict(zip(cols, r))
                 d['email'] = d['id']
                 result.append(d)
@@ -862,17 +957,125 @@ class LDYDBManager:
             _logger.warning(f"문의 조회 실패: {e}", exc_info=True)
             return []
 
+    def add_inquiry(self, inquiry_id: str, email: str, nickname: str,
+                    title: str, content: str, created_at: str,
+                    category: str = "general") -> bool:
+        """[Step Y] 신규 문의 추가 — INSERT OR IGNORE (PRIMARY KEY로 중복 방지).
+        
+        Returns:
+            True: 정상 등록
+            False: 중복 또는 실패
+        """
+        try:
+            # INSERT OR IGNORE — inquiry_id 중복 시 자동 무시
+            cursor = self._exec_sqlite(
+                """INSERT OR IGNORE INTO inquiries
+                (inquiry_id, id, nickname, title, content, created_at,
+                 category, status, admin_reply, admin_reply_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'open', '', '')""",
+                (inquiry_id, email, nickname, title, content, created_at, category)
+            )
+            # rowcount 확인 — 0이면 중복
+            if hasattr(cursor, 'rowcount') and cursor.rowcount == 0:
+                _logger.info(f"📮 문의 중복 무시: {inquiry_id}")
+                return False
+            self._mark_gist_dirty("inquiries")
+            _logger.info(f"📮 문의 등록: {inquiry_id} / {email} / {category}")
+            return True
+        except Exception as e:
+            _logger.warning(f"문의 등록 실패: {e}", exc_info=True)
+            return False
+
+    def update_inquiry_reply(self, inquiry_id: str, admin_reply: str,
+                              admin_reply_at: str = "") -> bool:
+        """[Step Y] 관리자 답변 등록"""
+        try:
+            from datetime import datetime as _dt
+            if not admin_reply_at:
+                admin_reply_at = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._exec_sqlite(
+                """UPDATE inquiries SET 
+                    admin_reply = ?, admin_reply_at = ?, status = 'replied'
+                   WHERE inquiry_id = ?""",
+                (admin_reply, admin_reply_at, inquiry_id)
+            )
+            self._mark_gist_dirty("inquiries")
+            return True
+        except Exception as e:
+            _logger.warning(f"문의 답변 실패: {e}", exc_info=True)
+            return False
+
+    def update_inquiry_status(self, inquiry_id: str, status: str) -> bool:
+        """[Step Y] 문의 상태 변경 (open / in_progress / replied / closed)"""
+        try:
+            self._exec_sqlite(
+                "UPDATE inquiries SET status = ? WHERE inquiry_id = ?",
+                (status, inquiry_id)
+            )
+            self._mark_gist_dirty("inquiries")
+            return True
+        except Exception as e:
+            _logger.warning(f"문의 상태 변경 실패: {e}")
+            return False
+
+    def delete_inquiry(self, inquiry_id: str) -> bool:
+        """[Step Y] 문의 삭제 — inquiry_id 기반 (created_at 충돌 X)"""
+        try:
+            self._exec_sqlite(
+                "DELETE FROM inquiries WHERE inquiry_id = ?", (inquiry_id,)
+            )
+            self._mark_gist_dirty("inquiries")
+            return True
+        except Exception as e:
+            _logger.warning(f"문의 삭제 실패: {e}")
+            return False
+
+    def get_user_inquiries(self, email: str) -> list:
+        """[Step Y] 사용자 본인 문의 조회"""
+        try:
+            cols = ["inquiry_id", "id", "nickname", "title", "content",
+                    "created_at", "category", "status", "admin_reply", "admin_reply_at"]
+            rows = self._exec_sqlite(
+                "SELECT inquiry_id, id, nickname, title, content, created_at, "
+                "category, status, admin_reply, admin_reply_at "
+                "FROM inquiries WHERE id = ? ORDER BY created_at DESC",
+                (email,), fetch=True
+            )
+            return [dict(zip(cols, r)) for r in (rows or [])]
+        except Exception as e:
+            _logger.warning(f"사용자 문의 조회 실패: {e}")
+            return []
+
+    def get_inquiry_stats(self) -> dict:
+        """[Step Y] 문의 통계 (관리자 대시보드용)"""
+        try:
+            stats = {"total": 0, "open": 0, "in_progress": 0, "replied": 0, "closed": 0}
+            rows = self._exec_sqlite(
+                "SELECT status, COUNT(*) FROM inquiries GROUP BY status",
+                fetch=True
+            ) or []
+            for r in rows:
+                status, cnt = r
+                if status in stats:
+                    stats[status] = cnt
+                stats["total"] += cnt
+            return stats
+        except Exception as e:
+            _logger.warning(f"문의 통계 실패: {e}")
+            return {"total": 0, "open": 0, "in_progress": 0, "replied": 0, "closed": 0}
+
+    # ─── [Step Y] 하위 호환: 기존 save_inquiries (DEPRECATED) ───
+    # 기존 코드가 호출할 수 있으므로 유지하되, 내부적으로 add_inquiry 사용 권장.
+    # 사용 X — 절대 호출하지 마세요 (전체 DELETE+INSERT는 위험)
     def save_inquiries(self, items):
-        self._exec_sqlite("DELETE FROM inquiries")
-        if items:
-            for i in items:
-                self._exec_sqlite(
-                    "INSERT INTO inquiries VALUES (?, ?, ?, ?, ?)",
-                    (i.get('email', i.get('id')), i.get('nickname'), i.get('title'),
-                     i.get('content'), i.get('created_at'))
-                )
-        self._mark_gist_dirty("inquiries")
-        return True
+        """⚠️ DEPRECATED — add_inquiry 사용 권장.
+        기존 호출자 호환을 위해 유지하지만 사용 X.
+        """
+        _logger.warning(
+            "⚠️ save_inquiries() DEPRECATED — add_inquiry() 사용 권장. "
+            "전체 DELETE+INSERT는 동시성 문제 + 중복 위험 있음."
+        )
+        return False  # 의도적으로 실패 — 새 코드는 add_inquiry 사용
 
     # ═══════════════════════════════════════════
     #  OLAP Methods — DuckDB (변경 없음)
