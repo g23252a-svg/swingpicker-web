@@ -298,6 +298,15 @@ def _render_today_hero(df: pd.DataFrame):
                     tp1_pct = (tp1 / buy - 1) * 100 if buy > 0 else 0
                     stop_pct = (stop / buy - 1) * 100 if buy > 0 else 0
                     
+                    # [v22 UI Step C] 3축 + 밸런스 + IS_NOW_ENTRY
+                    struct = safe_float(row.get('STRUCT_SCORE', 0))
+                    timing = safe_float(row.get('TIMING_SCORE', 0))
+                    ai_sc = safe_float(row.get('AI_SCORE', row.get('ML_SCORE', 0)))
+                    balance = safe_float(row.get('BALANCE_SCORE', 0))
+                    is_now_entry = str(row.get('IS_NOW_ENTRY', '0')).strip().upper() in [
+                        '1', '1.0', 'TRUE', 'Y', 'YES'
+                    ]
+                    
                     with ui.card().classes(
                         f"flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
                         f"border-l-4 rounded-xl"
@@ -312,6 +321,21 @@ def _render_today_hero(df: pd.DataFrame):
                         ui.label(f"{type_label}  ·  RR {rr:.1f}:1  ·  진입갭 {gap:+.1f}%").classes(
                             "text-xs text-gray-400 mb-2"
                         )
+                        
+                        # [v22 UI Step C] 3축 + 밸런스 한 줄
+                        ui.label(
+                            f"S{struct:.0f} / T{timing:.0f} / AI{ai_sc:.0f}  ·  균형 {balance:.0f}"
+                        ).classes("text-xs text-purple-300 mb-1")
+                        
+                        # [v22 UI Step C] IS_NOW_ENTRY 배지
+                        if is_now_entry:
+                            ui.label("✅ 지금 진입 가능").classes(
+                                "text-xs text-emerald-400 font-bold mb-1"
+                            )
+                        else:
+                            ui.label("⏳ 진입가 대기").classes(
+                                "text-xs text-amber-400 mb-1"
+                            )
                         
                         # 가격 (매수 → 목표 / 손절)
                         if buy > 0 and tp1 > 0:
@@ -510,22 +534,28 @@ def render_tab_market(df):
                         ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
                         ui.label(f"평균 ELITE {elite_avg:.0f}").classes("text-xs text-gray-500")
 
-        # ── [v21.3] 오늘의 Top 추천 — ELITE 기준 ──
+        # ── [v22 UI Step B] ELITE 후보 더 보기 — TOP_PICK 제외 ──
+        # Hero 카드에 이미 TOP_PICK이 표시되므로, 여기서는 TOP_PICK 제외한 후보만
         try:
             if "ELITE_SCORE" in df.columns:
                 _top_df = df.copy()
-                # TOP_PICK 우선, 없으면 ELITE 상위
+                
+                # [v22 UI Step B] TOP_PICK 제외 (Hero 카드 중복 제거)
                 if "TOP_PICK" in _top_df.columns:
-                    _picks = _top_df[_top_df["TOP_PICK"].astype(int) == 1].nlargest(3, "ELITE_SCORE")
-                    if len(_picks) < 3:
-                        _extra = _top_df[~_top_df.index.isin(_picks.index)].nlargest(3 - len(_picks), "ELITE_SCORE")
-                        _picks = pd.concat([_picks, _extra])
+                    _tp_str = _top_df["TOP_PICK"].astype(str).str.strip().str.upper()
+                    _tp_mask = _tp_str.isin(["1", "1.0", "TRUE", "Y", "YES"])
+                    _candidates = _top_df[~_tp_mask].copy()
+                    _label_text = "👀 ELITE 후보 더 보기 (TOP_PICK 제외)"
                 else:
-                    _picks = _top_df.nlargest(3, "ELITE_SCORE")
+                    _candidates = _top_df.copy()
+                    _label_text = "🏆 오늘의 ELITE Top"
+                
+                # 활성 ROUTE 우선 정렬 (관찰 가치 있는 종목)
+                _picks = _candidates.nlargest(3, "ELITE_SCORE") if not _candidates.empty else _candidates
 
                 if not _picks.empty:
                     with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
-                        ui.label("🏆 오늘의 ELITE Top").classes("text-xs text-gray-400 mb-2")
+                        ui.label(_label_text).classes("text-xs text-gray-400 mb-2")
                         with ui.row().classes("w-full gap-3 flex-wrap"):
                             for _, s in _picks.iterrows():
                                 route = str(s.get("ROUTE", ""))
@@ -536,7 +566,7 @@ def render_tab_market(df):
                                 rr = safe_float(s.get("RR_NOW_TP1", 0))
                                 wr = safe_float(s.get("EST_WIN_RATE", 0))
                                 bal = safe_float(s.get("BALANCE_SCORE", 0))
-                                tp_flag = "🏆 " if int(s.get("TOP_PICK", 0)) == 1 else ""
+                                tp_flag = ""   # [Step B] TOP_PICK 제외했으므로 항상 빈 문자열
                                 tp1_pct = (tp1 / close - 1) * 100 if close > 0 else 0
 
                                 with ui.card().classes("flex-1 min-w-[200px] p-3 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
