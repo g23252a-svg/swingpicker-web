@@ -204,21 +204,71 @@ def _get_fear_greed(df):
 # ═══════════════════════════════════════════════════
 # [v22 UI] 오늘의 결론 Hero 카드 — 첫 화면 1초 답변
 # ═══════════════════════════════════════════════════
-def _render_today_hero(df: pd.DataFrame):
+def _sort_top_picks_for_hero(top_picks: pd.DataFrame) -> pd.DataFrame:
+    """[v22 UI Step D2] TOP_PICK 다축 정렬 — Hero 1순위는 실전형으로
+    
+    우선순위:
+      1) LDY_RANK 있으면 그것
+      2) IS_NOW_ENTRY desc (지금 진입 가능 우선)
+      3) RR_NOW_TP1 desc (손익비 좋은 거 우선)
+      4) BALANCE_SCORE desc (3축 균형)
+      5) ENTRY_GAP_PCT abs asc (현재가 ~ 진입가 가까운 거)
+      6) ELITE_SCORE desc (점수)
+    """
+    x = top_picks.copy()
+    if x.empty:
+        return x
+    
+    # LDY_RANK 우선
+    if "LDY_RANK" in x.columns:
+        x["_rank"] = pd.to_numeric(x["LDY_RANK"], errors="coerce").fillna(9999)
+        return x.sort_values("_rank").drop(columns=["_rank"])
+    
+    # 다축 정렬
+    x["_is_now"] = (
+        x.get("IS_NOW_ENTRY", "0").astype(str).str.strip().str.upper()
+        .isin(["1", "1.0", "TRUE", "Y", "YES"]).astype(int)
+    )
+    x["_rr"] = pd.to_numeric(x.get("RR_NOW_TP1", 0), errors="coerce").fillna(0)
+    x["_bal"] = pd.to_numeric(x.get("BALANCE_SCORE", 0), errors="coerce").fillna(0)
+    x["_gap"] = pd.to_numeric(x.get("ENTRY_GAP_PCT", 999), errors="coerce").abs().fillna(999)
+    x["_elite"] = pd.to_numeric(x.get("ELITE_SCORE", 0), errors="coerce").fillna(0)
+    
+    sorted_x = x.sort_values(
+        ["_is_now", "_rr", "_bal", "_gap", "_elite"],
+        ascending=[False, False, False, True, False]
+    )
+    # 보조 컬럼 제거
+    return sorted_x.drop(columns=["_is_now", "_rr", "_bal", "_gap", "_elite"])
+
+
+def _render_today_hero(df: pd.DataFrame, meta: dict = None):
     """첫 화면 최상단 Hero 카드.
     
-    3가지 시나리오:
-      A) TOP_PICK >= 1   → 🏆 추천 카드 (큼직)
-      B) TOP_PICK = 0, ARMED/ATTACK 있음 → ⏸️ 관찰 모드 + 가까운 후보
-      C) 활성 후보도 0  → 🔴 매수 신호 없음
+    [v22 UI Step D] meta 인자 추가 — macro risk 기반 verdict
+    
+    Verdict 매트릭스:
+      NORMAL  + TOP_PICK + IS_NOW_ENTRY → 🟢 오늘 신규 진입 가능
+      CAUTION + TOP_PICK              → 🟠 보수적 분할 진입 (50% 비중)
+      WARNING/CRITICAL                → 🔴 신규 진입 금지 (관찰만)
+      NORMAL/CAUTION + TOP_PICK 0 + 활성 후보 → ⏸️ 관찰 모드
+      활성 후보도 0                   → 🔴 매수 신호 없음
     
     안전 설계:
       - try/except로 에러 시 카드만 안 띄우고 진행
+      - meta 누락이면 NORMAL로 가정 (기존 동작 유지)
       - 컬럼 누락 graceful fallback
     """
     try:
         if df is None or df.empty:
             return
+        
+        # [Step D] meta 안전 추출
+        meta = meta or {}
+        macro_risk = str(meta.get("macro_risk", "NORMAL")).upper()
+        max_route = str(meta.get("max_allowed_route", "")).upper()
+        is_macro_dangerous = macro_risk in ("WARNING", "CRITICAL")
+        is_macro_caution = macro_risk == "CAUTION"
         
         # TOP_PICK 종목 — 강건 파서 (1, 1.0, "True", "Y" 등)
         top_picks = pd.DataFrame()
@@ -230,7 +280,8 @@ def _render_today_hero(df: pd.DataFrame):
         n_top = len(top_picks)
         
         # ─────────────────────────────────────────────
-        # 시나리오 A: TOP_PICK >= 1 → 🏆 추천 카드
+        # 시나리오 A: TOP_PICK >= 1
+        # [Step D] macro risk 기반 verdict 분기
         # ─────────────────────────────────────────────
         if n_top >= 1:
             # AGGRESSIVE / STABLE 분류
@@ -242,31 +293,70 @@ def _render_today_hero(df: pd.DataFrame):
                 n_agg = 0
                 n_stb = 0
             
-            # 헤더 카드 — 결론 한 줄
+            # ─── [Step D] macro risk 기반 verdict 결정 ───
+            if is_macro_dangerous:
+                # 🔴 매크로 위험 — TOP_PICK 있어도 신규 진입 금지
+                verdict_emoji = "🔴"
+                verdict_text = "신규 진입 금지 (매크로 위험)"
+                verdict_subtitle = (
+                    f"TOP_PICK {n_top}개  ·  하지만 매크로 위험 "
+                    f"({macro_risk}) — 관찰만 권장"
+                )
+                gradient_from = "#3d0a0a"
+                gradient_via = "#541313"
+                border_color = "border-red-500/50"
+                text_main = "text-red-300"
+                text_sub = "text-red-100"
+                count_color = "text-red-300/60"
+            elif is_macro_caution:
+                # 🟠 매크로 주의 — 보수적 분할 진입
+                verdict_emoji = "🟠"
+                verdict_text = "보수적 분할 진입 권장"
+                verdict_subtitle = (
+                    f"TOP_PICK {n_top}개  ·  매크로 주의 "
+                    f"({macro_risk}) — 비중 50%로 축소"
+                )
+                gradient_from = "#3d2a0a"
+                gradient_via = "#544013"
+                border_color = "border-orange-500/50"
+                text_main = "text-orange-300"
+                text_sub = "text-orange-100"
+                count_color = "text-orange-300"
+            else:
+                # 🟢 정상 — 신규 진입 가능
+                verdict_emoji = "🟢"
+                verdict_text = "오늘 신규 진입 가능"
+                type_summary = []
+                if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
+                if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
+                if not type_summary: type_summary.append(f"⭐ 추천 {n_top}")
+                verdict_subtitle = f"TOP_PICK {n_top}개  ·  " + " / ".join(type_summary)
+                gradient_from = "#0a3d2a"
+                gradient_via = "#0d5440"
+                border_color = "border-emerald-500/50"
+                text_main = "text-emerald-300"
+                text_sub = "text-emerald-100"
+                count_color = "text-emerald-300"
+            
+            # 헤더 카드 — verdict
             with ui.card().classes(
-                "w-full p-5 mb-4 rounded-xl "
-                "bg-gradient-to-r from-[#0a3d2a] via-[#0d5440] to-[#0a3d2a] "
-                "border-2 border-emerald-500/50"
+                f"w-full p-5 mb-4 rounded-xl "
+                f"border-2 {border_color}"
+            ).style(
+                f"background: linear-gradient(to right, {gradient_from}, {gradient_via}, {gradient_from})"
             ):
                 with ui.row().classes("w-full items-center justify-between"):
                     with ui.column().classes("gap-1"):
-                        ui.label("🟢 오늘 신규 진입 가능").classes(
-                            "text-lg font-bold text-emerald-300"
+                        ui.label(f"{verdict_emoji} {verdict_text}").classes(
+                            f"text-lg font-bold {text_main}"
                         )
-                        type_summary = []
-                        if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
-                        if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
-                        if not type_summary: type_summary.append(f"⭐ 추천 {n_top}")
-                        ui.label(f"TOP_PICK {n_top}개  ·  " + " / ".join(type_summary)).classes(
-                            "text-sm text-emerald-100"
-                        )
+                        ui.label(verdict_subtitle).classes(f"text-sm {text_sub}")
                     ui.label(f"{n_top}").classes(
-                        "text-5xl font-black text-emerald-300"
+                        f"text-5xl font-black {count_color}"
                     )
             
-            # TOP_PICK 카드들 (최대 3개)
-            top_picks_sorted = top_picks.sort_values('ELITE_SCORE', ascending=False).head(3) \
-                if 'ELITE_SCORE' in top_picks.columns else top_picks.head(3)
+            # ─── [Step D2] TOP_PICK 카드들 — 다축 정렬 적용 ───
+            top_picks_sorted = _sort_top_picks_for_hero(top_picks).head(3)
             
             with ui.row().classes("w-full gap-3 flex-wrap mb-4"):
                 for rank, (_, row) in enumerate(top_picks_sorted.iterrows(), 1):
@@ -377,40 +467,67 @@ def _render_today_hero(df: pd.DataFrame):
             cand_buy = safe_float(top_cand.get('추천매수가', 0))
             cand_target = safe_float(top_cand.get('추천매도가1', 0))
             
-            # 부족한 점수 진단
-            struct = safe_float(top_cand.get('STRUCT_SCORE', 0))
-            timing = safe_float(top_cand.get('TIMING_SCORE', 0))
-            balance = safe_float(top_cand.get('BALANCE_SCORE', 0))
+            # [v22 UI Step D3] 후보 카드 강화 — 3축/밸런스/RR/진입갭/IS_NOW_ENTRY
+            cand_struct = safe_float(top_cand.get('STRUCT_SCORE', 0))
+            cand_timing = safe_float(top_cand.get('TIMING_SCORE', 0))
+            cand_ai = safe_float(top_cand.get('AI_SCORE', top_cand.get('ML_SCORE', 0)))
+            cand_balance = safe_float(top_cand.get('BALANCE_SCORE', 0))
+            cand_rr = safe_float(top_cand.get('RR_NOW_TP1', 0))
+            cand_gap = safe_float(top_cand.get('ENTRY_GAP_PCT', 0))
+            cand_is_now = str(top_cand.get('IS_NOW_ENTRY', '0')).strip().upper() in [
+                '1', '1.0', 'TRUE', 'Y', 'YES'
+            ]
             
+            # 부족한 점수 진단 (변수 재사용 — 위에서 추출했으므로 그대로)
             shortfall_msg = ""
-            if struct > 0 and struct < 80:
-                shortfall_msg = f"STRUCT {80 - struct:.1f}점 부족 (80↑ 필요)"
+            if cand_struct > 0 and cand_struct < 80:
+                shortfall_msg = f"STRUCT {80 - cand_struct:.1f}점 부족 (80↑ 필요)"
             elif cand_score < 75:
                 shortfall_msg = f"ELITE {75 - cand_score:.1f}점 부족 (75↑ 필요)"
-            elif timing > 0 and timing < 70:
-                shortfall_msg = f"TIMING {70 - timing:.1f}점 부족"
+            elif cand_timing > 0 and cand_timing < 70:
+                shortfall_msg = f"TIMING {70 - cand_timing:.1f}점 부족"
             else:
                 shortfall_msg = "조건 일부 미달"
             
-            # 헤더 카드 — 관찰 모드
+            # 헤더 카드 — 관찰 모드 (CRITICAL 위험이면 빨강으로 변경)
+            if is_macro_dangerous:
+                _hdr_emoji = "🔴"
+                _hdr_text = "신규 진입 금지 (매크로 위험)"
+                _hdr_subtitle = (
+                    f"활성 후보 {len(active)}종목 있지만 "
+                    f"매크로 위험 ({macro_risk}) — 관찰만"
+                )
+                _hdr_g_from = "#3d0a0a"; _hdr_g_via = "#541313"
+                _hdr_border = "border-red-500/50"
+                _hdr_text_main = "text-red-300"
+                _hdr_text_sub = "text-red-100"
+            else:
+                _hdr_emoji = "⏸️"
+                _hdr_text = "오늘은 관찰 모드"
+                _hdr_subtitle = f"정식 추천 0건  ·  활성 후보 {len(active)}종목"
+                _hdr_g_from = "#3d2a0a"; _hdr_g_via = "#544013"
+                _hdr_border = "border-amber-500/50"
+                _hdr_text_main = "text-amber-300"
+                _hdr_text_sub = "text-amber-100"
+            
             with ui.card().classes(
-                "w-full p-5 mb-4 rounded-xl "
-                "bg-gradient-to-r from-[#3d2a0a] via-[#544013] to-[#3d2a0a] "
-                "border-2 border-amber-500/50"
+                f"w-full p-5 mb-4 rounded-xl border-2 {_hdr_border}"
+            ).style(
+                f"background: linear-gradient(to right, {_hdr_g_from}, {_hdr_g_via}, {_hdr_g_from})"
             ):
                 with ui.row().classes("w-full items-center justify-between"):
                     with ui.column().classes("gap-1"):
-                        ui.label("⏸️ 오늘은 관찰 모드").classes(
-                            "text-lg font-bold text-amber-300"
+                        ui.label(f"{_hdr_emoji} {_hdr_text}").classes(
+                            f"text-lg font-bold {_hdr_text_main}"
                         )
-                        ui.label(f"정식 추천 0건  ·  활성 후보 {len(active)}종목").classes(
-                            "text-sm text-amber-100"
+                        ui.label(_hdr_subtitle).classes(
+                            f"text-sm {_hdr_text_sub}"
                         )
                     ui.label("0").classes(
-                        "text-5xl font-black text-amber-300/60"
+                        f"text-5xl font-black {_hdr_text_main}/60"
                     )
             
-            # 가까운 후보 카드
+            # 가까운 후보 카드 (강화됨)
             with ui.card().classes(
                 "w-full p-4 mb-4 rounded-xl "
                 "bg-[#1a1a2e] border border-amber-700/40"
@@ -424,8 +541,29 @@ def _render_today_hero(df: pd.DataFrame):
                     ui.badge(f"E{cand_score:.1f}", color="#F59E0B").classes("text-xs")
                     ui.badge(cand_route, color="#3B82F6").classes("text-xs")
                 
+                # [Step D3] 3축 + 밸런스
+                ui.label(
+                    f"S{cand_struct:.0f} / T{cand_timing:.0f} / AI{cand_ai:.0f}  "
+                    f"·  균형 {cand_balance:.0f}"
+                ).classes("text-xs text-purple-300 mb-1")
+                
+                # [Step D3] RR + 진입갭
+                ui.label(
+                    f"RR {cand_rr:.1f}:1  ·  진입갭 {cand_gap:+.1f}%"
+                ).classes("text-xs text-gray-400 mb-1")
+                
+                # [Step D3] IS_NOW_ENTRY 배지 (관찰모드는 보통 ⏳)
+                if cand_is_now:
+                    ui.label("✅ 지금 진입 가능 (조건 미달이지만 가격은 OK)").classes(
+                        "text-xs text-emerald-400 mb-1"
+                    )
+                else:
+                    ui.label("⏳ 진입가 대기").classes(
+                        "text-xs text-amber-400 mb-1"
+                    )
+                
                 ui.label(f"└ {shortfall_msg}").classes(
-                    "text-sm text-amber-300"
+                    "text-sm text-amber-300 mt-1"
                 )
                 
                 if cand_buy > 0 and cand_target > 0:
@@ -465,15 +603,12 @@ def render_tab_market(df):
     """Tab 1: 시장 현황"""
     import os, json
 
-    # ═══════════════════════════════════════════════════
-    # [v22 UI] 오늘의 결론 Hero 카드 — 가장 먼저 (1초 답변)
-    # ═══════════════════════════════════════════════════
-    _render_today_hero(df)
-
     fg_score, fg_label = _get_fear_greed(df)
     DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
-    # run_meta 로드
+    # ═══════════════════════════════════════════════════
+    # [v22 UI Step D] meta 먼저 로드 — Hero가 macro risk 알 수 있게
+    # ═══════════════════════════════════════════════════
     meta = {}
     try:
         mp = os.path.join(DATA_DIR, "run_meta_latest.json")
@@ -482,6 +617,12 @@ def render_tab_market(df):
                 meta = json.load(f)
     except Exception:
         pass
+
+    # ═══════════════════════════════════════════════════
+    # [v22 UI] 오늘의 결론 Hero 카드 — 가장 먼저 (1초 답변)
+    # [Step D] meta 인자 추가 → macro risk 기반 verdict
+    # ═══════════════════════════════════════════════════
+    _render_today_hero(df, meta)
 
     # ═══════════════════════════════════════════════════
     # [v22 UI Step A] 12개 분석 섹션을 expansion으로 접기 — 첫 화면 깔끔
