@@ -276,17 +276,23 @@ def _get_user_portfolio_key(user_profile=None) -> str:
 
 
 def _load_portfolio_file(user_profile=None):
-    """[Step N] 계정별 포트폴리오 로드 (Gist).
+    """[Step N + Q] 계정별 포트폴리오 로드 (Gist).
     
     동작:
-      1. 사용자별 파일명으로 먼저 조회
-      2. 없으면 기존 portfolio.txt fallback (마이그레이션용)
-      3. fallback에서 로드되면 다음 저장 시 자동으로 사용자 파일에 저장됨
+      1. 사용자별 파일이 존재하면 → 그 내용 사용 (빈 내용=의도적으로 비움)
+         legacy fallback 안 함 (사용자가 의도적으로 비운 걸 보호)
+      2. 사용자 파일이 한 번도 만들어진 적 없으면 → legacy portfolio.txt fallback
+    
+    [Step Q] 핵심 변경:
+      이전: 사용자 파일이 비어있으면(content="") → legacy로 fallback
+            → 전체 삭제 후 새로고침 시 옛날 데이터 부활 ❌
+      이후: 사용자 파일이 존재하기만 하면 → 그 내용 사용 (빈 placeholder도 OK)
+            → 의도적 비움 보호 ✅
     
     Returns:
         (content, source) 튜플
-        content: 포트폴리오 텍스트
-        source: "user" (사용자 파일) / "legacy" (구 portfolio.txt) / ""
+        content: 포트폴리오 텍스트 (placeholder 라인은 파서가 자동 skip)
+        source: "user" / "legacy" / ""
     """
     token = os.environ.get("LDY_GIST_TOKEN", "")
     gist_id = os.environ.get("LDY_GIST_ID", "")
@@ -300,13 +306,14 @@ def _load_portfolio_file(user_profile=None):
             files = r.json().get("files", {})
             user_filename = _get_user_portfolio_key(user_profile)
             
-            # 1순위: 사용자별 파일
+            # 1순위: 사용자별 파일이 존재하면 — 빈 내용이어도 그대로 사용
+            # (사용자가 의도적으로 비웠을 가능성 보호)
             if user_filename in files and user_filename != "portfolio.txt":
                 content = files[user_filename].get("content", "")
-                if content:
-                    return content, "user"
+                # 빈 내용도 "user"로 반환 → legacy fallback 안 함
+                return content, "user"
             
-            # 2순위: 기존 portfolio.txt (마이그레이션용 fallback)
+            # 2순위: 사용자 파일이 한 번도 없었음 → legacy fallback (마이그레이션)
             if "portfolio.txt" in files:
                 content = files["portfolio.txt"].get("content", "")
                 if content:
@@ -317,7 +324,14 @@ def _load_portfolio_file(user_profile=None):
 
 
 def _save_portfolio_file(text_data, user_profile=None):
-    """[Step N] 계정별 포트폴리오 저장 (Gist).
+    """[Step N + Q] 계정별 포트폴리오 저장 (Gist).
+    
+    [Step Q] 버그 수정: GitHub Gist API는 빈 content 저장 시 파일을 삭제함.
+    파일이 삭제되면 다음 로드 시 legacy portfolio.txt fallback이 발동되어
+    옛날 데이터가 부활하는 문제가 있음.
+    
+    해결: 빈 데이터일 때 placeholder 라인 저장 → Gist 파일 보존.
+    placeholder 라인은 ":"가 없으므로 파서가 자동으로 무시함.
     
     Returns:
         (success, filename) 튜플 — UI에 저장 상태 표시용
@@ -328,12 +342,17 @@ def _save_portfolio_file(text_data, user_profile=None):
         return False, ""
     
     filename = _get_user_portfolio_key(user_profile)
+    
+    # [Step Q] 빈 데이터 placeholder — Gist 파일 보존을 위해
+    # ":"가 없는 라인이므로 _parse_portfolio_text가 자동 skip
+    content_to_save = text_data if text_data.strip() else "# (의도적으로 비운 포트폴리오)"
+    
     try:
         import requests
         r = requests.patch(
             f"https://api.github.com/gists/{gist_id}",
             headers={"Authorization": f"token {token}"},
-            json={"files": {filename: {"content": text_data}}},
+            json={"files": {filename: {"content": content_to_save}}},
             timeout=10,
         )
         return r.ok, filename
@@ -1161,13 +1180,22 @@ def render_tab_portfolio(df, auth):
     saved_meta_at = ""  # Gist 메타에서 가져온 마지막 저장 시각
     
     if user_profile:
-        # 로그인 상태: Gist 먼저 읽기
+        # 로그인 상태: Gist 먼저 읽기 (진실의 원천)
         saved_gist, gist_source = _load_portfolio_file(user_profile)
         saved_meta_at = _load_portfolio_meta(user_profile)
         
-        if saved_gist:
+        # [Step Q] gist_source == "user" 면 (빈 placeholder여도) Gist를 따름
+        # 사용자가 의도적으로 비웠을 가능성 보호
+        if gist_source == "user":
+            # 사용자 파일 존재 (빈 내용도 OK = 의도적 비움)
             saved = saved_gist
-            # 로컬 캐시 동기화 (다음 진입 시 빠른 표시 + 일관성)
+            # 로컬 캐시 동기화 (Gist가 진실의 원천)
+            app.storage.user["portfolio_text"] = saved_gist
+            if saved_meta_at:
+                app.storage.user["portfolio_saved_at"] = saved_meta_at
+        elif saved_gist:
+            # legacy fallback에서 데이터 로드됨
+            saved = saved_gist
             app.storage.user["portfolio_text"] = saved_gist
             if saved_meta_at:
                 app.storage.user["portfolio_saved_at"] = saved_meta_at
@@ -1312,11 +1340,29 @@ def render_tab_portfolio(df, auth):
                         with ui.row().classes("gap-2 justify-end"):
                             ui.button("취소", on_click=dlg.close).props("flat")
                             
-                            def _confirm_clear():
+                            async def _confirm_clear():
+                                # [Step Q] 동기 저장 — 새로고침 race condition 방지
                                 pf_input.value = ""
                                 app.storage.user["portfolio_text"] = ""
-                                asyncio.ensure_future(_bg_save_portfolio("", user_profile))
-                                ui.notify("🗑️ 전체 종목 삭제 완료", type="warning")
+                                ok, _fn = await run_sync(
+                                    _save_portfolio_file, "", user_profile
+                                )
+                                if ok:
+                                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                                    app.storage.user["portfolio_saved_at"] = now_str
+                                    if user_profile:
+                                        await run_sync(
+                                            _save_portfolio_meta, user_profile, now_str
+                                        )
+                                    ui.notify(
+                                        f"🗑️ 전체 종목 삭제 완료 ({now_str})",
+                                        type="warning"
+                                    )
+                                else:
+                                    ui.notify(
+                                        "⚠️ 계정 저장 실패 — 새로고침 시 데이터 부활 가능",
+                                        type="negative"
+                                    )
                                 dlg.close()
                                 _refresh_holdings()
                             
