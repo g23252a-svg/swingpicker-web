@@ -710,7 +710,7 @@ if plot_score_waterfall is None:
                 elif v >= 50: return "#FFA726"  # 주황
                 else: return "#3B82F6"  # 파랑
 
-            labels = ["S (구조)", "T (타이밍)", "AI", "평균", "밸런스"]
+            labels = ["구조", "타이밍", "AI", "평균", "3축 균형"]
             values = [s, t, ai, mean, balance]
             colors = [_clr(v) for v in values]
 
@@ -2081,10 +2081,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "text-xs text-purple-300 font-bold mt-1"
             )
             ui.label(
-                "  · S (구조): 추세·정배열·VWAP 위치 등 기본기 — 0~100"
+                "  · 구조 점수 (S): 추세·정배열·VWAP 위치 등 기본기 — 0~100"
             ).classes("text-[11px] text-gray-400")
             ui.label(
-                "  · T (타이밍): RSI·MACD·거래량·TRIGGER 등 진입 시점 — 0~100"
+                "  · 타이밍 점수 (T): RSI·MACD·거래량·TRIGGER 등 진입 시점 — 0~100"
             ).classes("text-[11px] text-gray-400")
             ui.label(
                 "  · AI (=ML): 머신러닝 예측값 — 약 7~91 범위"
@@ -2389,16 +2389,16 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             # 점수 = DISPLAY_SCORE (파이프라인 최종, 화면 메인 숫자)
             {"name": "score", "label": "점수", "field": "score",
              "align": "center", "sortable": True},
-            {"name": "s", "label": "S", "field": "s",
+            {"name": "s", "label": "구조", "field": "s",
              "align": "center", "sortable": True},
-            {"name": "t", "label": "T", "field": "t",
+            {"name": "t", "label": "타이밍", "field": "t",
              "align": "center", "sortable": True},
             {"name": "ai", "label": "AI", "field": "ai",
              "align": "center", "sortable": True},
-            {"name": "gap", "label": "갭%", "field": "gap",
+            {"name": "gap", "label": "추천가 차이", "field": "gap",
              "align": "center", "sortable": True},
             # [v3.7.26] RR 컬럼 추가 — 실전 매매 의사결정의 핵심 지표
-            {"name": "rr", "label": "RR", "field": "rr",
+            {"name": "rr", "label": "수익:손실", "field": "rr",
              "align": "center", "sortable": True},
             {"name": "close", "label": "현재가", "field": "close", "align": "right"},
             {"name": "buy", "label": "매수", "field": "buy", "align": "right"},
@@ -2411,13 +2411,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         # 기본 모드에서는 숨김 (사용자 혼란 방지)
         advanced_cols = [
             # 종합 = ELITE_SCORE (파이프라인 품질 등급)
-            {"name": "elite", "label": "종합", "field": "elite",
+            {"name": "elite", "label": "종합 점수", "field": "elite",
              "align": "center", "sortable": True},
             # 랭크 = ELITE_RANK_SCORE (Top 선별용 내부 점수)
-            {"name": "rank", "label": "랭크", "field": "rank",
+            {"name": "rank", "label": "추천 순위", "field": "rank",
              "align": "center", "sortable": True},
             # 균형 = BALANCE_CALC (3축 편차)
-            {"name": "bal", "label": "균형", "field": "bal",
+            {"name": "bal", "label": "3축 균형", "field": "bal",
              "align": "center", "sortable": True},
         ]
 
@@ -2622,7 +2622,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                         reward = _t1 - _entry
                         rr = reward / risk
                         _score_gauge(
-                            "RR (T1:손절)", min(rr * 20, 100),  # RR 5배면 100점
+                            "수익:손실 (T1:손절)", min(rr * 20, 100),  # RR 5배면 100점
                             max_val=100, display_text=f"{rr:.1f}:1",
                         )
 
@@ -2744,7 +2744,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                         _mini_bar("균형", f"{bal:.0f}", bal, bc, tc)
                         # 랭크 (내부 Top 선별용)
                         bc, tc = _clr_hex(rank_val, good=40, bad=20)
-                        _mini_bar("랭크", f"{rank_val:.0f}", rank_val, bc, tc)
+                        _mini_bar("추천 순위", f"{rank_val:.0f}", rank_val, bc, tc)
 
                         # RSI: 70+ 과매수 빨강, 30- 과매도 파랑, 중간 회색
                         if rsi >= 70:
