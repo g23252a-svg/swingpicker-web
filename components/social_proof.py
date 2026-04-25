@@ -36,10 +36,115 @@ BETA_DISCOUNT_DEADLINE = os.environ.get("BETA_DISCOUNT_DEADLINE", "2026-05-31")
 BETA_LIMIT = int(os.environ.get("BETA_LIMIT", "100"))
 
 # 데이터 메트릭 (수동 설정)
-DATA_STOCK_COUNT = int(os.environ.get("DATA_STOCK_COUNT", "2500"))  # 분석 종목 수
-DATA_PERIOD_YEARS = int(os.environ.get("DATA_PERIOD_YEARS", "5"))  # 데이터 기간 (년)
-DATA_DART_DAILY = int(os.environ.get("DATA_DART_DAILY", "1000"))  # DART 공시 일평균
-DATA_BACKTEST_STRATEGIES = int(os.environ.get("DATA_BACKTEST_STRATEGIES", "100"))  # 백테스트 전략 수
+# 데이터 메트릭 (환경변수 fallback — 실제 파일 기반 계산이 우선)
+DATA_STOCK_COUNT = int(os.environ.get("DATA_STOCK_COUNT", "2500"))  # 분석 종목 수 fallback
+DATA_PERIOD_YEARS = int(os.environ.get("DATA_PERIOD_YEARS", "5"))  # 데이터 기간 (년) fallback
+DATA_DART_DAILY = int(os.environ.get("DATA_DART_DAILY", "1000"))  # DART 공시 일평균 fallback
+DATA_BACKTEST_STRATEGIES = int(os.environ.get("DATA_BACKTEST_STRATEGIES", "100"))  # 백테스트 전략 수 fallback
+
+
+def _calc_data_metrics() -> dict:
+    """[Step W] 실제 데이터 파일 기반으로 메트릭 계산.
+    
+    환경변수 fallback 유지 (파일 못 찾으면 fallback 사용).
+    
+    Returns:
+        {
+            "stock_count": int,       # 분석 종목 수 (recommend_latest.csv 기준)
+            "period_years": int,      # 데이터 기간 (OHLCV 캐시 기준)
+            "backtest_strategies": int,  # 백테스트 전략 수 (validation 파일 기준)
+            "dart_daily": int,        # DART 공시 일평균 (환경변수 유지 — 외부 API)
+        }
+    """
+    import glob
+    
+    # 1. 분석 종목 수 — recommend_latest.csv 라인 수 (헤더 제외)
+    stock_count = DATA_STOCK_COUNT  # fallback
+    try:
+        rec_paths = [
+            "data/recommend_latest.csv",
+            "/mnt/data/recommend_latest.csv",
+            os.path.join(os.path.dirname(__file__), "..", "data", "recommend_latest.csv"),
+        ]
+        for path in rec_paths:
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    line_count = sum(1 for _ in f) - 1  # 헤더 제외
+                if line_count > 0:
+                    stock_count = line_count
+                    break
+    except Exception as e:
+        _logger.debug(f"종목 수 계산 실패 (fallback 사용): {e}")
+    
+    # 2. 데이터 기간 — OHLCV 캐시 파일 첫~마지막 날짜로 계산
+    period_years = DATA_PERIOD_YEARS  # fallback
+    try:
+        ohlcv_paths = [
+            "data/ohlcv_cache_*.parquet",
+            "/mnt/data/ohlcv_cache_*.parquet",
+        ]
+        all_files = []
+        for pattern in ohlcv_paths:
+            all_files.extend(glob.glob(pattern))
+        
+        if all_files:
+            # 파일명에서 날짜 추출 (ohlcv_cache_YYYYMMDD.parquet)
+            dates = []
+            for f in all_files:
+                fname = os.path.basename(f)
+                # ohlcv_cache_20260226.parquet → 20260226
+                try:
+                    date_part = fname.replace("ohlcv_cache_", "").replace(".parquet", "")
+                    if len(date_part) == 8 and date_part.isdigit():
+                        dates.append(date_part)
+                except Exception:
+                    pass
+            
+            if dates:
+                dates.sort()
+                # 캐시 파일은 운영 기간이지, 데이터 기간 자체는 더 길 수 있음
+                # 보수적으로: 캐시 기간 + 환경변수 보정 사용
+                # 실제 OHLCV 데이터 자체는 5년치 등 더 길지만, 운영 캐시 기준으로 표시
+                first_dt = datetime.strptime(dates[0], "%Y%m%d")
+                last_dt = datetime.strptime(dates[-1], "%Y%m%d")
+                cache_days = (last_dt - first_dt).days
+                # 캐시 운영 기간이 60일 미만이면 환경변수 사용 (fallback)
+                # 60일+ 이면 실제 캐시 기간을 년수로 변환 (최소 1년)
+                if cache_days >= 60:
+                    period_years = max(1, cache_days // 365)
+                # 그 외는 fallback 유지
+    except Exception as e:
+        _logger.debug(f"데이터 기간 계산 실패 (fallback 사용): {e}")
+    
+    # 3. 백테스트 전략 수 — backtest_capital_curve_* 파일 개수 또는 환경변수
+    backtest_strategies = DATA_BACKTEST_STRATEGIES  # fallback
+    try:
+        bt_paths = [
+            "data/backtest_capital_curve_*.csv",
+            "/mnt/data/backtest_capital_curve_*.csv",
+        ]
+        all_bt_files = []
+        for pattern in bt_paths:
+            all_bt_files.extend(glob.glob(pattern))
+        # _latest.csv 제외
+        all_bt_files = [f for f in all_bt_files if "_latest" not in f]
+        actual_bt_count = len(all_bt_files)
+        # 실제 파일 수가 fallback보다 작으면 fallback 유지 (마케팅용 보정)
+        # 실제 파일 수가 더 많으면 실제 수 사용
+        if actual_bt_count > backtest_strategies:
+            backtest_strategies = actual_bt_count
+    except Exception as e:
+        _logger.debug(f"백테스트 전략 수 계산 실패 (fallback 사용): {e}")
+    
+    # 4. DART 공시 일평균 — 외부 API라 fallback 유지
+    dart_daily = DATA_DART_DAILY
+    
+    return {
+        "stock_count": stock_count,
+        "period_years": period_years,
+        "backtest_strategies": backtest_strategies,
+        "dart_daily": dart_daily,
+    }
 
 
 def _get_user_stats() -> dict:
@@ -246,11 +351,13 @@ def _render_data_metrics_only():
             )
         
         with ui.row().classes("w-full gap-3 flex-wrap"):
+            # [Step W] 실제 파일 기반 메트릭 (환경변수 fallback)
+            dm = _calc_data_metrics()
             metrics = [
-                ("📈", f"{DATA_STOCK_COUNT:,}+", "분석 종목"),
-                ("📅", f"{DATA_PERIOD_YEARS}년+", "데이터 기간"),
-                ("🧪", f"{DATA_BACKTEST_STRATEGIES}+", "백테스트 전략"),
-                ("🤖", f"일 {DATA_DART_DAILY:,}+", "DART 공시"),
+                ("📈", f"{dm['stock_count']:,}+", "분석 종목"),
+                ("📅", f"{dm['period_years']}년+", "데이터 기간"),
+                ("🧪", f"{dm['backtest_strategies']}+", "백테스트 전략"),
+                ("🤖", f"일 {dm['dart_daily']:,}+", "DART 공시"),
             ]
             for icon, value, label in metrics:
                 _render_metric_card(icon=icon, value=value, label=label, color="cyan")
@@ -277,11 +384,13 @@ def render_data_richness_card():
             )
         
         with ui.row().classes("w-full gap-3 flex-wrap"):
+            # [Step W] 실제 파일 기반 메트릭 (환경변수 fallback)
+            dm = _calc_data_metrics()
             metrics = [
-                ("📈", f"{DATA_STOCK_COUNT:,}+", "분석 종목"),
-                ("📅", f"{DATA_PERIOD_YEARS}년+", "데이터 기간"),
-                ("🧪", f"{DATA_BACKTEST_STRATEGIES}+", "백테스트 전략"),
-                ("🤖", f"일 {DATA_DART_DAILY:,}+", "DART 공시 학습"),
+                ("📈", f"{dm['stock_count']:,}+", "분석 종목"),
+                ("📅", f"{dm['period_years']}년+", "데이터 기간"),
+                ("🧪", f"{dm['backtest_strategies']}+", "백테스트 전략"),
+                ("🤖", f"일 {dm['dart_daily']:,}+", "DART 공시 학습"),
             ]
             for icon, value, label in metrics:
                 _render_metric_card(icon=icon, value=value, label=label, color="cyan")

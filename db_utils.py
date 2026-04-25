@@ -250,6 +250,30 @@ class LDYDBManager:
             )
         """)
 
+        # [v22 Step W] 결제 기록 테이블 — orderId UNIQUE로 중복 방지
+        # status: success / failed / amount_mismatch / duplicate / refunded
+        self._exec_sqlite("""
+            CREATE TABLE IF NOT EXISTS payments (
+                order_id TEXT PRIMARY KEY,
+                payment_key TEXT,
+                email TEXT,
+                plan TEXT,
+                amount INTEGER,
+                status TEXT,
+                method TEXT,
+                approved_at TEXT,
+                receipt_url TEXT,
+                created_at TEXT,
+                error_message TEXT
+            )
+        """)
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_payments_email ON payments (email)"
+        )
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments (status)"
+        )
+
         # ── DuckDB: OLAP 테이블 ──
         self.execute_safe("""
             CREATE TABLE IF NOT EXISTS daily_recommend (
@@ -609,6 +633,128 @@ class LDYDBManager:
             self._mark_gist_dirty("users")
         except Exception as e:
             _logger.warning(f"구독 업데이트 실패: {e}", exc_info=True)
+
+    # ═══════════════════════════════════════════
+    #  [v22 Step W] 결제 기록 함수
+    # ═══════════════════════════════════════════
+    def get_user_prime_expire(self, email):
+        """[Step W] 사용자의 현재 Prime 만료일 조회 (조기 갱신용).
+        
+        Returns:
+            datetime or None
+        """
+        try:
+            row = self._exec_sqlite_one(
+                "SELECT prime_expire_date, role FROM users WHERE id = ?", (email,)
+            )
+            if not row:
+                return None
+            expire_str, role = row
+            if not expire_str:
+                return None
+            # role이 prime/pro가 아니면 만료된 것으로 간주
+            if (role or "").lower() not in ("prime", "pro"):
+                return None
+            try:
+                # "2026-04-30" 또는 "2026-04-30 00:00:00" 처리
+                date_part = expire_str.split(" ")[0]
+                return datetime.strptime(date_part, "%Y-%m-%d")
+            except Exception:
+                return None
+        except Exception as e:
+            _logger.warning(f"Prime 만료일 조회 실패: {e}")
+            return None
+
+    def is_payment_processed(self, order_id: str) -> bool:
+        """[Step W] orderId가 이미 처리됐는지 확인 (DB 기반 중복 방지).
+        
+        메모리 set 보다 안정적: 서버 재시작/멀티 인스턴스에서도 작동.
+        """
+        try:
+            row = self._exec_sqlite_one(
+                "SELECT order_id FROM payments WHERE order_id = ? AND status = ?",
+                (order_id, "success")
+            )
+            return row is not None
+        except Exception as e:
+            _logger.warning(f"결제 중복 체크 실패: {e}")
+            return False
+
+    def record_payment(
+        self,
+        order_id: str,
+        payment_key: str,
+        email: str,
+        plan: str,
+        amount: int,
+        status: str,
+        method: str = "",
+        approved_at: str = "",
+        receipt_url: str = "",
+        error_message: str = "",
+    ) -> bool:
+        """[Step W] 결제 기록 저장 (성공/실패/금액불일치/중복/환불 모두).
+        
+        Args:
+            status: success / failed / amount_mismatch / duplicate / refunded
+        
+        Returns:
+            True if recorded successfully
+        """
+        try:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._exec_sqlite(
+                """INSERT OR REPLACE INTO payments
+                (order_id, payment_key, email, plan, amount, status,
+                 method, approved_at, receipt_url, created_at, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (order_id, payment_key, email, plan, amount, status,
+                 method, approved_at, receipt_url, now_str, error_message)
+            )
+            self._mark_gist_dirty("payments")
+            _logger.info(
+                f"💳 결제 기록 저장: {order_id} / {email} / {plan} / "
+                f"{amount:,}원 / {status}"
+            )
+            return True
+        except Exception as e:
+            _logger.error(f"결제 기록 저장 실패: {e}", exc_info=True)
+            return False
+
+    def get_payment(self, order_id: str) -> dict:
+        """[Step W] 주문 ID로 결제 기록 조회"""
+        try:
+            row = self._exec_sqlite_one(
+                """SELECT order_id, payment_key, email, plan, amount, status,
+                          method, approved_at, receipt_url, created_at, error_message
+                   FROM payments WHERE order_id = ?""",
+                (order_id,)
+            )
+            if not row:
+                return {}
+            cols = ["order_id", "payment_key", "email", "plan", "amount", "status",
+                    "method", "approved_at", "receipt_url", "created_at", "error_message"]
+            return dict(zip(cols, row))
+        except Exception as e:
+            _logger.warning(f"결제 기록 조회 실패: {e}")
+            return {}
+
+    def get_user_payments(self, email: str, limit: int = 20) -> list:
+        """[Step W] 사용자의 결제 이력 조회 (최근순)"""
+        try:
+            rows = self._exec_sqlite(
+                """SELECT order_id, plan, amount, status, method,
+                          approved_at, receipt_url, created_at
+                   FROM payments WHERE email = ?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (email, limit), fetch=True
+            )
+            cols = ["order_id", "plan", "amount", "status", "method",
+                    "approved_at", "receipt_url", "created_at"]
+            return [dict(zip(cols, r)) for r in (rows or [])]
+        except Exception as e:
+            _logger.warning(f"사용자 결제 이력 조회 실패: {e}")
+            return []
 
     def grant_all_users_trial(self, days=14):
         try:

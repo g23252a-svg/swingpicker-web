@@ -202,21 +202,52 @@ def _confirm_toss_payment(payment_key: str, order_id: str, amount: int) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def _activate_subscription(email: str, plan: str) -> bool:
-    """구독 활성화: DB 등급 변경 + 만료일 설정"""
+def _activate_subscription(email: str, plan: str) -> tuple:
+    """[Step R+W] 구독 활성화: DB 등급 변경 + 만료일 연장.
+    
+    [Step W] 기존 Prime 사용자의 조기 갱신 시 기존 잔여 기간 보존:
+    - 기존 만료일이 미래 → 기존 만료일 + 30일 (잔여 기간 보존)
+    - 기존 만료일이 과거 또는 없음 → 오늘 + 30일
+    
+    Returns:
+        (success: bool, expire_date: str)
+    """
     db = _get_db()
     if not db:
         _logger.error("DB 연결 실패 — 구독 활성화 불가")
-        return False
+        return False, ""
 
     try:
-        expire_date = (datetime.now(KST) + timedelta(days=SUBSCRIPTION_DAYS)).strftime("%Y-%m-%d")
+        now_kst = datetime.now(KST)
+        
+        # [Step W] 기존 만료일 조회
+        existing_expire = None
+        if hasattr(db, "get_user_prime_expire"):
+            existing_expire = db.get_user_prime_expire(email)
+        
+        # 만료일 계산
+        if existing_expire and existing_expire > now_kst.replace(tzinfo=None):
+            # 기존 만료일이 미래 → 기존 만료일 + 30일 (잔여 기간 보존)
+            new_expire = existing_expire + timedelta(days=SUBSCRIPTION_DAYS)
+            extension_msg = (
+                f"기존 만료일({existing_expire.strftime('%Y-%m-%d')})에 "
+                f"{SUBSCRIPTION_DAYS}일 추가 → {new_expire.strftime('%Y-%m-%d')}"
+            )
+        else:
+            # 기존 만료 또는 신규 → 오늘 + 30일
+            new_expire = now_kst.replace(tzinfo=None) + timedelta(days=SUBSCRIPTION_DAYS)
+            extension_msg = (
+                f"신규/만료된 구독 → 오늘부터 {SUBSCRIPTION_DAYS}일: "
+                f"{new_expire.strftime('%Y-%m-%d')}"
+            )
+        
+        expire_date = new_expire.strftime("%Y-%m-%d")
         db.update_user_subscription(email, plan, expire_date)
-        _logger.info(f"✅ 구독 활성화: {email} → {plan} (만료: {expire_date})")
-        return True
+        _logger.info(f"✅ 구독 활성화: {email} → {plan} ({extension_msg})")
+        return True, expire_date
     except Exception as e:
         _logger.error(f"구독 활성화 실패: {e}", exc_info=True)
-        return False
+        return False, ""
 
 
 def _find_email_by_hash(email_hash: str) -> str:
@@ -306,9 +337,19 @@ def register_payment_routes():
                           on_click=lambda: ui.navigate.to("/")).props("color=primary")
             return
 
-        # [Step R] 중복 결제 방지
-        if orderId in _processed_orders:
+        # [Step R+W] 중복 결제 방지 — DB 우선, 메모리 set 보조
+        # DB 중복 체크 (서버 재시작/멀티 인스턴스에서도 안정)
+        db_for_dup = _get_db()
+        is_duplicate_db = False
+        if db_for_dup and hasattr(db_for_dup, "is_payment_processed"):
+            is_duplicate_db = db_for_dup.is_payment_processed(orderId)
+        
+        if is_duplicate_db or orderId in _processed_orders:
             _logger.info(f"중복 결제 요청 무시: {orderId}")
+            # DB에도 중복 시도 기록
+            if db_for_dup and hasattr(db_for_dup, "record_payment"):
+                # 이미 처리된 거니까 새로 기록 X (INSERT OR REPLACE라 status=success 유지)
+                pass
             with ui.column().classes("w-full items-center p-12"):
                 ui.label("ℹ️").classes("text-6xl mb-4")
                 ui.label("이미 처리된 결제입니다").classes(
@@ -333,6 +374,20 @@ def register_payment_routes():
                 f"💰 요청 금액: {amount_int:,}원\n"
                 f"💵 정상 금액: {PLAN_PRICES.get(plan, 0):,}원"
             )
+            # [Step W] DB에 위변조 시도 기록
+            if db_for_dup and hasattr(db_for_dup, "record_payment"):
+                db_for_dup.record_payment(
+                    order_id=orderId,
+                    payment_key=paymentKey,
+                    email="",
+                    plan=plan,
+                    amount=amount_int,
+                    status="amount_mismatch",
+                    error_message=(
+                        f"expected={PLAN_PRICES.get(plan, 0)}, "
+                        f"actual={amount_int}"
+                    ),
+                )
             with ui.column().classes("w-full items-center p-12"):
                 ui.label("⚠️").classes("text-6xl mb-4")
                 ui.label("결제 금액이 올바르지 않습니다").classes(
@@ -355,16 +410,48 @@ def register_payment_routes():
                 email = _find_email_by_hash(email_hash)
             
             # 구독 활성화
+            # [Step W] 구독 활성화 (기존 만료일 고려) + 정확한 만료일 반환
             activated = False
+            actual_expire_date = ""
             if email:
-                activated = _activate_subscription(email, plan)
-                # 처리 완료 마킹
+                activated, actual_expire_date = _activate_subscription(email, plan)
+                # 메모리 set에도 마킹 (보조 캐시)
                 _processed_orders.add(orderId)
             
             # 영수증 URL
             receipt_url = payment_data.get("receipt", {}).get("url", "")
             method = payment_data.get("method", "-")
             approved_at = payment_data.get("approvedAt", "")[:19].replace("T", " ")
+            
+            # [Step W] 결제 기록 DB 저장 (성공)
+            if db_for_dup and hasattr(db_for_dup, "record_payment"):
+                db_for_dup.record_payment(
+                    order_id=orderId,
+                    payment_key=paymentKey,
+                    email=email or "",
+                    plan=plan,
+                    amount=amount_int,
+                    status="success",
+                    method=method,
+                    approved_at=approved_at,
+                    receipt_url=receipt_url,
+                )
+            
+            # [Step W] 세션 권한 즉시 갱신 — "메뉴 새로고침" 불필요
+            if activated and email:
+                try:
+                    user_profile = app.storage.user.get("profile", {}) or {}
+                    current_email = user_profile.get("login_id") or user_profile.get("id", "")
+                    # 결제한 이메일이 현재 로그인 사용자와 일치할 때만 갱신
+                    if current_email and current_email.lower() == email.lower():
+                        user_profile["role"] = plan
+                        user_profile["prime_expire_date"] = actual_expire_date
+                        app.storage.user["profile"] = user_profile
+                        # auth 정보도 갱신
+                        app.storage.user["auth"] = plan
+                        _logger.info(f"✅ 세션 권한 즉시 갱신: {email} → {plan}")
+                except Exception as session_err:
+                    _logger.warning(f"세션 갱신 실패 (무시): {session_err}")
 
             # 관리자 알림
             mode_emoji = "💎" if TOSS_IS_LIVE else "🧪"
@@ -377,7 +464,8 @@ def register_payment_routes():
                 f"💳 {method}\n"
                 f"🆔 {orderId}\n"
                 f"⏰ {approved_at}\n"
-                f"{'✅ 등급 활성화 완료' if activated else '⚠️ 등급 활성화 실패 — 수동 처리 필요'}"
+                f"📅 만료일: {actual_expire_date}\n"
+                f"{'✅ 등급 활성화 + 세션 갱신 완료' if activated else '⚠️ 등급 활성화 실패 — 수동 처리 필요'}"
             )
 
             # 성공 페이지
@@ -400,15 +488,23 @@ def register_payment_routes():
                         )
                     ui.separator().classes("my-2")
                     
-                    expire_date = (
-                        datetime.now(KST) + timedelta(days=SUBSCRIPTION_DAYS)
-                    ).strftime("%Y년 %m월 %d일")
+                    # [Step W] 실제 만료일 표시 (기존 잔여 기간 보존된 결과)
+                    if actual_expire_date:
+                        try:
+                            expire_dt = datetime.strptime(actual_expire_date, "%Y-%m-%d")
+                            expire_display = expire_dt.strftime("%Y년 %m월 %d일")
+                        except Exception:
+                            expire_display = actual_expire_date
+                    else:
+                        expire_display = (
+                            datetime.now(KST) + timedelta(days=SUBSCRIPTION_DAYS)
+                        ).strftime("%Y년 %m월 %d일")
                     
                     info_rows = [
                         ("📧 이메일", email or "(미확인)"),
                         ("💳 결제 수단", method),
                         ("⏰ 결제 시각", approved_at or "-"),
-                        ("📅 이용 기한", f"~ {expire_date} (30일)"),
+                        ("📅 이용 기한", f"~ {expire_display}"),
                         ("🆔 주문번호", orderId),
                     ]
                     for label, val in info_rows:
@@ -420,8 +516,9 @@ def register_payment_routes():
                     ui.label("✅ 프리미엄 기능이 활성화되었습니다!").classes(
                         "text-emerald-400 text-lg font-bold mb-2"
                     )
+                    # [Step W] 세션 즉시 갱신됐음을 명시
                     ui.label(
-                        "💡 메뉴를 새로고침하면 모든 기능을 이용하실 수 있습니다."
+                        "💡 지금 바로 모든 Prime 기능을 사용하실 수 있습니다 (재로그인 불필요)."
                     ).classes("text-gray-400 text-sm mb-4")
                 else:
                     ui.label("⏳ 등급 활성화 처리 중입니다").classes(
