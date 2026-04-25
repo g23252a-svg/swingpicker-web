@@ -608,20 +608,32 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
         n_observe = 0 # 점수 41~59 (모니터링)
         n_hold = 0    # 점수 ≥ 60 (양호)
         
+        # [Step M #2] 점수 + ROUTE 동시 분류 (시장/종목 탭과 일관성)
+        # 보유 유지: 점수≥60 + 안전 ROUTE (ATTACK/ARMED/CARRY/NEUTRAL)
+        # 지켜보기: 점수 41~59 또는 ROUTE=WAIT
+        # 교체 검토: 점수≤40 또는 BLOCKED/EXIT_WARNING/OVERHEAT
+        today_picks_in_holdings = []  # [Step M #5] 오늘 추천에 포함된 보유종목 이름
         if df is not None and not df.empty and "종목명" in df.columns:
             df_names = set(df["종목명"].astype(str))
+            _SAFE_ROUTES = {"ATTACK", "ARMED", "CARRY", "NEUTRAL"}
+            _BLOCKED_ROUTES = {"BLOCKED", "EXIT_WARNING", "OVERHEAT"}
             for it in items:
                 if it["name"] in df_names:
                     n_today += 1
+                    today_picks_in_holdings.append(it["name"])
                     match = df[df["종목명"] == it["name"]]
                     if not match.empty:
                         score = safe_float(match.iloc[0].get("DISPLAY_SCORE", 0))
-                        if score >= 60:
-                            n_hold += 1
-                        elif score >= 41:
-                            n_observe += 1
-                        elif score > 0:
-                            n_caution += 1
+                        route = str(match.iloc[0].get("ROUTE", "")).strip().upper()
+                        # 분류: 점수 + 상태 동시 고려
+                        if route in _BLOCKED_ROUTES or (score > 0 and score <= 40):
+                            n_caution += 1   # 교체 검토
+                        elif route == "WAIT" or (score > 0 and score < 60):
+                            n_observe += 1   # 지켜보기
+                        elif score >= 60 and route in _SAFE_ROUTES:
+                            n_hold += 1      # 보유 유지
+                        else:
+                            n_observe += 1   # 정보 부족 → 지켜보기
         
         # 헤더 카드 — 결론 한 줄
         with ui.card().classes(
@@ -645,7 +657,32 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
                     ui.label(f"{int(total_with_cash):,}원").classes(
                         "text-2xl font-black text-cyan-300"
                     )
-                    ui.label("매입 + 현금 기준").classes("text-[10px] text-gray-500")
+                    # [Step M #1] 임시 요약 명시
+                    ui.label("🔍 시세 조회 전 · 매입금 기준").classes(
+                        "text-[10px] text-amber-400/80"
+                    )
+            # [Step M #1] 카드 하단에 추가 안내
+            ui.label(
+                "AI 진단 실행 후 정확한 평가금이 표시됩니다"
+            ).classes("text-[10px] text-gray-500 italic mt-2")
+        
+        # [Step M #5] 오늘 추천 포함 보유종목 미리보기
+        if n_today > 0 and today_picks_in_holdings:
+            preview = today_picks_in_holdings[:3]
+            more = len(today_picks_in_holdings) - 3
+            preview_text = ", ".join(preview)
+            if more > 0:
+                preview_text += f" 외 {more}종목"
+            with ui.card().classes(
+                "w-full p-3 mb-3 bg-[#0d1a14] "
+                "border border-emerald-700/30 rounded-lg"
+            ):
+                ui.label("📌 오늘 추천에 포함된 보유종목").classes(
+                    "text-xs text-emerald-300 font-bold"
+                )
+                ui.label(f"{preview_text}  ·  총 {n_today}/{n_stocks}개").classes(
+                    "text-sm text-emerald-100 mt-1"
+                )
         
         # 빠른 진단 요약 (df에 있는 종목들만)
         if n_today > 0:
@@ -768,15 +805,16 @@ def _render_diagnosis_summary(pf_rows: list, cash_amt: float, dart_results: dict
             dart_risk = dart.get("risk_level", "") if dart else ""
             has_dart_warning = "위험" in dart_risk
             
-            if "교체" in advice or has_dart_warning:
+            # [Step M #3] AI조언 용어 변경에 맞춰 키워드도 업데이트
+            if "교체 검토" in advice or has_dart_warning:
                 n_action += 1
                 action_names.append(r["종목명"])
-            elif "금일 제외" in advice:
+            elif "오늘 추천 제외" in advice or "금일 제외" in advice:
                 n_out += 1
                 action_names.append(r["종목명"])
-            elif "관망" in advice or "주의" in dart_risk:
+            elif "지켜보기" in advice or "관망" in advice or "주의" in dart_risk:
                 n_monitor += 1
-            elif "강력홀딩" in advice or "보유" in advice:
+            elif "계속 보유" in advice or "보유 유지" in advice or "강력홀딩" in advice or "보유" in advice:
                 n_hold += 1
             else:
                 n_monitor += 1
@@ -896,9 +934,23 @@ def render_tab_portfolio(df, auth):
     _section_title("💼 내 자산: AI 리밸런싱 & DART 공시 진단")
 
     # DART 연동 상태 표시
-    dart_status = "🟢 DART+AI 연동" if (DART_INTEGRATION_OK and _GENAI_CLIENT) else \
-                  "🟡 DART만 연동" if DART_INTEGRATION_OK else "⚪ DART 미연결"
-    ui.label(dart_status).classes("text-xs text-gray-500 mb-2")
+    # [Step M #4] DART/Gemini 연동 상태 + 설명
+    if DART_INTEGRATION_OK and _GENAI_CLIENT:
+        dart_status = "🟢 DART+AI 연동"
+        dart_explain = "공시 리스크와 AI 리포트 모두 반영"
+        dart_color = "text-emerald-400"
+    elif DART_INTEGRATION_OK:
+        dart_status = "🟡 DART만 연동"
+        dart_explain = "AI 리포트는 규칙 기반으로 대체"
+        dart_color = "text-amber-400"
+    else:
+        dart_status = "⚪ DART 미연결"
+        dart_explain = "공시 리스크 제외, 가격/점수 기준 진단"
+        dart_color = "text-gray-400"
+    
+    with ui.row().classes("items-center gap-2 mb-2"):
+        ui.label(dart_status).classes(f"text-xs {dart_color} font-bold")
+        ui.label(f"— {dart_explain}").classes("text-xs text-gray-500")
 
     saved_local = app.storage.user.get("portfolio_text", "")
     saved_gist = _load_portfolio_file() if not saved_local else ""
@@ -1129,17 +1181,17 @@ def render_tab_portfolio(df, auth):
             score, route, source = _lookup_stock_info(code, name, df)
 
             if source == "금일추천":
-                if score >= 80: advice, acolor = "💪강력홀딩", "#10B981"
-                elif score >= 60: advice, acolor = "👌보유(양호)", "#3B82F6"
-                elif score <= 40 and score > 0: advice, acolor = "⚠️교체권장", "#EF4444"
-                else: advice, acolor = "👀관망", "#F59E0B"
+                if score >= 80: advice, acolor = "✅ 계속 보유", "#10B981"
+                elif score >= 60: advice, acolor = "✅ 보유 유지", "#3B82F6"
+                elif score <= 40 and score > 0: advice, acolor = "🚨 교체 검토", "#EF4444"
+                else: advice, acolor = "👀 지켜보기", "#F59E0B"
             elif source.startswith("전일추천"):
-                if score >= 70: advice, acolor = f"📤금일 제외 (전일 {score:.0f}점) — 홀딩 검토", "#F59E0B"
-                elif score >= 50: advice, acolor = f"📤금일 제외 (전일 {score:.0f}점) — 모니터링", "#F59E0B"
-                else: advice, acolor = f"📤금일 제외 (전일 {score:.0f}점) — 손절 검토", "#EF4444"
+                if score >= 70: advice, acolor = f"📤 오늘 추천 제외 (전일 {score:.0f}점) — 홀딩 검토", "#F59E0B"
+                elif score >= 50: advice, acolor = f"📤 오늘 추천 제외 (전일 {score:.0f}점) — 모니터링", "#F59E0B"
+                else: advice, acolor = f"📤 오늘 추천 제외 (전일 {score:.0f}점) — 손절 검토", "#EF4444"
             else:
-                if curr == 0: advice, acolor = "❓시세조회 실패", "#EF4444"
-                else: advice, acolor = "ℹ️시스템 외 종목", "#9CA3AF"
+                if curr == 0: advice, acolor = "❓ 시세조회 실패", "#EF4444"
+                else: advice, acolor = "ℹ️ 추천 데이터 없음", "#9CA3AF"
 
             pf_rows.append({"종목명": name, "현재가": curr, "평단가": avg, "수량": qty,
                             "매입금": buy_amt, "평가금": eval_amt, "수익률": pct,
