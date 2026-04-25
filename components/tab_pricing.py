@@ -31,6 +31,8 @@ TG_CHAT_ID = os.environ.get("TG_ID", "")
 TOSS_CLIENT_KEY = os.environ.get("TOSS_CLIENT_KEY", "")
 TOSS_SECRET_KEY = os.environ.get("TOSS_SECRET_KEY", "")
 TOSS_ENABLED = bool(TOSS_CLIENT_KEY and TOSS_SECRET_KEY)
+TOSS_IS_LIVE = TOSS_CLIENT_KEY.startswith("live_") and TOSS_SECRET_KEY.startswith("live_")
+TOSS_IS_TEST = TOSS_CLIENT_KEY.startswith("test_") and TOSS_SECRET_KEY.startswith("test_")
 
 
 def _get_db():
@@ -101,18 +103,47 @@ def render_tab_pricing(auth, user):
                 if expire and auth == "prime":
                     ui.label(f"· 만료: {str(expire)[:10]}").classes("text-gray-400 text-xs")
 
+    # ── [Step U] 사회적 증거 + 베타 배너 (등급 비교 위에 표시) ──
+    try:
+        from components.social_proof import render_social_proof_section
+        render_social_proof_section(show_all=True)
+    except ImportError:
+        pass  # social_proof 모듈 없어도 정상 작동
+
     # ── 등급 비교 테이블 ──
     _render_comparison_table(auth)
 
     ui.separator().classes("my-6")
 
-    # ── Phase 2: 토스페이먼츠 결제 (활성 시) ──
+    # ═══════════════════════════════════════════════════
+    # [Step R] 결제 흐름 — 토스 활성 시 토스 우선, 무통장은 접이식
+    # ═══════════════════════════════════════════════════
     if TOSS_ENABLED:
+        # 1순위: 토스페이먼츠 (즉시 활성화)
         _render_toss_payment(auth, user)
+        
         ui.separator().classes("my-6")
-
-    # ── Phase 1: 무통장 입금 안내 & 입금확인 폼 ──
-    _render_bank_transfer(auth, user)
+        
+        # 2순위: 무통장 입금 — expander로 접기 (혼란 방지)
+        with ui.expansion(
+            "💳 카드 결제가 어려우신가요? — 무통장 입금 안내",
+            icon="account_balance",
+        ).classes("w-full bg-[#1a1a2e] rounded-xl"):
+            _render_bank_transfer(auth, user)
+    else:
+        # 토스 미설정: 무통장 입금만 표시 (기존 동작)
+        if not TOSS_CLIENT_KEY and auth == "admin":
+            # 관리자에게만 안내 (일반 사용자에게는 노출 X)
+            with ui.card().classes(
+                "w-full p-3 bg-amber-900/10 border border-amber-700/30 "
+                "rounded-lg mb-4"
+            ):
+                ui.label(
+                    "💡 [관리자 안내] 환경변수 TOSS_CLIENT_KEY/TOSS_SECRET_KEY를 "
+                    "설정하면 토스페이먼츠 자동 결제가 활성화됩니다."
+                ).classes("text-xs text-amber-300")
+        
+        _render_bank_transfer(auth, user)
 
     # ── FAQ ──
     ui.separator().classes("my-6")
@@ -342,88 +373,219 @@ def _render_bank_transfer(auth, user):
 #  Phase 2: 토스페이먼츠 결제 위젯
 # ═══════════════════════════════════════════════════
 def _render_toss_payment(auth, user):
-    """토스페이먼츠 결제 위젯 (TOSS_CLIENT_KEY 설정 시 활성)"""
+    """[Step R+V] 토스페이먼츠 결제 위젯 + UX 개선
+    
+    SDK 정책:
+    - 토스페이먼츠 SDK v1 안정 버전 사용 (https://js.tosspayments.com/v1/payment)
+    - requestPayment API (v2 위젯 SDK는 별도 마이그레이션 필요 시 검토)
+    
+    개선점:
+    - Order ID에 이메일 평문 → SHA-256 해시 (URL safe)
+    - 결제 직전 정보 확인 카드 표시
+    - 모바일 친화적 디자인
+    """
 
     with ui.card().classes(
         "w-full p-6 bg-gradient-to-br from-[#1a1a2e] to-[#0f3460] "
         "border border-indigo-600 rounded-2xl"
     ):
-        ui.label("💳 간편 결제 (토스페이먼츠)").classes("text-xl font-bold text-white mb-4")
+        with ui.row().classes("w-full items-center gap-2 mb-4"):
+            ui.icon("credit_card", size="28px").classes("text-indigo-400")
+            ui.label("💳 간편 결제 (토스페이먼츠)").classes(
+                "text-xl font-bold text-white"
+            )
+            ui.badge("⚡ 즉시 활성화").props("color=green").classes("ml-auto")
+        
+        # [Step R+] 관리자에게만 LIVE/TEST 모드 표시
+        if auth == "admin":
+            if TOSS_IS_LIVE:
+                ui.label(
+                    "🔴 LIVE 모드 — 실제 결제가 처리됩니다 (정산 진행)"
+                ).classes("text-xs text-red-400 font-bold mb-2")
+            elif TOSS_IS_TEST:
+                ui.label(
+                    "🧪 TEST 모드 — 실제 결제 안 됨 (개발/테스트용)"
+                ).classes("text-xs text-amber-400 font-bold mb-2")
 
         if auth == "guest":
-            ui.label("⚠️ 로그인 후 결제 가능합니다.").classes("text-yellow-400")
+            with ui.card().classes(
+                "w-full p-4 bg-amber-900/20 border border-amber-600/40 rounded-lg"
+            ):
+                ui.label("⚠️ 로그인 후 결제 가능합니다").classes("text-amber-300 mb-2")
+                ui.button("🔐 로그인하기",
+                          on_click=lambda: ui.navigate.to("/login")).props("color=primary")
             return
 
         d_email = user.get("login_id", user.get("id", ""))
+        d_nickname = user.get("nickname", "고객님")
 
-        plan_select = ui.select(
-            {
-                "prime": f"👑 Prime ({PRICE_PRIME:,}원/월)",
-            },
-            label="결제 플랜",
-            value="prime",
-        ).classes("w-full mb-4").props("outlined dense")
+        # [Step R] 결제 정보 확인 카드 (사용자 안심)
+        with ui.card().classes(
+            "w-full p-4 bg-[#0d1b2a] rounded-lg mb-4 border border-indigo-700/30"
+        ):
+            ui.label("📋 결제 정보 확인").classes(
+                "text-xs text-indigo-300 font-bold mb-2"
+            )
+            for label, val in [
+                ("📧 가입 이메일", d_email),
+                ("👤 결제자명", d_nickname),
+                ("📦 상품", f"SwingPicker Prime 1개월 구독"),
+                ("💰 결제 금액", f"{PRICE_PRIME:,}원"),
+                ("📅 이용 기한", "결제일로부터 30일"),
+            ]:
+                with ui.row().classes("w-full items-center gap-2 py-1"):
+                    ui.label(label).classes("text-xs text-gray-400 w-28")
+                    ui.label(val).classes("text-sm text-white flex-1")
+
+        # 결제 수단 안내
+        with ui.row().classes("w-full gap-2 mb-3 flex-wrap justify-center"):
+            for icon, label in [
+                ("💳", "카드"),
+                ("📱", "간편결제"),
+                ("🏦", "계좌이체"),
+                ("💰", "가상계좌"),
+            ]:
+                with ui.card().classes(
+                    "px-3 py-2 bg-[#0d1b2a] border border-gray-700 rounded-lg"
+                ):
+                    ui.label(f"{icon} {label}").classes("text-xs text-gray-300")
 
         async def open_toss_widget():
-            plan = plan_select.value
+            """[Step R+V] 토스페이먼츠 결제 요청 (SDK v1 안정 버전 사용)"""
+            plan = "prime"
             amount = PRICE_PRIME
             plan_name = "Prime"
-            order_id = f"LDY-PRIME-{datetime.now().strftime('%Y%m%d%H%M%S')}-{d_email[:8]}"
+            
+            # [Step R] Order ID — 이메일 해시 사용 (URL safe)
+            try:
+                from payments import email_to_hash
+                email_hash = email_to_hash(d_email)
+            except Exception:
+                # fallback
+                import hashlib as _hl
+                email_hash = _hl.sha256(d_email.lower().encode()).hexdigest()[:8] if d_email else "00000000"
+            
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+            order_id = f"LDY-{plan.upper()}-{timestamp}-{email_hash}"
 
-            # 토스페이먼츠 결제 위젯 JS 삽입
+            # 토스페이먼츠 SDK v1 (안정 버전 유지, requestPayment API)
+            # 결제 위젯 모달 띄움 → 사용자가 결제 수단 선택
+            # 성공 시: successUrl로 GET 리다이렉트 (paymentKey, orderId, amount 포함)
+            # 실패 시: failUrl로 GET 리다이렉트 (code, message 포함)
             js_code = f"""
             (async () => {{
-                if (!window.TossPayments) {{
-                    const script = document.createElement('script');
-                    script.src = 'https://js.tosspayments.com/v1/payment';
-                    document.head.appendChild(script);
-                    await new Promise(resolve => script.onload = resolve);
+                try {{
+                    if (!window.TossPayments) {{
+                        const script = document.createElement('script');
+                        script.src = 'https://js.tosspayments.com/v1/payment';
+                        document.head.appendChild(script);
+                        await new Promise((resolve, reject) => {{
+                            script.onload = resolve;
+                            script.onerror = reject;
+                        }});
+                    }}
+                    const tossPayments = TossPayments('{TOSS_CLIENT_KEY}');
+                    await tossPayments.requestPayment('카드', {{
+                        amount: {amount},
+                        orderId: '{order_id}',
+                        orderName: 'SwingPicker {plan_name} 1개월 구독',
+                        customerName: {repr(d_nickname)},
+                        customerEmail: {repr(d_email)},
+                        successUrl: window.location.origin + '/api/payments/toss/success',
+                        failUrl: window.location.origin + '/api/payments/toss/fail',
+                    }});
+                }} catch (err) {{
+                    console.error('토스 결제 호출 실패:', err);
+                    alert('결제 위젯을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.\\n\\n오류: ' + (err.message || err));
                 }}
-                const tossPayments = TossPayments('{TOSS_CLIENT_KEY}');
-                tossPayments.requestPayment('카드', {{
-                    amount: {amount},
-                    orderId: '{order_id}',
-                    orderName: 'SwingPicker {plan_name} 월간 구독',
-                    customerName: '{user.get("nickname", "")}',
-                    customerEmail: '{d_email}',
-                    successUrl: window.location.origin + '/api/payments/toss/success',
-                    failUrl: window.location.origin + '/api/payments/toss/fail',
-                }});
             }})();
             """
             await ui.run_javascript(js_code)
 
+        # 메인 결제 버튼
         ui.button(
-            "💳 카드로 결제하기",
+            f"💳 {PRICE_PRIME:,}원 결제하기",
             on_click=open_toss_widget,
-        ).classes("w-full").props("color=indigo rounded size=lg")
+        ).classes("w-full mt-2").props("color=indigo rounded size=lg")
 
-        ui.label("카드/간편결제/계좌이체 모두 가능합니다").classes("text-gray-500 text-xs text-center mt-2")
+        # 보안/신뢰 신호
+        with ui.row().classes("w-full justify-center gap-3 mt-3 flex-wrap"):
+            for icon, label in [
+                ("🔒", "SSL 보호"),
+                ("🛡️", "토스페이먼츠 PG"),
+                ("✅", "안심 결제"),
+            ]:
+                ui.label(f"{icon} {label}").classes("text-[10px] text-gray-500")
+        
+        ui.label(
+            "💡 결제 완료 즉시 프리미엄 기능이 활성화됩니다 (재로그인 불필요)"
+        ).classes("text-xs text-emerald-400/80 text-center mt-2 italic")
 
 
 # ═══════════════════════════════════════════════════
 #  FAQ
 # ═══════════════════════════════════════════════════
 def _render_faq():
-    """자주 묻는 질문"""
+    """[Step R] 자주 묻는 질문 — 결제 보안/실패 처리 추가"""
     with ui.column().classes("w-full"):
         ui.label("❓ 자주 묻는 질문").classes("text-lg font-bold text-white mb-3")
 
         faqs = [
             ("결제 후 등급은 언제 적용되나요?",
-             "무통장 입금: 운영자 확인 후 수분~수시간 내 적용됩니다.\n"
-             "카드 결제: 결제 완료 즉시 자동 적용됩니다."),
-            ("구독 기간은 어떻게 되나요?",
-             "결제일 기준 30일간 이용 가능합니다. 만료 전 알림을 보내드립니다."),
+             "💳 카드/간편결제: 결제 완료 즉시 자동 활성화됩니다.\n"
+             "    → 메뉴 새로고침 또는 페이지 이동 시 모든 기능 이용 가능\n"
+             "🏦 무통장 입금: 운영자 확인 후 평균 2시간 내 (영업일 기준) 적용됩니다.\n"
+             "    → 처리 완료 시 가입 이메일로 안내 발송"),
+            ("구독 기간과 자동 갱신은 어떻게 되나요?",
+             "결제일 기준 30일간 이용 가능합니다.\n"
+             "현재는 정기 자동 결제 미지원 — 만료 7일 전 갱신 안내 발송됩니다.\n"
+             "갱신을 원하시면 다시 결제해주세요."),
             ("환불은 가능한가요?",
-             "결제 후 7일 이내, 유료 기능 미사용 시 전액 환불 가능합니다.\n"
-             "📮 문의 탭에서 환불 요청을 남겨주세요."),
+             "💳 카드 결제: 결제 후 7일 이내, 유료 기능 미사용 시 전액 환불 가능\n"
+             "🏦 무통장 입금: 결제 후 7일 이내, 동일 조건으로 환불\n"
+             "📮 문의 탭에서 '환불 요청'으로 남겨주시면 영업일 기준 1~3일 내 처리됩니다."),
+            ("결제 정보는 안전한가요?",
+             "✅ 모든 결제는 국내 PG사 토스페이먼츠를 통해 처리됩니다.\n"
+             "✅ 카드 정보는 토스페이먼츠 결제창에서 직접 입력되며, "
+             "SwingPicker는 카드번호를 저장하지 않습니다.\n"
+             "✅ HTTPS(SSL) 암호화 연결로 안전하게 처리됩니다.\n"
+             "✅ 결제 영수증은 토스페이먼츠 공식 영수증으로 발행됩니다."),
+            ("결제가 실패하면 어떻게 되나요?",
+             "결제가 승인되지 않은 경우 청구되지 않습니다.\n"
+             "다음 사항을 확인해주세요:\n"
+             "  • 카드 한도 / 잔액\n"
+             "  • 카드 유효기간\n"
+             "  • 해외 결제 차단 여부 (일부 카드)\n"
+             "지속 실패 시 다른 결제 수단(무통장 입금)을 이용하시거나 문의 탭에 남겨주세요."),
             ("Free와 Prime의 차이는 무엇인가요?",
-             "Free: 시장 현황, TOP 3 종목 분석 등 기본 기능\n"
-             "Prime: AI 자산진단, 전략 백테스트, 켈리 포지션 사이징,\n"
-             "텔레그램 시그널 등 모든 프리미엄 기능을 이용할 수 있습니다."),
+             "🆓 Free:\n"
+             "  • 시장 현황 대시보드\n"
+             "  • TOP 3 종목 분석\n\n"
+             "👑 Prime (모든 기능 잠금 해제):\n"
+             "  • 전체 종목 분석 + AI 코멘트\n"
+             "  • 내 자산 AI 진단 + DART 공시 리스크\n"
+             "  • 성과 리포트 + 매매 일지\n"
+             "  • 전략 백테스트 + 켈리 포지션 사이징\n"
+             "  • 텔레그램 실시간 시그널\n"
+             "  • 1:1 운영자 채팅 지원"),
         ]
 
         for q, a in faqs:
             with ui.expansion(q).classes("w-full bg-[#1a1a2e] rounded-lg mb-1").props("dense"):
-                ui.label(a).classes("text-gray-300 text-sm whitespace-pre-line p-2")
+                ui.label(a).classes("text-gray-300 text-sm whitespace-pre-line p-3")
+        
+        # [Step R] 사업자 정보 (한국 전자상거래법)
+        ui.separator().classes("my-4")
+        with ui.card().classes(
+            "w-full p-4 bg-[#0d1b2a] border border-gray-700 rounded-lg"
+        ):
+            ui.label("📋 사업자 정보").classes("text-xs text-gray-400 font-bold mb-2")
+            for label, val in [
+                ("상호", os.environ.get("BUSINESS_NAME", "SwingPicker")),
+                ("대표자", os.environ.get("BUSINESS_OWNER", BANK_HOLDER)),
+                ("이메일", os.environ.get("BUSINESS_EMAIL", "support@swingpicker.com")),
+                ("통신판매업 신고", os.environ.get("BUSINESS_LICENSE", "(신고 준비 중)")),
+            ]:
+                with ui.row().classes("w-full gap-2 py-1"):
+                    ui.label(f"{label}").classes("text-xs text-gray-500 w-24")
+                    ui.label(val).classes("text-xs text-gray-300 flex-1")
