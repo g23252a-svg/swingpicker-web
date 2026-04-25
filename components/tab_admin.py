@@ -204,28 +204,102 @@ def render_tab_admin():
             ui.label("⚠️ 위험 구역").classes("text-red-400 font-bold mb-2")
 
             async def _reset_all_members():
-                ui.notify("⏳ 초기화 중...", type="info")
+                """[v22 Step AA] 전체 초기화 — RESET 2중 확인 + payments 보존 + Gist 파일명 수정"""
+                
+                # ─── 2중 확인 다이얼로그 ───
+                with ui.dialog() as dialog, ui.card().classes("p-5 max-w-md"):
+                    ui.label("🚨 전체 회원 초기화").classes(
+                        "text-xl font-bold text-red-400 mb-2"
+                    )
+                    ui.label(
+                        "관리자 제외한 모든 회원과 문의가 삭제됩니다.\n"
+                        "결제 기록(payments)은 감사 로그로 보존됩니다."
+                    ).classes("text-sm text-gray-300 mb-3 whitespace-pre-line")
+                    
+                    ui.label(
+                        "확인하려면 아래에 RESET 을 입력하세요:"
+                    ).classes("text-sm text-amber-300 font-bold")
+                    
+                    confirm_input = ui.input(
+                        placeholder="RESET",
+                    ).classes("w-full mb-2").props("outlined dense")
+                    
+                    result_label = ui.label("").classes("text-sm")
+                    
+                    async def do_reset():
+                        if (confirm_input.value or "").strip() != "RESET":
+                            result_label.set_text(
+                                "❌ 'RESET' 정확히 입력해주세요."
+                            )
+                            result_label.classes(replace="text-sm text-red-400")
+                            return
+                        
+                        ui.notify("⏳ 초기화 중...", type="info")
+                        
+                        def _do():
+                            db_a = _get_db()
+                            if not db_a:
+                                return False, "DB 연결 실패"
+                            try:
+                                # [Step AA] payments 테이블은 보존! (감사 로그)
+                                db_a._exec_sqlite("DELETE FROM users WHERE role != 'admin'")
+                                db_a._exec_sqlite("DELETE FROM inquiries")
+                                
+                                # [Step AA] Gist 파일명 정확히 매핑
+                                # 이전 버그: users.json/inquiries.json (DB 표준은 _db.json)
+                                try:
+                                    from db_utils import (
+                                        TABLE_TO_GIST_FILE,
+                                        USER_DB_FILE,
+                                        INQUIRY_DB_FILE,
+                                    )
+                                    user_file = TABLE_TO_GIST_FILE.get(
+                                        "users", USER_DB_FILE
+                                    )
+                                    inq_file = TABLE_TO_GIST_FILE.get(
+                                        "inquiries", INQUIRY_DB_FILE
+                                    )
+                                except ImportError:
+                                    # 하위 호환 fallback
+                                    user_file = "users_db.json"
+                                    inq_file = "inquiries_db.json"
+                                
+                                u_ok = db_a._do_gist_upload("users", user_file)
+                                i_ok = db_a._do_gist_upload("inquiries", inq_file)
+                                
+                                if u_ok and i_ok:
+                                    return True, (
+                                        "🔄 회원/문의 초기화 + Gist 동기화 완료! "
+                                        "(payments 보존됨)"
+                                    )
+                                else:
+                                    return True, (
+                                        "⚠️ SQLite 삭제 완료, Gist 일부 실패"
+                                    )
+                            except Exception as ex:
+                                return False, f"❌ 오류: {ex}"
 
-                def _do():
-                    db_a = _get_db()
-                    if not db_a:
-                        return False, "DB 연결 실패"
-                    try:
-                        db_a._exec_sqlite("DELETE FROM users WHERE role != 'admin'")
-                        db_a._exec_sqlite("DELETE FROM inquiries")
-                        u_ok = db_a._do_gist_upload("users", "users.json")
-                        i_ok = db_a._do_gist_upload("inquiries", "inquiries.json")
-                        if u_ok and i_ok:
-                            return True, "🔄 전체 회원 초기화 + Gist 동기화 완료!"
-                        else:
-                            return True, "⚠️ SQLite 삭제 완료, Gist 일부 실패"
-                    except Exception as ex:
-                        return False, f"❌ 오류: {ex}"
+                        ok, msg = await asyncio.to_thread(_do)
+                        ui.notify(msg, type="positive" if ok else "negative")
+                        dialog.close()
+                    
+                    with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                        ui.button(
+                            "취소", on_click=dialog.close
+                        ).props("flat color=gray")
+                        ui.button(
+                            "🚨 초기화 실행",
+                            on_click=do_reset,
+                        ).props("color=red")
+                
+                dialog.open()
 
-                ok, msg = await asyncio.to_thread(_do)
-                ui.notify(msg, type="positive" if ok else "negative")
-
-            ui.button("🔄 전체 회원 초기화 (관리자 제외)", on_click=_reset_all_members).props("color=red outlined").tooltip("관리자 제외 모든 회원 + 문의 삭제 + Gist 즉시 반영")
+            ui.button(
+                "🔄 전체 회원 초기화 (관리자 제외)",
+                on_click=_reset_all_members,
+            ).props("color=red outlined").tooltip(
+                "관리자 제외 회원 + 문의 삭제 (payments 보존). RESET 입력 필요."
+            )
 
         # ── 입금확인 요청 목록 ──
         with ui.column().classes("flex-1"):
@@ -235,25 +309,47 @@ def render_tab_admin():
             payment_list = ui.column().classes("w-full")
 
             async def _dismiss_payment(req):
+                """[v22 Step AA] 입금확인 처리 — 삭제 X, closed 상태 + 자동 답변
+                
+                결제/입금 관련 데이터는 분쟁 대비 감사 로그로 보존.
+                """
                 def _do():
                     db_d = _get_db()
                     if not db_d:
                         return False
-                    # [Step Z] inquiry_id 기반 삭제 (created_at 충돌 X)
-                    if hasattr(db_d, 'delete_inquiry') and req.get("inquiry_id"):
-                        return db_d.delete_inquiry(req["inquiry_id"])
-                    # 하위 호환: inquiry_id 없으면 update_inquiry_status('closed') 사용
-                    if hasattr(db_d, 'update_inquiry_status') and req.get("inquiry_id"):
-                        return db_d.update_inquiry_status(req["inquiry_id"], "closed")
-                    # 둘 다 없으면 실패 (save_inquiries는 사용 X)
-                    _logger.warning(
-                        "delete_inquiry/update_inquiry_status 함수 없음 — Step Y 미적용"
+                    
+                    inquiry_id = req.get("inquiry_id")
+                    if not inquiry_id:
+                        _logger.warning("inquiry_id 없음 — 처리 불가")
+                        return False
+                    
+                    # [Step AA] 삭제 X → closed 상태 + 자동 답변 (감사 로그 보존)
+                    auto_reply = (
+                        "✅ 관리자 확인 완료\n"
+                        "Prime 등급 수동 부여 처리되었습니다.\n"
+                        "추가 문의가 있으시면 언제든 연락주세요."
                     )
-                    return False
+                    
+                    # 답변 등록 (자동 status='replied' 변경)
+                    if hasattr(db_d, 'update_inquiry_reply'):
+                        ok1 = db_d.update_inquiry_reply(inquiry_id, auto_reply)
+                    else:
+                        ok1 = False
+                    
+                    # 추가로 closed 상태로 변경
+                    if hasattr(db_d, 'update_inquiry_status'):
+                        ok2 = db_d.update_inquiry_status(inquiry_id, "closed")
+                    else:
+                        ok2 = False
+                    
+                    return ok1 or ok2
 
                 ok = await asyncio.to_thread(_do)
                 if ok:
-                    ui.notify("✅ 처리 완료", type="positive")
+                    ui.notify(
+                        "✅ 처리 완료 (감사 로그로 보존)",
+                        type="positive",
+                    )
                 else:
                     ui.notify("⚠️ 처리 실패", type="warning")
                 _load_payment_requests()
@@ -264,7 +360,12 @@ def render_tab_admin():
                 if not db_p:
                     return
                 inquiries = db_p.get_all_inquiries()
-                pay_reqs = [q for q in inquiries if q.get("title", "").startswith("[💳 입금확인]")]
+                # [Step AA] 처리 완료(closed)는 제외 — 대기 중인 것만 표시
+                pay_reqs = [
+                    q for q in inquiries
+                    if q.get("title", "").startswith("[💳 입금확인]")
+                    and q.get("status", "open") != "closed"
+                ]
                 with payment_list:
                     if not pay_reqs:
                         ui.label("대기 중인 요청 없음").classes("text-gray-500 text-sm")

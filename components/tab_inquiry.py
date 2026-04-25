@@ -174,23 +174,25 @@ def render_tab_inquiry(auth, user):
     # ─── 카카오톡 안내 (긴급 문의용) ───
     if BUSINESS_KAKAO and BUSINESS_KAKAO_URL:
         with ui.card().classes(
-            "w-full p-3 bg-yellow-900/20 border border-yellow-500/40 "
-            "rounded-lg mb-4"
+            "w-full p-3 bg-gradient-to-r from-[#FEE500]/15 to-[#FEE500]/5 "
+            "border border-[#FEE500]/50 rounded-lg mb-4"
         ):
             with ui.row().classes("w-full items-center gap-2"):
                 ui.label("💬").classes("text-2xl")
                 with ui.column().classes("flex-1 gap-0"):
                     ui.label("긴급 문의는 카카오톡 채널로!").classes(
-                        "text-sm font-bold text-yellow-300"
+                        "text-sm font-bold text-white"
                     )
                     ui.label(
                         f"채널: {BUSINESS_KAKAO} · "
                         f"이메일: {BUSINESS_EMAIL}"
-                    ).classes("text-xs text-gray-400")
+                    ).classes("text-xs text-gray-300")
                 ui.button(
                     f"💬 {BUSINESS_KAKAO}",
                     on_click=lambda: ui.navigate.to(BUSINESS_KAKAO_URL, new_tab=True)
-                ).props("color=yellow size=sm outlined")
+                ).props('size=sm color=amber unelevated').classes(
+                    "text-black font-bold"
+                )
     
     # ═══════════════════════════════════════════════════
     # 1. 문의 작성 폼
@@ -203,12 +205,26 @@ def render_tab_inquiry(auth, user):
         )
         
         # 카테고리 선택
-        category_options = {c["value"]: c["label"] for c in CATEGORIES}
+        # [Step AA] 비로그인은 공개 카테고리만 (결제/환불/버그는 로그인 필요)
+        if user_email or is_admin:
+            category_options = {c["value"]: c["label"] for c in CATEGORIES}
+        else:
+            category_options = {
+                c["value"]: c["label"]
+                for c in CATEGORIES if c["is_public"]
+            }
         cat_select = ui.select(
             options=category_options,
             value="general",
             label="카테고리",
         ).classes("w-full mb-2").props("outlined")
+        
+        # 비로그인 안내
+        if not user_email and not is_admin:
+            ui.label(
+                "💡 결제/환불/버그 문의는 로그인 후 작성해주세요. "
+                "(개인정보 보호)"
+            ).classes("text-xs text-amber-300 mb-2")
         
         # 닉네임 + 이메일 (로그인 시 자동 + readonly)
         with ui.row().classes("w-full gap-3"):

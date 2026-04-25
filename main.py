@@ -34,6 +34,12 @@ from components.tab_perf import render_tab_perf
 from components.tab_admin import render_tab_admin
 from components.tab_backtest import render_tab_backtest
 from components.tab_pricing import render_tab_pricing
+# [v22 Step AA] 사이트 전체 공지 배너
+try:
+    from components.site_banner import render_site_banner
+except ImportError:
+    def render_site_banner():
+        pass  # 모듈 없어도 정상 작동
 from components.page_stock import render_stock_page
 from components.page_briefing import render_briefing_page
 
@@ -42,12 +48,6 @@ try:
     PAYMENTS_OK = True
 except ImportError:
     PAYMENTS_OK = False
-
-try:
-    from components.legal_pages import register_legal_pages
-    LEGAL_OK = True
-except ImportError:
-    LEGAL_OK = False
 
 try:
     from trade_journal_tab import render_trade_journal_tab
@@ -91,6 +91,9 @@ async def index():
     df = store.scored
     auth = get_auth_status()
     user = get_current_user()
+
+    # [v22 Step AA] 사이트 전체 공지 배너 (환경변수로 제어)
+    render_site_banner()
 
     # ─── Hero Banner ───
     with ui.row().classes("w-full items-center justify-between px-4 py-3 rounded-xl mb-2 "
@@ -199,89 +202,9 @@ async def index():
 
     tabs.on_value_change(on_tab_change)
 
-    # ─── [Step S+T] 푸터 — 토스페이먼츠 심사 통과용 사업자 정보 ───
-    import os as _os
-    _business_name = _os.environ.get("BUSINESS_NAME", "SwingPicker")
-    _business_owner = _os.environ.get("BUSINESS_OWNER", "이두영")
-    _business_email = _os.environ.get("BUSINESS_EMAIL", "support@swingpicker.com")
-    _business_license = _os.environ.get("BUSINESS_LICENSE", "")
-    _business_reg_no = _os.environ.get("BUSINESS_REG_NO", "")  # 사업자등록번호
-    _business_address = _os.environ.get("BUSINESS_ADDRESS", "")
-    _business_phone = _os.environ.get("BUSINESS_PHONE", "")
-    # [Step T] 카카오톡 채널 (전화번호 대체)
-    _business_kakao = _os.environ.get("BUSINESS_KAKAO", "")  # @swingpicker
-    _business_kakao_url = _os.environ.get("BUSINESS_KAKAO_URL", "")  # https://pf.kakao.com/_xxx
-    
-    with ui.column().classes("w-full mt-8 mb-4"):
-        # 데이터 기준 + 투자 면책
-        ui.label(
-            f"📅 데이터 기준: {store.data_ts} · ⚠️ 투자 판단은 본인 책임"
-        ).classes("text-xs text-gray-500 text-center")
-        
-        ui.separator().classes("my-3 opacity-30")
-        
-        # 사업자 정보 (한국 전자상거래법 + 토스 심사 통과)
-        with ui.column().classes("w-full items-center text-center gap-1"):
-            # 상호명 + 대표
-            ui.label(
-                f"📌 상호: {_business_name}  ·  대표: {_business_owner}"
-            ).classes("text-xs text-gray-400")
-            
-            # 사업자등록번호 + 통신판매업 신고번호
-            license_parts = []
-            if _business_reg_no:
-                license_parts.append(f"사업자등록번호: {_business_reg_no}")
-            if _business_license:
-                license_parts.append(f"통신판매업: {_business_license}")
-            if license_parts:
-                ui.label("  ·  ".join(license_parts)).classes(
-                    "text-[10px] text-gray-500"
-                )
-            
-            # 주소 + 연락처
-            contact_parts = []
-            if _business_address:
-                contact_parts.append(f"주소: {_business_address}")
-            if _business_phone:
-                contact_parts.append(f"전화: {_business_phone}")
-            if _business_email:
-                contact_parts.append(f"이메일: {_business_email}")
-            # [Step T] 카카오톡 채널 (전화번호 대신 또는 추가)
-            if _business_kakao:
-                contact_parts.append(f"카카오톡: {_business_kakao}")
-            if contact_parts:
-                ui.label("  ·  ".join(contact_parts)).classes(
-                    "text-[10px] text-gray-500"
-                )
-            
-            # 약관/정책 링크
-            with ui.row().classes("gap-3 mt-1 items-center"):
-                ui.link("이용약관", "/terms").classes(
-                    "text-[10px] text-gray-400 hover:text-gray-200 no-underline"
-                )
-                ui.label("·").classes("text-[10px] text-gray-600")
-                ui.link("개인정보처리방침", "/privacy").classes(
-                    "text-[10px] text-gray-400 hover:text-gray-200 no-underline"
-                )
-                ui.label("·").classes("text-[10px] text-gray-600")
-                ui.link("환불정책", "/refund").classes(
-                    "text-[10px] text-gray-400 hover:text-gray-200 no-underline"
-                )
-                # [Step T] 카카오톡 채널 바로가기 (있을 시)
-                if _business_kakao_url:
-                    ui.label("·").classes("text-[10px] text-gray-600")
-                    ui.link(
-                        "💬 카카오톡 문의",
-                        _business_kakao_url,
-                        new_tab=True,
-                    ).classes(
-                        "text-[10px] text-yellow-400 hover:text-yellow-300 no-underline"
-                    )
-            
-            # Copyright
-            ui.label(
-                f"© 2026 {_business_name}. All rights reserved."
-            ).classes("text-[10px] text-gray-600 mt-2")
+    # ─── 푸터 ───
+    ui.label(f"📅 데이터 기준: {store.data_ts} · ⚠️ 투자 판단은 본인 책임"
+             ).classes("text-xs text-gray-500 text-center mt-8 mb-4")
 
 
 async def _do_refresh():
@@ -302,11 +225,6 @@ async def _do_refresh():
 if PAYMENTS_OK:
     register_payment_routes()
     logger.info("💳 결제 API 라우트 등록 완료")
-
-# [v22 Step S] 법적 페이지 라우트 등록 (이용약관/개인정보/환불정책)
-if LEGAL_OK:
-    register_legal_pages()
-    logger.info("📜 법적 페이지 라우트 등록 완료 (/terms /privacy /refund)")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(STATIC_DIR):
