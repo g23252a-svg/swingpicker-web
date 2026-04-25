@@ -24,6 +24,9 @@ BUSINESS_PHONE = os.environ.get("BUSINESS_PHONE", "")
 BUSINESS_REG_NO = os.environ.get("BUSINESS_REG_NO", "")
 BUSINESS_LICENSE = os.environ.get("BUSINESS_LICENSE", "")
 BUSINESS_ADDRESS = os.environ.get("BUSINESS_ADDRESS", "")
+# [Step T] 카카오톡 채널
+BUSINESS_KAKAO = os.environ.get("BUSINESS_KAKAO", "")  # @swingpicker
+BUSINESS_KAKAO_URL = os.environ.get("BUSINESS_KAKAO_URL", "")  # https://pf.kakao.com/_xxx
 PRICE_PRIME = 19_900
 
 
@@ -73,6 +76,8 @@ def _legal_footer():
             contact_parts.append(BUSINESS_PHONE)
         if BUSINESS_EMAIL:
             contact_parts.append(BUSINESS_EMAIL)
+        if BUSINESS_KAKAO:
+            contact_parts.append(f"카카오톡: {BUSINESS_KAKAO}")
         if contact_parts:
             ui.label("  ·  ".join(contact_parts)).classes(
                 "text-[10px] text-gray-500"
@@ -401,6 +406,18 @@ def render_refund_page():
                 ui.label(f"전화: {BUSINESS_PHONE}").classes(
                     "text-sm text-gray-300"
                 )
+            if BUSINESS_KAKAO:
+                with ui.row().classes("w-full items-center gap-2 mt-1"):
+                    ui.label(f"카카오톡: {BUSINESS_KAKAO}").classes(
+                        "text-sm text-gray-300"
+                    )
+                    if BUSINESS_KAKAO_URL:
+                        ui.button(
+                            "💬 채널 바로가기",
+                            on_click=lambda url=BUSINESS_KAKAO_URL: ui.navigate.to(
+                                url, new_tab=True
+                            ),
+                        ).props("flat dense color=yellow size=sm").classes("text-xs")
             ui.label("응답 시간: 영업일 1~3일 이내").classes(
                 "text-xs text-gray-500 mt-1"
             )

@@ -199,7 +199,7 @@ async def index():
 
     tabs.on_value_change(on_tab_change)
 
-    # ─── [Step S] 푸터 — 토스페이먼츠 심사 통과용 사업자 정보 ───
+    # ─── [Step S+T] 푸터 — 토스페이먼츠 심사 통과용 사업자 정보 ───
     import os as _os
     _business_name = _os.environ.get("BUSINESS_NAME", "SwingPicker")
     _business_owner = _os.environ.get("BUSINESS_OWNER", "이두영")
@@ -208,6 +208,9 @@ async def index():
     _business_reg_no = _os.environ.get("BUSINESS_REG_NO", "")  # 사업자등록번호
     _business_address = _os.environ.get("BUSINESS_ADDRESS", "")
     _business_phone = _os.environ.get("BUSINESS_PHONE", "")
+    # [Step T] 카카오톡 채널 (전화번호 대체)
+    _business_kakao = _os.environ.get("BUSINESS_KAKAO", "")  # @swingpicker
+    _business_kakao_url = _os.environ.get("BUSINESS_KAKAO_URL", "")  # https://pf.kakao.com/_xxx
     
     with ui.column().classes("w-full mt-8 mb-4"):
         # 데이터 기준 + 투자 면책
@@ -243,13 +246,16 @@ async def index():
                 contact_parts.append(f"전화: {_business_phone}")
             if _business_email:
                 contact_parts.append(f"이메일: {_business_email}")
+            # [Step T] 카카오톡 채널 (전화번호 대신 또는 추가)
+            if _business_kakao:
+                contact_parts.append(f"카카오톡: {_business_kakao}")
             if contact_parts:
                 ui.label("  ·  ".join(contact_parts)).classes(
                     "text-[10px] text-gray-500"
                 )
             
             # 약관/정책 링크
-            with ui.row().classes("gap-3 mt-1"):
+            with ui.row().classes("gap-3 mt-1 items-center"):
                 ui.link("이용약관", "/terms").classes(
                     "text-[10px] text-gray-400 hover:text-gray-200 no-underline"
                 )
@@ -261,6 +267,16 @@ async def index():
                 ui.link("환불정책", "/refund").classes(
                     "text-[10px] text-gray-400 hover:text-gray-200 no-underline"
                 )
+                # [Step T] 카카오톡 채널 바로가기 (있을 시)
+                if _business_kakao_url:
+                    ui.label("·").classes("text-[10px] text-gray-600")
+                    ui.link(
+                        "💬 카카오톡 문의",
+                        _business_kakao_url,
+                        new_tab=True,
+                    ).classes(
+                        "text-[10px] text-yellow-400 hover:text-yellow-300 no-underline"
+                    )
             
             # Copyright
             ui.label(
