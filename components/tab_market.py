@@ -270,12 +270,21 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
         is_macro_dangerous = macro_risk in ("WARNING", "CRITICAL")
         is_macro_caution = macro_risk == "CAUTION"
         
-        # [v22 UI Step E1] max_allowed_route 기반 ROUTE 차단 감지
-        # ATTACK/ARMED만 진입 허용. 나머지(WAIT/NEUTRAL/BLOCKED/NO_TRADE/CARRY 등)는 제한.
+        # [v22 UI Step E1 + F2] max_allowed_route 기반 ROUTE 차단 감지
+        # 진입 허용 routes (확장된 세트):
+        #   ATTACK, ARMED — 표준 ROUTE enum (기본 허용)
+        #   ALL, FULL — 전체 허용 (다른 시스템 호환)
+        #   TOP_PICK, ATTACK_ONLY, ALLOW_ATTACK — TOP_PICK 위주 허용 변종
         # 빈 문자열이면 정보 없음 = 차단 안 함 (기존 동작 유지)
+        # 차단으로 간주: WAIT/NEUTRAL/BLOCKED/NO_TRADE/CARRY 등
+        _ALLOWED_MAX_ROUTES = frozenset({
+            "ATTACK", "ARMED",
+            "ALL", "FULL",
+            "TOP_PICK", "ATTACK_ONLY", "ALLOW_ATTACK",
+        })
         is_route_blocked = (
             bool(max_route) and 
-            max_route not in ("ATTACK", "ARMED")
+            max_route not in _ALLOWED_MAX_ROUTES
         )
         
         # TOP_PICK 종목 — 강건 파서 (1, 1.0, "True", "Y" 등)
@@ -424,8 +433,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         '1', '1.0', 'TRUE', 'Y', 'YES'
                     ]
                     
-                    # [v22 UI Step E4] Kelly engine
+                    # [v22 UI Step E4 + F3] Kelly engine + error 요약
                     kelly_engine = str(row.get('KELLY_ENGINE', '')).strip()
+                    kelly_error = str(row.get('KELLY_ERROR', '')).strip()
                     
                     with ui.card().classes(
                         f"flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
@@ -477,12 +487,19 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         # 추천 비중 + 승률
                         with ui.row().classes("w-full gap-3 mt-2 items-center"):
                             if amt > 0:
-                                # [Step E2] CAUTION 시 권장 비중 안내
-                                if is_macro_caution:
+                                # [Step F1] 위험/차단/주의 3단계 비중 안내
+                                if is_macro_dangerous or is_route_blocked:
+                                    # ⛔ 위험장 또는 엔진 차단 — 신규 매수 0원
+                                    ui.label(
+                                        f"⛔ 신규매수 0원  ·  기준 {amt:.0f}만원은 관찰용"
+                                    ).classes("text-sm font-bold text-red-300")
+                                elif is_macro_caution:
+                                    # 🟠 매크로 주의 — 50% 비중 권장
                                     ui.label(
                                         f"💰 기준 {amt:.0f}만원  ·  주의장 권장 {amt*0.5:.0f}만원"
                                     ).classes("text-sm font-bold text-amber-300")
                                 else:
+                                    # 🟢 정상 — 기준값 그대로
                                     ui.label(f"💰 {amt:.0f}만원").classes(
                                         "text-sm font-bold text-amber-300"
                                     )
@@ -491,12 +508,20 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                                     "text-xs text-gray-400"
                                 )
                         
-                        # [Step E4] Kelly engine 표시 (운영 신뢰)
+                        # [Step E4 + F3] Kelly engine 표시 (운영 신뢰)
                         if kelly_engine:
                             if 'fallback' in kelly_engine.lower():
                                 ui.label(f"⚠️ Kelly fallback ({kelly_engine})").classes(
                                     "text-xs text-red-300 mt-1"
                                 )
+                                # [F3] KELLY_ERROR 요약 (있을 때만, 80자로 잘라서)
+                                if kelly_error and kelly_error.lower() not in ("nan", "none", ""):
+                                    _err_short = kelly_error[:80]
+                                    if len(kelly_error) > 80:
+                                        _err_short += "…"
+                                    ui.label(_err_short).classes(
+                                        "text-[10px] text-red-400/70"
+                                    )
                             else:
                                 ui.label(f"Kelly {kelly_engine}").classes(
                                     "text-xs text-gray-500 mt-1"
