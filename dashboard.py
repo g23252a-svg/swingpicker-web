@@ -3158,20 +3158,31 @@ if df_latest is not None and not df_latest.empty:
 user = get_user()
 user_role = (user or {}).get("role", "guest")
 
-# tab7 변수와 목록 맨 끝에 "📈 시스템 성과 (Performance)" 추가
-# tab8 변수 추가 및 "👑 회원관리" 탭 라벨 추가
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
-    [
-        "📊 시장 (Market)",
-        "🔭 종목 분석",
-        "💼 내 자산",
-        "📮 문의 게시판",
-        "⚖️ 이용 약관 / 투자 유의사항",
-        "🧩 LDY Pro Trader 업데이트 노트",
-        "📈 시스템 성과 (Performance)", 
-        "👑 회원관리",  # 👈 추가된 부분
-    ]
-)
+# ═══════════════════════════════════════════════════
+# [v22 UI Phase 2] 탭 구조 개선
+#   - tab1 라벨: "📊 시장 (Market)" → "🏠 오늘의 추천"
+#   - tab8 (회원관리): admin에게만 라벨 노출
+# 권한 로직(auth_status/PRIME/결제)은 안 건드림 — 사이드바 그대로 유지
+# ═══════════════════════════════════════════════════
+is_admin = (auth_status == "admin")
+
+_tab_labels = [
+    "🏠 오늘의 추천",
+    "🔭 종목 분석",
+    "💼 내 자산",
+    "📮 문의 게시판",
+    "⚖️ 이용 약관 / 투자 유의사항",
+    "🧩 LDY Pro Trader 업데이트 노트",
+    "📈 시스템 성과 (Performance)",
+]
+
+if is_admin:
+    _tab_labels.append("👑 회원관리")
+
+_tabs = st.tabs(_tab_labels)
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = _tabs[:7]
+tab8 = _tabs[7] if is_admin else None
 
 # ── [v20.0.1] 탭/종목 상태 자동 복원 (모바일 탭 전환 대응) ──
 st.markdown("""
@@ -3231,190 +3242,10 @@ st.markdown("""
 </script>
 """, unsafe_allow_html=True)
 
-with tab1:
-    # 🔥 v6.8 Reality Check: 지난 추천 성과 요약
-    rc = reality_check_top(top20, DATA_TS, n=5)
-    if rc is not None:
-        msg = (
-            f"📅 {rc['base_str']} 추천 Top {rc['count']} 기준, "
-            f"현재 평균 수익률 **{rc['avg_ret']:+.2f}%** "
-            f"(적중 {rc['hit']}/{rc['count']})"
-        )
-        st.success(msg)
-    else:
-        st.caption("※ FDR 데이터 또는 추천 데이터가 부족해 성과 검증을 표시할 수 없습니다.")
 
-    kp_stat, kp_diff, kq_stat, kq_diff = get_market_status(scored)
-    c1, c2 = st.columns(2)
-
-    def _fmt_metric(stat, diff):
-        bad_stats = {
-            "데이터 없음",
-            "데이터 오류",
-            "데이터 소스 오류",
-            "데이터 부족",
-            "Unknown",
-            "Error",
-        }
-        if stat in bad_stats or pd.isna(diff):
-            friendly = "📡 지수 데이터 지연/점검 중"
-            return friendly, "-", "off"
-
-        delta_txt = f"{diff:.2f}%"
-        delta_color = "off" if ("상승" in stat or diff >= 0) else "inverse"
-        return stat, delta_txt, delta_color
-
-    kp_value, kp_delta, kp_color = _fmt_metric(kp_stat, kp_diff)
-    kq_value, kq_delta, kq_color = _fmt_metric(kq_stat, kq_diff)
-
-    c1.metric("KOSPI", kp_value, kp_delta, delta_color=kp_color)
-    c2.metric("KOSDAQ", kq_value, kq_delta, delta_color=kq_color)
-
-
-    # 👇 [여기 삽입] 🔥 [v8.0] 매크로(환율/미증시) 메트릭 및 리스크 배너
-    macro_data = get_macro_metrics()
-    if macro_data:
-        st.markdown("---")
-        m1, m2, m3 = st.columns(3)
-        
-        # 환율
-        if "USD" in macro_data:
-            val, diff = macro_data["USD"]
-            # 1400원 넘으면 경고색 (inverse: 빨강/파랑 반전 효과 활용 or 직접 지정)
-            usd_color = "inverse" if val >= 1400 else "normal" 
-            m1.metric("USD/KRW (환율)", f"{val:,.1f}원", f"{diff:+.1f}원", delta_color=usd_color)
-            
-        # 나스닥
-        if "IXIC" in macro_data:
-            val, pct = macro_data["IXIC"]
-            # -2% 이상 하락 시 경고색
-            nas_color = "inverse" if pct <= -2.0 else "normal"
-            m2.metric("NASDAQ (나스닥)", f"{val:,.0f}", f"{pct:+.2f}%", delta_color=nas_color)
-            
-        # 리스크 상태 요약
-        risk_msg = "✅ 평온 (Normal)"
-        if "USD" in macro_data and macro_data["USD"][0] >= 1400:
-            risk_msg = "⚠️ 주의 (고환율)"
-        if "IXIC" in macro_data and macro_data["IXIC"][1] <= -2.0:
-            risk_msg = "🚨 위험 (미증시 급락)"
-            
-        m3.metric("시장 리스크 모드", risk_msg)
-
-    # 🔥 v6.5: 데이터 기준 시각 + 지표 모드 + 소스 태그 + 신선도 경고
-    fg_score, fg_status = get_fear_greed_index(scored)
-
-    info_lines = []
-
-    # 0) 데이터 소스 태그
-    if DATA_SRC == "remote":
-        info_lines.append("📡 데이터 출처: **GitHub 원격 CSV** (실시간 반영)")
-    elif DATA_SRC == "local":
-        info_lines.append("📁 데이터 출처: **로컬 캐시 파일** (네트워크 장애 시 대체 사용)")
-    else:
-        info_lines.append("📡 데이터 출처: **알 수 없음** (코드/환경 확인 필요)")
-
-    # 1) 추천 데이터 기준 일자
-    if DATA_TS is not None:
-        ts_date = to_kst_str(DATA_TS, fmt="%Y-%m-%d")
-        if ts_date:
-            info_lines.append(f"📅 추천 데이터 기준 일자: **{ts_date} (KST)**")
-
-            # 신선도 경고 (기준일이 2일 이상 지났을 때)
-            try:
-                ts_kst = pd.to_datetime(DATA_TS).tz_convert(KST)
-                days_diff = (now_kst().date() - ts_kst.date()).days
-                if days_diff >= 2:
-                    info_lines.append(
-                        f"⚠️ 기준일이 **{days_diff}일** 지났습니다. "
-                        "GitHub의 `recommend_latest.csv` 업데이트 여부를 확인해 주세요."
-                    )
-            except Exception:
-                pass
-
-    # 2) 지수/스코어 기준 여부 요약
-    mode_bits = []
-
-    if "스코어 기반" in str(kp_stat) or "스코어 기반" in str(kq_stat):
-        mode_bits.append("시장 상태: 🔄 **로컬 스코어 기반 추정**")
-    else:
-        mode_bits.append("시장 상태: 📡 **지수(FDR/pykrx) 기준**")
-
-    if "스코어 기준" in fg_status:
-        mode_bits.append("공포/탐욕: 📊 **스코어 기준**")
-    elif "지수 기준" in fg_status:
-        mode_bits.append("공포/탐욕: 📈 **지수 기준**")
-
-    if mode_bits:
-        info_lines.append(" · ".join(mode_bits))
-
-    # 3) KOSPI/KOSDAQ 퍼센트 계산 방식 설명 추가
-    use_local_market = ("스코어 기반" in str(kp_stat)) or ("스코어 기반" in str(kq_stat))
-    if use_local_market:
-        info_lines.append(
-            "※ KOSPI/KOSDAQ 퍼센트 값은 지수 데이터 장애 시 "
-            "**최근 5영업일 평균 수익률**을 기반으로 한 로컬 추정치입니다."
-        )
-    else:
-        info_lines.append(
-            "※ KOSPI/KOSDAQ 퍼센트 값은 지수 종가와 **20일 이동평균선 괴리율(%)** 기준입니다."
-        )
-
-    if info_lines:
-        st.caption("  \n".join(info_lines))
-
-
-    st.divider()
-
-    # 공포/탐욕 게이지 + 섹터맵
-    c_gauge, c_map = st.columns([1, 1.5])
-    # 🚨 [수정] 공포/탐욕 게이지와 섹터맵을 모바일에서 보기 좋게 변경
-    # PC에서는 옆으로, 모바일에서는 위아래로 자연스럽게 배치되도록
-    # Streamlit은 화면이 좁으면 자동으로 수직 배치하지만, 
-    # [1, 1.5] 비율 강제보다는 1:1이 모바일에서 찌그러짐을 방지함.
-    c_gauge, c_map = st.columns([1, 1]) 
-    
-    with c_gauge:
-        st.plotly_chart(
-            plot_fear_greed_gauge(fg_score),
-            use_container_width=True,
-            # 모바일에서 게이지가 너무 작아지지 않게 높이 약간 확보
-            config={'staticPlot': True} # 터치 오동작 방지
-        )
-        st.caption(f"시장 공포/탐욕 지수 — {fg_status}")
-    
-    with c_map:
-        st.markdown("##### 🔥 오늘의 주도 섹터")
-        map_src = st.radio(
-            "섹터맵 기준 데이터",
-            options=["EBS/유동성 통과 종목", "전체 상위 Top 50"],
-            horizontal=True,
-            key="sector_data_src",
-        )
-        if "업종" in scored.columns:
-            if map_src == "EBS/유동성 통과 종목":
-                map_df = base.copy()
-            else:
-                map_df = scored.head(50).copy()
-            fig = plot_sector_treemap(map_df)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("섹터 데이터 부족")
-        else:
-            st.info("섹터 정보 없음")
-
-    st.divider()
-    st.markdown("##### 🚀 섹터 모멘텀 Top 10")
-    mom_fig = plot_sector_momentum_bar(scored)
-    if mom_fig and len(mom_fig.data) > 0:
-        st.plotly_chart(mom_fig, use_container_width=True)
-    else:
-        st.caption("※ 섹터 모멘텀을 계산할 수 있는 데이터가 부족합니다.")
-
-    # 👇 [여기 추가!] 이 두 줄을 tab1 맨 마지막에 넣으세요
-    st.divider()
-    plot_regime_summary(scored)
-
+# ═══════════════════════════════════════════════════
+# [v22 UI] 헬퍼 함수 — tab1/tab2에서 사용
+# ═══════════════════════════════════════════════════
 def _to_num(x, default=np.nan):
     v = pd.to_numeric(x, errors="coerce")
     return default if pd.isna(v) else float(v)
@@ -3569,6 +3400,202 @@ def render_today_summary_card(scored_df: pd.DataFrame):
             st.caption(f"_(오늘의 요약 카드 일시 비표시)_")
         except Exception:
             pass
+
+
+with tab1:
+    # ═══════════════════════════════════════════════════
+    # [v22 UI Phase 2] 첫 화면 Hero 카드 — 한눈에 결론
+    # ═══════════════════════════════════════════════════
+    render_today_summary_card(scored)
+    
+    # 🔥 v6.8 Reality Check: 지난 추천 성과 요약
+    rc = reality_check_top(top20, DATA_TS, n=5)
+    if rc is not None:
+        msg = (
+            f"📅 {rc['base_str']} 추천 Top {rc['count']} 기준, "
+            f"현재 평균 수익률 **{rc['avg_ret']:+.2f}%** "
+            f"(적중 {rc['hit']}/{rc['count']})"
+        )
+        st.success(msg)
+    else:
+        st.caption("※ FDR 데이터 또는 추천 데이터가 부족해 성과 검증을 표시할 수 없습니다.")
+
+    kp_stat, kp_diff, kq_stat, kq_diff = get_market_status(scored)
+    c1, c2 = st.columns(2)
+
+    def _fmt_metric(stat, diff):
+        bad_stats = {
+            "데이터 없음",
+            "데이터 오류",
+            "데이터 소스 오류",
+            "데이터 부족",
+            "Unknown",
+            "Error",
+        }
+        if stat in bad_stats or pd.isna(diff):
+            friendly = "📡 지수 데이터 지연/점검 중"
+            return friendly, "-", "off"
+
+        delta_txt = f"{diff:.2f}%"
+        delta_color = "off" if ("상승" in stat or diff >= 0) else "inverse"
+        return stat, delta_txt, delta_color
+
+    kp_value, kp_delta, kp_color = _fmt_metric(kp_stat, kp_diff)
+    kq_value, kq_delta, kq_color = _fmt_metric(kq_stat, kq_diff)
+
+    c1.metric("KOSPI", kp_value, kp_delta, delta_color=kp_color)
+    c2.metric("KOSDAQ", kq_value, kq_delta, delta_color=kq_color)
+
+    # ═══════════════════════════════════════════════════
+    # [v22 UI Phase 2] 상세 정보는 expander로 접기 — 첫 화면 깔끔하게
+    # 펼치면: 글로벌 매크로 / 엔진 상태 / 공포탐욕 / 섹터맵 / 모멘텀 / 지표 분석
+    # ═══════════════════════════════════════════════════
+    with st.expander("📊 시장 상세 분석 보기 (글로벌 매크로 · 섹터 · 지표 승률)", expanded=False):
+
+            # 👇 [여기 삽입] 🔥 [v8.0] 매크로(환율/미증시) 메트릭 및 리스크 배너
+        macro_data = get_macro_metrics()
+        if macro_data:
+            st.markdown("---")
+            m1, m2, m3 = st.columns(3)
+        
+            # 환율
+            if "USD" in macro_data:
+                val, diff = macro_data["USD"]
+                # 1400원 넘으면 경고색 (inverse: 빨강/파랑 반전 효과 활용 or 직접 지정)
+                usd_color = "inverse" if val >= 1400 else "normal" 
+                m1.metric("USD/KRW (환율)", f"{val:,.1f}원", f"{diff:+.1f}원", delta_color=usd_color)
+            
+            # 나스닥
+            if "IXIC" in macro_data:
+                val, pct = macro_data["IXIC"]
+                # -2% 이상 하락 시 경고색
+                nas_color = "inverse" if pct <= -2.0 else "normal"
+                m2.metric("NASDAQ (나스닥)", f"{val:,.0f}", f"{pct:+.2f}%", delta_color=nas_color)
+            
+            # 리스크 상태 요약
+            risk_msg = "✅ 평온 (Normal)"
+            if "USD" in macro_data and macro_data["USD"][0] >= 1400:
+                risk_msg = "⚠️ 주의 (고환율)"
+            if "IXIC" in macro_data and macro_data["IXIC"][1] <= -2.0:
+                risk_msg = "🚨 위험 (미증시 급락)"
+            
+            m3.metric("시장 리스크 모드", risk_msg)
+
+        # 🔥 v6.5: 데이터 기준 시각 + 지표 모드 + 소스 태그 + 신선도 경고
+        fg_score, fg_status = get_fear_greed_index(scored)
+
+        info_lines = []
+
+        # 0) 데이터 소스 태그
+        if DATA_SRC == "remote":
+            info_lines.append("📡 데이터 출처: **GitHub 원격 CSV** (실시간 반영)")
+        elif DATA_SRC == "local":
+            info_lines.append("📁 데이터 출처: **로컬 캐시 파일** (네트워크 장애 시 대체 사용)")
+        else:
+            info_lines.append("📡 데이터 출처: **알 수 없음** (코드/환경 확인 필요)")
+
+        # 1) 추천 데이터 기준 일자
+        if DATA_TS is not None:
+            ts_date = to_kst_str(DATA_TS, fmt="%Y-%m-%d")
+            if ts_date:
+                info_lines.append(f"📅 추천 데이터 기준 일자: **{ts_date} (KST)**")
+
+                # 신선도 경고 (기준일이 2일 이상 지났을 때)
+                try:
+                    ts_kst = pd.to_datetime(DATA_TS).tz_convert(KST)
+                    days_diff = (now_kst().date() - ts_kst.date()).days
+                    if days_diff >= 2:
+                        info_lines.append(
+                            f"⚠️ 기준일이 **{days_diff}일** 지났습니다. "
+                            "GitHub의 `recommend_latest.csv` 업데이트 여부를 확인해 주세요."
+                        )
+                except Exception:
+                    pass
+
+        # 2) 지수/스코어 기준 여부 요약
+        mode_bits = []
+
+        if "스코어 기반" in str(kp_stat) or "스코어 기반" in str(kq_stat):
+            mode_bits.append("시장 상태: 🔄 **로컬 스코어 기반 추정**")
+        else:
+            mode_bits.append("시장 상태: 📡 **지수(FDR/pykrx) 기준**")
+
+        if "스코어 기준" in fg_status:
+            mode_bits.append("공포/탐욕: 📊 **스코어 기준**")
+        elif "지수 기준" in fg_status:
+            mode_bits.append("공포/탐욕: 📈 **지수 기준**")
+
+        if mode_bits:
+            info_lines.append(" · ".join(mode_bits))
+
+        # 3) KOSPI/KOSDAQ 퍼센트 계산 방식 설명 추가
+        use_local_market = ("스코어 기반" in str(kp_stat)) or ("스코어 기반" in str(kq_stat))
+        if use_local_market:
+            info_lines.append(
+                "※ KOSPI/KOSDAQ 퍼센트 값은 지수 데이터 장애 시 "
+                "**최근 5영업일 평균 수익률**을 기반으로 한 로컬 추정치입니다."
+            )
+        else:
+            info_lines.append(
+                "※ KOSPI/KOSDAQ 퍼센트 값은 지수 종가와 **20일 이동평균선 괴리율(%)** 기준입니다."
+            )
+
+        if info_lines:
+            st.caption("  \n".join(info_lines))
+
+
+        st.divider()
+
+        # 공포/탐욕 게이지 + 섹터맵
+        c_gauge, c_map = st.columns([1, 1.5])
+        # 🚨 [수정] 공포/탐욕 게이지와 섹터맵을 모바일에서 보기 좋게 변경
+        # PC에서는 옆으로, 모바일에서는 위아래로 자연스럽게 배치되도록
+        # Streamlit은 화면이 좁으면 자동으로 수직 배치하지만, 
+        # [1, 1.5] 비율 강제보다는 1:1이 모바일에서 찌그러짐을 방지함.
+        c_gauge, c_map = st.columns([1, 1]) 
+    
+        with c_gauge:
+            st.plotly_chart(
+                plot_fear_greed_gauge(fg_score),
+                use_container_width=True,
+                # 모바일에서 게이지가 너무 작아지지 않게 높이 약간 확보
+                config={'staticPlot': True} # 터치 오동작 방지
+            )
+            st.caption(f"시장 공포/탐욕 지수 — {fg_status}")
+    
+        with c_map:
+            st.markdown("##### 🔥 오늘의 주도 섹터")
+            map_src = st.radio(
+                "섹터맵 기준 데이터",
+                options=["EBS/유동성 통과 종목", "전체 상위 Top 50"],
+                horizontal=True,
+                key="sector_data_src",
+            )
+            if "업종" in scored.columns:
+                if map_src == "EBS/유동성 통과 종목":
+                    map_df = base.copy()
+                else:
+                    map_df = scored.head(50).copy()
+                fig = plot_sector_treemap(map_df)
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("섹터 데이터 부족")
+            else:
+                st.info("섹터 정보 없음")
+
+        st.divider()
+        st.markdown("##### 🚀 섹터 모멘텀 Top 10")
+        mom_fig = plot_sector_momentum_bar(scored)
+        if mom_fig and len(mom_fig.data) > 0:
+            st.plotly_chart(mom_fig, use_container_width=True)
+        else:
+            st.caption("※ 섹터 모멘텀을 계산할 수 있는 데이터가 부족합니다.")
+
+        # 👇 [여기 추가!] 이 두 줄을 tab1 맨 마지막에 넣으세요
+        st.divider()
+        plot_regime_summary(scored)
+
 
 
 with tab2:
@@ -4731,110 +4758,112 @@ with tab7:
                         
                     st.dataframe(disp_df.sort_values('Date', ascending=False), use_container_width=True)
 
-with tab8:
-    st.subheader("👑 회원 관리 (Admin)")
+# [v22 UI Phase 2] admin이 아니면 tab8 = None이라 with 진입 차단 필수
+if is_admin and tab8 is not None:
+    with tab8:
+        st.subheader("👑 회원 관리 (Admin)")
     
-    # 1. 권한 체크 (보안 필수)
-    if auth_status == "admin":
-        users = list_users()
+        # 1. 권한 체크 (보안 필수)
+        if auth_status == "admin":
+            users = list_users()
         
-        # --- 상단 요약 통계 ---
-        if users:
-            total_users = len(users)
+            # --- 상단 요약 통계 ---
+            if users:
+                total_users = len(users)
             
-            # 간단한 가입자 통계 표시
-            st.markdown(f"""
-            <div style="background-color:rgba(0,0,0,0.05); padding:10px; border-radius:5px; margin-bottom:15px;">
-                👥 <b>총 가입자:</b> {total_users}명
-            </div>
-            """, unsafe_allow_html=True)
+                # 간단한 가입자 통계 표시
+                st.markdown(f"""
+                <div style="background-color:rgba(0,0,0,0.05); padding:10px; border-radius:5px; margin-bottom:15px;">
+                    👥 <b>총 가입자:</b> {total_users}명
+                </div>
+                """, unsafe_allow_html=True)
         
-        # --- 메인 리스트 ---
-        if not users:
-            st.info("등록된 회원이 없습니다.")
-        else:
-            # 표시할 데이터 가공
-            rows = []
-            for u in users:
-                # 상태 메시지 꾸미기
-                is_banned = u.get("is_banned", False)
-                role = u.get("role", "free")
+            # --- 메인 리스트 ---
+            if not users:
+                st.info("등록된 회원이 없습니다.")
+            else:
+                # 표시할 데이터 가공
+                rows = []
+                for u in users:
+                    # 상태 메시지 꾸미기
+                    is_banned = u.get("is_banned", False)
+                    role = u.get("role", "free")
                 
-                status_icon = "✅"
-                if is_banned: status_icon = "🚫차단"
+                    status_icon = "✅"
+                    if is_banned: status_icon = "🚫차단"
                 
-                rows.append({
-                    "Email": u.get("login_id"),
-                    "닉네임": u.get("nickname"),
-                    "권한": role.upper(),
-                    "상태": status_icon,
-                    "가입일": to_kst_str(u.get("join_date")),
-                    "최근접속": to_kst_str(u.get("last_login")),
-                    "만료일": to_kst_str(u.get("prime_expire_date")).split(" ")[0] if u.get("prime_expire_date") else "-"
-                })
+                    rows.append({
+                        "Email": u.get("login_id"),
+                        "닉네임": u.get("nickname"),
+                        "권한": role.upper(),
+                        "상태": status_icon,
+                        "가입일": to_kst_str(u.get("join_date")),
+                        "최근접속": to_kst_str(u.get("last_login")),
+                        "만료일": to_kst_str(u.get("prime_expire_date")).split(" ")[0] if u.get("prime_expire_date") else "-"
+                    })
             
-            df_users = pd.DataFrame(rows)
+                df_users = pd.DataFrame(rows)
             
-            # 최신 접속순 정렬
-            if "최근접속" in df_users.columns:
-                df_users = df_users.sort_values("최근접속", ascending=False)
+                # 최신 접속순 정렬
+                if "최근접속" in df_users.columns:
+                    df_users = df_users.sort_values("최근접속", ascending=False)
 
-            # 테이블 출력
-            st.dataframe(
-                df_users, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "Email": st.column_config.TextColumn("이메일", width="medium"),
-                    "최근접속": st.column_config.TextColumn("최근접속", width="small"),
-                }
-            )
+                # 테이블 출력
+                st.dataframe(
+                    df_users, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "Email": st.column_config.TextColumn("이메일", width="medium"),
+                        "최근접속": st.column_config.TextColumn("최근접속", width="small"),
+                    }
+                )
             
-            st.divider()
+                st.divider()
             
-            # --- [관리자 액션 패널] ---
-            c_left, c_right = st.columns([1, 1])
+                # --- [관리자 액션 패널] ---
+                c_left, c_right = st.columns([1, 1])
             
-            with c_left:
-                st.markdown("### 🛠️ 개별 회원 제어")
-                target_email = st.selectbox("회원 선택", df_users["Email"], key="adm_usr_sel")
+                with c_left:
+                    st.markdown("### 🛠️ 개별 회원 제어")
+                    target_email = st.selectbox("회원 선택", df_users["Email"], key="adm_usr_sel")
                 
-                c_act1, c_act2 = st.columns(2)
-                with c_act1:
-                    new_role = st.selectbox("등급 변경", ["free", "pro", "prime", "admin"], key="adm_role_sel")
-                    if st.button("등급 적용", use_container_width=True):
-                        if update_user_role(target_email, new_role):
-                            st.toast(f"✅ {target_email} -> {new_role} 변경 완료")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("변경 실패")
+                    c_act1, c_act2 = st.columns(2)
+                    with c_act1:
+                        new_role = st.selectbox("등급 변경", ["free", "pro", "prime", "admin"], key="adm_role_sel")
+                        if st.button("등급 적용", use_container_width=True):
+                            if update_user_role(target_email, new_role):
+                                st.toast(f"✅ {target_email} -> {new_role} 변경 완료")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("변경 실패")
                             
-                with c_act2:
-                    st.write("") # 간격
-                    st.write("") 
-                    if st.button("🚫 차단/해제", type="primary", use_container_width=True):
-                        ok, msg = toggle_user_ban(target_email)
+                    with c_act2:
+                        st.write("") # 간격
+                        st.write("") 
+                        if st.button("🚫 차단/해제", type="primary", use_container_width=True):
+                            ok, msg = toggle_user_ban(target_email)
+                            if ok:
+                                st.toast(msg)
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+
+                with c_right:
+                    st.markdown("### 🎉 전체 이벤트")
+                    st.caption("관리자를 제외한 모든 회원에게 체험권을 일괄 지급합니다.")
+                
+                    if st.button("🎁 전원 7일 Prime 무료 지급", type="primary", use_container_width=True):
+                        ok, msg = grant_all_users_trial(days=7)
                         if ok:
-                            st.toast(msg)
-                            time.sleep(1)
+                            st.balloons()
+                            st.success(msg)
+                            time.sleep(2)
                             st.rerun()
                         else:
                             st.error(msg)
 
-            with c_right:
-                st.markdown("### 🎉 전체 이벤트")
-                st.caption("관리자를 제외한 모든 회원에게 체험권을 일괄 지급합니다.")
-                
-                if st.button("🎁 전원 7일 Prime 무료 지급", type="primary", use_container_width=True):
-                    ok, msg = grant_all_users_trial(days=7)
-                    if ok:
-                        st.balloons()
-                        st.success(msg)
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-    else:
-        st.error("🚫 관리자 권한이 필요합니다.")
+        else:
+            st.error("🚫 관리자 권한이 필요합니다.")
