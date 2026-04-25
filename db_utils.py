@@ -38,6 +38,16 @@ else:
 
 USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json"
+# [v22 Step W+X] 결제 기록 별도 Gist 파일 — inquiries와 컬럼 매핑 분리
+PAYMENT_DB_FILE = "payments_db.json"
+
+# [v22 Step X] 테이블 → Gist 파일명 매핑
+# Sync manager + load 양쪽에서 일관 사용
+TABLE_TO_GIST_FILE = {
+    "users": USER_DB_FILE,
+    "inquiries": INQUIRY_DB_FILE,
+    "payments": PAYMENT_DB_FILE,
+}
 
 # ═══════════════════════════════════════════
 #  [v6.0 핵심] Gist 디바운스 동기화
@@ -51,7 +61,7 @@ class _GistSyncManager:
     """변경 감지 → 배치 업로드 (Rate Limit 폭탄 방지 + 실패 시 자동 재시도)"""
 
     def __init__(self):
-        self._dirty: set[str] = set()  # {"users", "inquiries"}
+        self._dirty: set[str] = set()  # {"users", "inquiries", "payments"}
         self._lock = threading.Lock()
         self._running = False
         self._consecutive_fails: dict[str, int] = {}  # 테이블별 연속 실패 횟수
@@ -74,7 +84,14 @@ class _GistSyncManager:
                     self._dirty.clear()
 
                 for tbl in tables:
-                    filename = USER_DB_FILE if tbl == "users" else INQUIRY_DB_FILE
+                    # [v22 Step X] 테이블별 파일명 정확한 매핑
+                    filename = TABLE_TO_GIST_FILE.get(tbl)
+                    if not filename:
+                        _logger.warning(
+                            f"[Gist] 알 수 없는 테이블 '{tbl}' 동기화 스킵 "
+                            f"(허용: {list(TABLE_TO_GIST_FILE.keys())})"
+                        )
+                        continue
                     success = db_manager._do_gist_upload(tbl, filename)
 
                     if success:
@@ -319,6 +336,8 @@ class LDYDBManager:
         try:
             self._load_users_from_gist()
             self._load_inquiries_from_gist()
+            # [v22 Step X] payments 테이블도 Gist에서 복구
+            self._load_payments_from_gist()
             self._gist_loaded = True
         except Exception as e:
             _logger.warning(f"Gist 초기 로드 실패 (DB는 정상): {e}")
@@ -334,7 +353,8 @@ class LDYDBManager:
                 return {}
             files = resp.json().get("files", {})
             result = {}
-            for fname in [USER_DB_FILE, INQUIRY_DB_FILE]:
+            # [v22 Step X] payments 파일도 함께 다운로드
+            for fname in [USER_DB_FILE, INQUIRY_DB_FILE, PAYMENT_DB_FILE]:
                 if fname in files:
                     content = files[fname].get("content", "")
                     if content:
@@ -349,6 +369,9 @@ class LDYDBManager:
             self._insert_gist_users(downloaded[USER_DB_FILE])
         if INQUIRY_DB_FILE in downloaded:
             self._insert_gist_inquiries(downloaded[INQUIRY_DB_FILE])
+        # [v22 Step X] payments 데이터 적용
+        if PAYMENT_DB_FILE in downloaded:
+            self._insert_gist_payments(downloaded[PAYMENT_DB_FILE])
 
     def _insert_gist_users(self, data):
         if not data:
@@ -420,11 +443,45 @@ class LDYDBManager:
         except Exception as e:
             _logger.warning(f" inquiries INSERT 실패: {e}")
 
+    def _insert_gist_payments(self, data):
+        """[v22 Step X] payments 테이블 Gist 데이터 적용 (UPSERT — order_id PK)"""
+        if not data or not isinstance(data, list):
+            return
+        try:
+            for item in data:
+                # INSERT OR REPLACE — order_id PK 기준 UPSERT
+                self._exec_sqlite(
+                    """INSERT OR REPLACE INTO payments
+                    (order_id, payment_key, email, plan, amount, status,
+                     method, approved_at, receipt_url, created_at, error_message)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        item.get('order_id'),
+                        item.get('payment_key'),
+                        item.get('email'),
+                        item.get('plan'),
+                        item.get('amount'),
+                        item.get('status'),
+                        item.get('method', ''),
+                        item.get('approved_at', ''),
+                        item.get('receipt_url', ''),
+                        item.get('created_at', ''),
+                        item.get('error_message', ''),
+                    )
+                )
+            _logger.info(f" payments 적용 완료 ({len(data)}건)")
+        except Exception as e:
+            _logger.warning(f" payments INSERT 실패: {e}", exc_info=True)
+
     def _load_users_from_gist(self):
         self._load_gist_to_table(USER_DB_FILE, "users")
 
     def _load_inquiries_from_gist(self):
         self._load_gist_to_table(INQUIRY_DB_FILE, "inquiries")
+
+    def _load_payments_from_gist(self):
+        """[v22 Step X] payments 테이블 Gist에서 로드"""
+        self._load_gist_to_table(PAYMENT_DB_FILE, "payments")
 
     def _load_gist_to_table(self, filename, tablename):
         if not GIST_ID or not GIST_TOKEN:
@@ -451,6 +508,9 @@ class LDYDBManager:
                 self._insert_gist_users(data)
             elif tablename == 'inquiries':
                 self._insert_gist_inquiries(data)
+            elif tablename == 'payments':
+                # [v22 Step X] payments 테이블 적용
+                self._insert_gist_payments(data)
 
         except Exception as e:
             _logger.error(f" [Gist] {tablename} 로드 실패: {e}", exc_info=True)
@@ -464,17 +524,33 @@ class LDYDBManager:
         _gist_sync.mark_dirty(tablename)
 
     def _do_gist_upload(self, tablename: str, filename: str) -> bool:
-        """실제 업로드 (배치 루프에서 호출). 성공 시 True, 실패 시 False."""
+        """[v22 Step X] 실제 업로드 — 테이블별 컬럼 정확히 분기.
+        
+        지원 테이블: users, inquiries, payments
+        성공 시 True, 실패 시 False.
+        """
         if not GIST_ID or not GIST_TOKEN:
             return True  # Gist 미설정은 실패가 아님
         try:
             rows = self._exec_sqlite(f"SELECT * FROM {tablename}", fetch=True)
+            
+            # [v22 Step X] 테이블별 컬럼 정확한 분기
             if tablename == "users":
                 cols = ["id", "password", "salt", "nickname", "role", "join_date",
                         "last_login", "is_banned", "security_q_idx", "security_a_hash",
                         "session_token", "prime_expire_date", "login_fail_count", "lock_until"]
-            else:
+            elif tablename == "inquiries":
                 cols = ["id", "nickname", "title", "content", "created_at"]
+            elif tablename == "payments":
+                # CREATE TABLE 컬럼 순서와 일치 (db 패치 1)
+                cols = ["order_id", "payment_key", "email", "plan", "amount",
+                        "status", "method", "approved_at", "receipt_url",
+                        "created_at", "error_message"]
+            else:
+                _logger.warning(
+                    f" [Gist] 알 수 없는 테이블 '{tablename}' — 업로드 스킵"
+                )
+                return False
 
             data = [dict(zip(cols, r)) for r in rows]
             json_str = json.dumps(data, ensure_ascii=False, indent=2, default=str)
@@ -484,10 +560,13 @@ class LDYDBManager:
             payload = {"files": {filename: {"content": json_str}}}
             resp = requests.patch(url, headers=headers, json=payload, timeout=10)
             if resp.status_code == 200:
-                _logger.debug(f" Gist 배치 업로드 완료: {tablename}")
+                _logger.debug(f" Gist 배치 업로드 완료: {tablename} → {filename}")
                 return True
             else:
-                _logger.warning(f" Gist 배치 업로드 실패 ({resp.status_code}): {tablename}")
+                _logger.warning(
+                    f" Gist 배치 업로드 실패 ({resp.status_code}): "
+                    f"{tablename} → {filename}"
+                )
                 return False
         except Exception as e:
             _logger.warning(f" Gist 배치 업로드 에러: {e}", exc_info=True)

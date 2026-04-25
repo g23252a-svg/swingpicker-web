@@ -116,25 +116,11 @@ def _calc_data_metrics() -> dict:
     except Exception as e:
         _logger.debug(f"데이터 기간 계산 실패 (fallback 사용): {e}")
     
-    # 3. 백테스트 전략 수 — backtest_capital_curve_* 파일 개수 또는 환경변수
-    backtest_strategies = DATA_BACKTEST_STRATEGIES  # fallback
-    try:
-        bt_paths = [
-            "data/backtest_capital_curve_*.csv",
-            "/mnt/data/backtest_capital_curve_*.csv",
-        ]
-        all_bt_files = []
-        for pattern in bt_paths:
-            all_bt_files.extend(glob.glob(pattern))
-        # _latest.csv 제외
-        all_bt_files = [f for f in all_bt_files if "_latest" not in f]
-        actual_bt_count = len(all_bt_files)
-        # 실제 파일 수가 fallback보다 작으면 fallback 유지 (마케팅용 보정)
-        # 실제 파일 수가 더 많으면 실제 수 사용
-        if actual_bt_count > backtest_strategies:
-            backtest_strategies = actual_bt_count
-    except Exception as e:
-        _logger.debug(f"백테스트 전략 수 계산 실패 (fallback 사용): {e}")
+    # 3. 백테스트 전략 수 — [v22 Step X 재검토]
+    # backtest_capital_curve_YYYYMMDD.csv는 "일자별 시뮬 결과"이지
+    # "전략 수"가 아님. 일자 파일을 전략 수로 표시하면 오해 소지.
+    # → 환경변수 fallback 유지 (실제 코드의 전략 갯수로 운영자 직접 설정)
+    backtest_strategies = DATA_BACKTEST_STRATEGIES
     
     # 4. DART 공시 일평균 — 외부 API라 fallback 유지
     dart_daily = DATA_DART_DAILY

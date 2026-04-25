@@ -251,11 +251,13 @@ def _activate_subscription(email: str, plan: str) -> tuple:
 
 
 def _find_email_by_hash(email_hash: str) -> str:
-    """[Step R] 해시로 사용자 이메일 역조회.
+    """[Step R+X] 해시로 사용자 이메일 역조회.
     
     Order ID에 이메일 평문이 들어가면 URL 인코딩 문제가 있어
-    SHA-256 앞 8자리 해시로 저장. 결제 승인 시 모든 사용자
-    이메일에 같은 해시 적용해서 매칭되는 이메일 찾음.
+    SHA-256 앞 12자리(Step X 강화) 해시로 저장. 결제 승인 시 
+    모든 사용자 이메일에 같은 해시 적용해서 매칭되는 이메일 찾음.
+    
+    하위 호환: 8자리 해시 (Step R~W)도 매칭 처리.
     """
     if not email_hash:
         return ""
@@ -263,13 +265,21 @@ def _find_email_by_hash(email_hash: str) -> str:
     if not db:
         return ""
     try:
-        # 모든 사용자 이메일에서 같은 해시 매칭
+        hash_len = len(email_hash)
+        # 모든 사용자 이메일에서 같은 해시 매칭 (8/12자리 둘 다 지원)
         users = db.get_all_users() if hasattr(db, "get_all_users") else []
         for u in users:
             email = u.get("id") or u.get("email") or ""
             if email:
-                h = hashlib.sha256(email.lower().encode()).hexdigest()[:8]
-                if h == email_hash.lower():
+                full = hashlib.sha256(email.lower().encode()).hexdigest()
+                # 신규(12자리) 우선 매칭
+                if hash_len == 12 and full[:12] == email_hash.lower():
+                    return email
+                # 하위 호환(8자리) 매칭
+                elif hash_len == 8 and full[:8] == email_hash.lower():
+                    return email
+                # 기타 길이도 안전하게 매칭
+                elif hash_len > 0 and full[:hash_len] == email_hash.lower():
                     return email
     except Exception as e:
         _logger.warning(f"이메일 역조회 실패: {e}")
@@ -277,13 +287,14 @@ def _find_email_by_hash(email_hash: str) -> str:
 
 
 def email_to_hash(email: str) -> str:
-    """[Step R] 이메일 → URL safe 해시 (Order ID 생성용).
+    """[Step R+X] 이메일 → URL safe 해시 (Order ID 생성용).
     
+    [Step X] 충돌 방지 강화: 8자리 → 12자리.
     공개 함수: tab_pricing.py에서 결제 위젯 호출 시 사용.
     """
     if not email:
         return ""
-    return hashlib.sha256(email.lower().encode()).hexdigest()[:8]
+    return hashlib.sha256(email.lower().encode()).hexdigest()[:12]
 
 
 # ═══════════════════════════════════════════════════
@@ -541,12 +552,33 @@ def register_payment_routes():
                         ).props("color=gray outlined size=lg")
 
         else:
+            # [v22 Step X] 결제 실패도 DB에 기록 (감사 로그 완전성)
+            error_msg = result.get("error", "unknown")
+            error_code = result.get("code", "")
+            if db_for_dup and hasattr(db_for_dup, "record_payment"):
+                # email은 이 시점에 알 수 있으면 기록 (parsed에서 hash로 역조회)
+                fail_email = ""
+                try:
+                    if email_hash:
+                        fail_email = _find_email_by_hash(email_hash) or ""
+                except Exception:
+                    pass
+                db_for_dup.record_payment(
+                    order_id=orderId,
+                    payment_key=paymentKey,
+                    email=fail_email,
+                    plan=plan,
+                    amount=amount_int,
+                    status="failed",
+                    error_message=f"{error_code}: {error_msg}" if error_code else error_msg,
+                )
+            
             _send_telegram(
                 f"❌ <b>[결제 승인 실패]</b>\n"
                 f"🆔 {orderId}\n"
                 f"💰 {amount_int:,}원\n"
-                f"❗ {result.get('error', 'unknown')}\n"
-                f"📛 코드: {result.get('code', '-')}"
+                f"❗ {error_msg}\n"
+                f"📛 코드: {error_code or '-'}"
             )
 
             with ui.column().classes("w-full items-center p-12 max-w-xl mx-auto"):
