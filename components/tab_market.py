@@ -26,6 +26,7 @@ try:
         gap_direction,
         is_truthy_flag,
         is_route_blocked,
+        VERDICT_LABELS,
     )
 except Exception as _ui_terms_err:
     logging.getLogger(__name__).warning(
@@ -66,6 +67,14 @@ except Exception as _ui_terms_err:
         if not s: return False
         return s not in {"ATTACK", "ARMED", "ALL", "FULL",
                           "TOP_PICK", "ATTACK_ONLY", "ALLOW_ATTACK"}
+    VERDICT_LABELS = {
+        "OK":           "🟢 오늘 매수 OK",
+        "HALF":         "🟠 절반만 매수 권장",
+        "BLOCK_ENGINE": "🟠 신규 매수 자제 (엔진 제한)",
+        "BLOCK_MARKET": "🔴 오늘 매수 금지 (시장 위험)",
+        "OBSERVE":      "⏸️ 오늘은 지켜보세요",
+        "NO_SIGNAL":    "🔴 매수 신호 없음",
+    }
 
 try:
     import plotly.graph_objects as go
@@ -354,11 +363,15 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 n_agg = 0
                 n_stb = 0
             
-            # ─── [Step D + E1] verdict 결정 ───
+            # ─── [Step D + E1 + J] verdict 결정 (VERDICT_LABELS 키 사용) ───
+            # VERDICT_LABELS는 "이모지 + 텍스트" 통합형이라 헤더에서 직접 사용
+            # verdict_emoji는 카드 디자인용으로 별도 유지
             if is_macro_dangerous:
                 # 🔴 매크로 위험 — TOP_PICK 있어도 신규 진입 금지
                 verdict_emoji = "🔴"
-                verdict_text = "오늘 매수 금지 (시장 위험)"
+                verdict_text = VERDICT_LABELS.get(
+                    "BLOCK_MARKET", "🔴 오늘 매수 금지 (시장 위험)"
+                ).replace("🔴 ", "")  # 헤더에서 emoji는 별도 표시
                 verdict_subtitle = (
                     f"TOP_PICK {n_top}개  ·  하지만 시장 위험 "
                     f"({macro_risk}) — 지켜보기만 권장"
@@ -372,7 +385,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             elif route_blocked:
                 # [Step E1] 🟠 엔진이 ROUTE 제한 — 매크로는 정상이지만 신규 진입 X
                 verdict_emoji = "🟠"
-                verdict_text = "신규 매수 자제 (엔진 제한)"
+                verdict_text = VERDICT_LABELS.get(
+                    "BLOCK_ENGINE", "🟠 신규 매수 자제 (엔진 제한)"
+                ).replace("🟠 ", "")
                 verdict_subtitle = (
                     f"TOP_PICK {n_top}개  ·  엔진 최대 허용 ROUTE={max_route} "
                     f"— 지켜보기만 권장"
@@ -386,7 +401,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             elif is_macro_caution:
                 # 🟠 시장 주의 — 보수적 분할 진입
                 verdict_emoji = "🟠"
-                verdict_text = "절반만 매수 권장"
+                verdict_text = VERDICT_LABELS.get(
+                    "HALF", "🟠 절반만 매수 권장"
+                ).replace("🟠 ", "")
                 verdict_subtitle = (
                     f"TOP_PICK {n_top}개  ·  시장 주의 "
                     f"({macro_risk}) — 비중 절반으로 축소"
@@ -400,7 +417,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             else:
                 # 🟢 정상 — 신규 진입 가능
                 verdict_emoji = "🟢"
-                verdict_text = "오늘 매수 OK"
+                verdict_text = VERDICT_LABELS.get(
+                    "OK", "🟢 오늘 매수 OK"
+                ).replace("🟢 ", "")
                 type_summary = []
                 if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
                 if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
@@ -783,16 +802,18 @@ def render_tab_market(df):
                     ui.label("엔진 신뢰도").classes("text-xs text-gray-400")
                     cc = "#10B981" if confidence >= 80 else "#F59E0B" if confidence >= 50 else "#EF4444"
                     ui.label(f"{confidence:.0f}/100").classes("text-lg font-bold").style(f"color:{cc}")
-                    ui.label(f"최대허용: {max_route}").classes("text-xs text-gray-500")
+                    # [Step J] 최대 허용 ROUTE도 한국어로 표시
+                    _max_route_disp = route_display(max_route) if max_route else "-"
+                    ui.label(f"최대허용: {_max_route_disp}").classes("text-xs text-gray-500")
 
                 # ELITE/TOP_PICK 요약
                 if "ELITE_SCORE" in df.columns:
                     elite_avg = df["ELITE_SCORE"].mean()
                     tp_count = int(df.get("TOP_PICK", pd.Series(0)).sum()) if "TOP_PICK" in df.columns else 0
                     with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
-                        ui.label("오늘의 ELITE").classes("text-xs text-gray-400")
+                        ui.label("오늘의 추천 종목").classes("text-xs text-gray-400")
                         ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
-                        ui.label(f"평균 ELITE {elite_avg:.0f}").classes("text-xs text-gray-500")
+                        ui.label(f"평균 점수 {elite_avg:.0f}").classes("text-xs text-gray-500")
 
         # ── [v22 UI Step B] ELITE 후보 더 보기 — TOP_PICK 제외 ──
         # Hero 카드에 이미 TOP_PICK이 표시되므로, 여기서는 TOP_PICK 제외한 후보만
