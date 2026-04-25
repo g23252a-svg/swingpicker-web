@@ -1506,132 +1506,139 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
             ).classes(f"text-sm {badge_clr} mb-2 font-bold")
 
         # ───────────────────────────────────────────
-        # 📊 보조 블록 — 검증 증거 (회색 톤으로 구분)
+        # [v22 UI Phase 2] 보조 블록 + 메타 블록 → expansion 으로 접기
+        # 평소: 헤더 + 메인 블록 (실집행/신호/신뢰도) 만 보임
+        # 클릭: WF/Rolling/3종목/Top3 + 검증조건 + 갱신시각 펼침
         # ───────────────────────────────────────────
-        ui.label("📊 보조 검증 (참고)").classes(
-            "text-[11px] text-gray-400 font-bold mt-2 mb-1 uppercase tracking-wider"
-        )
+        with ui.expansion(
+            "📊 백테스트 검증 상세 보기 (Walk-forward · Rolling · 검증조건)",
+            icon="science"
+        ).classes(
+            "w-full mt-2 mb-2 bg-[rgba(255,255,255,0.02)] "
+            "border border-[rgba(255,255,255,0.05)] rounded"
+        ).props("dense"):
+            ui.label("📊 보조 검증 (참고)").classes(
+                "text-[11px] text-gray-400 font-bold mt-1 mb-1 uppercase tracking-wider"
+            )
 
-        # Walk-forward 일반화
-        wf_results = wf_stats.get("results") if isinstance(wf_stats, dict) else None
-        if wf_results and len(wf_results) > 0:
-            generalizes_n = sum(1 for r in wf_results if r.get("generalizes"))
-            total_n = len(wf_results)
-            horizon = wf_stats.get("horizon_used", "?")
-            if generalizes_n == total_n:
-                mark = "✅"
-                color = "text-green-400"
-            elif generalizes_n >= total_n // 2:
-                mark = "⚠️"
-                color = "text-yellow-400"
-            else:
-                mark = "❌"
-                color = "text-red-400"
-            top = wf_results[0]
-            is_ev = top.get("is_summary", {}).get("ev", 0)
-            oos_ev = top.get("oos_summary", {}).get("ev", 0)
-            ui.label(
-                f"{mark} Walk-forward(h={horizon}일): "
-                f"IS Top 5 중 {generalizes_n}/{total_n} 일반화 · "
-                f"대표조합 IS {is_ev:+.2f}% → OOS {oos_ev:+.2f}%"
-            ).classes(f"text-xs {color} mb-1")
-
-        # Rolling walk-forward
-        if rolling_stats and rolling_stats.get("n_valid", 0) > 0:
-            n_gen = rolling_stats.get("n_generalizes", 0)
-            n_val = rolling_stats.get("n_valid", 0)
-            avg_is = rolling_stats.get("avg_is_ev", 0)
-            avg_oos = rolling_stats.get("avg_oos_ev", 0)
-            robust = rolling_stats.get("robust", False)
-            r_mark = "🔁 ✅" if robust else "🔁 ⚠️"
-            r_color = "text-green-400" if robust else "text-yellow-400"
-            ui.label(
-                f"{r_mark} Rolling {n_gen}/{n_val} 폴드 일반화 · "
-                f"평균 IS {avg_is:+.2f}% → OOS {avg_oos:+.2f}%"
-            ).classes(f"text-xs {r_color} mb-1")
-
-        # 일자별 3종목 포트폴리오 (참고 수치)
-        if port_stats and port_stats.get("n_days", 0) >= 5:
-            avg_daily = port_stats["avg_daily_portfolio_ret"]
-            pos_rate = port_stats.get("positive_rate", 0) * 100
-            n_days = port_stats["n_days"]
-            n_pos = port_stats.get("n_positive_days", 0)
-            p_mark = "📈" if avg_daily > 0 else "📉"
-            p_color = "text-green-500" if avg_daily > 0 else "text-gray-500"
-            ui.label(
-                f"{p_mark} (참고) 일평균 3종목 포트폴리오: {avg_daily:+.2f}% · "
-                f"플러스 마감 {n_pos}/{n_days}일 ({pos_rate:.0f}%)"
-            ).classes(f"text-xs {p_color} mb-1")
-
-        # Top3 자본 시뮬 (참고)
-        if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
-            total_ret = capital_stats.get("total_return_pct", 0)
-            mdd = capital_stats.get("max_drawdown_pct", 0)
-            n_filled = capital_stats["n_trades_filled"]
-            ui.label(
-                f"· (참고) Top3 모드 자본시뮬: "
-                f"기간수익 {total_ret:+.2f}% · MDD {mdd:.1f}% · 체결 {n_filled}건"
-            ).classes("text-xs text-gray-500 mb-1")
-
-        # ───────────────────────────────────────────
-        # 🔧 메타 블록 — 검증 조건 + 갱신 시각
-        # ───────────────────────────────────────────
-
-        # [v3.7.15] methodology 메타 한 줄 — 검증 조건 완전 투명화
-        methodology = bt.get("methodology")
-        if isinstance(methodology, dict):
-            mh = methodology.get("horizon_days", "?")
-            mf = methodology.get("fill_window_days", "?")
-            mc = methodology.get("fee_pct_roundtrip", "?")
-            mp = methodology.get("max_positions_top1", "?")
-            mdedup = "✓" if methodology.get("dedup_same_ticker") else "✗"
-            mreentry = "✓" if methodology.get("reentry_after_exit") else "✗"
-            msel = methodology.get("selection_mode", "?")
-            mdate = methodology.get("date_range", ["", ""])
-            ui.label(
-                f"🔧 검증조건: horizon {mh}일 · fill {mf}일 · fee {mc}% · "
-                f"max_pos {mp} · dedup {mdedup} · reentry {mreentry} · "
-                f"{msel} · {mdate[0]}~{mdate[1]}"
-            ).classes("text-[10px] text-gray-500 mb-1 italic")
-
-        # [v3.7.21] 검증 JSON 생성 시각 표시 — 데이터 신선도(Freshness) 투명화
-        # 이전엔 generated_at이 전혀 표시 안 돼서 사용자가 숫자 기준 시점 모름
-        # auto_collect.yml에서 매일 백테스트 자동 실행 후 여기에 갱신 시각 반영
-        generated_at = bt.get("generated_at", "")
-        if generated_at:
-            # "2026-04-18T01:08:10" → "2026-04-18 01:08"
-            gen_display = generated_at.replace("T", " ")[:16]
-            # 얼마나 오래됐는지 계산 (UI 색상으로 신선도 표시)
-            try:
-                from datetime import datetime, timezone
-                gen_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-                if gen_dt.tzinfo is None:
-                    gen_dt = gen_dt.replace(tzinfo=timezone.utc)
-                now = datetime.now(timezone.utc)
-                age_hours = (now - gen_dt).total_seconds() / 3600
-                if age_hours < 24:
-                    freshness = "🟢"  # 24시간 이내 (fresh)
-                    fresh_cls = "text-green-500"
-                elif age_hours < 72:
-                    freshness = "🟡"  # 3일 이내 (stale)
-                    fresh_cls = "text-yellow-500"
+            # Walk-forward 일반화
+            wf_results = wf_stats.get("results") if isinstance(wf_stats, dict) else None
+            if wf_results and len(wf_results) > 0:
+                generalizes_n = sum(1 for r in wf_results if r.get("generalizes"))
+                total_n = len(wf_results)
+                horizon = wf_stats.get("horizon_used", "?")
+                if generalizes_n == total_n:
+                    mark = "✅"
+                    color = "text-green-400"
+                elif generalizes_n >= total_n // 2:
+                    mark = "⚠️"
+                    color = "text-yellow-400"
                 else:
-                    freshness = "🔴"  # 3일 초과 (outdated)
-                    fresh_cls = "text-red-500"
-                age_txt = (
-                    f"{int(age_hours)}시간 전" if age_hours < 48
-                    else f"{int(age_hours/24)}일 전"
-                )
-            except Exception:
-                freshness = "📅"
-                fresh_cls = "text-gray-500"
-                age_txt = ""
-            ver = bt.get("version", "")
-            ui.label(
-                f"{freshness} 마지막 검증 갱신: {gen_display}"
-                + (f" ({age_txt})" if age_txt else "")
-                + (f" · 버전 {ver}" if ver else "")
-            ).classes(f"text-[10px] {fresh_cls} mb-2 italic")
+                    mark = "❌"
+                    color = "text-red-400"
+                top = wf_results[0]
+                is_ev = top.get("is_summary", {}).get("ev", 0)
+                oos_ev = top.get("oos_summary", {}).get("ev", 0)
+                ui.label(
+                    f"{mark} Walk-forward(h={horizon}일): "
+                    f"IS Top 5 중 {generalizes_n}/{total_n} 일반화 · "
+                    f"대표조합 IS {is_ev:+.2f}% → OOS {oos_ev:+.2f}%"
+                ).classes(f"text-xs {color} mb-1")
+
+            # Rolling walk-forward
+            if rolling_stats and rolling_stats.get("n_valid", 0) > 0:
+                n_gen = rolling_stats.get("n_generalizes", 0)
+                n_val = rolling_stats.get("n_valid", 0)
+                avg_is = rolling_stats.get("avg_is_ev", 0)
+                avg_oos = rolling_stats.get("avg_oos_ev", 0)
+                robust = rolling_stats.get("robust", False)
+                r_mark = "🔁 ✅" if robust else "🔁 ⚠️"
+                r_color = "text-green-400" if robust else "text-yellow-400"
+                ui.label(
+                    f"{r_mark} Rolling {n_gen}/{n_val} 폴드 일반화 · "
+                    f"평균 IS {avg_is:+.2f}% → OOS {avg_oos:+.2f}%"
+                ).classes(f"text-xs {r_color} mb-1")
+
+            # 일자별 3종목 포트폴리오 (참고 수치)
+            if port_stats and port_stats.get("n_days", 0) >= 5:
+                avg_daily = port_stats["avg_daily_portfolio_ret"]
+                pos_rate = port_stats.get("positive_rate", 0) * 100
+                n_days = port_stats["n_days"]
+                n_pos = port_stats.get("n_positive_days", 0)
+                p_mark = "📈" if avg_daily > 0 else "📉"
+                p_color = "text-green-500" if avg_daily > 0 else "text-gray-500"
+                ui.label(
+                    f"{p_mark} (참고) 일평균 3종목 포트폴리오: {avg_daily:+.2f}% · "
+                    f"플러스 마감 {n_pos}/{n_days}일 ({pos_rate:.0f}%)"
+                ).classes(f"text-xs {p_color} mb-1")
+
+            # Top3 자본 시뮬 (참고)
+            if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
+                total_ret = capital_stats.get("total_return_pct", 0)
+                mdd = capital_stats.get("max_drawdown_pct", 0)
+                n_filled = capital_stats["n_trades_filled"]
+                ui.label(
+                    f"· (참고) Top3 모드 자본시뮬: "
+                    f"기간수익 {total_ret:+.2f}% · MDD {mdd:.1f}% · 체결 {n_filled}건"
+                ).classes("text-xs text-gray-500 mb-1")
+
+            # ───────────────────────────────────────────
+            # 🔧 메타 블록 — 검증 조건 + 갱신 시각 (expansion 안)
+            # ───────────────────────────────────────────
+
+            # [v3.7.15] methodology 메타 한 줄 — 검증 조건 완전 투명화
+            methodology = bt.get("methodology")
+            if isinstance(methodology, dict):
+                mh = methodology.get("horizon_days", "?")
+                mf = methodology.get("fill_window_days", "?")
+                mc = methodology.get("fee_pct_roundtrip", "?")
+                mp = methodology.get("max_positions_top1", "?")
+                mdedup = "✓" if methodology.get("dedup_same_ticker") else "✗"
+                mreentry = "✓" if methodology.get("reentry_after_exit") else "✗"
+                msel = methodology.get("selection_mode", "?")
+                mdate = methodology.get("date_range", ["", ""])
+                ui.label(
+                    f"🔧 검증조건: horizon {mh}일 · fill {mf}일 · fee {mc}% · "
+                    f"max_pos {mp} · dedup {mdedup} · reentry {mreentry} · "
+                    f"{msel} · {mdate[0]}~{mdate[1]}"
+                ).classes("text-[10px] text-gray-500 mb-1 italic")
+
+            # [v3.7.21] 검증 JSON 생성 시각 표시 — 데이터 신선도(Freshness) 투명화
+            generated_at = bt.get("generated_at", "")
+            if generated_at:
+                # "2026-04-18T01:08:10" → "2026-04-18 01:08"
+                gen_display = generated_at.replace("T", " ")[:16]
+                # 얼마나 오래됐는지 계산 (UI 색상으로 신선도 표시)
+                try:
+                    from datetime import datetime, timezone
+                    gen_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+                    if gen_dt.tzinfo is None:
+                        gen_dt = gen_dt.replace(tzinfo=timezone.utc)
+                    now = datetime.now(timezone.utc)
+                    age_hours = (now - gen_dt).total_seconds() / 3600
+                    if age_hours < 24:
+                        freshness = "🟢"  # 24시간 이내 (fresh)
+                        fresh_cls = "text-green-500"
+                    elif age_hours < 72:
+                        freshness = "🟡"  # 3일 이내 (stale)
+                        fresh_cls = "text-yellow-500"
+                    else:
+                        freshness = "🔴"  # 3일 초과 (outdated)
+                        fresh_cls = "text-red-500"
+                    age_txt = (
+                        f"{int(age_hours)}시간 전" if age_hours < 48
+                        else f"{int(age_hours/24)}일 전"
+                    )
+                except Exception:
+                    freshness = "📅"
+                    fresh_cls = "text-gray-500"
+                    age_txt = ""
+                ver = bt.get("version", "")
+                ui.label(
+                    f"{freshness} 마지막 검증 갱신: {gen_display}"
+                    + (f" ({age_txt})" if age_txt else "")
+                    + (f" · 버전 {ver}" if ver else "")
+                ).classes(f"text-[10px] {fresh_cls} mb-1 italic")
 
         if not top3_codes:
             # [v3.7.2] 빈 상태에도 백테스트 실측을 표시 — 데이터의 정직함 우선
@@ -1690,6 +1697,227 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                     )
 
 
+def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
+    """[v22 UI Phase 1] 종목 분석 탭 Hero 카드 — 첫 화면 1초 답변
+    
+    3가지 시나리오:
+      A) 콤보/최강/즉시진입 라벨 종목 ≥1   → 🟢 진입 가능 라벨 + 카드 Top 3
+      B) ⚠️ 추격 라벨만 있음                → 🟠 추격 비추 + 추격 라벨 통계
+      C) 라벨 통과 종목 0건                  → 🔴 매수 신호 없음
+    
+    안전 설계:
+      - try/except로 에러 시 카드만 안 띄우고 진행
+      - top3_codes가 있으면 그 종목들 카드, 없으면 라벨 통계만
+    """
+    try:
+        if df is None or df.empty:
+            return
+        
+        # 라벨 카운트
+        if "ELITE_LABEL" not in df.columns:
+            return
+        
+        n_combo = int((df["ELITE_LABEL"] == "🛡️ 콤보").sum())
+        n_strong = int((df["ELITE_LABEL"] == "🏆 최강").sum())
+        n_instant = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
+        n_chase = int((df["ELITE_LABEL"] == "⚠️ 추격").sum())
+        
+        # 진입 가능 (콤보 + 즉시진입 = 실전 매매 가능)
+        # 최강은 v3.7.25 기준 관찰 모드 (매매 제외)
+        n_actionable = n_combo + n_instant
+        n_total = n_combo + n_strong + n_instant + n_chase
+        
+        # ─────────────────────────────────────────────
+        # 시나리오 A: 진입 가능 라벨 ≥ 1
+        # ─────────────────────────────────────────────
+        if n_actionable >= 1:
+            with ui.card().classes(
+                "w-full p-5 mb-4 rounded-xl "
+                "border-2 border-emerald-500/50"
+            ).style(
+                "background: linear-gradient(to right, #0a3d2a, #0d5440, #0a3d2a)"
+            ):
+                with ui.row().classes("w-full items-center justify-between"):
+                    with ui.column().classes("gap-1"):
+                        ui.label(f"🟢 오늘 진입 가능 종목 {n_actionable}개").classes(
+                            "text-lg font-bold text-emerald-300"
+                        )
+                        # 라벨별 분해
+                        type_summary = []
+                        if n_combo > 0: type_summary.append(f"🛡️ 콤보 {n_combo}")
+                        if n_instant > 0: type_summary.append(f"✅ 즉시 {n_instant}")
+                        if n_strong > 0: type_summary.append(f"🏆 최강 {n_strong} (관찰)")
+                        ui.label(" · ".join(type_summary)).classes(
+                            "text-sm text-emerald-100"
+                        )
+                    ui.label(f"{n_actionable}").classes(
+                        "text-5xl font-black text-emerald-300"
+                    )
+            
+            # Top 3 카드 (top3_codes 사용 또는 즉시진입/콤보 우선)
+            display_codes = list(top3_codes) if top3_codes else []
+            if not display_codes:
+                # top3_codes 비어있으면 콤보 + 즉시진입 중 ELITE_RANK_SCORE 상위 3
+                actionable_df = df[df["ELITE_LABEL"].isin(["🛡️ 콤보", "✅ 즉시진입"])]
+                if not actionable_df.empty and "ELITE_RANK_SCORE" in actionable_df.columns:
+                    top_actionable = actionable_df.nlargest(3, "ELITE_RANK_SCORE")
+                    display_codes = [
+                        str(c).zfill(6) for c in top_actionable["종목코드"].tolist()
+                    ]
+            
+            if display_codes:
+                with ui.row().classes("w-full gap-3 flex-wrap mb-4"):
+                    for rank, code in enumerate(display_codes[:3], 1):
+                        match = df[df["종목코드"].astype(str).str.zfill(6) == code]
+                        if match.empty:
+                            continue
+                        r = match.iloc[0]
+                        
+                        name = str(r.get("종목명", "?"))
+                        lbl = str(r.get("ELITE_LABEL", ""))
+                        lbl_color = str(r.get("ELITE_LABEL_COLOR", "#3B82F6"))
+                        s_v = _nz(r.get("STRUCT_SCORE", 0))
+                        t_v = _nz(r.get("TIMING_SCORE", 0))
+                        a_v = _nz(r.get("AI_SCORE", 0))
+                        bal = _nz(r.get("BALANCE_CALC", r.get("BALANCE_SCORE", 0)))
+                        gap = _nz(r.get("GAP_PCT", 0))
+                        rr = _nz(r.get("RR_NOW_TP1", 0))
+                        ewr = _nz(r.get("EST_WIN_RATE", 0))
+                        elite_score = _nz(r.get("ELITE_SCORE", 
+                                                r.get("ELITE_RANK_SCORE", 0)))
+                        
+                        buy = int(_nz(r.get("추천매수가", 0)))
+                        tp1 = int(_nz(r.get("추천매도가1", 0)))
+                        stop = int(_nz(r.get("손절가", 0)))
+                        close = int(_nz(r.get("종가", 0)))
+                        
+                        tp1_pct = (tp1 / buy - 1) * 100 if buy > 0 else 0
+                        stop_pct = (stop / buy - 1) * 100 if buy > 0 else 0
+                        
+                        # 진입갭 방향 (시장 탭 Step E3 적용)
+                        if abs(gap) < 0.05:
+                            gap_desc = "현재가 일치"
+                        elif gap > 0:
+                            gap_desc = "현재가 높음"
+                        else:
+                            gap_desc = "현재가 낮음"
+                        
+                        # 라벨에 따른 강조 색상
+                        if "콤보" in lbl:
+                            accent = "#8B5CF6"  # purple
+                        elif "최강" in lbl:
+                            accent = "#F59E0B"  # amber
+                        elif "즉시" in lbl:
+                            accent = "#10B981"  # green
+                        else:
+                            accent = "#3B82F6"  # blue
+                        
+                        with ui.card().classes(
+                            "flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
+                            "border-l-4 rounded-xl"
+                        ).style(f"border-left-color: {accent}"):
+                            # 라벨 + 순위 + 종목명
+                            with ui.row().classes("w-full items-center gap-2 mb-2"):
+                                ui.label(f"#{rank}").classes(
+                                    "text-sm text-gray-500"
+                                )
+                                ui.badge(lbl, color=lbl_color).classes("text-xs")
+                                ui.label(name).classes(
+                                    "text-base font-bold text-white"
+                                )
+                            
+                            # 3축 + 밸런스
+                            ui.label(
+                                f"S{s_v:.0f} / T{t_v:.0f} / AI{a_v:.0f}  ·  "
+                                f"균형 {bal:.0f}"
+                            ).classes("text-xs text-purple-300 mb-1")
+                            
+                            # RR + 진입갭 방향성
+                            ui.label(
+                                f"RR {rr:.2f}:1  ·  진입갭 {gap:+.1f}% ({gap_desc})"
+                            ).classes("text-xs text-gray-400 mb-1")
+                            
+                            # 가격 (매수 → 목표 + 손절)
+                            if buy > 0 and tp1 > 0:
+                                ui.label(
+                                    f"매수 {buy:,} → 목표 {tp1:,}  ({tp1_pct:+.1f}%)"
+                                ).classes("text-sm text-cyan-300")
+                            if stop > 0 and buy > 0:
+                                ui.label(
+                                    f"손절 {stop:,}원  ({stop_pct:+.1f}%)"
+                                ).classes("text-xs text-red-300")
+                            
+                            # 추가 정보 (점수 / 승률)
+                            with ui.row().classes("w-full gap-3 mt-2 items-center"):
+                                if elite_score > 0:
+                                    ui.label(f"점수 {elite_score:.0f}").classes(
+                                        "text-xs text-amber-300"
+                                    )
+                                if ewr > 0:
+                                    ui.label(f"승률 {ewr*100:.0f}%").classes(
+                                        "text-xs text-gray-400"
+                                    )
+            return
+        
+        # ─────────────────────────────────────────────
+        # 시나리오 B: 추격 라벨만 (진입 가능 0)
+        # ─────────────────────────────────────────────
+        if n_chase > 0:
+            with ui.card().classes(
+                "w-full p-5 mb-4 rounded-xl border-2 border-amber-500/50"
+            ).style(
+                "background: linear-gradient(to right, #3d2a0a, #544013, #3d2a0a)"
+            ):
+                with ui.row().classes("w-full items-center justify-between"):
+                    with ui.column().classes("gap-1"):
+                        ui.label("⏸️ 오늘은 관찰 모드 (추격 비추)").classes(
+                            "text-lg font-bold text-amber-300"
+                        )
+                        msg_parts = ["진입 가능 종목 0건"]
+                        if n_chase > 0:
+                            msg_parts.append(f"⚠️ 추격 후보 {n_chase}개")
+                        if n_strong > 0:
+                            msg_parts.append(f"🏆 최강(관찰) {n_strong}개")
+                        ui.label("  ·  ".join(msg_parts)).classes(
+                            "text-sm text-amber-100"
+                        )
+                    ui.label("0").classes(
+                        "text-5xl font-black text-amber-300/60"
+                    )
+            
+            ui.label(
+                "💡 추격은 갭이 5%를 넘어선 종목입니다. "
+                "이미 늦었을 가능성이 크니 무리하지 마세요."
+            ).classes("text-xs text-gray-500 italic mb-4")
+            return
+        
+        # ─────────────────────────────────────────────
+        # 시나리오 C: 라벨 통과 0건
+        # ─────────────────────────────────────────────
+        with ui.card().classes(
+            "w-full p-5 mb-4 rounded-xl border-2 border-red-500/50"
+        ).style(
+            "background: linear-gradient(to right, #3d0a0a, #541313, #3d0a0a)"
+        ):
+            with ui.row().classes("w-full items-center justify-between"):
+                with ui.column().classes("gap-1"):
+                    ui.label("🔴 오늘은 매수 신호 없음").classes(
+                        "text-lg font-bold text-red-300"
+                    )
+                    ui.label(
+                        "라벨 조건을 통과한 종목이 없습니다. 다음 거래일 대기 권장."
+                    ).classes("text-sm text-red-100")
+                ui.icon("warning", size="48px").classes("text-red-400")
+    
+    except Exception as _e:
+        # Hero 카드 실패해도 나머지 화면은 정상 표시
+        try:
+            from utils.logger import get_logger
+            get_logger().warning(f"종목 Hero 카드 렌더 실패: {_e}")
+        except Exception:
+            pass
+
+
 def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     """Tab 2: AI & Quant 추천 종목
 
@@ -1711,6 +1939,12 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     ui.label("🎯 AI & Quant 추천 종목").classes(
         "text-xl font-bold text-white mb-4"
     )
+
+    # ═══════════════════════════════════════════════════
+    # [v22 UI Phase 1] Hero 카드 — 첫 화면 1초 답변
+    # 시장 탭과 같은 패턴: 결론 → 카드 → 상세
+    # ═══════════════════════════════════════════════════
+    _render_stocks_hero(df, top3_codes)
 
     # ── [v3.7] Top 3 헤더 카드 (백테스트 검증 기반) ──
     _render_top3_card(df, top3_codes)
@@ -1756,12 +1990,20 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     else:
         n_combo = n_strong = n_instant = n_chase = n_none = 0
 
-    with ui.card().classes(
-        "w-full p-2 mb-3 bg-[rgba(255,255,255,0.02)] "
+    # [v22 UI Phase 3] 라벨 기준 안내 → expansion으로 접기 (기본 닫힘)
+    # 헤더 텍스트에 카운트 요약 표시 → 펼치지 않아도 전체 통계 파악 가능
+    _label_summary = (
+        f"🛡️ 콤보 {n_combo}  ·  🏆 최강 {n_strong}  ·  "
+        f"✅ 즉시진입 {n_instant}  ·  ⚠️ 추격 {n_chase}"
+    )
+    with ui.expansion(
+        f"🏷️ 라벨 기준 보기  ({_label_summary})",
+        icon="bookmark"
+    ).classes(
+        "w-full mb-3 bg-[rgba(255,255,255,0.02)] "
         "border border-[rgba(255,255,255,0.05)] rounded"
-    ):
-        with ui.row().classes("w-full gap-6 items-center flex-wrap"):
-            ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
+    ).props("dense"):
+        with ui.column().classes("w-full gap-1 p-2"):
             # [v3.7.25] 🛡️ 콤보 최우선 표시 (제1 매수 · 실성능 1위)
             ui.label(
                 f"🛡️ 콤보 ({n_combo}): S≥90 · T≥80 · AI≥60 · ATTACK/ARMED "
