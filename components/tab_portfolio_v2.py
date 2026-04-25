@@ -26,6 +26,34 @@ from nicegui import ui, app
 
 from shared_utils import nz_num, safe_float
 
+# ═══════════════════════════════════════════════════
+# [v22 UI Step L] 공통 용어 사전 import (시장/종목 탭과 동일 패턴)
+# 배포 중 import 경로 꼬여도 화면 죽지 않게 fallback 제공
+# ═══════════════════════════════════════════════════
+try:
+    from components.ui_terms import (
+        route_display,
+        route_icon,
+        is_truthy_flag,
+    )
+except Exception as _ui_terms_err:
+    logging.getLogger(__name__).warning(
+        f"ui_terms import 실패, fallback 사용: {_ui_terms_err}"
+    )
+    def route_display(x):
+        _map = {"ATTACK": "🚀 적극 매수", "ARMED": "🎯 매수 준비",
+                "WAIT": "⏸️ 관망", "NEUTRAL": "👁️ 중립",
+                "CARRY": "📌 보유 관리", "OVERHEAT": "🔥 과열 주의",
+                "EXIT_WARNING": "⚠️ 이탈 주의", "BLOCKED": "⛔ 제외"}
+        return _map.get(str(x or "").strip().upper(), str(x or ""))
+    def route_icon(x):
+        _icons = {"ATTACK": "🚀", "ARMED": "🎯", "WAIT": "⏸️",
+                  "NEUTRAL": "👁️", "CARRY": "📌"}
+        return _icons.get(str(x or "").strip().upper(), "👀")
+    def is_truthy_flag(v):
+        if v is None: return False
+        return str(v).strip().upper() in {"1", "1.0", "TRUE", "Y", "YES"}
+
 try:
     from async_helpers import run_sync, _io_pool
 except ImportError:
@@ -493,6 +521,347 @@ def _generate_fallback_report(pf_rows, dart_results, total_eval, cash_amt):
 #  메인 렌더
 # ══════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════
+# [v22 UI Step L] Hero 카드 + 진단 요약 헬퍼
+# 첫 화면 1초 답변 + 진단 결과 결론성 강화
+# 시장/종목 탭과 동일한 결론 → 카드 → 상세 패턴
+# ══════════════════════════════════════════════════════
+
+def _parse_portfolio_text(text: str) -> tuple:
+    """저장된 포트폴리오 텍스트를 (종목 리스트, 현금 합계)로 파싱.
+    
+    Returns:
+        (items, cash_amt)
+        items: [{"name": str, "avg": int, "qty": int}, ...]
+        cash_amt: float (CASH/현금 라인의 합계)
+    """
+    items = []
+    cash_amt = 0.0
+    if not text:
+        return items, cash_amt
+    for line in text.split("\n"):
+        if ":" not in line:
+            continue
+        parts = line.split(":")
+        if len(parts) < 3:
+            continue
+        try:
+            nm = parts[0].strip()
+            avg = int(float(parts[1].replace(",", "").strip()))
+            qty = int(float(parts[2].replace(",", "").strip()))
+        except (ValueError, IndexError, TypeError):
+            continue
+        if nm.upper() == "CASH" or "현금" in nm:
+            cash_amt += avg * qty
+        else:
+            items.append({"name": nm, "avg": avg, "qty": qty})
+    return items, cash_amt
+
+
+def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
+    """[v22 UI Step L] 내자산 탭 Hero 카드 — 진입 시 1초 답변
+    
+    저장된 포트폴리오가 있으면:
+      - 종목 수, 매입 합계, 평단 기반 추정 평가금
+      - 시스템 추천에 들어와있는 종목 수 (오늘 추천 / 관찰 대상)
+      - 즉시 액션 필요 종목 수 (점수 ≤ 40)
+    
+    저장된 포트폴리오가 없으면:
+      - 온보딩 카드 (입력하면 무엇을 받을 수 있는지)
+    
+    안전: try/except로 카드 실패해도 진단 화면은 정상
+    """
+    try:
+        items, cash_amt = _parse_portfolio_text(saved_text)
+        n_stocks = len(items)
+        
+        # ─────────────────────────────────────────────
+        # 빈 상태 (보유 종목 없음) → 온보딩
+        # ─────────────────────────────────────────────
+        if n_stocks == 0 and cash_amt == 0:
+            with ui.card().classes(
+                "w-full p-5 mb-4 rounded-xl border-2 border-blue-500/40"
+            ).style(
+                "background: linear-gradient(to right, #0a1a3d, #0d2a5b, #0a1a3d)"
+            ):
+                with ui.row().classes("w-full items-center gap-4"):
+                    ui.icon("savings", size="48px").classes("text-blue-300")
+                    with ui.column().classes("gap-1 flex-1"):
+                        ui.label("💼 보유 종목을 입력하면").classes(
+                            "text-base font-bold text-blue-300"
+                        )
+                        ui.label(
+                            "✓ 매일 자동 AI 진단  ·  ✓ DART 공시 리스크 알림  ·  "
+                            "✓ AI 종합 리포트  ·  ✓ 적정 비중 제안"
+                        ).classes("text-xs text-blue-100")
+            return
+        
+        # ─────────────────────────────────────────────
+        # 보유 종목 있음 → 빠른 요약 (정확한 평가금은 진단 후)
+        # ─────────────────────────────────────────────
+        total_buy = sum(i["avg"] * i["qty"] for i in items)
+        total_with_cash = total_buy + cash_amt
+        
+        # 시스템 추천 매칭 — 빠른 lookup (현재 df 기준)
+        n_today = 0   # 오늘 추천에 있는 종목
+        n_caution = 0 # 점수 ≤ 40 (교체 검토)
+        n_observe = 0 # 점수 41~59 (모니터링)
+        n_hold = 0    # 점수 ≥ 60 (양호)
+        
+        if df is not None and not df.empty and "종목명" in df.columns:
+            df_names = set(df["종목명"].astype(str))
+            for it in items:
+                if it["name"] in df_names:
+                    n_today += 1
+                    match = df[df["종목명"] == it["name"]]
+                    if not match.empty:
+                        score = safe_float(match.iloc[0].get("DISPLAY_SCORE", 0))
+                        if score >= 60:
+                            n_hold += 1
+                        elif score >= 41:
+                            n_observe += 1
+                        elif score > 0:
+                            n_caution += 1
+        
+        # 헤더 카드 — 결론 한 줄
+        with ui.card().classes(
+            "w-full p-5 mb-4 rounded-xl border-2 border-cyan-500/50"
+        ).style(
+            "background: linear-gradient(to right, #0a2a3d, #0d4054, #0a2a3d)"
+        ):
+            with ui.row().classes("w-full items-center justify-between"):
+                with ui.column().classes("gap-1"):
+                    ui.label(f"💼 보유 자산 현황").classes(
+                        "text-lg font-bold text-cyan-300"
+                    )
+                    parts = [f"종목 {n_stocks}개"]
+                    if total_buy > 0:
+                        parts.append(f"매입 {int(total_buy):,}원")
+                    if cash_amt > 0:
+                        cash_pct = cash_amt / total_with_cash * 100 if total_with_cash > 0 else 0
+                        parts.append(f"현금 {cash_pct:.0f}%")
+                    ui.label("  ·  ".join(parts)).classes("text-sm text-cyan-100")
+                with ui.column().classes("items-end gap-0"):
+                    ui.label(f"{int(total_with_cash):,}원").classes(
+                        "text-2xl font-black text-cyan-300"
+                    )
+                    ui.label("매입 + 현금 기준").classes("text-[10px] text-gray-500")
+        
+        # 빠른 진단 요약 (df에 있는 종목들만)
+        if n_today > 0:
+            with ui.row().classes("w-full gap-3 mb-4 flex-wrap"):
+                # 즉시 액션 필요 (교체 검토)
+                if n_caution > 0:
+                    with ui.card().classes(
+                        "flex-1 min-w-[200px] p-3 rounded-lg "
+                        "border-l-4 border-red-500"
+                    ).style("background: #1a0a14"):
+                        ui.label("🚨 즉시 액션 필요").classes(
+                            "text-xs text-red-300 font-bold"
+                        )
+                        ui.label(f"{n_caution}종목").classes(
+                            "text-2xl font-black text-red-400"
+                        )
+                        ui.label("점수 40 이하 — 교체 검토").classes(
+                            "text-[10px] text-gray-400"
+                        )
+                
+                # 모니터링
+                if n_observe > 0:
+                    with ui.card().classes(
+                        "flex-1 min-w-[200px] p-3 rounded-lg "
+                        "border-l-4 border-amber-500"
+                    ).style("background: #1a1408"):
+                        ui.label("⚠️ 모니터링").classes(
+                            "text-xs text-amber-300 font-bold"
+                        )
+                        ui.label(f"{n_observe}종목").classes(
+                            "text-2xl font-black text-amber-400"
+                        )
+                        ui.label("점수 41~59 — 지켜보기").classes(
+                            "text-[10px] text-gray-400"
+                        )
+                
+                # 양호
+                if n_hold > 0:
+                    with ui.card().classes(
+                        "flex-1 min-w-[200px] p-3 rounded-lg "
+                        "border-l-4 border-emerald-500"
+                    ).style("background: #0a1a14"):
+                        ui.label("✅ 양호").classes(
+                            "text-xs text-emerald-300 font-bold"
+                        )
+                        ui.label(f"{n_hold}종목").classes(
+                            "text-2xl font-black text-emerald-400"
+                        )
+                        ui.label("점수 60 이상 — 보유 유지").classes(
+                            "text-[10px] text-gray-400"
+                        )
+                
+                # 추천 외 종목
+                n_outside = n_stocks - n_today
+                if n_outside > 0:
+                    with ui.card().classes(
+                        "flex-1 min-w-[200px] p-3 rounded-lg "
+                        "border-l-4 border-gray-600"
+                    ).style("background: #14141a"):
+                        ui.label("ℹ️ 추천 외").classes(
+                            "text-xs text-gray-400 font-bold"
+                        )
+                        ui.label(f"{n_outside}종목").classes(
+                            "text-2xl font-black text-gray-500"
+                        )
+                        ui.label("시스템 추천에 없음").classes(
+                            "text-[10px] text-gray-500"
+                        )
+            
+            ui.label(
+                "💡 정확한 진단은 아래 [🤖 AI 진단 실행]을 눌러주세요. "
+                "(시세 조회 + DART 공시 + AI 리포트)"
+            ).classes("text-xs text-gray-500 italic")
+        else:
+            ui.label(
+                "💡 보유 종목이 오늘 추천에 없습니다. "
+                "[🤖 AI 진단 실행]으로 상세 분석을 받아보세요."
+            ).classes("text-xs text-gray-500 italic mb-4")
+    
+    except Exception as _e:
+        # Hero 실패해도 화면은 정상
+        try:
+            logging.getLogger(__name__).warning(
+                f"포트폴리오 Hero 카드 렌더 실패: {_e}"
+            )
+        except Exception:
+            pass
+
+
+def _render_diagnosis_summary(pf_rows: list, cash_amt: float, dart_results: dict):
+    """[v22 UI Step L] AI 진단 후 즉시 액션 요약 카드
+    
+    종목별 카드 직전에 표시 — 사용자가 무엇을 해야 하는지 1초 답변
+    
+    분류:
+      🚨 즉시 액션: 점수 ≤ 40 또는 DART 위험 신호
+      ⚠️ 모니터링: 점수 41~59 또는 DART 주의
+      ✅ 유지: 점수 ≥ 60
+      📤 금일 제외: 전일추천 (시스템에서 빠짐)
+    """
+    try:
+        if not pf_rows:
+            return
+        
+        # 분류
+        n_action = 0  # 즉시 액션
+        n_monitor = 0
+        n_hold = 0
+        n_out = 0  # 금일 제외
+        
+        action_names = []
+        for r in pf_rows:
+            score = r.get("점수", 0)
+            source = r.get("소스", "")
+            advice = r.get("AI조언", "")
+            code = r.get("code", "")
+            
+            # DART 위험 추가 가중
+            dart = dart_results.get(code, {})
+            dart_risk = dart.get("risk_level", "") if dart else ""
+            has_dart_warning = "위험" in dart_risk
+            
+            if "교체" in advice or has_dart_warning:
+                n_action += 1
+                action_names.append(r["종목명"])
+            elif "금일 제외" in advice:
+                n_out += 1
+                action_names.append(r["종목명"])
+            elif "관망" in advice or "주의" in dart_risk:
+                n_monitor += 1
+            elif "강력홀딩" in advice or "보유" in advice:
+                n_hold += 1
+            else:
+                n_monitor += 1
+        
+        total_eval = sum(r.get("평가금", 0) for r in pf_rows)
+        total_buy = sum(r.get("매입금", 0) for r in pf_rows)
+        total_pl = total_eval - total_buy
+        total_rate = (total_pl / total_buy * 100) if total_buy > 0 else 0
+        
+        # 결론 카드
+        if n_action > 0 or n_out > 0:
+            verdict_emoji = "🚨"
+            verdict_text = "즉시 검토 필요"
+            verdict_subtitle = f"손절/교체 검토 {n_action}건"
+            if n_out > 0:
+                verdict_subtitle += f"  ·  금일 추천 제외 {n_out}건"
+            border_color = "border-red-500/50"
+            text_main = "text-red-300"
+            text_sub = "text-red-100"
+            grad = "linear-gradient(to right, #3d0a14, #541324, #3d0a14)"
+        elif n_monitor > 0:
+            verdict_emoji = "⚠️"
+            verdict_text = "일부 모니터링 필요"
+            verdict_subtitle = f"지켜볼 종목 {n_monitor}건"
+            if n_hold > 0:
+                verdict_subtitle += f"  ·  양호 {n_hold}건"
+            border_color = "border-amber-500/50"
+            text_main = "text-amber-300"
+            text_sub = "text-amber-100"
+            grad = "linear-gradient(to right, #3d2a0a, #544013, #3d2a0a)"
+        else:
+            verdict_emoji = "✅"
+            verdict_text = "포트폴리오 양호"
+            verdict_subtitle = f"전 종목 점수 60 이상  ·  유지 권장"
+            border_color = "border-emerald-500/50"
+            text_main = "text-emerald-300"
+            text_sub = "text-emerald-100"
+            grad = "linear-gradient(to right, #0a3d2a, #0d5440, #0a3d2a)"
+        
+        with ui.card().classes(
+            f"w-full p-5 mb-3 rounded-xl border-2 {border_color}"
+        ).style(f"background: {grad}"):
+            with ui.row().classes("w-full items-center justify-between"):
+                with ui.column().classes("gap-1"):
+                    ui.label(f"{verdict_emoji} {verdict_text}").classes(
+                        f"text-lg font-bold {text_main}"
+                    )
+                    ui.label(verdict_subtitle).classes(f"text-sm {text_sub}")
+                with ui.column().classes("items-end gap-0"):
+                    pl_color = "text-emerald-300" if total_pl >= 0 else "text-red-300"
+                    ui.label(f"{total_pl:+,}원").classes(
+                        f"text-xl font-black {pl_color}"
+                    )
+                    ui.label(f"{total_rate:+.2f}%").classes(
+                        f"text-sm {pl_color}"
+                    )
+        
+        # 액션 필요 종목 미리보기 (3개까지)
+        if action_names:
+            with ui.card().classes(
+                "w-full p-3 mb-3 bg-[#0d0d1a] "
+                "border border-gray-700 rounded-lg"
+            ):
+                ui.label("📋 검토 대상 종목").classes(
+                    "text-xs text-gray-400 font-bold mb-1"
+                )
+                preview = action_names[:3]
+                more = len(action_names) - 3
+                preview_text = "  ·  ".join(preview)
+                if more > 0:
+                    preview_text += f"  ·  외 {more}종목"
+                ui.label(preview_text).classes("text-sm text-white")
+                ui.label("⬇️ 아래 카드에서 종목별 상세 진단 확인").classes(
+                    "text-[10px] text-gray-500 italic mt-1"
+                )
+    
+    except Exception as _e:
+        try:
+            logging.getLogger(__name__).warning(
+                f"진단 요약 카드 렌더 실패: {_e}"
+            )
+        except Exception:
+            pass
+
+
 def render_tab_portfolio(df, auth):
     """Tab 3: 내 자산 (포트폴리오 AI 진단 — Phase 2 통합)"""
 
@@ -534,6 +903,12 @@ def render_tab_portfolio(df, auth):
     saved_local = app.storage.user.get("portfolio_text", "")
     saved_gist = _load_portfolio_file() if not saved_local else ""
     saved = saved_local or saved_gist or ""
+
+    # ═══════════════════════════════════════════════════
+    # [v22 UI Step L] Hero 카드 — 첫 화면 1초 답변
+    # 시장/종목 탭과 동일 패턴: 결론 → 카드 → 상세
+    # ═══════════════════════════════════════════════════
+    _render_portfolio_hero(saved, df)
 
     # [v21.3] 종목 검색 기반 입력 UI
     code_map = _get_code_map(df)
@@ -830,8 +1205,14 @@ def render_tab_portfolio(df, auth):
                                  f"{cash_amt/total_asset*100:.1f}%" if total_asset > 0 else "0%",
                                  f"{int(cash_amt):,}원")
 
+            # ═══════════════════════════════════════════════════
+            # [v22 UI Step L] 진단 요약 카드 — 즉시 액션 결론
+            # 종목별 상세 카드 직전에 표시 → 사용자 1초 답변
+            # ═══════════════════════════════════════════════════
+            _render_diagnosis_summary(pf_rows, cash_amt, dart_results)
+
             # ── 종목별 카드 (DART 통합) ──
-            _section_title("🩺 AI 포트폴리오 진단")
+            _section_title("🩺 종목별 AI 진단 상세")
             pf_rows.sort(key=lambda x: x["점수"])
             for r in pf_rows:
                 code = r["code"]
@@ -843,8 +1224,14 @@ def render_tab_portfolio(df, auth):
                             with ui.row().classes("items-center gap-2"):
                                 ui.label(r["종목명"]).classes("text-white font-bold")
                                 if r.get("상태"):
-                                    _rc = {"ATTACK": "red", "ARMED": "orange", "WAIT": "blue"}.get(r["상태"], "gray")
-                                    ui.badge(r["상태"], color=_rc).classes("text-xs")
+                                    # [Step L] ROUTE 영문 → 한국어 (route_display 사용)
+                                    _route_show = route_display(r["상태"])
+                                    _rc = {
+                                        "ATTACK": "red", "ARMED": "orange",
+                                        "WAIT": "blue", "NEUTRAL": "gray",
+                                        "CARRY": "purple", "OVERHEAT": "red",
+                                    }.get(str(r["상태"]).upper(), "gray")
+                                    ui.badge(_route_show, color=_rc).classes("text-xs")
                                 # DART 리스크 배지
                                 if dart.get("has_disclosure"):
                                     risk = dart.get("risk_level", "")
