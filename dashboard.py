@@ -3424,7 +3424,157 @@ def _to_int_str(x, default=0):
     return f"{int(v) if pd.notna(v) else default:,}"
 
 
+# ═══════════════════════════════════════════════════
+# [v22 UI] 오늘의 결론 카드 — 한눈에 보는 요약
+# ═══════════════════════════════════════════════════
+def render_today_summary_card(scored_df: pd.DataFrame):
+    """대시보드 최상단에 '오늘의 결론' 카드 표시.
+    
+    3가지 시나리오:
+      A) TOP_PICK >= 1   → 추천 카드 (큼직하게)
+      B) TOP_PICK = 0, ARMED/ATTACK 있음 → 관찰 모드 + 가까운 후보
+      C) TOP_PICK = 0, 활성 후보도 0    → 매수 신호 없음
+    
+    안전 설계:
+      - try/except로 에러 시 카드 자체 미표시 (기존 화면 유지)
+      - 컬럼 누락 시 graceful fallback
+    """
+    try:
+        if scored_df is None or scored_df.empty:
+            return
+        
+        # TOP_PICK 종목 추출 (다양한 표기 대응)
+        top_picks = pd.DataFrame()
+        if 'TOP_PICK' in scored_df.columns:
+            tp_str = scored_df['TOP_PICK'].astype(str).str.strip().str.upper()
+            tp_mask = tp_str.isin(['1', '1.0', 'TRUE', 'Y', 'YES'])
+            top_picks = scored_df[tp_mask].copy()
+        
+        n_top = len(top_picks)
+        
+        # ── 시나리오 A: TOP_PICK 있음 ──
+        if n_top >= 1:
+            st.markdown("### 🏆 오늘의 추천")
+            
+            # 최대 3개까지만 표시
+            top_picks = top_picks.head(3)
+            cols = st.columns(len(top_picks))
+            
+            for i, (_, row) in enumerate(top_picks.iterrows()):
+                with cols[i]:
+                    name = row.get('종목명', 'N/A')
+                    
+                    # TOP_PICK_TYPE에 따라 이모지 분리
+                    tp_type = str(row.get('TOP_PICK_TYPE', '')).upper()
+                    if tp_type == 'AGGRESSIVE':
+                        emoji = '🔥'
+                        type_label = '공격형'
+                    elif tp_type == 'STABLE':
+                        emoji = '💎'
+                        type_label = '안정형'
+                    else:
+                        emoji = '⭐'
+                        type_label = '추천'
+                    
+                    st.markdown(f"#### {emoji} {name}")
+                    st.caption(f"{type_label} · ELITE {_to_num(row.get('ELITE_SCORE'), 0):.1f}")
+                    
+                    # 가격 정보
+                    buy = _to_num(row.get('추천매수가'))
+                    tp1 = _to_num(row.get('추천매도가1'))
+                    stop = _to_num(row.get('손절가'))
+                    
+                    if pd.notna(buy) and buy > 0:
+                        st.markdown(f"**매수**: {int(buy):,}원")
+                        if pd.notna(tp1) and tp1 > 0:
+                            ret = (tp1 / buy - 1) * 100
+                            st.markdown(f"**목표**: {int(tp1):,}원  `+{ret:.1f}%`")
+                        if pd.notna(stop) and stop > 0:
+                            loss = (stop / buy - 1) * 100
+                            st.markdown(f"**손절**: {int(stop):,}원  `{loss:.1f}%`")
+                    
+                    # 추천 비중
+                    amt = _to_num(row.get('추천금액(만원)'), 0)
+                    if amt > 0:
+                        st.markdown(f"**비중**: {amt:.0f}만원")
+                    
+                    # 승률
+                    ewr = _to_num(row.get('EST_WIN_RATE'))
+                    if pd.notna(ewr):
+                        st.caption(f"예상 승률 {ewr:.0%}")
+            
+            st.divider()
+            return
+        
+        # ── 시나리오 B/C: TOP_PICK 0건 ──
+        # 활성 ROUTE 후보 찾기
+        active = pd.DataFrame()
+        if 'ROUTE' in scored_df.columns:
+            active = scored_df[
+                scored_df['ROUTE'].astype(str).str.strip().str.upper().isin(['ATTACK', 'ARMED'])
+            ].copy()
+        
+        if len(active) > 0 and 'ELITE_SCORE' in active.columns:
+            # ── 시나리오 B: 관찰 모드 ──
+            top_candidate = active.sort_values('ELITE_SCORE', ascending=False).iloc[0]
+            cand_name = top_candidate.get('종목명', 'N/A')
+            cand_score = _to_num(top_candidate.get('ELITE_SCORE'), 0)
+            cand_route = top_candidate.get('ROUTE', '')
+            cand_tp1 = _to_num(top_candidate.get('TP1_PCT'), 0)
+            
+            # 부족한 점수 진단
+            shortfall = ""
+            struct = _to_num(top_candidate.get('STRUCT_SCORE'), 0)
+            timing = _to_num(top_candidate.get('TIMING_SCORE'), 0)
+            balance = _to_num(top_candidate.get('BALANCE_SCORE'), 0)
+            if cand_score < 75 and cand_score >= 70:
+                shortfall = f"ELITE {75 - cand_score:.1f}점 부족 (75 이상 필요)"
+            elif struct > 0 and struct < 80:
+                shortfall = f"STRUCT {80 - struct:.1f}점 부족 (80 이상 필요)"
+            elif timing > 0 and timing < 70:
+                shortfall = f"TIMING {70 - timing:.1f}점 부족"
+            else:
+                shortfall = "조건 일부 미달"
+            
+            st.warning(f"""
+            ⏸️ **오늘은 관찰 모드** — 정식 추천 0건
+            
+            **가장 가까운 후보**: {cand_name} (점수 {cand_score:.1f}, {cand_route})
+            
+            └ {shortfall}, 목표수익 +{cand_tp1:.1f}%
+            
+            > 시스템이 신중하게 골라서 오늘은 통과한 종목이 없어요. 무리한 진입은 자제하시고 다음 기회를 기다리세요.
+            """)
+            
+            with st.expander(f"📋 활성 후보 {len(active)}종목 더 보기"):
+                show_cols = [c for c in ['종목명','ROUTE','ELITE_SCORE','TP1_PCT',
+                                          'EST_WIN_RATE','추천금액(만원)']
+                             if c in active.columns]
+                top10 = active.sort_values('ELITE_SCORE', ascending=False).head(10)
+                st.dataframe(top10[show_cols], use_container_width=True, hide_index=True)
+        else:
+            # ── 시나리오 C: 활성 후보 0 ──
+            st.error("""
+            🔴 **오늘은 매수 신호 없음** — 시장 약세
+            
+            ATTACK/ARMED 종목이 없어 신규 진입을 권하지 않습니다. 다음 거래일을 기다려주세요.
+            """)
+        
+        st.divider()
+    
+    except Exception as e:
+        # 카드 렌더링 실패해도 기존 화면은 유지
+        # (디버그용 — 운영에선 silent fail)
+        try:
+            st.caption(f"_(오늘의 요약 카드 일시 비표시)_")
+        except Exception:
+            pass
+
+
 with tab2:
+    # [v22 UI] 오늘의 결론 카드 — 최상단 한눈에 보기
+    render_today_summary_card(scored)
+    
     st.subheader("🎯 AI & Quant 추천 종목")
 
     # ✅ [v8.5] 회원가입 직후 Top 5 프리뷰
