@@ -2031,20 +2031,109 @@ def analyze_ticker(
         bench_map, inv_maps,
     )
 
-# [v13] 켈리 공식 — 캘리브레이션 기반 승률 사용
+# [v22] 켈리 공식 — apply_kelly_calibrated wrapper 위임 (ELITE_SCORE 축 + empirical b_ratio)
 def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000,
                         out_dir: str = "") -> pd.DataFrame:
     """
-    Kelly Criterion 비중 최적화.
-    - 승률(p): 캘리브레이션 테이블 기반 (없으면 선형 fallback)
-    - 손익비(b): (목표가 - 매수가) / (매수가 - 손절가)
+    Kelly Criterion 비중 최적화 — v22 SSOT 적용.
+    
+    [v22 변경]
+    - 점수 축 ELITE_SCORE 우선 (랭킹·승률·Kelly 일치)
+    - method 자동 동기화 (양방향)
+    - b_ratio = min(planned, empirical) — 과대배팅 방지
+    - empirical 미가용 시 planned×0.6 보수화
+    - 관측 컬럼 4종: KELLY_PLANNED_B / EMPIRICAL_B / FINAL_B / FRACTION
+    - 엔진 식별 컬럼: KELLY_ENGINE = "v22_calibrated" | "v13_fallback"
+    
+    [v22 v2 — inactive route 확장]
+    - WAIT/OVERHEAT/EXIT_WARNING + CARRY/BLOCKED도 추천금액 0원 처리
+    - CARRY는 기존 보유 관리용 → 신규 추천 베팅 금지가 보수적
     """
-    log("💰 [Money Management] 켈리 공식(Kelly Criterion) — 캘리브레이션 적용 중...")
+    log("💰 [Money Management v22] 켈리 — ELITE_SCORE + empirical b_ratio 적용 중...")
+    
+    # [v22] 비활성 ROUTE 정의 (한 곳에서 관리)
+    INACTIVE_ROUTES = ["WAIT", "OVERHEAT", "EXIT_WARNING", "CARRY", "BLOCKED"]
+    
+    try:
+        from kelly_calibrator import apply_kelly_calibrated
+    except ImportError as e:
+        log(f"⚠️ [v22] kelly_calibrator import 실패 ({e}) → v13 fallback")
+        return _apply_kelly_betting_v13_fallback(df, total_capital, out_dir,
+                                                   error=f"import: {e}",
+                                                   inactive_routes=INACTIVE_ROUTES)
+    
+    try:
+        # v22 wrapper 호출 (전체 DataFrame 처리 — 벡터화)
+        df = apply_kelly_calibrated(
+            df,
+            out_dir=out_dir or ".",
+            total_capital=total_capital,
+            method="ELITE_SCORE",   # 명시적 ELITE 우선 (내부에서 score_col과 동기화)
+            kelly_multiplier=0.5,
+            max_allocation=0.25,
+            min_score_threshold=60.0,
+        )
+    except Exception as e:
+        # 런타임 에러만 잡음 (ImportError는 위에서 처리). 버그는 fallback으로 숨기되 흔적 남김.
+        log(f"⚠️ [v22] apply_kelly_calibrated 런타임 실패 ({type(e).__name__}: {e}) → v13 fallback")
+        return _apply_kelly_betting_v13_fallback(df, total_capital, out_dir,
+                                                   error=f"{type(e).__name__}: {e}",
+                                                   inactive_routes=INACTIVE_ROUTES)
+    
+    # ───────── v22 wrapper 성공 경로 ─────────
+    
+    # [v22 가드] 비활성 ROUTE는 0원 강제 (apply_kelly_calibrated가 score 60+이면 베팅하므로 추가 필터)
+    try:
+        from collector_config import Route
+        _route_strs = [
+            *INACTIVE_ROUTES,
+            *[str(getattr(Route, r, "")) for r in INACTIVE_ROUTES],
+        ]
+    except ImportError:
+        _route_strs = INACTIVE_ROUTES
+    
+    inactive_mask = df["ROUTE"].astype(str).isin(_route_strs)
+    
+    # [v22 v3] 비활성 ROUTE에서 모든 베팅 관련 컬럼 0 강제
+    # apply_kelly_calibrated는 score 60+이면 ROUTE 무관 베팅하므로 추가 필터 필수.
+    # 관측 컬럼(PLANNED_B/EMPIRICAL_B/FINAL_B)은 진단용이라 0으로 초기화 안 함 — 값은 보존,
+    # 단 KELLY_FRACTION만 0으로 두면 "계산은 됐지만 베팅 안 함" 의미 보존.
+    if inactive_mask.any():
+        for col in ["켈리_수량", "켈리_금액(원)", "추천수량", "추천금액(만원)",
+                    "KELLY_FRACTION"]:
+            if col in df.columns:
+                df.loc[inactive_mask, col] = 0
+    
+    # [v22] 엔진 식별 컬럼 — CSV에서 어떤 경로 탔는지 확인 가능
+    df["KELLY_ENGINE"] = "v22_calibrated"
+    df["KELLY_ERROR"] = ""
+    
+    # 관측 로그
+    n_active = int((df.get("KELLY_FRACTION", pd.Series(0, index=df.index)).fillna(0) > 0).sum())
+    n_emp = int(df.get("KELLY_EMPIRICAL_B", pd.Series(dtype=float)).notna().sum())
+    n_inactive = int(inactive_mask.sum())
+    log(f"✅ [v22 calibrated] Kelly 적용: 활성 {n_active}건, "
+        f"empirical b 적용 {n_emp}건, 비활성ROUTE 0원 처리 {n_inactive}건")
+    
+    return df
 
+
+def _apply_kelly_betting_v13_fallback(df: pd.DataFrame, total_capital: int = 10_000_000,
+                                       out_dir: str = "",
+                                       error: str = "",
+                                       inactive_routes: List[str] = None) -> pd.DataFrame:
+    """[v13 fallback] v22 wrapper 실패 시 안전망 — 기존 인라인 로직.
+    
+    [v22 v2] CSV 스키마 호환: KELLY_PLANNED_B/EMPIRICAL_B/FINAL_B/FRACTION/ENGINE/ERROR 컬럼 보장.
+    fallback이어도 대시보드/스키마가 깨지지 않게 NaN으로라도 채움.
+    """
     KELLY_MULTIPLIER = 0.5
     MAX_ALLOCATION = 0.25
-
-    # 캘리브레이션 테이블 로드 시도
+    
+    # 비활성 ROUTE 기본값
+    if inactive_routes is None:
+        inactive_routes = ["WAIT", "OVERHEAT", "EXIT_WARNING", "CARRY", "BLOCKED"]
+    
     _use_cal = False
     try:
         from kelly_calibrator import calibrated_win_rate, kelly_fraction
@@ -2052,39 +2141,46 @@ def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000,
             _use_cal = True
     except ImportError:
         pass
+    
+    # Route enum value 둘 다 인식
+    try:
+        from collector_config import Route
+        _inactive_set = set(inactive_routes) | set(
+            str(getattr(Route, r, "")) for r in inactive_routes
+        )
+    except ImportError:
+        _inactive_set = set(inactive_routes)
 
     def _calc_row(row):
         try:
-            # [v19.5] 상태 기반 가드 — 비활성 ROUTE는 무조건 0원
-            _route = row.get("ROUTE", row.get("상태", ""))
-            if _route in (Route.WAIT, Route.OVERHEAT, Route.EXIT_WARNING):
-                return 0, 0
+            _route = str(row.get("ROUTE", row.get("상태", "")))
+            if _route in _inactive_set:
+                return 0, 0, 0.0, 0.0   # qty, amt, planned_b, fraction
 
-            score = float(row.get("TOTAL_SCORE", 0))
+            # [v22 fallback] ELITE_SCORE 있으면 우선, 없으면 TOTAL_SCORE
+            score = float(row.get("ELITE_SCORE", row.get("TOTAL_SCORE", 0)))
             buy = float(row.get("추천매수가", 0))
             stop = float(row.get("손절가", 0))
             target = float(row.get("추천매도가1", 0))
 
             if buy <= 0 or stop <= 0 or target <= 0:
-                return 0, 0
+                return 0, 0, 0.0, 0.0
 
             risk = buy - stop
             reward = target - buy
             if risk <= 0:
-                return 0, 0
+                return 0, 0, 0.0, 0.0
 
             b = reward / risk
 
-            # ✅ 캘리브레이션 승률 (SSOT)
             if _use_cal:
                 p = calibrated_win_rate(score, out_dir)
             else:
-                # fallback: 기존 선형 추정
                 p = 0.4 + (max(score, 0) - 60) * 0.01
                 p = min(max(p, 0.3), 0.85)
 
             if score < 60:
-                return 0, 0
+                return 0, 0, b, 0.0   # planned_b는 기록
 
             if _use_cal:
                 f_final = kelly_fraction(p, b, KELLY_MULTIPLIER, MAX_ALLOCATION)
@@ -2097,23 +2193,37 @@ def apply_kelly_betting(df: pd.DataFrame, total_capital: int = 10_000_000,
             final_amt = int(total_capital * f_final)
             final_qty = int(final_amt / buy)
 
-            return final_qty, final_amt
+            return final_qty, final_amt, b, f_final
 
         except Exception:
-            return 0, 0
+            return 0, 0, 0.0, 0.0
 
+    # [v22 v2] expand 결과 4개 컬럼 — 기존 (qty, amt) 유지하면서 관측 컬럼도 함께
     res = df.apply(_calc_row, axis=1, result_type='expand')
-    df["켈리_수량"] = res[0]
-    df["켈리_금액(원)"] = res[1]
+    df["켈리_수량"] = res[0].astype(int)
+    df["켈리_금액(원)"] = res[1].astype(int)
+    
+    # [v22 v2] 관측 컬럼 스키마 유지 — fallback에서도 채움
+    df["KELLY_PLANNED_B"] = res[2].round(3)
+    df["KELLY_EMPIRICAL_B"] = np.nan      # fallback에선 empirical 미사용
+    df["KELLY_FINAL_B"] = res[2].round(3) # fallback에서 final = planned (보수화 미적용)
+    df["KELLY_FRACTION"] = res[3].round(4)
+    df["KELLY_ENGINE"] = "v13_fallback"
+    df["KELLY_ERROR"] = (str(error)[:200] if error else "")[:200]
+
+    # [v22 v3] 추천수량/추천금액 stale 방지 — 전체 0으로 초기화 후 양수 Kelly만 채움
+    # fallback 진입 전 다른 단계에서 이미 들어있던 값이 있으면 비활성 ROUTE에 잔존 가능 → 차단
+    df["추천수량"] = 0
+    df["추천금액(만원)"] = 0
 
     mask = df["켈리_수량"] > 0
     df.loc[mask, "추천수량"] = df.loc[mask, "켈리_수량"]
     df.loc[mask, "추천금액(만원)"] = (df.loc[mask, "켈리_금액(원)"] / 10000).round(1)
 
     if _use_cal:
-        log("✅ [v13] 캘리브레이션 기반 승률 적용됨")
+        log(f"✅ [v13 fallback] 캘리브레이션 기반 승률 적용됨 (engine=v13_fallback)")
     else:
-        log("⚠️ [v13] 캘리브레이션 없음 → 선형 fallback 사용")
+        log(f"⚠️ [v13 fallback] 캘리브레이션 없음 → 선형 추정 (engine=v13_fallback)")
 
     return df
 
