@@ -342,6 +342,76 @@ def _save_portfolio_file(text_data, user_profile=None):
         return False, filename
 
 
+def _get_user_meta_filename(user_profile=None) -> str:
+    """[Step O #3] 사용자별 메타 파일명 (포트폴리오 파일과 짝)."""
+    portfolio_fn = _get_user_portfolio_key(user_profile)
+    if portfolio_fn == "portfolio.txt":
+        return ""  # 비로그인은 메타 X
+    # portfolio_<hash>.txt → portfolio_<hash>_meta.json
+    return portfolio_fn.replace(".txt", "_meta.json")
+
+
+def _load_portfolio_meta(user_profile=None) -> str:
+    """[Step O #3] 사용자별 포트폴리오 메타 로드 → updated_at 문자열.
+    
+    메타 파일이 없거나 파싱 실패 시 빈 문자열 반환.
+    """
+    if not user_profile:
+        return ""
+    meta_fn = _get_user_meta_filename(user_profile)
+    if not meta_fn:
+        return ""
+    
+    token = os.environ.get("LDY_GIST_TOKEN", "")
+    gist_id = os.environ.get("LDY_GIST_ID", "")
+    if not token or not gist_id:
+        return ""
+    try:
+        import requests, json
+        r = requests.get(f"https://api.github.com/gists/{gist_id}",
+                        headers={"Authorization": f"token {token}"}, timeout=10)
+        if r.ok:
+            files = r.json().get("files", {})
+            if meta_fn in files:
+                content = files[meta_fn].get("content", "")
+                if content:
+                    meta = json.loads(content)
+                    return str(meta.get("updated_at", ""))
+    except Exception as e:
+        _logger.warning(f"포트폴리오 메타 로드 실패: {e}")
+    return ""
+
+
+def _save_portfolio_meta(user_profile, updated_at: str) -> bool:
+    """[Step O #3] 사용자별 포트폴리오 메타 저장 → updated_at 등."""
+    if not user_profile:
+        return False
+    meta_fn = _get_user_meta_filename(user_profile)
+    if not meta_fn:
+        return False
+    
+    token = os.environ.get("LDY_GIST_TOKEN", "")
+    gist_id = os.environ.get("LDY_GIST_ID", "")
+    if not token or not gist_id:
+        return False
+    try:
+        import requests, json
+        meta_content = json.dumps({
+            "updated_at": updated_at,
+            "version": 1,
+        }, ensure_ascii=False, indent=2)
+        r = requests.patch(
+            f"https://api.github.com/gists/{gist_id}",
+            headers={"Authorization": f"token {token}"},
+            json={"files": {meta_fn: {"content": meta_content}}},
+            timeout=10,
+        )
+        return r.ok
+    except Exception as e:
+        _logger.warning(f"포트폴리오 메타 저장 실패: {e}")
+        return False
+
+
 # ── 과거 추천 캐시 ──
 _hist_recommend_cache: dict = {}
 _hist_cache_loaded = False
@@ -685,11 +755,17 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
         n_observe = 0 # 점수 41~59 (모니터링)
         n_hold = 0    # 점수 ≥ 60 (양호)
         
-        # [Step M #2] 점수 + ROUTE 동시 분류 (시장/종목 탭과 일관성)
+        # [Step M #2 + O #2] 분류 (시장/종목 탭과 일관성)
         # 보유 유지: 점수≥60 + 안전 ROUTE (ATTACK/ARMED/CARRY/NEUTRAL)
         # 지켜보기: 점수 41~59 또는 ROUTE=WAIT
         # 교체 검토: 점수≤40 또는 BLOCKED/EXIT_WARNING/OVERHEAT
-        today_picks_in_holdings = []  # [Step M #5] 오늘 추천에 포함된 보유종목 이름
+        # 
+        # [Step O #2] TOP_PICK 기준 엄격화:
+        #   n_today = 오늘 분석 데이터에 포함 (df에 있음)
+        #   n_top_pick = 진짜 오늘의 추천 (TOP_PICK == 1)
+        today_picks_in_holdings = []  # 오늘 추천(TOP_PICK)에 포함된 보유종목
+        n_top_pick = 0  # [Step O #2] TOP_PICK == 1 만 카운트
+        
         if df is not None and not df.empty and "종목명" in df.columns:
             df_names = set(df["종목명"].astype(str))
             _SAFE_ROUTES = {"ATTACK", "ARMED", "CARRY", "NEUTRAL"}
@@ -697,11 +773,17 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
             for it in items:
                 if it["name"] in df_names:
                     n_today += 1
-                    today_picks_in_holdings.append(it["name"])
                     match = df[df["종목명"] == it["name"]]
                     if not match.empty:
-                        score = safe_float(match.iloc[0].get("DISPLAY_SCORE", 0))
-                        route = str(match.iloc[0].get("ROUTE", "")).strip().upper()
+                        row = match.iloc[0]
+                        score = safe_float(row.get("DISPLAY_SCORE", 0))
+                        route = str(row.get("ROUTE", "")).strip().upper()
+                        # [Step O #2] TOP_PICK 정확히 판정
+                        is_top_pick = is_truthy_flag(row.get("TOP_PICK", 0))
+                        if is_top_pick:
+                            n_top_pick += 1
+                            today_picks_in_holdings.append(it["name"])
+                        
                         # 분류: 점수 + 상태 동시 고려
                         if route in _BLOCKED_ROUTES or (score > 0 and score <= 40):
                             n_caution += 1   # 교체 검토
@@ -743,8 +825,10 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
                 "AI 진단 실행 후 정확한 평가금이 표시됩니다"
             ).classes("text-[10px] text-gray-500 italic mt-2")
         
-        # [Step M #5] 오늘 추천 포함 보유종목 미리보기
-        if n_today > 0 and today_picks_in_holdings:
+        # [Step M #5 + O #2] 오늘 추천 (TOP_PICK) 포함 보유종목 미리보기
+        # n_top_pick = TOP_PICK==1 만 카운트 (엄격)
+        # n_today = 오늘 분석 데이터에 포함 (느슨)
+        if n_top_pick > 0 and today_picks_in_holdings:
             preview = today_picks_in_holdings[:3]
             more = len(today_picks_in_holdings) - 3
             preview_text = ", ".join(preview)
@@ -754,12 +838,30 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
                 "w-full p-3 mb-3 bg-[#0d1a14] "
                 "border border-emerald-700/30 rounded-lg"
             ):
-                ui.label("📌 오늘 추천에 포함된 보유종목").classes(
+                ui.label("📌 오늘의 추천에 포함된 보유종목").classes(
                     "text-xs text-emerald-300 font-bold"
                 )
-                ui.label(f"{preview_text}  ·  총 {n_today}/{n_stocks}개").classes(
+                # [Step O #2] 정확한 표현: TOP_PICK 종목 / 오늘 분석 포함 / 전체
+                _detail_text = f"{preview_text}  ·  오늘의 추천 {n_top_pick}개"
+                if n_today > n_top_pick:
+                    _detail_text += f" (오늘 분석 포함 {n_today}개 중)"
+                _detail_text += f"  ·  전체 보유 {n_stocks}개"
+                ui.label(_detail_text).classes(
                     "text-sm text-emerald-100 mt-1"
                 )
+        elif n_today > 0:
+            # TOP_PICK 0이지만 분석에는 포함된 케이스
+            with ui.card().classes(
+                "w-full p-3 mb-3 bg-[#1a1408] "
+                "border border-amber-700/30 rounded-lg"
+            ):
+                ui.label("ℹ️ 분석 데이터에 포함된 보유종목").classes(
+                    "text-xs text-amber-300 font-bold"
+                )
+                ui.label(
+                    f"분석 포함 {n_today}/{n_stocks}개  ·  "
+                    f"오늘의 추천(TOP_PICK)에는 0개"
+                ).classes("text-sm text-amber-100 mt-1")
         
         # 빠른 진단 요약 (df에 있는 종목들만)
         if n_today > 0:
@@ -1039,14 +1141,47 @@ def render_tab_portfolio(df, auth):
     except Exception:
         pass
     
+    # ═══════════════════════════════════════════════════
+    # [Step O #1] 로드 우선순위 — 로그인 상태에서는 Gist가 진실의 원천
+    # 
+    # 로그인 상태:
+    #   1. 사용자별 Gist 파일 (portfolio_<hash>.txt) — 진실의 원천
+    #   2. 로컬 app.storage.user — Gist 미발견 시 fallback
+    #   3. legacy portfolio.txt — 마이그레이션용
+    # 
+    # 비로그인 상태:
+    #   1. 로컬 app.storage.user
+    # 
+    # 효과:
+    #   - 회사 PC에서 수정 후 집 PC 접속 시 최신 Gist 자동 로드
+    #   - 브라우저 캐시 삭제해도 정확히 복원
+    # ═══════════════════════════════════════════════════
     saved_local = app.storage.user.get("portfolio_text", "")
     saved_gist, gist_source = ("", "")
-    if not saved_local:
+    saved_meta_at = ""  # Gist 메타에서 가져온 마지막 저장 시각
+    
+    if user_profile:
+        # 로그인 상태: Gist 먼저 읽기
         saved_gist, gist_source = _load_portfolio_file(user_profile)
-    saved = saved_local or saved_gist or ""
+        saved_meta_at = _load_portfolio_meta(user_profile)
+        
+        if saved_gist:
+            saved = saved_gist
+            # 로컬 캐시 동기화 (다음 진입 시 빠른 표시 + 일관성)
+            app.storage.user["portfolio_text"] = saved_gist
+            if saved_meta_at:
+                app.storage.user["portfolio_saved_at"] = saved_meta_at
+        elif saved_local:
+            saved = saved_local
+        else:
+            saved = ""
+    else:
+        # 비로그인: 로컬만
+        saved = saved_local or ""
     
     # 저장 상태 안내 (계정별 자동 저장 명시)
-    last_saved_at = app.storage.user.get("portfolio_saved_at", "")
+    # [Step O #3] 마지막 저장 시각은 Gist 메타 우선 → 로컬 fallback
+    last_saved_at = saved_meta_at or app.storage.user.get("portfolio_saved_at", "")
     if user_profile:
         if last_saved_at:
             _save_msg = f"✅ 이 포트폴리오는 내 계정에 자동 저장됩니다.  ·  마지막 저장: {last_saved_at}"
@@ -1062,13 +1197,16 @@ def render_tab_portfolio(df, auth):
             "⚠️ 비로그인 상태 — 브라우저에만 임시 저장됩니다. 로그인 시 계정에 자동 저장됩니다."
         ).classes("text-[11px] text-amber-400/80 mb-2 italic")
     
-    # [Step N] 백그라운드 자동 저장 헬퍼 (종목 추가/삭제 시 사용)
+    # [Step N + O] 백그라운드 자동 저장 헬퍼 (종목 추가/삭제 시 사용)
     async def _bg_save_portfolio(text: str, profile):
         try:
             ok, _fn = await run_sync(_save_portfolio_file, text, profile)
             if ok:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
                 app.storage.user["portfolio_saved_at"] = now_str
+                # [Step O #3] 메타 파일도 함께 저장 (기기 간 동기화)
+                if profile:
+                    await run_sync(_save_portfolio_meta, profile, now_str)
         except Exception as _e:
             _logger.warning(f"백그라운드 저장 실패: {_e}")
 
@@ -1195,12 +1333,14 @@ def render_tab_portfolio(df, auth):
         if not text: return
 
         app.storage.user["portfolio_text"] = text
-        # [Step N] 계정별 자동 저장
+        # [Step N + O] 계정별 자동 저장 + 메타 동시 저장
         save_ok, _saved_filename = await run_sync(_save_portfolio_file, text, user_profile)
         if save_ok:
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
             app.storage.user["portfolio_saved_at"] = now_str
+            # [Step O #3] 메타 파일 함께 저장 (기기 간 동기화)
             if user_profile:
+                await run_sync(_save_portfolio_meta, user_profile, now_str)
                 ui.notify(f"💾 내 계정에 저장됨 ({now_str})", type="positive")
             else:
                 ui.notify("💾 브라우저에 임시 저장됨 (로그인 시 계정 저장)", type="info")
