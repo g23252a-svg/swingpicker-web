@@ -292,6 +292,54 @@ def compute_realized_returns(
             continue
         rec_df["종목코드"] = rec_df["종목코드"].str.zfill(6)
 
+        # ═══════════════════════════════════════════════════
+        # [v22 v5] 진입 규칙 — 실제 추천 로직과 일치시켜 시뮬레이션 정확도 ↑
+        # ═══════════════════════════════════════════════════
+        # 정책:
+        #   1) v22 컬럼(TOP_PICK 또는 ROUTE)이 있으면 → 그 기준으로만 진입.
+        #      후보 0개면 skip ("no_entry_candidates"로 기록만, results 추가 안 함).
+        #   2) v22 컬럼이 둘 다 없으면 (진짜 옛날 CSV) → 전체 universe 사용 (backward compat).
+        #
+        # 이전 (v4) 문제: TOP_PICK 컬럼은 있는데 1건도 없고 ROUTE active도 0건이면
+        #                rec_df 필터 미적용 → 전체 universe로 진입 → 데이터 오염 재발 가능
+        # v5 수정: 그날은 학습 후보 없음 → 명시적 skip
+        _has_v22_cols = ("TOP_PICK" in rec_df.columns) or ("ROUTE" in rec_df.columns)
+        _entry_rule = "all"   # legacy CSV 기본값
+        
+        if _has_v22_cols:
+            _matched = False
+            
+            # [v22 v5 #4] TOP_PICK 강건 파서: 1, 1.0, "1", "True", "Y" 등 다양한 표기 대응
+            if "TOP_PICK" in rec_df.columns:
+                _tp_str = rec_df["TOP_PICK"].astype(str).str.strip().str.upper()
+                _tp_filter = _tp_str.isin(["1", "1.0", "TRUE", "Y", "YES"])
+                if _tp_filter.any():
+                    rec_df = rec_df[_tp_filter]
+                    _entry_rule = "top_pick_only"
+                    _matched = True
+            
+            # TOP_PICK 0건이면 ROUTE active로 fallback
+            if not _matched and "ROUTE" in rec_df.columns:
+                _route_filter = rec_df["ROUTE"].astype(str).str.strip().str.upper().isin(
+                    ["ATTACK", "ARMED"]
+                )
+                if _route_filter.any():
+                    rec_df = rec_df[_route_filter]
+                    _entry_rule = "route_active_fallback" if "TOP_PICK" in rec_df.columns else "route_active"
+                    _matched = True
+            
+            if not _matched:
+                # v22 컬럼은 있지만 진입 후보 0개 → skip (그날은 학습 데이터 없음)
+                # 'all' fallback은 절대 금지 — 데이터 오염 재발 차단.
+                logger.debug(f"{rec_ymd}: v22 컬럼 존재하나 진입 후보 0건 → skip "
+                             f"(no_entry_candidates)")
+                continue
+        # else: TOP_PICK도 ROUTE도 없는 진짜 옛날 CSV → 전체 사용 (backward compat)
+        # _entry_rule = "all" 유지
+
+        if rec_df.empty:
+            continue
+
         # ✅ 안전장치 2: 진입일 = 다음 영업일, 청산일 = 진입일 + horizon
         entry_ymd = _offset_bday(trade_days, rec_ymd, 1)
         exit_ymd = _offset_bday(trade_days, rec_ymd, 1 + config.horizon_bdays)
@@ -340,6 +388,7 @@ def compute_realized_returns(
                     "code": code,
                     "score": float(row.get(score_col, 0)),
                     "score_method": score_col,
+                    "entry_rule_used": _entry_rule,
                     "entry_price": entry_p,
                     "exit_price": 0.0,
                     "ret_gross_pct": -100.0,
@@ -365,6 +414,7 @@ def compute_realized_returns(
                     "code": code,
                     "score": float(row.get(score_col, 0)),
                     "score_method": score_col,
+                    "entry_rule_used": _entry_rule,
                     "entry_price": entry_p,
                     "exit_price": 0.0,
                     "ret_gross_pct": -100.0,
@@ -407,6 +457,7 @@ def compute_realized_returns(
                 "code": code,
                 "score": float(row.get(score_col, 0)),
                 "score_method": score_col,
+                    "entry_rule_used": _entry_rule,
                 "entry_price": entry_p,
                 "exit_price": actual_exit,
                 "ret_gross_pct": round(ret_gross, 4),
@@ -704,6 +755,24 @@ def auto_calibrate(
         "n_trades": len(returns_df),
     }
     meta.update(_fc_meta)  # [v20.8] Feature Contract 메타 병합
+    
+    # [v22 v5] entry universe 규칙 메타 — Kelly empirical_b 신뢰도 판단용
+    # entry_rule_used_counts에서 "all" 비중이 높으면 학습 데이터에 비활성 ROUTE
+    # 종목이 섞였다는 뜻 → empirical_b 신뢰도 ↓ → 보수화 권장
+    meta["entry_universe_rule"] = "top_pick_or_active_route"
+    if "entry_rule_used" in returns_df.columns and len(returns_df) > 0:
+        _counts = returns_df["entry_rule_used"].value_counts().to_dict()
+        meta["entry_rule_used_counts"] = {str(k): int(v) for k, v in _counts.items()}
+        # 신뢰도 지표: 'all'(legacy fallback) 비중
+        _all_n = int(_counts.get("all", 0))
+        _total = int(sum(_counts.values()))
+        meta["entry_rule_all_ratio"] = round(_all_n / _total, 4) if _total > 0 else 0.0
+        # 권장: 5% 미만이면 신뢰 가능, 그 이상이면 empirical_b 비추천
+        meta["entry_rule_trustworthy"] = bool(meta["entry_rule_all_ratio"] < 0.05)
+    else:
+        meta["entry_rule_used_counts"] = {}
+        meta["entry_rule_all_ratio"] = 0.0
+        meta["entry_rule_trustworthy"] = True   # 데이터 없으면 보수적으로 trust=True (별도 sufficient 가드 작동)
 
     # 테이블 + 메타를 하나의 JSON으로
     save_obj = {
@@ -747,6 +816,15 @@ def auto_calibrate(
                 and ("sufficient" in method_table.columns
                      and method_table["sufficient"].any())
             )
+            
+            # [v22 v5] per-method entry_rule 카운트 (이 method만의 분포)
+            if "entry_rule_used" in method_subset.columns and len(method_subset) > 0:
+                _m_counts = method_subset["entry_rule_used"].value_counts().to_dict()
+                method_meta["entry_rule_used_counts"] = {str(k): int(v) for k, v in _m_counts.items()}
+                _m_all = int(_m_counts.get("all", 0))
+                method_meta["entry_rule_all_ratio"] = round(_m_all / n_method, 4) if n_method > 0 else 0.0
+                method_meta["entry_rule_trustworthy"] = bool(method_meta["entry_rule_all_ratio"] < 0.05)
+            
             method_save_obj = {
                 "meta": method_meta,
                 "table": (json.loads(method_table.to_json(orient="records"))
@@ -769,9 +847,13 @@ def auto_calibrate(
         
         # [v22] kelly_calibrator의 winrate_table 캐시 무효화
         try:
-            from kelly_calibrator import _load_winrate_table_cached, _get_empirical_base
+            from kelly_calibrator import (
+                _load_winrate_table_cached, _get_empirical_base,
+                _load_winrate_meta_cached
+            )
             _load_winrate_table_cached.cache_clear()
             _get_empirical_base.cache_clear()
+            _load_winrate_meta_cached.cache_clear()
         except (ImportError, AttributeError):
             pass
 

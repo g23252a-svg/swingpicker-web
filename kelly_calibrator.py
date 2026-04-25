@@ -675,13 +675,81 @@ _load_winrate_table_cached.cache_clear = _load_winrate_table_impl.cache_clear
 _load_winrate_table_cached.cache_info = _load_winrate_table_impl.cache_info
 
 
+@lru_cache(maxsize=16)
+def _load_winrate_meta_impl(out_dir: str, method: str,
+                              _mtime_key: int) -> Optional[Dict]:
+    """[v22 v5] winrate_table meta 로드 — entry_rule 신뢰도 검증용"""
+    for fname in [f"winrate_table_by_{method}_latest.json",
+                  "winrate_table_latest.json"]:
+        p = os.path.join(out_dir, fname)
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "meta" in data:
+                return data["meta"]
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
+def _load_winrate_meta_cached(out_dir: str,
+                                method: str = "RANK_SCORE") -> Optional[Dict]:
+    mtime_key = _get_winrate_table_mtime(out_dir, method)
+    return _load_winrate_meta_impl(out_dir, method, mtime_key)
+
+
+_load_winrate_meta_cached.cache_clear = _load_winrate_meta_impl.cache_clear
+
+
+def _is_winrate_table_trustworthy(out_dir: str, method: str = "RANK_SCORE") -> bool:
+    """[v22 v5] winrate_table의 entry_rule이 신뢰할 만한지 판정.
+    
+    True 조건:
+      - meta 자체 없음 (옛날 테이블) → True (보수적으로 신뢰, 다른 가드 작동)
+      - entry_rule_trustworthy == True (all 비중 < 5%)
+      - entry_rule_all_ratio 정보 없으면 (옛날 테이블) → True
+    
+    False 조건:
+      - meta.entry_rule_trustworthy == False
+      - meta.entry_rule_all_ratio >= 0.05
+    """
+    meta = _load_winrate_meta_cached(out_dir, method=method)
+    if not meta:
+        return True   # 메타 없으면 옛날 테이블 — 보수적으로 신뢰 (다른 sufficient 가드 작동)
+    
+    # 명시적 trustworthy 플래그
+    if "entry_rule_trustworthy" in meta:
+        return bool(meta["entry_rule_trustworthy"])
+    
+    # all 비중으로 추정
+    if "entry_rule_all_ratio" in meta:
+        return float(meta["entry_rule_all_ratio"]) < 0.05
+    
+    return True   # 정보 없으면 신뢰
+
+
 def _get_empirical_b(scores, out_dir: str, method: str = "RANK_SCORE",
                       min_n: int = 200) -> Optional[np.ndarray]:
     """점수별 empirical b_ratio 보간.
     
     설계 §2.2.4: Kelly 과대 배팅 방지.
     planned_b(선언)와 empirical_b(실측) 중 min 취함.
+    
+    [v22 v5] entry_rule 신뢰도 가드:
+      winrate_table의 'all' fallback 비중이 5%+면 학습 데이터에 비활성 ROUTE
+      종목이 섞였다는 뜻 → empirical_b 미사용 (None 반환).
+      그러면 apply_kelly_calibrated가 planned_b * 0.6으로 보수화.
     """
+    # [v22 v5] entry_rule 신뢰도 검증
+    if not _is_winrate_table_trustworthy(out_dir, method=method):
+        _logger.warning(
+            f"⚠️ [v22] winrate_table_by_{method} entry_rule 신뢰도 부족 "
+            f"(all fallback 비중 ≥5%) → empirical_b 미사용, planned×0.6 보수화"
+        )
+        return None
+    
     wt = _load_winrate_table_cached(out_dir, method=method)
     if wt is None or wt.empty:
         return None
