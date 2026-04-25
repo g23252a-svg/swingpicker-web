@@ -373,7 +373,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                     "BLOCK_MARKET", "🔴 오늘 매수 금지 (시장 위험)"
                 ).replace("🔴 ", "")  # 헤더에서 emoji는 별도 표시
                 verdict_subtitle = (
-                    f"TOP_PICK {n_top}개  ·  하지만 시장 위험 "
+                    f"오늘의 추천 {n_top}개  ·  하지만 시장 위험 "
                     f"({macro_risk}) — 지켜보기만 권장"
                 )
                 gradient_from = "#3d0a0a"
@@ -389,7 +389,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                     "BLOCK_ENGINE", "🟠 신규 매수 자제 (엔진 제한)"
                 ).replace("🟠 ", "")
                 verdict_subtitle = (
-                    f"TOP_PICK {n_top}개  ·  엔진 최대 허용 ROUTE={max_route} "
+                    f"오늘의 추천 {n_top}개  ·  엔진 상태={route_display(max_route)} "
                     f"— 지켜보기만 권장"
                 )
                 gradient_from = "#3d2a0a"
@@ -405,7 +405,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                     "HALF", "🟠 절반만 매수 권장"
                 ).replace("🟠 ", "")
                 verdict_subtitle = (
-                    f"TOP_PICK {n_top}개  ·  시장 주의 "
+                    f"오늘의 추천 {n_top}개  ·  시장 주의 "
                     f"({macro_risk}) — 비중 절반으로 축소"
                 )
                 gradient_from = "#3d2a0a"
@@ -424,7 +424,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
                 if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
                 if not type_summary: type_summary.append(f"⭐ 추천 {n_top}")
-                verdict_subtitle = f"TOP_PICK {n_top}개  ·  " + " / ".join(type_summary)
+                verdict_subtitle = f"오늘의 추천 {n_top}개  ·  " + " / ".join(type_summary)
                 gradient_from = "#0a3d2a"
                 gradient_via = "#0d5440"
                 border_color = "border-emerald-500/50"
@@ -631,7 +631,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 _hdr_text = "신규 매수 자제 (엔진 제한)"
                 _hdr_subtitle = (
                     f"관찰 후보 {len(active)}종목 있지만 "
-                    f"엔진 최대 허용 ROUTE={max_route} — 관찰만"
+                    f"엔진 상태={route_display(max_route)} — 관찰만"
                 )
                 _hdr_g_from = "#3d2a0a"; _hdr_g_via = "#544013"
                 _hdr_border = "border-orange-500/50"
@@ -815,7 +815,7 @@ def render_tab_market(df):
                         ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
                         ui.label(f"평균 점수 {elite_avg:.0f}").classes("text-xs text-gray-500")
 
-        # ── [v22 UI Step B] ELITE 후보 더 보기 — TOP_PICK 제외 ──
+        # ── [v22 UI Step B + K] 점수 우수 후보 더 보기 — TOP_PICK 제외 ──
         # Hero 카드에 이미 TOP_PICK이 표시되므로, 여기서는 TOP_PICK 제외한 후보만
         try:
             if "ELITE_SCORE" in df.columns:
@@ -825,10 +825,10 @@ def render_tab_market(df):
                 if "TOP_PICK" in _top_df.columns:
                     _tp_mask = _top_df["TOP_PICK"].apply(is_truthy_flag)
                     _candidates = _top_df[~_tp_mask].copy()
-                    _label_text = "👀 ELITE 후보 더 보기 (TOP_PICK 제외)"
+                    _label_text = "👀 점수 우수 후보 더 보기 (오늘의 추천 제외)"
                 else:
                     _candidates = _top_df.copy()
-                    _label_text = "🏆 오늘의 ELITE Top"
+                    _label_text = "🏆 오늘의 점수 우수 종목 Top"
                 
                 # 활성 ROUTE 우선 정렬 (관찰 가치 있는 종목)
                 _picks = _candidates.nlargest(3, "ELITE_SCORE") if not _candidates.empty else _candidates
@@ -1065,7 +1065,7 @@ def render_tab_market(df):
 
             with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
                 # ROUTE별 통계
-                ui.label("🚦 ROUTE별 승률").classes("text-sm font-bold text-white mb-2")
+                ui.label("🚦 상태별 승률").classes("text-sm font-bold text-white mb-2")
                 route_rows = []
                 for route in ["ATTACK", "ARMED", "WAIT", "NEUTRAL", "CARRY"]:
                     sub = df[df.get("ROUTE", pd.Series(dtype=str)) == route]
@@ -1085,8 +1085,8 @@ def render_tab_market(df):
                             {"name": "route", "label": "ROUTE", "field": "route", "align": "center"},
                             {"name": "n", "label": "종목수", "field": "n", "align": "center"},
                             {"name": "wr", "label": "평균 승률", "field": "wr", "align": "center"},
-                            {"name": "elite", "label": "평균 ELITE", "field": "elite", "align": "center"},
-                            {"name": "rr", "label": "평균 RR", "field": "rr", "align": "center"},
+                            {"name": "elite", "label": "평균 종합 점수", "field": "elite", "align": "center"},
+                            {"name": "rr", "label": "평균 수익:손실", "field": "rr", "align": "center"},
                         ],
                         rows=route_rows, row_key="route",
                     ).classes("w-full").props("dense dark flat bordered")
@@ -1097,7 +1097,7 @@ def render_tab_market(df):
                     ("DISPLAY_SCORE", "종합점수"), ("STRUCT_SCORE", "구조(S)"),
                     ("TIMING_SCORE", "타이밍(T)"), ("AI_SCORE", "AI"),
                     ("ELITE_SCORE", "ELITE"), ("BALANCE_SCORE", "밸런스"),
-                    ("RR_NOW_TP1", "손익비(RR)"),
+                    ("RR_NOW_TP1", "수익:손실"),
                 ]
                 ax_rows = []
                 n20 = max(1, int(len(df) * 0.2))
