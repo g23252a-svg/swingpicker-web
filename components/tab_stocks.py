@@ -390,6 +390,90 @@ from typing import Optional
 import pandas as pd
 from nicegui import ui, run, app
 
+# ═══════════════════════════════════════════════════
+# [v22 UI Step H] 공통 용어 사전 import
+# 화면 표시 한국어 매핑은 components/ui_terms.py에 통일
+# 배포 중 import 경로 꼬여도 화면 죽지 않게 fallback 제공
+# ═══════════════════════════════════════════════════
+try:
+    from components.ui_terms import (
+        route_display,
+        route_icon,
+        pick_type_info,
+        label_to_display,
+        label_to_internal,
+        kelly_engine_label,
+        gap_direction,
+        is_truthy_flag,
+        is_route_blocked,
+        SCORE_LABELS,
+        VERDICT_LABELS,
+    )
+except Exception as _ui_terms_err:
+    logging.getLogger(__name__).warning(
+        f"ui_terms import 실패, fallback 사용: {_ui_terms_err}"
+    )
+    # Fallback: ui_terms.py 못 찾아도 화면 죽지 않게 기본값
+    def route_display(x): return str(x or "")
+    def route_icon(x):
+        _icons = {"ATTACK": "🚀", "ARMED": "🎯", "WAIT": "⏸️",
+                  "NEUTRAL": "👁️", "CARRY": "📌"}
+        return _icons.get(str(x or "").strip().upper(), "👀")
+    def pick_type_info(x):
+        _t = str(x or "").strip().upper()
+        if _t == "AGGRESSIVE": return ("🔥", "공격형", "#EF4444")
+        if _t == "STABLE": return ("💎", "안정형", "#10B981")
+        return ("⭐", "추천", "#F59E0B")
+    def label_to_display(x, short=False):
+        _map_long = {
+            "🛡️ 콤보": "🎯 최우선 추천",
+            "🏆 최강": "🏆 강력 후보 · 관찰",
+            "✅ 즉시진입": "✅ 지금 매수 가능",
+            "⚠️ 추격": "⚠️ 추격 매수 위험",
+        }
+        _map_short = {
+            "🛡️ 콤보": "🎯 최우선",
+            "🏆 최강": "🏆 강력 후보",
+            "✅ 즉시진입": "✅ 매수 가능",
+            "⚠️ 추격": "⚠️ 추격 위험",
+        }
+        s = str(x or "").strip()
+        if not s:
+            return "—"
+        return (_map_short if short else _map_long).get(s, s)
+    def label_to_internal(x):
+        _rev = {
+            "🎯 최우선 추천": "🛡️ 콤보",
+            "🏆 강력 후보 · 관찰": "🏆 최강",
+            "✅ 지금 매수 가능": "✅ 즉시진입",
+            "⚠️ 추격 매수 위험": "⚠️ 추격",
+        }
+        return _rev.get(str(x or "").strip(), str(x or ""))
+    def kelly_engine_label(x):
+        s = str(x or "").strip()
+        if not s or s.lower() in ("nan", "none"):
+            return ("", "")
+        if "fallback" in s.lower():
+            return (f"⚠️ 매수금액 모델 보수모드 ({s})", "text-xs text-red-300")
+        return (f"매수금액 모델 정상 ({s})", "text-xs text-gray-500")
+    def gap_direction(g):
+        try:
+            v = float(g)
+        except (TypeError, ValueError):
+            return ""
+        if abs(v) < 0.05: return "현재가 일치"
+        return "현재가 높음" if v > 0 else "현재가 낮음"
+    def is_truthy_flag(v):
+        if v is None: return False
+        return str(v).strip().upper() in {"1", "1.0", "TRUE", "Y", "YES"}
+    def is_route_blocked(r):
+        s = str(r or "").strip().upper()
+        if not s: return False
+        return s not in {"ATTACK", "ARMED", "ALL", "FULL",
+                          "TOP_PICK", "ATTACK_ONLY", "ALLOW_ATTACK"}
+    SCORE_LABELS = {}
+    VERDICT_LABELS = {}
+
 _logger = logging.getLogger(__name__)
 
 # ── 외부 모듈 (지연 임포트) ──
@@ -1717,11 +1801,10 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
         if df is None or df.empty:
             return
         
-        # ─── TOP_PICK 강건 파서 (v22 1순위) ───
+        # ─── TOP_PICK 강건 파서 (ui_terms.is_truthy_flag 사용) ───
         top_picks = pd.DataFrame()
         if 'TOP_PICK' in df.columns:
-            tp_str = df['TOP_PICK'].astype(str).str.strip().str.upper()
-            tp_mask = tp_str.isin(['1', '1.0', 'TRUE', 'Y', 'YES'])
+            tp_mask = df['TOP_PICK'].apply(is_truthy_flag)
             top_picks = df[tp_mask].copy()
         n_top = len(top_picks)
         
@@ -1767,12 +1850,9 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
                         "text-5xl font-black text-emerald-300"
                     )
             
-            # TOP_PICK 다축 정렬 (시장 탭과 동일 로직 인라인)
+            # TOP_PICK 다축 정렬 (ui_terms.is_truthy_flag 사용)
             x = top_picks.copy()
-            x["_is_now"] = (
-                x.get("IS_NOW_ENTRY", "0").astype(str).str.strip().str.upper()
-                .isin(["1","1.0","TRUE","Y","YES"]).astype(int)
-            )
+            x["_is_now"] = x.get("IS_NOW_ENTRY", "0").apply(is_truthy_flag).astype(int)
             x["_rr"] = pd.to_numeric(x.get("RR_NOW_TP1", 0), errors="coerce").fillna(0)
             x["_bal"] = pd.to_numeric(x.get("BALANCE_SCORE", 0), errors="coerce").fillna(0)
             x["_gap"] = pd.to_numeric(x.get("ENTRY_GAP_PCT", 999), errors="coerce").abs().fillna(999)
@@ -1785,20 +1865,11 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
             with ui.row().classes("w-full gap-3 flex-wrap mb-4"):
                 for rank, (_, row) in enumerate(top_sorted.iterrows(), 1):
                     name = str(row.get("종목명", "?"))
-                    tp_type = str(row.get("TOP_PICK_TYPE", "")).upper()
                     
-                    if tp_type == "AGGRESSIVE":
-                        emoji = "🔥"
-                        type_label = "공격형"
-                        accent = "#EF4444"
-                    elif tp_type == "STABLE":
-                        emoji = "💎"
-                        type_label = "안정형"
-                        accent = "#10B981"
-                    else:
-                        emoji = "⭐"
-                        type_label = "추천"
-                        accent = "#F59E0B"
+                    # [Step H] TOP_PICK_TYPE → ui_terms.pick_type_info
+                    emoji, type_label, accent = pick_type_info(
+                        row.get("TOP_PICK_TYPE", "")
+                    )
                     
                     elite = _nz(row.get("ELITE_SCORE", 0))
                     rr = _nz(row.get("RR_NOW_TP1", 0))
@@ -1809,9 +1880,8 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
                     t_v = _nz(row.get("TIMING_SCORE", 0))
                     a_v = _nz(row.get("AI_SCORE", row.get("ML_SCORE", 0)))
                     bal = _nz(row.get("BALANCE_SCORE", 0))
-                    is_now = str(row.get("IS_NOW_ENTRY", "0")).strip().upper() in [
-                        "1","1.0","TRUE","Y","YES"
-                    ]
+                    # [Step H] IS_NOW_ENTRY → is_truthy_flag
+                    is_now = is_truthy_flag(row.get("IS_NOW_ENTRY", "0"))
                     kelly_engine = str(row.get("KELLY_ENGINE", "")).strip()
                     
                     buy = int(_nz(row.get("추천매수가", 0)))
@@ -1820,13 +1890,8 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
                     tp1_pct = (tp1 / buy - 1) * 100 if buy > 0 else 0
                     stop_pct = (stop / buy - 1) * 100 if buy > 0 else 0
                     
-                    # 진입갭 방향성
-                    if abs(gap) < 0.05:
-                        gap_desc = "현재가 일치"
-                    elif gap > 0:
-                        gap_desc = "현재가 높음"
-                    else:
-                        gap_desc = "현재가 낮음"
+                    # [Step H] 진입갭 방향성 → ui_terms.gap_direction
+                    gap_desc = gap_direction(gap)
                     
                     with ui.card().classes(
                         "flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
@@ -1880,16 +1945,10 @@ def _render_stocks_hero(df: pd.DataFrame, top3_codes: list):
                                     "text-xs text-gray-400"
                                 )
                         
-                        # 매수금액 모델 (Kelly engine)
-                        if kelly_engine:
-                            if "fallback" in kelly_engine.lower():
-                                ui.label(
-                                    f"⚠️ 매수금액 모델 보수모드 ({kelly_engine})"
-                                ).classes("text-xs text-red-300 mt-1")
-                            else:
-                                ui.label(
-                                    f"매수금액 모델 정상 ({kelly_engine})"
-                                ).classes("text-xs text-gray-500 mt-1")
+                        # [Step H] 매수금액 모델 (Kelly engine) → ui_terms.kelly_engine_label
+                        kelly_text, kelly_cls = kelly_engine_label(kelly_engine)
+                        if kelly_text:
+                            ui.label(kelly_text).classes(f"{kelly_cls} mt-1")
             return
         
         # ═══════════════════════════════════════════════════
@@ -2308,16 +2367,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             fdf = fdf[fdf["ROUTE"].astype(str).str.contains(
                 route_filter.value, na=False
             )]
-        # [v3.7.18 + v22 한국어] 라벨 필터 적용 — 한국어 표시 → 내부 라벨 매핑
-        # 사용자에게 보이는 라벨은 한국어, 데이터의 ELITE_LABEL은 기존 라벨 유지
-        _LABEL_DISPLAY_TO_INTERNAL = {
-            "🎯 최우선 추천": "🛡️ 콤보",
-            "🏆 강력 후보 · 관찰": "🏆 최강",
-            "✅ 지금 매수 가능": "✅ 즉시진입",
-            "⚠️ 추격 매수 위험": "⚠️ 추격",
-        }
+        # [Step H] 라벨 필터 매핑 → ui_terms.label_to_internal 사용
+        # 사용자에게 보이는 한국어 라벨 → 데이터의 ELITE_LABEL 내부값
         if label_filter.value != "전체" and "ELITE_LABEL" in fdf.columns:
-            _internal = _LABEL_DISPLAY_TO_INTERNAL.get(label_filter.value, label_filter.value)
+            _internal = label_to_internal(label_filter.value)
             fdf = fdf[fdf["ELITE_LABEL"] == _internal]
         # [v3.7] 정렬 로직 확장
         if sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
@@ -2373,13 +2426,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         # [v3.7.26] 보기 모드별 컬럼 구성 — 기본: 핵심만 / 고급: 전체
         is_advanced = view_table_mode.value == "🔬 상세"
 
-        # [v22 한국어] 내부 ELITE_LABEL → 화면 표시용 한국어 라벨
-        _LABEL_INTERNAL_TO_DISPLAY = {
-            "🛡️ 콤보": "🎯 최우선",
-            "🏆 최강": "🏆 강력 후보",
-            "✅ 즉시진입": "✅ 매수 가능",
-            "⚠️ 추격": "⚠️ 추격 위험",
-        }
+        # [Step H] ELITE_LABEL/ROUTE 한국어 표시는 ui_terms 함수 사용
+        # (인라인 매핑 제거됨 — components/ui_terms.py 참조)
 
         # 공통 컬럼 (항상 표시)
         base_cols = [
@@ -2431,13 +2479,18 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             columns = base_cols
         rows = []
         for _, r in show.iterrows():
+            # [Step H] ELITE_LABEL → label_to_display(short=True) (nan/빈값 처리)
+            # [Step H] ROUTE → route_display
+            _elite_raw = r.get("ELITE_LABEL", "")
+            if pd.isna(_elite_raw):
+                _elite_lbl_internal = ""
+            else:
+                _elite_lbl_internal = str(_elite_raw or "")
+            _route_internal = str(r.get("ROUTE", ""))
             rows.append({
                 "code": str(r.get("종목코드", "")).zfill(6),
-                "label": _LABEL_INTERNAL_TO_DISPLAY.get(
-                    str(r.get("ELITE_LABEL", "") or ""),
-                    str(r.get("ELITE_LABEL", "") or "—")
-                ),
-                "route": str(r.get("ROUTE", "—")),
+                "label": label_to_display(_elite_lbl_internal, short=True),
+                "route": route_display(_route_internal) if _route_internal else "—",
                 "name": str(r.get("종목명", "—")),
                 "score": f'{_nz(r.get("DISPLAY_SCORE", 0)):.0f}',
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
@@ -2488,9 +2541,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             df_watch = show
 
         with ui.row().classes("w-full gap-4 flex-wrap items-start"):
-            _kanban_col("🚀 ATTACK", df_atk, "#EF4444")
-            _kanban_col("🔫 ARMED", df_arm, "#F59E0B")
-            _kanban_col("👀 WATCH", df_watch, "#3B82F6")
+            _kanban_col("🚀 적극 매수", df_atk, "#EF4444")
+            _kanban_col("🎯 매수 준비", df_arm, "#F59E0B")
+            _kanban_col("👀 관찰", df_watch, "#3B82F6")
 
     def _kanban_col(title: str, sub_df: pd.DataFrame, color: str):
         with ui.column().classes("kanban-col min-w-[280px] flex-1"):
@@ -2508,17 +2561,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     "border border-[rgba(255,255,255,0.1)] rounded-xl "
                     "hover:bg-[rgba(255,255,255,0.08)]"
                 ):
-                    # [v3.7 + v22 한국어] 라벨 뱃지 — 한국어 표시
-                    _kanban_label_map = {
-                        "🛡️ 콤보": "🎯 최우선",
-                        "🏆 최강": "🏆 강력 후보",
-                        "✅ 즉시진입": "✅ 매수 가능",
-                        "⚠️ 추격": "⚠️ 추격 위험",
-                    }
-                    elite_lbl_internal = str(r.get("ELITE_LABEL", "") or "")
-                    elite_lbl = _kanban_label_map.get(elite_lbl_internal, elite_lbl_internal)
+                    # [Step H] 칸반 라벨 뱃지 → ui_terms.label_to_display (nan/빈값 처리)
+                    _elite_raw = r.get("ELITE_LABEL", "")
+                    if pd.isna(_elite_raw):
+                        elite_lbl_internal = ""
+                    else:
+                        elite_lbl_internal = str(_elite_raw or "")
+                    elite_lbl = label_to_display(elite_lbl_internal, short=True) if elite_lbl_internal else ""
                     elite_color = str(r.get("ELITE_LABEL_COLOR", "") or "")
-                    if elite_lbl:
+                    if elite_lbl and elite_lbl != "—":
                         ui.badge(elite_lbl, color=elite_color).classes("text-[10px] mb-1")
 
                     with ui.row().classes("justify-between items-center"):
