@@ -12,6 +12,61 @@ from datetime import datetime, timedelta
 import pandas as pd
 from nicegui import ui
 
+# ═══════════════════════════════════════════════════
+# [v22 UI Step I] 공통 용어 사전 import
+# 시장 탭/종목 탭 양쪽이 같은 함수 사용 → 용어 정합성
+# 배포 중 import 경로 꼬여도 화면 죽지 않게 fallback 제공
+# ═══════════════════════════════════════════════════
+try:
+    from components.ui_terms import (
+        route_display,
+        route_icon,
+        pick_type_info,
+        kelly_engine_label,
+        gap_direction,
+        is_truthy_flag,
+        is_route_blocked,
+    )
+except Exception as _ui_terms_err:
+    logging.getLogger(__name__).warning(
+        f"ui_terms import 실패, fallback 사용: {_ui_terms_err}"
+    )
+    def route_display(x):
+        _map = {"ATTACK": "🚀 적극 매수", "ARMED": "🎯 매수 준비",
+                "WAIT": "⏸️ 관망", "NEUTRAL": "👁️ 중립",
+                "CARRY": "📌 보유 관리", "OVERHEAT": "🔥 과열 주의",
+                "EXIT_WARNING": "⚠️ 이탈 주의", "BLOCKED": "⛔ 제외"}
+        return _map.get(str(x or "").strip().upper(), str(x or ""))
+    def route_icon(x):
+        _icons = {"ATTACK": "🚀", "ARMED": "🎯", "WAIT": "⏸️",
+                  "NEUTRAL": "👁️", "CARRY": "📌"}
+        return _icons.get(str(x or "").strip().upper(), "👀")
+    def pick_type_info(x):
+        t = str(x or "").strip().upper()
+        if t == "AGGRESSIVE": return ("🔥", "공격형", "#EF4444")
+        if t == "STABLE": return ("💎", "안정형", "#10B981")
+        return ("⭐", "추천", "#F59E0B")
+    def kelly_engine_label(x):
+        s = str(x or "").strip()
+        if not s or s.lower() in ("nan", "none"):
+            return ("", "")
+        if "fallback" in s.lower():
+            return (f"⚠️ 매수금액 모델 보수모드 ({s})", "text-xs text-red-300")
+        return (f"매수금액 모델 정상 ({s})", "text-xs text-gray-500")
+    def gap_direction(g):
+        try: v = float(g)
+        except (TypeError, ValueError): return ""
+        if abs(v) < 0.05: return "현재가 일치"
+        return "현재가 높음" if v > 0 else "현재가 낮음"
+    def is_truthy_flag(v):
+        if v is None: return False
+        return str(v).strip().upper() in {"1", "1.0", "TRUE", "Y", "YES"}
+    def is_route_blocked(r):
+        s = str(r or "").strip().upper()
+        if not s: return False
+        return s not in {"ATTACK", "ARMED", "ALL", "FULL",
+                          "TOP_PICK", "ATTACK_ONLY", "ALLOW_ATTACK"}
+
 try:
     import plotly.graph_objects as go
     PLOTLY_OK = True
@@ -224,11 +279,8 @@ def _sort_top_picks_for_hero(top_picks: pd.DataFrame) -> pd.DataFrame:
         x["_rank"] = pd.to_numeric(x["LDY_RANK"], errors="coerce").fillna(9999)
         return x.sort_values("_rank").drop(columns=["_rank"])
     
-    # 다축 정렬
-    x["_is_now"] = (
-        x.get("IS_NOW_ENTRY", "0").astype(str).str.strip().str.upper()
-        .isin(["1", "1.0", "TRUE", "Y", "YES"]).astype(int)
-    )
+    # 다축 정렬 (ui_terms.is_truthy_flag 사용)
+    x["_is_now"] = x.get("IS_NOW_ENTRY", "0").apply(is_truthy_flag).astype(int)
     x["_rr"] = pd.to_numeric(x.get("RR_NOW_TP1", 0), errors="coerce").fillna(0)
     x["_bal"] = pd.to_numeric(x.get("BALANCE_SCORE", 0), errors="coerce").fillna(0)
     x["_gap"] = pd.to_numeric(x.get("ENTRY_GAP_PCT", 999), errors="coerce").abs().fillna(999)
@@ -270,28 +322,15 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
         is_macro_dangerous = macro_risk in ("WARNING", "CRITICAL")
         is_macro_caution = macro_risk == "CAUTION"
         
-        # [v22 UI Step E1 + F2] max_allowed_route 기반 ROUTE 차단 감지
-        # 진입 허용 routes (확장된 세트):
-        #   ATTACK, ARMED — 표준 ROUTE enum (기본 허용)
-        #   ALL, FULL — 전체 허용 (다른 시스템 호환)
-        #   TOP_PICK, ATTACK_ONLY, ALLOW_ATTACK — TOP_PICK 위주 허용 변종
-        # 빈 문자열이면 정보 없음 = 차단 안 함 (기존 동작 유지)
-        # 차단으로 간주: WAIT/NEUTRAL/BLOCKED/NO_TRADE/CARRY 등
-        _ALLOWED_MAX_ROUTES = frozenset({
-            "ATTACK", "ARMED",
-            "ALL", "FULL",
-            "TOP_PICK", "ATTACK_ONLY", "ALLOW_ATTACK",
-        })
-        is_route_blocked = (
-            bool(max_route) and 
-            max_route not in _ALLOWED_MAX_ROUTES
-        )
+        # [Step I] max_allowed_route 차단 감지 → ui_terms.is_route_blocked 사용
+        # ALLOWED_MAX_ROUTES 세트는 ui_terms.py에 통일됨
+        # 변수명은 함수와 충돌 방지 위해 'route_blocked'로 (함수: is_route_blocked)
+        route_blocked = is_route_blocked(max_route)
         
-        # TOP_PICK 종목 — 강건 파서 (1, 1.0, "True", "Y" 등)
+        # TOP_PICK 종목 — ui_terms.is_truthy_flag 사용
         top_picks = pd.DataFrame()
         if 'TOP_PICK' in df.columns:
-            tp_str = df['TOP_PICK'].astype(str).str.strip().str.upper()
-            tp_mask = tp_str.isin(['1', '1.0', 'TRUE', 'Y', 'YES'])
+            tp_mask = df['TOP_PICK'].apply(is_truthy_flag)
             top_picks = df[tp_mask].copy()
         
         n_top = len(top_picks)
@@ -301,7 +340,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
         # [Step D + E1] macro risk + max_route 기반 verdict 분기
         # 우선순위:
         #   1. is_macro_dangerous (CRITICAL/WARNING) — 가장 강한 경고 🔴
-        #   2. is_route_blocked (엔진이 ROUTE 제한) — 🟠
+        #   2. route_blocked (엔진이 ROUTE 제한) — 🟠
         #   3. is_macro_caution (CAUTION) — 🟠 분할 진입
         #   4. NORMAL + 모든 통과 — 🟢
         # ─────────────────────────────────────────────
@@ -330,7 +369,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 text_main = "text-red-300"
                 text_sub = "text-red-100"
                 count_color = "text-red-300/60"
-            elif is_route_blocked:
+            elif route_blocked:
                 # [Step E1] 🟠 엔진이 ROUTE 제한 — 매크로는 정상이지만 신규 진입 X
                 verdict_emoji = "🟠"
                 verdict_text = "신규 매수 자제 (엔진 제한)"
@@ -424,14 +463,12 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                     tp1_pct = (tp1 / buy - 1) * 100 if buy > 0 else 0
                     stop_pct = (stop / buy - 1) * 100 if buy > 0 else 0
                     
-                    # [v22 UI Step C] 3축 + 밸런스 + IS_NOW_ENTRY
+                    # [v22 UI Step C + I] 3축 + 밸런스 + IS_NOW_ENTRY (ui_terms 사용)
                     struct = safe_float(row.get('STRUCT_SCORE', 0))
                     timing = safe_float(row.get('TIMING_SCORE', 0))
                     ai_sc = safe_float(row.get('AI_SCORE', row.get('ML_SCORE', 0)))
                     balance = safe_float(row.get('BALANCE_SCORE', 0))
-                    is_now_entry = str(row.get('IS_NOW_ENTRY', '0')).strip().upper() in [
-                        '1', '1.0', 'TRUE', 'Y', 'YES'
-                    ]
+                    is_now_entry = is_truthy_flag(row.get('IS_NOW_ENTRY', '0'))
                     
                     # [v22 UI Step E4 + F3] Kelly engine + error 요약
                     kelly_engine = str(row.get('KELLY_ENGINE', '')).strip()
@@ -448,13 +485,8 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                             )
                             ui.badge(f"E{elite:.0f}", color="#3B82F6").classes("text-xs")
                         
-                        # [Step E3] 진입갭 방향성 명확화
-                        if abs(gap) < 0.05:
-                            gap_desc = "현재가 일치"
-                        elif gap > 0:
-                            gap_desc = "현재가 높음"
-                        else:
-                            gap_desc = "현재가 낮음"
+                        # [Step I] 진입갭 방향성 → ui_terms.gap_direction
+                        gap_desc = gap_direction(gap)
                         ui.label(
                             f"{type_label}  ·  수익:손실 {rr:.1f}:1  ·  추천가 차이 {gap:+.1f}% ({gap_desc})"
                         ).classes("text-xs text-gray-400 mb-2")
@@ -488,7 +520,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         with ui.row().classes("w-full gap-3 mt-2 items-center"):
                             if amt > 0:
                                 # [Step F1] 위험/차단/주의 3단계 비중 안내
-                                if is_macro_dangerous or is_route_blocked:
+                                if is_macro_dangerous or route_blocked:
                                     # ⛔ 위험장 또는 엔진 차단 — 신규 매수 0원
                                     ui.label(
                                         f"⛔ 신규매수 0원  ·  기준 {amt:.0f}만원은 관찰용"
@@ -508,13 +540,12 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                                     "text-xs text-gray-400"
                                 )
                         
-                        # [Step E4 + F3] Kelly engine 표시 (운영 신뢰)
-                        if kelly_engine:
+                        # [Step E4 + F3 + I] Kelly engine 표시 → ui_terms.kelly_engine_label
+                        kelly_text, kelly_cls = kelly_engine_label(kelly_engine)
+                        if kelly_text:
+                            ui.label(kelly_text).classes(f"{kelly_cls} mt-1")
+                            # [F3] fallback일 때 KELLY_ERROR 요약 (있을 때만, 80자)
                             if 'fallback' in kelly_engine.lower():
-                                ui.label(f"⚠️ 매수금액 모델 보수모드 ({kelly_engine})").classes(
-                                    "text-xs text-red-300 mt-1"
-                                )
-                                # [F3] KELLY_ERROR 요약 (있을 때만, 80자로 잘라서)
                                 if kelly_error and kelly_error.lower() not in ("nan", "none", ""):
                                     _err_short = kelly_error[:80]
                                     if len(kelly_error) > 80:
@@ -522,10 +553,6 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                                     ui.label(_err_short).classes(
                                         "text-[10px] text-red-400/70"
                                     )
-                            else:
-                                ui.label(f"매수금액 모델 정상 ({kelly_engine})").classes(
-                                    "text-xs text-gray-500 mt-1"
-                                )
             return
         
         # ─────────────────────────────────────────────
@@ -553,9 +580,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             cand_balance = safe_float(top_cand.get('BALANCE_SCORE', 0))
             cand_rr = safe_float(top_cand.get('RR_NOW_TP1', 0))
             cand_gap = safe_float(top_cand.get('ENTRY_GAP_PCT', 0))
-            cand_is_now = str(top_cand.get('IS_NOW_ENTRY', '0')).strip().upper() in [
-                '1', '1.0', 'TRUE', 'Y', 'YES'
-            ]
+            cand_is_now = is_truthy_flag(top_cand.get('IS_NOW_ENTRY', '0'))
             
             # 부족한 점수 진단 (변수 재사용 — 위에서 추출했으므로 그대로)
             shortfall_msg = ""
@@ -581,7 +606,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 _hdr_border = "border-red-500/50"
                 _hdr_text_main = "text-red-300"
                 _hdr_text_sub = "text-red-100"
-            elif is_route_blocked:
+            elif route_blocked:
                 # [Step E1] 엔진 ROUTE 제한 — 신규 진입 X
                 _hdr_emoji = "🟠"
                 _hdr_text = "신규 매수 자제 (엔진 제한)"
@@ -640,13 +665,8 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                     f"·  3축 균형 {cand_balance:.0f}"
                 ).classes("text-xs text-purple-300 mb-1")
                 
-                # [Step D3] RR + 진입갭 (Step E3 방향성 추가)
-                if abs(cand_gap) < 0.05:
-                    _cand_gap_desc = "현재가 일치"
-                elif cand_gap > 0:
-                    _cand_gap_desc = "현재가 높음"
-                else:
-                    _cand_gap_desc = "현재가 낮음"
+                # [Step I] RR + 진입갭 → ui_terms.gap_direction
+                _cand_gap_desc = gap_direction(cand_gap)
                 ui.label(
                     f"수익:손실 {cand_rr:.1f}:1  ·  추천가 차이 {cand_gap:+.1f}% ({_cand_gap_desc})"
                 ).classes("text-xs text-gray-400 mb-1")
@@ -782,8 +802,7 @@ def render_tab_market(df):
                 
                 # [v22 UI Step B] TOP_PICK 제외 (Hero 카드 중복 제거)
                 if "TOP_PICK" in _top_df.columns:
-                    _tp_str = _top_df["TOP_PICK"].astype(str).str.strip().str.upper()
-                    _tp_mask = _tp_str.isin(["1", "1.0", "TRUE", "Y", "YES"])
+                    _tp_mask = _top_df["TOP_PICK"].apply(is_truthy_flag)
                     _candidates = _top_df[~_tp_mask].copy()
                     _label_text = "👀 ELITE 후보 더 보기 (TOP_PICK 제외)"
                 else:
@@ -799,7 +818,8 @@ def render_tab_market(df):
                         with ui.row().classes("w-full gap-3 flex-wrap"):
                             for _, s in _picks.iterrows():
                                 route = str(s.get("ROUTE", ""))
-                                route_icon = {"ATTACK": "🚀", "ARMED": "🔫", "CARRY": "📌"}.get(route, "👀")
+                                # [Step I] route_icon → ui_terms.route_icon
+                                _route_icon = route_icon(route)
                                 elite = safe_float(s.get("ELITE_SCORE", 0))
                                 close = safe_float(s.get("종가", 0))
                                 tp1 = safe_float(s.get("추천매도가1", 0))
@@ -811,7 +831,7 @@ def render_tab_market(df):
 
                                 with ui.card().classes("flex-1 min-w-[200px] p-3 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
                                     with ui.row().classes("items-center gap-2"):
-                                        ui.label(f"{route_icon} {tp_flag}{s.get('종목명', '')}").classes("text-white font-bold text-sm")
+                                        ui.label(f"{_route_icon} {tp_flag}{s.get('종목명', '')}").classes("text-white font-bold text-sm")
                                         ui.badge(f"E{elite:.0f}", color="#10B981" if elite >= 80 else "#3B82F6").classes("text-xs")
                                     ui.label(f"구조 {safe_float(s.get('STRUCT_SCORE', 0)):.0f} · 타이밍 {safe_float(s.get('TIMING_SCORE', 0)):.0f} · AI {safe_float(s.get('AI_SCORE', 0)):.0f} | 3축 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
                                     ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | 수익:손실 {rr:.1f}:1 | 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")

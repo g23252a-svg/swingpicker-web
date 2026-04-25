@@ -1770,13 +1770,13 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list):
                         ui.label(f"#{i}").classes("text-sm text-gray-500")
                         ui.badge(lbl, color=color).classes("text-xs")
                     ui.label(name).classes("text-base font-bold text-white")
-                    ui.label(f"S{s_v:.0f} T{t_v:.0f} AI{a_v:.0f}").classes(
+                    ui.label(f"구조 {s_v:.0f} · 타이밍 {t_v:.0f} · AI {a_v:.0f}").classes(
                         "text-xs text-gray-400 mt-0.5"
                     )
                     ui.label(f"🎯{entry:,}  🟢{tp1:,}  🛡️{stop:,}").classes(
                         "text-xs text-gray-400 mt-0.5"
                     )
-                    ui.label(f"갭 {gap:.1f}% · RR {rr:.2f} · {desc}").classes(
+                    ui.label(f"추천가 차이 {gap:.1f}% · 수익:손실 {rr:.2f} · {desc}").classes(
                         "text-[10px] text-gray-500 mt-1"
                     )
 
@@ -2184,7 +2184,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ).classes("text-[11px] text-gray-400")
 
             # ── 라벨 가중치 ──
-            ui.label("🏷️ 라벨 가중치 (랭크 계산에 곱해지는 배수)").classes(
+            ui.label("🏷️ 라벨 가중치 (추천 순위 계산에 곱해지는 배수)").classes(
                 "text-xs text-purple-300 font-bold mt-2"
             )
             ui.label(
