@@ -201,11 +201,250 @@ def _get_fear_greed(df):
     return score, label
 
 
+# ═══════════════════════════════════════════════════
+# [v22 UI] 오늘의 결론 Hero 카드 — 첫 화면 1초 답변
+# ═══════════════════════════════════════════════════
+def _render_today_hero(df: pd.DataFrame):
+    """첫 화면 최상단 Hero 카드.
+    
+    3가지 시나리오:
+      A) TOP_PICK >= 1   → 🏆 추천 카드 (큼직)
+      B) TOP_PICK = 0, ARMED/ATTACK 있음 → ⏸️ 관찰 모드 + 가까운 후보
+      C) 활성 후보도 0  → 🔴 매수 신호 없음
+    
+    안전 설계:
+      - try/except로 에러 시 카드만 안 띄우고 진행
+      - 컬럼 누락 graceful fallback
+    """
+    try:
+        if df is None or df.empty:
+            return
+        
+        # TOP_PICK 종목 — 강건 파서 (1, 1.0, "True", "Y" 등)
+        top_picks = pd.DataFrame()
+        if 'TOP_PICK' in df.columns:
+            tp_str = df['TOP_PICK'].astype(str).str.strip().str.upper()
+            tp_mask = tp_str.isin(['1', '1.0', 'TRUE', 'Y', 'YES'])
+            top_picks = df[tp_mask].copy()
+        
+        n_top = len(top_picks)
+        
+        # ─────────────────────────────────────────────
+        # 시나리오 A: TOP_PICK >= 1 → 🏆 추천 카드
+        # ─────────────────────────────────────────────
+        if n_top >= 1:
+            # AGGRESSIVE / STABLE 분류
+            if 'TOP_PICK_TYPE' in top_picks.columns:
+                tp_type_str = top_picks['TOP_PICK_TYPE'].astype(str).str.upper()
+                n_agg = (tp_type_str == 'AGGRESSIVE').sum()
+                n_stb = (tp_type_str == 'STABLE').sum()
+            else:
+                n_agg = 0
+                n_stb = 0
+            
+            # 헤더 카드 — 결론 한 줄
+            with ui.card().classes(
+                "w-full p-5 mb-4 rounded-xl "
+                "bg-gradient-to-r from-[#0a3d2a] via-[#0d5440] to-[#0a3d2a] "
+                "border-2 border-emerald-500/50"
+            ):
+                with ui.row().classes("w-full items-center justify-between"):
+                    with ui.column().classes("gap-1"):
+                        ui.label("🟢 오늘 신규 진입 가능").classes(
+                            "text-lg font-bold text-emerald-300"
+                        )
+                        type_summary = []
+                        if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
+                        if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
+                        if not type_summary: type_summary.append(f"⭐ 추천 {n_top}")
+                        ui.label(f"TOP_PICK {n_top}개  ·  " + " / ".join(type_summary)).classes(
+                            "text-sm text-emerald-100"
+                        )
+                    ui.label(f"{n_top}").classes(
+                        "text-5xl font-black text-emerald-300"
+                    )
+            
+            # TOP_PICK 카드들 (최대 3개)
+            top_picks_sorted = top_picks.sort_values('ELITE_SCORE', ascending=False).head(3) \
+                if 'ELITE_SCORE' in top_picks.columns else top_picks.head(3)
+            
+            with ui.row().classes("w-full gap-3 flex-wrap mb-4"):
+                for rank, (_, row) in enumerate(top_picks_sorted.iterrows(), 1):
+                    name = str(row.get('종목명', 'N/A'))
+                    tp_type = str(row.get('TOP_PICK_TYPE', '')).upper()
+                    
+                    if tp_type == 'AGGRESSIVE':
+                        emoji = '🔥'
+                        type_label = '공격형'
+                        accent = '#EF4444'   # red
+                    elif tp_type == 'STABLE':
+                        emoji = '💎'
+                        type_label = '안정형'
+                        accent = '#10B981'   # green
+                    else:
+                        emoji = '⭐'
+                        type_label = '추천'
+                        accent = '#F59E0B'   # amber
+                    
+                    elite = safe_float(row.get('ELITE_SCORE', 0))
+                    rr = safe_float(row.get('RR_NOW_TP1', 0))
+                    gap = safe_float(row.get('ENTRY_GAP_PCT', 0))
+                    amt = safe_float(row.get('추천금액(만원)', 0))
+                    ewr = safe_float(row.get('EST_WIN_RATE', 0))
+                    
+                    buy = safe_float(row.get('추천매수가', 0))
+                    tp1 = safe_float(row.get('추천매도가1', 0))
+                    stop = safe_float(row.get('손절가', 0))
+                    tp1_pct = (tp1 / buy - 1) * 100 if buy > 0 else 0
+                    stop_pct = (stop / buy - 1) * 100 if buy > 0 else 0
+                    
+                    with ui.card().classes(
+                        f"flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
+                        f"border-l-4 rounded-xl"
+                    ).style(f"border-left-color: {accent}"):
+                        # 종목명 + 타입 + 순위
+                        with ui.row().classes("w-full items-center gap-2 mb-2"):
+                            ui.label(f"{emoji} {rank}순위 · {name}").classes(
+                                "text-base font-bold text-white"
+                            )
+                            ui.badge(f"E{elite:.0f}", color="#3B82F6").classes("text-xs")
+                        
+                        ui.label(f"{type_label}  ·  RR {rr:.1f}:1  ·  진입갭 {gap:+.1f}%").classes(
+                            "text-xs text-gray-400 mb-2"
+                        )
+                        
+                        # 가격 (매수 → 목표 / 손절)
+                        if buy > 0 and tp1 > 0:
+                            ui.label(f"매수 {int(buy):,} → 목표 {int(tp1):,}  ({tp1_pct:+.1f}%)").classes(
+                                "text-sm text-cyan-300"
+                            )
+                        if stop > 0 and buy > 0:
+                            ui.label(f"손절 {int(stop):,}원  ({stop_pct:+.1f}%)").classes(
+                                "text-xs text-red-300"
+                            )
+                        
+                        # 추천 비중 + 승률
+                        with ui.row().classes("w-full gap-3 mt-2 items-center"):
+                            if amt > 0:
+                                ui.label(f"💰 {amt:.0f}만원").classes(
+                                    "text-sm font-bold text-amber-300"
+                                )
+                            if ewr > 0:
+                                ui.label(f"승률 {ewr*100:.0f}%").classes(
+                                    "text-xs text-gray-400"
+                                )
+            return
+        
+        # ─────────────────────────────────────────────
+        # 시나리오 B/C: TOP_PICK 0건
+        # ─────────────────────────────────────────────
+        active = pd.DataFrame()
+        if 'ROUTE' in df.columns:
+            route_upper = df['ROUTE'].astype(str).str.strip().str.upper()
+            active = df[route_upper.isin(['ATTACK', 'ARMED'])].copy()
+        
+        if len(active) > 0 and 'ELITE_SCORE' in active.columns:
+            # 시나리오 B: 관찰 모드
+            top_cand = active.sort_values('ELITE_SCORE', ascending=False).iloc[0]
+            cand_name = str(top_cand.get('종목명', 'N/A'))
+            cand_score = safe_float(top_cand.get('ELITE_SCORE', 0))
+            cand_route = str(top_cand.get('ROUTE', ''))
+            cand_tp1 = safe_float(top_cand.get('TP1_PCT', 0))
+            cand_buy = safe_float(top_cand.get('추천매수가', 0))
+            cand_target = safe_float(top_cand.get('추천매도가1', 0))
+            
+            # 부족한 점수 진단
+            struct = safe_float(top_cand.get('STRUCT_SCORE', 0))
+            timing = safe_float(top_cand.get('TIMING_SCORE', 0))
+            balance = safe_float(top_cand.get('BALANCE_SCORE', 0))
+            
+            shortfall_msg = ""
+            if struct > 0 and struct < 80:
+                shortfall_msg = f"STRUCT {80 - struct:.1f}점 부족 (80↑ 필요)"
+            elif cand_score < 75:
+                shortfall_msg = f"ELITE {75 - cand_score:.1f}점 부족 (75↑ 필요)"
+            elif timing > 0 and timing < 70:
+                shortfall_msg = f"TIMING {70 - timing:.1f}점 부족"
+            else:
+                shortfall_msg = "조건 일부 미달"
+            
+            # 헤더 카드 — 관찰 모드
+            with ui.card().classes(
+                "w-full p-5 mb-4 rounded-xl "
+                "bg-gradient-to-r from-[#3d2a0a] via-[#544013] to-[#3d2a0a] "
+                "border-2 border-amber-500/50"
+            ):
+                with ui.row().classes("w-full items-center justify-between"):
+                    with ui.column().classes("gap-1"):
+                        ui.label("⏸️ 오늘은 관찰 모드").classes(
+                            "text-lg font-bold text-amber-300"
+                        )
+                        ui.label(f"정식 추천 0건  ·  활성 후보 {len(active)}종목").classes(
+                            "text-sm text-amber-100"
+                        )
+                    ui.label("0").classes(
+                        "text-5xl font-black text-amber-300/60"
+                    )
+            
+            # 가까운 후보 카드
+            with ui.card().classes(
+                "w-full p-4 mb-4 rounded-xl "
+                "bg-[#1a1a2e] border border-amber-700/40"
+            ):
+                ui.label(f"💡 가장 가까운 후보").classes("text-xs text-gray-400 mb-2")
+                
+                with ui.row().classes("w-full items-center gap-3 mb-2"):
+                    ui.label(f"👀 {cand_name}").classes(
+                        "text-lg font-bold text-white"
+                    )
+                    ui.badge(f"E{cand_score:.1f}", color="#F59E0B").classes("text-xs")
+                    ui.badge(cand_route, color="#3B82F6").classes("text-xs")
+                
+                ui.label(f"└ {shortfall_msg}").classes(
+                    "text-sm text-amber-300"
+                )
+                
+                if cand_buy > 0 and cand_target > 0:
+                    ui.label(
+                        f"매수 {int(cand_buy):,} → 목표 {int(cand_target):,}  (+{cand_tp1:.1f}%)"
+                    ).classes("text-sm text-cyan-400 mt-1")
+                
+                ui.label(
+                    "시스템이 신중하게 골라서 오늘은 통과한 종목이 없어요. "
+                    "무리한 진입은 자제하시고 다음 기회를 기다리세요."
+                ).classes("text-xs text-gray-500 mt-2 italic")
+        else:
+            # 시나리오 C: 매수 신호 없음
+            with ui.card().classes(
+                "w-full p-5 mb-4 rounded-xl "
+                "bg-gradient-to-r from-[#3d0a0a] via-[#541313] to-[#3d0a0a] "
+                "border-2 border-red-500/50"
+            ):
+                with ui.row().classes("w-full items-center justify-between"):
+                    with ui.column().classes("gap-1"):
+                        ui.label("🔴 오늘은 매수 신호 없음").classes(
+                            "text-lg font-bold text-red-300"
+                        )
+                        ui.label(
+                            "ATTACK/ARMED 종목 0건 — 시장 약세. 다음 거래일 대기."
+                        ).classes("text-sm text-red-100")
+                    ui.icon("warning", size="48px").classes("text-red-400")
+    
+    except Exception as _e:
+        # Hero 카드 실패해도 나머지 화면은 정상 표시
+        _logger.warning(f"Hero 카드 렌더 실패 (silent fail): {_e}")
+
+
 # ── 메인 렌더 ──
 
 def render_tab_market(df):
     """Tab 1: 시장 현황"""
     import os, json
+
+    # ═══════════════════════════════════════════════════
+    # [v22 UI] 오늘의 결론 Hero 카드 — 가장 먼저 (1초 답변)
+    # ═══════════════════════════════════════════════════
+    _render_today_hero(df)
 
     fg_score, fg_label = _get_fear_greed(df)
     DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
