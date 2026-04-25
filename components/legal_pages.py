@@ -429,7 +429,7 @@ def render_refund_page():
 #  라우트 등록
 # ═══════════════════════════════════════════════════
 def register_legal_pages():
-    """[v22 Step S] 법적 페이지 라우트 등록.
+    """[v22 Step S+AC] 법적 페이지 라우트 등록.
     
     main.py에서 호출:
         from components.legal_pages import register_legal_pages
@@ -447,3 +447,14 @@ def register_legal_pages():
     @ui.page('/refund')
     async def _refund_page():
         render_refund_page()
+    
+    # [v22 Step AC] 약관 변경 이력 페이지
+    @ui.page('/terms/history')
+    async def _terms_history_page():
+        try:
+            from components.tab_terms import render_terms_history_page
+            render_terms_history_page()
+        except ImportError:
+            ui.label("약관 변경 이력 페이지를 불러올 수 없습니다.").classes(
+                "text-red-400 p-6"
+            )

@@ -49,6 +49,13 @@ try:
 except ImportError:
     PAYMENTS_OK = False
 
+# [v22 Step S+AC] 법적 페이지 라우트 (/terms /privacy /refund /terms/history)
+try:
+    from components.legal_pages import register_legal_pages
+    LEGAL_OK = True
+except ImportError:
+    LEGAL_OK = False
+
 try:
     from trade_journal_tab import render_trade_journal_tab
     JOURNAL_OK = True
@@ -225,6 +232,11 @@ async def _do_refresh():
 if PAYMENTS_OK:
     register_payment_routes()
     logger.info("💳 결제 API 라우트 등록 완료")
+
+# [v22 Step S+AC] 법적 페이지 라우트 등록 (/terms /privacy /refund /terms/history)
+if LEGAL_OK:
+    register_legal_pages()
+    logger.info("📜 법적 페이지 라우트 등록 완료")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(STATIC_DIR):

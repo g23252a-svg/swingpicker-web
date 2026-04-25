@@ -40,13 +40,16 @@ USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json"
 # [v22 Step W+X] 결제 기록 별도 Gist 파일 — inquiries와 컬럼 매핑 분리
 PAYMENT_DB_FILE = "payments_db.json"
+# [v22 Step AC] 약관 동의 기록 별도 Gist 파일 — 전자상거래법 5년 보관 의무
+TERMS_DB_FILE = "terms_agreements_db.json"
 
-# [v22 Step X] 테이블 → Gist 파일명 매핑
+# [v22 Step X+AC] 테이블 → Gist 파일명 매핑
 # Sync manager + load 양쪽에서 일관 사용
 TABLE_TO_GIST_FILE = {
     "users": USER_DB_FILE,
     "inquiries": INQUIRY_DB_FILE,
     "payments": PAYMENT_DB_FILE,
+    "terms_agreements": TERMS_DB_FILE,
 }
 
 # ═══════════════════════════════════════════
@@ -342,6 +345,27 @@ class LDYDBManager:
             "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments (status)"
         )
 
+        # [v22 Step AC] 약관 동의 기록 테이블 — 전자상거래법 대비
+        # context: signup / payment / re_consent (약관 변경 시 재동의)
+        self._exec_sqlite("""
+            CREATE TABLE IF NOT EXISTS terms_agreements (
+                agreement_id TEXT PRIMARY KEY,
+                email TEXT,
+                terms_version TEXT,
+                terms_type TEXT,
+                context TEXT,
+                agreed_at TEXT,
+                ip_address TEXT,
+                user_agent TEXT
+            )
+        """)
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_terms_email ON terms_agreements (email)"
+        )
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_terms_version ON terms_agreements (terms_version)"
+        )
+
         # ── DuckDB: OLAP 테이블 ──
         self.execute_safe("""
             CREATE TABLE IF NOT EXISTS daily_recommend (
@@ -389,6 +413,8 @@ class LDYDBManager:
             self._load_inquiries_from_gist()
             # [v22 Step X] payments 테이블도 Gist에서 복구
             self._load_payments_from_gist()
+            # [v22 Step AC] terms_agreements 테이블도 Gist에서 복구
+            self._load_terms_from_gist()
             self._gist_loaded = True
         except Exception as e:
             _logger.warning(f"Gist 초기 로드 실패 (DB는 정상): {e}")
@@ -404,8 +430,8 @@ class LDYDBManager:
                 return {}
             files = resp.json().get("files", {})
             result = {}
-            # [v22 Step X] payments 파일도 함께 다운로드
-            for fname in [USER_DB_FILE, INQUIRY_DB_FILE, PAYMENT_DB_FILE]:
+            # [v22 Step X+AC] payments + terms_agreements 파일도 함께 다운로드
+            for fname in [USER_DB_FILE, INQUIRY_DB_FILE, PAYMENT_DB_FILE, TERMS_DB_FILE]:
                 if fname in files:
                     content = files[fname].get("content", "")
                     if content:
@@ -423,6 +449,9 @@ class LDYDBManager:
         # [v22 Step X] payments 데이터 적용
         if PAYMENT_DB_FILE in downloaded:
             self._insert_gist_payments(downloaded[PAYMENT_DB_FILE])
+        # [v22 Step AC] terms_agreements 데이터 적용
+        if TERMS_DB_FILE in downloaded:
+            self._insert_gist_terms(downloaded[TERMS_DB_FILE])
 
     def _insert_gist_users(self, data):
         if not data:
@@ -556,6 +585,32 @@ class LDYDBManager:
         except Exception as e:
             _logger.warning(f" payments INSERT 실패: {e}", exc_info=True)
 
+    def _insert_gist_terms(self, data):
+        """[v22 Step AC] terms_agreements 테이블 Gist 데이터 적용 (UPSERT)"""
+        if not data or not isinstance(data, list):
+            return
+        try:
+            for item in data:
+                self._exec_sqlite(
+                    """INSERT OR REPLACE INTO terms_agreements
+                    (agreement_id, email, terms_version, terms_type,
+                     context, agreed_at, ip_address, user_agent)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        item.get('agreement_id'),
+                        item.get('email'),
+                        item.get('terms_version'),
+                        item.get('terms_type', 'all'),
+                        item.get('context', 'signup'),
+                        item.get('agreed_at'),
+                        item.get('ip_address', ''),
+                        item.get('user_agent', ''),
+                    )
+                )
+            _logger.info(f" terms_agreements 적용 완료 ({len(data)}건)")
+        except Exception as e:
+            _logger.warning(f" terms_agreements INSERT 실패: {e}", exc_info=True)
+
     def _load_users_from_gist(self):
         self._load_gist_to_table(USER_DB_FILE, "users")
 
@@ -565,6 +620,10 @@ class LDYDBManager:
     def _load_payments_from_gist(self):
         """[v22 Step X] payments 테이블 Gist에서 로드"""
         self._load_gist_to_table(PAYMENT_DB_FILE, "payments")
+
+    def _load_terms_from_gist(self):
+        """[v22 Step AC] terms_agreements 테이블 Gist에서 로드"""
+        self._load_gist_to_table(TERMS_DB_FILE, "terms_agreements")
 
     def _load_gist_to_table(self, filename, tablename):
         if not GIST_ID or not GIST_TOKEN:
@@ -594,6 +653,9 @@ class LDYDBManager:
             elif tablename == 'payments':
                 # [v22 Step X] payments 테이블 적용
                 self._insert_gist_payments(data)
+            elif tablename == 'terms_agreements':
+                # [v22 Step AC] terms_agreements 테이블 적용
+                self._insert_gist_terms(data)
 
         except Exception as e:
             _logger.error(f" [Gist] {tablename} 로드 실패: {e}", exc_info=True)
@@ -617,7 +679,7 @@ class LDYDBManager:
         try:
             rows = self._exec_sqlite(f"SELECT * FROM {tablename}", fetch=True)
             
-            # [v22 Step X+Y] 테이블별 컬럼 정확한 분기
+            # [v22 Step X+Y+AC] 테이블별 컬럼 정확한 분기
             if tablename == "users":
                 cols = ["id", "password", "salt", "nickname", "role", "join_date",
                         "last_login", "is_banned", "security_q_idx", "security_a_hash",
@@ -627,10 +689,14 @@ class LDYDBManager:
                 cols = ["inquiry_id", "id", "nickname", "title", "content",
                         "created_at", "category", "status", "admin_reply", "admin_reply_at"]
             elif tablename == "payments":
-                # CREATE TABLE 컬럼 순서와 일치 (db 패치 1)
+                # CREATE TABLE 컬럼 순서와 일치
                 cols = ["order_id", "payment_key", "email", "plan", "amount",
                         "status", "method", "approved_at", "receipt_url",
                         "created_at", "error_message"]
+            elif tablename == "terms_agreements":
+                # [Step AC] 약관 동의 기록 컬럼
+                cols = ["agreement_id", "email", "terms_version", "terms_type",
+                        "context", "agreed_at", "ip_address", "user_agent"]
             else:
                 _logger.warning(
                     f" [Gist] 알 수 없는 테이블 '{tablename}' — 업로드 스킵"
@@ -919,6 +985,86 @@ class LDYDBManager:
         except Exception as e:
             _logger.warning(f"사용자 결제 이력 조회 실패: {e}")
             return []
+
+    # ═══════════════════════════════════════════
+    #  [v22 Step AC] 약관 동의 기록 함수
+    # ═══════════════════════════════════════════
+    def record_terms_agreement(
+        self,
+        email: str,
+        terms_version: str,
+        terms_type: str = "all",
+        context: str = "signup",
+        ip_address: str = "",
+        user_agent: str = "",
+    ) -> bool:
+        """[Step AC] 약관 동의 기록.
+        
+        Args:
+            email: 사용자 이메일
+            terms_version: 약관 버전 (예: 2026-04-25-v1)
+            terms_type: all / terms / privacy / refund / marketing
+            context: signup / payment / re_consent
+        
+        Returns:
+            True if recorded successfully
+        """
+        try:
+            from datetime import datetime as _dt
+            agreed_at = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 안정적 agreement_id (이메일+버전+타입+컨텍스트+시각)
+            seed = f"{email}|{terms_version}|{terms_type}|{context}|{agreed_at}"
+            import hashlib as _hl
+            agreement_id = _hl.sha256(seed.encode()).hexdigest()[:16]
+            
+            self._exec_sqlite(
+                """INSERT OR REPLACE INTO terms_agreements
+                (agreement_id, email, terms_version, terms_type, context,
+                 agreed_at, ip_address, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (agreement_id, email, terms_version, terms_type,
+                 context, agreed_at, ip_address[:200], user_agent[:500])
+            )
+            self._mark_gist_dirty("terms_agreements")
+            _logger.info(
+                f"📜 약관 동의 기록: {email} / {terms_version} / "
+                f"{terms_type} ({context})"
+            )
+            return True
+        except Exception as e:
+            _logger.error(f"약관 동의 기록 실패: {e}", exc_info=True)
+            return False
+
+    def get_user_agreements(self, email: str) -> list:
+        """[Step AC] 사용자의 약관 동의 이력 조회 (최근순)"""
+        try:
+            cols = ["agreement_id", "email", "terms_version", "terms_type",
+                    "context", "agreed_at", "ip_address", "user_agent"]
+            rows = self._exec_sqlite(
+                """SELECT agreement_id, email, terms_version, terms_type,
+                          context, agreed_at, ip_address, user_agent
+                   FROM terms_agreements WHERE email = ?
+                   ORDER BY agreed_at DESC""",
+                (email,), fetch=True
+            )
+            return [dict(zip(cols, r)) for r in (rows or [])]
+        except Exception as e:
+            _logger.warning(f"약관 동의 이력 조회 실패: {e}")
+            return []
+
+    def has_agreed_to_version(self, email: str, terms_version: str) -> bool:
+        """[Step AC] 사용자가 특정 약관 버전에 동의했는지 확인"""
+        try:
+            row = self._exec_sqlite_one(
+                """SELECT agreement_id FROM terms_agreements
+                   WHERE email = ? AND terms_version = ?
+                   AND terms_type IN ('all', 'terms') LIMIT 1""",
+                (email, terms_version)
+            )
+            return row is not None
+        except Exception as e:
+            _logger.warning(f"약관 동의 확인 실패: {e}")
+            return False
 
     def grant_all_users_trial(self, days=14):
         try:

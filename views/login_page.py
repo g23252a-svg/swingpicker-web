@@ -147,6 +147,16 @@ def login_page():
                 j_p2 = ui.input("비밀번호 확인", password=True).classes("w-full")
                 j_q = ui.select({i: q for i, q in enumerate(SECURITY_QUESTIONS)}, value=0, label="보안 질문").classes("w-full")
                 j_ans = ui.input("보안 질문 답변").classes("w-full")
+                
+                # [v22 Step AC] 약관 동의 체크박스 (필수)
+                consent = None
+                try:
+                    from components.terms_consent import SignupConsent
+                    consent = SignupConsent()
+                    consent.render()
+                except ImportError:
+                    pass  # 모듈 없으면 무시 (하위 호환)
+                
                 j_msg = ui.label("").classes("text-sm mt-2")
 
                 async def do_join():
@@ -171,6 +181,13 @@ def login_page():
                         j_msg.set_text("비밀번호 불일치")
                         j_msg.classes(replace="text-sm mt-2 text-red-400")
                         return
+                    
+                    # [v22 Step AC] 약관 동의 검증
+                    if consent is not None:
+                        if not consent.is_valid():
+                            j_msg.set_text(f"⚠️ {consent.error_message}")
+                            j_msg.classes(replace="text-sm mt-2 text-amber-400")
+                            return
 
                     db = get_db()
                     if not db:
@@ -184,6 +201,28 @@ def login_page():
                         salt, j_nk.value[:8], j_q.value, hash_ans(j_ans.value, salt)
                     )
                     if ok:
+                        # [v22 Step AC] 약관 동의 기록
+                        if consent is not None:
+                            try:
+                                from components.terms_consent import record_agreement
+                                record_agreement(
+                                    email=clean_email,
+                                    terms_type="all",
+                                    context="signup",
+                                )
+                                if consent.marketing_agreed:
+                                    record_agreement(
+                                        email=clean_email,
+                                        terms_type="marketing",
+                                        context="signup",
+                                    )
+                            except Exception as e:
+                                # 동의 기록 실패해도 가입은 완료 (DB 안 막힘)
+                                import logging
+                                logging.getLogger(__name__).warning(
+                                    f"약관 동의 기록 실패 (가입은 완료): {e}"
+                                )
+                        
                         # ✅ 가입 성공 → 14일 Prime 자동 부여
                         try:
                             expire = (datetime.now() + timedelta(days=TRIAL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")

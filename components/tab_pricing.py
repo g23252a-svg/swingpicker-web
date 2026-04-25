@@ -475,8 +475,37 @@ def _render_toss_payment(auth, user):
                 ):
                     ui.label(f"{icon} {label}").classes("text-xs text-gray-300")
 
+        # [v22 Step AC] 결제 동의 체크박스
+        payment_consent = None
+        try:
+            from components.terms_consent import PaymentConsent
+            payment_consent = PaymentConsent()
+            payment_consent.render()
+        except ImportError:
+            pass
+
         async def open_toss_widget():
-            """[Step R+V] 토스페이먼츠 결제 요청 (SDK v1 안정 버전 사용)"""
+            """[Step R+V+AC] 토스페이먼츠 결제 요청 (SDK v1 안정 버전 사용)"""
+            
+            # [v22 Step AC] 약관 동의 검증
+            if payment_consent is not None:
+                if not payment_consent.is_valid():
+                    ui.notify(
+                        f"⚠️ {payment_consent.error_message}",
+                        type="warning",
+                    )
+                    return
+                # 동의 기록 (DB)
+                try:
+                    from components.terms_consent import record_agreement
+                    record_agreement(
+                        email=d_email,
+                        terms_type="refund",
+                        context="payment",
+                    )
+                except Exception:
+                    pass  # 동의 기록 실패해도 결제는 진행
+            
             plan = "prime"
             amount = PRICE_PRIME
             plan_name = "Prime"
