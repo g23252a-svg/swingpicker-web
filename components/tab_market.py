@@ -266,9 +266,17 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
         # [Step D] meta 안전 추출
         meta = meta or {}
         macro_risk = str(meta.get("macro_risk", "NORMAL")).upper()
-        max_route = str(meta.get("max_allowed_route", "")).upper()
+        max_route = str(meta.get("max_allowed_route", "")).upper().strip()
         is_macro_dangerous = macro_risk in ("WARNING", "CRITICAL")
         is_macro_caution = macro_risk == "CAUTION"
+        
+        # [v22 UI Step E1] max_allowed_route 기반 ROUTE 차단 감지
+        # ATTACK/ARMED만 진입 허용. 나머지(WAIT/NEUTRAL/BLOCKED/NO_TRADE/CARRY 등)는 제한.
+        # 빈 문자열이면 정보 없음 = 차단 안 함 (기존 동작 유지)
+        is_route_blocked = (
+            bool(max_route) and 
+            max_route not in ("ATTACK", "ARMED")
+        )
         
         # TOP_PICK 종목 — 강건 파서 (1, 1.0, "True", "Y" 등)
         top_picks = pd.DataFrame()
@@ -281,7 +289,12 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
         
         # ─────────────────────────────────────────────
         # 시나리오 A: TOP_PICK >= 1
-        # [Step D] macro risk 기반 verdict 분기
+        # [Step D + E1] macro risk + max_route 기반 verdict 분기
+        # 우선순위:
+        #   1. is_macro_dangerous (CRITICAL/WARNING) — 가장 강한 경고 🔴
+        #   2. is_route_blocked (엔진이 ROUTE 제한) — 🟠
+        #   3. is_macro_caution (CAUTION) — 🟠 분할 진입
+        #   4. NORMAL + 모든 통과 — 🟢
         # ─────────────────────────────────────────────
         if n_top >= 1:
             # AGGRESSIVE / STABLE 분류
@@ -293,7 +306,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 n_agg = 0
                 n_stb = 0
             
-            # ─── [Step D] macro risk 기반 verdict 결정 ───
+            # ─── [Step D + E1] verdict 결정 ───
             if is_macro_dangerous:
                 # 🔴 매크로 위험 — TOP_PICK 있어도 신규 진입 금지
                 verdict_emoji = "🔴"
@@ -308,6 +321,20 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 text_main = "text-red-300"
                 text_sub = "text-red-100"
                 count_color = "text-red-300/60"
+            elif is_route_blocked:
+                # [Step E1] 🟠 엔진이 ROUTE 제한 — 매크로는 정상이지만 신규 진입 X
+                verdict_emoji = "🟠"
+                verdict_text = "신규 진입 제한 (엔진)"
+                verdict_subtitle = (
+                    f"TOP_PICK {n_top}개  ·  엔진 최대 허용 ROUTE={max_route} "
+                    f"— 관찰만 권장"
+                )
+                gradient_from = "#3d2a0a"
+                gradient_via = "#544013"
+                border_color = "border-orange-500/50"
+                text_main = "text-orange-300"
+                text_sub = "text-orange-100"
+                count_color = "text-orange-300"
             elif is_macro_caution:
                 # 🟠 매크로 주의 — 보수적 분할 진입
                 verdict_emoji = "🟠"
@@ -397,6 +424,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         '1', '1.0', 'TRUE', 'Y', 'YES'
                     ]
                     
+                    # [v22 UI Step E4] Kelly engine
+                    kelly_engine = str(row.get('KELLY_ENGINE', '')).strip()
+                    
                     with ui.card().classes(
                         f"flex-1 min-w-[280px] p-4 bg-[#1a1a2e] "
                         f"border-l-4 rounded-xl"
@@ -408,9 +438,16 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                             )
                             ui.badge(f"E{elite:.0f}", color="#3B82F6").classes("text-xs")
                         
-                        ui.label(f"{type_label}  ·  RR {rr:.1f}:1  ·  진입갭 {gap:+.1f}%").classes(
-                            "text-xs text-gray-400 mb-2"
-                        )
+                        # [Step E3] 진입갭 방향성 명확화
+                        if abs(gap) < 0.05:
+                            gap_desc = "현재가 일치"
+                        elif gap > 0:
+                            gap_desc = "현재가 높음"
+                        else:
+                            gap_desc = "현재가 낮음"
+                        ui.label(
+                            f"{type_label}  ·  RR {rr:.1f}:1  ·  진입갭 {gap:+.1f}% ({gap_desc})"
+                        ).classes("text-xs text-gray-400 mb-2")
                         
                         # [v22 UI Step C] 3축 + 밸런스 한 줄
                         ui.label(
@@ -440,12 +477,29 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         # 추천 비중 + 승률
                         with ui.row().classes("w-full gap-3 mt-2 items-center"):
                             if amt > 0:
-                                ui.label(f"💰 {amt:.0f}만원").classes(
-                                    "text-sm font-bold text-amber-300"
-                                )
+                                # [Step E2] CAUTION 시 권장 비중 안내
+                                if is_macro_caution:
+                                    ui.label(
+                                        f"💰 기준 {amt:.0f}만원  ·  주의장 권장 {amt*0.5:.0f}만원"
+                                    ).classes("text-sm font-bold text-amber-300")
+                                else:
+                                    ui.label(f"💰 {amt:.0f}만원").classes(
+                                        "text-sm font-bold text-amber-300"
+                                    )
                             if ewr > 0:
                                 ui.label(f"승률 {ewr*100:.0f}%").classes(
                                     "text-xs text-gray-400"
+                                )
+                        
+                        # [Step E4] Kelly engine 표시 (운영 신뢰)
+                        if kelly_engine:
+                            if 'fallback' in kelly_engine.lower():
+                                ui.label(f"⚠️ Kelly fallback ({kelly_engine})").classes(
+                                    "text-xs text-red-300 mt-1"
+                                )
+                            else:
+                                ui.label(f"Kelly {kelly_engine}").classes(
+                                    "text-xs text-gray-500 mt-1"
                                 )
             return
         
@@ -489,7 +543,8 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
             else:
                 shortfall_msg = "조건 일부 미달"
             
-            # 헤더 카드 — 관찰 모드 (CRITICAL 위험이면 빨강으로 변경)
+            # 헤더 카드 — 관찰 모드
+            # [Step D + E1] macro risk + route_blocked 통합 분기
             if is_macro_dangerous:
                 _hdr_emoji = "🔴"
                 _hdr_text = "신규 진입 금지 (매크로 위험)"
@@ -501,10 +556,23 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 _hdr_border = "border-red-500/50"
                 _hdr_text_main = "text-red-300"
                 _hdr_text_sub = "text-red-100"
+            elif is_route_blocked:
+                # [Step E1] 엔진 ROUTE 제한 — 신규 진입 X
+                _hdr_emoji = "🟠"
+                _hdr_text = "신규 진입 제한 (엔진)"
+                _hdr_subtitle = (
+                    f"활성 후보 {len(active)}종목 있지만 "
+                    f"엔진 최대 허용 ROUTE={max_route} — 관찰만"
+                )
+                _hdr_g_from = "#3d2a0a"; _hdr_g_via = "#544013"
+                _hdr_border = "border-orange-500/50"
+                _hdr_text_main = "text-orange-300"
+                _hdr_text_sub = "text-orange-100"
             else:
                 _hdr_emoji = "⏸️"
                 _hdr_text = "오늘은 관찰 모드"
-                _hdr_subtitle = f"정식 추천 0건  ·  활성 후보 {len(active)}종목"
+                _suffix = f" · 매크로 주의({macro_risk})" if is_macro_caution else ""
+                _hdr_subtitle = f"정식 추천 0건  ·  활성 후보 {len(active)}종목{_suffix}"
                 _hdr_g_from = "#3d2a0a"; _hdr_g_via = "#544013"
                 _hdr_border = "border-amber-500/50"
                 _hdr_text_main = "text-amber-300"
@@ -547,9 +615,15 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                     f"·  균형 {cand_balance:.0f}"
                 ).classes("text-xs text-purple-300 mb-1")
                 
-                # [Step D3] RR + 진입갭
+                # [Step D3] RR + 진입갭 (Step E3 방향성 추가)
+                if abs(cand_gap) < 0.05:
+                    _cand_gap_desc = "현재가 일치"
+                elif cand_gap > 0:
+                    _cand_gap_desc = "현재가 높음"
+                else:
+                    _cand_gap_desc = "현재가 낮음"
                 ui.label(
-                    f"RR {cand_rr:.1f}:1  ·  진입갭 {cand_gap:+.1f}%"
+                    f"RR {cand_rr:.1f}:1  ·  진입갭 {cand_gap:+.1f}% ({_cand_gap_desc})"
                 ).classes("text-xs text-gray-400 mb-1")
                 
                 # [Step D3] IS_NOW_ENTRY 배지 (관찰모드는 보통 ⏳)
