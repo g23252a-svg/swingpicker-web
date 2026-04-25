@@ -1291,23 +1291,176 @@ def render_tab_portfolio(df, auth):
         if not items:
             return
         with holding_area:
+            # [Step P] 헤더 — 종목 수 + 전체 삭제 버튼
+            with ui.row().classes("w-full items-center justify-between mb-2"):
+                ui.label(f"📌 보유 종목 {len(items)}개").classes(
+                    "text-sm font-bold text-cyan-300"
+                )
+                
+                def _clear_all():
+                    """전체 삭제 — 확인 다이얼로그"""
+                    with ui.dialog() as dlg, ui.card().classes("p-4"):
+                        ui.label("⚠️ 보유 종목 전체 삭제").classes(
+                            "text-lg font-bold text-red-400"
+                        )
+                        ui.label(f"{len(items)}개 종목을 모두 삭제합니다. 계속할까요?").classes(
+                            "text-sm text-gray-300 my-2"
+                        )
+                        ui.label("⚠️ 이 작업은 되돌릴 수 없습니다.").classes(
+                            "text-xs text-amber-400 mb-3"
+                        )
+                        with ui.row().classes("gap-2 justify-end"):
+                            ui.button("취소", on_click=dlg.close).props("flat")
+                            
+                            def _confirm_clear():
+                                pf_input.value = ""
+                                app.storage.user["portfolio_text"] = ""
+                                asyncio.ensure_future(_bg_save_portfolio("", user_profile))
+                                ui.notify("🗑️ 전체 종목 삭제 완료", type="warning")
+                                dlg.close()
+                                _refresh_holdings()
+                            
+                            ui.button("전체 삭제", on_click=_confirm_clear).props(
+                                "color=red"
+                            )
+                    dlg.open()
+                
+                if items:
+                    ui.button("🗑️ 전체 삭제", on_click=_clear_all).props(
+                        "flat dense size=sm color=red"
+                    ).classes("text-xs")
+            
+            # 종목 카드 그리드
             with ui.row().classes("w-full gap-2 flex-wrap"):
                 for item in items:
-                    with ui.card().classes("p-2 bg-[#0d0d1a] border border-gray-700 rounded-lg"):
-                        with ui.row().classes("items-center gap-2"):
-                            ui.label(f"{item['name']}").classes("text-white text-sm font-bold")
-                            ui.label(f"{item['avg']:,}원 × {item['qty']}주").classes("text-xs text-gray-400")
-                            val = item['avg'] * item['qty']
-                            ui.label(f"= {val:,}원").classes("text-xs text-cyan-400")
-                            def _remove(n=item['name']):
-                                lines = [l for l in pf_input.value.strip().split("\n") if not l.startswith(f"{n}:")]
-                                pf_input.value = "\n".join(lines)
-                                app.storage.user["portfolio_text"] = pf_input.value
-                                # [Step N] 백그라운드 자동 저장
-                                asyncio.ensure_future(_bg_save_portfolio(pf_input.value, user_profile))
-                                ui.notify(f"🗑️ {n} 제거", type="info")
-                                _refresh_holdings()
-                            ui.button("✕", on_click=_remove).props("flat dense size=xs color=red")
+                    val = item['avg'] * item['qty']
+                    with ui.card().classes(
+                        "p-3 bg-[#0d0d1a] border border-gray-700 rounded-lg "
+                        "min-w-[260px] hover:border-cyan-500/50"
+                    ):
+                        # 종목명 + 합계
+                        with ui.row().classes("w-full items-center justify-between mb-1"):
+                            ui.label(f"📌 {item['name']}").classes(
+                                "text-white text-sm font-bold"
+                            )
+                            ui.label(f"{val:,}원").classes(
+                                "text-sm text-cyan-400 font-bold"
+                            )
+                        
+                        # 평단가 × 수량
+                        ui.label(f"{item['avg']:,}원 × {item['qty']}주").classes(
+                            "text-xs text-gray-400 mb-2"
+                        )
+                        
+                        # [Step P] 편집 / 삭제 버튼 (충분한 터치 영역)
+                        with ui.row().classes("w-full gap-2"):
+                            def _make_edit(it=item):
+                                """평단가/수량 수정 다이얼로그"""
+                                def _open_edit():
+                                    with ui.dialog() as dlg, ui.card().classes("p-4 min-w-[300px]"):
+                                        ui.label(f"✏️ {it['name']} 수정").classes(
+                                            "text-base font-bold text-white mb-3"
+                                        )
+                                        new_avg = ui.number(
+                                            "평단가 (원)", value=it['avg'],
+                                            min=0, step=100, format="%.0f"
+                                        ).classes("w-full mb-2")
+                                        new_qty = ui.number(
+                                            "수량 (주)", value=it['qty'],
+                                            min=1, step=1, format="%.0f"
+                                        ).classes("w-full mb-3")
+                                        
+                                        with ui.row().classes("gap-2 justify-end"):
+                                            ui.button("취소", on_click=dlg.close).props("flat")
+                                            
+                                            def _save_edit():
+                                                avg_v = int(new_avg.value or 0)
+                                                qty_v = int(new_qty.value or 0)
+                                                if avg_v <= 0 or qty_v <= 0:
+                                                    ui.notify(
+                                                        "⚠️ 평단가와 수량을 입력하세요",
+                                                        type="warning"
+                                                    )
+                                                    return
+                                                # 해당 라인 교체
+                                                lines = pf_input.value.strip().split("\n")
+                                                new_line = f"{it['name']}:{avg_v}:{qty_v}"
+                                                updated = [
+                                                    new_line if l.startswith(f"{it['name']}:") else l
+                                                    for l in lines
+                                                ]
+                                                pf_input.value = "\n".join(updated)
+                                                app.storage.user["portfolio_text"] = pf_input.value
+                                                asyncio.ensure_future(
+                                                    _bg_save_portfolio(pf_input.value, user_profile)
+                                                )
+                                                ui.notify(
+                                                    f"✏️ {it['name']} 수정 완료 "
+                                                    f"({avg_v:,}원 × {qty_v}주)",
+                                                    type="positive"
+                                                )
+                                                dlg.close()
+                                                _refresh_holdings()
+                                            
+                                            ui.button("저장", on_click=_save_edit).props(
+                                                "color=primary"
+                                            )
+                                    dlg.open()
+                                return _open_edit
+                            
+                            def _make_remove(it=item):
+                                """삭제 — 확인 다이얼로그"""
+                                def _open_remove():
+                                    with ui.dialog() as dlg, ui.card().classes("p-4"):
+                                        ui.label(f"🗑️ {it['name']} 삭제").classes(
+                                            "text-base font-bold text-red-400 mb-2"
+                                        )
+                                        ui.label(
+                                            f"{it['avg']:,}원 × {it['qty']}주 = "
+                                            f"{it['avg']*it['qty']:,}원"
+                                        ).classes("text-sm text-gray-300 mb-3")
+                                        ui.label("이 종목을 삭제할까요?").classes(
+                                            "text-sm text-gray-400 mb-3"
+                                        )
+                                        
+                                        with ui.row().classes("gap-2 justify-end"):
+                                            ui.button("취소", on_click=dlg.close).props("flat")
+                                            
+                                            def _confirm_remove():
+                                                lines = [
+                                                    l for l in pf_input.value.strip().split("\n")
+                                                    if not l.startswith(f"{it['name']}:")
+                                                ]
+                                                pf_input.value = "\n".join(lines)
+                                                app.storage.user["portfolio_text"] = pf_input.value
+                                                asyncio.ensure_future(
+                                                    _bg_save_portfolio(pf_input.value, user_profile)
+                                                )
+                                                ui.notify(
+                                                    f"🗑️ {it['name']} 삭제됨",
+                                                    type="info"
+                                                )
+                                                dlg.close()
+                                                _refresh_holdings()
+                                            
+                                            ui.button("삭제", on_click=_confirm_remove).props(
+                                                "color=red"
+                                            )
+                                    dlg.open()
+                                return _open_remove
+                            
+                            # 편집 버튼 (회색)
+                            ui.button(
+                                "✏️ 수정", on_click=_make_edit(item)
+                            ).props("flat dense size=sm color=blue").classes(
+                                "text-xs flex-1"
+                            )
+                            # 삭제 버튼 (빨강)
+                            ui.button(
+                                "🗑️ 삭제", on_click=_make_remove(item)
+                            ).props("flat dense size=sm color=red").classes(
+                                "text-xs flex-1"
+                            )
 
     # 기존 textarea (접힘)
     with ui.expansion("📋 텍스트 직접 편집 (고급)", value=False).classes("w-full text-xs text-gray-500"):
