@@ -15,6 +15,7 @@ tab_portfolio_v2.py — 💼 내 자산: AI 리밸런싱 & DART 공시 진단 (P
 
 import asyncio
 import glob
+import hashlib
 import logging
 import os
 from datetime import datetime, timedelta
@@ -25,6 +26,15 @@ import plotly.graph_objects as go
 from nicegui import ui, app
 
 from shared_utils import nz_num, safe_float
+
+# ═══════════════════════════════════════════════════
+# [v22 UI Step N] 사용자 식별 — 로그인 정보 import
+# ═══════════════════════════════════════════════════
+try:
+    from services.auth import get_current_user
+except Exception:
+    def get_current_user():
+        return app.storage.user.get("profile")
 
 # ═══════════════════════════════════════════════════
 # [v22 UI Step L] 공통 용어 사전 import (시장/종목 탭과 동일 패턴)
@@ -231,38 +241,105 @@ def _fetch_current_price(code, name):
 
 
 # Portfolio Gist I/O
-def _load_portfolio_file():
+def _get_user_portfolio_key(user_profile=None) -> str:
+    """[Step N] 로그인 사용자별 포트폴리오 파일명 생성.
+    
+    이메일/id를 SHA-256 해시 (12자리) → 파일명 보안성 확보
+    
+    Args:
+        user_profile: get_current_user() 반환값 (dict). None이면 자동 조회.
+    
+    Returns:
+        "portfolio_<hash12>.txt" — 사용자별 고유 파일명
+        로그인 정보 없으면 "portfolio.txt" (기존 동작 유지 = 호환성)
+    """
+    if user_profile is None:
+        try:
+            user_profile = get_current_user()
+        except Exception:
+            user_profile = None
+    
+    if not user_profile:
+        return "portfolio.txt"  # 비로그인 fallback (기존 동작)
+    
+    # 우선순위: email > id > username
+    user_id = (
+        str(user_profile.get("email", "")).strip()
+        or str(user_profile.get("id", "")).strip()
+        or str(user_profile.get("username", "")).strip()
+    )
+    if not user_id:
+        return "portfolio.txt"
+    
+    h = hashlib.sha256(user_id.lower().encode("utf-8")).hexdigest()[:12]
+    return f"portfolio_{h}.txt"
+
+
+def _load_portfolio_file(user_profile=None):
+    """[Step N] 계정별 포트폴리오 로드 (Gist).
+    
+    동작:
+      1. 사용자별 파일명으로 먼저 조회
+      2. 없으면 기존 portfolio.txt fallback (마이그레이션용)
+      3. fallback에서 로드되면 다음 저장 시 자동으로 사용자 파일에 저장됨
+    
+    Returns:
+        (content, source) 튜플
+        content: 포트폴리오 텍스트
+        source: "user" (사용자 파일) / "legacy" (구 portfolio.txt) / ""
+    """
     token = os.environ.get("LDY_GIST_TOKEN", "")
     gist_id = os.environ.get("LDY_GIST_ID", "")
-    if not token or not gist_id: return ""
+    if not token or not gist_id:
+        return "", ""
     try:
         import requests
         r = requests.get(f"https://api.github.com/gists/{gist_id}",
                         headers={"Authorization": f"token {token}"}, timeout=10)
         if r.ok:
             files = r.json().get("files", {})
+            user_filename = _get_user_portfolio_key(user_profile)
+            
+            # 1순위: 사용자별 파일
+            if user_filename in files and user_filename != "portfolio.txt":
+                content = files[user_filename].get("content", "")
+                if content:
+                    return content, "user"
+            
+            # 2순위: 기존 portfolio.txt (마이그레이션용 fallback)
             if "portfolio.txt" in files:
-                return files["portfolio.txt"]["content"]
-    except Exception:
-        pass
-    return ""
+                content = files["portfolio.txt"].get("content", "")
+                if content:
+                    return content, "legacy"
+    except Exception as e:
+        _logger.warning(f"포트폴리오 로드 실패: {e}")
+    return "", ""
 
 
-def _save_portfolio_file(text_data):
+def _save_portfolio_file(text_data, user_profile=None):
+    """[Step N] 계정별 포트폴리오 저장 (Gist).
+    
+    Returns:
+        (success, filename) 튜플 — UI에 저장 상태 표시용
+    """
     token = os.environ.get("LDY_GIST_TOKEN", "")
     gist_id = os.environ.get("LDY_GIST_ID", "")
-    if not token or not gist_id: return False
+    if not token or not gist_id:
+        return False, ""
+    
+    filename = _get_user_portfolio_key(user_profile)
     try:
         import requests
         r = requests.patch(
             f"https://api.github.com/gists/{gist_id}",
             headers={"Authorization": f"token {token}"},
-            json={"files": {"portfolio.txt": {"content": text_data}}},
+            json={"files": {filename: {"content": text_data}}},
             timeout=10,
         )
-        return r.ok
-    except Exception:
-        return False
+        return r.ok, filename
+    except Exception as e:
+        _logger.warning(f"포트폴리오 저장 실패: {e}")
+        return False, filename
 
 
 # ── 과거 추천 캐시 ──
@@ -952,9 +1029,48 @@ def render_tab_portfolio(df, auth):
         ui.label(dart_status).classes(f"text-xs {dart_color} font-bold")
         ui.label(f"— {dart_explain}").classes("text-xs text-gray-500")
 
+    # ═══════════════════════════════════════════════════
+    # [Step N] 계정별 포트폴리오 자동 저장
+    # 우선순위: 사용자 Gist 파일 → 기존 portfolio.txt(legacy) → app.storage.user
+    # ═══════════════════════════════════════════════════
+    user_profile = None
+    try:
+        user_profile = get_current_user()
+    except Exception:
+        pass
+    
     saved_local = app.storage.user.get("portfolio_text", "")
-    saved_gist = _load_portfolio_file() if not saved_local else ""
+    saved_gist, gist_source = ("", "")
+    if not saved_local:
+        saved_gist, gist_source = _load_portfolio_file(user_profile)
     saved = saved_local or saved_gist or ""
+    
+    # 저장 상태 안내 (계정별 자동 저장 명시)
+    last_saved_at = app.storage.user.get("portfolio_saved_at", "")
+    if user_profile:
+        if last_saved_at:
+            _save_msg = f"✅ 이 포트폴리오는 내 계정에 자동 저장됩니다.  ·  마지막 저장: {last_saved_at}"
+        elif gist_source == "legacy":
+            _save_msg = "📦 이전 포트폴리오를 불러왔습니다. 다음 저장 시 내 계정으로 이전됩니다."
+        elif gist_source == "user":
+            _save_msg = "✅ 이 포트폴리오는 내 계정에 자동 저장됩니다."
+        else:
+            _save_msg = "💾 보유 종목을 추가하면 내 계정에 자동 저장됩니다."
+        ui.label(_save_msg).classes("text-[11px] text-emerald-400/80 mb-2 italic")
+    else:
+        ui.label(
+            "⚠️ 비로그인 상태 — 브라우저에만 임시 저장됩니다. 로그인 시 계정에 자동 저장됩니다."
+        ).classes("text-[11px] text-amber-400/80 mb-2 italic")
+    
+    # [Step N] 백그라운드 자동 저장 헬퍼 (종목 추가/삭제 시 사용)
+    async def _bg_save_portfolio(text: str, profile):
+        try:
+            ok, _fn = await run_sync(_save_portfolio_file, text, profile)
+            if ok:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                app.storage.user["portfolio_saved_at"] = now_str
+        except Exception as _e:
+            _logger.warning(f"백그라운드 저장 실패: {_e}")
 
     # ═══════════════════════════════════════════════════
     # [v22 UI Step L] Hero 카드 — 첫 화면 1초 답변
@@ -1008,6 +1124,8 @@ def render_tab_portfolio(df, auth):
                 ui.notify(f"✅ {name} 추가 완료", type="positive")
 
             app.storage.user["portfolio_text"] = pf_input.value
+            # [Step N] 백그라운드 자동 저장 (Gist) — UI 블로킹 없이
+            asyncio.ensure_future(_bg_save_portfolio(pf_input.value, user_profile))
             stock_select.value = None
             avg_price_input.value = None
             qty_input.value = None
@@ -1047,6 +1165,8 @@ def render_tab_portfolio(df, auth):
                                 lines = [l for l in pf_input.value.strip().split("\n") if not l.startswith(f"{n}:")]
                                 pf_input.value = "\n".join(lines)
                                 app.storage.user["portfolio_text"] = pf_input.value
+                                # [Step N] 백그라운드 자동 저장
+                                asyncio.ensure_future(_bg_save_portfolio(pf_input.value, user_profile))
                                 ui.notify(f"🗑️ {n} 제거", type="info")
                                 _refresh_holdings()
                             ui.button("✕", on_click=_remove).props("flat dense size=xs color=red")
@@ -1063,6 +1183,8 @@ def render_tab_portfolio(df, auth):
 
     def _auto_save():
         app.storage.user["portfolio_text"] = pf_input.value
+        # [Step N] textarea blur 시에도 백그라운드 자동 저장
+        asyncio.ensure_future(_bg_save_portfolio(pf_input.value, user_profile))
         _refresh_holdings()
     pf_input.on("blur", lambda _: _auto_save())
     _refresh_holdings()
@@ -1073,8 +1195,20 @@ def render_tab_portfolio(df, auth):
         if not text: return
 
         app.storage.user["portfolio_text"] = text
-        await run_sync(_save_portfolio_file, text)
-        ui.notify("💾 포트폴리오 저장됨", type="positive")
+        # [Step N] 계정별 자동 저장
+        save_ok, _saved_filename = await run_sync(_save_portfolio_file, text, user_profile)
+        if save_ok:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            app.storage.user["portfolio_saved_at"] = now_str
+            if user_profile:
+                ui.notify(f"💾 내 계정에 저장됨 ({now_str})", type="positive")
+            else:
+                ui.notify("💾 브라우저에 임시 저장됨 (로그인 시 계정 저장)", type="info")
+        else:
+            ui.notify(
+                "⚠️ 계정 저장 실패 — 현재 브라우저에만 임시 저장되었습니다.",
+                type="warning"
+            )
 
         code_map = _get_code_map(df)
         targets = []
