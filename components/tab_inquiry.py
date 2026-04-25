@@ -15,6 +15,7 @@ tab_inquiry.py — 📮 문의 게시판 (NiceGUI Dark Theme)
 8. ✅ 카카오톡 채널 안내
 """
 import hashlib
+import html as _html
 import logging
 import os
 from datetime import datetime, timezone, timedelta
@@ -36,15 +37,23 @@ MAX_TITLE_LEN = 100
 MAX_CONTENT_LEN = 2000
 MIN_CONTENT_LEN = 5
 
-# ─── 카테고리 ───
+# ─── 카테고리 (is_public: True=공개, False=본인+관리자만) ───
 CATEGORIES = [
-    {"value": "payment", "label": "💳 결제 문의", "color": "amber", "priority": 1},
-    {"value": "refund", "label": "💰 환불 요청", "color": "red", "priority": 1},
-    {"value": "bug", "label": "🐛 버그 신고", "color": "orange", "priority": 2},
-    {"value": "feature", "label": "💡 기능 제안", "color": "blue", "priority": 3},
-    {"value": "general", "label": "📝 일반 문의", "color": "gray", "priority": 4},
+    {"value": "payment", "label": "💳 결제 문의", "color": "amber",
+     "priority": 1, "is_public": False},
+    {"value": "refund", "label": "💰 환불 요청", "color": "red",
+     "priority": 1, "is_public": False},
+    {"value": "bug", "label": "🐛 버그 신고", "color": "orange",
+     "priority": 2, "is_public": False},
+    {"value": "feature", "label": "💡 기능 제안", "color": "blue",
+     "priority": 3, "is_public": True},
+    {"value": "general", "label": "📝 일반 문의", "color": "gray",
+     "priority": 4, "is_public": True},
 ]
 CATEGORY_MAP = {c["value"]: c for c in CATEGORIES}
+
+# 공개 카테고리 (비로그인도 볼 수 있는 — 게시판 성격)
+PUBLIC_CATEGORIES = {c["value"] for c in CATEGORIES if c["is_public"]}
 
 # ─── 상태 ───
 STATUS_MAP = {
@@ -201,7 +210,7 @@ def render_tab_inquiry(auth, user):
             label="카테고리",
         ).classes("w-full mb-2").props("outlined")
         
-        # 닉네임 + 이메일 (로그인 시 자동)
+        # 닉네임 + 이메일 (로그인 시 자동 + readonly)
         with ui.row().classes("w-full gap-3"):
             d_nick = user.get("nickname", "") if user else ""
             d_email = user_email
@@ -212,11 +221,24 @@ def render_tab_inquiry(auth, user):
                 placeholder="작성자 표시 이름",
             ).classes("flex-1").props("outlined dense")
             
-            email_in = ui.input(
-                "이메일",
-                value=d_email,
-                placeholder="답변 받을 이메일 (필수)",
-            ).classes("flex-1").props("outlined dense")
+            # [Step Z] 로그인 유저는 이메일 readonly (계정 이메일 강제)
+            if user_email and not is_admin:
+                email_in = ui.input(
+                    "이메일 (계정 이메일)",
+                    value=d_email,
+                ).classes("flex-1").props("outlined dense readonly")
+            else:
+                # 비로그인 또는 관리자: 자유 입력
+                placeholder = (
+                    "답변 받을 이메일 (필수)"
+                    if not is_admin
+                    else "이메일 (선택, 관리자)"
+                )
+                email_in = ui.input(
+                    "이메일",
+                    value=d_email,
+                    placeholder=placeholder,
+                ).classes("flex-1").props("outlined dense")
         
         # 제목
         title_in = ui.input(
@@ -272,10 +294,18 @@ def render_tab_inquiry(auth, user):
                     ui.notify(msg, type="warning")
                     return
                 
-                # 이메일 간단 검증
-                if email and "@" not in email:
-                    ui.notify("올바른 이메일을 입력해주세요.", type="warning")
-                    return
+                # [Step Z] 이메일 필수화 (관리자는 예외)
+                if not is_admin:
+                    if not email:
+                        ui.notify(
+                            "답변 받을 이메일을 입력해주세요. "
+                            "비로그인 시 이메일 없이는 답변 드릴 수 없습니다.",
+                            type="warning",
+                        )
+                        return
+                    if "@" not in email or "." not in email:
+                        ui.notify("올바른 이메일 형식이 아닙니다.", type="warning")
+                        return
                 
                 # 안정적인 inquiry_id 생성 (5초 윈도우 → 더블 클릭 시 동일 ID)
                 inquiry_id = _generate_inquiry_id(email or nickname, title, content)
@@ -300,16 +330,22 @@ def render_tab_inquiry(auth, user):
                 )
                 
                 if ok:
-                    # Telegram 즉시 알림
+                    # [Step Z] Telegram HTML escape — 사용자 입력 안전 처리
                     cat_info = CATEGORY_MAP.get(category, CATEGORY_MAP["general"])
                     priority_emoji = "🚨" if cat_info["priority"] == 1 else "📮"
+                    safe_nickname = _html.escape(nickname)
+                    safe_email = _html.escape(email or "익명")
+                    safe_title = _html.escape(title)
+                    safe_content = _html.escape(content[:200])
+                    safe_cat_label = _html.escape(cat_info["label"])
+                    
                     _send_telegram(
                         f"{priority_emoji} <b>[신규 문의]</b>\n"
                         f"━━━━━━━━━━━━\n"
-                        f"📌 분류: {cat_info['label']}\n"
-                        f"👤 {nickname} ({email or '익명'})\n"
-                        f"📋 {title}\n"
-                        f"💬 {content[:200]}"
+                        f"📌 분류: {safe_cat_label}\n"
+                        f"👤 {safe_nickname} ({safe_email})\n"
+                        f"📋 {safe_title}\n"
+                        f"💬 {safe_content}"
                         f"{'...' if len(content) > 200 else ''}\n"
                         f"⏰ {created_at} UTC"
                     )
@@ -374,18 +410,52 @@ def render_tab_inquiry(auth, user):
 #  문의 목록 렌더링
 # ═══════════════════════════════════════════════════
 def _render_inquiry_list(auth, user_email, is_admin, filter_state, refresh_fn):
-    """[Step Y] 문의 목록 + 필터 + 카테고리/상태 표시"""
+    """[Step Y+Z] 문의 목록 — 권한별 데이터 분리.
+    
+    [Step Z] 개인정보 보호:
+    - 관리자: 전체 문의 보기 가능
+    - 일반 유저: 본인 문의 + 공개 카테고리(general/feature)만
+    - 비로그인: 공개 카테고리만 (작성은 별도 막음)
+    
+    결제/환불/버그는 본인 또는 관리자만 볼 수 있음.
+    """
     
     db = _get_db()
     if not db:
         ui.label("DB 연결 실패").classes("text-red-400")
         return
     
-    # 데이터 조회
-    if filter_state["view"] == "my" and user_email and not is_admin:
-        items = db.get_user_inquiries(user_email) if hasattr(db, 'get_user_inquiries') else []
-    else:
+    # ─── [Step Z] 권한별 데이터 조회 ───
+    if is_admin:
+        # 관리자: 전체 문의
         items = db.get_all_inquiries() if hasattr(db, 'get_all_inquiries') else []
+    elif user_email:
+        # 일반 로그인 유저: 본인 문의 + 공개 카테고리
+        my_items = (
+            db.get_user_inquiries(user_email)
+            if hasattr(db, 'get_user_inquiries') else []
+        )
+        all_items = (
+            db.get_all_inquiries() if hasattr(db, 'get_all_inquiries') else []
+        )
+        # view 모드에 따라 분기
+        if filter_state["view"] == "my":
+            items = my_items
+        else:
+            # 전체 문의 보기 = 본인 + 공개 카테고리만
+            my_ids = {i.get("inquiry_id") for i in my_items}
+            public_items = [
+                i for i in all_items
+                if i.get("category") in PUBLIC_CATEGORIES
+                or i.get("inquiry_id") in my_ids
+            ]
+            items = public_items
+    else:
+        # 비로그인: 공개 카테고리만
+        all_items = db.get_all_inquiries() if hasattr(db, 'get_all_inquiries') else []
+        items = [
+            i for i in all_items if i.get("category") in PUBLIC_CATEGORIES
+        ]
     
     # 상태/카테고리 필터
     if filter_state["status_filter"] != "all":
@@ -395,10 +465,10 @@ def _render_inquiry_list(auth, user_email, is_admin, filter_state, refresh_fn):
     
     # ─── 필터 바 ───
     with ui.row().classes("w-full items-center gap-2 mb-3 flex-wrap"):
-        # 뷰 전환 (관리자가 아니고 로그인 시)
+        # [Step Z] 일반 유저: 내 문의 / 공개 게시판 (결제/환불/버그는 비공개)
         if user_email and not is_admin:
             ui.toggle(
-                {"my": "📂 내 문의", "all": "🌐 전체 문의"},
+                {"my": "📂 내 문의", "all": "🌐 공개 게시판"},
                 value=filter_state["view"],
                 on_change=lambda e: (
                     filter_state.update({"view": e.value, "page": 0}),
@@ -437,12 +507,16 @@ def _render_inquiry_list(auth, user_email, is_admin, filter_state, refresh_fn):
             ).props("dense outlined").classes("min-w-[140px]")
     
     # 헤더
-    title_text = (
-        f"📂 내 문의 ({len(items)}건)"
-        if filter_state["view"] == "my"
-        else f"📂 전체 문의 ({len(items)}건)"
-    )
-    ui.label(title_text).classes("text-white font-bold mt-2")
+    if is_admin:
+        title_text = f"📂 전체 문의 ({len(items)}건)"
+    elif filter_state["view"] == "my":
+        title_text = f"📂 내 문의 ({len(items)}건)"
+    else:
+        title_text = (
+            f"🌐 공개 게시판 ({len(items)}건) "
+            f"· 결제/환불/버그는 본인+관리자만 열람"
+        )
+    ui.label(title_text).classes("text-white font-bold mt-2 text-sm")
     
     if not items:
         with ui.card().classes(
@@ -587,11 +661,13 @@ def _render_inquiry_card(item, is_admin, user_email, refresh_fn):
                     if db and hasattr(db, 'update_inquiry_reply'):
                         ok = db.update_inquiry_reply(iid, txt)
                         if ok:
-                            # Telegram 알림
+                            # [Step Z] Telegram HTML escape
+                            safe_t = _html.escape(t[:50])
+                            safe_txt = _html.escape(txt[:150])
                             _send_telegram(
                                 f"✅ <b>[관리자 답변 등록]</b>\n"
-                                f"📋 {t[:50]}\n"
-                                f"💬 {txt[:150]}"
+                                f"📋 {safe_t}\n"
+                                f"💬 {safe_txt}"
                                 f"{'...' if len(txt) > 150 else ''}"
                             )
                             ui.notify("답변이 등록되었습니다!", type="positive")

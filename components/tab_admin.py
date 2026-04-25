@@ -237,16 +237,25 @@ def render_tab_admin():
             async def _dismiss_payment(req):
                 def _do():
                     db_d = _get_db()
-                    if db_d:
-                        items = [x for x in db_d.get_all_inquiries()
-                                 if x.get("created_at") != req.get("created_at")]
-                        db_d.save_inquiries(items)
-                        return True
+                    if not db_d:
+                        return False
+                    # [Step Z] inquiry_id 기반 삭제 (created_at 충돌 X)
+                    if hasattr(db_d, 'delete_inquiry') and req.get("inquiry_id"):
+                        return db_d.delete_inquiry(req["inquiry_id"])
+                    # 하위 호환: inquiry_id 없으면 update_inquiry_status('closed') 사용
+                    if hasattr(db_d, 'update_inquiry_status') and req.get("inquiry_id"):
+                        return db_d.update_inquiry_status(req["inquiry_id"], "closed")
+                    # 둘 다 없으면 실패 (save_inquiries는 사용 X)
+                    _logger.warning(
+                        "delete_inquiry/update_inquiry_status 함수 없음 — Step Y 미적용"
+                    )
                     return False
 
                 ok = await asyncio.to_thread(_do)
                 if ok:
                     ui.notify("✅ 처리 완료", type="positive")
+                else:
+                    ui.notify("⚠️ 처리 실패", type="warning")
                 _load_payment_requests()
 
             def _load_payment_requests():

@@ -6,6 +6,7 @@ Phase 1: 등급 비교 테이블 + 무통장 입금 안내 + 입금확인 요청
 Phase 2: 토스페이먼츠 결제 위젯 연동 (준비)
 Phase 3: 정기 구독 빌링 자동화 (준비)
 """
+import hashlib
 import logging
 import os
 from datetime import datetime, timezone, timedelta
@@ -314,24 +315,48 @@ def _render_bank_transfer(auth, user):
             plan_label = "Prime"
             now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
 
-            # DB에 결제 요청 기록 (inquiries 테이블 활용)
+            # [Step Z] DB에 결제 요청 기록 — add_inquiry 사용 (save_inquiries DEPRECATED)
             db = _get_db()
             if db:
                 try:
-                    db.save_inquiries(db.get_all_inquiries() + [{
-                        "title": f"[💳 입금확인] {plan_label} - {depositor}",
-                        "content": (
-                            f"이메일: {email}\n"
-                            f"입금자명: {depositor}\n"
-                            f"플랜: {plan_label}\n"
-                            f"금액: {amount}원\n"
-                            f"비고: {note_input.value.strip()}\n"
-                            f"요청시각: {now_kst}"
-                        ),
-                        "nickname": depositor,
-                        "email": email,
-                        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                    }])
+                    # 안정적인 inquiry_id 생성 (5초 윈도우 — 더블 클릭 방어)
+                    now_5sec = int(datetime.now().timestamp() / 5) * 5
+                    seed = (
+                        f"{email}|입금확인|{plan_label}|{depositor}|"
+                        f"{amount}|{now_5sec}"
+                    )
+                    inquiry_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
+                    
+                    title = f"[💳 입금확인] {plan_label} - {depositor}"
+                    content = (
+                        f"이메일: {email}\n"
+                        f"입금자명: {depositor}\n"
+                        f"플랜: {plan_label}\n"
+                        f"금액: {amount}원\n"
+                        f"비고: {note_input.value.strip()}\n"
+                        f"요청시각: {now_kst}"
+                    )
+                    created_at = datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    
+                    if hasattr(db, 'add_inquiry'):
+                        # Step Y+ 신규 함수 사용
+                        db.add_inquiry(
+                            inquiry_id=inquiry_id,
+                            email=email,
+                            nickname=depositor,
+                            title=title,
+                            content=content,
+                            created_at=created_at,
+                            category="payment",  # 결제 카테고리 (비공개)
+                        )
+                    else:
+                        # Step Y 미적용 환경 (구 버전 호환)
+                        _logger.warning(
+                            "add_inquiry 함수 없음 — Step Y 미적용 환경. "
+                            "Telegram 알림만으로 처리."
+                        )
                 except Exception as e:
                     _logger.warning(f"입금확인 DB 저장 실패: {e}")
 

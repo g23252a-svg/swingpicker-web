@@ -176,8 +176,18 @@ def load_inquiry_items():
     return db.get_all_inquiries() if db else []
 
 def save_inquiry_items(items):
-    db = get_db()
-    return db.save_inquiries(items) if db else False
+    """⚠️ [v22 Step Z] DEPRECATED — db.add_inquiry() 사용 권장.
+    
+    구버전 호환을 위해 함수는 유지하지만, 내부적으로 항상 False 반환.
+    호출 코드는 add_inquiry()로 마이그레이션 필요.
+    
+    구버전 streamlit dashboard.py에서만 사용되며, NiceGUI main.py에서는 사용 X.
+    """
+    import logging as _lg
+    _lg.getLogger(__name__).warning(
+        "save_inquiry_items() DEPRECATED — db.add_inquiry() 사용 필요"
+    )
+    return False
 
 def load_subscriptions_db():
     db = get_db()
