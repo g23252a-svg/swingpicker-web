@@ -2,25 +2,31 @@
 """
 trade_journal_tab.py — 매매 복기(Trading Journal) 탭
 ═══════════════════════════════════════════════════════════
-[v22 Step AQ+AR+AS+AT] 전면 리팩토링 — 68 → 99점 목표
+[v22 Step AQ+AR+AS+AT+AU] 전면 리팩토링 — 68 → 99점 목표
 
 ⚠️ 보안 핵심: 사용자별 데이터 격리 (user_email_hash)
 
 개선 사항 (Step AQ): 사용자 격리, 면책, 자동채움, 청산모달, 필터, 메트릭, 차트, CSV
 개선 사항 (Step AR): user_key 통일, abspath, 삭제확인, 메모append, Gist sync
 개선 사항 (Step AS): 자동 채움 부각, Gist 백업 전체, journal_uid, 자동 백업, 환경변수
+개선 사항 (Step AT): 비동기 백업, 수량 검증, 영속화, 수동 모드, 다중 삭제, 일괄 정리
 
-개선 사항 (Step AT — 운영 안정성 마감):
-23. ✅ 자동 백업 비동기화 (background_tasks + run_sync) — UI 안 막힘
-24. ✅ 수량 필수 검증 (라벨과 일치)
-25. ✅ 백업 상태 영속화 (app.storage.user) — 새로고침 후 유지
-26. ✅ 자동채움 없을 때 수동 입력 expansion 기본 오픈
-27. ✅ 다중 선택 + 일괄 삭제 (selection=multiple)
-28. ✅ 일괄 정리 (3개월/6개월/1년/전체) — 미리보기 카운트
+개선 사항 (Step AU — 사고 방지 + UX 마감):
+29. ✅ 전체 삭제 후 Gist 빈 상태 동기화 (사고 방지)
+   - 이전 버그: 0건이면 return → Gist 옛 데이터 부활
+   - 수정: 빈 리스트도 sync_to_gist() 호출
+30. ✅ 전체 삭제 시 'RESET' 입력 확인 (이중 안전망)
+31. ✅ rowClick → '상세/청산' 버튼 컬럼 (다중 선택 충돌 방지)
+32. ✅ 수동 Gist 백업 비동기화 + spinner
+
+향후 작업 (다음 마이그레이션):
+- journal_uid 컬럼화 (현재는 tags JSON {_uid, tags} 형태)
+  ALTER TABLE trade_journal ADD COLUMN journal_uid TEXT;
+  CREATE UNIQUE INDEX idx_journal_uid ON trade_journal(user_email_hash, journal_uid);
 
 저장소: 
 - 로컬: SQLite ldy_trader.db (LDY_DATA_DIR 환경변수 우선)
-- 백업: Gist (LDY_GIST_ID/TOKEN, 비동기 자동 시도)
+- 백업: Gist (LDY_GIST_ID/TOKEN, 비동기 자동/수동 모두)
 """
 
 import os
@@ -1330,6 +1336,8 @@ def render_trade_journal_tab(df_scored=None):
                 {"name": "pnl", "label": "손익%", "field": "pnl", "align": "right", "sortable": True},
                 {"name": "out", "label": "결과", "field": "out", "align": "center"},
                 {"name": "route", "label": "상태", "field": "route", "align": "center"},
+                # [Step AU] 액션 버튼 컬럼 (rowClick 대신)
+                {"name": "actions", "label": "액션", "field": "actions", "align": "center"},
             ]
             rows = []
             for t in trades:
@@ -1348,19 +1356,54 @@ def render_trade_journal_tab(df_scored=None):
                         t.get("outcome", ""), "?",
                     ),
                     "route": t.get("route", ""),
+                    "actions": "📝",  # body-cell-actions 슬롯에서 버튼으로 렌더
                 })
 
             ui.label(
-                "💡 행을 클릭하면 청산 기록 / 삭제 모달이 열립니다 · "
-                "체크박스로 다중 선택 후 일괄 삭제 가능"
+                "💡 액션 버튼(📝) 클릭 = 상세/청산 모달  ·  "
+                "체크박스 = 다중 선택 후 일괄 삭제"
             ).classes("text-xs text-gray-500 italic mb-1")
 
-            # [Step AT] 다중 선택 가능한 테이블 (selection=multiple)
+            # [Step AT+AU] 다중 선택 가능한 테이블 (rowClick 제거)
             tbl = ui.table(
                 columns=cols, rows=rows, row_key="id",
                 pagination={"rowsPerPage": 15},
-                selection="multiple",  # ⭐ 다중 선택 활성화
+                selection="multiple",  # 다중 선택 활성화
             ).classes("w-full").props("dense dark flat bordered")
+            
+            # [Step AU] 액션 버튼 슬롯 (Quasar body-cell-{name} 패턴)
+            tbl.add_slot("body-cell-actions", """
+                <q-td :props="props">
+                    <q-btn
+                        flat dense round
+                        color="cyan"
+                        icon="edit"
+                        size="sm"
+                        @click="() => $parent.$emit('detail', props.row)"
+                    >
+                        <q-tooltip>상세/청산</q-tooltip>
+                    </q-btn>
+                </q-td>
+            """)
+            
+            # [Step AU] 행 클릭 대신 버튼 클릭 이벤트
+            def on_detail(e):
+                try:
+                    row = e.args
+                    if not row:
+                        return
+                    trade_id = row.get("id")
+                    if not trade_id:
+                        return
+                    trade = next(
+                        (t for t in trades if t["id"] == trade_id), None,
+                    )
+                    if trade:
+                        _open_exit_dialog(trade)
+                except Exception as ex:
+                    logger.debug(f"액션 버튼 오류: {ex}")
+            
+            tbl.on("detail", on_detail)
             
             # [Step AT] 다중 선택 액션 바 (선택 시에만 표시)
             with ui.row().classes("w-full mt-2 items-center gap-2 flex-wrap"):
@@ -1523,6 +1566,38 @@ def render_trade_journal_tab(df_scored=None):
                             "💡 백업이 필요하면 먼저 CSV 다운로드를 받으세요."
                         ).classes("text-xs text-amber-200 mt-2 italic")
                         
+                        # [Step AU] 전체 삭제 시 RESET 입력 (이중 안전망)
+                        reset_input_card = ui.card().classes(
+                            "w-full p-2 mt-2 bg-red-900/30 "
+                            "border border-red-500/60 rounded-lg hidden"
+                        )
+                        with reset_input_card:
+                            ui.label(
+                                "🚨 전체 매매일지 삭제 — 추가 확인 필요"
+                            ).classes("text-xs font-bold text-red-300")
+                            ui.label(
+                                "이 작업은 모든 매매 기록을 삭제하고 "
+                                "복구할 수 없습니다."
+                            ).classes("text-xs text-gray-300 mt-1")
+                            reset_input = ui.input(
+                                placeholder="RESET 입력 후 정리 실행 클릭",
+                            ).classes("w-full mt-2").props(
+                                "outlined dense"
+                            )
+                        
+                        # 'all' 선택 시에만 RESET 입력 카드 표시
+                        def toggle_reset_card():
+                            if period_select.value == "all":
+                                reset_input_card.classes(remove="hidden")
+                            else:
+                                reset_input_card.classes(add="hidden")
+                                reset_input.value = ""
+                        
+                        period_select.on(
+                            "update:model-value",
+                            lambda _: toggle_reset_card(),
+                        )
+                        
                         with ui.row().classes("w-full justify-end gap-2 mt-3"):
                             ui.button(
                                 "취소",
@@ -1531,6 +1606,17 @@ def render_trade_journal_tab(df_scored=None):
                             
                             def do_cleanup():
                                 period = period_select.value or "3m"
+                                # [Step AU] 'all' 선택 시 RESET 검증
+                                if period == "all":
+                                    typed = (reset_input.value or "").strip()
+                                    if typed != "RESET":
+                                        ui.notify(
+                                            "⚠️ 'RESET'을 정확히 입력해야 "
+                                            "전체 삭제됩니다",
+                                            type="warning",
+                                        )
+                                        return
+                                
                                 cutoff = compute_cutoff(period)
                                 deleted = delete_all_trades(
                                     user_hash, before_date=cutoff,
@@ -1563,25 +1649,8 @@ def render_trade_journal_tab(df_scored=None):
                     "오래된 기록 일괄 정리 (3개월/6개월/1년/전체)"
                 )
 
-            # 행 클릭 → 청산 모달 열기
-            def on_row_click(e):
-                try:
-                    args = e.args
-                    if not args or len(args) < 2:
-                        return
-                    row = args[1]
-                    trade_id = row.get("id")
-                    if not trade_id:
-                        return
-                    trade = next(
-                        (t for t in trades if t["id"] == trade_id), None,
-                    )
-                    if trade:
-                        _open_exit_dialog(trade)
-                except Exception as ex:
-                    logger.debug(f"행 클릭 오류: {ex}")
-
-            tbl.on("rowClick", on_row_click)
+            # [Step AU] rowClick 제거됨 — 액션 버튼 컬럼(📝)으로 청산 모달 열림
+            # 다중 선택과 충돌 가능성 차단
 
     def _open_exit_dialog(trade: dict):
         """[Step AQ] 청산 모달"""
@@ -1757,10 +1826,12 @@ def render_trade_journal_tab(df_scored=None):
         )
     
     def _try_auto_backup():
-        """[Step AS+AT] 저장/청산/삭제 후 자동 백업 — 비동기 (UI 안 막힘).
+        """[Step AS+AT+AU] 저장/청산/삭제 후 자동 백업 — 비동기 (UI 안 막힘).
         
         [Step AT] async_helpers.run_sync로 background_tasks에 던짐.
         실패해도 silent — dirty 유지하여 다음 변경 시 재시도 가능.
+        
+        [Step AU 핵심 수정] 빈 리스트도 동기화 (전체 삭제 후 Gist 살아나는 버그 방지).
         """
         if not _has_gist_env():
             return
@@ -1776,10 +1847,10 @@ def render_trade_journal_tab(df_scored=None):
                     all_trades = await run_sync(
                         lambda: load_trades(user_hash, 5000)
                     )
-                    if not all_trades:
-                        return
+                    # [Step AU 핵심] 빈 리스트도 업로드 — 전체 삭제 동기화
+                    # 이전 버그: 0건이면 return → Gist에 옛 100건 그대로 → 복원 시 부활
                     ok = await run_sync(
-                        lambda: sync_to_gist(user_hash, all_trades)
+                        lambda: sync_to_gist(user_hash, all_trades or [])
                     )
                     if ok:
                         backup_state["dirty"] = False
@@ -1789,7 +1860,7 @@ def render_trade_journal_tab(df_scored=None):
                         # [Step AT] 영속화 — 새로고침 후에도 유지
                         _persist_backup_state()
                         logger.info(
-                            f"☁️ 자동 백업 성공 ({len(all_trades)}건)"
+                            f"☁️ 자동 백업 성공 ({len(all_trades or [])}건)"
                         )
                 except Exception as e:
                     logger.debug(f"자동 백업 실패 (silent): {e}")
@@ -1801,7 +1872,8 @@ def render_trade_journal_tab(df_scored=None):
             logger.debug(f"비동기 백업 fallback (동기): {e}")
             try:
                 all_trades = load_trades(user_hash, 5000)
-                if all_trades and sync_to_gist(user_hash, all_trades):
+                # [Step AU] fallback도 빈 리스트 허용
+                if sync_to_gist(user_hash, all_trades or []):
                     backup_state["dirty"] = False
                     backup_state["last_backup_at"] = datetime.now().strftime(
                         "%Y-%m-%d %H:%M"
@@ -1811,39 +1883,100 @@ def render_trade_journal_tab(df_scored=None):
                 pass
     
     def _gist_backup(_visible_trades=None):
-        """[Step AR+AS+AT] Gist 수동 백업 — 항상 전체 기록.
+        """[Step AR+AS+AT+AU] Gist 수동 백업 — 항상 전체 기록 + 비동기.
         
         [Step AS 핵심 수정] 필터링된 trades 무시, 전체 기록 백업.
         이전 버그: 필터 7일 → 3건 백업 → Gist 100건이 3건으로 덮어씀 ❌
         [Step AT] 영속화 추가
+        [Step AU] 비동기 + spinner 알림 (UI 안 막힘)
         """
+        # [Step AU] 즉시 사용자 피드백 + 비동기 실행
+        spinner_notify = ui.notify(
+            "☁️ Gist 백업 중... (잠시만 기다려 주세요)",
+            type="ongoing",
+            timeout=0,
+            spinner=True,
+        )
+        
         try:
-            # [Step AS] 필터 무시, 전체 기록 로드
-            all_trades = load_trades(user_hash, 5000)
-            if not all_trades:
-                ui.notify("📭 백업할 기록 없음", type="warning")
-                return
+            from nicegui import background_tasks
+            from async_helpers import run_sync
             
-            ok = sync_to_gist(user_hash, all_trades)
-            if ok:
-                backup_state["dirty"] = False
-                backup_state["last_backup_at"] = datetime.now().strftime(
-                    "%Y-%m-%d %H:%M"
-                )
-                _persist_backup_state()  # [Step AT] 영속화
-                ui.notify(
-                    f"☁️ Gist 백업 완료 — 전체 {len(all_trades)}건",
-                    type="positive",
-                )
-                _refresh()
-            else:
-                ui.notify(
-                    "⚠️ Gist 백업 실패 — 환경변수 확인 (LDY_GIST_*)",
-                    type="warning",
-                )
+            async def _async_manual_backup():
+                try:
+                    # [Step AS+AU] 필터 무시, 전체 기록 (빈 리스트도 허용)
+                    all_trades = await run_sync(
+                        lambda: load_trades(user_hash, 5000)
+                    )
+                    ok = await run_sync(
+                        lambda: sync_to_gist(user_hash, all_trades or [])
+                    )
+                    
+                    # spinner 닫기
+                    try:
+                        spinner_notify.dismiss()
+                    except Exception:
+                        pass
+                    
+                    if ok:
+                        backup_state["dirty"] = False
+                        backup_state["last_backup_at"] = datetime.now().strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
+                        _persist_backup_state()
+                        cnt = len(all_trades or [])
+                        if cnt == 0:
+                            ui.notify(
+                                "☁️ Gist 백업 완료 — 빈 상태 동기화",
+                                type="positive",
+                            )
+                        else:
+                            ui.notify(
+                                f"☁️ Gist 백업 완료 — 전체 {cnt}건",
+                                type="positive",
+                            )
+                        _refresh()
+                    else:
+                        ui.notify(
+                            "⚠️ Gist 백업 실패 — 환경변수 확인 (LDY_GIST_*)",
+                            type="warning",
+                        )
+                except Exception as e:
+                    try:
+                        spinner_notify.dismiss()
+                    except Exception:
+                        pass
+                    logger.error(f"Gist 백업 실패: {e}")
+                    ui.notify(f"⚠️ 실패: {e}", type="negative")
+            
+            background_tasks.create(_async_manual_backup())
         except Exception as e:
-            logger.error(f"Gist 백업 실패: {e}")
-            ui.notify(f"⚠️ 실패: {e}", type="negative")
+            # background_tasks 사용 불가 시 동기 fallback
+            try:
+                spinner_notify.dismiss()
+            except Exception:
+                pass
+            try:
+                all_trades = load_trades(user_hash, 5000)
+                if sync_to_gist(user_hash, all_trades or []):
+                    backup_state["dirty"] = False
+                    backup_state["last_backup_at"] = datetime.now().strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    _persist_backup_state()
+                    ui.notify(
+                        f"☁️ Gist 백업 완료 — 전체 {len(all_trades or [])}건",
+                        type="positive",
+                    )
+                    _refresh()
+                else:
+                    ui.notify(
+                        "⚠️ Gist 백업 실패 — 환경변수 확인",
+                        type="warning",
+                    )
+            except Exception as ex:
+                logger.error(f"백업 fallback 실패: {ex}")
+                ui.notify(f"⚠️ 실패: {ex}", type="negative")
     
     # ─── [Step AR+AS] Gist 복원 (병합) ───
     def _gist_restore():
