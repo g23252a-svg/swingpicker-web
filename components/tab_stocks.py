@@ -395,6 +395,15 @@ _logger = logging.getLogger(__name__)
 # [Step AC P0-6] sticky-header CSS 1회 주입 가드 (모듈 단위)
 _STICKY_CSS_INJECTED = False
 
+# [Step AE] 라벨/ROUTE 화면 표시 — 매핑 헬퍼 (ui_terms.py)
+# raw 비교는 절대 건드리지 말고, 표시만 매핑 통과
+from components.ui_terms import (
+    label_to_display as _ae_label_disp,
+    route_display as _ae_route_disp,
+    ELITE_LABEL_DISPLAY as _AE_LBL_MAP,
+    ROUTE_LABELS as _AE_ROUTE_MAP,
+)
+
 # ── 외부 모듈 (지연 임포트) ──
 # [v3.7.17] chart_components import를 함수별로 분리
 # 이전엔 하나의 try에서 세 함수 묶어 import → plot_candle_chart 없으면 radar/waterfall도 죽음
@@ -1674,18 +1683,18 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None):
         if not top3_codes:
             # [Step AC P0-3] 빈 상태 강화 — 콤보/즉시진입(엄격) 모두 없을 때 차선/관찰 후보 표시
             ui.label(
-                "🛡️ 콤보 0개 · ✅ 즉시진입(엄격필터) 0개 → 오늘은 매매 보류"
+                "🟣 핵심매수 0개 · 🟢 진입가능(엄격필터) 0개 → 오늘은 매매 보류"
             ).classes("text-sm text-yellow-400 font-semibold mb-1")
 
-            # 차선 후보 / 관찰 후보 카운트
+            # [Step AE] 차선 후보 / 관찰 후보 카운트 — 한글 표시 (raw 비교 유지)
             if "ELITE_LABEL" in df.columns:
                 strong_n = int((df["ELITE_LABEL"] == "🏆 최강").sum())
                 instant_n = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
                 parts = []
                 if instant_n > 0:
-                    parts.append(f"✅ 즉시진입 {instant_n}개 (엄격필터 미통과)")
+                    parts.append(f"🟢 진입가능 {instant_n}개 (엄격필터 미통과)")
                 if strong_n > 0:
-                    parts.append(f"🏆 최강 {strong_n}개 (👁️ 관찰 · 매매 제외)")
+                    parts.append(f"🔵 관심관찰 {strong_n}개 (👁️ 관찰 · 매매 제외)")
                 if parts:
                     ui.label(
                         "📋 후보 — " + " · ".join(parts) +
@@ -1697,13 +1706,13 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None):
                 tp1 = strong_stats["tp1_rate"] * 100
                 ev = strong_stats["ev"]
                 ui.label(
-                    f"(과거 🏆 최강 검증: {strong_stats['n']}건 · "
+                    f"(과거 🔵 관심관찰 검증: {strong_stats['n']}건 · "
                     f"TP1 {tp1:.1f}% · EV {ev:+.2f}%)"
                 ).classes("text-[11px] text-gray-500 mb-1 italic")
 
             ui.label(
-                "🛡️ 콤보: S≥90·T≥80·AI≥60·ATTACK/ARMED  ·  "
-                "✅ 즉시진입: 최소≥50·밸런스≥70·갭≤5%"
+                "🟣 핵심매수: S≥90·T≥80·AI≥60·매수검토/진입대기  ·  "
+                "🟢 진입가능: 최소≥50·균형≥70·갭≤5%"
             ).classes("text-xs text-gray-500 mt-1")
             return
 
@@ -1735,7 +1744,8 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None):
                 with _card:
                     with ui.row().classes("items-center gap-2 mb-1"):
                         ui.label(f"#{i}").classes("text-sm text-gray-500")
-                        ui.badge(lbl, color=color).classes("text-xs")
+                        # [Step AE] 라벨 표시는 매핑 통과 (내부값 lbl 그대로 유지)
+                        ui.badge(_ae_label_disp(lbl, short=True), color=color).classes("text-xs")
                     ui.label(name).classes("text-base font-bold text-white")
                     ui.label(f"S{s_v:.0f} T{t_v:.0f} AI{a_v:.0f}").classes(
                         "text-xs text-gray-400 mt-0.5"
@@ -1789,16 +1799,30 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         view_mode = ui.toggle(
             ["📋 테이블", "🃏 칸반"], value="📋 테이블"
         )
+        # [Step AE] dict 옵션: key=internal(비교용), value=display(화면)
         route_filter = ui.select(
-            ["전체", "ATTACK", "ARMED", "WAIT", "NEUTRAL"],
+            {
+                "전체": "전체",
+                "ATTACK":  "매수검토",
+                "ARMED":   "진입대기",
+                "WAIT":    "관망",
+                "NEUTRAL": "중립",
+            },
             value="전체", label="상태",
-        ).classes("min-w-[120px]")
+        ).classes("min-w-[130px]")
         # [v3.7.18] 라벨 필터 추가 - 즉시진입 너무 많을 때 최강만 보기 등
         # [v3.7.25] 🛡️ 콤보 필터 추가 (제1 매수 종목)
+        # [Step AE] dict 옵션: key=internal(비교용), value=display(화면)
         label_filter = ui.select(
-            ["전체", "🛡️ 콤보", "🏆 최강", "✅ 즉시진입", "⚠️ 추격"],
+            {
+                "전체": "전체",
+                "🛡️ 콤보":   "🟣 핵심매수",
+                "🏆 최강":   "🔵 관심관찰",
+                "✅ 즉시진입": "🟢 진입가능",
+                "⚠️ 추격":   "🟠 추격주의",
+            },
             value="전체", label="라벨",
-        ).classes("min-w-[130px]")
+        ).classes("min-w-[140px]")
         # [v3.7.24] "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준 명확화)
         sort_mode = ui.toggle(
             ["🔢 점수순", "🧱 3축최저순", "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"],
@@ -1831,20 +1855,21 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     ):
         with ui.row().classes("w-full gap-6 items-center flex-wrap"):
             ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
-            # [v3.7.25] 🛡️ 콤보 최우선 표시 (제1 매수 · 실성능 1위)
+            # [Step AE] 라벨명을 외부 리뷰안 한글로 표시 (내부값은 그대로 유지)
+            # [v3.7.25] 핵심매수 최우선 표시 (제1 매수 · 실성능 1위)
             ui.label(
-                f"🛡️ 콤보 ({n_combo}): S≥90 · T≥80 · AI≥60 · ATTACK/ARMED "
+                f"🟣 핵심매수 ({n_combo}): S≥90 · T≥80 · AI≥60 · 매수검토/진입대기 "
                 f"[n=112 EV +25.77% 승률 83.9%]"
             ).classes("text-xs text-purple-400 font-bold")
             ui.label(
-                f"🏆 최강 ({n_strong}): 평균≥70 · 밸런스≥70 · 갭≤3% · RR≥0.8 "
+                f"🔵 관심관찰 ({n_strong}): 평균≥70 · 균형≥70 · 갭≤3% · 손익비≥0.8 "
                 f"[n=6 · 👁️ 관찰중 · 매매 제외]"
             ).classes("text-xs text-gray-500 line-through opacity-60")
             ui.label(
-                f"✅ 즉시진입 ({n_instant}): 최소≥50 · 밸런스≥70 · 갭≤5%"
+                f"🟢 진입가능 ({n_instant}): 최소≥50 · 균형≥70 · 갭≤5%"
             ).classes("text-xs text-green-400")
             ui.label(
-                f"⚠️ 추격 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
+                f"🟠 추격주의 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
             ).classes("text-xs text-orange-400")
             if n_none > 0:
                 ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
@@ -1863,14 +1888,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ui.label("🧱 핵심 3축 (실전 매매 기본)").classes(
                 "text-xs text-purple-300 font-bold mt-1"
             )
+            # [Step AF-4] 회원 친화 별명 연결 (테이블 헤더는 짧게 유지)
             ui.label(
-                "  · S (구조): 추세·정배열·VWAP 위치 등 기본기 — 0~100"
+                "  · S (= 기초체력): 추세·정배열·VWAP 위치 등 기본기 — 0~100"
             ).classes("text-[11px] text-gray-400")
             ui.label(
-                "  · T (타이밍): RSI·MACD·거래량·TRIGGER 등 진입 시점 — 0~100"
+                "  · T (= 진입타이밍): RSI·MACD·거래량·TRIGGER 등 진입 시점 — 0~100"
             ).classes("text-[11px] text-gray-400")
             ui.label(
-                "  · AI (=ML): 머신러닝 예측값 — 약 7~91 범위"
+                "  · AI (= AI상승확률, =ML): 머신러닝 예측값 — 약 7~91 범위"
             ).classes("text-[11px] text-gray-400")
 
             # ── 파생 통계 ──
@@ -1891,7 +1917,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "    +면 추격 위험 · -면 할인/대기 구간 (Step AD: signed)"
             ).classes("text-[10px] text-gray-500 ml-2")
             ui.label(
-                "  · RR: (T1 - 현재가) / (현재가 - 손절가)"
+                "  · RR (= 손익비): (T1 - 현재가) / (현재가 - 손절가)"
             ).classes("text-[11px] text-gray-400")
             ui.label(
                 "    지금 진입 시 손익비 (현재가 기준 · 테이블/상세 일치)"
@@ -1917,19 +1943,22 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "text-xs text-purple-300 font-bold mt-2"
             )
             ui.label(
-                "  · 🛡️ 콤보 ×1.50 (실성능 1위)  "
-                "· ✅ 즉시진입 ×1.30  "
-                "· 🏆 최강 ×0.50 (관찰 모드)  "
-                "· ⚠️ 추격 ×0.70"
+                # [Step AE] 라벨 가중치 설명 한글화
+                "  · 🟣 핵심매수 ×1.50 (실성능 1위)  "
+                "· 🟢 진입가능 ×1.30  "
+                "· 🔵 관심관찰 ×0.50 (관찰 모드)  "
+                "· 🟠 추격주의 ×0.70"
             ).classes("text-[11px] text-gray-400")
 
             # ── 실전 팁 ──
             ui.label("💡 실전 매매 시 우선 확인 순서").classes(
                 "text-xs text-yellow-400 font-bold mt-2"
             )
+            # [Step AF-2] 실전 팁 — 한글 라벨 + 친절한 표현
             ui.label(
-                "  ① 라벨 (🛡️/✅/⚠️)  → ② 점수(DISPLAY) 70+  "
-                "→ ③ RR 1.0+  → ④ 갭 5% 이하  → ⑤ S/T/AI 세부 확인"
+                "  ① 라벨 (🟣 핵심매수·🟢 진입가능 우선, 🟠 추격주의 신중)  "
+                "→ ② 종합점수 70+  →  ③ 손익비(RR) 1.0+  "
+                "→ ④ 진입갭 ±5% 이내  →  ⑤ S/T/AI 세부 확인"
             ).classes("text-[11px] text-gray-300")
 
     # [v3.7.22] CSV 다운로드 권한 제어 — prime/admin만 허용
@@ -2028,6 +2057,26 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
             out_df = source_df[download_cols].copy()
 
+            # [Step AG-3] CSV 회원 친화 표시 컬럼 추가
+            # raw 컬럼(ELITE_LABEL/ROUTE)은 그대로 유지 — 호환성/필터링용
+            # "라벨표시"/"상태표시"는 한글 친화 컬럼 — 회원이 엑셀에서 바로 이해
+            if "ELITE_LABEL" in out_df.columns:
+                _lbl_pos = out_df.columns.get_loc("ELITE_LABEL")
+                out_df.insert(
+                    _lbl_pos, "라벨표시",
+                    out_df["ELITE_LABEL"].apply(
+                        lambda x: _ae_label_disp(str(x), short=True) if x else ""
+                    ),
+                )
+            if "ROUTE" in out_df.columns:
+                _rt_pos = out_df.columns.get_loc("ROUTE")
+                out_df.insert(
+                    _rt_pos, "상태표시",
+                    out_df["ROUTE"].apply(
+                        lambda x: _ae_route_disp(str(x)) if x else ""
+                    ),
+                )
+
             # UTF-8 BOM 포함 (한글 엑셀 호환)
             csv_bytes = out_df.to_csv(index=False).encode("utf-8-sig")
 
@@ -2038,13 +2087,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
             # NiceGUI download 트리거
             ui.download(csv_bytes, filename)
-            # [v3.7.27] 컬럼 수와 절감량도 알림에 표시
+            # [v3.7.27 + Step AG-3] 컬럼 수와 절감량 + 친화 컬럼 표시
             original_cols = len(source_df.columns)
-            final_cols = len(download_cols)
-            saved = original_cols - final_cols
+            final_cols = len(out_df.columns)  # 라벨표시/상태표시 추가 반영
+            saved = original_cols - len(download_cols)
             ui.notify(
                 f"✅ {len(out_df)}개 종목 · {final_cols}컬럼 "
-                f"({saved}개 중복/상수 제거)",
+                f"({saved}개 중복/상수 제거 · 라벨표시/상태표시 추가)",
                 type="positive",
             )
         except Exception as e:
@@ -2215,10 +2264,14 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             _close_t = _nz(r.get("종가", 0))
             _entry_t = _nz(r.get("추천매수가", 0))
             _gap_signed = ((_close_t - _entry_t) / _entry_t * 100) if _entry_t > 0 else 0
+            # [Step AE] 테이블 row의 label/route는 화면 표시값으로 매핑
+            # (정렬/필터 비교는 _filtered() 안에서 ELITE_LABEL/ROUTE 원본값으로 그대로 동작)
+            _r_label = str(r.get("ELITE_LABEL", "") or "")
+            _r_route = str(r.get("ROUTE", ""))
             rows.append({
                 "code": str(r.get("종목코드", "")).zfill(6),
-                "label": str(r.get("ELITE_LABEL", "") or "—"),
-                "route": str(r.get("ROUTE", "—")),
+                "label": _ae_label_disp(_r_label, short=True) if _r_label else "—",
+                "route": _ae_route_disp(_r_route) if _r_route else "—",
                 "name": str(r.get("종목명", "—")),
                 "score": f'{_nz(r.get("DISPLAY_SCORE", 0)):.0f}',
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
@@ -2312,9 +2365,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             df_watch = show
 
         with ui.row().classes("w-full gap-4 flex-wrap items-start"):
-            _kanban_col("🚀 ATTACK", df_atk, "#EF4444")
-            _kanban_col("🔫 ARMED", df_arm, "#F59E0B")
-            _kanban_col("👀 WATCH", df_watch, "#3B82F6")
+            # [Step AE] 칸반 컬럼 제목 한글화 (내부 ROUTE는 비교에서 그대로 사용)
+            _kanban_col(f"🚀 {_AE_ROUTE_MAP.get('ATTACK', '매수검토')}", df_atk, "#EF4444")
+            _kanban_col(f"🎯 {_AE_ROUTE_MAP.get('ARMED', '진입대기')}", df_arm, "#F59E0B")
+            _kanban_col(f"👀 {_AE_ROUTE_MAP.get('WAIT', '관망')}", df_watch, "#3B82F6")
 
     def _kanban_col(title: str, sub_df: pd.DataFrame, color: str):
         with ui.column().classes("kanban-col min-w-[280px] flex-1"):
@@ -2336,7 +2390,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     elite_lbl = str(r.get("ELITE_LABEL", "") or "")
                     elite_color = str(r.get("ELITE_LABEL_COLOR", "") or "")
                     if elite_lbl:
-                        ui.badge(elite_lbl, color=elite_color).classes("text-[10px] mb-1")
+                        # [Step AF-1] 칸반 카드 내부 라벨 뱃지 한글 표시 (raw 비교 X)
+                        ui.badge(_ae_label_disp(elite_lbl, short=True), color=elite_color).classes("text-[10px] mb-1")
 
                     with ui.row().classes("justify-between items-center"):
                         ui.label(str(r.get("종목명", ""))).classes(
@@ -2417,7 +2472,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     )
                     ui.label(f"({code})").classes("text-sm text-gray-400")
                     if elite_lbl:
-                        ui.badge(elite_lbl, color=elite_color_hex).classes(
+                        # [Step AE] 라벨 뱃지 한글 표시 (내부값 elite_lbl 그대로 유지)
+                        ui.badge(_ae_label_disp(elite_lbl, short=True), color=elite_color_hex).classes(
                             "text-sm font-bold px-3 py-1"
                         )
                     route_color = {
@@ -2425,7 +2481,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                         "WAIT": "#3B82F6", "NEUTRAL": "#6B7280",
                         "OVERHEAT": "#DC2626", "CARRY": "#8B5CF6",
                     }.get(route, "#6B7280")
-                    ui.badge(route, color=route_color).classes("text-xs")
+                    # [Step AE] 라우트 뱃지 한글 표시 (내부값 route 그대로 유지)
+                    ui.badge(_ae_route_disp(route), color=route_color).classes("text-xs")
                     if sector:
                         ui.label(f"· {sector}").classes("text-xs text-gray-400")
 
@@ -2661,13 +2718,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     except Exception:
                         ui.label("워터폴 차트 오류").classes("text-gray-500")
 
-            # ROUTE 배지
+            # [Step AG-1] 상세 패널 맨 아래 ROUTE 뱃지 한글 표시 (raw 비교 X)
             rv = str(row.get("ROUTE", "NEUTRAL"))
             rc = {
                 "ATTACK": "#EF4444", "ARMED": "#F59E0B",
                 "WAIT": "#3B82F6", "NEUTRAL": "#6B7280",
             }.get(rv, "#6B7280")
-            ui.badge(rv, color=rc).classes("mt-2")
+            ui.badge(_ae_route_disp(rv), color=rc).classes("mt-2")
 
     # ── 이벤트 바인딩 ──
     # [v3.7.26] view_table_mode 추가 — 기본/고급 전환 시 테이블 재구성
@@ -2683,11 +2740,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 # ═══════════════════════════════════════════════════
 
 # ── ROUTE 상수 ──
+# [Step AG-2] page_stock.py / page_briefing.py 호환 매핑을 ui_terms.py와 통일
+# ui_terms.ROUTE_LABELS의 외부 리뷰안 용어 그대로 사용 — 화면 간 용어 일관성
 ROUTE_KR = {
-    "ATTACK":   "매수 돌입",
-    "ARMED":    "매수 대기",
+    "ATTACK":   "매수검토",
+    "ARMED":    "진입대기",
     "WAIT":     "관망",
-    "OVERHEAT": "과열 주의",
+    "OVERHEAT": "과열주의",
     "NEUTRAL":  "중립",
 }
 
