@@ -1,18 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-tab_backtest.py — 🧪 전략 샌드박스 (백테스트 시뮬레이터)
+tab_backtest.py — 🧪 전략 샌드박스 (간이 백테스트 시뮬레이터)
 ═══════════════════════════════════════════════════════════
-[v22 Step AO] 전면 리팩토링 — 82 → 95점 목표
+[v22 Step AO+AP] 전면 리팩토링 — 82 → 95점 목표
 
-개선 사항:
+⚠️ 이것은 간이 백테스트입니다:
+- recommend CSV의 사후 수익률 컬럼(ret_Xd_%)을 사용
+- 손절/익절 도달 순서, 장중 고가/저가, 실제 동시 보유 자금 제약 미반영
+- 더 정밀한 백테스트는 OHLCV 기반 별도 백엔드 필요
+
+개선 사항 (Step AO):
 1. ✅ 면책 + 과적합 경고 (Prime 유료 기능 법적 안전)
-2. ✅ 프리셋 4종 (보수/균형/공격/커스텀)
+2. ✅ 프리셋 4종 (보수/균형/공격/단타)
 3. ✅ CAGR + Sharpe 추가 메트릭
 4. ✅ 즐겨찾기 저장 (app.storage.user 활용)
-5. ✅ 사용자 친화 라벨 (ret_10d_% 자동 숨김, 보유기간 라벨)
-6. ✅ 모바일 슬라이더 + 숫자 입력 동기화
-7. ✅ 차트 보기 모드 (자산 성장 / Drawdown / 수익률 분포 / 월별 히트맵)
-8. ✅ 거래 내역 CSV 다운로드
+5. ✅ 사용자 친화 라벨 (ret_10d_% 자동 숨김)
+6. ✅ 차트 보기 모드 (자산 성장 / Drawdown / 수익률 분포 / 월별 히트맵)
+7. ✅ 거래 내역 CSV 다운로드
+
+추가 개선 (Step AP):
+8. ✅ '간이 백테스트' 명시 + 자금/체결 제약 미반영 고지
+9. ✅ 슬라이더 + 숫자 입력 동기화 (실제 구현)
+10. ✅ 신뢰도 배지 (LOW/MEDIUM/HIGH — 거래 수 기반)
+
+향후 작업 (백엔드 필요):
+- OHLCV 기반 target/stop 도달 순서 계산
+- 최대 동시 보유 수 제한
+- position sizing / Kelly 비중
+- walk-forward / out-of-sample 분리
+- 즐겨찾기 계정별 저장 (Gist 통합)
 
 Premium 전용 킬러 기능 — Prime 가입 동기의 핵심
 """
@@ -130,6 +146,83 @@ CHART_MODE_EXPLANATIONS = {
         "특정 월에만 수익이 몰리면 시장 의존성 높음 (강건성↓)."
     ),
 }
+
+
+# ═══════════════════════════════════════════════════
+#  [Step AP] 신뢰도 배지 (표본 수 기반)
+# ═══════════════════════════════════════════════════
+def _get_confidence_level(total_trades: int, trading_days: int) -> dict:
+    """[Step AP] 거래 수와 기간 기반 결과 신뢰도 평가.
+    
+    거래 수 기준:
+    - LOW: < 30건 (또는 < 7일)
+    - MEDIUM: 30~99건 (또는 7~14일)
+    - HIGH: 100건 이상 (또는 15일 이상)
+    
+    Returns:
+        {"level": "LOW/MEDIUM/HIGH", "label", "color", "icon", "message"}
+    """
+    if total_trades < 30 or trading_days < 7:
+        return {
+            "level": "LOW",
+            "label": "낮음",
+            "color": "red",
+            "icon": "🚨",
+            "message": (
+                f"표본 부족 — 거래 {total_trades}건 / {trading_days}일. "
+                "결과 과신 금지, 과적합 위험 매우 높음."
+            ),
+        }
+    elif total_trades < 100 or trading_days < 15:
+        return {
+            "level": "MEDIUM",
+            "label": "보통",
+            "color": "amber",
+            "icon": "⚠️",
+            "message": (
+                f"표본 보통 — 거래 {total_trades}건 / {trading_days}일. "
+                "참고용으로만 사용하고 다른 파라미터 조합도 시도하세요."
+            ),
+        }
+    else:
+        return {
+            "level": "HIGH",
+            "label": "양호",
+            "color": "green",
+            "icon": "✅",
+            "message": (
+                f"표본 충분 — 거래 {total_trades}건 / {trading_days}일. "
+                "통계적 의미 있는 표본이지만, 여전히 과거 데이터의 한계는 존재."
+            ),
+        }
+
+
+def _render_confidence_badge(result: dict):
+    """[Step AP] 신뢰도 배지 카드 표시"""
+    conf = _get_confidence_level(
+        result.get("total_trades", 0),
+        result.get("trading_days", 0),
+    )
+    
+    color_map = {
+        "red": ("bg-red-900/20", "border-red-500/40", "text-red-300"),
+        "amber": ("bg-amber-900/20", "border-amber-500/40", "text-amber-300"),
+        "green": ("bg-emerald-900/20", "border-emerald-500/40", "text-emerald-300"),
+    }
+    bg, border, text_color = color_map.get(conf["color"], color_map["amber"])
+    
+    with ui.card().classes(
+        f"w-full p-3 {bg} border {border} rounded-xl mt-3 mb-1"
+    ):
+        with ui.row().classes("w-full items-start gap-2"):
+            ui.label(conf["icon"]).classes("text-xl")
+            with ui.column().classes("flex-1 gap-1"):
+                ui.label(
+                    f"📊 결과 신뢰도: {conf['label']} ({conf['level']})"
+                ).classes(f"text-sm font-bold {text_color}")
+                ui.label(conf["message"]).classes(
+                    "text-xs text-gray-200 leading-relaxed"
+                )
 
 
 def _get_ret_col(hold_days: int) -> str:
@@ -550,23 +643,52 @@ def _build_chart_by_mode(result: dict, mode: str):
 #  [Step AO] 면책 + 과적합 경고
 # ═══════════════════════════════════════════════════
 def _render_disclaimer():
-    """[Step AO] 백테스트 한계 + 과적합 경고 (Prime 유료 기능 법적 안전)"""
+    """[Step AO+AP] 백테스트 한계 + 과적합 경고 (Prime 유료 기능 법적 안전)"""
     
-    # 백테스트 한계
+    # [Step AP] 간이 백테스트 명시 (가장 중요 — 오해 방지)
+    with ui.card().classes(
+        "w-full p-3 bg-blue-900/20 border border-blue-500/40 rounded-xl mb-3"
+    ):
+        with ui.row().classes("w-full items-start gap-2"):
+            ui.label("ℹ️").classes("text-xl")
+            with ui.column().classes("flex-1 gap-1"):
+                ui.label("간이 백테스트 (Simplified Backtest)").classes(
+                    "text-sm font-bold text-blue-300"
+                )
+                ui.label(
+                    "이 샌드박스는 recommend CSV의 사후 수익률 컬럼"
+                    "(ret_1d/5d/10d/20d/60d/120d_%)을 사용한 간이 시뮬레이션입니다."
+                ).classes("text-xs text-gray-200 leading-relaxed")
+                ui.label(
+                    "다음 항목은 단순화 또는 미반영되어 있습니다:"
+                ).classes("text-xs text-gray-300 mt-1 font-bold")
+                for line in [
+                    "• 손절/익절 도달 순서 (장중 고가→저가 순서 X)",
+                    "• 장중 고가/저가 (시작가 대비 종가 기반 평균 수익률)",
+                    "• 실제 동시 보유 자금 제약 (Top-K 균등 배분 가정)",
+                    "• 포지션 사이징 (Kelly 등 자본 비중 계산 X)",
+                    "• 슬리피지 / 부분 체결 / 거래정지",
+                ]:
+                    ui.label(line).classes("text-xs text-gray-300")
+                ui.label(
+                    "💡 더 정밀한 결과는 OHLCV 기반 별도 백테스트 도구가 필요합니다."
+                ).classes("text-xs text-blue-200 mt-1")
+    
+    # 백테스트 한계 (기존 amber)
     with ui.card().classes(
         "w-full p-3 bg-amber-900/20 border border-amber-500/40 rounded-xl mb-3"
     ):
         with ui.row().classes("w-full items-start gap-2"):
             ui.label("⚠️").classes("text-xl")
             with ui.column().classes("flex-1 gap-1"):
-                ui.label("백테스트 시뮬레이션 한계").classes(
+                ui.label("백테스트 일반 한계").classes(
                     "text-sm font-bold text-amber-300"
                 )
                 for line in [
                     "• 과거 데이터는 미래 수익을 보장하지 않습니다",
-                    "• 실제 체결가 ≠ 시뮬레이션 가격 (슬리피지/체결 실패)",
+                    "• 실제 체결가 ≠ 시뮬레이션 가격",
                     "• 생존자 편향 — 상장폐지/거래정지 종목 미반영",
-                    "• 균등 배분 가정 — 실제 매수 단위 반영 X",
+                    "• 수수료/세금/슬리피지는 cost_pct로 단순화",
                 ]:
                     ui.label(line).classes("text-xs text-gray-300")
     
@@ -759,15 +881,24 @@ def render_tab_backtest(df, auth):
                     "text-sm font-bold text-blue-400 mb-1"
                 )
                 
+                # [Step AP] 슬라이더 + 숫자 입력 동기화
                 sl_score = ui.slider(
                     min=40, max=95,
                     value=PRESETS["balanced"]["min_score"],
                     step=5,
                 ).classes("w-full")
-                ui.label("").bind_text_from(
-                    sl_score, "value",
-                    backward=lambda v: f"최소 점수: {int(v)}점",
-                ).classes("text-xs text-gray-300")
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.label("").bind_text_from(
+                        sl_score, "value",
+                        backward=lambda v: f"최소 점수: {int(v)}점",
+                    ).classes("text-xs text-gray-300 flex-1")
+                    ui.number(
+                        value=PRESETS["balanced"]["min_score"],
+                        min=40, max=95, step=5,
+                        format="%.0f",
+                    ).bind_value(sl_score, "value").classes("w-20").props(
+                        "outlined dense"
+                    )
                 sliders["min_score"] = sl_score
                 
                 sl_topk = ui.slider(
@@ -775,10 +906,18 @@ def render_tab_backtest(df, auth):
                     value=PRESETS["balanced"]["top_k"],
                     step=1,
                 ).classes("w-full")
-                ui.label("").bind_text_from(
-                    sl_topk, "value",
-                    backward=lambda v: f"일일 편입 종목 수: {int(v)}개",
-                ).classes("text-xs text-gray-300")
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.label("").bind_text_from(
+                        sl_topk, "value",
+                        backward=lambda v: f"일일 편입 종목 수: {int(v)}개",
+                    ).classes("text-xs text-gray-300 flex-1")
+                    ui.number(
+                        value=PRESETS["balanced"]["top_k"],
+                        min=3, max=30, step=1,
+                        format="%.0f",
+                    ).bind_value(sl_topk, "value").classes("w-20").props(
+                        "outlined dense"
+                    )
                 sliders["top_k"] = sl_topk
             
             # 매매 규칙
@@ -792,11 +931,18 @@ def render_tab_backtest(df, auth):
                     value=PRESETS["balanced"]["hold_days"],
                     step=1,
                 ).classes("w-full")
-                # [Step AO] 사용자 친화 라벨 — ret_10d_% 자동 숨김
-                ui.label("").bind_text_from(
-                    sl_hold, "value",
-                    backward=lambda v: f"보유 기간: {_hold_days_label(int(v))}",
-                ).classes("text-xs text-gray-300")
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.label("").bind_text_from(
+                        sl_hold, "value",
+                        backward=lambda v: f"보유 기간: {_hold_days_label(int(v))}",
+                    ).classes("text-xs text-gray-300 flex-1")
+                    ui.number(
+                        value=PRESETS["balanced"]["hold_days"],
+                        min=1, max=60, step=1,
+                        format="%.0f",
+                    ).bind_value(sl_hold, "value").classes("w-20").props(
+                        "outlined dense"
+                    )
                 sliders["hold_days"] = sl_hold
                 
                 sl_target = ui.slider(
@@ -804,10 +950,18 @@ def render_tab_backtest(df, auth):
                     value=PRESETS["balanced"]["target_pct"],
                     step=1,
                 ).classes("w-full")
-                ui.label("").bind_text_from(
-                    sl_target, "value",
-                    backward=lambda v: f"익절선: +{int(v)}%",
-                ).classes("text-xs text-gray-300")
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.label("").bind_text_from(
+                        sl_target, "value",
+                        backward=lambda v: f"익절선: +{int(v)}%",
+                    ).classes("text-xs text-gray-300 flex-1")
+                    ui.number(
+                        value=PRESETS["balanced"]["target_pct"],
+                        min=2, max=30, step=1,
+                        format="%.0f",
+                    ).bind_value(sl_target, "value").classes("w-20").props(
+                        "outlined dense"
+                    )
                 sliders["target_pct"] = sl_target
             
             # 리스크 관리
@@ -821,10 +975,18 @@ def render_tab_backtest(df, auth):
                     value=PRESETS["balanced"]["stop_pct"],
                     step=1,
                 ).classes("w-full")
-                ui.label("").bind_text_from(
-                    sl_stop, "value",
-                    backward=lambda v: f"손절선: -{int(v)}%",
-                ).classes("text-xs text-gray-300")
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.label("").bind_text_from(
+                        sl_stop, "value",
+                        backward=lambda v: f"손절선: -{int(v)}%",
+                    ).classes("text-xs text-gray-300 flex-1")
+                    ui.number(
+                        value=PRESETS["balanced"]["stop_pct"],
+                        min=2, max=15, step=1,
+                        format="%.0f",
+                    ).bind_value(sl_stop, "value").classes("w-20").props(
+                        "outlined dense"
+                    )
                 sliders["stop_pct"] = sl_stop
                 
                 sl_cost = ui.slider(
@@ -832,11 +994,24 @@ def render_tab_backtest(df, auth):
                     value=PRESETS["balanced"]["cost_pct"],
                     step=0.05,
                 ).classes("w-full")
-                ui.label("").bind_text_from(
-                    sl_cost, "value",
-                    backward=lambda v: f"왕복 거래비용: {float(v):.2f}%",
-                ).classes("text-xs text-gray-300")
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.label("").bind_text_from(
+                        sl_cost, "value",
+                        backward=lambda v: f"왕복 거래비용: {float(v):.2f}%",
+                    ).classes("text-xs text-gray-300 flex-1")
+                    ui.number(
+                        value=PRESETS["balanced"]["cost_pct"],
+                        min=0, max=1.0, step=0.05,
+                        format="%.2f",
+                    ).bind_value(sl_cost, "value").classes("w-20").props(
+                        "outlined dense"
+                    )
                 sliders["cost_pct"] = sl_cost
+        
+        # [Step AP] 자금 제약 안내 (파라미터 패널 하단)
+        ui.label(
+            "ℹ️ 결과는 날짜별 Top-K 균등 평균이며, 실제 동시 보유 슬롯/현금 제약은 단순화되어 있습니다."
+        ).classes("text-[11px] text-gray-500 italic mt-3 leading-relaxed")
 
     # ─── [Step AO] 즐겨찾기 영역 ───
     favorites_container = ui.column().classes("w-full mb-3")
@@ -963,6 +1138,9 @@ def render_tab_backtest(df, auth):
 # ═══════════════════════════════════════════════════
 def _render_results(result: dict, cfg: dict):
     """결과 메트릭 + 차트 모드 + 다운로드"""
+    
+    # [Step AP] 신뢰도 배지 (가장 먼저 — 표본 부족 시 즉시 인지)
+    _render_confidence_badge(result)
     
     # ─── 핵심 메트릭 5개 ───
     with ui.row().classes("w-full gap-2 flex-wrap mb-3"):
