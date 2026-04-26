@@ -201,6 +201,20 @@ def _to_kst_str(value, fmt="%Y-%m-%d %H:%M:%S"):
         return str(value)
 
 
+def _safe_str(value, default: str = "") -> str:
+    """[Step AZ] None / 빈 값 안전 처리.
+    
+    DB의 NULL은 dict.get(key, default)에서 default가 적용되지 않음
+    (키가 있고 값이 None이기 때문). startswith/슬라이싱/lower 직전에 사용.
+    """
+    if value is None:
+        return default
+    try:
+        return str(value)
+    except Exception:
+        return default
+
+
 def _get_current_admin_email() -> str:
     """[Step AV] 현재 로그인된 관리자 이메일 (액션 로그용)"""
     try:
@@ -786,7 +800,7 @@ def render_tab_admin():
                             "border border-gray-700/50 rounded-lg mb-1"
                         ):
                             ui.label(
-                                f"📌 {q.get('title', '')[:80]}"
+                                f"📌 {_safe_str(q.get('title'))[:80]}"
                             ).classes("text-xs text-white")
                             ui.label(
                                 _to_kst_str(q.get("created_at"))
@@ -820,7 +834,7 @@ def render_tab_admin():
                                 f"⚡ {a.get('action_type', '')}"
                             ).classes("text-xs text-amber-300 font-bold")
                             ui.label(
-                                a.get("timestamp", "")[:16]
+                                _safe_str(a.get("timestamp"))[:16]
                             ).classes("text-xs text-gray-500")
                         ui.label(
                             f"by {a.get('admin_email', '')[:20]}"
@@ -1296,13 +1310,13 @@ def render_tab_admin():
                         pass
                     n_inquiries = len(inquiries)
                     
-                    # [Step AX] payment/refund 카테고리 분리 카운트
+                    # [Step AX+AZ] payment/refund 카테고리 분리 카운트
                     n_payment = sum(
                         1 for q in inquiries
                         if (
                             q.get("category") in ("payment", "refund")
-                            or q.get("title", "").startswith("[💳 입금확인]")
-                            or q.get("title", "").startswith("[환불]")
+                            or _safe_str(q.get("title")).startswith("[💳 입금확인]")
+                            or _safe_str(q.get("title")).startswith("[환불]")
                         )
                     )
                     n_general = n_inquiries - n_payment
@@ -1583,10 +1597,10 @@ def render_tab_admin():
                         "text-base font-bold text-emerald-300"
                     )
                     ui.label(
-                        f"📌 {req.get('title', '')[:60]}"
+                        f"📌 {_safe_str(req.get('title'))[:60]}"
                     ).classes("text-sm text-white mt-2")
                     ui.label(
-                        req.get("content", "")[:200]
+                        _safe_str(req.get("content"))[:200]
                     ).classes("text-xs text-gray-300 mt-1")
                     ui.label(
                         f"🕐 {_to_kst_str(req.get('created_at'))}"
@@ -1628,7 +1642,7 @@ def render_tab_admin():
                                     target_email,
                                     {
                                         "inquiry_id": inquiry_id,
-                                        "title": req.get("title", "")[:80],
+                                        "title": _safe_str(req.get("title"))[:80],
                                         "admin_reply": reply,
                                         "category": req.get(
                                             "category", "payment"
@@ -1660,13 +1674,12 @@ def render_tab_admin():
                 if not db_p:
                     return
                 inquiries = db_p.get_all_inquiries()
-                # [Step AW] payment 탐지 — category 우선 + title prefix fallback
-                # (현재 inquiries 스키마에 category 컬럼 없으나 향후 호환 대비)
+                # [Step AW+AZ] payment 탐지 — None 안전
                 pay_reqs_all = [
                     q for q in inquiries
                     if (
                         q.get("category") == "payment"
-                        or q.get("title", "").startswith("[💳 입금확인]")
+                        or _safe_str(q.get("title")).startswith("[💳 입금확인]")
                     )
                 ]
                 # [Step AW] 처리 완료/미처리 분리 (보존 + 가독성)
@@ -1698,7 +1711,7 @@ def render_tab_admin():
                                     "w-full justify-between items-center"
                                 ):
                                     ui.label(
-                                        f"📌 {req.get('title', '')[:40]}"
+                                        f"📌 {_safe_str(req.get('title'))[:40]}"
                                     ).classes("text-xs text-white")
                                     ui.button(
                                         "✅ 처리",
@@ -1707,7 +1720,7 @@ def render_tab_admin():
                                         ),
                                     ).props("flat dense size=sm color=green")
                                 ui.label(
-                                    req.get("content", "")[:80]
+                                    _safe_str(req.get("content"))[:80]
                                 ).classes("text-xs text-gray-300 mt-1")
                                 ui.label(
                                     f"🕐 {_to_kst_str(req.get('created_at'))}"
@@ -1725,7 +1738,7 @@ def render_tab_admin():
                                 "opacity-70"
                             ):
                                 ui.label(
-                                    f"✅ {req.get('title', '')[:40]}"
+                                    f"✅ {_safe_str(req.get('title'))[:40]}"
                                 ).classes("text-xs text-emerald-300")
                                 ui.label(
                                     f"🕐 {_to_kst_str(req.get('created_at'))}"
@@ -1790,7 +1803,7 @@ def render_tab_admin():
                                 f"⚡ {action_type}"
                             ).classes(f"text-sm text-{color}-300 font-bold")
                             ui.label(
-                                a.get("timestamp", "")[:19]
+                                _safe_str(a.get("timestamp"))[:19]
                             ).classes("text-xs text-gray-500")
                         with ui.row().classes(
                             "w-full justify-between items-center mt-1"
