@@ -229,9 +229,12 @@ def login_page():
                                         "잠시 후 다시 시도해주세요."
                                     )
                                     j_msg.classes(replace="text-sm mt-2 text-red-400")
-                                    # ⚠️ 가입은 이미 DB에 등록됨 → 롤백 시도
+                                    # [v22 Step AE] delete_user 정식 함수 사용 (롤백)
                                     try:
-                                        if hasattr(db, '_exec_sqlite'):
+                                        if hasattr(db, 'delete_user'):
+                                            db.delete_user(clean_email)
+                                        elif hasattr(db, '_exec_sqlite'):
+                                            # 하위 호환 (delete_user 없는 환경)
                                             db._exec_sqlite(
                                                 "DELETE FROM users WHERE id = ?",
                                                 (clean_email,)
@@ -264,9 +267,11 @@ def login_page():
                                     "⚠️ 약관 동의 시스템 오류. 운영자에게 문의해주세요."
                                 )
                                 j_msg.classes(replace="text-sm mt-2 text-red-400")
-                                # 롤백
+                                # [v22 Step AE] delete_user 정식 함수 사용 (롤백)
                                 try:
-                                    if hasattr(db, '_exec_sqlite'):
+                                    if hasattr(db, 'delete_user'):
+                                        db.delete_user(clean_email)
+                                    elif hasattr(db, '_exec_sqlite'):
                                         db._exec_sqlite(
                                             "DELETE FROM users WHERE id = ?",
                                             (clean_email,)

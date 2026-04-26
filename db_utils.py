@@ -748,6 +748,24 @@ class LDYDBManager:
             _logger.error(f"회원가입 실패: {e}", exc_info=True)
             return False, f"DB Error: {e}"
 
+    def delete_user(self, email: str) -> bool:
+        """[v22 Step AE] 회원 정식 삭제 함수.
+        
+        가입 롤백 / 회원 탈퇴 / 관리자 강제 삭제 시 사용.
+        private _exec_sqlite 직접 호출 대신 이 함수 사용 권장.
+        
+        Returns:
+            True if deleted (or didn't exist), False on error
+        """
+        try:
+            self._exec_sqlite("DELETE FROM users WHERE id = ?", (email,))
+            self._mark_gist_dirty("users")
+            _logger.info(f"🗑️ 회원 삭제: {email}")
+            return True
+        except Exception as e:
+            _logger.error(f"회원 삭제 실패 ({email}): {e}", exc_info=True)
+            return False
+
     def get_user_by_id(self, email):
         try:
             row = self._exec_sqlite_one("SELECT * FROM users WHERE id = ?", (email,))

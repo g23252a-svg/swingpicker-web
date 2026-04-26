@@ -102,8 +102,10 @@ async def index():
     # [v22 Step AA] 사이트 전체 공지 배너 (환경변수로 제어)
     render_site_banner()
     
-    # [v22 Step AD] 약관 변경 시 재동의 강제 (관리자 제외)
+    # [v22 Step AD+AE] 약관 변경 시 재동의 강제 (관리자 제외)
     # TERMS_VERSION 환경변수 변경 시 모든 사용자에게 재동의 요청
+    # [Step AE] 미완료 시 핵심 탭 렌더링 차단 (다이얼로그만이 아닌 접근 자체 제한)
+    re_consent_required = False
     if user and auth not in ("guest", "admin"):
         try:
             from components.terms_consent import (
@@ -113,10 +115,33 @@ async def index():
             if email and not has_user_agreed(email):
                 # persistent 다이얼로그 — 동의하지 않으면 사이트 사용 불가
                 show_re_consent_dialog(email)
+                re_consent_required = True
         except ImportError:
             pass  # terms_consent 모듈 없으면 무시 (하위 호환)
         except Exception as e:
             logger.warning(f"재동의 다이얼로그 호출 실패: {e}")
+    
+    # [v22 Step AE] 재동의 미완료 시 핵심 탭 차단 — 빈 화면 + 안내
+    if re_consent_required:
+        with ui.column().classes("w-full items-center p-12 max-w-2xl mx-auto"):
+            ui.label("📜").classes("text-7xl mb-4")
+            ui.label("약관이 변경되었습니다").classes(
+                "text-2xl font-bold text-white mb-3"
+            )
+            ui.label(
+                "이용 계속을 위해 변경된 약관에 동의해주세요.\n"
+                "동의 다이얼로그가 화면에 표시됩니다."
+            ).classes("text-sm text-gray-300 text-center mb-4 whitespace-pre-line")
+            with ui.row().classes("gap-3 mt-3"):
+                ui.button(
+                    "🔄 새로고침",
+                    on_click=lambda: ui.run_javascript("window.location.reload()"),
+                ).props("color=primary outlined")
+                ui.button(
+                    "❌ 로그아웃",
+                    on_click=lambda: ui.navigate.to("/logout"),
+                ).props("flat color=gray")
+        return  # 핵심 탭 렌더링 차단
 
     # ─── Hero Banner ───
     with ui.row().classes("w-full items-center justify-between px-4 py-3 rounded-xl mb-2 "

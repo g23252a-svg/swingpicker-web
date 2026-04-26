@@ -448,20 +448,57 @@ def register_payment_routes():
                     receipt_url=receipt_url,
                 )
             
-            # [v22 Step AD] 결제 성공 후 최종 동의 기록 — payment_success_consent
+            # [v22 Step AD+AE] 결제 성공 후 최종 동의 기록 — payment_success_consent
             # 결제창 열기 전 동의(payment_attempt)와 별개로,
             # 실제 결제 완료 시점의 동의 증빙 추가 보관
+            # 실패 시 Telegram 관리자 알림 (결제는 성공했으므로 정상 처리 유지)
             if email and db_for_dup and hasattr(db_for_dup, "record_terms_agreement"):
                 try:
-                    db_for_dup.record_terms_agreement(
+                    consent_terms_ver = os.environ.get(
+                        "TERMS_VERSION", "2026-04-25-v1"
+                    )
+                    consent_ok = db_for_dup.record_terms_agreement(
                         email=email,
-                        terms_version=os.environ.get("TERMS_VERSION", "2026-04-25-v1"),
+                        terms_version=consent_terms_ver,
                         terms_type="refund",
                         context="payment_success",
                     )
-                    _logger.info(f"📜 결제 성공 시점 환불정책 동의 기록: {email}")
+                    if consent_ok:
+                        _logger.info(
+                            f"📜 결제 성공 시점 환불정책 동의 기록: {email}"
+                        )
+                    else:
+                        # [v22 Step AE] 동의 기록 실패 → Telegram 관리자 알림
+                        # (결제는 정상 처리, 운영자가 수동으로 확인)
+                        _logger.warning(
+                            f"⚠️ 결제 성공 동의 기록 실패: {email} / {orderId}"
+                        )
+                        _send_telegram(
+                            f"⚠️ <b>[결제 성공 동의 기록 실패]</b>\n"
+                            f"━━━━━━━━━━━━\n"
+                            f"📧 {email}\n"
+                            f"🆔 {orderId}\n"
+                            f"💰 {amount_int:,}원 ({plan})\n"
+                            f"📌 결제는 정상 완료됨 (sub 활성화 OK)\n"
+                            f"⚠️ payment_success 동의 기록만 실패\n"
+                            f"💡 terms_agreements 테이블에서 "
+                            f"payment_attempt 기록은 있는지 확인 필요\n"
+                            f"💡 분쟁 시 환불정책 동의는 "
+                            f"payment_attempt context로 입증 가능"
+                        )
                 except Exception as ce:
-                    _logger.warning(f"결제 성공 동의 기록 실패 (결제는 정상): {ce}")
+                    _logger.warning(
+                        f"결제 성공 동의 기록 예외 (결제는 정상): {ce}"
+                    )
+                    try:
+                        _send_telegram(
+                            f"⚠️ <b>[결제 성공 동의 기록 예외]</b>\n"
+                            f"📧 {email}\n"
+                            f"🆔 {orderId}\n"
+                            f"❗ {str(ce)[:200]}"
+                        )
+                    except Exception:
+                        pass
             
             # [Step W] 세션 권한 즉시 갱신 — "메뉴 새로고침" 불필요
             if activated and email:
