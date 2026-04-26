@@ -674,8 +674,39 @@ def register_payment_routes():
         message: str = "결제가 취소되었습니다.",
         orderId: str = "-",
     ):
-        """[Step R] 토스페이먼츠 결제 실패/취소 — query param 직접 받기"""
+        """[Step R+AF] 토스페이먼츠 결제 실패/취소 — query param 직접 받기"""
         _logger.info(f"결제 실패/취소: {code} - {message} (order: {orderId})")
+        
+        # [v22 Step AF] 결제 취소/실패도 DB 기록 (감사 로그 완성도)
+        # orderId가 "-"가 아닐 때만 기록 (유효 주문)
+        if orderId != "-":
+            try:
+                _db = _get_db()
+                if _db and hasattr(_db, "record_payment"):
+                    _db.record_payment(
+                        order_id=orderId,
+                        payment_key="",
+                        email="",  # 사용자가 결제창에서 취소 → 이메일 추출 불가
+                        plan="prime",
+                        amount=0,
+                        status="cancelled",
+                        method="",
+                        approved_at="",
+                        receipt_url="",
+                        error_message=f"{code}: {message}"[:300],
+                    )
+                    _logger.info(f"💾 결제 취소 기록 저장: {orderId}")
+                
+                # Telegram 알림 (운영자용)
+                _send_telegram(
+                    f"❌ <b>[결제 취소/실패]</b>\n"
+                    f"━━━━━━━━━━━━\n"
+                    f"🆔 {orderId}\n"
+                    f"📛 {code}\n"
+                    f"💬 {message[:150]}"
+                )
+            except Exception as e:
+                _logger.warning(f"결제 취소 기록 실패 (무시): {e}")
 
         with ui.column().classes("w-full items-center p-12 max-w-xl mx-auto"):
             ui.label("😥").classes("text-6xl mb-4")

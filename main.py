@@ -87,6 +87,21 @@ async def briefing_page():
     await render_briefing_page()
 
 
+# [v22 Step AF] 명시적 /logout 라우트 — 404 방지
+@ui.page('/logout')
+async def logout_page():
+    """로그아웃 후 /login으로 리다이렉트.
+    
+    재동의 거부 / 헤더 로그아웃 버튼 / terms_consent.show_re_consent_dialog
+    에서 호출됨.
+    """
+    try:
+        set_current_user(None)
+    except Exception as e:
+        logger.warning(f"set_current_user(None) 실패: {e}")
+    ui.navigate.to("/login")
+
+
 # ═══════════════════════════════════════════
 #  메인 페이지
 # ═══════════════════════════════════════════
@@ -113,8 +128,13 @@ async def index():
             )
             email = user.get("login_id") or user.get("id") or user.get("email", "")
             if email and not has_user_agreed(email):
-                # persistent 다이얼로그 — 동의하지 않으면 사이트 사용 불가
-                show_re_consent_dialog(email)
+                # [v22 Step AF] 동의 완료 시 자동 새로고침 — 차단 화면 즉시 해제
+                show_re_consent_dialog(
+                    email,
+                    on_agreed=lambda: ui.run_javascript(
+                        "window.location.reload()"
+                    ),
+                )
                 re_consent_required = True
         except ImportError:
             pass  # terms_consent 모듈 없으면 무시 (하위 호환)
