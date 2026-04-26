@@ -2,17 +2,23 @@
 """
 tab_perf.py — 📈 시스템 성과 추세 (NiceGUI Dark Theme)
 ═══════════════════════════════════════════════════════════
-[v22 Step AK] 전면 리팩토링 — 75 → 90점 목표
+[v22 Step AK+AL] 전면 리팩토링 — 75 → 94점 목표
 
-개선 사항:
+개선 사항 (Step AK):
 1. ✅ 면책 + 백테스트 한계 안내 (법적 안전)
 2. ✅ 메트릭 6개로 확장 (낙폭/도달률 추가)
 3. ✅ 사용자 친화 라벨 (METHOD/TOPK/보유기간)
 4. ✅ 위험 강조 (MDD 빨간 카드)
-5. ✅ 시장 비교 (KOSPI 대비 알파)
-6. ✅ 모바일 반응형 (높이/필터)
-7. ✅ Research Workbench 통합 정리
-8. ✅ 지표별 툴팁 + 설명
+5. ✅ 모바일 반응형 (높이/필터)
+6. ✅ Research Workbench 통합 정리
+7. ✅ 지표별 툴팁 + 설명
+
+추가 개선 (Step AL):
+8. ✅ latest CSV 중복 제거 (drop_duplicates)
+9. ✅ 모바일 grid 실제 반응형 (grid-cols-2 md:grid-cols-3)
+10. ✅ 차트에 MDD 추세 라인 추가 (빨간 점선)
+11. ✅ 비용 차감 후 추정 수익률 (기본 0.4%)
+12. ✅ 시장 비교(KOSPI 알파)는 데이터 추가 시 구현 — 현재 미지원
 """
 import glob
 import logging
@@ -68,6 +74,15 @@ HOLD_LABELS = {
     10: "10영업일 (2주일)",
 }
 
+# [Step AL] 거래 비용 상수 — 슬리피지 + 수수료 + 세금 합산 추정
+# 한국 주식 기준: 매수 수수료 0.015% + 매도 수수료 0.015% + 거래세 0.18% + 슬리피지 ~0.1%
+# 단순화: 왕복 0.4% 가정 (보수적 추정)
+DEFAULT_COST_PCT = 0.4
+COST_DESCRIPTION = (
+    "왕복 거래비용 추정치 — "
+    "매수/매도 수수료 + 거래세(0.18%) + 슬리피지 합산 (~0.4%)"
+)
+
 
 def _now_kst():
     return datetime.now(KST)
@@ -116,6 +131,21 @@ def _load_history() -> pd.DataFrame:
     if not dfs:
         return pd.DataFrame()
     result = pd.concat(dfs, ignore_index=True).sort_values('Date')
+    
+    # [v22 Step AL] latest CSV 중복 제거
+    # rank_validation_summary_latest.csv가 오늘 날짜 파일과 중복될 가능성 방어
+    # Date + METHOD + TOPK + H 조합으로 unique 보장 (keep="last" — latest 우선)
+    dedup_cols = [c for c in ["Date", "METHOD", "TOPK", "H(영업일)"]
+                  if c in result.columns]
+    if dedup_cols:
+        before = len(result)
+        result = result.drop_duplicates(subset=dedup_cols, keep="last")
+        after = len(result)
+        if before != after:
+            _logger.info(
+                f"📊 중복 제거: {before} → {after}행 ({before - after}건 제거)"
+            )
+    
     _logger.info(f"📊 성과 데이터 로드: {len(result)}행")
     return result
 
@@ -157,7 +187,7 @@ def _render_disclaimer_card():
 #  메트릭 6종 카드
 # ═══════════════════════════════════════════════════
 def _render_metrics_grid(cdf: pd.DataFrame):
-    """[Step AK] 메트릭 6종 — 승률/수익률/도달률/낙폭/표본"""
+    """[Step AK+AL] 메트릭 6종 — 승률/수익률/도달률/낙폭/표본"""
     if cdf.empty:
         return
     
@@ -179,12 +209,19 @@ def _render_metrics_grid(cdf: pd.DataFrame):
     worst_mdd = safe_mean('WORST_MDD_%')
     total_n = cdf['TOTAL_N'].sum() if 'TOTAL_N' in cdf.columns else 0
     
+    # [Step AL] 비용 차감 후 추정 수익률
+    avg_ret_after_cost = None
+    if avg_ret is not None:
+        avg_ret_after_cost = avg_ret - DEFAULT_COST_PCT
+    
     ui.label("📊 핵심 지표 (선택 조건 기준)").classes(
         "text-sm font-bold text-cyan-300 mt-3 mb-2"
     )
     
-    # 6개 메트릭 카드 — 모바일 2열, 데스크톱 3열
-    with ui.grid(columns=3).classes("w-full gap-3"):
+    # [Step AL] 메트릭 카드 6개 — 모바일 2열, 데스크톱 3열 반응형
+    with ui.grid().classes(
+        "w-full gap-3 grid-cols-2 md:grid-cols-3"
+    ):
         # 1. 평균 승률
         _render_metric_card(
             icon="📊", label="평균 승률",
@@ -193,28 +230,34 @@ def _render_metrics_grid(cdf: pd.DataFrame):
             tooltip="보유 기간 종료 시 진입가 대비 +1% 이상 종목 비율",
         )
         
-        # 2. 평균 수익률
+        # 2. 평균 수익률 (총 수익률 — 비용 미반영)
         _render_metric_card(
-            icon="💰", label="평균 수익률",
+            icon="💰", label="평균 수익률 (총)",
             value=f"{avg_ret:+.2f}%" if avg_ret is not None else "—",
             color="blue",
-            tooltip="모든 포지션의 산술 평균 수익률 (수수료 미반영)",
+            tooltip="모든 포지션의 산술 평균 수익률 (수수료/세금 미반영)",
         )
         
-        # 3. 5% 도달률
+        # 3. [Step AL] 비용 반영 추정 수익률 — 새 카드
+        _render_metric_card(
+            icon="💵", label="비용 반영 추정",
+            value=(
+                f"{avg_ret_after_cost:+.2f}%"
+                if avg_ret_after_cost is not None else "—"
+            ),
+            color="emerald",
+            tooltip=(
+                f"평균 수익률에서 왕복 거래비용 {DEFAULT_COST_PCT}% 차감한 추정치.\n"
+                f"실제로는 종목/시장에 따라 변동 가능."
+            ),
+        )
+        
+        # 4. 5% 도달률
         _render_metric_card(
             icon="🎯", label="5% 도달률",
             value=f"{hit_5:.1f}%" if hit_5 is not None else "—",
             color="green",
             tooltip="보유 중 한 번이라도 +5% 이상 찍은 종목 비율",
-        )
-        
-        # 4. 2% 도달률
-        _render_metric_card(
-            icon="📈", label="2% 도달률",
-            value=f"{hit_2:.1f}%" if hit_2 is not None else "—",
-            color="cyan",
-            tooltip="보유 중 한 번이라도 +2% 이상 찍은 종목 비율",
         )
         
         # 5. 평균 최대 낙폭 (위험 강조)
@@ -232,6 +275,19 @@ def _render_metrics_grid(cdf: pd.DataFrame):
             color="red",
             tooltip="기간 중 가장 컸던 단일 포지션 낙폭 (최악의 케이스)",
         )
+    
+    # [Step AL] 비용 안내 + 시장 비교 안내
+    with ui.column().classes("w-full gap-1 mt-3"):
+        ui.label(
+            f"💡 '비용 반영 추정'은 왕복 {DEFAULT_COST_PCT}%(매수/매도 수수료 + "
+            f"거래세 0.18% + 슬리피지) 차감한 보수적 추정치입니다."
+        ).classes("text-xs text-gray-400 leading-relaxed")
+        
+        # [Step AL] 시장 비교는 KOSPI 데이터 통합 후 추가 예정
+        ui.label(
+            "📌 KOSPI 대비 알파(시장 초과 수익률)는 시장 데이터 통합 후 "
+            "다음 업데이트에서 제공할 예정입니다."
+        ).classes("text-xs text-gray-500 italic leading-relaxed")
     
     # 표본 + 기간 정보
     with ui.row().classes("w-full justify-center gap-4 mt-2 flex-wrap"):
@@ -258,6 +314,7 @@ def _render_metric_card(icon: str, label: str, value: str,
         "amber": ("border-amber-700/40", "text-amber-400", "text-amber-300"),
         "blue": ("border-blue-700/40", "text-blue-400", "text-blue-300"),
         "green": ("border-emerald-700/40", "text-emerald-400", "text-emerald-300"),
+        "emerald": ("border-emerald-600/50", "text-emerald-300", "text-emerald-200"),
         "cyan": ("border-cyan-700/40", "text-cyan-400", "text-cyan-300"),
         "orange": ("border-orange-700/40", "text-orange-400", "text-orange-300"),
         "red": ("border-red-700/40", "text-red-400", "text-red-300"),
@@ -424,6 +481,8 @@ def render_tab_perf():
             # ─── 차트 ───
             if PLOTLY_OK:
                 fig = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # 1) 승률 막대 (왼쪽 축)
                 fig.add_trace(
                     go.Bar(
                         x=cdf['Date'], y=cdf[col_win],
@@ -434,17 +493,35 @@ def render_tab_perf():
                     ),
                     secondary_y=False,
                 )
+                
+                # 2) 평균 수익률 라인 (오른쪽 축)
                 fig.add_trace(
                     go.Scatter(
                         x=cdf['Date'], y=cdf[col_ret],
-                        name="수익률(%)",
+                        name="평균 수익률(%)",
                         mode='lines+markers',
                         line=dict(color='#29B6F6', width=3),
                         marker=dict(size=6),
-                        hovertemplate="<b>%{x}</b><br>수익률: %{y:.2f}%<extra></extra>",
+                        hovertemplate="<b>%{x}</b><br>평균 수익률: %{y:.2f}%<extra></extra>",
                     ),
                     secondary_y=True,
                 )
+                
+                # 3) [Step AL] 평균 낙폭(MDD) 라인 (오른쪽 축, 빨간 점선)
+                # MDD는 위험 추세 — 사용자가 위험 변화도 시각적으로 파악
+                if 'AVG_MDD_%' in cdf.columns:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=cdf['Date'], y=cdf['AVG_MDD_%'],
+                            name="평균 낙폭(%)",
+                            mode='lines',
+                            line=dict(color='#EF4444', width=2, dash='dot'),
+                            opacity=0.85,
+                            hovertemplate="<b>%{x}</b><br>평균 낙폭: %{y:.2f}%<extra></extra>",
+                        ),
+                        secondary_y=True,
+                    )
+                
                 # 0% 기준선 (수익률)
                 fig.add_hline(
                     y=0, line_dash="dot", line_color="rgba(255,255,255,0.3)",
@@ -471,7 +548,7 @@ def render_tab_perf():
                     secondary_y=False,
                 )
                 fig.update_yaxes(
-                    title_text="수익률 (%)",
+                    title_text="수익률 / 낙폭 (%)",
                     gridcolor='rgba(255,255,255,0.05)',
                     secondary_y=True,
                 )
