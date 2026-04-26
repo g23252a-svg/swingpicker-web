@@ -2,39 +2,31 @@
 """
 tab_admin.py — 👑 회원 관리 (NiceGUI Dark Theme)
 ═══════════════════════════════════════════════════
-[v22 Step AV+AW] 전면 리팩토링 — 64 → 93점 목표
+[v22 Step AV+AW+AX] 전면 리팩토링 — 64 → 96점 목표
 
 ⚠️ 사고 방지 핵심:
 - 이전: 전체 초기화/전원 Prime 지급/차단/강등이 1클릭 즉시 실행 → 사고 위험
 - 현재: 모든 위험 작업에 RESET 입력/확인 다이얼로그/미리보기 카운트
 
-개선 사항 (Step AV):
-1. ✅ 위험 작업 보호 4종 (RESET 입력, 인원수/금액 미리보기, 사유 입력)
-2. ✅ 검색 + 필터 5종 (이메일/실제상태/등급/기간/차단)
-3. ✅ 회원 선택 시 현재 값 자동 채움 (등급/만료일)
-4. ✅ 회원 상세 모달 (문의 이력, 액션 로그)
-5. ✅ 액션 로그 (admin_actions 테이블 — 감사 추적)
-6. ✅ 가입 추세 통계 (이번 달/이번 주 신규, 전환율, 만료 임박)
-7. ✅ CSV 내보내기 (회원 목록 백업)
-8. ✅ 다중 선택 + 일괄 작업 (차단/강등)
-9. ✅ 모바일 반응형 + 사용자 친화 라벨
-10. ✅ 면책 안내 (개인정보 처리)
+개선 사항 (Step AV): 위험 보호 4종, 검색 5종, 자동채움, 상세 모달, 액션 로그, 추세, CSV, 다중선택
+개선 사항 (Step AW): Gist 파일명 표준화, 입금확인 보존, payment 탐지, 차단 필터, 매출 주석 정리
 
-개선 사항 (Step AW — 회귀 수정 + UX 마감):
-11. ✅ Gist 파일명 표준화 (USER_DB_FILE/INQUIRY_DB_FILE)
-   - 이전 회귀 버그: "users.json"/"inquiries.json"
-   - 정확: "users_db.json"/"inquiries_db.json"
-12. ✅ 입금확인 처리 — 삭제 금지, admin_actions 보존
-   - 이전 회귀 버그: save_inquiries() 삭제성 처리
-   - 현재: PAYMENT_CONFIRMED 액션 로그로 영구 보존
-   - 처리 완료/대기 분리 표시
-13. ✅ payment 탐지 — category="payment" 또는 title prefix
-14. ✅ 차단 필터 UI 추가 (state와 일치)
-15. ✅ 매출 통계 주석 → 가입 추세로 정정 (payments 테이블 부재)
+개선 사항 (Step AX — 운영 데이터 모델 강화):
+16. ✅ admin_actions Gist 백업 (TABLE_TO_GIST_FILE 매핑 + admin_actions_db.json)
+   - Railway 재배포 시에도 감사 로그 유실 방지
+   - _log_admin_action 호출 시 자동 mark_gist_dirty
+17. ✅ PAYMENT_CONFIRMED 직접 SQL 조회 (전체 범위)
+   - 이전: 최근 200개 스캔 → 운영 길어지면 누락 위험
+   - 수정: _get_payment_confirmed_action(inquiry_id) 전용 함수
+18. ✅ 전체 초기화 범위 세분화 (3가지 옵션)
+   - A. 회원만 초기화 (문의 보존)
+   - B. 회원 + 일반 문의 (결제/환불 보존) ⭐ 권장
+   - C. 회원 + 모든 문의 (분쟁 기록 사라짐) 🚨
 
-향후 작업 (백엔드 단계):
-- payments 테이블 생성 → 실제 매출 통계 가능
-- inquiries 테이블에 category/status/admin_reply 컬럼 추가
+향후 작업 (백엔드 단계 — db_utils.py 마이그레이션 필요):
+- inquiries 테이블 category/status/admin_reply/admin_reply_at 컬럼 추가
+- 입금확인 → Prime 부여 통합 버튼 (위 컬럼 의존)
+- payments 테이블 → 실제 매출 통계
 """
 import asyncio
 import io
@@ -87,13 +79,16 @@ def _log_admin_action(
     target_email: str = "",
     details: dict = None,
 ):
-    """[Step AV] 관리자 작업 기록 — 감사 추적
+    """[Step AV+AX] 관리자 작업 기록 — 감사 추적 + Gist 백업
     
     Args:
         admin_email: 작업한 관리자 이메일
         action_type: ROLE_CHANGE / BAN_TOGGLE / BULK_TRIAL / RESET_ALL / DOWNGRADE / DELETE_USER 등
         target_email: 대상 회원 (전체 작업 시 'ALL')
         details: 추가 정보 (이전 값, 새 값, 사유 등)
+    
+    [Step AX] 기록 후 자동 Gist 동기화 (admin_actions_db.json)
+    → Railway 재배포 시에도 감사 로그 유실 방지
     """
     if not db:
         return
@@ -110,6 +105,12 @@ def _log_admin_action(
         _logger.info(
             f"📝 ADMIN: {admin_email} → {action_type} → {target_email or 'ALL'} | {details}"
         )
+        # [Step AX] Gist 백업 트리거 (60초 배치 동기화)
+        try:
+            if hasattr(db, "_mark_gist_dirty"):
+                db._mark_gist_dirty("admin_actions")
+        except Exception as e:
+            _logger.debug(f"admin_actions Gist 동기화 마킹 실패: {e}")
     except Exception as e:
         _logger.error(f"액션 로그 저장 실패: {e}")
 
@@ -137,6 +138,40 @@ def _get_admin_actions(db, target_email: str = None, limit: int = 50) -> list:
     except Exception as e:
         _logger.debug(f"액션 로그 조회 실패: {e}")
         return []
+
+
+def _get_payment_confirmed_action(db, inquiry_id: str) -> dict:
+    """[Step AX] 특정 inquiry의 PAYMENT_CONFIRMED 액션 직접 조회.
+    
+    이전 버그 (Step AW): 최근 200개만 스캔 → 운영 길어지면 누락
+    수정 (Step AX): SQL LIKE로 inquiry_id 직접 검색 (전체 범위)
+    
+    Args:
+        inquiry_id: inquiry created_at 또는 id (details JSON에 저장됨)
+    
+    Returns:
+        매칭되는 첫 번째 액션 dict 또는 빈 dict
+    """
+    if not db or not inquiry_id:
+        return {}
+    try:
+        _ensure_admin_actions_table(db)
+        # SQLite LIKE로 details JSON 안의 inquiry_id 검색
+        # JSON 형태: {"inquiry_id": "2026-04-26 12:30:00", ...}
+        like_pattern = f'%"inquiry_id": "{inquiry_id}"%'
+        rows = db._exec_sqlite(
+            "SELECT * FROM admin_actions "
+            "WHERE action_type='PAYMENT_CONFIRMED' AND details LIKE ? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (like_pattern,),
+            fetch=True,
+        )
+        if rows:
+            return dict(rows[0])
+        return {}
+    except Exception as e:
+        _logger.debug(f"PAYMENT_CONFIRMED 조회 실패: {e}")
+        return {}
 
 
 # ═══════════════════════════════════════════════════
@@ -1249,7 +1284,7 @@ def render_tab_admin():
                 )
                 
                 async def reset_all_with_protection():
-                    """[Step AV] RESET 입력 + 카운트 미리보기 + 사유"""
+                    """[Step AV+AX] RESET 입력 + 카운트 미리보기 + 사유 + 범위 선택"""
                     non_admin = sum(
                         1 for u in users
                         if str(u.get("role", "")).lower() != "admin"
@@ -1261,27 +1296,99 @@ def render_tab_admin():
                         pass
                     n_inquiries = len(inquiries)
                     
+                    # [Step AX] payment/refund 카테고리 분리 카운트
+                    n_payment = sum(
+                        1 for q in inquiries
+                        if (
+                            q.get("category") in ("payment", "refund")
+                            or q.get("title", "").startswith("[💳 입금확인]")
+                            or q.get("title", "").startswith("[환불]")
+                        )
+                    )
+                    n_general = n_inquiries - n_payment
+                    
                     with ui.dialog() as cd, ui.card().classes(
                         "p-4 bg-[#1a1a2e] border border-red-500/60 "
-                        "rounded-xl min-w-[450px]"
+                        "rounded-xl min-w-[480px]"
                     ):
-                        ui.label("🚨 전체 회원 초기화").classes(
+                        ui.label("🚨 초기화 범위 선택").classes(
                             "text-base font-bold text-red-300"
                         )
                         ui.label(
-                            "관리자 제외 모든 회원과 문의를 영구 삭제합니다."
+                            "초기화 범위를 신중히 선택하세요. "
+                            "복구할 수 없습니다."
                         ).classes("text-sm text-gray-200 mt-2")
                         
-                        with ui.column().classes("gap-1 mt-2"):
-                            ui.label(
-                                f"  • 회원 삭제: {non_admin}명"
-                            ).classes("text-xs text-red-200")
-                            ui.label(
-                                f"  • 문의 삭제: {n_inquiries}건"
-                            ).classes("text-xs text-red-200")
-                            ui.label(
-                                "  • 복구: 불가능"
-                            ).classes("text-xs text-red-300 font-bold")
+                        # [Step AX] 범위 선택 (3가지 옵션)
+                        scope_select = ui.select(
+                            options={
+                                "users_only": (
+                                    f"A. 회원만 초기화 ({non_admin}명, 문의 보존)"
+                                ),
+                                "users_general": (
+                                    f"B. 회원 + 일반 문의 "
+                                    f"({non_admin}명 + {n_general}건, "
+                                    f"결제/환불 문의 보존) ⭐ 권장"
+                                ),
+                                "users_all": (
+                                    f"C. 회원 + 모든 문의 "
+                                    f"({non_admin}명 + {n_inquiries}건, "
+                                    f"분쟁 기록 사라짐) 🚨"
+                                ),
+                            },
+                            value="users_general",
+                            label="초기화 범위",
+                        ).classes("w-full mt-2").props("outlined dense")
+                        
+                        # 범위별 미리보기 카드
+                        preview_card = ui.card().classes(
+                            "w-full p-2 mt-2 bg-[#0a0a14] "
+                            "border border-amber-500/40 rounded-lg"
+                        )
+                        
+                        def update_preview():
+                            preview_card.clear()
+                            scope = scope_select.value
+                            with preview_card:
+                                if scope == "users_only":
+                                    ui.label(
+                                        f"  • 회원 삭제: {non_admin}명"
+                                    ).classes("text-xs text-red-200")
+                                    ui.label(
+                                        f"  • 문의 보존: {n_inquiries}건"
+                                    ).classes("text-xs text-emerald-300")
+                                    ui.label(
+                                        "  💡 분쟁 대응 기록 모두 보존"
+                                    ).classes("text-xs text-amber-200")
+                                elif scope == "users_general":
+                                    ui.label(
+                                        f"  • 회원 삭제: {non_admin}명"
+                                    ).classes("text-xs text-red-200")
+                                    ui.label(
+                                        f"  • 일반 문의 삭제: {n_general}건"
+                                    ).classes("text-xs text-red-200")
+                                    ui.label(
+                                        f"  • 결제/환불 문의 보존: {n_payment}건 ⭐"
+                                    ).classes("text-xs text-emerald-300")
+                                else:  # users_all
+                                    ui.label(
+                                        f"  • 회원 삭제: {non_admin}명"
+                                    ).classes("text-xs text-red-200")
+                                    ui.label(
+                                        f"  • 모든 문의 삭제: {n_inquiries}건"
+                                    ).classes("text-xs text-red-200")
+                                    ui.label(
+                                        f"  ⚠️ 결제/환불 문의 {n_payment}건도 삭제 — 분쟁 위험"
+                                    ).classes("text-xs text-red-300 font-bold")
+                                ui.label(
+                                    "  • 복구: 불가능"
+                                ).classes("text-xs text-red-300 font-bold")
+                        
+                        scope_select.on(
+                            "update:model-value",
+                            lambda _: update_preview(),
+                        )
+                        update_preview()
                         
                         ui.label(
                             "💡 백업이 필요하면 먼저 CSV 다운로드를 받으세요."
@@ -1305,6 +1412,7 @@ def render_tab_admin():
                             async def do_reset():
                                 typed = (reset_input.value or "").strip()
                                 reason = (reason_input.value or "").strip()
+                                scope = scope_select.value or "users_general"
                                 
                                 if typed != "RESET":
                                     ui.notify(
@@ -1327,26 +1435,51 @@ def render_tab_admin():
                                     if not db_a:
                                         return False, "DB 연결 실패"
                                     try:
+                                        # [Step AX] 범위별 삭제 카운트
+                                        if scope == "users_only":
+                                            inquiries_deleted = 0
+                                            inquiry_action = "preserved_all"
+                                        elif scope == "users_general":
+                                            inquiries_deleted = n_general
+                                            inquiry_action = "deleted_general_only"
+                                        else:  # users_all
+                                            inquiries_deleted = n_inquiries
+                                            inquiry_action = "deleted_all"
+                                        
                                         # 액션 로그 먼저 (삭제 전!)
                                         _log_admin_action(
                                             db_a, admin_email,
                                             "RESET_ALL", "ALL",
                                             {
+                                                "scope": scope,
                                                 "users_deleted": non_admin,
-                                                "inquiries_deleted": n_inquiries,
+                                                "inquiries_deleted": inquiries_deleted,
+                                                "inquiry_action": inquiry_action,
+                                                "payment_preserved": n_payment if scope != "users_all" else 0,
                                                 "reason": reason,
                                             },
                                         )
+                                        # 회원 삭제 (모든 범위 공통)
                                         db_a._exec_sqlite(
                                             "DELETE FROM users "
                                             "WHERE role != 'admin'"
                                         )
-                                        db_a._exec_sqlite(
-                                            "DELETE FROM inquiries"
-                                        )
-                                        # [Step AW S급 수정] Gist 표준 파일명
-                                        # 이전 버그: "users.json"/"inquiries.json"
-                                        # 정확: USER_DB_FILE="users_db.json", INQUIRY_DB_FILE="inquiries_db.json"
+                                        # [Step AX] 범위별 문의 삭제
+                                        if scope == "users_general":
+                                            # 결제/환불 보존, 일반만 삭제
+                                            db_a._exec_sqlite(
+                                                "DELETE FROM inquiries "
+                                                "WHERE NOT (title LIKE '[💳 입금확인]%' "
+                                                "OR title LIKE '[환불]%')"
+                                            )
+                                        elif scope == "users_all":
+                                            # 모두 삭제
+                                            db_a._exec_sqlite(
+                                                "DELETE FROM inquiries"
+                                            )
+                                        # users_only는 inquiries 손대지 않음
+                                        
+                                        # [Step AW+AX] Gist 표준 파일명 (TABLE_TO_GIST_FILE)
                                         try:
                                             from db_utils import (
                                                 USER_DB_FILE, INQUIRY_DB_FILE,
@@ -1357,12 +1490,15 @@ def render_tab_admin():
                                         u_ok = db_a._do_gist_upload(
                                             "users", USER_DB_FILE,
                                         )
-                                        i_ok = db_a._do_gist_upload(
-                                            "inquiries", INQUIRY_DB_FILE,
-                                        )
+                                        i_ok = True  # users_only면 동기화 불필요
+                                        if scope != "users_only":
+                                            i_ok = db_a._do_gist_upload(
+                                                "inquiries", INQUIRY_DB_FILE,
+                                            )
                                         if u_ok and i_ok:
                                             return True, (
-                                                "🔄 초기화 + Gist 동기화 완료"
+                                                f"🔄 초기화 완료 "
+                                                f"(범위: {scope})"
                                             )
                                         else:
                                             return True, (
@@ -1390,13 +1526,13 @@ def render_tab_admin():
                     cd.open()
                 
                 ui.button(
-                    "🔄 전체 회원 초기화",
+                    "🔄 초기화 (범위 선택)",
                     on_click=reset_all_with_protection,
                 ).props("flat color=red").classes("w-full").tooltip(
-                    "RESET 입력 + 사유 필수"
+                    "범위 선택 + RESET 입력 + 사유 필수"
                 )
                 ui.label(
-                    "⚠️ RESET 입력 + 사유 필수"
+                    "⚠️ 3가지 범위 / RESET 입력 / 사유 필수"
                 ).classes("text-[10px] text-red-300 mt-1 text-center")
 
         # ─── 입금확인 + 액션 로그 보기 ───
@@ -1415,24 +1551,17 @@ def render_tab_admin():
             # admin_actions 테이블에 PAYMENT_CONFIRMED 기록이 있으면 처리됨
             # → 삭제하지 않고 보존 (분쟁 대응)
             def _is_payment_confirmed(req: dict) -> bool:
-                """[Step AW] PAYMENT_CONFIRMED 액션 로그 존재 여부"""
+                """[Step AW+AX] PAYMENT_CONFIRMED 액션 로그 존재 여부.
+                
+                [Step AX 수정] 최근 200개 스캔 → 직접 SQL 조회 (전체 범위)
+                """
                 try:
                     inquiry_id = req.get("created_at", "") or req.get("id", "")
                     if not inquiry_id:
                         return False
-                    actions = _get_admin_actions(db, limit=200)
-                    for a in actions:
-                        if a.get("action_type") != "PAYMENT_CONFIRMED":
-                            continue
-                        try:
-                            details = json.loads(a.get("details", "{}") or "{}")
-                            if details.get("inquiry_id") == inquiry_id:
-                                return True
-                            if details.get("created_at") == inquiry_id:
-                                return True
-                        except Exception:
-                            pass
-                    return False
+                    # [Step AX] _get_payment_confirmed_action으로 직접 조회
+                    action = _get_payment_confirmed_action(db, inquiry_id)
+                    return bool(action)
                 except Exception:
                     return False
             

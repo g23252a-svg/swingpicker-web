@@ -38,18 +38,30 @@ else:
 
 USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json"
-# [v22 Step W+X] 결제 기록 별도 Gist 파일 — inquiries와 컬럼 매핑 분리
-PAYMENT_DB_FILE = "payments_db.json"
-# [v22 Step AC] 약관 동의 기록 별도 Gist 파일 — 전자상거래법 5년 보관 의무
-TERMS_DB_FILE = "terms_agreements_db.json"
+# [Step AX] 관리자 감사 로그 — Gist 백업 (분쟁 대응 / Railway 재배포 보호)
+ADMIN_ACTIONS_DB_FILE = "admin_actions_db.json"
 
-# [v22 Step X+AC] 테이블 → Gist 파일명 매핑
-# Sync manager + load 양쪽에서 일관 사용
+# [Step AX] 테이블 → Gist 파일명 통일 매핑 (회귀 방지)
 TABLE_TO_GIST_FILE = {
     "users": USER_DB_FILE,
     "inquiries": INQUIRY_DB_FILE,
-    "payments": PAYMENT_DB_FILE,
-    "terms_agreements": TERMS_DB_FILE,
+    "admin_actions": ADMIN_ACTIONS_DB_FILE,
+}
+
+# [Step AX] 테이블별 컬럼 정의 (Gist 직렬화용)
+TABLE_COLUMNS = {
+    "users": [
+        "id", "password", "salt", "nickname", "role", "join_date",
+        "last_login", "is_banned", "security_q_idx", "security_a_hash",
+        "session_token", "prime_expire_date", "login_fail_count", "lock_until",
+    ],
+    "inquiries": [
+        "id", "nickname", "title", "content", "created_at",
+    ],
+    "admin_actions": [
+        "id", "admin_email", "action_type", "target_email",
+        "details", "timestamp",
+    ],
 }
 
 # ═══════════════════════════════════════════
@@ -64,7 +76,7 @@ class _GistSyncManager:
     """변경 감지 → 배치 업로드 (Rate Limit 폭탄 방지 + 실패 시 자동 재시도)"""
 
     def __init__(self):
-        self._dirty: set[str] = set()  # {"users", "inquiries", "payments"}
+        self._dirty: set[str] = set()  # {"users", "inquiries"}
         self._lock = threading.Lock()
         self._running = False
         self._consecutive_fails: dict[str, int] = {}  # 테이블별 연속 실패 횟수
@@ -87,12 +99,11 @@ class _GistSyncManager:
                     self._dirty.clear()
 
                 for tbl in tables:
-                    # [v22 Step X] 테이블별 파일명 정확한 매핑
+                    # [Step AX] TABLE_TO_GIST_FILE 통일 매핑 (admin_actions 포함)
                     filename = TABLE_TO_GIST_FILE.get(tbl)
                     if not filename:
                         _logger.warning(
-                            f"[Gist] 알 수 없는 테이블 '{tbl}' 동기화 스킵 "
-                            f"(허용: {list(TABLE_TO_GIST_FILE.keys())})"
+                            f" [Gist] 알 수 없는 테이블 무시: {tbl}"
                         )
                         continue
                     success = db_manager._do_gist_upload(tbl, filename)
@@ -260,111 +271,15 @@ class LDYDBManager:
                 lock_until TEXT
             )
         """)
-        # [v22 Step Y] inquiries 테이블 마이그레이션 — 기존 컬럼 5개 → 9개
-        # PRIMARY KEY 추가 (중복 방지) + 답변/상태/카테고리 컬럼
-        try:
-            existing_cols = [r[1] for r in self._exec_sqlite(
-                "PRAGMA table_info(inquiries)").fetchall()]
-            if existing_cols and "inquiry_id" not in existing_cols:
-                _logger.info(" 🔄 inquiries 스키마 마이그레이션: 컬럼 4개 추가")
-                # 기존 데이터 백업
-                old_rows = self._exec_sqlite(
-                    "SELECT id, nickname, title, content, created_at FROM inquiries",
-                    fetch=True
-                ) or []
-                # 기존 테이블 DROP
-                self._exec_sqlite("DROP TABLE IF EXISTS inquiries")
-        except Exception as _e:
-            _logger.debug(f"inquiries 마이그레이션 체크 실패 (무시): {_e}")
-            old_rows = []
-
         self._exec_sqlite("""
             CREATE TABLE IF NOT EXISTS inquiries (
-                inquiry_id TEXT PRIMARY KEY,
                 id TEXT,
                 nickname TEXT,
                 title TEXT,
                 content TEXT,
-                created_at TEXT,
-                category TEXT DEFAULT 'general',
-                status TEXT DEFAULT 'open',
-                admin_reply TEXT DEFAULT '',
-                admin_reply_at TEXT DEFAULT ''
+                created_at TEXT
             )
         """)
-        self._exec_sqlite(
-            "CREATE INDEX IF NOT EXISTS idx_inq_email ON inquiries (id)"
-        )
-        self._exec_sqlite(
-            "CREATE INDEX IF NOT EXISTS idx_inq_status ON inquiries (status)"
-        )
-        self._exec_sqlite(
-            "CREATE INDEX IF NOT EXISTS idx_inq_created ON inquiries (created_at)"
-        )
-
-        # 마이그레이션 데이터 복원 (created_at + content 해시로 inquiry_id 생성)
-        try:
-            if 'old_rows' in dir() and old_rows:
-                import hashlib
-                for r in old_rows:
-                    email, nickname, title, content, created_at = r
-                    # 안정적인 inquiry_id 생성: created_at + content 해시
-                    seed = f"{created_at}|{title}|{content}|{email}"
-                    inquiry_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
-                    self._exec_sqlite(
-                        """INSERT OR IGNORE INTO inquiries
-                        (inquiry_id, id, nickname, title, content, created_at, category, status)
-                        VALUES (?, ?, ?, ?, ?, ?, 'general', 'open')""",
-                        (inquiry_id, email, nickname, title, content, created_at)
-                    )
-                _logger.info(f"  ✅ inquiries 마이그레이션 완료: {len(old_rows)}건 → 중복 자동 제거")
-        except Exception as _mig_e:
-            _logger.warning(f"inquiries 마이그레이션 실패 (무시 가능): {_mig_e}")
-
-        # [v22 Step W] 결제 기록 테이블 — orderId UNIQUE로 중복 방지
-        # status: success / failed / amount_mismatch / duplicate / refunded
-        self._exec_sqlite("""
-            CREATE TABLE IF NOT EXISTS payments (
-                order_id TEXT PRIMARY KEY,
-                payment_key TEXT,
-                email TEXT,
-                plan TEXT,
-                amount INTEGER,
-                status TEXT,
-                method TEXT,
-                approved_at TEXT,
-                receipt_url TEXT,
-                created_at TEXT,
-                error_message TEXT
-            )
-        """)
-        self._exec_sqlite(
-            "CREATE INDEX IF NOT EXISTS idx_payments_email ON payments (email)"
-        )
-        self._exec_sqlite(
-            "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments (status)"
-        )
-
-        # [v22 Step AC] 약관 동의 기록 테이블 — 전자상거래법 대비
-        # context: signup / payment / re_consent (약관 변경 시 재동의)
-        self._exec_sqlite("""
-            CREATE TABLE IF NOT EXISTS terms_agreements (
-                agreement_id TEXT PRIMARY KEY,
-                email TEXT,
-                terms_version TEXT,
-                terms_type TEXT,
-                context TEXT,
-                agreed_at TEXT,
-                ip_address TEXT,
-                user_agent TEXT
-            )
-        """)
-        self._exec_sqlite(
-            "CREATE INDEX IF NOT EXISTS idx_terms_email ON terms_agreements (email)"
-        )
-        self._exec_sqlite(
-            "CREATE INDEX IF NOT EXISTS idx_terms_version ON terms_agreements (terms_version)"
-        )
 
         # ── DuckDB: OLAP 테이블 ──
         self.execute_safe("""
@@ -411,10 +326,6 @@ class LDYDBManager:
         try:
             self._load_users_from_gist()
             self._load_inquiries_from_gist()
-            # [v22 Step X] payments 테이블도 Gist에서 복구
-            self._load_payments_from_gist()
-            # [v22 Step AC] terms_agreements 테이블도 Gist에서 복구
-            self._load_terms_from_gist()
             self._gist_loaded = True
         except Exception as e:
             _logger.warning(f"Gist 초기 로드 실패 (DB는 정상): {e}")
@@ -430,8 +341,7 @@ class LDYDBManager:
                 return {}
             files = resp.json().get("files", {})
             result = {}
-            # [v22 Step X+AC] payments + terms_agreements 파일도 함께 다운로드
-            for fname in [USER_DB_FILE, INQUIRY_DB_FILE, PAYMENT_DB_FILE, TERMS_DB_FILE]:
+            for fname in [USER_DB_FILE, INQUIRY_DB_FILE]:
                 if fname in files:
                     content = files[fname].get("content", "")
                     if content:
@@ -446,12 +356,6 @@ class LDYDBManager:
             self._insert_gist_users(downloaded[USER_DB_FILE])
         if INQUIRY_DB_FILE in downloaded:
             self._insert_gist_inquiries(downloaded[INQUIRY_DB_FILE])
-        # [v22 Step X] payments 데이터 적용
-        if PAYMENT_DB_FILE in downloaded:
-            self._insert_gist_payments(downloaded[PAYMENT_DB_FILE])
-        # [v22 Step AC] terms_agreements 데이터 적용
-        if TERMS_DB_FILE in downloaded:
-            self._insert_gist_terms(downloaded[TERMS_DB_FILE])
 
     def _insert_gist_users(self, data):
         if not data:
@@ -510,120 +414,24 @@ class LDYDBManager:
         """, vals)
 
     def _insert_gist_inquiries(self, data):
-        """[v22 Step Y] inquiries Gist 데이터 적용 (UPSERT — inquiry_id PK).
-        
-        기존 INSERT INTO 방식은 동일 row 매번 추가되어 중복 폭발 발생 (Step Y 이전 버그).
-        INSERT OR REPLACE로 변경하여 inquiry_id 기준 UPSERT.
-        하위 호환: 기존 데이터 (inquiry_id 없음)는 created_at+content 해시로 자동 생성.
-        """
-        if not data or not isinstance(data, list):
-            return
-        try:
-            import hashlib
-            for item in data:
-                # inquiry_id 추출 또는 생성 (하위 호환)
-                inquiry_id = item.get('inquiry_id', '')
-                if not inquiry_id:
-                    # 기존 데이터: created_at + title + content + email 해시
-                    seed = (
-                        f"{item.get('created_at', '')}|"
-                        f"{item.get('title', '')}|"
-                        f"{item.get('content', '')}|"
-                        f"{item.get('id') or item.get('email', '')}"
-                    )
-                    inquiry_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
-                
-                self._exec_sqlite(
-                    """INSERT OR REPLACE INTO inquiries
-                    (inquiry_id, id, nickname, title, content, created_at,
-                     category, status, admin_reply, admin_reply_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        inquiry_id,
-                        item.get('id') or item.get('email', ''),
-                        item.get('nickname', '익명'),
-                        item.get('title', ''),
-                        item.get('content', ''),
-                        item.get('created_at', ''),
-                        item.get('category', 'general'),
-                        item.get('status', 'open'),
-                        item.get('admin_reply', ''),
-                        item.get('admin_reply_at', ''),
-                    )
-                )
-            _logger.info(f" inquiries 적용 완료 ({len(data)}건, UPSERT)")
-        except Exception as e:
-            _logger.warning(f" inquiries INSERT 실패: {e}", exc_info=True)
-
-    def _insert_gist_payments(self, data):
-        """[v22 Step X] payments 테이블 Gist 데이터 적용 (UPSERT — order_id PK)"""
-        if not data or not isinstance(data, list):
-            return
-        try:
-            for item in data:
-                # INSERT OR REPLACE — order_id PK 기준 UPSERT
-                self._exec_sqlite(
-                    """INSERT OR REPLACE INTO payments
-                    (order_id, payment_key, email, plan, amount, status,
-                     method, approved_at, receipt_url, created_at, error_message)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        item.get('order_id'),
-                        item.get('payment_key'),
-                        item.get('email'),
-                        item.get('plan'),
-                        item.get('amount'),
-                        item.get('status'),
-                        item.get('method', ''),
-                        item.get('approved_at', ''),
-                        item.get('receipt_url', ''),
-                        item.get('created_at', ''),
-                        item.get('error_message', ''),
-                    )
-                )
-            _logger.info(f" payments 적용 완료 ({len(data)}건)")
-        except Exception as e:
-            _logger.warning(f" payments INSERT 실패: {e}", exc_info=True)
-
-    def _insert_gist_terms(self, data):
-        """[v22 Step AC] terms_agreements 테이블 Gist 데이터 적용 (UPSERT)"""
         if not data or not isinstance(data, list):
             return
         try:
             for item in data:
                 self._exec_sqlite(
-                    """INSERT OR REPLACE INTO terms_agreements
-                    (agreement_id, email, terms_version, terms_type,
-                     context, agreed_at, ip_address, user_agent)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        item.get('agreement_id'),
-                        item.get('email'),
-                        item.get('terms_version'),
-                        item.get('terms_type', 'all'),
-                        item.get('context', 'signup'),
-                        item.get('agreed_at'),
-                        item.get('ip_address', ''),
-                        item.get('user_agent', ''),
-                    )
+                    "INSERT INTO inquiries VALUES (?,?,?,?,?)",
+                    (item.get('id'), item.get('nickname'), item.get('title'),
+                     item.get('content'), item.get('created_at'))
                 )
-            _logger.info(f" terms_agreements 적용 완료 ({len(data)}건)")
+            _logger.info(f" inquiries 적용 완료 ({len(data)}건)")
         except Exception as e:
-            _logger.warning(f" terms_agreements INSERT 실패: {e}", exc_info=True)
+            _logger.warning(f" inquiries INSERT 실패: {e}")
 
     def _load_users_from_gist(self):
         self._load_gist_to_table(USER_DB_FILE, "users")
 
     def _load_inquiries_from_gist(self):
         self._load_gist_to_table(INQUIRY_DB_FILE, "inquiries")
-
-    def _load_payments_from_gist(self):
-        """[v22 Step X] payments 테이블 Gist에서 로드"""
-        self._load_gist_to_table(PAYMENT_DB_FILE, "payments")
-
-    def _load_terms_from_gist(self):
-        """[v22 Step AC] terms_agreements 테이블 Gist에서 로드"""
-        self._load_gist_to_table(TERMS_DB_FILE, "terms_agreements")
 
     def _load_gist_to_table(self, filename, tablename):
         if not GIST_ID or not GIST_TOKEN:
@@ -650,12 +458,6 @@ class LDYDBManager:
                 self._insert_gist_users(data)
             elif tablename == 'inquiries':
                 self._insert_gist_inquiries(data)
-            elif tablename == 'payments':
-                # [v22 Step X] payments 테이블 적용
-                self._insert_gist_payments(data)
-            elif tablename == 'terms_agreements':
-                # [v22 Step AC] terms_agreements 테이블 적용
-                self._insert_gist_terms(data)
 
         except Exception as e:
             _logger.error(f" [Gist] {tablename} 로드 실패: {e}", exc_info=True)
@@ -669,39 +471,22 @@ class LDYDBManager:
         _gist_sync.mark_dirty(tablename)
 
     def _do_gist_upload(self, tablename: str, filename: str) -> bool:
-        """[v22 Step X] 실제 업로드 — 테이블별 컬럼 정확히 분기.
+        """실제 업로드 (배치 루프에서 호출). 성공 시 True, 실패 시 False.
         
-        지원 테이블: users, inquiries, payments
-        성공 시 True, 실패 시 False.
+        [Step AX] TABLE_COLUMNS 통일 매핑 사용 (admin_actions 포함).
         """
         if not GIST_ID or not GIST_TOKEN:
             return True  # Gist 미설정은 실패가 아님
         try:
             rows = self._exec_sqlite(f"SELECT * FROM {tablename}", fetch=True)
-            
-            # [v22 Step X+Y+AC] 테이블별 컬럼 정확한 분기
-            if tablename == "users":
-                cols = ["id", "password", "salt", "nickname", "role", "join_date",
-                        "last_login", "is_banned", "security_q_idx", "security_a_hash",
-                        "session_token", "prime_expire_date", "login_fail_count", "lock_until"]
-            elif tablename == "inquiries":
-                # [Step Y] inquiry_id PRIMARY KEY + 답변/상태/카테고리 컬럼
-                cols = ["inquiry_id", "id", "nickname", "title", "content",
-                        "created_at", "category", "status", "admin_reply", "admin_reply_at"]
-            elif tablename == "payments":
-                # CREATE TABLE 컬럼 순서와 일치
-                cols = ["order_id", "payment_key", "email", "plan", "amount",
-                        "status", "method", "approved_at", "receipt_url",
-                        "created_at", "error_message"]
-            elif tablename == "terms_agreements":
-                # [Step AC] 약관 동의 기록 컬럼
-                cols = ["agreement_id", "email", "terms_version", "terms_type",
-                        "context", "agreed_at", "ip_address", "user_agent"]
-            else:
+            # [Step AX] 통일 매핑에서 컬럼 가져오기
+            cols = TABLE_COLUMNS.get(tablename)
+            if not cols:
+                # 안전망 — 매핑 없으면 inquiries 기본 컬럼 (구버전 호환)
                 _logger.warning(
-                    f" [Gist] 알 수 없는 테이블 '{tablename}' — 업로드 스킵"
+                    f" Gist 업로드: {tablename} 컬럼 매핑 없음 → 기본 사용"
                 )
-                return False
+                cols = TABLE_COLUMNS.get("inquiries", [])
 
             data = [dict(zip(cols, r)) for r in rows]
             json_str = json.dumps(data, ensure_ascii=False, indent=2, default=str)
@@ -711,13 +496,10 @@ class LDYDBManager:
             payload = {"files": {filename: {"content": json_str}}}
             resp = requests.patch(url, headers=headers, json=payload, timeout=10)
             if resp.status_code == 200:
-                _logger.debug(f" Gist 배치 업로드 완료: {tablename} → {filename}")
+                _logger.debug(f" Gist 배치 업로드 완료: {tablename}")
                 return True
             else:
-                _logger.warning(
-                    f" Gist 배치 업로드 실패 ({resp.status_code}): "
-                    f"{tablename} → {filename}"
-                )
+                _logger.warning(f" Gist 배치 업로드 실패 ({resp.status_code}): {tablename}")
                 return False
         except Exception as e:
             _logger.warning(f" Gist 배치 업로드 에러: {e}", exc_info=True)
@@ -747,24 +529,6 @@ class LDYDBManager:
         except Exception as e:
             _logger.error(f"회원가입 실패: {e}", exc_info=True)
             return False, f"DB Error: {e}"
-
-    def delete_user(self, email: str) -> bool:
-        """[v22 Step AE] 회원 정식 삭제 함수.
-        
-        가입 롤백 / 회원 탈퇴 / 관리자 강제 삭제 시 사용.
-        private _exec_sqlite 직접 호출 대신 이 함수 사용 권장.
-        
-        Returns:
-            True if deleted (or didn't exist), False on error
-        """
-        try:
-            self._exec_sqlite("DELETE FROM users WHERE id = ?", (email,))
-            self._mark_gist_dirty("users")
-            _logger.info(f"🗑️ 회원 삭제: {email}")
-            return True
-        except Exception as e:
-            _logger.error(f"회원 삭제 실패 ({email}): {e}", exc_info=True)
-            return False
 
     def get_user_by_id(self, email):
         try:
@@ -882,208 +646,6 @@ class LDYDBManager:
         except Exception as e:
             _logger.warning(f"구독 업데이트 실패: {e}", exc_info=True)
 
-    # ═══════════════════════════════════════════
-    #  [v22 Step W] 결제 기록 함수
-    # ═══════════════════════════════════════════
-    def get_user_prime_expire(self, email):
-        """[Step W] 사용자의 현재 Prime 만료일 조회 (조기 갱신용).
-        
-        Returns:
-            datetime or None
-        """
-        try:
-            row = self._exec_sqlite_one(
-                "SELECT prime_expire_date, role FROM users WHERE id = ?", (email,)
-            )
-            if not row:
-                return None
-            expire_str, role = row
-            if not expire_str:
-                return None
-            # role이 prime/pro가 아니면 만료된 것으로 간주
-            if (role or "").lower() not in ("prime", "pro"):
-                return None
-            try:
-                # "2026-04-30" 또는 "2026-04-30 00:00:00" 처리
-                date_part = expire_str.split(" ")[0]
-                return datetime.strptime(date_part, "%Y-%m-%d")
-            except Exception:
-                return None
-        except Exception as e:
-            _logger.warning(f"Prime 만료일 조회 실패: {e}")
-            return None
-
-    def is_payment_processed(self, order_id: str) -> bool:
-        """[Step W] orderId가 이미 처리됐는지 확인 (DB 기반 중복 방지).
-        
-        메모리 set 보다 안정적: 서버 재시작/멀티 인스턴스에서도 작동.
-        """
-        try:
-            row = self._exec_sqlite_one(
-                "SELECT order_id FROM payments WHERE order_id = ? AND status = ?",
-                (order_id, "success")
-            )
-            return row is not None
-        except Exception as e:
-            _logger.warning(f"결제 중복 체크 실패: {e}")
-            return False
-
-    def record_payment(
-        self,
-        order_id: str,
-        payment_key: str,
-        email: str,
-        plan: str,
-        amount: int,
-        status: str,
-        method: str = "",
-        approved_at: str = "",
-        receipt_url: str = "",
-        error_message: str = "",
-    ) -> bool:
-        """[Step W] 결제 기록 저장 (성공/실패/금액불일치/중복/환불 모두).
-        
-        Args:
-            status: success / failed / amount_mismatch / duplicate / refunded
-        
-        Returns:
-            True if recorded successfully
-        """
-        try:
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self._exec_sqlite(
-                """INSERT OR REPLACE INTO payments
-                (order_id, payment_key, email, plan, amount, status,
-                 method, approved_at, receipt_url, created_at, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (order_id, payment_key, email, plan, amount, status,
-                 method, approved_at, receipt_url, now_str, error_message)
-            )
-            self._mark_gist_dirty("payments")
-            _logger.info(
-                f"💳 결제 기록 저장: {order_id} / {email} / {plan} / "
-                f"{amount:,}원 / {status}"
-            )
-            return True
-        except Exception as e:
-            _logger.error(f"결제 기록 저장 실패: {e}", exc_info=True)
-            return False
-
-    def get_payment(self, order_id: str) -> dict:
-        """[Step W] 주문 ID로 결제 기록 조회"""
-        try:
-            row = self._exec_sqlite_one(
-                """SELECT order_id, payment_key, email, plan, amount, status,
-                          method, approved_at, receipt_url, created_at, error_message
-                   FROM payments WHERE order_id = ?""",
-                (order_id,)
-            )
-            if not row:
-                return {}
-            cols = ["order_id", "payment_key", "email", "plan", "amount", "status",
-                    "method", "approved_at", "receipt_url", "created_at", "error_message"]
-            return dict(zip(cols, row))
-        except Exception as e:
-            _logger.warning(f"결제 기록 조회 실패: {e}")
-            return {}
-
-    def get_user_payments(self, email: str, limit: int = 20) -> list:
-        """[Step W] 사용자의 결제 이력 조회 (최근순)"""
-        try:
-            rows = self._exec_sqlite(
-                """SELECT order_id, plan, amount, status, method,
-                          approved_at, receipt_url, created_at
-                   FROM payments WHERE email = ?
-                   ORDER BY created_at DESC LIMIT ?""",
-                (email, limit), fetch=True
-            )
-            cols = ["order_id", "plan", "amount", "status", "method",
-                    "approved_at", "receipt_url", "created_at"]
-            return [dict(zip(cols, r)) for r in (rows or [])]
-        except Exception as e:
-            _logger.warning(f"사용자 결제 이력 조회 실패: {e}")
-            return []
-
-    # ═══════════════════════════════════════════
-    #  [v22 Step AC] 약관 동의 기록 함수
-    # ═══════════════════════════════════════════
-    def record_terms_agreement(
-        self,
-        email: str,
-        terms_version: str,
-        terms_type: str = "all",
-        context: str = "signup",
-        ip_address: str = "",
-        user_agent: str = "",
-    ) -> bool:
-        """[Step AC] 약관 동의 기록.
-        
-        Args:
-            email: 사용자 이메일
-            terms_version: 약관 버전 (예: 2026-04-25-v1)
-            terms_type: all / terms / privacy / refund / marketing
-            context: signup / payment / re_consent
-        
-        Returns:
-            True if recorded successfully
-        """
-        try:
-            from datetime import datetime as _dt
-            agreed_at = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-            # 안정적 agreement_id (이메일+버전+타입+컨텍스트+시각)
-            seed = f"{email}|{terms_version}|{terms_type}|{context}|{agreed_at}"
-            import hashlib as _hl
-            agreement_id = _hl.sha256(seed.encode()).hexdigest()[:16]
-            
-            self._exec_sqlite(
-                """INSERT OR REPLACE INTO terms_agreements
-                (agreement_id, email, terms_version, terms_type, context,
-                 agreed_at, ip_address, user_agent)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (agreement_id, email, terms_version, terms_type,
-                 context, agreed_at, ip_address[:200], user_agent[:500])
-            )
-            self._mark_gist_dirty("terms_agreements")
-            _logger.info(
-                f"📜 약관 동의 기록: {email} / {terms_version} / "
-                f"{terms_type} ({context})"
-            )
-            return True
-        except Exception as e:
-            _logger.error(f"약관 동의 기록 실패: {e}", exc_info=True)
-            return False
-
-    def get_user_agreements(self, email: str) -> list:
-        """[Step AC] 사용자의 약관 동의 이력 조회 (최근순)"""
-        try:
-            cols = ["agreement_id", "email", "terms_version", "terms_type",
-                    "context", "agreed_at", "ip_address", "user_agent"]
-            rows = self._exec_sqlite(
-                """SELECT agreement_id, email, terms_version, terms_type,
-                          context, agreed_at, ip_address, user_agent
-                   FROM terms_agreements WHERE email = ?
-                   ORDER BY agreed_at DESC""",
-                (email,), fetch=True
-            )
-            return [dict(zip(cols, r)) for r in (rows or [])]
-        except Exception as e:
-            _logger.warning(f"약관 동의 이력 조회 실패: {e}")
-            return []
-
-    def has_agreed_to_version(self, email: str, terms_version: str) -> bool:
-        """[Step AC] 사용자가 특정 약관 버전에 동의했는지 확인"""
-        try:
-            row = self._exec_sqlite_one(
-                """SELECT agreement_id FROM terms_agreements
-                   WHERE email = ? AND terms_version = ?
-                   AND terms_type IN ('all', 'terms') LIMIT 1""",
-                (email, terms_version)
-            )
-            return row is not None
-        except Exception as e:
-            _logger.warning(f"약관 동의 확인 실패: {e}")
-            return False
-
     def grant_all_users_trial(self, days=14):
         try:
             new_expire = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
@@ -1097,22 +659,12 @@ class LDYDBManager:
             return False, f"DB Error: {e}"
 
     # --- Inquiry Methods ---
-    # ═══════════════════════════════════════════
-    #  [v22 Step Y] 문의 함수 — UPSERT 기반 (중복 방지)
-    # ═══════════════════════════════════════════
     def get_all_inquiries(self):
-        """[Step Y] 모든 문의 조회 (최근순)"""
         try:
-            cols = ["inquiry_id", "id", "nickname", "title", "content",
-                    "created_at", "category", "status", "admin_reply", "admin_reply_at"]
-            rows = self._exec_sqlite(
-                "SELECT inquiry_id, id, nickname, title, content, created_at, "
-                "category, status, admin_reply, admin_reply_at "
-                "FROM inquiries ORDER BY created_at DESC",
-                fetch=True
-            )
+            cols = ["id", "nickname", "title", "content", "created_at"]
+            rows = self._exec_sqlite("SELECT * FROM inquiries", fetch=True)
             result = []
-            for r in rows or []:
+            for r in rows:
                 d = dict(zip(cols, r))
                 d['email'] = d['id']
                 result.append(d)
@@ -1121,125 +673,17 @@ class LDYDBManager:
             _logger.warning(f"문의 조회 실패: {e}", exc_info=True)
             return []
 
-    def add_inquiry(self, inquiry_id: str, email: str, nickname: str,
-                    title: str, content: str, created_at: str,
-                    category: str = "general") -> bool:
-        """[Step Y] 신규 문의 추가 — INSERT OR IGNORE (PRIMARY KEY로 중복 방지).
-        
-        Returns:
-            True: 정상 등록
-            False: 중복 또는 실패
-        """
-        try:
-            # INSERT OR IGNORE — inquiry_id 중복 시 자동 무시
-            cursor = self._exec_sqlite(
-                """INSERT OR IGNORE INTO inquiries
-                (inquiry_id, id, nickname, title, content, created_at,
-                 category, status, admin_reply, admin_reply_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'open', '', '')""",
-                (inquiry_id, email, nickname, title, content, created_at, category)
-            )
-            # rowcount 확인 — 0이면 중복
-            if hasattr(cursor, 'rowcount') and cursor.rowcount == 0:
-                _logger.info(f"📮 문의 중복 무시: {inquiry_id}")
-                return False
-            self._mark_gist_dirty("inquiries")
-            _logger.info(f"📮 문의 등록: {inquiry_id} / {email} / {category}")
-            return True
-        except Exception as e:
-            _logger.warning(f"문의 등록 실패: {e}", exc_info=True)
-            return False
-
-    def update_inquiry_reply(self, inquiry_id: str, admin_reply: str,
-                              admin_reply_at: str = "") -> bool:
-        """[Step Y] 관리자 답변 등록"""
-        try:
-            from datetime import datetime as _dt
-            if not admin_reply_at:
-                admin_reply_at = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-            self._exec_sqlite(
-                """UPDATE inquiries SET 
-                    admin_reply = ?, admin_reply_at = ?, status = 'replied'
-                   WHERE inquiry_id = ?""",
-                (admin_reply, admin_reply_at, inquiry_id)
-            )
-            self._mark_gist_dirty("inquiries")
-            return True
-        except Exception as e:
-            _logger.warning(f"문의 답변 실패: {e}", exc_info=True)
-            return False
-
-    def update_inquiry_status(self, inquiry_id: str, status: str) -> bool:
-        """[Step Y] 문의 상태 변경 (open / in_progress / replied / closed)"""
-        try:
-            self._exec_sqlite(
-                "UPDATE inquiries SET status = ? WHERE inquiry_id = ?",
-                (status, inquiry_id)
-            )
-            self._mark_gist_dirty("inquiries")
-            return True
-        except Exception as e:
-            _logger.warning(f"문의 상태 변경 실패: {e}")
-            return False
-
-    def delete_inquiry(self, inquiry_id: str) -> bool:
-        """[Step Y] 문의 삭제 — inquiry_id 기반 (created_at 충돌 X)"""
-        try:
-            self._exec_sqlite(
-                "DELETE FROM inquiries WHERE inquiry_id = ?", (inquiry_id,)
-            )
-            self._mark_gist_dirty("inquiries")
-            return True
-        except Exception as e:
-            _logger.warning(f"문의 삭제 실패: {e}")
-            return False
-
-    def get_user_inquiries(self, email: str) -> list:
-        """[Step Y] 사용자 본인 문의 조회"""
-        try:
-            cols = ["inquiry_id", "id", "nickname", "title", "content",
-                    "created_at", "category", "status", "admin_reply", "admin_reply_at"]
-            rows = self._exec_sqlite(
-                "SELECT inquiry_id, id, nickname, title, content, created_at, "
-                "category, status, admin_reply, admin_reply_at "
-                "FROM inquiries WHERE id = ? ORDER BY created_at DESC",
-                (email,), fetch=True
-            )
-            return [dict(zip(cols, r)) for r in (rows or [])]
-        except Exception as e:
-            _logger.warning(f"사용자 문의 조회 실패: {e}")
-            return []
-
-    def get_inquiry_stats(self) -> dict:
-        """[Step Y] 문의 통계 (관리자 대시보드용)"""
-        try:
-            stats = {"total": 0, "open": 0, "in_progress": 0, "replied": 0, "closed": 0}
-            rows = self._exec_sqlite(
-                "SELECT status, COUNT(*) FROM inquiries GROUP BY status",
-                fetch=True
-            ) or []
-            for r in rows:
-                status, cnt = r
-                if status in stats:
-                    stats[status] = cnt
-                stats["total"] += cnt
-            return stats
-        except Exception as e:
-            _logger.warning(f"문의 통계 실패: {e}")
-            return {"total": 0, "open": 0, "in_progress": 0, "replied": 0, "closed": 0}
-
-    # ─── [Step Y] 하위 호환: 기존 save_inquiries (DEPRECATED) ───
-    # 기존 코드가 호출할 수 있으므로 유지하되, 내부적으로 add_inquiry 사용 권장.
-    # 사용 X — 절대 호출하지 마세요 (전체 DELETE+INSERT는 위험)
     def save_inquiries(self, items):
-        """⚠️ DEPRECATED — add_inquiry 사용 권장.
-        기존 호출자 호환을 위해 유지하지만 사용 X.
-        """
-        _logger.warning(
-            "⚠️ save_inquiries() DEPRECATED — add_inquiry() 사용 권장. "
-            "전체 DELETE+INSERT는 동시성 문제 + 중복 위험 있음."
-        )
-        return False  # 의도적으로 실패 — 새 코드는 add_inquiry 사용
+        self._exec_sqlite("DELETE FROM inquiries")
+        if items:
+            for i in items:
+                self._exec_sqlite(
+                    "INSERT INTO inquiries VALUES (?, ?, ?, ?, ?)",
+                    (i.get('email', i.get('id')), i.get('nickname'), i.get('title'),
+                     i.get('content'), i.get('created_at'))
+                )
+        self._mark_gist_dirty("inquiries")
+        return True
 
     # ═══════════════════════════════════════════
     #  OLAP Methods — DuckDB (변경 없음)
