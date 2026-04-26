@@ -735,7 +735,15 @@ class LDYDBManager:
             return None
 
     def update_login_timestamp(self, email):
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """[Step BB hotfix] last_login UTC 명시 저장.
+        
+        이전 버그: datetime.now()는 서버 로컬 시간 (Dockerfile에서 TZ=Asia/Seoul 설정)
+        → KST naive datetime → tz_localize('UTC')로 잘못 간주 → +9시간 미래 표시
+        
+        수정: datetime.now(timezone.utc) — auth_user.py의 join_date와 일관
+        → tz_localize('UTC')가 정확히 작동
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self._exec_sqlite("UPDATE users SET last_login = ? WHERE id = ?", (now, email))
         self._mark_gist_dirty("users")  # ← 즉시 업로드 대신 dirty 마킹
 
