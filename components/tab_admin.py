@@ -2,23 +2,39 @@
 """
 tab_admin.py — 👑 회원 관리 (NiceGUI Dark Theme)
 ═══════════════════════════════════════════════════
-[v22 Step AV] 전면 리팩토링 — 64 → 90점 목표
+[v22 Step AV+AW] 전면 리팩토링 — 64 → 93점 목표
 
 ⚠️ 사고 방지 핵심:
 - 이전: 전체 초기화/전원 Prime 지급/차단/강등이 1클릭 즉시 실행 → 사고 위험
 - 현재: 모든 위험 작업에 RESET 입력/확인 다이얼로그/미리보기 카운트
 
-개선 사항:
+개선 사항 (Step AV):
 1. ✅ 위험 작업 보호 4종 (RESET 입력, 인원수/금액 미리보기, 사유 입력)
-2. ✅ 검색 + 필터 5종 (이메일/상태/등급/기간/차단)
+2. ✅ 검색 + 필터 5종 (이메일/실제상태/등급/기간/차단)
 3. ✅ 회원 선택 시 현재 값 자동 채움 (등급/만료일)
-4. ✅ 회원 상세 모달 (결제/문의 이력, 액션 로그)
+4. ✅ 회원 상세 모달 (문의 이력, 액션 로그)
 5. ✅ 액션 로그 (admin_actions 테이블 — 감사 추적)
-6. ✅ 가입 추세 통계 (이번 달/이번 주 신규, 매출, 전환율)
+6. ✅ 가입 추세 통계 (이번 달/이번 주 신규, 전환율, 만료 임박)
 7. ✅ CSV 내보내기 (회원 목록 백업)
 8. ✅ 다중 선택 + 일괄 작업 (차단/강등)
 9. ✅ 모바일 반응형 + 사용자 친화 라벨
 10. ✅ 면책 안내 (개인정보 처리)
+
+개선 사항 (Step AW — 회귀 수정 + UX 마감):
+11. ✅ Gist 파일명 표준화 (USER_DB_FILE/INQUIRY_DB_FILE)
+   - 이전 회귀 버그: "users.json"/"inquiries.json"
+   - 정확: "users_db.json"/"inquiries_db.json"
+12. ✅ 입금확인 처리 — 삭제 금지, admin_actions 보존
+   - 이전 회귀 버그: save_inquiries() 삭제성 처리
+   - 현재: PAYMENT_CONFIRMED 액션 로그로 영구 보존
+   - 처리 완료/대기 분리 표시
+13. ✅ payment 탐지 — category="payment" 또는 title prefix
+14. ✅ 차단 필터 UI 추가 (state와 일치)
+15. ✅ 매출 통계 주석 → 가입 추세로 정정 (payments 테이블 부재)
+
+향후 작업 (백엔드 단계):
+- payments 테이블 생성 → 실제 매출 통계 가능
+- inquiries 테이블에 category/status/admin_reply 컬럼 추가
 """
 import asyncio
 import io
@@ -389,6 +405,11 @@ def render_tab_admin():
                 ["전체", "최근 7일 가입", "최근 30일 가입", "만료 임박 (7일)"],
                 value="전체", label="기간",
             ).classes("min-w-[160px]").props("outlined dense")
+            # [Step AW] 차단 필터 UI 추가 (state와 일치)
+            f_banned = ui.select(
+                ["전체", "정상", "차단"],
+                value="전체", label="차단 여부",
+            ).classes("min-w-[120px]").props("outlined dense")
 
     # ─── 영역 ───
     table_area = ui.column().classes("w-full")
@@ -433,6 +454,11 @@ def render_tab_admin():
                     and r["expire"] != "-"
                     and today <= r["expire"] <= week_later
                 ]
+        # [Step AW] 차단 필터
+        if state["banned"] == "차단":
+            result = [r for r in result if r["status"] == "🚫차단"]
+        elif state["banned"] == "정상":
+            result = [r for r in result if r["status"] == "✅"]
         return result
 
     def _refresh_table():
@@ -1318,11 +1344,21 @@ def render_tab_admin():
                                         db_a._exec_sqlite(
                                             "DELETE FROM inquiries"
                                         )
+                                        # [Step AW S급 수정] Gist 표준 파일명
+                                        # 이전 버그: "users.json"/"inquiries.json"
+                                        # 정확: USER_DB_FILE="users_db.json", INQUIRY_DB_FILE="inquiries_db.json"
+                                        try:
+                                            from db_utils import (
+                                                USER_DB_FILE, INQUIRY_DB_FILE,
+                                            )
+                                        except ImportError:
+                                            USER_DB_FILE = "users_db.json"
+                                            INQUIRY_DB_FILE = "inquiries_db.json"
                                         u_ok = db_a._do_gist_upload(
-                                            "users", "users.json"
+                                            "users", USER_DB_FILE,
                                         )
                                         i_ok = db_a._do_gist_upload(
-                                            "inquiries", "inquiries.json"
+                                            "inquiries", INQUIRY_DB_FILE,
                                         )
                                         if u_ok and i_ok:
                                             return True, (
@@ -1375,28 +1411,119 @@ def render_tab_admin():
             # 입금확인 대기
             payment_list = ui.column().classes("w-full")
             
-            async def _dismiss_payment(req):
-                def _do():
-                    db_d = _get_db()
-                    if db_d:
-                        items = [
-                            x for x in db_d.get_all_inquiries()
-                            if x.get("created_at") != req.get("created_at")
-                        ]
-                        db_d.save_inquiries(items)
-                        _log_admin_action(
-                            db_d, admin_email,
-                            "PAYMENT_CONFIRMED",
-                            req.get("id", ""),
-                            {"title": req.get("title", "")[:50]},
-                        )
-                        return True
+            # [Step AW] 입금확인 처리 완료된 inquiry_id 추적
+            # admin_actions 테이블에 PAYMENT_CONFIRMED 기록이 있으면 처리됨
+            # → 삭제하지 않고 보존 (분쟁 대응)
+            def _is_payment_confirmed(req: dict) -> bool:
+                """[Step AW] PAYMENT_CONFIRMED 액션 로그 존재 여부"""
+                try:
+                    inquiry_id = req.get("created_at", "") or req.get("id", "")
+                    if not inquiry_id:
+                        return False
+                    actions = _get_admin_actions(db, limit=200)
+                    for a in actions:
+                        if a.get("action_type") != "PAYMENT_CONFIRMED":
+                            continue
+                        try:
+                            details = json.loads(a.get("details", "{}") or "{}")
+                            if details.get("inquiry_id") == inquiry_id:
+                                return True
+                            if details.get("created_at") == inquiry_id:
+                                return True
+                        except Exception:
+                            pass
                     return False
-
-                ok = await asyncio.to_thread(_do)
-                if ok:
-                    ui.notify("✅ 처리 완료", type="positive")
-                _load_payment_requests()
+                except Exception:
+                    return False
+            
+            async def _confirm_payment_request(req):
+                """[Step AW S급 수정] 입금확인 처리 — 삭제 금지, 액션 로그로 보존
+                
+                이전 버그: save_inquiries(items)로 문의 삭제
+                → 분쟁 시 기록 없음
+                
+                현재: admin_actions 테이블에 PAYMENT_CONFIRMED 기록
+                → inquiries 보존, 처리 여부는 액션 로그로 판정
+                """
+                # 확인 다이얼로그
+                with ui.dialog() as cd, ui.card().classes(
+                    "p-4 bg-[#1a1a2e] border border-emerald-500/40 "
+                    "rounded-xl min-w-[400px]"
+                ):
+                    ui.label("💳 입금확인 처리").classes(
+                        "text-base font-bold text-emerald-300"
+                    )
+                    ui.label(
+                        f"📌 {req.get('title', '')[:60]}"
+                    ).classes("text-sm text-white mt-2")
+                    ui.label(
+                        req.get("content", "")[:200]
+                    ).classes("text-xs text-gray-300 mt-1")
+                    ui.label(
+                        f"🕐 {_to_kst_str(req.get('created_at'))}"
+                    ).classes("text-xs text-gray-500 mt-1")
+                    
+                    ui.separator().classes("my-2")
+                    ui.label(
+                        "💡 입금확인 후 해당 회원 등급을 PRIME으로 변경하세요. "
+                        "처리 기록은 admin_actions에 영구 보존됩니다 (분쟁 대응)."
+                    ).classes("text-xs text-amber-200 italic")
+                    
+                    reply_input = ui.input(
+                        "처리 메모 (액션 로그)",
+                        placeholder="예: 토스 30,000원 입금 확인, PRIME 30일 적용",
+                    ).classes("w-full mt-2").props("outlined dense")
+                    
+                    with ui.row().classes("w-full justify-end gap-2 mt-3"):
+                        ui.button("취소", on_click=cd.close).props("flat")
+                        
+                        async def do_confirm():
+                            cd.close()
+                            reply = (reply_input.value or "").strip()
+                            
+                            def _do():
+                                db_d = _get_db()
+                                if not db_d:
+                                    return False
+                                # [Step AW] 삭제하지 않고 admin_actions에만 기록
+                                inquiry_id = (
+                                    req.get("created_at", "")
+                                    or req.get("id", "")
+                                )
+                                target_email = (
+                                    req.get("id", "") or req.get("login_id", "")
+                                )
+                                _log_admin_action(
+                                    db_d, admin_email,
+                                    "PAYMENT_CONFIRMED",
+                                    target_email,
+                                    {
+                                        "inquiry_id": inquiry_id,
+                                        "title": req.get("title", "")[:80],
+                                        "admin_reply": reply,
+                                        "category": req.get(
+                                            "category", "payment"
+                                        ),
+                                    },
+                                )
+                                return True
+                            
+                            ok = await asyncio.to_thread(_do)
+                            if ok:
+                                ui.notify(
+                                    "✅ 입금확인 기록 보존 완료 — "
+                                    "분쟁 시 admin_actions에서 조회 가능",
+                                    type="positive",
+                                )
+                                _load_payment_requests()
+                            else:
+                                ui.notify("❌ 처리 실패", type="negative")
+                        
+                        ui.button(
+                            "✅ 입금확인 처리",
+                            on_click=do_confirm,
+                        ).props("color=positive")
+                cd.open()
 
             def _load_payment_requests():
                 payment_list.clear()
@@ -1404,37 +1531,76 @@ def render_tab_admin():
                 if not db_p:
                     return
                 inquiries = db_p.get_all_inquiries()
-                pay_reqs = [
+                # [Step AW] payment 탐지 — category 우선 + title prefix fallback
+                # (현재 inquiries 스키마에 category 컬럼 없으나 향후 호환 대비)
+                pay_reqs_all = [
                     q for q in inquiries
-                    if q.get("title", "").startswith("[💳 입금확인]")
+                    if (
+                        q.get("category") == "payment"
+                        or q.get("title", "").startswith("[💳 입금확인]")
+                    )
                 ]
+                # [Step AW] 처리 완료/미처리 분리 (보존 + 가독성)
+                pending = [
+                    q for q in pay_reqs_all
+                    if not _is_payment_confirmed(q)
+                ]
+                completed = [
+                    q for q in pay_reqs_all
+                    if _is_payment_confirmed(q)
+                ]
+                
                 with payment_list:
-                    if not pay_reqs:
-                        ui.label("대기 중인 요청 없음").classes(
-                            "text-xs text-gray-500 italic"
-                        )
-                        return
-                    for req in reversed(pay_reqs[-10:]):
-                        with ui.card().classes(
-                            "w-full p-2 mb-1 bg-[#0f3460] "
-                            "border border-blue-700/50 rounded-lg"
-                        ):
-                            with ui.row().classes(
-                                "w-full justify-between items-center"
+                    # 대기 중
+                    if not pending:
+                        ui.label(
+                            "✅ 대기 중인 입금확인 요청 없음"
+                        ).classes("text-xs text-gray-500 italic")
+                    else:
+                        ui.label(
+                            f"⏳ 대기 중 ({len(pending)}건)"
+                        ).classes("text-xs text-amber-300 font-bold mb-1")
+                        for req in reversed(pending[-10:]):
+                            with ui.card().classes(
+                                "w-full p-2 mb-1 bg-[#0f3460] "
+                                "border border-amber-500/40 rounded-lg"
+                            ):
+                                with ui.row().classes(
+                                    "w-full justify-between items-center"
+                                ):
+                                    ui.label(
+                                        f"📌 {req.get('title', '')[:40]}"
+                                    ).classes("text-xs text-white")
+                                    ui.button(
+                                        "✅ 처리",
+                                        on_click=lambda r=req: (
+                                            _confirm_payment_request(r)
+                                        ),
+                                    ).props("flat dense size=sm color=green")
+                                ui.label(
+                                    req.get("content", "")[:80]
+                                ).classes("text-xs text-gray-300 mt-1")
+                                ui.label(
+                                    f"🕐 {_to_kst_str(req.get('created_at'))}"
+                                ).classes("text-xs text-gray-500 mt-1")
+                    
+                    # 처리 완료 (보존 표시)
+                    if completed:
+                        ui.label(
+                            f"✅ 처리 완료 ({len(completed)}건, 보존)"
+                        ).classes("text-xs text-emerald-300 font-bold mt-3 mb-1")
+                        for req in reversed(completed[-5:]):
+                            with ui.card().classes(
+                                "w-full p-2 mb-1 bg-[#0a0a14] "
+                                "border border-emerald-700/30 rounded-lg "
+                                "opacity-70"
                             ):
                                 ui.label(
-                                    f"📌 {req.get('title', '')[:40]}"
-                                ).classes("text-xs text-white")
-                                ui.button(
-                                    "✅",
-                                    on_click=lambda r=req: _dismiss_payment(r),
-                                ).props("flat dense size=sm color=green")
-                            ui.label(
-                                req.get("content", "")[:80]
-                            ).classes("text-xs text-gray-300 mt-1")
-                            ui.label(
-                                f"🕐 {_to_kst_str(req.get('created_at'))}"
-                            ).classes("text-xs text-gray-500 mt-1")
+                                    f"✅ {req.get('title', '')[:40]}"
+                                ).classes("text-xs text-emerald-300")
+                                ui.label(
+                                    f"🕐 {_to_kst_str(req.get('created_at'))}"
+                                ).classes("text-xs text-gray-500")
             
             _load_payment_requests()
             
@@ -1537,10 +1703,15 @@ def render_tab_admin():
         state["period"] = e.value or "전체"
         _refresh_table()
 
+    def _on_banned(e):
+        state["banned"] = e.value or "전체"
+        _refresh_table()
+
     f_search.on("update:model-value", _on_search)
     f_access.on("update:model-value", _on_access)
     f_role.on("update:model-value", _on_role)
     f_period.on("update:model-value", _on_period)
+    f_banned.on("update:model-value", _on_banned)
 
     # ─── 초기 렌더 ───
     _refresh_table()
