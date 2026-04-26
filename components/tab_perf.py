@@ -2,23 +2,27 @@
 """
 tab_perf.py — 📈 시스템 성과 추세 (NiceGUI Dark Theme)
 ═══════════════════════════════════════════════════════════
-[v22 Step AK+AL] 전면 리팩토링 — 75 → 94점 목표
+[v22 Step AK+AL+AM] 전면 리팩토링 — 75 → 97점 목표
 
 개선 사항 (Step AK):
 1. ✅ 면책 + 백테스트 한계 안내 (법적 안전)
-2. ✅ 메트릭 6개로 확장 (낙폭/도달률 추가)
-3. ✅ 사용자 친화 라벨 (METHOD/TOPK/보유기간)
-4. ✅ 위험 강조 (MDD 빨간 카드)
-5. ✅ 모바일 반응형 (높이/필터)
-6. ✅ Research Workbench 통합 정리
-7. ✅ 지표별 툴팁 + 설명
+2. ✅ 사용자 친화 라벨 (METHOD/TOPK/보유기간)
+3. ✅ 위험 강조 (MDD 빨간 카드)
+4. ✅ 모바일 반응형 (높이/필터)
+5. ✅ Research Workbench 통합 정리
+6. ✅ 지표별 툴팁 + 설명
 
 추가 개선 (Step AL):
-8. ✅ latest CSV 중복 제거 (drop_duplicates)
-9. ✅ 모바일 grid 실제 반응형 (grid-cols-2 md:grid-cols-3)
-10. ✅ 차트에 MDD 추세 라인 추가 (빨간 점선)
-11. ✅ 비용 차감 후 추정 수익률 (기본 0.4%)
-12. ✅ 시장 비교(KOSPI 알파)는 데이터 추가 시 구현 — 현재 미지원
+7. ✅ latest CSV 중복 제거 (drop_duplicates)
+8. ✅ 모바일 grid 실제 반응형 (grid-cols-2 md:grid-cols-3)
+9. ✅ 차트에 MDD 추세 라인 추가 (빨간 점선)
+10. ✅ 비용 차감 후 추정 수익률 (기본 0.4%)
+
+추가 개선 (Step AM):
+11. ✅ 메트릭 6종 — 승률/수익률/비용반영/도달률/낙폭/표본
+12. ✅ 거래비용 가정 select (0.3%/0.4%/0.5%/0.7%)
+13. ✅ KOSPI 알파 구현 (bench_cache_latest.json 활용)
+14. ✅ 차트 보기 모드 (성과/위험/도달률/시장비교)
 """
 import glob
 import logging
@@ -82,6 +86,76 @@ COST_DESCRIPTION = (
     "왕복 거래비용 추정치 — "
     "매수/매도 수수료 + 거래세(0.18%) + 슬리피지 합산 (~0.4%)"
 )
+
+# [Step AM] 거래비용 옵션 (사용자 선택)
+COST_OPTIONS = {
+    0.3: "0.3% (저비용)",
+    0.4: "0.4% (기본 — 보수)",
+    0.5: "0.5% (보수적)",
+    0.7: "0.7% (스캘핑/고빈도)",
+}
+
+
+# ═══════════════════════════════════════════════════
+#  [Step AM] KOSPI 벤치마크 로더
+# ═══════════════════════════════════════════════════
+def _load_bench_cache() -> dict:
+    """[Step AM] bench_cache_latest.json 로드 — KOSPI/KOSDAQ 보유기간별 수익률.
+    
+    파일 형식:
+        {
+            "KOSPI": {"1": -0.0, "3": 1.36, "5": 4.58, "10": 10.53, "20": 19.06},
+            "KOSDAQ": {...}
+        }
+    
+    Returns:
+        {"KOSPI": {1: -0.0, 5: 4.58, ...}, ...} (정수 키로 변환)
+        파일 없으면 빈 dict
+    """
+    import json
+    
+    dirs_to_try = [
+        DATA_DIR,
+        os.path.join(os.getcwd(), "data"),
+        "data",
+    ]
+    
+    for d in dirs_to_try:
+        path = os.path.join(d, "bench_cache_latest.json")
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+                # 키를 string → int 변환 (H(영업일) 매칭용)
+                result = {}
+                for index_name, hold_data in raw.items():
+                    if isinstance(hold_data, dict):
+                        result[index_name] = {
+                            int(k): float(v)
+                            for k, v in hold_data.items()
+                            if str(k).isdigit()
+                        }
+                _logger.info(
+                    f"📊 KOSPI 벤치마크 로드: {list(result.keys())} "
+                    f"(보유기간: {sorted(result.get('KOSPI', {}).keys())})"
+                )
+                return result
+            except Exception as e:
+                _logger.warning(f"bench_cache 로드 실패 ({path}): {e}")
+                return {}
+    
+    _logger.info("bench_cache_latest.json 없음 — KOSPI 알파 미표시")
+    return {}
+
+
+def _get_kospi_return(bench_data: dict, hold_days: int) -> float:
+    """[Step AM] 특정 보유기간의 KOSPI 수익률 추출.
+    
+    Returns: KOSPI 수익률(%) 또는 None
+    """
+    if not bench_data or "KOSPI" not in bench_data:
+        return None
+    return bench_data["KOSPI"].get(int(hold_days))
 
 
 def _now_kst():
@@ -186,8 +260,20 @@ def _render_disclaimer_card():
 # ═══════════════════════════════════════════════════
 #  메트릭 6종 카드
 # ═══════════════════════════════════════════════════
-def _render_metrics_grid(cdf: pd.DataFrame):
-    """[Step AK+AL] 메트릭 6종 — 승률/수익률/도달률/낙폭/표본"""
+def _render_metrics_grid(
+    cdf: pd.DataFrame,
+    cost_pct: float = DEFAULT_COST_PCT,
+    bench_data: dict = None,
+    hold_days: int = None,
+):
+    """[Step AK+AL+AM] 메트릭 6종 — 승률/수익률/비용반영/도달률/낙폭.
+    
+    Args:
+        cdf: 필터링된 데이터프레임
+        cost_pct: 거래비용 % (사용자 선택)
+        bench_data: KOSPI 벤치마크 dict
+        hold_days: 보유기간 (KOSPI 알파 매칭용)
+    """
     if cdf.empty:
         return
     
@@ -204,21 +290,28 @@ def _render_metrics_grid(cdf: pd.DataFrame):
     win_rate = safe_mean('WIN_RATE_%')
     avg_ret = safe_mean('AVG_RET_%')
     hit_5 = safe_mean('HIT_5%_%')
-    hit_2 = safe_mean('HIT_2%_%')
     avg_mdd = safe_mean('AVG_MDD_%')
     worst_mdd = safe_mean('WORST_MDD_%')
     total_n = cdf['TOTAL_N'].sum() if 'TOTAL_N' in cdf.columns else 0
     
-    # [Step AL] 비용 차감 후 추정 수익률
+    # [Step AL+AM] 비용 차감 후 추정 수익률 (사용자 선택 비용률)
     avg_ret_after_cost = None
     if avg_ret is not None:
-        avg_ret_after_cost = avg_ret - DEFAULT_COST_PCT
+        avg_ret_after_cost = avg_ret - cost_pct
+    
+    # [Step AM] KOSPI 알파 계산
+    kospi_ret = None
+    alpha = None
+    if bench_data and hold_days is not None:
+        kospi_ret = _get_kospi_return(bench_data, hold_days)
+        if kospi_ret is not None and avg_ret is not None:
+            alpha = avg_ret - kospi_ret
     
     ui.label("📊 핵심 지표 (선택 조건 기준)").classes(
         "text-sm font-bold text-cyan-300 mt-3 mb-2"
     )
     
-    # [Step AL] 메트릭 카드 6개 — 모바일 2열, 데스크톱 3열 반응형
+    # [Step AL+AM] 메트릭 카드 — 모바일 2열, 데스크톱 3열 반응형
     with ui.grid().classes(
         "w-full gap-3 grid-cols-2 md:grid-cols-3"
     ):
@@ -238,16 +331,16 @@ def _render_metrics_grid(cdf: pd.DataFrame):
             tooltip="모든 포지션의 산술 평균 수익률 (수수료/세금 미반영)",
         )
         
-        # 3. [Step AL] 비용 반영 추정 수익률 — 새 카드
+        # 3. [Step AL+AM] 비용 반영 추정 — 사용자 선택 비용률
         _render_metric_card(
-            icon="💵", label="비용 반영 추정",
+            icon="💵", label=f"비용 반영 ({cost_pct:.1f}%)",
             value=(
                 f"{avg_ret_after_cost:+.2f}%"
                 if avg_ret_after_cost is not None else "—"
             ),
             color="emerald",
             tooltip=(
-                f"평균 수익률에서 왕복 거래비용 {DEFAULT_COST_PCT}% 차감한 추정치.\n"
+                f"평균 수익률에서 왕복 거래비용 {cost_pct:.1f}% 차감.\n"
                 f"실제로는 종목/시장에 따라 변동 가능."
             ),
         )
@@ -276,18 +369,68 @@ def _render_metrics_grid(cdf: pd.DataFrame):
             tooltip="기간 중 가장 컸던 단일 포지션 낙폭 (최악의 케이스)",
         )
     
-    # [Step AL] 비용 안내 + 시장 비교 안내
+    # [Step AM] KOSPI 알파 카드 (있을 때만 별도 표시 — 강조)
+    if alpha is not None and kospi_ret is not None:
+        ui.label(
+            f"📈 시장 비교 (KOSPI 동기간 {hold_days}영업일)"
+        ).classes("text-sm font-bold text-cyan-300 mt-3 mb-2")
+        
+        with ui.grid().classes(
+            "w-full gap-3 grid-cols-1 md:grid-cols-3"
+        ):
+            # KOSPI 동기간 수익률
+            _render_metric_card(
+                icon="📊", label="KOSPI 수익률",
+                value=f"{kospi_ret:+.2f}%",
+                color="cyan",
+                tooltip=f"동일 보유기간({hold_days}영업일) KOSPI 평균 수익률",
+            )
+            
+            # 전략 수익률
+            _render_metric_card(
+                icon="💰", label="전략 수익률",
+                value=f"{avg_ret:+.2f}%" if avg_ret is not None else "—",
+                color="blue",
+                tooltip="동일 조건 백테스트 전략 평균 수익률 (총)",
+            )
+            
+            # 알파 (전략 - KOSPI)
+            alpha_color = "green" if alpha > 0 else "red"
+            alpha_icon = "🚀" if alpha > 0 else "⚠️"
+            _render_metric_card(
+                icon=alpha_icon, label="알파 (시장 초과)",
+                value=f"{alpha:+.2f}%p",
+                color=alpha_color,
+                tooltip=(
+                    f"전략 수익률 - KOSPI 수익률 = {avg_ret:+.2f}% - {kospi_ret:+.2f}% "
+                    f"= {alpha:+.2f}%p\n"
+                    "양수면 시장 초과 성과(알파+), 음수면 시장 미달."
+                ),
+            )
+        
+        # 알파 해설
+        alpha_msg = (
+            "✅ 전략이 시장(KOSPI) 평균을 초과 — 알파(+) 발생"
+            if alpha > 0 else
+            "⚠️ 전략이 시장(KOSPI) 평균에 미치지 못함 — 알파(-)"
+        )
+        ui.label(alpha_msg).classes(
+            f"text-xs italic mt-1 text-center "
+            f"{'text-emerald-300' if alpha > 0 else 'text-red-300'}"
+        )
+    
+    # [Step AL+AM] 비용 안내 + 시장 비교 안내
     with ui.column().classes("w-full gap-1 mt-3"):
         ui.label(
-            f"💡 '비용 반영 추정'은 왕복 {DEFAULT_COST_PCT}%(매수/매도 수수료 + "
+            f"💡 '비용 반영'은 왕복 {cost_pct:.1f}%(매수/매도 수수료 + "
             f"거래세 0.18% + 슬리피지) 차감한 보수적 추정치입니다."
         ).classes("text-xs text-gray-400 leading-relaxed")
         
-        # [Step AL] 시장 비교는 KOSPI 데이터 통합 후 추가 예정
-        ui.label(
-            "📌 KOSPI 대비 알파(시장 초과 수익률)는 시장 데이터 통합 후 "
-            "다음 업데이트에서 제공할 예정입니다."
-        ).classes("text-xs text-gray-500 italic leading-relaxed")
+        if not bench_data:
+            # KOSPI 데이터 없을 때
+            ui.label(
+                "📌 KOSPI 알파는 bench_cache_latest.json 데이터가 있을 때 자동 표시됩니다."
+            ).classes("text-xs text-gray-500 italic leading-relaxed")
     
     # 표본 + 기간 정보
     with ui.row().classes("w-full justify-center gap-4 mt-2 flex-wrap"):
@@ -305,6 +448,10 @@ def _render_metrics_grid(cdf: pd.DataFrame):
                     ).classes("text-xs text-gray-500")
             except Exception:
                 pass
+        # 2% 도달률 안내
+        ui.label(
+            "💡 2% 도달률 등 추가 지표는 아래 Research Workbench에서 확인"
+        ).classes("text-xs text-gray-600 italic")
 
 
 def _render_metric_card(icon: str, label: str, value: str,
@@ -336,10 +483,158 @@ def _render_metric_card(icon: str, label: str, value: str,
 
 
 # ═══════════════════════════════════════════════════
+#  [Step AM] 차트 보기 모드별 빌더
+# ═══════════════════════════════════════════════════
+def _build_chart_by_mode(
+    cdf: pd.DataFrame,
+    mode: str,
+    bench_data: dict,
+    hold_days: int,
+    col_win: str = 'WIN_RATE_%',
+    col_ret: str = 'AVG_RET_%',
+):
+    """[Step AM] 모드별 Plotly figure 생성.
+    
+    Modes:
+        - performance: 승률 + 평균 수익률 (기본)
+        - risk: 평균 낙폭 + 최악 낙폭
+        - hit: 2% / 5% 도달률
+        - market: 전략 vs KOSPI 비교
+    """
+    if not PLOTLY_OK or cdf.empty:
+        return None
+    
+    common_layout = dict(
+        height=380,
+        autosize=True,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font_color='white',
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.12, x=0),
+        hoverlabel=dict(
+            bgcolor="#1a1a2e", font_size=13,
+            font_color="white", bordercolor="#444",
+        ),
+        margin=dict(l=20, r=20, t=50, b=40),
+    )
+    grid_props = dict(
+        gridcolor='rgba(255,255,255,0.05)',
+    )
+    
+    # ─── 모드 1: 성과 보기 ───
+    if mode == "performance":
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_trace(go.Bar(
+            x=cdf['Date'], y=cdf[col_win], name="승률(%)",
+            marker_color='#FFA726', opacity=0.6,
+            hovertemplate="<b>%{x}</b><br>승률: %{y:.1f}%<extra></extra>",
+        ), secondary_y=False)
+        fig.add_trace(go.Scatter(
+            x=cdf['Date'], y=cdf[col_ret], name="평균 수익률(%)",
+            mode='lines+markers',
+            line=dict(color='#29B6F6', width=3),
+            marker=dict(size=6),
+            hovertemplate="<b>%{x}</b><br>수익률: %{y:.2f}%<extra></extra>",
+        ), secondary_y=True)
+        fig.add_hline(y=0, line_dash="dot",
+                      line_color="rgba(255,255,255,0.3)", secondary_y=True)
+        fig.update_layout(**common_layout)
+        fig.update_yaxes(title_text="승률 (%)", range=[0, 100],
+                         gridcolor='rgba(255,255,255,0.1)', secondary_y=False)
+        fig.update_yaxes(title_text="수익률 (%)",
+                         gridcolor='rgba(255,255,255,0.05)', secondary_y=True)
+        fig.update_xaxes(**grid_props)
+        return fig
+    
+    # ─── 모드 2: 위험 보기 ───
+    elif mode == "risk":
+        fig = go.Figure()
+        if 'AVG_MDD_%' in cdf.columns:
+            fig.add_trace(go.Scatter(
+                x=cdf['Date'], y=cdf['AVG_MDD_%'], name="평균 낙폭(%)",
+                mode='lines+markers',
+                line=dict(color='#F59E0B', width=2),
+                marker=dict(size=5),
+                hovertemplate="<b>%{x}</b><br>평균 낙폭: %{y:.2f}%<extra></extra>",
+            ))
+        if 'WORST_MDD_%' in cdf.columns:
+            fig.add_trace(go.Scatter(
+                x=cdf['Date'], y=cdf['WORST_MDD_%'], name="최악 낙폭(%)",
+                mode='lines+markers',
+                line=dict(color='#EF4444', width=2, dash='dot'),
+                marker=dict(size=5),
+                hovertemplate="<b>%{x}</b><br>최악 낙폭: %{y:.2f}%<extra></extra>",
+            ))
+        fig.add_hline(y=0, line_dash="dot",
+                      line_color="rgba(255,255,255,0.3)")
+        fig.update_layout(**common_layout)
+        fig.update_yaxes(title_text="낙폭 (%)", **grid_props)
+        fig.update_xaxes(**grid_props)
+        return fig
+    
+    # ─── 모드 3: 도달률 보기 ───
+    elif mode == "hit":
+        fig = go.Figure()
+        if 'HIT_2%_%' in cdf.columns:
+            fig.add_trace(go.Scatter(
+                x=cdf['Date'], y=cdf['HIT_2%_%'], name="2% 도달률(%)",
+                mode='lines+markers',
+                line=dict(color='#22D3EE', width=2),
+                marker=dict(size=5),
+                hovertemplate="<b>%{x}</b><br>2% 도달률: %{y:.1f}%<extra></extra>",
+            ))
+        if 'HIT_5%_%' in cdf.columns:
+            fig.add_trace(go.Scatter(
+                x=cdf['Date'], y=cdf['HIT_5%_%'], name="5% 도달률(%)",
+                mode='lines+markers',
+                line=dict(color='#10B981', width=3),
+                marker=dict(size=6),
+                hovertemplate="<b>%{x}</b><br>5% 도달률: %{y:.1f}%<extra></extra>",
+            ))
+        fig.update_layout(**common_layout)
+        fig.update_yaxes(title_text="도달률 (%)", range=[0, 100], **grid_props)
+        fig.update_xaxes(**grid_props)
+        return fig
+    
+    # ─── 모드 4: 시장 비교 (KOSPI vs 전략) ───
+    elif mode == "market":
+        fig = go.Figure()
+        # 전략 평균 수익률
+        fig.add_trace(go.Scatter(
+            x=cdf['Date'], y=cdf[col_ret], name="전략 평균 수익률(%)",
+            mode='lines+markers',
+            line=dict(color='#29B6F6', width=3),
+            marker=dict(size=6),
+            hovertemplate="<b>%{x}</b><br>전략: %{y:.2f}%<extra></extra>",
+        ))
+        # KOSPI 동기간 수익률 (수평선)
+        kospi_ret = _get_kospi_return(bench_data, hold_days) if hold_days else None
+        if kospi_ret is not None:
+            fig.add_hline(
+                y=kospi_ret,
+                line_dash="dash",
+                line_color="#A78BFA",
+                line_width=2,
+                annotation_text=f"KOSPI {hold_days}영업일 수익률 {kospi_ret:+.2f}%",
+                annotation_position="top right",
+                annotation_font_color="#A78BFA",
+            )
+        fig.add_hline(y=0, line_dash="dot",
+                      line_color="rgba(255,255,255,0.3)")
+        fig.update_layout(**common_layout)
+        fig.update_yaxes(title_text="수익률 (%)", **grid_props)
+        fig.update_xaxes(**grid_props)
+        return fig
+    
+    return None
+
+
+# ═══════════════════════════════════════════════════
 #  메인 렌더링
 # ═══════════════════════════════════════════════════
 def render_tab_perf():
-    """[Step AK] 시스템 성과 추세 — 면책 + 6개 메트릭 + 모바일 대응"""
+    """[Step AK+AL+AM] 시스템 성과 추세 — 면책 + 6개 메트릭 + 모바일 + KOSPI 알파"""
     
     # ─── 헤더 ───
     with ui.row().classes("w-full items-center justify-between mb-3 flex-wrap gap-2"):
@@ -356,6 +651,9 @@ def render_tab_perf():
 
     # ─── 데이터 로드 ───
     history = _load_history()
+    
+    # [Step AM] KOSPI 벤치마크 로드
+    bench_data = _load_bench_cache()
 
     if history.empty:
         with ui.card().classes(
@@ -394,6 +692,8 @@ def render_tab_perf():
     with ui.row().classes("w-full items-center gap-2 mb-3 flex-wrap"):
         ui.badge(f"📊 {n_files}일 누적").props("color=cyan").classes("text-xs")
         ui.badge(f"🔬 {len(history):,}개 검증 결과").props("color=indigo").classes("text-xs")
+        if bench_data and "KOSPI" in bench_data:
+            ui.badge("📈 KOSPI 벤치마크 사용").props("color=green").classes("text-xs")
 
     # ─── 필터 (사용자 친화 라벨) ───
     methods = sorted(history['METHOD'].unique()) if 'METHOD' in history.columns else []
@@ -442,6 +742,30 @@ def render_tab_perf():
         "text-xs text-gray-400 italic mb-3 pl-1"
     )
     
+    # ─── [Step AM] 차트 보기 모드 + 거래비용 가정 ───
+    with ui.row().classes("w-full gap-3 flex-wrap mb-3"):
+        # 차트 보기 모드
+        chart_mode_options = {
+            "performance": "📊 성과 보기 (승률 + 수익률)",
+            "risk": "⚠️ 위험 보기 (평균 + 최악 낙폭)",
+            "hit": "🎯 도달률 보기 (2% / 5%)",
+        }
+        if bench_data and "KOSPI" in bench_data:
+            chart_mode_options["market"] = "📈 시장 비교 (전략 vs KOSPI)"
+        
+        sel_chart_mode = ui.select(
+            options=chart_mode_options,
+            value="performance",
+            label="📈 차트 보기",
+        ).classes("flex-1 min-w-[200px]").props("outlined dense")
+        
+        # 거래비용 가정
+        sel_cost = ui.select(
+            options=COST_OPTIONS,
+            value=DEFAULT_COST_PCT,
+            label="💵 거래비용 가정",
+        ).classes("flex-1 min-w-[180px]").props("outlined dense")
+    
     chart_area = ui.column().classes("w-full")
 
     def _build_chart():
@@ -464,6 +788,11 @@ def render_tab_perf():
             cdf['Date'] = cdf['Date'].apply(
                 lambda x: x.strftime('%Y-%m-%d') if isinstance(x, pd.Timestamp) else str(x)
             )
+        
+        # [Step AM] 현재 선택된 차트 모드 + 비용률
+        chart_mode = sel_chart_mode.value if sel_chart_mode else "performance"
+        cost_pct = float(sel_cost.value) if sel_cost else DEFAULT_COST_PCT
+        current_hold = int(sel_h.value) if sel_h and sel_h.value else None
 
         with chart_area:
             if cdf.empty:
@@ -478,91 +807,30 @@ def render_tab_perf():
                     )
                 return
 
-            # ─── 차트 ───
+            # ─── [Step AM] 차트 보기 모드별 trace 분기 ───
             if PLOTLY_OK:
-                fig = make_subplots(specs=[[{"secondary_y": True}]])
-                
-                # 1) 승률 막대 (왼쪽 축)
-                fig.add_trace(
-                    go.Bar(
-                        x=cdf['Date'], y=cdf[col_win],
-                        name="승률(%)",
-                        marker_color='#FFA726',
-                        opacity=0.6,
-                        hovertemplate="<b>%{x}</b><br>승률: %{y:.1f}%<extra></extra>",
-                    ),
-                    secondary_y=False,
+                fig = _build_chart_by_mode(
+                    cdf=cdf,
+                    mode=chart_mode,
+                    bench_data=bench_data,
+                    hold_days=current_hold,
+                    col_win=col_win,
+                    col_ret=col_ret,
                 )
-                
-                # 2) 평균 수익률 라인 (오른쪽 축)
-                fig.add_trace(
-                    go.Scatter(
-                        x=cdf['Date'], y=cdf[col_ret],
-                        name="평균 수익률(%)",
-                        mode='lines+markers',
-                        line=dict(color='#29B6F6', width=3),
-                        marker=dict(size=6),
-                        hovertemplate="<b>%{x}</b><br>평균 수익률: %{y:.2f}%<extra></extra>",
-                    ),
-                    secondary_y=True,
-                )
-                
-                # 3) [Step AL] 평균 낙폭(MDD) 라인 (오른쪽 축, 빨간 점선)
-                # MDD는 위험 추세 — 사용자가 위험 변화도 시각적으로 파악
-                if 'AVG_MDD_%' in cdf.columns:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=cdf['Date'], y=cdf['AVG_MDD_%'],
-                            name="평균 낙폭(%)",
-                            mode='lines',
-                            line=dict(color='#EF4444', width=2, dash='dot'),
-                            opacity=0.85,
-                            hovertemplate="<b>%{x}</b><br>평균 낙폭: %{y:.2f}%<extra></extra>",
-                        ),
-                        secondary_y=True,
-                    )
-                
-                # 0% 기준선 (수익률)
-                fig.add_hline(
-                    y=0, line_dash="dot", line_color="rgba(255,255,255,0.3)",
-                    secondary_y=True,
-                )
-                fig.update_layout(
-                    height=380,
-                    autosize=True,
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    font_color='white',
-                    hovermode="x unified",
-                    legend=dict(orientation="h", y=1.12, x=0),
-                    hoverlabel=dict(
-                        bgcolor="#1a1a2e", font_size=13,
-                        font_color="white", bordercolor="#444",
-                    ),
-                    margin=dict(l=20, r=20, t=50, b=40),
-                )
-                fig.update_yaxes(
-                    title_text="승률 (%)",
-                    range=[0, 100],
-                    gridcolor='rgba(255,255,255,0.1)',
-                    secondary_y=False,
-                )
-                fig.update_yaxes(
-                    title_text="수익률 / 낙폭 (%)",
-                    gridcolor='rgba(255,255,255,0.05)',
-                    secondary_y=True,
-                )
-                fig.update_xaxes(
-                    gridcolor='rgba(255,255,255,0.05)',
-                )
-                ui.plotly(fig).classes("w-full")
+                if fig:
+                    ui.plotly(fig).classes("w-full")
             else:
                 ui.label("⚠️ Plotly 미설치 — 차트 표시 불가").classes(
                     "text-amber-400 p-4"
                 )
 
-            # ─── 메트릭 6개 ───
-            _render_metrics_grid(cdf)
+            # ─── 메트릭 (cost_pct + bench 전달) ───
+            _render_metrics_grid(
+                cdf,
+                cost_pct=cost_pct,
+                bench_data=bench_data,
+                hold_days=current_hold,
+            )
             
             # ─── 추가 안내 ───
             with ui.card().classes(
@@ -575,7 +843,8 @@ def render_tab_perf():
                     "(통상 0.3~0.5% 수준)."
                 ).classes("text-xs text-gray-400 leading-relaxed")
 
-    for w in [sel_m, sel_k, sel_h]:
+    # [Step AM] 차트 모드 + 비용 select도 변경 시 차트 재빌드
+    for w in [sel_m, sel_k, sel_h, sel_chart_mode, sel_cost]:
         if w:
             w.on("update:model-value", lambda _: _build_chart())
     _build_chart()
