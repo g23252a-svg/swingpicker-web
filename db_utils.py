@@ -40,15 +40,18 @@ USER_DB_FILE = "users_db.json"
 INQUIRY_DB_FILE = "inquiries_db.json"
 # [Step AX] 관리자 감사 로그 — Gist 백업 (분쟁 대응 / Railway 재배포 보호)
 ADMIN_ACTIONS_DB_FILE = "admin_actions_db.json"
+# [Step BA] 결제 기록 — Gist 백업 (회귀 복구 / 결제 분쟁 대응)
+PAYMENT_DB_FILE = "payments_db.json"
 
-# [Step AX] 테이블 → Gist 파일명 통일 매핑 (회귀 방지)
+# [Step AX+BA] 테이블 → Gist 파일명 통일 매핑 (회귀 방지)
 TABLE_TO_GIST_FILE = {
     "users": USER_DB_FILE,
     "inquiries": INQUIRY_DB_FILE,
     "admin_actions": ADMIN_ACTIONS_DB_FILE,
+    "payments": PAYMENT_DB_FILE,  # [Step BA] 회귀 복구
 }
 
-# [Step AX] 테이블별 컬럼 정의 (Gist 직렬화용)
+# [Step AX+BA] 테이블별 컬럼 정의 (Gist 직렬화용)
 TABLE_COLUMNS = {
     "users": [
         "id", "password", "salt", "nickname", "role", "join_date",
@@ -61,6 +64,10 @@ TABLE_COLUMNS = {
     "admin_actions": [
         "id", "admin_email", "action_type", "target_email",
         "details", "timestamp",
+    ],
+    "payments": [
+        "order_id", "payment_key", "email", "plan", "amount", "status",
+        "method", "approved_at", "receipt_url", "created_at", "error_message",
     ],
 }
 
@@ -281,6 +288,32 @@ class LDYDBManager:
             )
         """)
 
+        # [v22 Step W+BA] 결제 기록 테이블 — orderId UNIQUE로 중복 방지
+        # status: success / failed / amount_mismatch / duplicate / refunded
+        self._exec_sqlite("""
+            CREATE TABLE IF NOT EXISTS payments (
+                order_id TEXT PRIMARY KEY,
+                payment_key TEXT,
+                email TEXT,
+                plan TEXT,
+                amount INTEGER,
+                status TEXT,
+                method TEXT,
+                approved_at TEXT,
+                receipt_url TEXT,
+                created_at TEXT,
+                error_message TEXT
+            )
+        """)
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_payments_email "
+            "ON payments (email)"
+        )
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_payments_status "
+            "ON payments (status)"
+        )
+
         # ── DuckDB: OLAP 테이블 ──
         self.execute_safe("""
             CREATE TABLE IF NOT EXISTS daily_recommend (
@@ -328,6 +361,8 @@ class LDYDBManager:
             self._load_inquiries_from_gist()
             # [Step AY] admin_actions 복구 로드 — 감사 로그 영구 보존
             self._load_admin_actions_from_gist()
+            # [Step BA] payments 복구 로드 — 결제 기록 영구 보존
+            self._load_payments_from_gist()
             self._gist_loaded = True
         except Exception as e:
             _logger.warning(f"Gist 초기 로드 실패 (DB는 정상): {e}")
@@ -343,8 +378,11 @@ class LDYDBManager:
                 return {}
             files = resp.json().get("files", {})
             result = {}
-            # [Step AY] admin_actions_db.json 추가 (감사 로그 복구)
-            for fname in [USER_DB_FILE, INQUIRY_DB_FILE, ADMIN_ACTIONS_DB_FILE]:
+            # [Step AY+BA] 모든 백업 파일 포함
+            for fname in [
+                USER_DB_FILE, INQUIRY_DB_FILE,
+                ADMIN_ACTIONS_DB_FILE, PAYMENT_DB_FILE,  # [BA] payments
+            ]:
                 if fname in files:
                     content = files[fname].get("content", "")
                     if content:
@@ -362,6 +400,9 @@ class LDYDBManager:
         # [Step AY] admin_actions 복구 적용
         if ADMIN_ACTIONS_DB_FILE in downloaded:
             self._insert_gist_admin_actions(downloaded[ADMIN_ACTIONS_DB_FILE])
+        # [Step BA] payments 복구 적용
+        if PAYMENT_DB_FILE in downloaded:
+            self._insert_gist_payments(downloaded[PAYMENT_DB_FILE])
 
     def _insert_gist_users(self, data):
         if not data:
@@ -521,6 +562,59 @@ class LDYDBManager:
         """[Step AY] admin_actions Gist 복구 로드 (감사 로그 보존)"""
         self._load_gist_to_table(ADMIN_ACTIONS_DB_FILE, "admin_actions")
 
+    def _insert_gist_payments(self, data):
+        """[Step BA] payments Gist → SQLite 복구 (결제 기록 보존)
+        
+        order_id가 PRIMARY KEY이므로 INSERT OR REPLACE로 멱등 보장.
+        """
+        if not data or not isinstance(data, list):
+            return
+        try:
+            inserted = updated = 0
+            for item in data:
+                order_id = item.get('order_id', '')
+                if not order_id:
+                    continue
+                
+                # 기존 row 존재 여부 (통계용)
+                existing = self._exec_sqlite_one(
+                    "SELECT order_id FROM payments WHERE order_id = ?",
+                    (order_id,)
+                )
+                
+                self._exec_sqlite(
+                    """INSERT OR REPLACE INTO payments
+                    (order_id, payment_key, email, plan, amount, status,
+                     method, approved_at, receipt_url, created_at, error_message)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        order_id,
+                        item.get('payment_key', ''),
+                        item.get('email', ''),
+                        item.get('plan', ''),
+                        item.get('amount', 0),
+                        item.get('status', ''),
+                        item.get('method', ''),
+                        item.get('approved_at', ''),
+                        item.get('receipt_url', ''),
+                        item.get('created_at', ''),
+                        item.get('error_message', ''),
+                    )
+                )
+                if existing:
+                    updated += 1
+                else:
+                    inserted += 1
+            _logger.info(
+                f" payments 적용 완료 (신규 {inserted}건 / 업데이트 {updated}건)"
+            )
+        except Exception as e:
+            _logger.warning(f" payments INSERT 실패: {e}")
+
+    def _load_payments_from_gist(self):
+        """[Step BA] payments Gist 복구 로드 (결제 분쟁 대응)"""
+        self._load_gist_to_table(PAYMENT_DB_FILE, "payments")
+
     def _load_gist_to_table(self, filename, tablename):
         if not GIST_ID or not GIST_TOKEN:
             _logger.warning(f" [Gist] {tablename} 로드 스킵 — Gist 인증 키 없음")
@@ -549,6 +643,9 @@ class LDYDBManager:
             elif tablename == 'admin_actions':
                 # [Step AY] admin_actions 복구 분기
                 self._insert_gist_admin_actions(data)
+            elif tablename == 'payments':
+                # [Step BA] payments 복구 분기
+                self._insert_gist_payments(data)
 
         except Exception as e:
             _logger.error(f" [Gist] {tablename} 로드 실패: {e}", exc_info=True)
@@ -736,6 +833,157 @@ class LDYDBManager:
             self._mark_gist_dirty("users")
         except Exception as e:
             _logger.warning(f"구독 업데이트 실패: {e}", exc_info=True)
+
+    # ═══════════════════════════════════════════
+    #  [v22 Step W+BA] 결제 기록 메서드 — payments 테이블
+    # ═══════════════════════════════════════════
+    def get_user_prime_expire(self, email):
+        """[Step W+BA] 사용자의 현재 Prime 만료일 조회 (조기 갱신용).
+        
+        Returns:
+            datetime or None
+        """
+        try:
+            row = self._exec_sqlite_one(
+                "SELECT prime_expire_date, role FROM users WHERE id = ?", (email,)
+            )
+            if not row:
+                return None
+            expire_str, role = row
+            if not expire_str:
+                return None
+            # role이 prime/pro가 아니면 만료된 것으로 간주
+            if (role or "").lower() not in ("prime", "pro"):
+                return None
+            try:
+                # "2026-04-30" 또는 "2026-04-30 00:00:00" 처리
+                date_part = str(expire_str).split(" ")[0]
+                return datetime.strptime(date_part, "%Y-%m-%d")
+            except Exception:
+                return None
+        except Exception as e:
+            _logger.warning(f"Prime 만료일 조회 실패: {e}")
+            return None
+
+    def is_payment_processed(self, order_id: str) -> bool:
+        """[Step W+BA] orderId가 이미 처리되었는지 확인 (DB 기반 중복 방지).
+        
+        메모리 set 보다 안정적: 서버 재시작/멀티 인스턴스에서도 작동.
+        """
+        try:
+            row = self._exec_sqlite_one(
+                "SELECT order_id FROM payments WHERE order_id = ? AND status = ?",
+                (order_id, "success")
+            )
+            return row is not None
+        except Exception as e:
+            _logger.warning(f"결제 중복 체크 실패: {e}")
+            return False
+
+    def record_payment(
+        self,
+        order_id: str,
+        payment_key: str,
+        email: str,
+        plan: str,
+        amount: int,
+        status: str,
+        method: str = "",
+        approved_at: str = "",
+        receipt_url: str = "",
+        error_message: str = "",
+    ) -> bool:
+        """[Step W+BA] 결제 기록 저장 (성공/실패/금액불일치/중복/환불 모두).
+        
+        Args:
+            status: success / failed / amount_mismatch / duplicate / refunded
+        
+        Returns:
+            True if recorded successfully
+        """
+        try:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._exec_sqlite(
+                """INSERT OR REPLACE INTO payments
+                (order_id, payment_key, email, plan, amount, status,
+                 method, approved_at, receipt_url, created_at, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (order_id, payment_key, email, plan, amount, status,
+                 method, approved_at, receipt_url, now_str, error_message)
+            )
+            # [Step BA] Gist 백업 트리거
+            self._mark_gist_dirty("payments")
+            _logger.info(
+                f"💳 결제 기록 저장: {order_id} / {email} / {plan} / "
+                f"{amount:,}원 / {status}"
+            )
+            return True
+        except Exception as e:
+            _logger.error(f"결제 기록 저장 실패: {e}", exc_info=True)
+            return False
+
+    def get_payment(self, order_id: str) -> dict:
+        """[Step W+BA] 주문 ID로 결제 기록 조회"""
+        try:
+            row = self._exec_sqlite_one(
+                """SELECT order_id, payment_key, email, plan, amount, status,
+                          method, approved_at, receipt_url, created_at, error_message
+                   FROM payments WHERE order_id = ?""",
+                (order_id,)
+            )
+            if not row:
+                return {}
+            cols = ["order_id", "payment_key", "email", "plan", "amount", "status",
+                    "method", "approved_at", "receipt_url", "created_at", "error_message"]
+            return dict(zip(cols, row))
+        except Exception as e:
+            _logger.warning(f"결제 기록 조회 실패: {e}")
+            return {}
+
+    def get_user_payments(self, email: str, limit: int = 20) -> list:
+        """[Step W+BA] 사용자의 결제 이력 조회 (최근순)"""
+        try:
+            rows = self._exec_sqlite(
+                """SELECT order_id, plan, amount, status, method,
+                          approved_at, receipt_url, created_at
+                   FROM payments WHERE email = ?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (email, limit), fetch=True
+            )
+            cols = ["order_id", "plan", "amount", "status", "method",
+                    "approved_at", "receipt_url", "created_at"]
+            return [dict(zip(cols, r)) for r in (rows or [])]
+        except Exception as e:
+            _logger.warning(f"사용자 결제 이력 조회 실패: {e}")
+            return []
+
+    def get_all_payments(self, status: str = None, limit: int = 1000) -> list:
+        """[Step BA] 전체 결제 기록 조회 (관리자 매출 통계용).
+        
+        Args:
+            status: 'success' / 'failed' / 'refunded' / None (모두)
+        """
+        try:
+            if status:
+                rows = self._exec_sqlite(
+                    "SELECT order_id, payment_key, email, plan, amount, status, "
+                    "method, approved_at, receipt_url, created_at, error_message "
+                    "FROM payments WHERE status = ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (status, limit), fetch=True,
+                )
+            else:
+                rows = self._exec_sqlite(
+                    "SELECT order_id, payment_key, email, plan, amount, status, "
+                    "method, approved_at, receipt_url, created_at, error_message "
+                    "FROM payments ORDER BY created_at DESC LIMIT ?",
+                    (limit,), fetch=True,
+                )
+            cols = TABLE_COLUMNS["payments"]
+            return [dict(zip(cols, r)) for r in (rows or [])]
+        except Exception as e:
+            _logger.warning(f"전체 결제 조회 실패: {e}")
+            return []
 
     def grant_all_users_trial(self, days=14):
         try:
