@@ -2,34 +2,25 @@
 """
 trade_journal_tab.py — 매매 복기(Trading Journal) 탭
 ═══════════════════════════════════════════════════════════
-[v22 Step AQ+AR] 전면 리팩토링 — 68 → 95점 목표
+[v22 Step AQ+AR+AS] 전면 리팩토링 — 68 → 97점 목표
 
 ⚠️ 보안 핵심: 사용자별 데이터 격리 (user_email_hash)
-- 이전: 모든 사용자가 같은 SQLite DB 공유 → 보안 사고 위험
-- 현재: 각 사용자 본인 기록만 표시/수정/삭제 가능
-- 마이그레이션: 기존 데이터는 'legacy' 라벨 + 관리자만 접근
 
-개선 사항 (Step AQ):
-1. ✅ 사용자별 데이터 격리 (user_email_hash 컬럼 + 마이그레이션)
-2. ✅ 면책 + 데이터 백업 안내
-3. ✅ 종목 자동 채움 (df_scored 활용)
-4. ✅ 청산 UX 개선 (행 클릭 → 모달)
-5. ✅ 필터 5종 + 검색
-6. ✅ 추가 메트릭 (Sharpe, MDD, 연승/연패)
-7. ✅ 차트 보기 모드 4종
-8. ✅ CSV 다운로드
-9. ✅ 모바일 반응형 + 사용자 친화 라벨
-
-추가 개선 (Step AR):
-10. ✅ _get_user_key() 통일 helper (email/login_id/id/username/user_id fallback)
-11. ✅ DB 경로 명시 (os.path.abspath, 루트 위치 검증)
-12. ✅ 삭제 확인 다이얼로그 (실수 방지)
-13. ✅ 청산 메모 append (진입 메모 + [청산 메모 ts] 첨가)
-14. ✅ Gist 동기화 (계정별 자동 백업 — trade_journal_<user_hash>.json)
+개선 사항 (Step AQ): 사용자 격리, 면책, 자동채움, 청산모달, 필터, 메트릭, 차트, CSV
+개선 사항 (Step AR): user_key 통일, abspath, 삭제확인, 메모append, Gist sync
+개선 사항 (Step AS — 사용성 + 백업 안전성):
+15. ✅ 자동 채움 부각 — 큰 카드 + 자동 채움된 정보 즉시 표시
+16. ✅ 메인 입력 폼 단순화 — 체결가/수량/메모만 main, 나머지는 자동/접힘
+17. ✅ Gist 백업은 항상 전체 기록 (필터 무시) — 데이터 유실 방지
+18. ✅ journal_uid 자동 생성 (tags JSON에 저장) — 안전한 중복 키
+19. ✅ 저장/청산/삭제 후 자동 백업 시도 (silent)
+20. ✅ 백업 상태 배지 (마지막 백업 시각 / 변경사항 있음)
+21. ✅ Gist 복원 확인 다이얼로그
+22. ✅ DB 경로 환경변수 우선 (LDY_DATA_DIR)
 
 저장소: 
-- 로컬: SQLite ldy_trader.db (trade_journal 테이블)
-- 백업: Gist (LDY_GIST_ID/TOKEN 환경변수)
+- 로컬: SQLite ldy_trader.db (LDY_DATA_DIR 환경변수 우선)
+- 백업: Gist (LDY_GIST_ID/TOKEN, 자동 시도)
 """
 
 import os
@@ -46,12 +37,15 @@ logger = logging.getLogger("trade_journal")
 # ─────────────────────────────────────────────
 #  DB 경로
 # ─────────────────────────────────────────────
-# [Step AR] DB 경로 명시 — trade_journal_tab.py는 루트 위치
-# (components/ 안의 파일이라면 dirname(dirname(__file__)) 사용)
-# Railway/Docker 볼륨 마운트: /app/data 가 영구 저장소
-_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+# [Step AR+AS] DB 경로 — 환경변수 우선 (Railway/Docker 안전)
+# Railway 볼륨: railway.toml에 [[mounts]] source="data" target="/app/data" 설정 필요
+_DATA_DIR = os.getenv(
+    "LDY_DATA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"),
+)
 os.makedirs(_DATA_DIR, exist_ok=True)
 _DB_PATH = os.path.join(_DATA_DIR, "ldy_trader.db")
+logger.info(f"📂 매매일지 DB: {_DB_PATH}")
 
 # [Step AQ] user_email_hash 컬럼 추가 + 인덱스
 _CREATE_SQL = """
@@ -164,8 +158,29 @@ def _get_user_hash() -> Optional[str]:
 # ─────────────────────────────────────────────
 #  CRUD (모두 user_email_hash 필수)
 # ─────────────────────────────────────────────
+def _generate_journal_uid(user_hash: str, entry: dict) -> str:
+    """[Step AS] 거래 고유 식별자 생성 — Gist 복원 시 안전한 중복 키.
+    
+    구성: user_hash + created_at + stock_code + actual_price + qty
+    → SHA256 16자 (충돌 가능성 매우 낮음)
+    
+    같은 종목 동일 시각 분할 매수도 actual_price/qty 차이로 구분.
+    """
+    import hashlib
+    parts = [
+        str(user_hash or ""),
+        str(entry.get("created_at", "")),
+        str(entry.get("stock_code", "")),
+        str(entry.get("actual_price", "") or ""),
+        str(entry.get("qty", "") or ""),
+        str(entry.get("recommend_price", "") or ""),
+    ]
+    raw = "|".join(parts)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 def save_trade(entry: dict, user_hash: str) -> int:
-    """[Step AQ] 신규 거래 기록 저장 — user_hash 필수."""
+    """[Step AQ+AS] 신규 거래 기록 저장 — user_hash 필수, journal_uid 자동 생성."""
     if not user_hash:
         return -1
     conn = _get_conn()
@@ -186,7 +201,18 @@ def save_trade(entry: dict, user_hash: str) -> int:
             elif profit < 0:
                 outcome = "LOSS"
 
-        tags = json.dumps(entry.get("tags", []), ensure_ascii=False)
+        # [Step AS] journal_uid 생성 (tags에 저장 — 스키마 변경 없이)
+        created_at = entry.get("created_at", now)
+        full_entry = dict(entry, created_at=created_at)
+        journal_uid = _generate_journal_uid(user_hash, full_entry)
+        
+        # tags JSON에 journal_uid 포함
+        existing_tags = entry.get("tags", [])
+        if isinstance(existing_tags, list):
+            tags_obj = {"_uid": journal_uid, "tags": existing_tags}
+        else:
+            tags_obj = {"_uid": journal_uid, "tags": []}
+        tags = json.dumps(tags_obj, ensure_ascii=False)
 
         cur = conn.execute(
             """INSERT INTO trade_journal
@@ -196,7 +222,7 @@ def save_trade(entry: dict, user_hash: str) -> int:
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 user_hash,
-                entry.get("created_at", now),
+                created_at,
                 entry.get("stock_name", ""),
                 entry.get("stock_code", ""),
                 entry.get("direction", "LONG"),
@@ -219,6 +245,20 @@ def save_trade(entry: dict, user_hash: str) -> int:
         return -1
     finally:
         conn.close()
+
+
+def _extract_journal_uid(trade: dict) -> str:
+    """[Step AS] tags에서 journal_uid 추출 (없으면 빈 문자열)"""
+    try:
+        tags_raw = trade.get("tags", "")
+        if not tags_raw:
+            return ""
+        tags_obj = json.loads(tags_raw) if isinstance(tags_raw, str) else tags_raw
+        if isinstance(tags_obj, dict):
+            return tags_obj.get("_uid", "")
+        return ""
+    except Exception:
+        return ""
 
 
 def load_trades(user_hash: str, limit: int = 200) -> List[Dict]:
@@ -616,19 +656,20 @@ def render_trade_journal_tab(df_scored=None):
     # ─── 면책 ───
     _render_disclaimer(ui)
 
-    # ─── df_scored 자동채움 매핑 ───
+    # ─── df_scored 자동채움 매핑 (강화) ───
     stock_options = {}
     stock_meta = {}
     if df_scored is not None and not df_scored.empty:
         try:
-            for _, row in df_scored.head(200).iterrows():
-                name = str(row.get("종목명", ""))
-                code = str(row.get("종목코드", ""))
+            for _, row in df_scored.head(300).iterrows():
+                name = str(row.get("종목명", "")).strip()
+                code = str(row.get("종목코드", "")).strip()
                 if not name or not code:
                     continue
+                # 검색 키 — 사용자가 종목명/코드 둘 다 검색 가능
                 key = f"{name} ({code})"
                 stock_options[key] = key
-                # 자동채움 데이터
+                # 자동채움 데이터 (가능한 모든 필드)
                 close = float(row.get("종가", 0) or 0)
                 stop = float(row.get("손절가", 0) or 0)
                 tp1_pct = float(row.get("TP1_PCT", 0) or 0)
@@ -642,67 +683,170 @@ def render_trade_journal_tab(df_scored=None):
                     "route": str(row.get("ROUTE", "")),
                     "score": float(row.get("DISPLAY_SCORE", 0) or 0),
                 }
+            logger.info(
+                f"📊 자동채움 종목 {len(stock_meta)}개 매핑 완료"
+            )
         except Exception as e:
-            logger.debug(f"df_scored 매핑 오류: {e}")
+            logger.warning(f"df_scored 매핑 오류: {e}")
 
-    # ─── 입력 폼 (자동채움 포함) ───
+    # ─── [Step AS] 입력 폼 — 자동 채움 부각 ───
     with ui.expansion(
-        "✏️ 새 매매 기록 추가", value=True
+        "✏️ 새 매매 기록 추가",
+        value=True,
     ).classes("w-full mb-4"):
-        # [Step AQ] 종목 자동검색/채움
+        # [Step AS] 종목 자동검색 — 메인 입력으로 부각 (큰 카드)
         if stock_options:
-            search_select = ui.select(
-                options=list(stock_options.keys())[:200],
-                label="🔍 종목 검색 (오늘 추천 목록 — 자동 채움)",
-                with_input=True,
-            ).classes("w-full mb-2").props("outlined dense clearable")
+            with ui.card().classes(
+                "w-full p-3 mb-3 bg-cyan-900/20 "
+                "border border-cyan-500/40 rounded-xl"
+            ):
+                with ui.row().classes("w-full items-center gap-2 mb-2"):
+                    ui.label("🔍").classes("text-2xl")
+                    with ui.column().classes("gap-0 flex-1"):
+                        ui.label(
+                            "오늘 추천 종목 자동 채움"
+                        ).classes("text-sm font-bold text-cyan-300")
+                        ui.label(
+                            f"{len(stock_options)}개 종목 검색 가능 — "
+                            "선택하면 종목명/코드/추천가/손절/목표/ROUTE/점수 "
+                            "7개 필드 자동 입력"
+                        ).classes("text-xs text-gray-300")
+                
+                search_select = ui.select(
+                    options=list(stock_options.keys())[:300],
+                    label="🔍 종목명 또는 종목코드로 검색",
+                    with_input=True,
+                    clearable=True,
+                ).classes("w-full").props(
+                    "outlined dense behavior=menu"
+                )
+                
+                ui.label(
+                    "💡 입력하면 매수일/체결가/수량만 직접 입력하면 됩니다"
+                ).classes("text-xs text-cyan-200 italic mt-2")
         else:
             search_select = None
+            with ui.card().classes(
+                "w-full p-2 mb-3 bg-amber-900/20 "
+                "border border-amber-500/40 rounded-lg"
+            ):
+                ui.label(
+                    "⚠️ 오늘 추천 데이터를 불러올 수 없어 자동 채움이 비활성화됩니다. "
+                    "수동 입력으로 진행하세요."
+                ).classes("text-xs text-amber-200")
+
+        # [Step AS] 자동 채움된 종목 정보 표시 (읽기 전용 카드)
+        # 사용자가 [🔍 종목 검색]에서 선택하면 이 카드에 자동 채워진 정보 표시
+        autofilled_card = ui.card().classes(
+            "w-full p-3 mb-3 bg-[#0a0a14] border border-gray-700/50 "
+            "rounded-lg hidden"
+        )
+        with autofilled_card:
+            ui.label(
+                "📋 자동 채움된 종목 정보"
+            ).classes("text-xs font-bold text-gray-300 mb-2")
+            autofilled_content = ui.row().classes("w-full gap-3 flex-wrap")
+
+        # [Step AS] 메인 입력 — 체결가/수량/메모만 필수
+        ui.label(
+            "📝 매수 정보 (체결가/수량/메모만 입력)"
+        ).classes("text-sm font-bold text-white mt-2 mb-1")
 
         with ui.row().classes("w-full gap-3 flex-wrap"):
-            f_name = ui.input("종목명").classes("flex-1 min-w-[150px]")
-            f_code = ui.input("종목코드").classes("min-w-[120px]")
-            f_route = ui.select(
-                ["ATTACK", "ARMED", "WAIT", "NEUTRAL"],
-                value="ATTACK",
-                label="시스템 상태",
-            ).classes("min-w-[140px]")
-            f_score = ui.number(
-                "시스템 점수", value=0, min=0, max=100,
-            ).classes("min-w-[120px]")
+            f_act = ui.number(
+                "💰 실제 체결가 (필수)", value=0, min=0,
+            ).classes("flex-1 min-w-[180px]").props("outlined dense")
+            f_qty = ui.number(
+                "📦 수량 (필수)", value=0, min=0,
+            ).classes("flex-1 min-w-[140px]").props("outlined dense")
 
-        with ui.row().classes("w-full gap-3 flex-wrap"):
-            f_rec = ui.number("추천 매수가", value=0, min=0).classes("flex-1 min-w-[120px]")
-            f_act = ui.number("실제 체결가", value=0, min=0).classes("flex-1 min-w-[120px]")
-            f_stop = ui.number("손절가", value=0, min=0).classes("flex-1 min-w-[120px]")
-            f_tgt = ui.number("목표가 (T1)", value=0, min=0).classes("flex-1 min-w-[120px]")
-            f_qty = ui.number("수량", value=0, min=0).classes("min-w-[100px]")
+        # [Step AS] 자동 채움 필드 — 접힌 상태로 (수정 가능)
+        with ui.expansion(
+            "⚙️ 자동 채움 필드 수정 (필요 시)",
+            value=False,
+        ).classes("w-full mt-1"):
+            with ui.row().classes("w-full gap-3 flex-wrap"):
+                f_name = ui.input("종목명").classes("flex-1 min-w-[150px]").props("outlined dense")
+                f_code = ui.input("종목코드").classes("min-w-[120px]").props("outlined dense")
+                f_route = ui.select(
+                    ["ATTACK", "ARMED", "WAIT", "NEUTRAL"],
+                    value="ATTACK",
+                    label="시스템 상태",
+                ).classes("min-w-[140px]").props("outlined dense")
+                f_score = ui.number(
+                    "시스템 점수", value=0, min=0, max=100,
+                ).classes("min-w-[120px]").props("outlined dense")
+
+            with ui.row().classes("w-full gap-3 flex-wrap"):
+                f_rec = ui.number(
+                    "추천 매수가", value=0, min=0,
+                ).classes("flex-1 min-w-[120px]").props("outlined dense")
+                f_stop = ui.number(
+                    "손절가", value=0, min=0,
+                ).classes("flex-1 min-w-[120px]").props("outlined dense")
+                f_tgt = ui.number(
+                    "목표가 (T1)", value=0, min=0,
+                ).classes("flex-1 min-w-[120px]").props("outlined dense")
 
         f_notes = ui.input(
-            "메모", placeholder="진입 근거, 특이사항 등"
-        ).classes("w-full")
+            "📝 메모 (선택)",
+            placeholder="진입 근거, 특이사항 등",
+        ).classes("w-full mt-2").props("outlined dense")
         save_msg = ui.label("").classes("text-sm mt-1")
 
-        # 자동채움 핸들러
+        # [Step AS] 자동 채움 핸들러 — 카드 표시 + 모든 필드 자동
         def on_stock_select(e):
             if not e.value or e.value not in stock_meta:
+                # 선택 해제
+                autofilled_card.classes(replace="hidden")
                 return
             meta = stock_meta[e.value]
+            # 모든 필드 자동 채움
             f_name.value = meta["name"]
             f_code.value = meta["code"]
             f_rec.value = meta["close"]
             f_stop.value = meta["stop"]
             f_tgt.value = meta["target"]
-            f_route.value = meta["route"] if meta["route"] in ("ATTACK", "ARMED", "WAIT", "NEUTRAL") else "NEUTRAL"
+            f_route.value = (
+                meta["route"]
+                if meta["route"] in ("ATTACK", "ARMED", "WAIT", "NEUTRAL")
+                else "NEUTRAL"
+            )
             f_score.value = meta["score"]
-            ui.notify(f"✅ {meta['name']} 자동 채움 완료", type="positive")
+
+            # 자동 채움 카드 표시 (사용자가 무엇이 채워졌는지 즉시 인지)
+            autofilled_content.clear()
+            with autofilled_content:
+                with ui.column().classes("gap-1"):
+                    ui.label(f"🏷️ {meta['name']} ({meta['code']})").classes(
+                        "text-sm font-bold text-cyan-300"
+                    )
+                    with ui.row().classes("gap-3 text-xs text-gray-300 flex-wrap"):
+                        ui.label(f"📊 {meta['route']} / {meta['score']:.1f}점")
+                        ui.label(f"💰 추천가 {int(meta['close']):,}원")
+                        ui.label(f"🛡️ 손절 {int(meta['stop']):,}원")
+                        if meta["target"] > 0:
+                            ui.label(f"🎯 목표 {int(meta['target']):,}원")
+
+            autofilled_card.classes(remove="hidden")
+            ui.notify(
+                f"✅ {meta['name']} 자동 채움 — 체결가/수량만 입력하세요",
+                type="positive",
+                timeout=3000,
+            )
 
         if search_select:
             search_select.on("update:model-value", on_stock_select)
 
         def _save():
             if not f_name.value or not f_name.value.strip():
-                save_msg.set_text("⚠️ 종목명 필수")
+                save_msg.set_text(
+                    "⚠️ 종목 검색 후 자동 채움하거나 종목명을 직접 입력하세요"
+                )
+                save_msg.classes(replace="text-sm mt-1 text-amber-400")
+                return
+            if not f_act.value or float(f_act.value) <= 0:
+                save_msg.set_text("⚠️ 실제 체결가 입력 필수")
                 save_msg.classes(replace="text-sm mt-1 text-amber-400")
                 return
             tid = save_trade(
@@ -723,7 +867,12 @@ def render_trade_journal_tab(df_scored=None):
             if tid > 0:
                 save_msg.set_text(f"✅ 저장 완료 (#{tid})")
                 save_msg.classes(replace="text-sm mt-1 text-green-400")
+                # [Step AS] 백업 dirty 표시 + 자동 백업 시도
+                _mark_backup_dirty()
+                _try_auto_backup()
                 # 폼 초기화
+                if search_select:
+                    search_select.value = None
                 f_name.value = ""
                 f_code.value = ""
                 f_rec.value = 0
@@ -732,12 +881,16 @@ def render_trade_journal_tab(df_scored=None):
                 f_tgt.value = 0
                 f_qty.value = 0
                 f_notes.value = ""
+                autofilled_card.classes(replace="hidden")
                 _refresh()
             else:
                 save_msg.set_text("❌ 저장 실패")
                 save_msg.classes(replace="text-sm mt-1 text-red-400")
 
-        ui.button("💾 기록 저장", on_click=_save).props("color=primary").classes("mt-2")
+        ui.button(
+            "💾 기록 저장",
+            on_click=_save,
+        ).props("color=primary").classes("mt-2 w-full")
 
     # ─── 필터 + 검색 ───
     state = {
@@ -1057,30 +1210,42 @@ def render_trade_journal_tab(df_scored=None):
     def _draw_table(trades):
         with table_area:
             with ui.row().classes("w-full items-center justify-between mb-2 flex-wrap gap-2"):
-                ui.label(
-                    f"📂 매매 기록 ({len(trades)}건)"
-                ).classes("text-white font-bold")
+                with ui.column().classes("gap-0"):
+                    ui.label(
+                        f"📂 매매 기록 ({len(trades)}건)"
+                    ).classes("text-white font-bold")
+                    # [Step AS] 백업 상태 배지
+                    if _has_gist_env():
+                        if backup_state.get("dirty"):
+                            ui.label(
+                                "⚠️ 마지막 백업 후 변경사항 있음"
+                            ).classes("text-xs text-amber-300")
+                        elif backup_state.get("last_backup_at"):
+                            ui.label(
+                                f"☁️ 마지막 백업: {backup_state['last_backup_at']}"
+                            ).classes("text-xs text-gray-500")
+                        else:
+                            ui.label(
+                                "☁️ Gist 백업 미실행"
+                            ).classes("text-xs text-gray-500")
                 with ui.row().classes("gap-2"):
                     ui.button(
                         "📥 CSV 다운로드",
                         on_click=lambda: _download_csv(trades),
                     ).props("flat color=cyan size=sm")
-                    # [Step AR] Gist 백업 버튼 (환경변수 있을 때만 활성)
-                    has_gist = bool(os.getenv("LDY_GIST_ID")) and bool(
-                        os.getenv("LDY_GIST_TOKEN")
-                    )
-                    if has_gist:
+                    # [Step AR+AS] Gist 백업/복원 (환경변수 있을 때만)
+                    if _has_gist_env():
                         ui.button(
                             "☁️ Gist 백업",
-                            on_click=lambda: _gist_backup(trades),
+                            on_click=lambda: _gist_backup(),
                         ).props("flat color=purple size=sm").tooltip(
-                            "본인 매매일지를 Gist에 계정별 백업"
+                            "전체 매매일지 Gist에 백업 (필터 무시)"
                         )
                         ui.button(
                             "📤 Gist 복원",
                             on_click=lambda: _gist_restore(),
                         ).props("flat color=indigo size=sm").tooltip(
-                            "Gist에서 백업된 매매일지 가져오기 (병합)"
+                            "Gist 백업을 현재 매매일지에 병합"
                         )
 
             if not trades:
@@ -1196,6 +1361,9 @@ def render_trade_journal_tab(df_scored=None):
                     )
                     if ok:
                         ui.notify("✅ 청산 기록 완료", type="positive")
+                        # [Step AS] 청산 후 자동 백업
+                        _mark_backup_dirty()
+                        _try_auto_backup()
                         dialog.close()
                         _refresh()
                     else:
@@ -1238,6 +1406,9 @@ def render_trade_journal_tab(df_scored=None):
                                 confirm_dialog.close()
                                 if ok:
                                     ui.notify("🗑️ 삭제 완료", type="positive")
+                                    # [Step AS] 삭제 후 자동 백업
+                                    _mark_backup_dirty()
+                                    _try_auto_backup()
                                     dialog.close()
                                     _refresh()
                                 else:
@@ -1277,22 +1448,71 @@ def render_trade_journal_tab(df_scored=None):
             logger.error(f"CSV 다운로드 실패: {e}")
             ui.notify(f"⚠️ 실패: {e}", type="negative")
 
-    # ─── [Step AR] Gist 백업 ───
-    def _gist_backup(trades):
-        """[Step AR] 본인 매매일지를 Gist에 계정별 백업.
+    # ─── [Step AR+AS] Gist 백업 ───
+    # [Step AS] 백업 dirty 플래그 + 마지막 백업 시각
+    backup_state = {
+        "dirty": False,
+        "last_backup_at": None,
+        "auto_attempted": False,
+    }
+    
+    def _mark_backup_dirty():
+        """[Step AS] 변경사항 발생 — 백업 필요 표시"""
+        backup_state["dirty"] = True
+    
+    def _has_gist_env():
+        return bool(os.getenv("LDY_GIST_ID")) and bool(
+            os.getenv("LDY_GIST_TOKEN")
+        )
+    
+    def _try_auto_backup():
+        """[Step AS] 저장/청산/삭제 후 자동 백업 시도 (실패해도 silent).
         
-        파일명: trade_journal_<user_hash>.json
+        매번 시도하지 않고 변경 후에만, 백그라운드로 시도.
+        실패 시 dirty 유지하여 사용자가 수동으로 다시 시도 가능.
+        """
+        if not _has_gist_env():
+            return  # 환경변수 없으면 스킵
+        try:
+            # [Step AS] 항상 전체 기록 백업 (필터 무시)
+            all_trades = load_trades(user_hash, 5000)
+            if not all_trades:
+                return
+            ok = sync_to_gist(user_hash, all_trades)
+            if ok:
+                backup_state["dirty"] = False
+                backup_state["last_backup_at"] = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M"
+                )
+                logger.info(f"☁️ 자동 백업 성공 ({len(all_trades)}건)")
+        except Exception as e:
+            logger.debug(f"자동 백업 시도 실패 (silent): {e}")
+            # 실패는 silent — dirty 유지
+    
+    def _gist_backup(_visible_trades=None):
+        """[Step AR+AS] Gist 수동 백업 — 항상 전체 기록.
+        
+        [Step AS 핵심 수정] 필터링된 trades 무시, 전체 기록 백업.
+        이전 버그: 필터 7일 → 3건 백업 → Gist 100건이 3건으로 덮어씀 ❌
         """
         try:
-            if not trades:
+            # [Step AS] 필터 무시, 전체 기록 로드
+            all_trades = load_trades(user_hash, 5000)
+            if not all_trades:
                 ui.notify("📭 백업할 기록 없음", type="warning")
                 return
-            ok = sync_to_gist(user_hash, trades)
+            
+            ok = sync_to_gist(user_hash, all_trades)
             if ok:
+                backup_state["dirty"] = False
+                backup_state["last_backup_at"] = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M"
+                )
                 ui.notify(
-                    f"☁️ Gist 백업 완료 ({len(trades)}건)",
+                    f"☁️ Gist 백업 완료 — 전체 {len(all_trades)}건",
                     type="positive",
                 )
+                _refresh()  # 백업 배지 갱신
             else:
                 ui.notify(
                     "⚠️ Gist 백업 실패 — 환경변수 확인 (LDY_GIST_*)",
@@ -1302,9 +1522,50 @@ def render_trade_journal_tab(df_scored=None):
             logger.error(f"Gist 백업 실패: {e}")
             ui.notify(f"⚠️ 실패: {e}", type="negative")
     
-    # ─── [Step AR] Gist 복원 (병합) ───
+    # ─── [Step AR+AS] Gist 복원 (병합) ───
     def _gist_restore():
-        """[Step AR] Gist에서 매매일지 복원 — 기존 데이터에 병합 (중복 created_at 스킵)."""
+        """[Step AS] Gist 복원 — 확인 다이얼로그 + journal_uid 기반 중복 방지."""
+        # [Step AS] 복원 전 확인 다이얼로그
+        with ui.dialog() as confirm_dialog, ui.card().classes(
+            "p-4 bg-[#1a1a2e] border border-indigo-500/40 "
+            "rounded-xl min-w-[360px]"
+        ):
+            ui.label("📤 Gist 백업 복원").classes(
+                "text-base font-bold text-indigo-300"
+            )
+            ui.label(
+                "Gist에 저장된 매매일지를 현재 기록에 병합합니다."
+            ).classes("text-sm text-gray-200 mt-2")
+            with ui.column().classes("gap-1 mt-2"):
+                ui.label(
+                    "• journal_uid 기반 중복 자동 스킵 (안전)"
+                ).classes("text-xs text-gray-400")
+                ui.label(
+                    "• 기존 기록은 보존됩니다 (병합만 수행)"
+                ).classes("text-xs text-gray-400")
+                ui.label(
+                    "• 복원 후 변경사항 자동 백업 시도"
+                ).classes("text-xs text-gray-400")
+            
+            with ui.row().classes("w-full justify-end gap-2 mt-3"):
+                ui.button(
+                    "취소",
+                    on_click=confirm_dialog.close,
+                ).props("flat color=gray")
+                
+                def do_restore():
+                    confirm_dialog.close()
+                    _do_actual_restore()
+                
+                ui.button(
+                    "📤 복원 시작",
+                    on_click=do_restore,
+                ).props("color=indigo")
+        
+        confirm_dialog.open()
+    
+    def _do_actual_restore():
+        """실제 복원 로직 — journal_uid 우선, fallback (created_at, code, price)"""
         try:
             restored = restore_from_gist(user_hash)
             if not restored:
@@ -1314,26 +1575,55 @@ def render_trade_journal_tab(df_scored=None):
                 )
                 return
             
-            # 기존 created_at 집합
-            existing = load_trades(user_hash, 1000)
-            existing_keys = {
-                (t.get("created_at"), t.get("stock_name"))
-                for t in existing
-            }
+            # [Step AS] journal_uid 기반 중복 키 + fallback
+            existing = load_trades(user_hash, 5000)
+            existing_uids = set()
+            existing_keys = set()
+            for t in existing:
+                uid = _extract_journal_uid(t)
+                if uid:
+                    existing_uids.add(uid)
+                # fallback: created_at + code + price + qty
+                fallback_key = (
+                    t.get("created_at"),
+                    t.get("stock_code"),
+                    t.get("actual_price"),
+                    t.get("qty"),
+                )
+                existing_keys.add(fallback_key)
             
             added = 0
+            skipped = 0
             for t in restored:
-                key = (t.get("created_at"), t.get("stock_name"))
-                if key in existing_keys:
+                # 1) journal_uid 우선
+                uid = _extract_journal_uid(t)
+                if uid and uid in existing_uids:
+                    skipped += 1
                     continue
-                # 새 거래로 저장
+                # 2) fallback 키 (legacy 데이터 호환)
+                fallback_key = (
+                    t.get("created_at"),
+                    t.get("stock_code"),
+                    t.get("actual_price"),
+                    t.get("qty"),
+                )
+                if fallback_key in existing_keys:
+                    skipped += 1
+                    continue
+                
+                # 신규로 저장
                 save_trade(t, user_hash)
                 added += 1
             
             ui.notify(
-                f"📤 복원 완료 — 신규 {added}건 추가 (중복 {len(restored) - added}건 스킵)",
+                f"📤 복원 완료 — 신규 {added}건 추가 / 중복 {skipped}건 스킵",
                 type="positive",
             )
+            
+            # [Step AS] 복원 후 자동 백업
+            if added > 0:
+                _try_auto_backup()
+            
             _refresh()
         except Exception as e:
             logger.error(f"Gist 복원 실패: {e}")
