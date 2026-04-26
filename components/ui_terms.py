@@ -20,15 +20,16 @@
 # ═══════════════════════════════════════════════════
 # ROUTE — 매매 단계 (진행 상태)
 # ═══════════════════════════════════════════════════
+# [Step AE] 외부 리뷰안 — 행동 중심 부드러운 표현 (마케팅 톤 X)
 ROUTE_LABELS = {
-    "ATTACK":       "🚀 적극 매수",
-    "ARMED":        "🎯 매수 준비",
-    "WAIT":         "⏸️ 관망",
-    "NEUTRAL":      "👁️ 중립",
-    "CARRY":        "📌 보유 관리",
-    "OVERHEAT":     "🔥 과열 주의",
-    "EXIT_WARNING": "⚠️ 이탈 주의",
-    "BLOCKED":      "⛔ 제외",
+    "ATTACK":       "매수검토",
+    "ARMED":        "진입대기",
+    "WAIT":         "관망",
+    "NEUTRAL":      "중립",
+    "CARRY":        "보유관리",
+    "OVERHEAT":     "과열주의",
+    "EXIT_WARNING": "매도주의",
+    "BLOCKED":      "제외",
 }
 
 ROUTE_ICONS = {
@@ -44,7 +45,11 @@ ROUTE_ICONS = {
 
 
 def route_display(route: str) -> str:
-    """ROUTE 코드 → 화면 표시명 (예: 'ATTACK' → '🚀 적극 매수')."""
+    """ROUTE 코드 → 화면 표시명 (예: 'ATTACK' → '매수검토').
+
+    [Step AE] 외부 리뷰안 — 행동 중심 부드러운 표현 사용.
+    매핑은 ROUTE_LABELS 참조.
+    """
     if not route:
         return ""
     key = str(route).strip().upper()
@@ -85,23 +90,24 @@ def pick_type_info(pick_type: str) -> tuple:
 # ELITE_LABEL — v3.7 라벨 체계 (내부값 유지, 화면만 한국어)
 # ═══════════════════════════════════════════════════
 
-# 내부 ELITE_LABEL → 화면 표시 (필터 드롭다운용 — 길게)
+# [Step AE] 외부 리뷰안 — 행동 중심 + 컬러 통일 🟣🟢🔵🟠
+# 내부 ELITE_LABEL → 화면 표시
 ELITE_LABEL_DISPLAY = {
-    "🛡️ 콤보":   "🎯 최우선 추천",
-    "🏆 최강":   "🏆 강력 후보 · 관찰",
-    "✅ 즉시진입": "✅ 지금 매수 가능",
-    "⚠️ 추격":   "⚠️ 추격 매수 위험",
+    "🛡️ 콤보":   "🟣 핵심매수",
+    "🏆 최강":   "🔵 관심관찰",
+    "✅ 즉시진입": "🟢 진입가능",
+    "⚠️ 추격":   "🟠 추격주의",
 }
 
 # 화면 표시 → 내부 ELITE_LABEL (필터 → 데이터 매칭용)
 ELITE_LABEL_INTERNAL = {v: k for k, v in ELITE_LABEL_DISPLAY.items()}
 
-# 테이블/칸반용 — 짧은 버전
+# [Step AE] 테이블/칸반용 — 길지 않으니 동일하게
 ELITE_LABEL_DISPLAY_SHORT = {
-    "🛡️ 콤보":   "🎯 최우선",
-    "🏆 최강":   "🏆 강력 후보",
-    "✅ 즉시진입": "✅ 매수 가능",
-    "⚠️ 추격":   "⚠️ 추격 위험",
+    "🛡️ 콤보":   "🟣 핵심매수",
+    "🏆 최강":   "🔵 관심관찰",
+    "✅ 즉시진입": "🟢 진입가능",
+    "⚠️ 추격":   "🟠 추격주의",
 }
 
 
