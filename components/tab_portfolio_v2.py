@@ -211,12 +211,42 @@ def _get_code_map(df):
 
 
 def _find_code_by_name(name, code_map):
-    if name in code_map: return code_map[name]
+    """[Step AK-1] 정규화 정확 매칭 우선 → substring은 마지막 fallback.
+
+    이전 버전 버그: substring 매칭이 "신세계 I&C" → 신세계(004170)
+    같은 다른 종목 코드 반환 → 시세 조회 시 다른 종목 가격 fetch.
+
+    수정 우선순위:
+      1) 정확 일치 (df code_map)
+      2) 정규화 정확 일치 (공백/대소문자 제거)  ← 핵심 안전망
+      3) KRX 맵 정확 일치
+      4) KRX 정규화 정확 일치
+      5) substring 매칭 (위험 fallback — df code_map만)
+      6) substring 매칭 (KRX 맵 — 가장 위험)
+    """
+    if not name:
+        return name
+    # 1) 정확 일치
+    if name in code_map:
+        return code_map[name]
+    # 2) 정규화 정확 일치 — 공백/대소문자 차이만 흡수 (안전)
+    norm = "".join(str(name).lower().split())
     for k, v in code_map.items():
-        if name in k or k in name: return v
+        if "".join(str(k).lower().split()) == norm:
+            return v
+    # 3) KRX 정확
     _ensure_krx_map()
     if name in _KRX_NAME_MAP:
         return _KRX_NAME_MAP[name]
+    # 4) KRX 정규화 정확
+    for k, v in _KRX_NAME_MAP.items():
+        if "".join(str(k).lower().split()) == norm:
+            return v
+    # 5) substring (df) — 마지막 fallback
+    for k, v in code_map.items():
+        if name in k or k in name:
+            return v
+    # 6) substring (KRX) — 가장 위험, 최후 수단
     for k, v in _KRX_NAME_MAP.items():
         if name in k or k in name:
             return v
@@ -327,8 +357,17 @@ def _fetch_current_price(code, name):
 
     if FDR_OK and not code_str:
         _ensure_krx_map()
+        # [Step AK-2] 정규화 정확 매칭 우선 — substring은 마지막 fallback
+        # 이전 버그: "신세계 I&C" → substring 매칭으로 다른 신세계 계열 코드 잡힘
         found = _KRX_NAME_MAP.get(name)
         if not found:
+            # 정규화 정확 매칭 (공백/대소문자 흡수)
+            _norm = "".join(str(name).lower().split())
+            for k, v in _KRX_NAME_MAP.items():
+                if "".join(str(k).lower().split()) == _norm:
+                    found = v; break
+        if not found:
+            # 마지막 fallback — substring (위험)
             for k, v in _KRX_NAME_MAP.items():
                 if name in k or k in name:
                     found = v; break
@@ -2028,7 +2067,19 @@ def render_tab_portfolio(df, auth):
             if nm.upper() == "CASH" or "현금" in nm:
                 cash_amt += price * qty
             else:
-                real_code = _find_code_by_name(nm, code_map) or nm
+                # [Step AK-3] df row 우선 매칭 → 정확한 종목코드 사용
+                # _match_holding_row는 4단계 매칭 (정확→코드→substring→정규화)
+                # df에서 매칭 row 찾으면 그 row의 종목코드 사용 (가장 안전)
+                real_code = nm
+                _matched_row = _match_holding_row(nm, df, code_map)
+                if _matched_row is not None:
+                    _row_code = str(_matched_row.get("종목코드", "")).strip().zfill(6)
+                    if _row_code and _row_code != "000000":
+                        real_code = _row_code
+                else:
+                    # df에 없으면 _find_code_by_name fallback
+                    # (AK-1로 정규화 정확 매칭 우선 강화됨)
+                    real_code = _find_code_by_name(nm, code_map) or nm
                 targets.append((real_code, nm, price, qty))
 
         if not targets and cash_amt <= 0:
