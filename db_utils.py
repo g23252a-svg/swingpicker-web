@@ -326,6 +326,8 @@ class LDYDBManager:
         try:
             self._load_users_from_gist()
             self._load_inquiries_from_gist()
+            # [Step AY] admin_actions 복구 로드 — 감사 로그 영구 보존
+            self._load_admin_actions_from_gist()
             self._gist_loaded = True
         except Exception as e:
             _logger.warning(f"Gist 초기 로드 실패 (DB는 정상): {e}")
@@ -341,7 +343,8 @@ class LDYDBManager:
                 return {}
             files = resp.json().get("files", {})
             result = {}
-            for fname in [USER_DB_FILE, INQUIRY_DB_FILE]:
+            # [Step AY] admin_actions_db.json 추가 (감사 로그 복구)
+            for fname in [USER_DB_FILE, INQUIRY_DB_FILE, ADMIN_ACTIONS_DB_FILE]:
                 if fname in files:
                     content = files[fname].get("content", "")
                     if content:
@@ -356,6 +359,9 @@ class LDYDBManager:
             self._insert_gist_users(downloaded[USER_DB_FILE])
         if INQUIRY_DB_FILE in downloaded:
             self._insert_gist_inquiries(downloaded[INQUIRY_DB_FILE])
+        # [Step AY] admin_actions 복구 적용
+        if ADMIN_ACTIONS_DB_FILE in downloaded:
+            self._insert_gist_admin_actions(downloaded[ADMIN_ACTIONS_DB_FILE])
 
     def _insert_gist_users(self, data):
         if not data:
@@ -427,11 +433,93 @@ class LDYDBManager:
         except Exception as e:
             _logger.warning(f" inquiries INSERT 실패: {e}")
 
+    def _ensure_admin_actions_table(self):
+        """[Step AY] admin_actions 테이블 멱등 생성 (Gist 로드 전 보장)
+        
+        tab_admin.py에도 동일 로직이 있지만, Gist 복구 시점이 더 이를 수 있어
+        db_utils.py에서도 보장. 멱등이라 중복 호출 안전.
+        """
+        try:
+            self._exec_sqlite("""
+                CREATE TABLE IF NOT EXISTS admin_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_email TEXT NOT NULL,
+                    action_type TEXT NOT NULL,
+                    target_email TEXT,
+                    details TEXT,
+                    timestamp TEXT NOT NULL
+                )
+            """)
+            self._exec_sqlite(
+                "CREATE INDEX IF NOT EXISTS idx_admin_actions_target "
+                "ON admin_actions(target_email, timestamp DESC)"
+            )
+            self._exec_sqlite(
+                "CREATE INDEX IF NOT EXISTS idx_admin_actions_time "
+                "ON admin_actions(timestamp DESC)"
+            )
+        except Exception as e:
+            _logger.debug(f"admin_actions 테이블 보장 실패: {e}")
+
+    def _insert_gist_admin_actions(self, data):
+        """[Step AY] admin_actions Gist → SQLite 복구
+        
+        중복 방지: (admin_email, action_type, target_email, timestamp) 동일하면 스킵
+        - id는 AUTOINCREMENT라 Gist에서 가져온 id와 충돌 가능 → 기존 row 검사
+        - INSERT OR IGNORE 대신 명시적 검사 (id 컬럼 충돌 방지)
+        """
+        if not data or not isinstance(data, list):
+            return
+        try:
+            self._ensure_admin_actions_table()
+            inserted = 0
+            skipped = 0
+            for item in data:
+                admin_email = item.get('admin_email', '')
+                action_type = item.get('action_type', '')
+                target_email = item.get('target_email', '') or ''
+                timestamp = item.get('timestamp', '')
+                details = item.get('details', '') or ''
+                
+                if not admin_email or not action_type or not timestamp:
+                    skipped += 1
+                    continue
+                
+                # 중복 검사 (자연 키 기반)
+                existing = self._exec_sqlite(
+                    "SELECT id FROM admin_actions "
+                    "WHERE admin_email=? AND action_type=? "
+                    "AND target_email=? AND timestamp=?",
+                    (admin_email, action_type, target_email, timestamp),
+                    fetch=True,
+                )
+                if existing:
+                    skipped += 1
+                    continue
+                
+                self._exec_sqlite(
+                    "INSERT INTO admin_actions "
+                    "(admin_email, action_type, target_email, details, timestamp) "
+                    "VALUES (?,?,?,?,?)",
+                    (admin_email, action_type, target_email, details, timestamp),
+                )
+                inserted += 1
+            _logger.info(
+                f" admin_actions 적용 완료 "
+                f"(신규 {inserted}건 / 중복 {skipped}건)"
+            )
+        except Exception as e:
+            _logger.warning(f" admin_actions INSERT 실패: {e}")
+
     def _load_users_from_gist(self):
         self._load_gist_to_table(USER_DB_FILE, "users")
 
     def _load_inquiries_from_gist(self):
         self._load_gist_to_table(INQUIRY_DB_FILE, "inquiries")
+
+    def _load_admin_actions_from_gist(self):
+        """[Step AY] admin_actions Gist 복구 로드 (감사 로그 보존)"""
+        self._load_gist_to_table(ADMIN_ACTIONS_DB_FILE, "admin_actions")
 
     def _load_gist_to_table(self, filename, tablename):
         if not GIST_ID or not GIST_TOKEN:
@@ -458,6 +546,9 @@ class LDYDBManager:
                 self._insert_gist_users(data)
             elif tablename == 'inquiries':
                 self._insert_gist_inquiries(data)
+            elif tablename == 'admin_actions':
+                # [Step AY] admin_actions 복구 분기
+                self._insert_gist_admin_actions(data)
 
         except Exception as e:
             _logger.error(f" [Gist] {tablename} 로드 실패: {e}", exc_info=True)
