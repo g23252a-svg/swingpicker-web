@@ -13,6 +13,7 @@ tab_updates.py — 🧩 업데이트 노트 (NiceGUI Dark Theme)
 6. ✅ v21 PDF 배너 정리 (조건부 + 우측 작게)
 7. ✅ 모바일 가독성 (그룹 토글로 스크롤 단축)
 """
+import html as _html
 import os
 import re
 
@@ -119,27 +120,63 @@ DEFAULT_CATEGORY = {
     "emoji_hints": [],
 }
 
+# [Step AJ] key → category 매핑 (수동 지정용)
+CATEGORY_BY_KEY = {cat["key"]: cat for cat in CATEGORY_RULES}
+CATEGORY_BY_KEY[DEFAULT_CATEGORY["key"]] = DEFAULT_CATEGORY
 
-def _categorize_item(item: str) -> dict:
-    """[Step AH] 변경 항목을 카테고리에 자동 분류.
+
+def _get_item_text(item) -> str:
+    """[Step AJ] 항목에서 텍스트 추출 — dict/str 모두 지원.
     
-    우선순위: 이모지 힌트 → 키워드 매칭 → 기타.
+    하위 호환:
+    - str: 그대로 반환
+    - dict: text 또는 message 필드 사용
+    """
+    if isinstance(item, dict):
+        return str(item.get("text") or item.get("message") or "")
+    return str(item) if item else ""
+
+
+def _categorize_item(item) -> dict:
+    """[Step AH+AJ] 변경 항목을 카테고리에 자동 분류.
+    
+    [Step AJ] 수동 category 필드 우선 — dict로 category 지정 시 자동 분류 스킵.
+    
+    예:
+    "🐛 단순 텍스트"                              → 자동 분류
+    {"text": "...", "category": "data"}           → 수동 분류 (data 강제)
+    
+    우선순위:
+    1) item이 dict이고 category 필드가 유효하면 그대로 사용
+    2) 이모지 힌트 (가장 정확)
+    3) 키워드 매칭
+    4) 기타 (DEFAULT_CATEGORY)
     """
     if not item:
         return DEFAULT_CATEGORY
     
-    text = item.lower()
+    # [Step AJ] 1순위: 수동 category 필드 (dict)
+    if isinstance(item, dict):
+        manual_cat = item.get("category", "")
+        if manual_cat and manual_cat in CATEGORY_BY_KEY:
+            return CATEGORY_BY_KEY[manual_cat]
     
-    # 1순위: 이모지 힌트 (가장 정확)
+    text = _get_item_text(item)
+    if not text:
+        return DEFAULT_CATEGORY
+    
+    text_lower = text.lower()
+    
+    # 2순위: 이모지 힌트 (가장 정확)
     for cat in CATEGORY_RULES:
         for hint in cat["emoji_hints"]:
-            if hint in item:
+            if hint in text:
                 return cat
     
-    # 2순위: 키워드 매칭
+    # 3순위: 키워드 매칭
     for cat in CATEGORY_RULES:
         for kw in cat["keywords"]:
-            if kw.lower() in text:
+            if kw.lower() in text_lower:
                 return cat
     
     return DEFAULT_CATEGORY
@@ -149,7 +186,7 @@ def _categorize_item(item: str) -> dict:
 #  통계 계산
 # ═══════════════════════════════════════════════════
 def _compute_stats() -> dict:
-    """[Step AH] 전체 CHANGELOG 통계."""
+    """[Step AH+AJ] 전체 CHANGELOG 통계 (dict 항목 지원)."""
     total_changes = 0
     by_category = {cat["key"]: 0 for cat in CATEGORY_RULES}
     by_category[DEFAULT_CATEGORY["key"]] = 0
@@ -157,7 +194,7 @@ def _compute_stats() -> dict:
     for log in CHANGELOG:
         for item in log.get("items", []):
             total_changes += 1
-            cat = _categorize_item(item)
+            cat = _categorize_item(item)  # dict/str 모두 자동 처리
             by_category[cat["key"]] = by_category.get(cat["key"], 0) + 1
     
     return {
@@ -168,11 +205,11 @@ def _compute_stats() -> dict:
 
 
 def _compute_version_stats(items: list) -> dict:
-    """단일 버전의 카테고리별 통계."""
+    """[Step AH+AJ] 단일 버전의 카테고리별 통계 (dict 항목 지원)."""
     stats = {cat["key"]: 0 for cat in CATEGORY_RULES}
     stats[DEFAULT_CATEGORY["key"]] = 0
     for item in items:
-        cat = _categorize_item(item)
+        cat = _categorize_item(item)  # dict/str 모두 자동 처리
         stats[cat["key"]] = stats.get(cat["key"], 0) + 1
     return stats
 
@@ -182,11 +219,56 @@ def _strip_markdown(text: str) -> str:
     return re.sub(r"\*\*(.+?)\*\*", r"\1", text)
 
 
+def _highlight_search(text: str, keyword: str) -> str:
+    """[Step AJ] 검색어를 mark 태그로 강조 — escape 처리 필수.
+    
+    Args:
+        text: 원본 텍스트 (escape 처리됨)
+        keyword: 검색 키워드 (없으면 escape만 적용)
+    
+    Returns:
+        HTML 안전한 문자열 (mark 태그 포함)
+    """
+    safe = _html.escape(text or "")
+    if not keyword:
+        return safe
+    
+    keyword = keyword.strip()
+    if not keyword:
+        return safe
+    
+    try:
+        # 검색 키워드도 escape 후 정규식 escape
+        safe_keyword = _html.escape(keyword)
+        pattern = re.escape(safe_keyword)
+        return re.sub(
+            pattern,
+            lambda m: (
+                f"<mark style='background:#F59E0B;color:#111827;"
+                f"border-radius:3px;padding:0 3px;font-weight:600'>"
+                f"{m.group(0)}</mark>"
+            ),
+            safe,
+            flags=re.IGNORECASE,
+        )
+    except Exception:
+        # 정규식 오류 시 안전한 fallback
+        return safe
+
+
 # ═══════════════════════════════════════════════════
 #  메인 렌더링
 # ═══════════════════════════════════════════════════
 def render_tab_updates():
-    """[Step AH] 업데이트 노트 — 전면 리팩토링"""
+    """[Step AH+AJ] 업데이트 노트 — 전면 리팩토링"""
+    
+    # [Step AJ] CHANGELOG 최신순 보장 — date 기준 내림차순 정렬
+    # version_info.py의 순서가 어긋나도 안전하게 최신 표시
+    sorted_changelog = sorted(
+        CHANGELOG,
+        key=lambda x: x.get("date", "0000-00-00"),
+        reverse=True,
+    )
     
     # ─── 헤더 ───
     with ui.row().classes("w-full items-center justify-between mb-3"):
@@ -215,7 +297,7 @@ def render_tab_updates():
                 "text-xs text-indigo-400 hover:text-indigo-300 no-underline"
             ).style("padding: 6px 12px; border: 1px solid rgba(99,102,241,0.4); border-radius: 6px;")
     
-    if not CHANGELOG:
+    if not sorted_changelog:
         with ui.card().classes(
             "w-full p-8 bg-[#1a1a2e] border border-gray-700 rounded-lg "
             "items-center"
@@ -224,7 +306,7 @@ def render_tab_updates():
             ui.label("등록된 업데이트 기록이 없습니다.").classes("text-gray-400")
         return
     
-    latest = CHANGELOG[0]
+    latest = sorted_changelog[0]
     
     # ─── 히어로 카드 (최신 버전) ───
     _render_hero_card(latest)
@@ -241,21 +323,22 @@ def render_tab_updates():
         "outlined dense clearable debounce=300"
     )
     
-    # 카테고리 필터
-    with ui.row().classes("w-full gap-1 mb-3 flex-wrap"):
-        category_options = {"all": f"📌 전체"}
-        for cat in CATEGORY_RULES:
-            category_options[cat["key"]] = cat["label"]
-        category_options[DEFAULT_CATEGORY["key"]] = DEFAULT_CATEGORY["label"]
-        
-        ui.toggle(
-            category_options,
-            value="all",
-            on_change=lambda e: (
-                state.update({"category": e.value}),
-                _refresh(),
-            ),
-        ).props("dense")
+    # [Step AJ] 카테고리 필터 — select 방식 (모바일 친화)
+    # 9개 카테고리 → toggle은 모바일에서 너무 길어짐
+    category_options = {"all": "📌 전체 카테고리"}
+    for cat in CATEGORY_RULES:
+        category_options[cat["key"]] = cat["label"]
+    category_options[DEFAULT_CATEGORY["key"]] = DEFAULT_CATEGORY["label"]
+    
+    ui.select(
+        options=category_options,
+        value="all",
+        label="카테고리 필터",
+        on_change=lambda e: (
+            state.update({"category": e.value}),
+            _refresh(),
+        ),
+    ).classes("w-full mb-3").props("outlined dense")
     
     # 본문 영역
     content_area = ui.column().classes("w-full")
@@ -263,7 +346,7 @@ def render_tab_updates():
     def _refresh():
         content_area.clear()
         with content_area:
-            _render_versions(state)
+            _render_versions(state, sorted_changelog)
     
     def on_search_change(e):
         state["search"] = (e.value or "").strip()
@@ -275,9 +358,10 @@ def render_tab_updates():
 
 
 def _render_hero_card(latest: dict):
-    """[Step AH] 최신 버전 히어로 카드"""
+    """[Step AH+AJ] 최신 버전 히어로 카드 (dict 항목 지원)"""
     items = latest.get("items", [])
-    items_clean = [_strip_markdown(i) for i in items]
+    # [Step AJ] dict/str 모두 텍스트 추출 후 strip
+    items_clean = [_strip_markdown(_get_item_text(i)) for i in items]
     version_stats = _compute_version_stats(items)
     
     # [Step AI] Top 5 highlight — 첫 5개 항목의 핵심 부분만 추출
@@ -379,16 +463,31 @@ def _render_stats_card():
                         ).classes("text-[10px]")
 
 
-def _render_versions(state: dict):
-    """[Step AH] 버전별 변경사항 렌더링 (검색/필터 적용)"""
+def _render_versions(state: dict, sorted_changelog: list = None):
+    """[Step AH+AJ] 버전별 변경사항 렌더링 (검색/필터/하이라이트 적용).
     
-    search = state["search"].lower()
+    [Step AJ] 변경사항:
+    - sorted_changelog 전달받기 (date 기준 최신순 정렬됨)
+    - dict 항목 지원 ({text, category} 형태)
+    - 검색어 하이라이트 (ui.html + mark 태그)
+    """
+    
+    # [Step AJ] sorted_changelog 없으면 fallback (안전)
+    if sorted_changelog is None:
+        sorted_changelog = sorted(
+            CHANGELOG,
+            key=lambda x: x.get("date", "0000-00-00"),
+            reverse=True,
+        )
+    
+    search_raw = state.get("search", "")
+    search = search_raw.lower()
     cat_filter = state["category"]
     
     # 결과 카운트
     visible_count = 0
     
-    for i, log in enumerate(CHANGELOG):
+    for i, log in enumerate(sorted_changelog):
         is_latest = (i == 0)
         ver = log.get("version", "?")
         date = log.get("date", "")
@@ -398,7 +497,9 @@ def _render_versions(state: dict):
         # 항목별 카테고리 분류
         items_by_cat = {}
         for item in items:
-            item_clean = _strip_markdown(item)
+            # [Step AJ] dict/str 모두 지원
+            item_text = _get_item_text(item)
+            item_clean = _strip_markdown(item_text)
             cat = _categorize_item(item)
             
             # 검색 필터
@@ -455,9 +556,11 @@ def _render_versions(state: dict):
                 
                 # 항목 리스트
                 for item in grp["items"]:
-                    # [Step AI] 검색 결과 텍스트 표시 (하이라이트는 미구현)
-                    ui.label(f"• {item}").classes(
-                        "text-sm text-gray-300 ml-3 mb-1 leading-relaxed"
+                    # [Step AJ] 검색어 하이라이트 (escape + mark)
+                    highlighted = _highlight_search(item, search_raw)
+                    ui.html(
+                        f"<div class='text-sm text-gray-300 ml-3 mb-1 "
+                        f"leading-relaxed'>• {highlighted}</div>"
                     )
     
     # 결과 없음 메시지
