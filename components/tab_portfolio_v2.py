@@ -27,6 +27,29 @@ from nicegui import ui, app
 
 from shared_utils import nz_num, safe_float
 
+# [Step AH] 라벨/ROUTE 매핑 (종목분석 탭과 일관) + 비동기 시세 조회
+from components.ui_terms import (
+    label_to_display as _ah_label_disp,
+    route_display as _ah_route_disp,
+)
+from async_helpers import run_sync as _ah_run_sync
+
+# [Step AH-8] 글로벌 refresh 콜백 슬롯
+# _set_filter (모듈 함수) → _refresh_holdings (closure) 즉시 호출용.
+# 탭 재진입 시 슬롯 교체 — 누적 방지.
+_AH_REFRESH_SLOT: list = []
+
+def _ah_register_refresh(fn):
+    _AH_REFRESH_SLOT.clear()
+    _AH_REFRESH_SLOT.append(fn)
+
+def _ah_trigger_refresh():
+    for fn in list(_AH_REFRESH_SLOT):
+        try:
+            fn()
+        except Exception:
+            pass
+
 # ═══════════════════════════════════════════════════
 # [v22 UI Step N] 사용자 식별 — 로그인 정보 import
 # ═══════════════════════════════════════════════════
@@ -198,6 +221,90 @@ def _find_code_by_name(name, code_map):
         if name in k or k in name:
             return v
     return name
+
+
+# ════════════════════════════════════════════════════
+# [Step AJ-1] 종목명 → df row 매칭 — Hero/카드 공용
+#   매칭 4단계:
+#     1) 종목명 정확 일치
+#     2) 종목코드 변환 (_find_code_by_name = KRX 맵 + 부분 일치)
+#     3) 종목명 양방향 substring
+#     4) 공백/대소문자 정규화
+# ════════════════════════════════════════════════════
+def _match_holding_row(name, df, code_map=None):
+    """종목명 → df row 매칭. 못 찾으면 None."""
+    if df is None or len(df) == 0 or "종목명" not in df.columns:
+        return None
+    if not name:
+        return None
+    if code_map is None:
+        code_map = _get_code_map(df)
+    # 1) 정확 일치
+    _by_name = dict(zip(df["종목명"].astype(str), df.to_dict("records")))
+    if name in _by_name:
+        return _by_name[name]
+    # 2) 종목코드 변환
+    try:
+        code = _find_code_by_name(name, code_map)
+        if code:
+            code_z = str(code).zfill(6)
+            mask = df["종목코드"].astype(str).str.zfill(6) == code_z
+            if mask.any():
+                return df[mask].iloc[0].to_dict()
+    except Exception:
+        pass
+    # 3) 부분 일치
+    for n, r in _by_name.items():
+        if name in n or n in name:
+            return r
+    # 4) 공백/대소문자 정규화
+    norm_target = "".join(name.lower().split())
+    for n, r in _by_name.items():
+        norm_cand = "".join(str(n).lower().split())
+        if (norm_target == norm_cand or
+            norm_target in norm_cand or
+            norm_cand in norm_target):
+            return r
+    return None
+
+
+# ════════════════════════════════════════════════════
+# [Step AJ-3] 보유 종목 분류 — Hero/카드/진단 후 공용
+#   group: caution(즉시액션) / observe(모니터링) / hold(양호) / outside(추천외)
+# ════════════════════════════════════════════════════
+_AJ_BLOCKED_ROUTES = {"BLOCKED", "EXIT_WARNING", "OVERHEAT"}
+_AJ_SAFE_ROUTES = {"ATTACK", "ARMED", "CARRY", "NEUTRAL"}
+
+def _classify_holding(score, route, has_dart_warning=False):
+    """점수/ROUTE/DART 기반 분류. 4가지 그룹 + 액션 텍스트.
+
+    Args:
+        score: DISPLAY_SCORE
+        route: ROUTE 문자열
+        has_dart_warning: DART 위험 신호 있으면 즉시 액션으로 가중
+    Returns:
+        dict {group, action, action_color, border}
+    """
+    route_u = str(route or "").strip().upper()
+    sc = float(score) if score else 0
+
+    # DART 위험은 즉시 액션 가중
+    if has_dart_warning:
+        return {"group": "caution", "action": "🚨 공시 주의 + 검토",
+                "action_color": "text-red-400", "border": "border-red-500/40"}
+
+    if route_u in _AJ_BLOCKED_ROUTES or (sc > 0 and sc <= 40):
+        return {"group": "caution", "action": "🚨 교체 검토",
+                "action_color": "text-red-400", "border": "border-red-500/40"}
+    if route_u == "WAIT" or (sc > 0 and sc < 60):
+        return {"group": "observe", "action": "⚠️ 지켜보기",
+                "action_color": "text-amber-400", "border": "border-amber-500/40"}
+    if sc >= 60 and route_u in _AJ_SAFE_ROUTES:
+        return {"group": "hold", "action": "✅ 보유 유지",
+                "action_color": "text-emerald-400", "border": "border-emerald-500/40"}
+    # 정보 부족 — 모니터링으로 분류 (Hero와 카드 일관)
+    return {"group": "observe", "action": "👁️ 정보 부족",
+            "action_color": "text-gray-400", "border": "border-gray-600"}
 
 
 def _fetch_current_price(code, name):
@@ -784,34 +891,40 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
         #   n_top_pick = 진짜 오늘의 추천 (TOP_PICK == 1)
         today_picks_in_holdings = []  # 오늘 추천(TOP_PICK)에 포함된 보유종목
         n_top_pick = 0  # [Step O #2] TOP_PICK == 1 만 카운트
-        
+        # [Step AH-1] 추천 외 종목 이름 추적 (외부 리뷰 ④)
+        outside_names = []   # df에 없는 종목 (시스템 분석 외)
+        caution_names = []   # 점수 ≤40 또는 BLOCKED — 즉시 액션
+        observe_names = []   # 41~59 또는 WAIT — 모니터링
+        hold_names = []      # ≥60 + safe ROUTE — 양호
+
         if df is not None and not df.empty and "종목명" in df.columns:
-            df_names = set(df["종목명"].astype(str))
-            _SAFE_ROUTES = {"ATTACK", "ARMED", "CARRY", "NEUTRAL"}
-            _BLOCKED_ROUTES = {"BLOCKED", "EXIT_WARNING", "OVERHEAT"}
+            # [Step AJ-1+3] 카드와 동일한 매칭 헬퍼 + 분류 함수 사용
+            # → Hero 추천외 N개 vs 카드 분석 포함 N개 불일치 방지
+            _hero_code_map = _get_code_map(df)
             for it in items:
-                if it["name"] in df_names:
+                row = _match_holding_row(it["name"], df, _hero_code_map)
+                if row is not None:
                     n_today += 1
-                    match = df[df["종목명"] == it["name"]]
-                    if not match.empty:
-                        row = match.iloc[0]
-                        score = safe_float(row.get("DISPLAY_SCORE", 0))
-                        route = str(row.get("ROUTE", "")).strip().upper()
-                        # [Step O #2] TOP_PICK 정확히 판정
-                        is_top_pick = is_truthy_flag(row.get("TOP_PICK", 0))
-                        if is_top_pick:
-                            n_top_pick += 1
-                            today_picks_in_holdings.append(it["name"])
-                        
-                        # 분류: 점수 + 상태 동시 고려
-                        if route in _BLOCKED_ROUTES or (score > 0 and score <= 40):
-                            n_caution += 1   # 교체 검토
-                        elif route == "WAIT" or (score > 0 and score < 60):
-                            n_observe += 1   # 지켜보기
-                        elif score >= 60 and route in _SAFE_ROUTES:
-                            n_hold += 1      # 보유 유지
-                        else:
-                            n_observe += 1   # 정보 부족 → 지켜보기
+                    score = safe_float(row.get("DISPLAY_SCORE", 0))
+                    route = str(row.get("ROUTE", "")).strip().upper()
+                    # [Step O #2] TOP_PICK 정확히 판정
+                    is_top_pick = is_truthy_flag(row.get("TOP_PICK", 0))
+                    if is_top_pick:
+                        n_top_pick += 1
+                        today_picks_in_holdings.append(it["name"])
+
+                    # [Step AJ-3] 공용 분류 함수 사용 (카드와 동일 기준)
+                    cls = _classify_holding(score, route)
+                    grp = cls["group"]
+                    if grp == "caution":
+                        n_caution += 1; caution_names.append(it["name"])
+                    elif grp == "hold":
+                        n_hold += 1; hold_names.append(it["name"])
+                    else:  # observe (정보 부족 포함)
+                        n_observe += 1; observe_names.append(it["name"])
+                else:
+                    # [Step AH-1] df에 없는 종목 = 시스템 분석 외
+                    outside_names.append(it["name"])
         
         # 헤더 카드 — 결론 한 줄
         with ui.card().classes(
@@ -882,78 +995,161 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
                     f"오늘의 추천(TOP_PICK)에는 0개"
                 ).classes("text-sm text-amber-100 mt-1")
         
-        # 빠른 진단 요약 (df에 있는 종목들만)
+        # [Step AH-3] 빠른 진단 요약 — "예비 분류" 명시 (AI 진단 전 정확도 한계 표시)
         if n_today > 0:
-            with ui.row().classes("w-full gap-3 mb-4 flex-wrap"):
-                # 즉시 액션 필요 (교체 검토)
+            ui.label(
+                "🔍 예비 분류 (시세조회 전, 최근 점수 기준 · "
+                "정확한 판단은 [🤖 AI 진단 실행] 후)"
+            ).classes("text-[11px] text-amber-300 italic mb-1")
+
+            # [Step AH-2 + AH-6] 클릭 시 보유 종목 카드 필터링
+            # (필터 state는 app.storage.user에 저장 → _refresh_holdings에서 활용)
+            from nicegui import app as _ah_app
+            def _set_filter(group: str):
+                _ah_app.storage.user["_holding_filter"] = group
+                _label_kr = {
+                    "caution": "🚨 즉시 액션",
+                    "observe": "⚠️ 모니터링",
+                    "hold":    "✅ 양호",
+                    "outside": "ℹ️ 추천 외",
+                }.get(group, group)
+                ui.notify(f"🔍 {_label_kr} 필터 적용", type="info")
+                # [Step AH-8] 글로벌 슬롯 통해 _refresh_holdings 즉시 호출
+                _ah_trigger_refresh()
+
+            with ui.row().classes("w-full gap-3 mb-2 flex-wrap"):
+                # 즉시 액션 (교체 검토) — 종목명 표시 + 클릭 필터
                 if n_caution > 0:
+                    _names_c = ", ".join(caution_names[:3])
+                    if len(caution_names) > 3:
+                        _names_c += f" 외 {len(caution_names)-3}"
                     with ui.card().classes(
-                        "flex-1 min-w-[200px] p-3 rounded-lg "
-                        "border-l-4 border-red-500"
-                    ).style("background: #1a0a14"):
+                        "flex-1 min-w-[200px] p-3 rounded-lg cursor-pointer "
+                        "border-l-4 border-red-500 hover:bg-[#2a0a14]"
+                    ).style("background: #1a0a14").on(
+                        "click", lambda: _set_filter("caution")
+                    ):
                         ui.label("🚨 즉시 액션 필요").classes(
                             "text-xs text-red-300 font-bold"
                         )
                         ui.label(f"{n_caution}종목").classes(
                             "text-2xl font-black text-red-400"
                         )
-                        ui.label("점수 40 이하 — 교체 검토").classes(
+                        ui.label(_names_c).classes(
+                            "text-[11px] text-red-200 truncate"
+                        )
+                        ui.label("점수 40 이하 · 클릭 → 카드 필터").classes(
                             "text-[10px] text-gray-400"
                         )
-                
+
                 # 모니터링
                 if n_observe > 0:
+                    _names_o = ", ".join(observe_names[:3])
+                    if len(observe_names) > 3:
+                        _names_o += f" 외 {len(observe_names)-3}"
                     with ui.card().classes(
-                        "flex-1 min-w-[200px] p-3 rounded-lg "
-                        "border-l-4 border-amber-500"
-                    ).style("background: #1a1408"):
+                        "flex-1 min-w-[200px] p-3 rounded-lg cursor-pointer "
+                        "border-l-4 border-amber-500 hover:bg-[#2a1408]"
+                    ).style("background: #1a1408").on(
+                        "click", lambda: _set_filter("observe")
+                    ):
                         ui.label("⚠️ 모니터링").classes(
                             "text-xs text-amber-300 font-bold"
                         )
                         ui.label(f"{n_observe}종목").classes(
                             "text-2xl font-black text-amber-400"
                         )
-                        ui.label("점수 41~59 — 지켜보기").classes(
+                        ui.label(_names_o).classes(
+                            "text-[11px] text-amber-200 truncate"
+                        )
+                        ui.label("점수 41~59 · 클릭 → 카드 필터").classes(
                             "text-[10px] text-gray-400"
                         )
-                
+
                 # 양호
                 if n_hold > 0:
+                    _names_h = ", ".join(hold_names[:3])
+                    if len(hold_names) > 3:
+                        _names_h += f" 외 {len(hold_names)-3}"
                     with ui.card().classes(
-                        "flex-1 min-w-[200px] p-3 rounded-lg "
-                        "border-l-4 border-emerald-500"
-                    ).style("background: #0a1a14"):
+                        "flex-1 min-w-[200px] p-3 rounded-lg cursor-pointer "
+                        "border-l-4 border-emerald-500 hover:bg-[#0a2a14]"
+                    ).style("background: #0a1a14").on(
+                        "click", lambda: _set_filter("hold")
+                    ):
                         ui.label("✅ 양호").classes(
                             "text-xs text-emerald-300 font-bold"
                         )
                         ui.label(f"{n_hold}종목").classes(
                             "text-2xl font-black text-emerald-400"
                         )
-                        ui.label("점수 60 이상 — 보유 유지").classes(
+                        ui.label(_names_h).classes(
+                            "text-[11px] text-emerald-200 truncate"
+                        )
+                        ui.label("점수 60 이상 · 클릭 → 카드 필터").classes(
                             "text-[10px] text-gray-400"
                         )
-                
-                # 추천 외 종목
-                n_outside = n_stocks - n_today
+
+                # [Step AH-1] 추천 외 종목 — 이름 직접 표시 (외부 리뷰 ④)
+                n_outside = len(outside_names)
                 if n_outside > 0:
+                    _names_x = ", ".join(outside_names[:3])
+                    if n_outside > 3:
+                        _names_x += f" 외 {n_outside-3}"
                     with ui.card().classes(
-                        "flex-1 min-w-[200px] p-3 rounded-lg "
-                        "border-l-4 border-gray-600"
-                    ).style("background: #14141a"):
+                        "flex-1 min-w-[200px] p-3 rounded-lg cursor-pointer "
+                        "border-l-4 border-gray-600 hover:bg-[#24242a]"
+                    ).style("background: #14141a").on(
+                        "click", lambda: _set_filter("outside")
+                    ):
                         ui.label("ℹ️ 추천 외").classes(
                             "text-xs text-gray-400 font-bold"
                         )
                         ui.label(f"{n_outside}종목").classes(
                             "text-2xl font-black text-gray-500"
                         )
-                        ui.label("시스템 추천에 없음").classes(
+                        ui.label(_names_x).classes(
+                            "text-[11px] text-gray-300 truncate"
+                        )
+                        ui.label("시스템 분석 외 · 클릭 → 카드 필터").classes(
                             "text-[10px] text-gray-500"
                         )
-            
+
+            # [Step AH-2] 집중도 ≥30% 경고 (외부 리뷰 ⑤)
+            if total_buy > 0:
+                _max_item = max(items, key=lambda x: x["avg"] * x["qty"])
+                _max_val = _max_item["avg"] * _max_item["qty"]
+                _max_weight = _max_val / total_buy * 100
+                if _max_weight >= 30:
+                    _color = "red" if _max_weight >= 40 else "amber"
+                    with ui.card().classes(
+                        f"w-full p-3 mb-2 rounded-lg "
+                        f"border-l-4 border-{_color}-500"
+                    ).style(f"background: rgba({'180,40,40' if _color=='red' else '180,120,40'},0.08)"):
+                        ui.label(f"⚠️ 단일 종목 비중 높음").classes(
+                            f"text-sm text-{_color}-300 font-bold"
+                        )
+                        ui.label(
+                            f"{_max_item['name']}이 전체 매입금의 "
+                            f"{_max_weight:.1f}% — 단일 종목 리스크가 있어 "
+                            f"추가 매수는 신중히 검토하세요."
+                        ).classes(f"text-xs text-{_color}-100 mt-1")
+
             ui.label(
                 "💡 정확한 진단은 아래 [🤖 AI 진단 실행]을 눌러주세요. "
                 "(시세 조회 + DART 공시 + AI 리포트)"
             ).classes("text-xs text-gray-500 italic")
+
+            # [Step AH-1+] 분류 → 종목명 매핑을 storage에 저장 (카드 필터링용)
+            try:
+                _ah_app.storage.user["_holding_groups"] = {
+                    "caution": caution_names,
+                    "observe": observe_names,
+                    "hold":    hold_names,
+                    "outside": outside_names,
+                }
+            except Exception:
+                pass
         else:
             ui.label(
                 "💡 보유 종목이 오늘 추천에 없습니다. "
@@ -1133,17 +1329,18 @@ def render_tab_portfolio(df, auth):
 
     # DART 연동 상태 표시
     # [Step M #4] DART/Gemini 연동 상태 + 설명
+    # [Step AH-4] DART 상태 안내 — 회원 친화 표현 (불안 표현 제거)
     if DART_INTEGRATION_OK and _GENAI_CLIENT:
-        dart_status = "🟢 DART+AI 연동"
-        dart_explain = "공시 리스크와 AI 리포트 모두 반영"
+        dart_status = "🟢 통합 진단 모드"
+        dart_explain = "공시 리스크 + AI 리포트 모두 반영 (최고 정확도)"
         dart_color = "text-emerald-400"
     elif DART_INTEGRATION_OK:
-        dart_status = "🟡 DART만 연동"
-        dart_explain = "AI 리포트는 규칙 기반으로 대체"
+        dart_status = "🟡 공시 기반 진단 모드"
+        dart_explain = "DART 공시와 보유종목 점수를 기반으로 보수적으로 진단합니다"
         dart_color = "text-amber-400"
     else:
-        dart_status = "⚪ DART 미연결"
-        dart_explain = "공시 리스크 제외, 가격/점수 기준 진단"
+        dart_status = "⚪ 점수 기반 진단 모드"
+        dart_explain = "보유종목 점수와 가격 변동만으로 진단합니다"
         dart_color = "text-gray-400"
     
     with ui.row().classes("items-center gap-2 mb-2"):
@@ -1376,27 +1573,224 @@ def render_tab_portfolio(df, auth):
                         "flat dense size=sm color=red"
                     ).classes("text-xs")
             
+            # [Step AH-5] 보유 종목 카드 재설계 — 점수/라벨/비중/액션 즉시 표시
+            # 외부 리뷰 ① "종목별 액션이 안 보임" 해결
+            # df 매칭으로 점수/라벨/액션 즉시 산출 (AI 진단 안 눌러도)
+            # [AH-6] 분류 필터 적용
+            from nicegui import app as _ah_app2
+            _filter_group = _ah_app2.storage.user.get("_holding_filter", "all")
+            _groups_map = _ah_app2.storage.user.get("_holding_groups", {}) or {}
+            _filter_set = set(_groups_map.get(_filter_group, [])) if _filter_group != "all" else None
+
+            # [Step AJ-2] items hash 변경 감지 → 필터 완전 초기화
+            # 외부 리뷰: 추가/수정/삭제 후 stale 필터 방지 (교집합 검사로 부족)
+            try:
+                _items_sig = tuple(
+                    (it["name"], it["avg"], it["qty"]) for it in items
+                )
+                _prev_sig = _ah_app2.storage.user.get("_holding_items_sig")
+                if _prev_sig is not None and tuple(_prev_sig) != _items_sig:
+                    # items 변경됨 → 필터/그룹 완전 초기화
+                    _ah_app2.storage.user["_holding_filter"] = "all"
+                    _ah_app2.storage.user["_holding_groups"] = {}
+                    _filter_set = None
+                    _filter_group = "all"
+                _ah_app2.storage.user["_holding_items_sig"] = list(_items_sig)
+            except Exception:
+                pass
+
+            # [Step AI-2] 필터 stale 자동 해제 (안전망 — items 같아도 그룹이 비었을 때)
+            if _filter_set is not None and items:
+                _current_names = {it["name"] for it in items}
+                if not (_filter_set & _current_names):
+                    _ah_app2.storage.user["_holding_filter"] = "all"
+                    _filter_set = None
+                    _filter_group = "all"
+
+            # 필터 표시 + 해제 버튼
+            if _filter_set is not None:
+                _filter_label = {
+                    "caution": "🚨 즉시 액션",
+                    "observe": "⚠️ 모니터링",
+                    "hold":    "✅ 양호",
+                    "outside": "ℹ️ 추천 외",
+                }.get(_filter_group, _filter_group)
+                with ui.row().classes("w-full items-center gap-2 mb-2 p-2 rounded bg-[#1a1a2e]"):
+                    ui.label(f"🔍 필터: {_filter_label} ({len(_filter_set)}개)").classes(
+                        "text-xs text-cyan-300"
+                    )
+                    def _clear_filter():
+                        _ah_app2.storage.user["_holding_filter"] = "all"
+                        ui.notify("필터 해제", type="info")
+                        _refresh_holdings()
+                    ui.button("✕ 해제", on_click=_clear_filter).props(
+                        "flat dense size=sm color=grey"
+                    ).classes("text-xs")
+
+            # 비중 계산용 합계
+            _total_buy_for_pct = sum(it["avg"] * it["qty"] for it in items) or 1
+
+            # [Step AI-1] df 매칭 — 종목코드 기반 우선 (이름 변형 대응)
+            # 외부 리뷰: "신세계 I&C vs 신세계아이앤씨" 같은 케이스 추천 외 오분류 방지
+            # 매칭 단계: 1) 종목명 정확 일치 → 2) 부분 일치 → 3) KRX 이름 맵
+            _code_map = _get_code_map(df) if df is not None and not df.empty else {}
+            _df_by_code = {}  # code(zfill6) → row
+            _df_by_name = {}  # name → row (1차 fallback)
+            if df is not None and not df.empty and "종목코드" in df.columns:
+                for _, _r in df.iterrows():
+                    _c = str(_r.get("종목코드", "")).zfill(6)
+                    _n = str(_r.get("종목명", ""))
+                    if _c:
+                        _df_by_code[_c] = _r
+                    if _n:
+                        _df_by_name[_n] = _r
+
+            def _ai_lookup_row(name: str):
+                """[Step AI-1] 종목코드 우선 + 이름 변형 대응 매칭.
+
+                매칭 단계:
+                  1) 종목명 정확 일치
+                  2) 종목코드 변환 (_find_code_by_name = 부분 일치 + KRX 맵)
+                  3) 부분 일치 (양방향 substring)
+                  4) 공백/대소문자 정규화 후 비교 — "세아베스틸 지주" ↔ "세아베스틸지주"
+                """
+                # 1) 정확 일치
+                if name in _df_by_name:
+                    return _df_by_name[name]
+                # 2) 종목코드 변환
+                try:
+                    code = _find_code_by_name(name, _code_map)
+                    if code:
+                        code_z = str(code).zfill(6)
+                        if code_z in _df_by_code:
+                            return _df_by_code[code_z]
+                except Exception:
+                    pass
+                # 3) 부분 일치 (양방향 substring)
+                for _n, _r in _df_by_name.items():
+                    if name in _n or _n in name:
+                        return _r
+                # 4) [Step AI-1+] 공백/대소문자 정규화 매칭
+                _norm_target = "".join(name.lower().split())
+                for _n, _r in _df_by_name.items():
+                    _norm_cand = "".join(_n.lower().split())
+                    if (_norm_target == _norm_cand or
+                        _norm_target in _norm_cand or
+                        _norm_cand in _norm_target):
+                        return _r
+                return None
+
+            # [AH-7] 시세 캐시 (백그라운드 fetch 결과 — 있으면 평가금/수익률 표시)
+            _price_cache = _ah_app2.storage.user.get("_price_cache", {}) or {}
+            _price_cache_ts = _ah_app2.storage.user.get("_price_cache_ts", "")
+
             # 종목 카드 그리드
             with ui.row().classes("w-full gap-2 flex-wrap"):
                 for item in items:
+                    # 필터 적용
+                    if _filter_set is not None and item["name"] not in _filter_set:
+                        continue
+
                     val = item['avg'] * item['qty']
+                    weight_pct = val / _total_buy_for_pct * 100
+
+                    # [Step AJ-1+3] 모듈 공용 매칭 + 공용 분류 — Hero와 동일 기준
+                    _row = _match_holding_row(item["name"], df, _code_map)
+                    if _row is not None:
+                        _score = safe_float(_row.get("DISPLAY_SCORE", 0))
+                        _label_raw = str(_row.get("ELITE_LABEL", "") or "")
+                        _route_raw = str(_row.get("ROUTE", "") or "").strip().upper()
+                        _label_disp = _ah_label_disp(_label_raw, short=True) if _label_raw else "—"
+                        _route_disp = _ah_route_disp(_route_raw) if _route_raw else "—"
+                        # [Step AJ-3] 공용 분류 함수 사용
+                        _cls = _classify_holding(_score, _route_raw)
+                        _action = _cls["action"]
+                        _action_color = _cls["action_color"]
+                        _border = _cls["border"]
+                    else:
+                        _score = 0
+                        _label_disp = "⚪ 분석 외"
+                        _route_disp = "—"
+                        _action = "ℹ️ 시스템 추천 외"; _action_color = "text-gray-500"; _border = "border-gray-700"
+
+                    # 시세 + 평가금 + 수익률 (있으면)
+                    _cur_price = _price_cache.get(item["name"], 0)
+                    if _cur_price > 0:
+                        _eval_amt = _cur_price * item["qty"]
+                        _pl = _eval_amt - val
+                        _pl_pct = (_pl / val * 100) if val > 0 else 0
+                    else:
+                        _eval_amt = 0
+                        _pl = 0
+                        _pl_pct = 0
+
+                    # [Step AI-3] 시세 반영 상태 배지 — 3가지 상태 명확히 구분
+                    if _cur_price > 0:
+                        _ps_emoji, _ps_text, _ps_color = "🟢", "현재가 반영", "text-emerald-400"
+                    elif _price_cache_ts:
+                        # fetch는 시도했는데 가격 못 받음 (실패)
+                        _ps_emoji, _ps_text, _ps_color = "⚠️", "시세조회 실패", "text-amber-400"
+                    else:
+                        # 아직 fetch 안 됨 (예: 첫 진입 직후)
+                        _ps_emoji, _ps_text, _ps_color = "⏳", "시세 미조회", "text-gray-500"
+
                     with ui.card().classes(
-                        "p-3 bg-[#0d0d1a] border border-gray-700 rounded-lg "
-                        "min-w-[260px] hover:border-cyan-500/50"
+                        f"p-3 bg-[#0d0d1a] border-2 {_border} rounded-lg "
+                        f"min-w-[280px] hover:border-cyan-500/50"
                     ):
-                        # 종목명 + 합계
+                        # 1행: 종목명 + 라벨 뱃지
                         with ui.row().classes("w-full items-center justify-between mb-1"):
                             ui.label(f"📌 {item['name']}").classes(
-                                "text-white text-sm font-bold"
+                                "text-white text-sm font-bold flex-1 truncate"
                             )
-                            ui.label(f"{val:,}원").classes(
-                                "text-sm text-cyan-400 font-bold"
-                            )
-                        
-                        # 평단가 × 수량
-                        ui.label(f"{item['avg']:,}원 × {item['qty']}주").classes(
-                            "text-xs text-gray-400 mb-2"
+                            if _label_disp != "—" and _label_disp != "⚪ 분석 외":
+                                ui.badge(_label_disp).props("color=purple").classes("text-[10px]")
+
+                        # [Step AI-3] 시세 상태 배지 (카드 좌측 상단)
+                        ui.label(f"{_ps_emoji} {_ps_text}").classes(
+                            f"text-[10px] {_ps_color} mb-1"
                         )
+
+                        # 2행: 액션 (강조)
+                        ui.label(_action).classes(
+                            f"text-xs {_action_color} font-bold mb-1"
+                        )
+
+                        # 3행: 평단/현재가/수익률 (시세 있으면)
+                        if _cur_price > 0:
+                            _pl_color = "text-emerald-400" if _pl >= 0 else "text-red-400"
+                            with ui.row().classes("w-full items-center gap-2 mb-1"):
+                                ui.label(
+                                    f"평단 {item['avg']:,} → 현재 {_cur_price:,}"
+                                ).classes("text-[11px] text-gray-300")
+                                ui.label(
+                                    f"{_pl_pct:+.1f}%"
+                                ).classes(f"text-xs {_pl_color} font-bold ml-auto")
+                        else:
+                            # 시세 없을 때 평단×수량
+                            ui.label(f"{item['avg']:,}원 × {item['qty']}주").classes(
+                                "text-[11px] text-gray-400 mb-1"
+                            )
+
+                        # 4행: 점수 / 비중 / 평가금
+                        with ui.row().classes("w-full items-center gap-3 mb-2"):
+                            if _score > 0:
+                                _sc_color = ("text-emerald-400" if _score >= 60 else
+                                             "text-amber-400" if _score > 40 else "text-red-400")
+                                ui.label(f"점수 {_score:.0f}").classes(
+                                    f"text-[11px] {_sc_color} font-semibold"
+                                )
+                            ui.label(f"비중 {weight_pct:.1f}%").classes(
+                                "text-[11px] text-cyan-300"
+                            )
+                            if _eval_amt > 0:
+                                ui.label(f"평가 {int(_eval_amt):,}원").classes(
+                                    "text-[11px] text-cyan-100 ml-auto"
+                                )
+                            else:
+                                ui.label(f"매입 {val:,}원").classes(
+                                    "text-[11px] text-cyan-400 ml-auto"
+                                )
                         
                         # [Step P] 편집 / 삭제 버튼 (충분한 터치 영역)
                         with ui.row().classes("w-full gap-2"):
@@ -1524,7 +1918,75 @@ def render_tab_portfolio(df, auth):
         asyncio.ensure_future(_bg_save_portfolio(pf_input.value, user_profile))
         _refresh_holdings()
     pf_input.on("blur", lambda _: _auto_save())
+    # [Step AH-8] 글로벌 슬롯에 _refresh_holdings 등록 — 분류 카드 클릭 시 즉시 재렌더
+    _ah_register_refresh(_refresh_holdings)
     _refresh_holdings()
+
+    # ════════════════════════════════════════════════
+    # [Step AH-7] 시세 백그라운드 자동 조회 (외부 리뷰 ② + 자체 B)
+    # 페이지 진입 시 비동기로 보유 종목 시세 조회 → 카드에 평가금/수익률 자동 반영
+    # 캐시 5분 (반복 fetch 방지). 실패 시 매입금 표시 유지 (degradation).
+    # ════════════════════════════════════════════════
+    async def _ah_bg_fetch_prices():
+        try:
+            from datetime import datetime as _dt
+            cache = app.storage.user.get("_price_cache", {}) or {}
+            cache_ts = app.storage.user.get("_price_cache_ts")
+            # 5분 캐시 — 페이지 재진입 시 재호출 안 함
+            if cache_ts:
+                try:
+                    age = (_dt.now() - _dt.fromisoformat(cache_ts)).total_seconds()
+                    if age < 300 and cache:
+                        return  # 캐시 유효
+                except Exception:
+                    pass
+
+            text = pf_input.value.strip()
+            if not text:
+                return
+            _items_now = []
+            for line in text.split("\n"):
+                if ":" not in line:
+                    continue
+                _parts = line.split(":")
+                if len(_parts) < 3:
+                    continue
+                try:
+                    _items_now.append({
+                        "name": _parts[0].strip(),
+                        "avg": int(_parts[1]),
+                        "qty": int(_parts[2]),
+                    })
+                except (ValueError, IndexError):
+                    pass
+
+            new_cache = dict(cache)
+            for it in _items_now:
+                try:
+                    code, _name, price = await _ah_run_sync(
+                        _fetch_current_price, "", it["name"]
+                    )
+                    if price and price > 0:
+                        new_cache[it["name"]] = int(price)
+                except Exception:
+                    pass
+
+            app.storage.user["_price_cache"] = new_cache
+            app.storage.user["_price_cache_ts"] = _dt.now().isoformat()
+            # 카드 재렌더 — 평가금/수익률 반영
+            try:
+                _refresh_holdings()
+            except Exception:
+                pass
+        except Exception as _e:
+            try:
+                logging.getLogger(__name__).warning(
+                    f"[AH-7] 시세 백그라운드 조회 실패: {_e}"
+                )
+            except Exception:
+                pass
+
+    asyncio.ensure_future(_ah_bg_fetch_prices())
 
     async def analyze():
         result_area.clear()
