@@ -28,24 +28,43 @@ except ImportError:
 # ═══════════════════════════════════════════════════
 #  카테고리 자동 분류 시스템
 # ═══════════════════════════════════════════════════
-# 우선순위 순서 (먼저 매칭되는 카테고리가 적용됨)
+# [Step AI] 우선순위 재조정 — 결제/약관/개인정보 서비스 특성 반영
+# 1) security: 보안/안정성 (방어/롤백/검증 등 — 가장 자주 발생)
+# 2) business: 결제/환불/멤버십 (서비스 본질)
+# 3) bug: 명확한 버그 수정만 (방어/롤백은 security로)
+# 4) new: 신규 기능
+# 5) performance: 성능/속도
+# 6) improvement: 개선/리팩토링
+# 7) ux: UI/UX
+# 8) data: 데이터/분석
 CATEGORY_RULES = [
-    {
-        "key": "bug",
-        "label": "🐛 버그 수정",
-        "color": "red",
-        "keywords": ["수정", "버그", "오류", "장애", "복구", "차단", "방어", "fix",
-                     "fallback", "롤백", "재시도", "에러"],
-        "emoji_hints": ["🐛", "🔧", "🛠️"],
-    },
     {
         "key": "security",
         "label": "🛡️ 보안 · 안정성",
         "color": "amber",
+        # [Step AI] 차단/방어/롤백/재시도/fallback을 보안으로 이동
         "keywords": ["보안", "암호화", "검증", "인증", "동의", "약관", "개인정보",
-                     "권한", "롤백", "PCI", "SSL", "토큰", "해시", "잠금",
-                     "감사 로그", "위변조", "탈출", "민감", "익명"],
+                     "권한", "PCI", "SSL", "토큰", "해시", "잠금",
+                     "감사 로그", "위변조", "탈출", "민감", "익명",
+                     "차단", "방어", "롤백", "재시도", "fallback"],
         "emoji_hints": ["🛡️", "🔐", "🔒", "🔑", "📜", "🚨"],
+    },
+    {
+        "key": "business",
+        "label": "🏢 운영 · 비즈니스",
+        "color": "blue",
+        "keywords": ["사업자", "결제", "환불", "구독", "Prime", "멤버십", "토스",
+                     "가맹점", "도메인", "통신판매", "관리자", "운영", "고객",
+                     "문의", "카카오톡", "Telegram", "이메일 인증"],
+        "emoji_hints": ["💎", "🏢", "💳", "💰", "📞", "📧", "📮", "👑"],
+    },
+    {
+        "key": "bug",
+        "label": "🐛 버그 수정",
+        "color": "red",
+        # [Step AI] 명확한 버그 키워드만 유지 (차단/방어/롤백/재시도/fallback 제거)
+        "keywords": ["수정", "버그", "오류", "장애", "복구", "fix", "에러"],
+        "emoji_hints": ["🐛"],
     },
     {
         "key": "new",
@@ -64,22 +83,13 @@ CATEGORY_RULES = [
         "emoji_hints": ["⚡", "🏎️", "💨"],
     },
     {
-        "key": "business",
-        "label": "🏢 운영 · 비즈니스",
-        "color": "blue",
-        "keywords": ["사업자", "결제", "환불", "구독", "Prime", "멤버십", "토스",
-                     "가맹점", "도메인", "통신판매", "관리자", "운영", "고객",
-                     "문의", "카카오톡", "Telegram", "이메일 인증"],
-        "emoji_hints": ["💎", "🏢", "💳", "💰", "📞", "📧", "📮", "👑"],
-    },
-    {
         "key": "improvement",
         "label": "📈 개선 · 강화",
         "color": "cyan",
         "keywords": ["개선", "강화", "확장", "리팩토링", "재설계", "통합",
                      "정확도", "정밀도", "보존", "안정", "구조", "체계화",
                      "자동화", "고도화", "보강"],
-        "emoji_hints": ["📈", "🔄", "🔁", "🎯", "📊", "📉"],
+        "emoji_hints": ["📈", "🔄", "🔁", "🎯"],
     },
     {
         "key": "ux",
@@ -95,9 +105,9 @@ CATEGORY_RULES = [
         "label": "📊 데이터 · 분석",
         "color": "teal",
         "keywords": ["데이터", "백테스트", "스코어", "지표", "ELITE", "팩터",
-                     "벤치마크", "검증", "통계", "차트", "시그널", "ROUTE",
+                     "벤치마크", "통계", "차트", "시그널", "ROUTE",
                      "AI", "TOP_PICK", "추천", "랭킹", "RR", "Kelly"],
-        "emoji_hints": ["📊", "📈", "📉", "🎯", "🧪"],
+        "emoji_hints": ["📊", "📉", "🧪"],
     },
 ]
 # 어디에도 안 맞으면 fallback
@@ -227,7 +237,9 @@ def render_tab_updates():
     
     search_input = ui.input(
         placeholder="🔍 검색 (예: 결제, 환불, 버그, AI, 백테스트...)"
-    ).classes("w-full mt-3 mb-2").props("outlined dense clearable")
+    ).classes("w-full mt-3 mb-2").props(
+        "outlined dense clearable debounce=300"
+    )
     
     # 카테고리 필터
     with ui.row().classes("w-full gap-1 mb-3 flex-wrap"):
@@ -268,7 +280,7 @@ def _render_hero_card(latest: dict):
     items_clean = [_strip_markdown(i) for i in items]
     version_stats = _compute_version_stats(items)
     
-    # Top 3 highlight (이모지 시작 항목 우선)
+    # [Step AI] Top 5 highlight — 첫 5개 항목의 핵심 부분만 추출
     highlights = []
     for item in items_clean[:5]:
         # ** 제거된 텍스트에서 첫 줄/문장만 추출
@@ -443,7 +455,7 @@ def _render_versions(state: dict):
                 
                 # 항목 리스트
                 for item in grp["items"]:
-                    # 검색어 하이라이트 표시 (단순 구현 — 텍스트만)
+                    # [Step AI] 검색 결과 텍스트 표시 (하이라이트는 미구현)
                     ui.label(f"• {item}").classes(
                         "text-sm text-gray-300 ml-3 mb-1 leading-relaxed"
                     )
