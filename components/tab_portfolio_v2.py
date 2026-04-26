@@ -262,7 +262,24 @@ def _find_code_by_name(name, code_map):
 #     4) 공백/대소문자 정규화
 # ════════════════════════════════════════════════════
 def _match_holding_row(name, df, code_map=None):
-    """종목명 → df row 매칭. 못 찾으면 None."""
+    """[Step AL-1] 종목명 → df row 매칭 — substring 위험 단계 제거.
+
+    옛 버전 버그: 3)substring + 4)정규화 substring 모두
+    'nc in norm_t' 검사 포함 → df의 "신세계"가 입력 "신세계 I&C"의
+    substring 조건 매칭 → 신세계 본사 row 잘못 반환 → 가격 오염.
+
+    수정 단계 (안전 우선):
+      1) 정확 일치
+      2) 종목코드 변환 (_find_code_by_name = AK-1로 정규화 우선)
+         → 변환된 코드로 df 종목코드 검색 (가장 신뢰할 수 있는 경로)
+      3) 정규화 정확 일치만 (공백/대소문자 흡수)
+         → '세아베스틸 지주' ↔ '세아베스틸지주' 같은 케이스
+         → '신세계' ≠ '신세계I&C' (정규화도 다름) → 매칭 안 됨 ✅
+
+    제거된 단계 (위험):
+      ✗ 양방향 substring (name in n / n in name)
+      ✗ 정규화 substring (norm_t in nc / nc in norm_t)
+    """
     if df is None or len(df) == 0 or "종목명" not in df.columns:
         return None
     if not name:
@@ -273,27 +290,22 @@ def _match_holding_row(name, df, code_map=None):
     _by_name = dict(zip(df["종목명"].astype(str), df.to_dict("records")))
     if name in _by_name:
         return _by_name[name]
-    # 2) 종목코드 변환
+    # 2) 종목코드 변환 — _find_code_by_name이 정규화 정확 매칭 우선 (AK-1)
     try:
         code = _find_code_by_name(name, code_map)
-        if code:
+        if code and code != name:  # 변환된 결과가 입력과 다를 때만 사용
             code_z = str(code).zfill(6)
-            mask = df["종목코드"].astype(str).str.zfill(6) == code_z
-            if mask.any():
-                return df[mask].iloc[0].to_dict()
+            if code_z and code_z != "000000":
+                mask = df["종목코드"].astype(str).str.zfill(6) == code_z
+                if mask.any():
+                    return df[mask].iloc[0].to_dict()
     except Exception:
         pass
-    # 3) 부분 일치
-    for n, r in _by_name.items():
-        if name in n or n in name:
-            return r
-    # 4) 공백/대소문자 정규화
-    norm_target = "".join(name.lower().split())
+    # 3) 정규화 정확 일치만 — substring 검사 제거 (다른 종목 잘못 매칭 방지)
+    norm_target = "".join(str(name).lower().split())
     for n, r in _by_name.items():
         norm_cand = "".join(str(n).lower().split())
-        if (norm_target == norm_cand or
-            norm_target in norm_cand or
-            norm_cand in norm_target):
+        if norm_target == norm_cand:  # 정확 일치만
             return r
     return None
 
