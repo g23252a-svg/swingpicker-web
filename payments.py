@@ -89,10 +89,13 @@ def _send_telegram(text: str):
 
 
 def _parse_order_id(order_id: str) -> dict:
-    """[Step R] 주문ID 안전 파싱.
+    """[Step R+X] 주문ID 안전 파싱.
     
-    포맷: LDY-{PLAN}-{TIMESTAMP}-{EMAIL_HASH8}
-    예: LDY-PRIME-20260425143022-a3f9b21c
+    포맷: LDY-{PLAN}-{TIMESTAMP}-{EMAIL_HASH12}
+    예: LDY-PRIME-20260425143022-a3f9b21c4d5e
+    
+    [Step X] 이메일 해시는 12자리로 강화됨 (충돌 확률 0.001% → 0.00000003%).
+    하위 호환: 8자리 해시도 정상 파싱 (기존 주문 호환).
     
     Returns:
         {"plan": str, "timestamp": str, "hash": str}
@@ -106,6 +109,7 @@ def _parse_order_id(order_id: str) -> dict:
     if len(parts) >= 3:
         result["timestamp"] = parts[2]
     if len(parts) >= 4:
+        # 8자리 또는 12자리 모두 정상 처리
         result["hash"] = parts[3].lower()
     return result
 
@@ -674,37 +678,75 @@ def register_payment_routes():
         message: str = "결제가 취소되었습니다.",
         orderId: str = "-",
     ):
-        """[Step R+AF] 토스페이먼츠 결제 실패/취소 — query param 직접 받기"""
+        """[Step R+AF+AG] 토스페이먼츠 결제 실패/취소 — query param 직접 받기"""
         _logger.info(f"결제 실패/취소: {code} - {message} (order: {orderId})")
         
-        # [v22 Step AF] 결제 취소/실패도 DB 기록 (감사 로그 완성도)
+        # [v22 Step AF+AG] 결제 취소/실패도 DB 기록 (감사 로그 완성도)
         # orderId가 "-"가 아닐 때만 기록 (유효 주문)
         if orderId != "-":
             try:
                 _db = _get_db()
-                if _db and hasattr(_db, "record_payment"):
-                    _db.record_payment(
-                        order_id=orderId,
-                        payment_key="",
-                        email="",  # 사용자가 결제창에서 취소 → 이메일 추출 불가
-                        plan="prime",
-                        amount=0,
-                        status="cancelled",
-                        method="",
-                        approved_at="",
-                        receipt_url="",
-                        error_message=f"{code}: {message}"[:300],
-                    )
-                    _logger.info(f"💾 결제 취소 기록 저장: {orderId}")
                 
-                # Telegram 알림 (운영자용)
-                _send_telegram(
-                    f"❌ <b>[결제 취소/실패]</b>\n"
-                    f"━━━━━━━━━━━━\n"
-                    f"🆔 {orderId}\n"
-                    f"📛 {code}\n"
-                    f"💬 {message[:150]}"
-                )
+                # [v22 Step AG] 1. success 결제 보호 — 절대 cancelled로 덮지 않음
+                # 외부 공격자가 success orderId로 fail URL 호출 시 방어
+                already_success = False
+                if _db and hasattr(_db, "is_payment_processed"):
+                    already_success = _db.is_payment_processed(orderId)
+                
+                if already_success:
+                    _logger.warning(
+                        f"⚠️ 이미 success 처리된 주문에 대한 fail 콜백 — "
+                        f"cancelled 기록 스킵: {orderId}"
+                    )
+                    # 보안 경고 Telegram (외부 공격 가능성)
+                    _send_telegram(
+                        f"🚨 <b>[fail 콜백 비정상 호출]</b>\n"
+                        f"━━━━━━━━━━━━\n"
+                        f"🆔 {orderId}\n"
+                        f"⚠️ 이미 success 처리된 주문에 fail 콜백 도달\n"
+                        f"📛 {code}: {message[:100]}\n"
+                        f"💡 외부 공격 또는 토스 재전송 가능성 — 확인 필요"
+                    )
+                else:
+                    # [v22 Step AG] 2. orderId 파싱 → plan/email 추정
+                    parsed = _parse_order_id(orderId)
+                    parsed_plan = parsed.get("plan", "prime")
+                    parsed_hash = parsed.get("hash", "")
+                    parsed_email = ""
+                    if parsed_hash:
+                        try:
+                            parsed_email = _find_email_by_hash(parsed_hash) or ""
+                        except Exception as fe:
+                            _logger.debug(f"이메일 해시 매핑 실패: {fe}")
+                    
+                    if _db and hasattr(_db, "record_payment"):
+                        _db.record_payment(
+                            order_id=orderId,
+                            payment_key="",
+                            email=parsed_email,  # [Step AG] 해시→이메일 추정
+                            plan=parsed_plan,    # [Step AG] orderId에서 추출
+                            amount=0,
+                            status="cancelled",
+                            method="",
+                            approved_at="",
+                            receipt_url="",
+                            error_message=f"{code}: {message}"[:300],
+                        )
+                        _logger.info(
+                            f"💾 결제 취소 기록 저장: {orderId} / "
+                            f"plan={parsed_plan} / email={parsed_email or '미식별'}"
+                        )
+                    
+                    # Telegram 알림 (운영자용)
+                    _send_telegram(
+                        f"❌ <b>[결제 취소/실패]</b>\n"
+                        f"━━━━━━━━━━━━\n"
+                        f"🆔 {orderId}\n"
+                        f"📧 {parsed_email or '미식별'}\n"
+                        f"💎 {parsed_plan}\n"
+                        f"📛 {code}\n"
+                        f"💬 {message[:150]}"
+                    )
             except Exception as e:
                 _logger.warning(f"결제 취소 기록 실패 (무시): {e}")
 
