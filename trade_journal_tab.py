@@ -2,25 +2,34 @@
 """
 trade_journal_tab.py — 매매 복기(Trading Journal) 탭
 ═══════════════════════════════════════════════════════════
-[v22 Step AQ] 전면 리팩토링 — 68 → 90점 목표
+[v22 Step AQ+AR] 전면 리팩토링 — 68 → 95점 목표
 
 ⚠️ 보안 핵심: 사용자별 데이터 격리 (user_email_hash)
 - 이전: 모든 사용자가 같은 SQLite DB 공유 → 보안 사고 위험
 - 현재: 각 사용자 본인 기록만 표시/수정/삭제 가능
 - 마이그레이션: 기존 데이터는 'legacy' 라벨 + 관리자만 접근
 
-개선 사항:
+개선 사항 (Step AQ):
 1. ✅ 사용자별 데이터 격리 (user_email_hash 컬럼 + 마이그레이션)
 2. ✅ 면책 + 데이터 백업 안내
-3. ✅ 종목 자동 채움 (df_scored 활용 — 추천가/손절가/T1/ROUTE/점수)
-4. ✅ 청산 UX 개선 (행 클릭 → 모달, ID 입력 폐기)
-5. ✅ 필터 5종 + 검색 (종목/결과/ROUTE/기간/검색)
+3. ✅ 종목 자동 채움 (df_scored 활용)
+4. ✅ 청산 UX 개선 (행 클릭 → 모달)
+5. ✅ 필터 5종 + 검색
 6. ✅ 추가 메트릭 (Sharpe, MDD, 연승/연패)
-7. ✅ 차트 보기 모드 4종 (슬리피지/누적손익/ROUTE/요일별)
+7. ✅ 차트 보기 모드 4종
 8. ✅ CSV 다운로드
 9. ✅ 모바일 반응형 + 사용자 친화 라벨
 
-저장소: SQLite ldy_trader.db (trade_journal 테이블)
+추가 개선 (Step AR):
+10. ✅ _get_user_key() 통일 helper (email/login_id/id/username/user_id fallback)
+11. ✅ DB 경로 명시 (os.path.abspath, 루트 위치 검증)
+12. ✅ 삭제 확인 다이얼로그 (실수 방지)
+13. ✅ 청산 메모 append (진입 메모 + [청산 메모 ts] 첨가)
+14. ✅ Gist 동기화 (계정별 자동 백업 — trade_journal_<user_hash>.json)
+
+저장소: 
+- 로컬: SQLite ldy_trader.db (trade_journal 테이블)
+- 백업: Gist (LDY_GIST_ID/TOKEN 환경변수)
 """
 
 import os
@@ -37,7 +46,10 @@ logger = logging.getLogger("trade_journal")
 # ─────────────────────────────────────────────
 #  DB 경로
 # ─────────────────────────────────────────────
-_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+# [Step AR] DB 경로 명시 — trade_journal_tab.py는 루트 위치
+# (components/ 안의 파일이라면 dirname(dirname(__file__)) 사용)
+# Railway/Docker 볼륨 마운트: /app/data 가 영구 저장소
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 _DB_PATH = os.path.join(_DATA_DIR, "ldy_trader.db")
 
@@ -109,20 +121,44 @@ def _get_conn():
 
 
 # ─────────────────────────────────────────────
-#  [Step AQ] 사용자 식별 helper
+#  [Step AR] 사용자 식별 helper — 통일된 기준
 # ─────────────────────────────────────────────
-def _get_user_hash() -> Optional[str]:
-    """현재 로그인 사용자의 email_hash. 비로그인 시 None."""
+def _get_user_key() -> Optional[str]:
+    """[Step AR] 통일된 사용자 식별 키 추출.
+    
+    여러 필드를 fallback 순서로 검색 (다른 탭과 일관성 유지):
+        email → login_id → id → username → user_id
+    
+    Returns:
+        SHA256 12자 해시 또는 None (비로그인 시)
+    """
     try:
         from nicegui import app
         profile = app.storage.user.get("profile", {})
-        email = profile.get("email", "")
-        if not email:
+        if not isinstance(profile, dict):
+            return None
+        # 통일된 fallback 순서
+        raw = (
+            profile.get("email")
+            or profile.get("login_id")
+            or profile.get("id")
+            or profile.get("username")
+            or profile.get("user_id")
+            or ""
+        )
+        if not raw:
             return None
         import hashlib
-        return hashlib.sha256(email.lower().encode()).hexdigest()[:12]
-    except Exception:
+        return hashlib.sha256(str(raw).lower().encode()).hexdigest()[:12]
+    except Exception as e:
+        logger.debug(f"_get_user_key 오류: {e}")
         return None
+
+
+# 하위 호환 — 기존 코드가 _get_user_hash 호출 시 동일하게 작동
+def _get_user_hash() -> Optional[str]:
+    """[deprecated] _get_user_key()로 통일됨"""
+    return _get_user_key()
 
 
 # ─────────────────────────────────────────────
@@ -223,26 +259,46 @@ def delete_trade(trade_id: int, user_hash: str) -> bool:
 
 def update_exit(trade_id: int, exit_price: float, notes: str,
                 user_hash: str) -> bool:
-    """[Step AQ] 본인 거래만 청산 기록 (user_hash 검증)"""
+    """[Step AQ+AR] 본인 거래만 청산 기록 — 메모는 append 방식
+    
+    [Step AR] 청산 메모는 기존 진입 메모에 추가:
+        진입 메모: "차트 돌파, 거래량 급증"
+        청산 메모: "목표가 도달"
+        결과: "차트 돌파, 거래량 급증\n\n[청산 메모 2026-04-26 14:30] 목표가 도달"
+    
+    → 진입 이유 + 청산 이유 모두 보존하여 복기 가치 향상.
+    """
     if not user_hash:
         return False
     conn = _get_conn()
     try:
         row = conn.execute(
-            "SELECT actual_price FROM trade_journal "
+            "SELECT actual_price, notes FROM trade_journal "
             "WHERE id=? AND user_email_hash=?",
             (trade_id, user_hash),
         ).fetchone()
         if not row:
             return False
         act_p = row["actual_price"] or 0
+        old_notes = row["notes"] or ""
+        
         profit = (exit_price - act_p) / act_p * 100 if act_p > 0 else 0
         outcome = "WIN" if profit > 0 else "LOSS" if profit < 0 else "OPEN"
+        
+        # [Step AR] 청산 메모 append (진입 메모 보존)
+        if notes and notes.strip():
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+            exit_block = f"\n\n[청산 메모 {ts}] {notes.strip()}"
+            new_notes = (old_notes.rstrip() + exit_block) if old_notes else exit_block.lstrip("\n")
+        else:
+            # 청산 메모 비어 있으면 기존 메모 그대로 유지
+            new_notes = old_notes
+        
         conn.execute(
             """UPDATE trade_journal
                SET exit_price=?, profit_pct=?, outcome=?, notes=?
                WHERE id=? AND user_email_hash=?""",
-            (exit_price, profit, outcome, notes, trade_id, user_hash),
+            (exit_price, profit, outcome, new_notes, trade_id, user_hash),
         )
         conn.commit()
         return True
@@ -389,7 +445,114 @@ def _render_disclaimer(ui):
 
 
 # ─────────────────────────────────────────────
-#  [Step AQ] 차트 모드 해설
+#  [Step AR] Gist 동기화 (계정별 자동 백업)
+# ─────────────────────────────────────────────
+def _gist_filename(user_hash: str) -> str:
+    """user_hash별 Gist 파일명"""
+    return f"trade_journal_{user_hash}.json"
+
+
+def sync_to_gist(user_hash: str, trades: List[Dict]) -> bool:
+    """[Step AR] 본인 매매일지를 Gist에 업로드.
+    
+    파일명: trade_journal_<user_hash>.json
+    환경변수: LDY_GIST_ID, LDY_GIST_TOKEN
+    
+    Returns:
+        성공 시 True, 실패 시 False
+    """
+    if not user_hash:
+        return False
+    
+    # 환경변수 체크
+    gist_id = os.getenv("LDY_GIST_ID", "").strip()
+    gist_token = os.getenv("LDY_GIST_TOKEN", "").strip()
+    if not gist_id or not gist_token:
+        logger.warning("Gist 동기화 스킵 — LDY_GIST_ID/TOKEN 미설정")
+        return False
+    
+    try:
+        import requests
+        # user_email_hash 제외 (이미 파일명으로 격리됨)
+        sanitized = []
+        for t in trades:
+            t_copy = dict(t)
+            t_copy.pop("user_email_hash", None)
+            sanitized.append(t_copy)
+        
+        payload = {
+            "version": "1.0",
+            "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "user_hash": user_hash[:8] + "...",  # 마지막 4자 마스킹
+            "count": len(sanitized),
+            "trades": sanitized,
+        }
+        
+        filename = _gist_filename(user_hash)
+        url = f"https://api.github.com/gists/{gist_id}"
+        headers = {
+            "Authorization": f"token {gist_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        body = {
+            "files": {
+                filename: {
+                    "content": json.dumps(payload, ensure_ascii=False, indent=2),
+                },
+            },
+        }
+        
+        resp = requests.patch(url, headers=headers, json=body, timeout=10)
+        if resp.status_code == 200:
+            logger.info(f"✅ Gist 백업 완료: {filename} ({len(sanitized)}건)")
+            return True
+        else:
+            logger.warning(
+                f"Gist 업로드 실패: HTTP {resp.status_code} — {resp.text[:200]}"
+            )
+            return False
+    except Exception as e:
+        logger.error(f"Gist 동기화 오류: {e}")
+        return False
+
+
+def restore_from_gist(user_hash: str) -> Optional[List[Dict]]:
+    """[Step AR] Gist에서 본인 매매일지 복원."""
+    if not user_hash:
+        return None
+    
+    gist_id = os.getenv("LDY_GIST_ID", "").strip()
+    gist_token = os.getenv("LDY_GIST_TOKEN", "").strip()
+    if not gist_id or not gist_token:
+        return None
+    
+    try:
+        import requests
+        url = f"https://api.github.com/gists/{gist_id}"
+        headers = {
+            "Authorization": f"token {gist_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        filename = _gist_filename(user_hash)
+        files = data.get("files", {})
+        if filename not in files:
+            return None
+        
+        content = files[filename].get("content", "{}")
+        payload = json.loads(content)
+        return payload.get("trades", [])
+    except Exception as e:
+        logger.error(f"Gist 복원 오류: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────
+#  차트 모드 해설
 # ─────────────────────────────────────────────
 CHART_MODE_EXPLANATIONS = {
     "slippage": (
@@ -425,7 +588,7 @@ def render_trade_journal_tab(df_scored=None):
         return
 
     # ─── 사용자 인증 체크 ───
-    user_hash = _get_user_hash()
+    user_hash = _get_user_key()  # [Step AR] 통일된 식별자
     if not user_hash:
         with ui.card().classes(
             "w-full p-8 bg-[#1a1a2e] border border-amber-500/40 "
@@ -897,10 +1060,28 @@ def render_trade_journal_tab(df_scored=None):
                 ui.label(
                     f"📂 매매 기록 ({len(trades)}건)"
                 ).classes("text-white font-bold")
-                ui.button(
-                    "📥 CSV 다운로드",
-                    on_click=lambda: _download_csv(trades),
-                ).props("flat color=cyan size=sm")
+                with ui.row().classes("gap-2"):
+                    ui.button(
+                        "📥 CSV 다운로드",
+                        on_click=lambda: _download_csv(trades),
+                    ).props("flat color=cyan size=sm")
+                    # [Step AR] Gist 백업 버튼 (환경변수 있을 때만 활성)
+                    has_gist = bool(os.getenv("LDY_GIST_ID")) and bool(
+                        os.getenv("LDY_GIST_TOKEN")
+                    )
+                    if has_gist:
+                        ui.button(
+                            "☁️ Gist 백업",
+                            on_click=lambda: _gist_backup(trades),
+                        ).props("flat color=purple size=sm").tooltip(
+                            "본인 매매일지를 Gist에 계정별 백업"
+                        )
+                        ui.button(
+                            "📤 Gist 복원",
+                            on_click=lambda: _gist_restore(),
+                        ).props("flat color=indigo size=sm").tooltip(
+                            "Gist에서 백업된 매매일지 가져오기 (병합)"
+                        )
 
             if not trades:
                 ui.label("📭 표시할 기록이 없습니다.").classes(
@@ -1027,19 +1208,50 @@ def render_trade_journal_tab(df_scored=None):
             ui.separator().classes("my-3")
 
             with ui.row().classes("w-full justify-between gap-2"):
-                # [Step AQ] 단순 삭제 (확인 차단은 위험 적은 매매일지 1건이라 단순화)
-                def quick_delete():
-                    ok = delete_trade(trade["id"], user_hash)
-                    if ok:
-                        ui.notify("🗑️ 삭제 완료", type="positive")
-                        dialog.close()
-                        _refresh()
-                    else:
-                        ui.notify("❌ 삭제 실패", type="negative")
+                # [Step AR] 삭제 확인 다이얼로그 (실수 방지)
+                def open_delete_confirm():
+                    with ui.dialog() as confirm_dialog, ui.card().classes(
+                        "p-4 bg-[#1a1a2e] border border-red-500/40 "
+                        "rounded-xl min-w-[320px]"
+                    ):
+                        ui.label("⚠️ 매매 기록 삭제").classes(
+                            "text-base font-bold text-red-300"
+                        )
+                        ui.label(
+                            f"#{trade['id']} {trade['stock_name']}"
+                        ).classes("text-sm text-white mt-2")
+                        ui.label(
+                            "정말 삭제하시겠습니까? 삭제 후 복구할 수 없습니다."
+                        ).classes("text-xs text-gray-300 mt-2")
+                        ui.label(
+                            "💡 백업이 필요하면 먼저 CSV 다운로드를 받으세요."
+                        ).classes("text-xs text-amber-200 mt-1 italic")
+                        
+                        with ui.row().classes("w-full justify-end gap-2 mt-3"):
+                            ui.button(
+                                "취소",
+                                on_click=confirm_dialog.close,
+                            ).props("flat color=gray")
+                            
+                            def do_confirmed_delete():
+                                ok = delete_trade(trade["id"], user_hash)
+                                confirm_dialog.close()
+                                if ok:
+                                    ui.notify("🗑️ 삭제 완료", type="positive")
+                                    dialog.close()
+                                    _refresh()
+                                else:
+                                    ui.notify("❌ 삭제 실패", type="negative")
+                            
+                            ui.button(
+                                "🗑️ 삭제 확정",
+                                on_click=do_confirmed_delete,
+                            ).props("color=red")
+                    confirm_dialog.open()
 
                 ui.button(
                     "🗑️ 이 기록 삭제",
-                    on_click=quick_delete,
+                    on_click=open_delete_confirm,
                 ).props("flat color=red size=sm")
                 ui.button("닫기", on_click=dialog.close).props("flat")
 
@@ -1063,6 +1275,68 @@ def render_trade_journal_tab(df_scored=None):
             ui.notify(f"📥 다운로드: {fname}", type="positive")
         except Exception as e:
             logger.error(f"CSV 다운로드 실패: {e}")
+            ui.notify(f"⚠️ 실패: {e}", type="negative")
+
+    # ─── [Step AR] Gist 백업 ───
+    def _gist_backup(trades):
+        """[Step AR] 본인 매매일지를 Gist에 계정별 백업.
+        
+        파일명: trade_journal_<user_hash>.json
+        """
+        try:
+            if not trades:
+                ui.notify("📭 백업할 기록 없음", type="warning")
+                return
+            ok = sync_to_gist(user_hash, trades)
+            if ok:
+                ui.notify(
+                    f"☁️ Gist 백업 완료 ({len(trades)}건)",
+                    type="positive",
+                )
+            else:
+                ui.notify(
+                    "⚠️ Gist 백업 실패 — 환경변수 확인 (LDY_GIST_*)",
+                    type="warning",
+                )
+        except Exception as e:
+            logger.error(f"Gist 백업 실패: {e}")
+            ui.notify(f"⚠️ 실패: {e}", type="negative")
+    
+    # ─── [Step AR] Gist 복원 (병합) ───
+    def _gist_restore():
+        """[Step AR] Gist에서 매매일지 복원 — 기존 데이터에 병합 (중복 created_at 스킵)."""
+        try:
+            restored = restore_from_gist(user_hash)
+            if not restored:
+                ui.notify(
+                    "📭 Gist에 백업 없음 또는 복원 실패",
+                    type="warning",
+                )
+                return
+            
+            # 기존 created_at 집합
+            existing = load_trades(user_hash, 1000)
+            existing_keys = {
+                (t.get("created_at"), t.get("stock_name"))
+                for t in existing
+            }
+            
+            added = 0
+            for t in restored:
+                key = (t.get("created_at"), t.get("stock_name"))
+                if key in existing_keys:
+                    continue
+                # 새 거래로 저장
+                save_trade(t, user_hash)
+                added += 1
+            
+            ui.notify(
+                f"📤 복원 완료 — 신규 {added}건 추가 (중복 {len(restored) - added}건 스킵)",
+                type="positive",
+            )
+            _refresh()
+        except Exception as e:
+            logger.error(f"Gist 복원 실패: {e}")
             ui.notify(f"⚠️ 실패: {e}", type="negative")
 
     # ─── 필터 변경 핸들러 ───
