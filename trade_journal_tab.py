@@ -2,25 +2,25 @@
 """
 trade_journal_tab.py — 매매 복기(Trading Journal) 탭
 ═══════════════════════════════════════════════════════════
-[v22 Step AQ+AR+AS] 전면 리팩토링 — 68 → 97점 목표
+[v22 Step AQ+AR+AS+AT] 전면 리팩토링 — 68 → 99점 목표
 
 ⚠️ 보안 핵심: 사용자별 데이터 격리 (user_email_hash)
 
 개선 사항 (Step AQ): 사용자 격리, 면책, 자동채움, 청산모달, 필터, 메트릭, 차트, CSV
 개선 사항 (Step AR): user_key 통일, abspath, 삭제확인, 메모append, Gist sync
-개선 사항 (Step AS — 사용성 + 백업 안전성):
-15. ✅ 자동 채움 부각 — 큰 카드 + 자동 채움된 정보 즉시 표시
-16. ✅ 메인 입력 폼 단순화 — 체결가/수량/메모만 main, 나머지는 자동/접힘
-17. ✅ Gist 백업은 항상 전체 기록 (필터 무시) — 데이터 유실 방지
-18. ✅ journal_uid 자동 생성 (tags JSON에 저장) — 안전한 중복 키
-19. ✅ 저장/청산/삭제 후 자동 백업 시도 (silent)
-20. ✅ 백업 상태 배지 (마지막 백업 시각 / 변경사항 있음)
-21. ✅ Gist 복원 확인 다이얼로그
-22. ✅ DB 경로 환경변수 우선 (LDY_DATA_DIR)
+개선 사항 (Step AS): 자동 채움 부각, Gist 백업 전체, journal_uid, 자동 백업, 환경변수
+
+개선 사항 (Step AT — 운영 안정성 마감):
+23. ✅ 자동 백업 비동기화 (background_tasks + run_sync) — UI 안 막힘
+24. ✅ 수량 필수 검증 (라벨과 일치)
+25. ✅ 백업 상태 영속화 (app.storage.user) — 새로고침 후 유지
+26. ✅ 자동채움 없을 때 수동 입력 expansion 기본 오픈
+27. ✅ 다중 선택 + 일괄 삭제 (selection=multiple)
+28. ✅ 일괄 정리 (3개월/6개월/1년/전체) — 미리보기 카운트
 
 저장소: 
 - 로컬: SQLite ldy_trader.db (LDY_DATA_DIR 환경변수 우선)
-- 백업: Gist (LDY_GIST_ID/TOKEN, 자동 시도)
+- 백업: Gist (LDY_GIST_ID/TOKEN, 비동기 자동 시도)
 """
 
 import os
@@ -293,6 +293,65 @@ def delete_trade(trade_id: int, user_hash: str) -> bool:
         return cur.rowcount > 0
     except Exception:
         return False
+    finally:
+        conn.close()
+
+
+def delete_many_trades(trade_ids: list, user_hash: str) -> int:
+    """[Step AT] 여러 거래 일괄 삭제 — user_hash 검증.
+    
+    Returns: 실제 삭제된 건수
+    """
+    if not user_hash or not trade_ids:
+        return 0
+    conn = _get_conn()
+    try:
+        # 안전한 IN 쿼리 (placeholder)
+        placeholders = ",".join("?" * len(trade_ids))
+        params = list(trade_ids) + [user_hash]
+        cur = conn.execute(
+            f"DELETE FROM trade_journal WHERE id IN ({placeholders}) "
+            f"AND user_email_hash=?",
+            params,
+        )
+        conn.commit()
+        return cur.rowcount
+    except Exception as e:
+        logger.error(f"일괄 삭제 실패: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
+def delete_all_trades(user_hash: str, before_date: str = None) -> int:
+    """[Step AT] 본인 거래 전체 삭제 (또는 특정 날짜 이전).
+    
+    Args:
+        user_hash: 본인 식별자 (필수 검증)
+        before_date: YYYY-MM-DD 이전 거래만 삭제 (None이면 전체)
+    
+    Returns: 삭제된 건수
+    """
+    if not user_hash:
+        return 0
+    conn = _get_conn()
+    try:
+        if before_date:
+            cur = conn.execute(
+                "DELETE FROM trade_journal "
+                "WHERE user_email_hash=? AND created_at < ?",
+                (user_hash, before_date),
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM trade_journal WHERE user_email_hash=?",
+                (user_hash,),
+            )
+        conn.commit()
+        return cur.rowcount
+    except Exception as e:
+        logger.error(f"전체 삭제 실패: {e}")
+        return 0
     finally:
         conn.close()
 
@@ -760,10 +819,12 @@ def render_trade_journal_tab(df_scored=None):
                 "📦 수량 (필수)", value=0, min=0,
             ).classes("flex-1 min-w-[140px]").props("outlined dense")
 
-        # [Step AS] 자동 채움 필드 — 접힌 상태로 (수정 가능)
+        # [Step AS+AT] 자동 채움 필드 — 자동채움 가능하면 접힘, 없으면 펼침
+        manual_mode = not bool(stock_options)
         with ui.expansion(
-            "⚙️ 자동 채움 필드 수정 (필요 시)",
-            value=False,
+            "⚙️ 자동 채움 필드 수정 (필요 시)" if not manual_mode
+            else "⚙️ 종목 정보 입력 (수동)",
+            value=manual_mode,  # 자동채움 없으면 기본 펼침
         ).classes("w-full mt-1"):
             with ui.row().classes("w-full gap-3 flex-wrap"):
                 f_name = ui.input("종목명").classes("flex-1 min-w-[150px]").props("outlined dense")
@@ -847,6 +908,11 @@ def render_trade_journal_tab(df_scored=None):
                 return
             if not f_act.value or float(f_act.value) <= 0:
                 save_msg.set_text("⚠️ 실제 체결가 입력 필수")
+                save_msg.classes(replace="text-sm mt-1 text-amber-400")
+                return
+            # [Step AT] 수량 필수 검증 추가
+            if not f_qty.value or int(f_qty.value) <= 0:
+                save_msg.set_text("⚠️ 수량 입력 필수")
                 save_msg.classes(replace="text-sm mt-1 text-amber-400")
                 return
             tid = save_trade(
@@ -1285,13 +1351,217 @@ def render_trade_journal_tab(df_scored=None):
                 })
 
             ui.label(
-                "💡 행을 클릭하면 청산 기록 / 삭제 모달이 열립니다"
+                "💡 행을 클릭하면 청산 기록 / 삭제 모달이 열립니다 · "
+                "체크박스로 다중 선택 후 일괄 삭제 가능"
             ).classes("text-xs text-gray-500 italic mb-1")
 
+            # [Step AT] 다중 선택 가능한 테이블 (selection=multiple)
             tbl = ui.table(
                 columns=cols, rows=rows, row_key="id",
                 pagination={"rowsPerPage": 15},
-            ).classes("w-full").props("dense dark flat bordered selection=single")
+                selection="multiple",  # ⭐ 다중 선택 활성화
+            ).classes("w-full").props("dense dark flat bordered")
+            
+            # [Step AT] 다중 선택 액션 바 (선택 시에만 표시)
+            with ui.row().classes("w-full mt-2 items-center gap-2 flex-wrap"):
+                selection_label = ui.label("").classes(
+                    "text-xs text-cyan-300"
+                )
+                
+                def update_selection_label():
+                    n = len(tbl.selected) if tbl.selected else 0
+                    if n > 0:
+                        selection_label.set_text(f"☑️ {n}건 선택됨")
+                    else:
+                        selection_label.set_text("")
+                
+                tbl.on("selection", lambda _: update_selection_label())
+                
+                # 선택 항목 일괄 삭제
+                def open_bulk_delete_confirm():
+                    selected_ids = [
+                        r.get("id") for r in (tbl.selected or [])
+                        if r.get("id")
+                    ]
+                    if not selected_ids:
+                        ui.notify("⚠️ 삭제할 항목을 선택하세요", type="warning")
+                        return
+                    
+                    with ui.dialog() as cd, ui.card().classes(
+                        "p-4 bg-[#1a1a2e] border border-red-500/40 "
+                        "rounded-xl min-w-[360px]"
+                    ):
+                        ui.label("⚠️ 다중 선택 일괄 삭제").classes(
+                            "text-base font-bold text-red-300"
+                        )
+                        ui.label(
+                            f"선택한 {len(selected_ids)}건의 매매 기록을 "
+                            "삭제하시겠습니까?"
+                        ).classes("text-sm text-gray-200 mt-2")
+                        ui.label(
+                            "삭제 후 복구할 수 없습니다."
+                        ).classes("text-xs text-gray-300 mt-1")
+                        ui.label(
+                            "💡 백업이 필요하면 먼저 CSV 다운로드 또는 "
+                            "Gist 백업을 받으세요."
+                        ).classes("text-xs text-amber-200 mt-2 italic")
+                        
+                        with ui.row().classes("w-full justify-end gap-2 mt-3"):
+                            ui.button(
+                                "취소",
+                                on_click=cd.close,
+                            ).props("flat color=gray")
+                            
+                            def do_bulk_delete():
+                                deleted = delete_many_trades(
+                                    selected_ids, user_hash
+                                )
+                                cd.close()
+                                if deleted > 0:
+                                    ui.notify(
+                                        f"🗑️ {deleted}건 삭제 완료",
+                                        type="positive",
+                                    )
+                                    _mark_backup_dirty()
+                                    _try_auto_backup()
+                                    tbl.selected = []  # 선택 초기화
+                                    _refresh()
+                                else:
+                                    ui.notify(
+                                        "❌ 삭제 실패",
+                                        type="negative",
+                                    )
+                            
+                            ui.button(
+                                f"🗑️ {len(selected_ids)}건 삭제 확정",
+                                on_click=do_bulk_delete,
+                            ).props("color=red")
+                    cd.open()
+                
+                ui.button(
+                    "🗑️ 선택 항목 삭제",
+                    on_click=open_bulk_delete_confirm,
+                ).props("flat color=red size=sm").tooltip(
+                    "체크박스로 선택한 항목들을 한번에 삭제"
+                )
+                
+                # 일괄 정리 (오래된 기록 / 전체 삭제)
+                def open_bulk_cleanup_dialog():
+                    with ui.dialog() as cd, ui.card().classes(
+                        "p-4 bg-[#1a1a2e] border border-amber-500/40 "
+                        "rounded-xl min-w-[400px]"
+                    ):
+                        ui.label("🧹 매매일지 일괄 정리").classes(
+                            "text-base font-bold text-amber-300"
+                        )
+                        ui.label(
+                            "기간을 선택하여 해당 기간 이전의 모든 기록을 삭제합니다."
+                        ).classes("text-sm text-gray-200 mt-2")
+                        
+                        period_options = {
+                            "3m": "3개월 이전 기록 삭제",
+                            "6m": "6개월 이전 기록 삭제",
+                            "1y": "1년 이전 기록 삭제",
+                            "all": "🚨 전체 매매일지 삭제 (모든 기록)",
+                        }
+                        period_select = ui.select(
+                            options=period_options,
+                            value="3m",
+                            label="삭제 기간",
+                        ).classes("w-full mt-3").props("outlined dense")
+                        
+                        # 미리보기 카운트
+                        preview_label = ui.label("").classes(
+                            "text-xs text-gray-400 mt-2"
+                        )
+                        
+                        def compute_cutoff(period: str):
+                            if period == "all":
+                                return None  # 전체
+                            now = datetime.now(timezone.utc)
+                            days_map = {"3m": 90, "6m": 180, "1y": 365}
+                            cutoff = now - timedelta(
+                                days=days_map.get(period, 90)
+                            )
+                            return cutoff.strftime("%Y-%m-%d")
+                        
+                        def update_preview():
+                            try:
+                                period = period_select.value or "3m"
+                                cutoff = compute_cutoff(period)
+                                all_t = load_trades(user_hash, 5000)
+                                if cutoff is None:
+                                    cnt = len(all_t)
+                                    preview_label.set_text(
+                                        f"⚠️ 전체 {cnt}건이 모두 삭제됩니다"
+                                    )
+                                    preview_label.classes(
+                                        replace="text-xs text-red-400 mt-2 font-bold"
+                                    )
+                                else:
+                                    cnt = sum(
+                                        1 for t in all_t
+                                        if str(t.get("created_at", ""))[:10] < cutoff
+                                    )
+                                    preview_label.set_text(
+                                        f"📊 {cutoff} 이전 기록 {cnt}건이 삭제됩니다 "
+                                        f"(전체 {len(all_t)}건 중)"
+                                    )
+                                    preview_label.classes(
+                                        replace="text-xs text-amber-300 mt-2"
+                                    )
+                            except Exception:
+                                pass
+                        
+                        period_select.on(
+                            "update:model-value",
+                            lambda _: update_preview(),
+                        )
+                        update_preview()
+                        
+                        ui.label(
+                            "💡 백업이 필요하면 먼저 CSV 다운로드를 받으세요."
+                        ).classes("text-xs text-amber-200 mt-2 italic")
+                        
+                        with ui.row().classes("w-full justify-end gap-2 mt-3"):
+                            ui.button(
+                                "취소",
+                                on_click=cd.close,
+                            ).props("flat color=gray")
+                            
+                            def do_cleanup():
+                                period = period_select.value or "3m"
+                                cutoff = compute_cutoff(period)
+                                deleted = delete_all_trades(
+                                    user_hash, before_date=cutoff,
+                                )
+                                cd.close()
+                                if deleted > 0:
+                                    ui.notify(
+                                        f"🧹 {deleted}건 정리 완료",
+                                        type="positive",
+                                    )
+                                    _mark_backup_dirty()
+                                    _try_auto_backup()
+                                    _refresh()
+                                else:
+                                    ui.notify(
+                                        "📭 삭제할 기록 없음",
+                                        type="info",
+                                    )
+                            
+                            ui.button(
+                                "🧹 정리 실행",
+                                on_click=do_cleanup,
+                            ).props("color=amber")
+                    cd.open()
+                
+                ui.button(
+                    "🧹 일괄 정리",
+                    on_click=open_bulk_cleanup_dialog,
+                ).props("flat color=amber size=sm").tooltip(
+                    "오래된 기록 일괄 정리 (3개월/6개월/1년/전체)"
+                )
 
             # 행 클릭 → 청산 모달 열기
             def on_row_click(e):
@@ -1448,17 +1718,38 @@ def render_trade_journal_tab(df_scored=None):
             logger.error(f"CSV 다운로드 실패: {e}")
             ui.notify(f"⚠️ 실패: {e}", type="negative")
 
-    # ─── [Step AR+AS] Gist 백업 ───
-    # [Step AS] 백업 dirty 플래그 + 마지막 백업 시각
-    backup_state = {
-        "dirty": False,
-        "last_backup_at": None,
-        "auto_attempted": False,
-    }
+    # ─── [Step AR+AS+AT] Gist 백업 ───
+    # [Step AT] 백업 상태 영속화 — app.storage.user에 저장
+    BACKUP_STATE_KEY = f"trade_journal_backup_{user_hash}"
+    
+    def _load_backup_state() -> dict:
+        """[Step AT] 백업 상태 로드 — 새로고침 후에도 유지"""
+        try:
+            saved = app.storage.user.get(BACKUP_STATE_KEY, {})
+            if isinstance(saved, dict):
+                return {
+                    "dirty": bool(saved.get("dirty", False)),
+                    "last_backup_at": saved.get("last_backup_at"),
+                    "auto_attempted": bool(saved.get("auto_attempted", False)),
+                }
+        except Exception:
+            pass
+        return {"dirty": False, "last_backup_at": None, "auto_attempted": False}
+    
+    def _persist_backup_state():
+        """[Step AT] 백업 상태 영속화"""
+        try:
+            app.storage.user[BACKUP_STATE_KEY] = dict(backup_state)
+        except Exception as e:
+            logger.debug(f"백업 상태 영속화 실패: {e}")
+    
+    # 초기 로드
+    backup_state = _load_backup_state()
     
     def _mark_backup_dirty():
-        """[Step AS] 변경사항 발생 — 백업 필요 표시"""
+        """[Step AS+AT] 변경사항 발생 — 백업 필요 표시 + 영속화"""
         backup_state["dirty"] = True
+        _persist_backup_state()
     
     def _has_gist_env():
         return bool(os.getenv("LDY_GIST_ID")) and bool(
@@ -1466,34 +1757,65 @@ def render_trade_journal_tab(df_scored=None):
         )
     
     def _try_auto_backup():
-        """[Step AS] 저장/청산/삭제 후 자동 백업 시도 (실패해도 silent).
+        """[Step AS+AT] 저장/청산/삭제 후 자동 백업 — 비동기 (UI 안 막힘).
         
-        매번 시도하지 않고 변경 후에만, 백그라운드로 시도.
-        실패 시 dirty 유지하여 사용자가 수동으로 다시 시도 가능.
+        [Step AT] async_helpers.run_sync로 background_tasks에 던짐.
+        실패해도 silent — dirty 유지하여 다음 변경 시 재시도 가능.
         """
         if not _has_gist_env():
-            return  # 환경변수 없으면 스킵
+            return
+        
+        # [Step AT] background_tasks로 비동기 실행 (UI 블록 방지)
         try:
-            # [Step AS] 항상 전체 기록 백업 (필터 무시)
-            all_trades = load_trades(user_hash, 5000)
-            if not all_trades:
-                return
-            ok = sync_to_gist(user_hash, all_trades)
-            if ok:
-                backup_state["dirty"] = False
-                backup_state["last_backup_at"] = datetime.now().strftime(
-                    "%Y-%m-%d %H:%M"
-                )
-                logger.info(f"☁️ 자동 백업 성공 ({len(all_trades)}건)")
+            from nicegui import background_tasks
+            from async_helpers import run_sync
+            
+            async def _async_backup():
+                try:
+                    # DB 로드 + Gist 업로드 모두 백그라운드
+                    all_trades = await run_sync(
+                        lambda: load_trades(user_hash, 5000)
+                    )
+                    if not all_trades:
+                        return
+                    ok = await run_sync(
+                        lambda: sync_to_gist(user_hash, all_trades)
+                    )
+                    if ok:
+                        backup_state["dirty"] = False
+                        backup_state["last_backup_at"] = datetime.now().strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
+                        # [Step AT] 영속화 — 새로고침 후에도 유지
+                        _persist_backup_state()
+                        logger.info(
+                            f"☁️ 자동 백업 성공 ({len(all_trades)}건)"
+                        )
+                except Exception as e:
+                    logger.debug(f"자동 백업 실패 (silent): {e}")
+                    # 실패는 silent — dirty 유지
+            
+            background_tasks.create(_async_backup())
         except Exception as e:
-            logger.debug(f"자동 백업 시도 실패 (silent): {e}")
-            # 실패는 silent — dirty 유지
+            # background_tasks 사용 불가 시 fallback (동기 호출)
+            logger.debug(f"비동기 백업 fallback (동기): {e}")
+            try:
+                all_trades = load_trades(user_hash, 5000)
+                if all_trades and sync_to_gist(user_hash, all_trades):
+                    backup_state["dirty"] = False
+                    backup_state["last_backup_at"] = datetime.now().strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    _persist_backup_state()
+            except Exception:
+                pass
     
     def _gist_backup(_visible_trades=None):
-        """[Step AR+AS] Gist 수동 백업 — 항상 전체 기록.
+        """[Step AR+AS+AT] Gist 수동 백업 — 항상 전체 기록.
         
         [Step AS 핵심 수정] 필터링된 trades 무시, 전체 기록 백업.
         이전 버그: 필터 7일 → 3건 백업 → Gist 100건이 3건으로 덮어씀 ❌
+        [Step AT] 영속화 추가
         """
         try:
             # [Step AS] 필터 무시, 전체 기록 로드
@@ -1508,11 +1830,12 @@ def render_trade_journal_tab(df_scored=None):
                 backup_state["last_backup_at"] = datetime.now().strftime(
                     "%Y-%m-%d %H:%M"
                 )
+                _persist_backup_state()  # [Step AT] 영속화
                 ui.notify(
                     f"☁️ Gist 백업 완료 — 전체 {len(all_trades)}건",
                     type="positive",
                 )
-                _refresh()  # 백업 배지 갱신
+                _refresh()
             else:
                 ui.notify(
                     "⚠️ Gist 백업 실패 — 환경변수 확인 (LDY_GIST_*)",
