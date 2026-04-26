@@ -2,7 +2,7 @@
 """
 tab_perf.py — 📈 시스템 성과 추세 (NiceGUI Dark Theme)
 ═══════════════════════════════════════════════════════════
-[v22 Step AK+AL+AM] 전면 리팩토링 — 75 → 97점 목표
+[v22 Step AK+AL+AM+AN] 전면 리팩토링 — 75 → 99점 목표
 
 개선 사항 (Step AK):
 1. ✅ 면책 + 백테스트 한계 안내 (법적 안전)
@@ -23,6 +23,15 @@ tab_perf.py — 📈 시스템 성과 추세 (NiceGUI Dark Theme)
 12. ✅ 거래비용 가정 select (0.3%/0.4%/0.5%/0.7%)
 13. ✅ KOSPI 알파 구현 (bench_cache_latest.json 활용)
 14. ✅ 차트 보기 모드 (성과/위험/도달률/시장비교)
+
+추가 개선 (Step AN):
+15. ✅ _safe_float() helper — sel_cost.value 안전 변환
+16. ✅ 차트 모드별 해설 (CHART_MODE_EXPLANATIONS)
+17. ✅ KOSPI 근사치 명시 (행별 정확한 알파는 향후 백테스트 단계 작업)
+
+향후 작업 (백엔드 단계 — 99점 → 100점):
+- rank_validation_summary CSV에 KOSPI_RET_%/ALPHA_% 컬럼 추가
+- 거래별 비용 차감 후 평균 (현재는 평균에서 일괄 차감)
 """
 import glob
 import logging
@@ -94,6 +103,44 @@ COST_OPTIONS = {
     0.5: "0.5% (보수적)",
     0.7: "0.7% (스캘핑/고빈도)",
 }
+
+# [Step AN] 차트 모드별 해설 — 사용자가 모드 의미 즉시 이해
+CHART_MODE_EXPLANATIONS = {
+    "performance": (
+        "📊 성과 보기: 승률(막대)과 평균 수익률(라인)의 일별 추세를 함께 봅니다. "
+        "수익률 라인이 0% 위에 머무르면 안정적 성과."
+    ),
+    "risk": (
+        "⚠️ 위험 보기: 평균 낙폭과 최악 낙폭의 일별 추세입니다. "
+        "낙폭이 작을수록 실전 유지가 수월하며, 최악 낙폭은 손절가 설정의 기준."
+    ),
+    "hit": (
+        "🎯 도달률 보기: 보유 중 +2% / +5% 한 번이라도 찍은 종목 비율입니다. "
+        "익절 타이밍 설계에 참고하세요."
+    ),
+    "market": (
+        "📈 시장 비교: 알파(=전략 수익률 - KOSPI 동기간 수익률)가 양수면 "
+        "시장 평균을 초과한 성과입니다. 점선 위에 있는 날이 많을수록 일관된 알파."
+    ),
+}
+
+
+def _safe_float(v, default: float = DEFAULT_COST_PCT) -> float:
+    """[Step AN] 안전한 float 변환 — sel_cost.value가 str로 들어오는 케이스 방어.
+    
+    NiceGUI select에서 dict 옵션 사용 시 대부분 key가 그대로 오지만,
+    환경에 따라 label 또는 string으로 올 수 있어 방어.
+    """
+    if v is None:
+        return default
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        # "0.4%" 같은 형식도 처리
+        s = str(v).strip().replace("%", "").split()[0]
+        return float(s)
+    except (ValueError, IndexError, AttributeError):
+        return default
 
 
 # ═══════════════════════════════════════════════════
@@ -417,6 +464,15 @@ def _render_metrics_grid(
         ui.label(alpha_msg).classes(
             f"text-xs italic mt-1 text-center "
             f"{'text-emerald-300' if alpha > 0 else 'text-red-300'}"
+        )
+        
+        # [Step AN] 근사치 안내 — 행별 정확한 알파 미지원
+        ui.label(
+            "ℹ️ 현재 KOSPI 알파는 동일 보유기간 평균값 기반 근사치입니다. "
+            "행별(검증일별) 정확한 알파는 백테스트 데이터에 "
+            "KOSPI_RET_% / ALPHA_% 컬럼 추가 시 제공됩니다."
+        ).classes(
+            "text-[11px] text-gray-500 italic mt-2 text-center leading-relaxed"
         )
     
     # [Step AL+AM] 비용 안내 + 시장 비교 안내
@@ -791,7 +847,8 @@ def render_tab_perf():
         
         # [Step AM] 현재 선택된 차트 모드 + 비용률
         chart_mode = sel_chart_mode.value if sel_chart_mode else "performance"
-        cost_pct = float(sel_cost.value) if sel_cost else DEFAULT_COST_PCT
+        # [Step AN] _safe_float로 sel_cost.value 안전 변환
+        cost_pct = _safe_float(sel_cost.value, default=DEFAULT_COST_PCT) if sel_cost else DEFAULT_COST_PCT
         current_hold = int(sel_h.value) if sel_h and sel_h.value else None
 
         with chart_area:
@@ -823,6 +880,17 @@ def render_tab_perf():
                 ui.label("⚠️ Plotly 미설치 — 차트 표시 불가").classes(
                     "text-amber-400 p-4"
                 )
+            
+            # ─── [Step AN] 차트 모드별 해설 (차트 직후) ───
+            mode_explanation = CHART_MODE_EXPLANATIONS.get(chart_mode, "")
+            if mode_explanation:
+                with ui.card().classes(
+                    "w-full p-2 bg-[#1a1a2e]/50 border border-cyan-700/20 "
+                    "rounded-lg mt-2"
+                ):
+                    ui.label(mode_explanation).classes(
+                        "text-xs text-cyan-100 leading-relaxed"
+                    )
 
             # ─── 메트릭 (cost_pct + bench 전달) ───
             _render_metrics_grid(
@@ -842,6 +910,14 @@ def render_tab_perf():
                     "실제 거래 시 슬리피지/수수료/세금이 추가로 차감됩니다 "
                     "(통상 0.3~0.5% 수준)."
                 ).classes("text-xs text-gray-400 leading-relaxed")
+                
+                # [Step AN] 시장 비교 모드일 때 KOSPI 근사치 안내
+                if chart_mode == "market":
+                    ui.label(
+                        "ℹ️ 현재 KOSPI 비교는 보유기간별 평균 수익률을 수평선으로 "
+                        "표시한 근사치입니다. 행별 정확한 알파는 향후 백테스트 "
+                        "데이터에 KOSPI_RET_% / ALPHA_% 컬럼이 추가되면 제공됩니다."
+                    ).classes("text-xs text-gray-500 italic mt-1 leading-relaxed")
 
     # [Step AM] 차트 모드 + 비용 select도 변경 시 차트 재빌드
     for w in [sel_m, sel_k, sel_h, sel_chart_mode, sel_cost]:
