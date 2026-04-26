@@ -28,26 +28,82 @@ TERMS_VERSION = os.environ.get("TERMS_VERSION", "2026-04-25-v1")
 # ═══════════════════════════════════════════════════
 #  Helper — 동의 기록
 # ═══════════════════════════════════════════════════
+def _extract_request_metadata() -> tuple:
+    """[Step AD] 현재 요청에서 IP/User-Agent/Session ID 추출.
+    
+    NiceGUI 환경 변수에서 자동으로 가져옴.
+    실패 시 빈 문자열 반환.
+    
+    Returns:
+        (ip_address: str, user_agent: str, session_id: str)
+    """
+    ip = ""
+    ua = ""
+    sid = ""
+    try:
+        from nicegui import context as _ctx, app as _app
+        # User-Agent
+        client = getattr(_ctx, "client", None)
+        if client and hasattr(client, "request"):
+            req = client.request
+            ua = req.headers.get("user-agent", "")[:500]
+            # IP (X-Forwarded-For 우선, 없으면 client.host)
+            xff = req.headers.get("x-forwarded-for", "")
+            if xff:
+                ip = xff.split(",")[0].strip()[:100]
+            elif hasattr(req, "client") and req.client:
+                ip = (req.client.host or "")[:100]
+        # Session ID (NiceGUI app.storage.user 키 활용)
+        try:
+            sid_val = _app.storage.browser.get("id", "")
+            if sid_val:
+                sid = str(sid_val)[:100]
+        except Exception:
+            pass
+    except Exception as e:
+        _logger.debug(f"요청 메타데이터 추출 실패 (무시): {e}")
+    return ip, ua, sid
+
+
 def record_agreement(
     email: str,
     terms_type: str = "all",
     context: str = "signup",
     ip_address: str = "",
     user_agent: str = "",
+    session_id: str = "",
 ) -> bool:
-    """[Step AC] 약관 동의 기록 — DB 저장.
+    """[Step AC+AD] 약관 동의 기록 — DB 저장.
     
     Args:
         email: 사용자 이메일
         terms_type: all / terms / privacy / refund / marketing
-        context: signup / payment / re_consent
+        context: signup / payment_attempt / payment_success / re_consent
+        ip_address: 명시적 전달 X 시 자동 추출
+        user_agent: 명시적 전달 X 시 자동 추출
+        session_id: 명시적 전달 X 시 자동 추출
+    
+    Returns:
+        True if recorded successfully
     """
     try:
+        # [Step AD] 메타데이터 자동 추출 (호출자가 비워둔 경우)
+        if not ip_address or not user_agent or not session_id:
+            auto_ip, auto_ua, auto_sid = _extract_request_metadata()
+            ip_address = ip_address or auto_ip
+            user_agent = user_agent or auto_ua
+            session_id = session_id or auto_sid
+        
         from db_utils import get_db
         db = get_db()
         if not db or not hasattr(db, 'record_terms_agreement'):
             _logger.warning("record_terms_agreement 함수 없음 — DB 미적용 환경")
             return False
+        
+        # session_id는 user_agent 끝에 메타데이터로 부착 (DB 컬럼 호환)
+        ua_with_sid = user_agent
+        if session_id:
+            ua_with_sid = f"{user_agent} | sid={session_id}"[:500]
         
         return db.record_terms_agreement(
             email=email,
@@ -55,7 +111,7 @@ def record_agreement(
             terms_type=terms_type,
             context=context,
             ip_address=ip_address,
-            user_agent=user_agent,
+            user_agent=ua_with_sid,
         )
     except Exception as e:
         _logger.error(f"동의 기록 실패: {e}", exc_info=True)

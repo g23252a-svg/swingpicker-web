@@ -448,6 +448,21 @@ def register_payment_routes():
                     receipt_url=receipt_url,
                 )
             
+            # [v22 Step AD] 결제 성공 후 최종 동의 기록 — payment_success_consent
+            # 결제창 열기 전 동의(payment_attempt)와 별개로,
+            # 실제 결제 완료 시점의 동의 증빙 추가 보관
+            if email and db_for_dup and hasattr(db_for_dup, "record_terms_agreement"):
+                try:
+                    db_for_dup.record_terms_agreement(
+                        email=email,
+                        terms_version=os.environ.get("TERMS_VERSION", "2026-04-25-v1"),
+                        terms_type="refund",
+                        context="payment_success",
+                    )
+                    _logger.info(f"📜 결제 성공 시점 환불정책 동의 기록: {email}")
+                except Exception as ce:
+                    _logger.warning(f"결제 성공 동의 기록 실패 (결제는 정상): {ce}")
+            
             # [Step W] 세션 권한 즉시 갱신 — "메뉴 새로고침" 불필요
             if activated and email:
                 try:

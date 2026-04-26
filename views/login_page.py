@@ -201,27 +201,79 @@ def login_page():
                         salt, j_nk.value[:8], j_q.value, hash_ans(j_ans.value, salt)
                     )
                     if ok:
-                        # [v22 Step AC] 약관 동의 기록
+                        # [v22 Step AC+AD] 약관 동의 기록 — 실패 시 가입 중단
                         if consent is not None:
                             try:
                                 from components.terms_consent import record_agreement
-                                record_agreement(
+                                
+                                # User-Agent 추출
+                                ua = ""
+                                try:
+                                    from nicegui import context as _ctx
+                                    req = getattr(_ctx, "client", None)
+                                    if req and hasattr(req, "request"):
+                                        ua = req.request.headers.get("user-agent", "")[:500]
+                                except Exception:
+                                    pass
+                                
+                                # [v22 Step AD] 필수 동의 기록 — 실패 시 가입 중단
+                                consent_ok = record_agreement(
                                     email=clean_email,
                                     terms_type="all",
                                     context="signup",
+                                    user_agent=ua,
                                 )
-                                if consent.marketing_agreed:
-                                    record_agreement(
-                                        email=clean_email,
-                                        terms_type="marketing",
-                                        context="signup",
+                                if not consent_ok:
+                                    j_msg.set_text(
+                                        "⚠️ 약관 동의 기록 저장에 실패했습니다. "
+                                        "잠시 후 다시 시도해주세요."
                                     )
+                                    j_msg.classes(replace="text-sm mt-2 text-red-400")
+                                    # ⚠️ 가입은 이미 DB에 등록됨 → 롤백 시도
+                                    try:
+                                        if hasattr(db, '_exec_sqlite'):
+                                            db._exec_sqlite(
+                                                "DELETE FROM users WHERE id = ?",
+                                                (clean_email,)
+                                            )
+                                    except Exception:
+                                        pass
+                                    return
+                                
+                                # [v22 Step AD] 마케팅 동의는 실패해도 가입 진행 (선택)
+                                if consent.marketing_agreed:
+                                    try:
+                                        record_agreement(
+                                            email=clean_email,
+                                            terms_type="marketing",
+                                            context="signup",
+                                            user_agent=ua,
+                                        )
+                                    except Exception as me:
+                                        import logging
+                                        logging.getLogger(__name__).warning(
+                                            f"마케팅 동의 기록 실패 (가입은 진행): {me}"
+                                        )
                             except Exception as e:
-                                # 동의 기록 실패해도 가입은 완료 (DB 안 막힘)
+                                # ImportError 등 — 동의 기록 불가능한 환경
                                 import logging
-                                logging.getLogger(__name__).warning(
-                                    f"약관 동의 기록 실패 (가입은 완료): {e}"
+                                logging.getLogger(__name__).error(
+                                    f"동의 기록 시스템 오류: {e}", exc_info=True
                                 )
+                                j_msg.set_text(
+                                    "⚠️ 약관 동의 시스템 오류. 운영자에게 문의해주세요."
+                                )
+                                j_msg.classes(replace="text-sm mt-2 text-red-400")
+                                # 롤백
+                                try:
+                                    if hasattr(db, '_exec_sqlite'):
+                                        db._exec_sqlite(
+                                            "DELETE FROM users WHERE id = ?",
+                                            (clean_email,)
+                                        )
+                                except Exception:
+                                    pass
+                                return
                         
                         # ✅ 가입 성공 → 14일 Prime 자동 부여
                         try:

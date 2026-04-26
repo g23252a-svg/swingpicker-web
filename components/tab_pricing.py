@@ -485,9 +485,9 @@ def _render_toss_payment(auth, user):
             pass
 
         async def open_toss_widget():
-            """[Step R+V+AC] 토스페이먼츠 결제 요청 (SDK v1 안정 버전 사용)"""
+            """[Step R+V+AC+AD] 토스페이먼츠 결제 요청 (SDK v1 안정 버전 사용)"""
             
-            # [v22 Step AC] 약관 동의 검증
+            # [v22 Step AC+AD] 약관 동의 검증 + 기록 실패 시 결제 중단
             if payment_consent is not None:
                 if not payment_consent.is_valid():
                     ui.notify(
@@ -495,16 +495,45 @@ def _render_toss_payment(auth, user):
                         type="warning",
                     )
                     return
-                # 동의 기록 (DB)
+                
+                # [v22 Step AD] 동의 기록 — 실패 시 결제창 열지 않음
                 try:
                     from components.terms_consent import record_agreement
-                    record_agreement(
+                    
+                    # User-Agent 추출
+                    ua = ""
+                    try:
+                        from nicegui import context as _ctx
+                        req = getattr(_ctx, "client", None)
+                        if req and hasattr(req, "request"):
+                            ua = req.request.headers.get("user-agent", "")[:500]
+                    except Exception:
+                        pass
+                    
+                    consent_ok = record_agreement(
                         email=d_email,
                         terms_type="refund",
-                        context="payment",
+                        context="payment_attempt",
+                        user_agent=ua,
                     )
-                except Exception:
-                    pass  # 동의 기록 실패해도 결제는 진행
+                    if not consent_ok:
+                        ui.notify(
+                            "⚠️ 약관 동의 기록 저장에 실패했습니다. "
+                            "다시 시도해주세요.",
+                            type="warning",
+                            timeout=5000,
+                        )
+                        return
+                except ImportError:
+                    # terms_consent 모듈 없으면 결제는 진행 (하위 호환)
+                    pass
+                except Exception as e:
+                    _logger.error(f"동의 기록 시스템 오류: {e}", exc_info=True)
+                    ui.notify(
+                        "⚠️ 약관 동의 시스템 오류. 운영자에게 문의해주세요.",
+                        type="negative",
+                    )
+                    return
             
             plan = "prime"
             amount = PRICE_PRIME

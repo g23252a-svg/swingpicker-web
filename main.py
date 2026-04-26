@@ -101,6 +101,22 @@ async def index():
 
     # [v22 Step AA] 사이트 전체 공지 배너 (환경변수로 제어)
     render_site_banner()
+    
+    # [v22 Step AD] 약관 변경 시 재동의 강제 (관리자 제외)
+    # TERMS_VERSION 환경변수 변경 시 모든 사용자에게 재동의 요청
+    if user and auth not in ("guest", "admin"):
+        try:
+            from components.terms_consent import (
+                has_user_agreed, show_re_consent_dialog
+            )
+            email = user.get("login_id") or user.get("id") or user.get("email", "")
+            if email and not has_user_agreed(email):
+                # persistent 다이얼로그 — 동의하지 않으면 사이트 사용 불가
+                show_re_consent_dialog(email)
+        except ImportError:
+            pass  # terms_consent 모듈 없으면 무시 (하위 호환)
+        except Exception as e:
+            logger.warning(f"재동의 다이얼로그 호출 실패: {e}")
 
     # ─── Hero Banner ───
     with ui.row().classes("w-full items-center justify-between px-4 py-3 rounded-xl mb-2 "
