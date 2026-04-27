@@ -1423,5 +1423,105 @@
       "008770_20260416_TP1_HIT_20260424",
       "008770_20260416_TP2_HIT_20260424"
     ]
+  },
+  {
+    "code": "440110",
+    "name": "파두",
+    "entry_ymd": "20260304",
+    "entry_px": 49400.0,
+    "qty": 0,
+    "stop_px": 42000.0,
+    "stop_px_initial": 42000.0,
+    "take_px1": 71600.0,
+    "take_px2": 75300.0,
+    "trailing_high": 82200.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260427",
+    "last_close_px": 81300.0,
+    "unrealized_pnl_pct": 64.57,
+    "realized_pnl_pct": 64.57,
+    "close_ymd": "20260427",
+    "close_px": 81300.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "440110_20260304_WARN_DRAWDOWN_20260331",
+      "440110_20260304_TP1_HIT_20260427",
+      "440110_20260304_TP2_HIT_20260427"
+    ]
+  },
+  {
+    "code": "175330",
+    "name": "JB금융지주",
+    "entry_ymd": "20260410",
+    "entry_px": 30950.0,
+    "qty": 0,
+    "stop_px": 27750.0,
+    "stop_px_initial": 27750.0,
+    "take_px1": 38500.0,
+    "take_px2": 42750.0,
+    "trailing_high": 32200.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260427",
+    "last_close_px": 27500.0,
+    "unrealized_pnl_pct": -11.15,
+    "realized_pnl_pct": -11.15,
+    "close_ymd": "20260427",
+    "close_px": 27500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "175330_20260410_WARN_DRAWDOWN_20260424",
+      "175330_20260410_STOP_HIT_20260427"
+    ]
+  },
+  {
+    "code": "060370",
+    "name": "LS마린솔루션",
+    "entry_ymd": "20260416",
+    "entry_px": 32300.0,
+    "qty": 0,
+    "stop_px": 28700.0,
+    "stop_px_initial": 28700.0,
+    "take_px1": 34350.0,
+    "take_px2": 38500.0,
+    "trailing_high": 40450.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260427",
+    "last_close_px": 39150.0,
+    "unrealized_pnl_pct": 21.21,
+    "realized_pnl_pct": 21.21,
+    "close_ymd": "20260427",
+    "close_px": 39150.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "060370_20260416_TP1_HIT_20260423",
+      "060370_20260416_TP1_HIT_20260424",
+      "060370_20260416_TP1_HIT_20260427",
+      "060370_20260416_TP2_HIT_20260427"
+    ]
+  },
+  {
+    "code": "001250",
+    "name": "GS글로벌",
+    "entry_ymd": "20260423",
+    "entry_px": 3435.0,
+    "qty": 0,
+    "stop_px": 2920.0,
+    "stop_px_initial": 2920.0,
+    "take_px1": 4230.0,
+    "take_px2": 4680.0,
+    "trailing_high": 5350.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260427",
+    "last_close_px": 5060.0,
+    "unrealized_pnl_pct": 47.31,
+    "realized_pnl_pct": 47.31,
+    "close_ymd": "20260427",
+    "close_px": 5060.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "001250_20260423_TP1_HIT_20260424",
+      "001250_20260423_TP1_HIT_20260427",
+      "001250_20260423_TP2_HIT_20260427"
+    ]
   }
 ]
