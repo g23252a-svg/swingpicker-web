@@ -1008,7 +1008,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "003530_20260423_TP1_HIT_20260427"
+    ]
   },
   {
     "code": "002790",
@@ -1029,7 +1031,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "002790_20260424_TP1_HIT_20260427"
+    ]
   },
   {
     "code": "003570",
