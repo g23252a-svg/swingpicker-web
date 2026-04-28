@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260428",
+  "generated_at": "2026-04-28 21:42:51",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "102120",
+      "name": "어보브반도체",
+      "route": "ARMED",
+      "score": 85.0,
+      "close": 13750,
+      "entry": 13750,
+      "stop": 12230,
+      "target1": 15800,
+      "target2": 16580,
+      "est_win_rate": 0.649,
+      "rr": 1.3,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/102120"
+    },
+    {
+      "rank": 2,
+      "code": "474170",
+      "name": "루미르",
+      "route": "ATTACK",
+      "score": 82.2,
+      "close": 17450,
+      "entry": 15290,
+      "stop": 12990,
+      "target1": 17640,
+      "target2": 22650,
+      "est_win_rate": 0.62,
+      "rr": 1.0,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/474170"
+    },
+    {
+      "rank": 3,
+      "code": "004020",
+      "name": "현대제철",
+      "route": "ARMED",
+      "score": 81.4,
+      "close": 44100,
+      "entry": 44100,
+      "stop": 39750,
+      "target1": 46550,
+      "target2": 51400,
+      "est_win_rate": 0.62,
+      "rr": 0.6,
+      "sector": "철강·금속",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/004020"
+    }
+  ]
+}

@@ -1523,5 +1523,29 @@
       "001250_20260423_TP1_HIT_20260427",
       "001250_20260423_TP2_HIT_20260427"
     ]
+  },
+  {
+    "code": "092790",
+    "name": "넥스틸",
+    "entry_ymd": "20260410",
+    "entry_px": 13510.0,
+    "qty": 0,
+    "stop_px": 11470.0,
+    "stop_px_initial": 11470.0,
+    "take_px1": 17760.0,
+    "take_px2": 18430.0,
+    "trailing_high": 21600.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260428",
+    "last_close_px": 21600.0,
+    "unrealized_pnl_pct": 59.88,
+    "realized_pnl_pct": 59.88,
+    "close_ymd": "20260428",
+    "close_px": 21600.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "092790_20260410_TP1_HIT_20260428",
+      "092790_20260410_TP2_HIT_20260428"
+    ]
   }
 ]
