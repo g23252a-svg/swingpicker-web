@@ -42,6 +42,8 @@ INQUIRY_DB_FILE = "inquiries_db.json"
 ADMIN_ACTIONS_DB_FILE = "admin_actions_db.json"
 # [Step BA] 결제 기록 — Gist 백업 (회귀 복구 / 결제 분쟁 대응)
 PAYMENT_DB_FILE = "payments_db.json"
+# [Hotfix-AB1] 약관 동의 기록 — Gist 백업 (법적 증빙 / 분쟁 대응)
+TERMS_AGREEMENT_DB_FILE = "terms_agreements_db.json"
 
 # [Step AX+BA] 테이블 → Gist 파일명 통일 매핑 (회귀 방지)
 TABLE_TO_GIST_FILE = {
@@ -49,6 +51,7 @@ TABLE_TO_GIST_FILE = {
     "inquiries": INQUIRY_DB_FILE,
     "admin_actions": ADMIN_ACTIONS_DB_FILE,
     "payments": PAYMENT_DB_FILE,  # [Step BA] 회귀 복구
+    "terms_agreements": TERMS_AGREEMENT_DB_FILE,  # [Hotfix-AB1]
 }
 
 # [Step AX+BA] 테이블별 컬럼 정의 (Gist 직렬화용)
@@ -68,6 +71,10 @@ TABLE_COLUMNS = {
     "payments": [
         "order_id", "payment_key", "email", "plan", "amount", "status",
         "method", "approved_at", "receipt_url", "created_at", "error_message",
+    ],
+    "terms_agreements": [
+        "id", "email", "terms_version", "terms_type", "context",
+        "ip_address", "user_agent", "agreed_at",
     ],
 }
 
@@ -314,6 +321,36 @@ class LDYDBManager:
             "ON payments (status)"
         )
 
+        # ── [Hotfix-AB1] 약관 동의 기록 테이블 ──
+        # [Hotfix-AB1.1] NOT NULL DEFAULT로 NULL UNIQUE 우회 차단
+        # UNIQUE(email, terms_version, terms_type, context) — 약관 종류별 세밀 추적
+        self._exec_sqlite("""
+            CREATE TABLE IF NOT EXISTS terms_agreements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                terms_version TEXT NOT NULL,
+                terms_type TEXT NOT NULL DEFAULT 'all',
+                context TEXT NOT NULL DEFAULT 'signup',
+                ip_address TEXT NOT NULL DEFAULT '',
+                user_agent TEXT NOT NULL DEFAULT '',
+                agreed_at TEXT NOT NULL
+            )
+        """)
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_terms_email_version "
+            "ON terms_agreements (email, terms_version)"
+        )
+        # [Hotfix-AB1.1] v1 핫픽스의 옛 UNIQUE 인덱스 제거 (마이그레이션 호환)
+        try:
+            self._exec_sqlite("DROP INDEX IF EXISTS uq_terms_email_version_context")
+        except Exception as _e:
+            _logger.debug(f"옛 인덱스 제거 스킵: {_e}")
+        # [Hotfix-AB1.1] terms_type 포함 UNIQUE — 약관 종류별 분리 저장 가능
+        self._exec_sqlite(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_terms_email_version_type_context "
+            "ON terms_agreements (email, terms_version, terms_type, context)"
+        )
+
         # ── DuckDB: OLAP 테이블 ──
         self.execute_safe("""
             CREATE TABLE IF NOT EXISTS daily_recommend (
@@ -363,6 +400,8 @@ class LDYDBManager:
             self._load_admin_actions_from_gist()
             # [Step BA] payments 복구 로드 — 결제 기록 영구 보존
             self._load_payments_from_gist()
+            # [Hotfix-AB1.1] terms_agreements 복구 로드 — 약관 동의 영구 보존 (법적 증빙)
+            self._load_terms_agreements_from_gist()
             self._gist_loaded = True
         except Exception as e:
             _logger.warning(f"Gist 초기 로드 실패 (DB는 정상): {e}")
@@ -382,6 +421,7 @@ class LDYDBManager:
             for fname in [
                 USER_DB_FILE, INQUIRY_DB_FILE,
                 ADMIN_ACTIONS_DB_FILE, PAYMENT_DB_FILE,  # [BA] payments
+                TERMS_AGREEMENT_DB_FILE,  # [Hotfix-AB1]
             ]:
                 if fname in files:
                     content = files[fname].get("content", "")
@@ -403,6 +443,9 @@ class LDYDBManager:
         # [Step BA] payments 복구 적용
         if PAYMENT_DB_FILE in downloaded:
             self._insert_gist_payments(downloaded[PAYMENT_DB_FILE])
+        # [Hotfix-AB1] terms_agreements 복구 적용
+        if TERMS_AGREEMENT_DB_FILE in downloaded:
+            self._insert_gist_terms_agreements(downloaded[TERMS_AGREEMENT_DB_FILE])
 
     def _insert_gist_users(self, data):
         if not data:
@@ -615,6 +658,73 @@ class LDYDBManager:
         """[Step BA] payments Gist 복구 로드 (결제 분쟁 대응)"""
         self._load_gist_to_table(PAYMENT_DB_FILE, "payments")
 
+    # ═══════════════════════════════════════════════════
+    # [Hotfix-AB1] 약관 동의 기록 — Gist 복구
+    # ═══════════════════════════════════════════════════
+    def _insert_gist_terms_agreements(self, data):
+        """[Hotfix-AB1+AB1.1] terms_agreements Gist → SQLite 복구.
+
+        UNIQUE(email, terms_version, terms_type, context)로 멱등 보장.
+        [AB1.1] before/after row count로 신규 vs 기존 정확히 카운트.
+        """
+        if not data or not isinstance(data, list):
+            return
+        try:
+            # [AB1.1] before count — 정확한 신규 수 측정
+            before_row = self._exec_sqlite_one(
+                "SELECT COUNT(*) FROM terms_agreements"
+            )
+            before_count = before_row[0] if before_row else 0
+
+            seen = errored = 0
+            for item in data:
+                # [AB1.1] record_terms_agreement과 동일 정규화
+                email = (item.get('email') or '').strip().lower()
+                terms_version = (item.get('terms_version') or '').strip()
+                terms_type = (item.get('terms_type') or 'all').strip() or 'all'
+                context = (item.get('context') or 'signup').strip() or 'signup'
+                if not email or not terms_version:
+                    continue
+                seen += 1
+
+                try:
+                    self._exec_sqlite(
+                        """INSERT OR IGNORE INTO terms_agreements
+                        (email, terms_version, terms_type, context,
+                         ip_address, user_agent, agreed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            email,
+                            terms_version,
+                            terms_type,
+                            context,
+                            (item.get('ip_address') or '').strip(),
+                            (item.get('user_agent') or '').strip(),
+                            item.get('agreed_at', ''),
+                        )
+                    )
+                except Exception:
+                    errored += 1
+
+            # [AB1.1] after count — 진짜 신규 수
+            after_row = self._exec_sqlite_one(
+                "SELECT COUNT(*) FROM terms_agreements"
+            )
+            after_count = after_row[0] if after_row else 0
+            inserted = max(0, after_count - before_count)
+            existing = seen - inserted - errored
+            _logger.info(
+                f" terms_agreements 적용 완료 "
+                f"(신규 {inserted}건 / 기존 {existing}건 / 오류 {errored}건)"
+            )
+        except Exception as e:
+            _logger.warning(f" terms_agreements INSERT 실패: {e}")
+
+
+    def _load_terms_agreements_from_gist(self):
+        """[Hotfix-AB1] terms_agreements Gist 복구 로드 (법적 증빙)"""
+        self._load_gist_to_table(TERMS_AGREEMENT_DB_FILE, "terms_agreements")
+
     def _load_gist_to_table(self, filename, tablename):
         if not GIST_ID or not GIST_TOKEN:
             _logger.warning(f" [Gist] {tablename} 로드 스킵 — Gist 인증 키 없음")
@@ -646,6 +756,9 @@ class LDYDBManager:
             elif tablename == 'payments':
                 # [Step BA] payments 복구 분기
                 self._insert_gist_payments(data)
+            elif tablename == 'terms_agreements':
+                # [Hotfix-AB1.1] terms_agreements 복구 분기
+                self._insert_gist_terms_agreements(data)
 
         except Exception as e:
             _logger.error(f" [Gist] {tablename} 로드 실패: {e}", exc_info=True)
@@ -964,6 +1077,103 @@ class LDYDBManager:
         except Exception as e:
             _logger.warning(f"사용자 결제 이력 조회 실패: {e}")
             return []
+
+    # ═══════════════════════════════════════════════════
+    # [Hotfix-AB1] 약관 동의 기록 (법적 증빙)
+    # ═══════════════════════════════════════════════════
+    def record_terms_agreement(
+        self,
+        email: str,
+        terms_version: str,
+        terms_type: str = "all",
+        context: str = "signup",
+        ip_address: str = "",
+        user_agent: str = "",
+    ) -> bool:
+        """[Hotfix-AB1] 약관 동의 기록 저장.
+
+        UNIQUE(email, terms_version, terms_type, context)로 동일 약관/컨텍스트 중복 방지.
+        같은 (email, version, type, context)로 다시 호출하면 멱등 (UPDATE 안 함, 첫 동의 시점 보존).
+
+        Returns: True if recorded successfully (이미 있어도 True)
+        """
+        # [Hotfix-AB1.1] 입력 정규화 — None / 공백 / 대소문자 통일
+        email = (email or "").strip().lower()
+        terms_version = (terms_version or "").strip()
+        terms_type = (terms_type or "all").strip() or "all"
+        context = (context or "signup").strip() or "signup"
+        ip_address = (ip_address or "").strip()
+        user_agent = (user_agent or "").strip()
+
+        # [Hotfix-AB1.1] 필수 입력 검증 — 법적 증빙용이라 빈 값 차단
+        if not email or not terms_version:
+            _logger.warning(
+                f"약관 동의 기록 실패: 필수 필드 누락 "
+                f"(email={'있음' if email else '없음'}, "
+                f"version={'있음' if terms_version else '없음'})"
+            )
+            return False
+
+        try:
+            # [Hotfix-AB1.1] UTC 통일 — 분쟁 시 타임존 모호성 제거
+            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            self._exec_sqlite(
+                """INSERT OR IGNORE INTO terms_agreements
+                (email, terms_version, terms_type, context,
+                 ip_address, user_agent, agreed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (email, terms_version, terms_type, context,
+                 ip_address, user_agent, now_str)
+            )
+            self._mark_gist_dirty("terms_agreements")
+            _logger.info(
+                f"📜 약관 동의 기록: {email} / {terms_version} / "
+                f"{terms_type} / {context}"
+            )
+            return True
+        except Exception as e:
+            _logger.error(f"약관 동의 기록 실패: {e}", exc_info=True)
+            return False
+
+    def has_agreed_to_version(self, email: str, terms_version: str) -> bool:
+        """[Hotfix-AB1] 사용자가 특정 버전 약관에 동의했는지 확인."""
+        # [Hotfix-AB1.1] record_terms_agreement과 동일 정규화
+        email = (email or "").strip().lower()
+        terms_version = (terms_version or "").strip()
+        if not email or not terms_version:
+            return False
+        try:
+            row = self._exec_sqlite_one(
+                """SELECT id FROM terms_agreements
+                   WHERE email = ? AND terms_version = ?
+                   LIMIT 1""",
+                (email, terms_version)
+            )
+            return row is not None
+        except Exception as e:
+            _logger.warning(f"약관 동의 확인 실패: {e}")
+            return False
+
+    def get_user_agreement_history(self, email: str, limit: int = 20) -> list:
+        """[Hotfix-AB1] 사용자의 약관 동의 이력 (분쟁 대응 / 관리자 조회용)."""
+        email = (email or "").strip().lower()
+        if not email:
+            return []
+        try:
+            rows = self._exec_sqlite(
+                """SELECT terms_version, terms_type, context,
+                          ip_address, user_agent, agreed_at
+                   FROM terms_agreements WHERE email = ?
+                   ORDER BY agreed_at DESC LIMIT ?""",
+                (email, limit), fetch=True
+            )
+            cols = ["terms_version", "terms_type", "context",
+                    "ip_address", "user_agent", "agreed_at"]
+            return [dict(zip(cols, r)) for r in (rows or [])]
+        except Exception as e:
+            _logger.warning(f"약관 동의 이력 조회 실패: {e}")
+            return []
+
 
     def get_all_payments(self, status: str = None, limit: int = 1000) -> list:
         """[Step BA] 전체 결제 기록 조회 (관리자 매출 통계용).
