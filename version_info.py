@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.2",
+        "date": "2026-04-29",
+        "type": "patch",
+        "title": "v22.2 — 약관 동의 오류 긴급 수정 + 추천 데이터 정합성 강화",
+        "items": [
+            "🚨 **약관 동의 오류 긴급 수정:** \"처리 중 오류 발생. 다시 시도해주세요\" 메시지 반복 표시되어 진입 불가능했던 문제 해결 — DB 저장 메서드(record_terms_agreement) 누락이 원인 + Gist 백업 자동 복구 + UTC 타임스탬프 + 이메일 정규화(lowercase + strip)",
+            "🛡️ **추천 데이터 자동 검증 (Recommend Contract):** 추천매수가 / 손절가 / 추천매도가 1·2·3 가격 관계 항상 올바른지 자동 검증 — 손절가 ≥ 매수가 차단, 매도가 단조 증가 강제, PLAN_REASON / EXEC_RULE_ID 빈 값 차단, REGIME 화이트리스트(normal/high_vol/low_vol), 손익비 > 0, 손절폭 ≥ 0",
+            "🔒 **한글 컬럼 SSOT 강제화:** 추천 종목 dict 생성을 TradePlanResult.to_recommend_row() 한 곳으로 통일 — 누가 한글 키 매핑 실수로 변경해도 단일 출처에서만 수정되므로 회귀 위험 차단",
+            "🔇 **TP 산출 fallback 로깅:** compute_realistic_targets 실패 시 silent → logger.warning 변경 — 추천 목표가가 RR_LEGACY로 fallback될 때 사유 추적 가능 (silent baseline 158 → 157건 1건 감소)",
+            "🔬 **회귀 차단 테스트 인프라 확장:** 추천 데이터 계약 검증 테스트 68건 신규 추가 (이전 147 → 215 passed) — 향후 시스템 변경 시 추천 출력 정합성 CI에서 자동 보증 + STRICT_RECOMMEND_CONTRACT 환경변수로 운영/개발 모드 분리",
+            "📐 **점수 변화:** Phase 3+4 한글 SSOT 88점 → 97점 (4단계 패치 v1~v4)",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.1",
         "date": "2026-04-26",
         "type": "major",
