@@ -1,9 +1,9 @@
 {
   "version": 2,
   "doc": "DO NOT edit by hand unless you know what you're doing. Regenerate with: python scripts/check_silent_exceptions.py --regenerate. Matching is by (file, exc_type, body_kind, code) multiset count — robust to line shifts but distinguishes duplicates within same file.",
-  "count": 158,
+  "count": 157,
   "by_severity": {
-    "SILENT": 155,
+    "SILENT": 154,
     "QUASI": 3
   },
   "fingerprint_counts": {
@@ -45,7 +45,6 @@
     "7ea95abefc4e": 1,
     "80485ef4614c": 7,
     "81b605aa5cbb": 1,
-    "84d1d0c465af": 1,
     "86be9c986a69": 1,
     "8be99c27497e": 1,
     "8daaca9be109": 1,
@@ -791,7 +790,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 217,
+      "line": 224,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -799,7 +798,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 233,
+      "line": 240,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -807,7 +806,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 248,
+      "line": 255,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -815,7 +814,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 339,
+      "line": 376,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -823,7 +822,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 432,
+      "line": 475,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -831,7 +830,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 791,
+      "line": 904,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -839,7 +838,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1048,
+      "line": 1258,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -847,7 +846,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1107,
+      "line": 1317,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -855,7 +854,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1187,
+      "line": 1397,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -863,7 +862,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1242,
+      "line": 1452,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -1233,14 +1232,6 @@
       "file": "ticker_analyzer.py",
       "line": 382,
       "exc_type": "Exception",
-      "severity": "SILENT",
-      "body_kind": "pass"
-    },
-    {
-      "fingerprint": "84d1d0c465af",
-      "file": "ticker_analyzer.py",
-      "line": 547,
-      "exc_type": "(ImportError,Exception)",
       "severity": "SILENT",
       "body_kind": "pass"
     },

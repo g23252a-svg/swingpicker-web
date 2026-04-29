@@ -139,6 +139,18 @@ jobs:
             exit 1
           fi
 
+      - name: 🧪 [Phase 3+4] 추천 결과 한글 키 계약 테스트
+        run: |
+          # recommend_latest.csv가 의존하는 한글 키 (추천매수가/손절가/추천매도가1/2/3)
+          # + ENTRY_ACTION/POSITION_PCT/EXEC_RULE_ID 메타 계약 검증
+          # ticker_analyzer.assemble_result가 만드는 dict 형태 회귀 차단
+          if [ -f "tests/test_recommend_contract.py" ]; then
+            python -m pytest tests/test_recommend_contract.py -v --tb=short
+          else
+            echo "::error::tests/test_recommend_contract.py 없음 - 추천 스키마 회귀 차단 누락"
+            exit 1
+          fi
+
       # ─── 환경 의존 테스트 (조건부 — 명시적 스킵) ───
       - name: 🧪 ML 엔진 테스트 (torch 있는 경우만)
         run: |
