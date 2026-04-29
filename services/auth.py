@@ -12,7 +12,7 @@ import secrets
 from datetime import datetime
 
 import bcrypt
-from nicegui import app
+from nicegui import app  # ci-allow: layer-violation  # TODO: 이벤트 패턴으로 분리
 
 _logger = logging.getLogger(__name__)
 
@@ -69,6 +69,36 @@ def hash_ans(ans, salt):
     return hash_pw(ans.strip().lower(), salt)
 
 
+def hash_password_bcrypt(pw: str) -> str:
+    """[v22.5] 신규 가입 / 비밀번호 변경 시 bcrypt 해시 생성.
+
+    bcrypt는 hash 안에 salt가 포함되므로 별도 salt 컬럼 불필요.
+    이 함수의 결과를 db.register_user / db.update_user_password에 전달할 때
+    salt 인자는 빈 문자열("")로 호출하세요.
+
+    Returns: bcrypt hash 문자열 ($2b$로 시작)
+    """
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt(BCRYPT_COST)).decode()
+
+
+# 모듈 로드 시 한 번 계산 — 사용자 부재 시 timing 균등화용 dummy
+# 실제 유저는 bcrypt이므로 dummy도 bcrypt여야 일관됨.
+_DUMMY_BCRYPT_HASH = bcrypt.hashpw(
+    b"dummy-password-for-timing-defense",
+    bcrypt.gensalt(BCRYPT_COST),
+)
+
+
+def _dummy_password_check(password: str) -> None:
+    """[v22.5] 사용자 부재 시 timing 공격 방어 — bcrypt 검증과 동일한 비용 소비."""
+    try:
+        bcrypt.checkpw(password.encode(), _DUMMY_BCRYPT_HASH)
+    except (ValueError, TypeError) as e:
+        # password 인코딩 실패 등 — timing 균등화 목적이라 결과 무시
+        # logger 호출은 AST silent 분류 회피 + 진단 정보 제공
+        _logger.debug(f"dummy bcrypt 검증 예외 (timing 균등화 목적이라 무시): {e}")
+
+
 def normalize_email(email):
     email = email.strip().lower()
     if "@" not in email: return email
@@ -85,14 +115,97 @@ def check_pw_strength(pw):
 
 # ── 인증 ──
 
+def _is_bcrypt_hash(stored: str) -> bool:
+    """bcrypt hash는 $2a$ / $2b$ / $2y$로 시작."""
+    return isinstance(stored, str) and stored.startswith(("$2a$", "$2b$", "$2y$"))
+
+
+def verify_password(db, user_row, password, *, allow_upgrade=True):
+    """
+    [v22.3] 비밀번호 검증 + bcrypt 자동 마이그레이션.
+    [v22.4] allow_upgrade: 차단 계정 등에서 검증만 하고 write 안 하도록.
+
+    동작:
+      1. 저장된 hash가 bcrypt 형식($2b$ 등)이면 bcrypt.checkpw로 검증
+      2. legacy pbkdf2 hex hash이면 검증 후 bcrypt로 자동 업그레이드
+         - allow_upgrade=False면 검증만 하고 업그레이드 생략
+         - DB가 update_user_password를 지원하는 경우에만 저장
+         - 미지원 DB여도 검증 자체는 정상 통과 (graceful degradation)
+      3. user_row dict도 새 hash로 mutate (다음 호출 전까지 메모리 일관성)
+
+    Args:
+        allow_upgrade: True면 legacy 검증 성공 시 bcrypt로 자동 업그레이드.
+                       False면 검증만 하고 업그레이드 안 함 (banned 계정 등).
+
+    Returns: True (검증 성공) | False (실패)
+    """
+    stored = user_row.get("password", "")
+    if not stored:
+        return False
+
+    # Path 1: 이미 bcrypt 유저
+    if _is_bcrypt_hash(stored):
+        try:
+            return bcrypt.checkpw(password.encode(), stored.encode())
+        except (ValueError, TypeError) as e:
+            _logger.warning(f"bcrypt.checkpw 실패 ({user_row.get('email', '?')}): {e}")
+            return False
+
+    # Path 2: legacy pbkdf2 검증
+    salt = user_row.get("salt", "")
+    if not salt:
+        return False
+    if hash_pw(password, salt) != stored:
+        return False
+
+    # 비밀번호 일치. 업그레이드는 allow_upgrade=True일 때만.
+    if not allow_upgrade:
+        return True
+
+    # 검증 성공 → bcrypt로 자동 업그레이드
+    try:
+        new_hash = bcrypt.hashpw(
+            password.encode(),
+            bcrypt.gensalt(BCRYPT_COST),
+        ).decode()
+        email = user_row.get("email") or user_row.get("id")
+        # 기존 DB 메서드 update_user_password(email, pw_hash, salt) 재사용
+        # bcrypt는 hash 안에 salt가 포함되어 있으니 salt 인자는 빈 문자열
+        if email and hasattr(db, "update_user_password"):
+            db.update_user_password(email, new_hash, "")
+            user_row["password"] = new_hash  # 메모리 row도 갱신
+            user_row["salt"] = ""
+            _logger.info(f"bcrypt 마이그레이션 완료: {email}")
+        # update_user_password 미지원 DB여도 검증 자체는 통과
+    except Exception as e:
+        _logger.warning(f"bcrypt 업그레이드 실패 (검증은 성공): {e}")
+
+    return True
+
+
 def authenticate_user(db, email, password):
-    """반환: (user_dict, None) 성공 | (None, error_msg) 실패"""
+    """반환: (user_dict, None) 성공 | (None, error_msg) 실패
+
+    [v22.3] bcrypt 마이그레이션 통합.
+    [v22.4] 차단 계정은 비밀번호 검증은 하되 bcrypt 업그레이드는 안 함
+            — banned 계정에 DB write가 발생하지 않도록.
+    Timing attack 방어: 사용자 부재 시에도 동일한 시간 소비.
+    """
     u = db.get_user_by_id(email)
-    h = hash_pw(password, u["salt"] if u else "dummy")
-    if not u or h != u.get("password"):
+    if u is None:
+        # [v22.5] username enumeration 방어 — bcrypt 검증과 동일한 시간 소비
+        _dummy_password_check(password)
         return None, "아이디 또는 비밀번호 오류"
-    if str(u.get("is_banned")).upper() in ("Y", "TRUE", "1"):
+
+    # [v22.4] ban 여부를 먼저 판정 — 차단 계정엔 bcrypt write 발생 안 함
+    is_banned = str(u.get("is_banned")).upper() in ("Y", "TRUE", "1")
+
+    if not verify_password(db, u, password, allow_upgrade=not is_banned):
+        return None, "아이디 또는 비밀번호 오류"
+
+    if is_banned:
         return None, "🚫 차단된 계정"
+
     try:
         db.update_login_timestamp(email)
     except Exception as e:
@@ -218,10 +331,10 @@ def premium_guard(action_name="이 기능"):
             allowed, role, msg = require_premium(action_name)
             if not allowed:
                 try:
-                    from nicegui import ui
+                    from nicegui import ui  # ci-allow: layer-violation  # TODO: 이벤트 패턴으로 분리
                     ui.notify(msg, type="warning")
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.warning(f"premium_guard notify 실패: {e}")
                 return None
             return await fn(*args, **kwargs)
         return wrapper

@@ -226,6 +226,14 @@ def _create_salt(): return secrets.token_hex(16)
 def _hash_password(pw, salt): return hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100000).hex()
 def _hash_answer(ans, salt): return _hash_password(ans.strip().lower(), salt)
 
+
+# [v22.5] 신규 가입은 bcrypt로 — services.auth와 동일 정책
+def _hash_password_bcrypt(pw):
+    """신규 가입/비번변경용 bcrypt 해시. salt 컬럼은 ""로 저장."""
+    import bcrypt as _bcrypt
+    cost = int(os.environ.get("BCRYPT_COST", "12"))
+    return _bcrypt.hashpw(pw.encode(), _bcrypt.gensalt(cost)).decode()
+
 # ### [수정] 이메일 정규화 함수 (Gmail 전용 규칙 적용)
 def normalize_email(email):
     email = email.strip().lower()
@@ -391,13 +399,37 @@ def render_auth_box(show_debug: bool = False):
                 else:
                     clean_lid = rl_key  # 이미 normalize_email 됨
                     u = db.get_user_by_id(clean_lid)
-                    # 존재하지 않는 계정도 연산 시간은 동일하게 가져감 (보안)
-                    dummy_salt = "static_dummy_salt"
-                    provided_hash = _hash_password(lpw, u["salt"] if u else dummy_salt)
-                    stored_hash = u["password"] if u else "dummy_match_fail_hash"
-                    
-                    if u and provided_hash == stored_hash:
-                        if str(u.get("is_banned")).upper() in ["Y", "TRUE", "1"]:
+                    is_banned = u and str(u.get("is_banned")).upper() in ("Y", "TRUE", "1")
+                    auth_ok = False
+
+                    if u:
+                        stored = u.get("password", "")
+                        # [v22.5] bcrypt 또는 legacy pbkdf2
+                        if stored.startswith(("$2a$", "$2b$", "$2y$")):
+                            try:
+                                import bcrypt as _bcrypt
+                                auth_ok = _bcrypt.checkpw(lpw.encode(), stored.encode())
+                            except (ValueError, TypeError):
+                                auth_ok = False
+                        else:
+                            # legacy pbkdf2 검증
+                            if u.get("salt") and _hash_password(lpw, u["salt"]) == stored:
+                                auth_ok = True
+                                # 차단 계정이 아닐 때만 bcrypt로 자동 업그레이드
+                                if not is_banned:
+                                    try:
+                                        new_hash = _hash_password_bcrypt(lpw)
+                                        db.update_user_password(clean_lid, new_hash, "")
+                                        u["password"] = new_hash
+                                        u["salt"] = ""
+                                    except Exception as e:
+                                        logger.warning(f"bcrypt 업그레이드 실패 (검증 성공): {e}")
+                    else:
+                        # 사용자 없음 — timing 균등화
+                        _hash_password(lpw, "static_dummy_salt")
+
+                    if u and auth_ok:
+                        if is_banned:
                             st.error("🚫 접근 권한이 제한된 계정입니다.")
                         else:
                             reset_login_failures(clean_lid)
@@ -430,8 +462,14 @@ def render_auth_box(show_debug: bool = False):
                 elif p1 != p2: st.error("비밀번호가 일치하지 않습니다.")
                 elif not ans.strip(): st.error("보안 질문 답변은 필수입니다.")
                 else:
-                    salt = _create_salt()
-                    ok, msg = db.register_user(clean_em, _hash_password(p1, salt), salt, nk[:8], q_idx, _hash_answer(ans, salt))
+                    salt = _create_salt()  # 보안답변 hash용
+                    # [v22.5] 비밀번호는 bcrypt, 보안답변은 pbkdf2 with salt
+                    ok, msg = db.register_user(
+                        clean_em,
+                        _hash_password_bcrypt(p1),  # bcrypt
+                        salt,  # DB salt 컬럼은 보안답변용
+                        nk[:8], q_idx, _hash_answer(ans, salt)
+                    )
                     if ok:
                         st.balloons()
                         st.success("🎉 가입 성공! 로그인 탭에서 접속하세요.")
@@ -459,7 +497,8 @@ def render_auth_box(show_debug: bool = False):
                 if u and _hash_answer(ans_in, u["salt"]) == u["security_a_hash"]:
                     if check_password_strength(new_pw):
                         new_salt = _create_salt()
-                        new_hash = _hash_password(new_pw, new_salt)
+                        # [v22.5] 비밀번호는 bcrypt (self-contained), 보안답변은 새 salt로 재해싱
+                        new_hash = _hash_password_bcrypt(new_pw)
                         new_ans_hash = _hash_answer(ans_in, new_salt)  # 보안답변도 새 salt로!
                         if db.update_user_password(
                             clean_fid, new_hash, new_salt,

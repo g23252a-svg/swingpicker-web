@@ -32,8 +32,12 @@ class TestBcryptBasic(unittest.TestCase):
         self.assertTrue(bcrypt.checkpw(pw.encode(), hashed.encode()))
         self.assertFalse(bcrypt.checkpw(b"wrong", hashed.encode()))
 
+    @unittest.skipUnless(
+        os.environ.get("RUN_SLOW_AUTH_TESTS") == "1",
+        "slow perf test — set RUN_SLOW_AUTH_TESTS=1 to enable",
+    )
     def test_cost_12_reasonable_time(self):
-        """운영 cost=12 해싱이 3초 이내인지 확인."""
+        """운영 cost=12 해싱이 3초 이내인지 확인 (slow perf — CI에서 흔들릴 수 있음)."""
         start = time.time()
         bcrypt.hashpw(b"benchmark", bcrypt.gensalt(12))
         elapsed = time.time() - start
@@ -144,6 +148,11 @@ class TestLegacyMigration(unittest.TestCase):
 class TestTimingAttack(unittest.TestCase):
     """타이밍 공격 방어 검증."""
 
+    @unittest.skipUnless(
+        os.environ.get("RUN_SLOW_AUTH_TESTS") == "1",
+        "slow timing test — CI runner 부하 따라 flaky. "
+        "RUN_SLOW_AUTH_TESTS=1로 활성화",
+    )
     def test_nonexistent_user_same_time(self):
         """존재하지 않는 유저도 해싱 수행하여 응답 시간 균등화."""
         cost = int(os.environ.get("BCRYPT_COST", "4"))

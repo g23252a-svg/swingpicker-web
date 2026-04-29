@@ -3,11 +3,16 @@
 # SwingPicker CI — Push/PR 마다 자동 실행
 #
 # 체크 항목:
-#   1. 순환 참조 검사 (dep_guard)
-#   2. Silent Exception 검출 (except:pass 잔존 여부)
-#   3. [v20.8] Contract Gate (Policy SSOT + Feature Contract 위반 탐지)
-#   4. Import 오류 검사 (모든 .py 파일 구문 체크)
-#   5. 정책 일관성 + 체결 엔진 + ML 테스트
+#   1. Layer / Cycle 검사 (check_deps.py v2) — Hard Fail
+#   2. Silent Exception 검사 (check_silent_exceptions.py v2 — AST + baseline) — Hard Fail
+#   3. [v20.8] Contract Gate (Policy SSOT + Feature Contract) — Hard Fail
+#   4. Python Syntax 검사 — Hard Fail
+#   5. 정책 일관성 + 체결 엔진 + Auth 마이그레이션 + Route 계약 — Hard Fail
+#   6. ML 테스트는 torch 존재 시에만 실행
+#
+# [v22.2] 변경:
+#   · pip install 버전 spec quote 처리 (>가 redirection으로 해석되는 것 방지)
+#   · backup_*, .venv, data/ 검사 대상에서 명시적 제외
 # ═══════════════════════════════════════════════
 name: CI
 
@@ -15,7 +20,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - 'data/**'         # collector 결과물 커밋은 CI 스킵
+      - 'data/**'
       - '**.md'
   pull_request:
     branches: [main]
@@ -37,39 +42,47 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 1) 순환 참조 & 레이어 위반 검사
-      - name: 🔍 Import 순환 참조 검사
+      # 1) 레이어 + 순환참조 검사 (Hard Fail)
+      - name: 🔍 Layer & Import Cycle 검사
         run: python scripts/check_deps.py
 
-      # 2) except Exception: pass 잔존 검사
-      - name: 🔇 Silent Exception 검출
+      # 2) Silent Exception 검사 (AST + Baseline — Hard Fail)
+      - name: 🔇 Silent Exception 검출 (AST)
         run: python scripts/check_silent_exceptions.py
 
-      # 3) [v20.8] 계약 위반 탐지 게이트
+      # 3) [v20.8] 계약 위반 탐지 게이트 (Hard Fail)
       - name: 📋 Contract Gate (Policy SSOT + Feature Contract)
         run: python check_contract_gate.py
 
-      # 4) 모든 .py 파일 구문 체크
+      # 4) 모든 .py 파일 구문 체크 (Hard Fail, backup/data 제외)
       - name: 🐍 Python Syntax 검사
         run: |
           python -m py_compile main.py
-          find . -name "*.py" -not -path "./__pycache__/*" -not -path "./test_*" \
-            | head -30 \
-            | xargs -I {} python -m py_compile {} 2>&1 \
-            || { echo "❌ 구문 에러 발견"; exit 1; }
+          find . -name "*.py" \
+            -not -path "./__pycache__/*" \
+            -not -path "./.git/*" \
+            -not -path "./backup_*/*" \
+            -not -path "./legacy_*/*" \
+            -not -path "./.venv/*" \
+            -not -path "./venv/*" \
+            -not -path "./data/*" \
+            -not -name "test_*.py" \
+            -not -path "./tests/*" \
+            -print0 \
+          | xargs -0 -n1 python -m py_compile
 
   # ─────────────────────────────────────────
   #  Job 2: 테스트 (의존성 설치 필요)
   # ─────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
-    needs: quick-checks    # 빠른 검사 통과 후에만 실행
+    needs: quick-checks
 
     env:
       PYTHONUNBUFFERED: '1'
-      BCRYPT_COST: '4'       # 테스트는 빠른 cost 사용 (Tip #5)
+      BCRYPT_COST: '4'
       STORAGE_SECRET: 'ci-test-secret-key-12345'
-      LOG_TO_FILE: 'false'   # CI에서는 stdout만
+      LOG_TO_FILE: 'false'
 
     steps:
       - uses: actions/checkout@v4
@@ -87,27 +100,53 @@ jobs:
 
       - name: 📦 의존성 설치
         run: |
-          pip install --upgrade pip
-          pip install -r requirements_nicegui.txt
-          pip install bcrypt>=4.0.0 pytest
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements_nicegui.txt
+          # 버전 spec은 반드시 quote — `>`가 쉘 redirection으로 해석되는 것 방지
+          python -m pip install "bcrypt>=4.0.0" pytest
 
-      - name: 🧪 테스트 실행
+      # ─── 항상 실행되어야 하는 핵심 테스트 (Hard Fail) ───
+      - name: 🧪 Route 계약 테스트
+        run: python -m pytest test_route_contract_v22.py -v --tb=short
+
+      - name: 🧪 정책 일관성 테스트
+        run: python -m pytest test_policy_consistency.py -v --tb=short
+
+      - name: 🧪 체결 엔진(trade_plan) 테스트
+        run: python -m pytest test_trade_plan.py -v --tb=short
+
+      - name: 🧪 Auth 마이그레이션 테스트
         run: |
-          # [v20.8] 정책 일관성 + 체결 엔진 테스트
-          python -m pytest test_policy_consistency.py -v --tb=short 2>/dev/null || \
-          echo "⚠️ 정책 일관성 테스트 스킵"
+          # 경로 방어: tests/ 또는 루트, 둘 중 어디 있어도 동작
+          if [ -f "tests/test_auth_migration.py" ]; then
+            python -m pytest tests/test_auth_migration.py -v --tb=short
+          elif [ -f "test_auth_migration.py" ]; then
+            python -m pytest test_auth_migration.py -v --tb=short
+          else
+            echo "::error::tests/test_auth_migration.py 또는 test_auth_migration.py 둘 다 없음"
+            echo "::error::Auth 마이그레이션 테스트는 보안 회귀 차단의 핵심입니다."
+            echo "::error::해결: tests/ 디렉터리에 파일 추가 또는 CI에서 이 단계 제거"
+            exit 1
+          fi
 
-          python -m pytest test_trade_plan.py -v --tb=short 2>/dev/null || \
-          echo "⚠️ 체결 엔진 테스트 스킵"
+      - name: 🧪 Auth 서비스 통합 테스트
+        run: |
+          # 실제 services.auth.authenticate_user / compute_access_status 직접 호출
+          if [ -f "tests/test_auth_service.py" ]; then
+            python -m pytest tests/test_auth_service.py -v --tb=short
+          else
+            echo "::error::tests/test_auth_service.py 없음 - services.auth 회귀 차단 누락"
+            exit 1
+          fi
 
-          # 보안 테스트
-          python -m pytest tests/test_auth_migration.py -v --tb=short 2>/dev/null || \
-          python -m pytest test_security.py -v --tb=short 2>/dev/null || \
-          echo "⚠️ 보안 테스트 파일 없음 (스킵)"
-
-          # 기존 테스트
-          python -m pytest test_ml_engine.py -v --tb=short 2>/dev/null || \
-          echo "⚠️ ML 테스트 스킵 (모델 파일 없음)"
+      # ─── 환경 의존 테스트 (조건부 — 명시적 스킵) ───
+      - name: 🧪 ML 엔진 테스트 (torch 있는 경우만)
+        run: |
+          if python -c "import torch" 2>/dev/null; then
+            python -m pytest test_ml_engine.py -v --tb=short
+          else
+            echo "::notice::torch 미설치 환경 — ML 테스트 건너뜀 (의도된 환경 차이)"
+          fi
 
       - name: 📊 테스트 결과 요약
         if: always()

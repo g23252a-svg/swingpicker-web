@@ -14,6 +14,7 @@ from services.auth import (
     get_db, verify_admin_pw, normalize_email, check_pw_strength,
     authenticate_user, set_current_user,
     create_salt, hash_pw, hash_ans,
+    hash_password_bcrypt,  # [v22.5] 신규 가입/비번변경용
 )
 
 # ── 이메일 인증 (미설정 시 fallback) ──
@@ -195,10 +196,12 @@ def login_page():
                         return
 
                     clean_email = normalize_email(email)
-                    salt = create_salt()
+                    salt = create_salt()  # 보안답변 hash용 (password는 bcrypt이므로 별도 salt 불필요)
                     ok, m = db.register_user(
-                        clean_email, hash_pw(j_p1.value, salt),
-                        salt, j_nk.value[:8], j_q.value, hash_ans(j_ans.value, salt)
+                        clean_email,
+                        hash_password_bcrypt(j_p1.value),  # [v22.5] bcrypt
+                        salt,  # DB salt 컬럼은 보안답변 검증용으로만 사용
+                        j_nk.value[:8], j_q.value, hash_ans(j_ans.value, salt)
                     )
                     if ok:
                         # [v22 Step AC+AD] 약관 동의 기록 — 실패 시 가입 중단
@@ -316,8 +319,12 @@ def login_page():
                     ok = False
                     if u and hash_ans(r_ans.value, u["salt"]) == u.get("security_a_hash"):
                         if check_pw_strength(r_pw.value):
-                            ns = create_salt()
-                            ok = db.update_user_password(normalize_email(r_id.value), hash_pw(r_pw.value, ns), ns)
+                            # [v22.5] 비밀번호는 bcrypt, salt 컬럼은 그대로 (답변 hash 검증 호환)
+                            ok = db.update_user_password(
+                                normalize_email(r_id.value),
+                                hash_password_bcrypt(r_pw.value),
+                                u["salt"],  # 기존 salt 유지 — 보안답변 hash 무효화 방지
+                            )
                     r_msg.set_text("✅ 변경 완료!" if ok else "정보 불일치")
                     r_msg.classes(replace=f"text-sm mt-2 {'text-green-400' if ok else 'text-red-400'}")
 
