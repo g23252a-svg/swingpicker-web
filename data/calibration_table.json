@@ -5,9 +5,9 @@
     "score_lo":0,
     "score_hi":50.0,
     "score_center":25.0,
-    "p_calibrated":0.6052,
-    "n_effective":43.4,
-    "n_raw":59
+    "p_calibrated":0.6245,
+    "n_effective":46.7,
+    "n_raw":63
   },
   {
     "method":"DISPLAY_SCORE",
