@@ -3,18 +3,11 @@
 # SwingPicker v22 Monotonicity / CI HARD Gate
 # ─ 참조: SwingPicker_v22_Final_Consolidated.md §3
 #
-# 동작:
-#   1. daily_briefing.py로 monotonicity_report 생성
-#   2. ci_hard_all_pass 검증 (실패 시 워크플로우 빨강)
-#   3. SOFT warning 요약 출력
-#
-# 운영 단계:
-#   - Week 1~2 (이번 PR 시점): continue-on-error: true → REPORT-ONLY
-#     (실패해도 PR merge 가능, 알람만)
-#   - Week 3~4: continue-on-error 제거 → SOFT BLOCK
-#     (HARD FAIL 시 PR 빨강, 그래도 force-merge 가능)
-#   - MATURE (n_trades ≥ 100, winrate_table 안정): branch protection rule
-#     로 HARD ENFORCE (PR merge 차단)
+# [v22.2] 변경:
+#   · monotonicity_report 부재 정책을 이벤트별로 분리:
+#     - pull_request → SKIP (PR 작업자가 collector를 못 돌릴 수 있음)
+#     - schedule / push to main → FAIL
+#   · continue-on-error 제거 (이전 단계에서 이미 함, 유지)
 # ═══════════════════════════════════════════════
 name: v22 Monotonicity
 
@@ -35,10 +28,8 @@ on:
       - ".github/workflows/v22_monotonicity.yml"
   pull_request:
     branches: [main]
-  # 매일 한국 시간 16:30 (장 마감 + collector 30분 후) 기준 KST = UTC 07:30
   schedule:
-    - cron: "30 7 * * 1-5"
-  # 수동 실행
+    - cron: "30 7 * * 1-5"   # KST 16:30 (장 마감 + collector 30분 후)
   workflow_dispatch:
 
 concurrency:
@@ -48,13 +39,6 @@ concurrency:
 jobs:
   monotonicity-check:
     runs-on: ubuntu-latest
-    # ───────────────────────────────────────
-    # [v22 운영 가이드]
-    # 첫 1주일: REPORT-ONLY 모드 (continue-on-error: true)
-    # 이후 단계적으로 false 전환:
-    #   Week 3+: continue-on-error: false (PR 빨강)
-    # ───────────────────────────────────────
-    continue-on-error: true   # ⚠️ Week 3+ 에는 false로 변경
 
     steps:
       - uses: actions/checkout@v4
@@ -67,51 +51,59 @@ jobs:
       - name: Install minimal deps
         run: |
           python -m pip install --upgrade pip
-          # 본 워크플로우는 pandas/numpy만 있으면 충분
-          pip install pandas numpy pytest
+          python -m pip install pandas numpy pytest
 
       - name: 🧪 Route 계약 테스트
-        run: |
-          python -m pytest test_route_contract_v22.py -v --tb=short
+        run: python -m pytest test_route_contract_v22.py -v --tb=short
 
       - name: 📊 monotonicity_report 생성
         id: monobuild
         env:
           PYTHONUTF8: "1"
         run: |
-          # 어제 날짜 기준 (오늘 collector 안 돌았을 가능성 대비)
           YMD=$(date -u +"%Y%m%d")
           echo "asof_ymd=$YMD" >> $GITHUB_OUTPUT
-          
-          # data/ 디렉토리 없으면 생성 (첫 실행 방어)
           mkdir -p data
-          
-          # daily_briefing 단독 실행 — monotonicity_report 자동 생성
-          # 이미 collector가 돌았다면 recommend_latest.csv 존재
-          # 없으면 monotonicity_report에 빈 데이터 + SKIP gate로 정상 종료
-          python daily_briefing.py data $YMD || echo "⚠️ daily_briefing 실패 (collector 미실행 가능성)"
+
+          # daily_briefing 자체 실행 실패는 다음 step에서 분기 처리
+          # (pull_request라면 통과, push/schedule이라면 fail)
+          # 단, 실패 정보를 보존하기 위해 ::warning::으로 출력
+          python daily_briefing.py data $YMD || \
+            echo "::warning::daily_briefing 실행 실패 (collector 미실행 가능성)"
 
       - name: 🛡️ CI HARD Gate 검증
         env:
           PYTHONUTF8: "1"
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           python <<'PYEOF'
           import json, sys, os
-          
+
           path = "data/monotonicity_report_latest.json"
+          event = os.environ.get("GITHUB_EVENT_NAME", "")
+
           if not os.path.exists(path):
-              print("⚠️ monotonicity_report_latest.json 없음 — collector 미실행 가능성")
-              print("   첫 1주일은 데이터 누적 단계, SKIP 처리")
-              sys.exit(0)
-          
+              # [v22.2] 이벤트별 정책 분리
+              if event in ("pull_request", "workflow_dispatch"):
+                  print(f"⏭️  monotonicity_report 없음 — SKIP (event={event})")
+                  print("   PR 작업자는 보통 collector를 못 돌리므로 통과시킴.")
+                  sys.exit(0)
+              else:
+                  # push to main / schedule 에서는 무조건 있어야 함
+                  print(f"❌ monotonicity_report 없음 (event={event})")
+                  print("   main push 또는 schedule 실행에서는 collector가 돌고")
+                  print("   data/monotonicity_report_latest.json이 생성되어야 합니다.")
+                  print("   daily_briefing.py가 실패했거나 collector가 안 돈 상태입니다.")
+                  sys.exit(1)
+
           with open(path, "r", encoding="utf-8") as f:
               r = json.load(f)
-          
+
           print("=" * 60)
           print(f"📊 monotonicity_report ({r.get('asof_ymd')})")
+          print(f"   event={event}")
           print("=" * 60)
-          
-          # 핵심 지표
+
           print(f"  TOP_PICK count: {r.get('top_pick_count', 0)}")
           print(f"  declared_wr_top_pick: {r.get('declared_wr_top_pick')}")
           print(f"  declared_wr_active:   {r.get('declared_wr_active')}")
@@ -122,31 +114,26 @@ jobs:
           print(f"  market_map_coverage:  {r.get('market_map_coverage')}")
           print(f"  stable_7day_avg:      {r.get('top_pick_stable_7day_avg')}")
           print()
-          
-          # HARD gates
+
           print("🛡️ HARD Gates:")
           for g in r.get("ci_hard", []):
               icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️"}.get(g["status"], "❓")
               print(f"  {icon} {g['gate']}: {g['status']} ({g.get('detail', '')})")
-          
-          # SOFT gates
+
           print("\n💡 SOFT Gates:")
           for g in r.get("ci_soft", []):
               icon = {"OK": "✅", "WARN": "⚠️"}.get(g["status"], "❓")
               print(f"  {icon} {g['gate']}: {g['status']} ({g.get('detail', '')})")
-          
-          # 최종 판정
+
           hard_pass = r.get("ci_hard_all_pass", False)
           soft_warn = r.get("ci_soft_any_warn", False)
-          
+
           print("\n" + "=" * 60)
           print(f"최종: HARD={'PASS ✅' if hard_pass else 'FAIL ❌'}, "
                 f"SOFT={'WARN ⚠️' if soft_warn else 'OK ✅'}")
           print("=" * 60)
-          
+
           if not hard_pass:
-              # continue-on-error: true 인 동안에는 워크플로우 자체는 ✅,
-              # 이 step만 빨강 표시
               sys.exit(1)
           PYEOF
 

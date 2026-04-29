@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "doc": "Existing import cycles. Add new cycles here only with explicit review. Generated automatically on first run.",
+  "cycles": [
+    "collector→pipeline_analyze→collector",
+    "collector→pipeline_calibrate→collector",
+    "collector→pipeline_data→collector",
+    "collector→pipeline_finalize→collector",
+    "collector→pipeline_score→collector",
+    "collector→ticker_analyzer→collector"
+  ]
+}
