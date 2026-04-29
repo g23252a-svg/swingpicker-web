@@ -12,14 +12,28 @@ trade_plan.py — SSOT(단일 진실) 트레이딩 계획 엔진
   6. Observability: 모든 의사결정 근거를 reason에 남김
   7. 회귀테스트: 동일 입력 → 동일 출력 보장 (frozen dataclass)
 
-사용법:
-    from trade_plan import build_trade_plan, exec_bar, validate_row, ExecRule
-    
-    plan = build_trade_plan(features, exec_rule=ExecRule())
-    row = plan.to_row()  # → recommend CSV에 저장
-    
-    # 백테스트에서:
-    result = exec_bar(plan, bar_open, bar_high, bar_low, bar_close, rule=ExecRule())
+────────────────────────────────────────────────────────
+실 운영 흐름 (Phase 3+4):
+────────────────────────────────────────────────────────
+build_trade_plan() → TradePlan
+    ↓
+ticker_analyzer.assemble_result() — TradePlan을 한글 키 dict로 매핑
+    ↓
+recommend_latest.csv — "추천매수가", "손절가", "추천매도가1/2/3" + 영문 메타
+    ↓
+프런트(tab_stocks/page_stock 등) + 텔레그램 + 백테스트가 한글 키로 read
+
+권장 사용법 (Phase 3+4 신규):
+    from trade_plan import build_trade_plan, validate_recommend_row, ExecRule
+
+    plan = build_trade_plan(buy=..., atr_val=..., last_c=..., exec_rule=ExecRule())
+    row = plan.to_recommend_row()   # ← 한글 키 dict (운영용 SSOT)
+    validate_recommend_row(row)     # ← 한글 키 계약 검증
+    # row를 ticker_analyzer.assemble_result의 한글 매핑과 그대로 사용 가능
+
+레거시 (백테스트 / 영문 키 호환만 위해 유지):
+    plan.to_row()        # 영문 키 dict — DEPRECATED, 새 코드는 사용하지 말 것
+    validate_row(row)    # 영문 키 검증 — DEPRECATED
 """
 
 import math
@@ -103,8 +117,49 @@ class TradePlan:
     time_stop_min_move_pct: float = 2.0  # N일 내 이 수준 미달 시 청산
     time_stop_extend_if_profit: bool = True  # 수익 중이면 연장 허용
 
+    def to_recommend_row(self) -> Dict[str, Any]:
+        """[Phase 3+4] recommend_latest.csv용 한글 키 dict — 실 운영 SSOT.
+
+        한글 키 (ticker_analyzer.assemble_result와 일치):
+          - 가격: 추천매수가 / 손절가 / 추천매도가1 / 추천매도가2 / 추천매도가3
+          - 수량 메타: 추천수량 (별도 위치에서 채워짐 — 여기서는 None 안 들어감)
+
+        영문 메타 키 (관행상 영문 유지):
+          - ENTRY_ACTION, POSITION_PCT, EXEC_RULE_ID
+          - STOP_PCT, MAX_LOSS_PCT, RR_MULT, REGIME
+          - PLAN_REASON, TIME_STOP_DAYS
+
+        TP3는 0이면 None으로 직렬화 (CSV 빈 값) — 기존 assemble_result 패턴 유지.
+        validate_recommend_row()를 통해 계약 검증.
+        """
+        row = {
+            # ── 가격 (한글 SSOT) ──
+            "추천매수가": self.entry,
+            "손절가": self.stop,
+            "추천매도가1": self.tp1,
+            "추천매도가2": self.tp2,
+            "추천매도가3": self.tp3 if (self.tp3 and self.tp3 > 0) else None,
+            # ── 진입 제어 (영문 메타) ──
+            "ENTRY_ACTION": self.entry_action,
+            "POSITION_PCT": self.position_pct,
+            # ── 근거/체결 메타 (영문 메타) ──
+            "PLAN_REASON": self.plan_reason,
+            "STOP_PCT": round(self.stop_pct, 2),
+            "MAX_LOSS_PCT": round(self.max_loss_pct, 1),
+            "RR_MULT": round(self.rr_mult, 1),
+            "REGIME": self.regime,
+            "EXEC_RULE_ID": self.exec_rule_id,
+            "TIME_STOP_DAYS": self.time_stop_days,
+        }
+        validate_recommend_row(row)
+        return row
+
     def to_row(self) -> Dict[str, Any]:
-        """recommend CSV용 dict 변환 + 계약 검증"""
+        """[DEPRECATED] 영문 키 dict — 새 코드는 to_recommend_row() 사용.
+
+        이 메서드는 backtest 하네스나 영문 키 contract 테스트용으로만 유지됨.
+        실 운영(recommend_latest.csv 출력)에는 사용되지 않음.
+        """
         row = {
             "ENTRY_PRICE": self.entry,
             "STOP_PRICE": self.stop,
@@ -126,7 +181,9 @@ class TradePlan:
 
 
 # ═══════════════════════════════════════════════════
-#  3. 데이터 계약 (Contract) — 누락 시 에러
+#  3. [DEPRECATED] 영문 키 계약 — 백테스트/구버전 호환만
+#       실 운영(recommend_latest.csv)에는 사용되지 않음.
+#       새 코드는 REQUIRED_RECOMMEND_KEYS / validate_recommend_row 사용.
 # ═══════════════════════════════════════════════════
 
 REQUIRED_PLAN_KEYS = frozenset({
@@ -137,7 +194,11 @@ REQUIRED_PLAN_KEYS = frozenset({
 
 
 def validate_row(row: Dict[str, Any]) -> None:
-    """추천 결과가 계약을 만족하는지 강제 검증 (불변조건 포함)."""
+    """[DEPRECATED] 영문 키 row 검증 — 새 코드는 validate_recommend_row 사용.
+
+    이 함수는 TradePlan.to_row() 결과 검증용으로만 유지됨.
+    실 운영 흐름에서는 호출되지 않음.
+    """
     missing = REQUIRED_PLAN_KEYS - set(row.keys())
     if missing:
         raise ValueError(f"[Contract] 필수 컬럼 누락: {missing}")
@@ -189,6 +250,199 @@ def validate_row(row: Dict[str, Any]) -> None:
     stop_pct = float(row.get("STOP_PCT", 0) or 0)
     if stop_pct < 0 or stop_pct > 30:
         raise ValueError(f"[Contract] STOP_PCT={stop_pct} out of [0,30]")
+
+
+# ═══════════════════════════════════════════════════
+#  3-B. [Phase 3+4] 한글 키 계약 — 운영 SSOT
+#       recommend_latest.csv가 실제로 쓰는 한글 컬럼 계약.
+#       ticker_analyzer.assemble_result도 동일 키로 매핑됨.
+# ═══════════════════════════════════════════════════
+
+# [v3] 가격 키 — 가장 핵심
+REQUIRED_RECOMMEND_PRICE_KEYS = frozenset({
+    "추천매수가", "손절가", "추천매도가1",
+})
+
+# [v3] 진입 제어 키 — 어떻게 진입하는지
+REQUIRED_RECOMMEND_EXEC_KEYS = frozenset({
+    "ENTRY_ACTION", "POSITION_PCT", "EXEC_RULE_ID",
+})
+
+# [v3] 운영 메타 키 — 손익비/손절폭/사유 (프론트 표시 + 분쟁 대응)
+# [v4] TIME_STOP_DAYS도 필수화 — 타임스탑은 실전 운용 규칙
+REQUIRED_RECOMMEND_META_KEYS = frozenset({
+    "PLAN_REASON", "STOP_PCT", "MAX_LOSS_PCT", "RR_MULT", "REGIME",
+    "TIME_STOP_DAYS",
+})
+
+# [v4] REGIME 허용값 — TradePlan.regime의 정의된 세 가지
+ALLOWED_REGIMES = frozenset({"normal", "high_vol", "low_vol"})
+
+# 통합 — 모두 합친 필수 키 (운영 CSV 계약)
+REQUIRED_RECOMMEND_KEYS = (
+    REQUIRED_RECOMMEND_PRICE_KEYS
+    | REQUIRED_RECOMMEND_EXEC_KEYS
+    | REQUIRED_RECOMMEND_META_KEYS
+)
+
+
+def validate_recommend_row(row: Dict[str, Any]) -> None:
+    """[Phase 3+4] 한글 키 운영 row 계약 검증.
+
+    recommend_latest.csv에 들어갈 한 종목 row가 만족해야 하는 불변조건:
+      - 한글 가격 키 (추천매수가, 손절가, 추천매도가1) 모두 존재 + 양수
+      - 손절가 < 추천매수가 (정의상)
+      - 추천매도가1 > 추천매수가 (정의상)
+      - 추천매도가2 / 추천매도가3 있으면 단조 증가
+      - ENTRY_ACTION ∈ {enter, split, hold}
+      - POSITION_PCT ∈ [0, 100]
+      - hold/split 일관성
+
+    Raises:
+        ValueError: 계약 위반 시 — 어디가 어떻게 위반됐는지 명시.
+    """
+    missing = REQUIRED_RECOMMEND_KEYS - set(row.keys())
+    if missing:
+        raise ValueError(f"[Recommend Contract] 필수 컬럼 누락: {missing}")
+
+    # 가격 캐스팅
+    try:
+        entry = float(row["추천매수가"])
+        stop = float(row["손절가"])
+        tp1 = float(row["추천매도가1"])
+    except (TypeError, ValueError, KeyError) as e:
+        raise ValueError(f"[Recommend Contract] price cast fail: {e}")
+
+    if not np.isfinite(entry) or entry <= 0:
+        raise ValueError(f"[Recommend Contract] 추천매수가={entry} invalid")
+    if not np.isfinite(stop) or stop <= 0:
+        raise ValueError(f"[Recommend Contract] 손절가={stop} invalid")
+    if not np.isfinite(tp1) or tp1 <= 0:
+        raise ValueError(f"[Recommend Contract] 추천매도가1={tp1} invalid")
+
+    if stop >= entry:
+        raise ValueError(
+            f"[Recommend Contract] 손절가={stop} ≥ 추천매수가={entry}"
+        )
+    if tp1 <= entry:
+        raise ValueError(
+            f"[Recommend Contract] 추천매도가1={tp1} ≤ 추천매수가={entry}"
+        )
+
+    # ENTRY_ACTION
+    act = str(row.get("ENTRY_ACTION", ""))
+    if act not in ("enter", "split", "hold"):
+        raise ValueError(f"[Recommend Contract] ENTRY_ACTION invalid: {act}")
+
+    # POSITION_PCT
+    pos = float(row.get("POSITION_PCT", 0) or 0)
+    if not (0.0 <= pos <= 100.0):
+        raise ValueError(
+            f"[Recommend Contract] POSITION_PCT out of range: {pos}"
+        )
+
+    # 불변조건 (entry_action ↔ position_pct 일관성)
+    if act == "hold" and pos > 0:
+        raise ValueError(
+            f"[Recommend Contract] hold인데 POSITION_PCT={pos} > 0"
+        )
+    if act == "split" and pos >= 100.0:
+        raise ValueError(
+            f"[Recommend Contract] split인데 POSITION_PCT={pos} ≥ 100"
+        )
+
+    # TP 단조 증가 (있는 경우만) — 명확한 에러 메시지 helper 사용
+    tp2 = _optional_positive_float(row, "추천매도가2")
+    tp3 = _optional_positive_float(row, "추천매도가3")
+    if tp2 is not None and tp2 <= tp1:
+        raise ValueError(
+            f"[Recommend Contract] 추천매도가2={tp2} ≤ 추천매도가1={tp1}"
+        )
+    if tp3 is not None and tp2 is not None and tp3 <= tp2:
+        raise ValueError(
+            f"[Recommend Contract] 추천매도가3={tp3} ≤ 추천매도가2={tp2}"
+        )
+
+    # STOP_PCT 범위 체크
+    stop_pct = float(row.get("STOP_PCT", 0) or 0)
+    if stop_pct < 0 or stop_pct > 30:
+        raise ValueError(f"[Recommend Contract] STOP_PCT={stop_pct} out of [0,30]")
+
+    # ── [v4] 메타 값 품질 검증 — 빈 값 / 잘못된 부호 차단 ──
+
+    # PLAN_REASON 빈 문자열 차단 (분쟁 대응 시 사유 필수)
+    plan_reason = str(row.get("PLAN_REASON", "")).strip()
+    if not plan_reason:
+        raise ValueError(
+            "[Recommend Contract] PLAN_REASON 빈 값 — 추천 사유는 필수"
+        )
+
+    # EXEC_RULE_ID 빈 문자열 차단 (체결 규칙 식별자 필수)
+    exec_rule_id = str(row.get("EXEC_RULE_ID", "")).strip()
+    if not exec_rule_id:
+        raise ValueError(
+            "[Recommend Contract] EXEC_RULE_ID 빈 값 — 체결 규칙 ID 필수"
+        )
+
+    # REGIME 화이트리스트 (정의되지 않은 값 차단)
+    regime = str(row.get("REGIME", "")).strip()
+    if regime not in ALLOWED_REGIMES:
+        raise ValueError(
+            f"[Recommend Contract] REGIME='{regime}' invalid "
+            f"(allowed: {sorted(ALLOWED_REGIMES)})"
+        )
+
+    # RR_MULT > 0 (정의상 양수여야 함)
+    try:
+        rr_mult = float(row.get("RR_MULT", 0) or 0)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"[Recommend Contract] RR_MULT cast fail: {e}")
+    if rr_mult <= 0:
+        raise ValueError(
+            f"[Recommend Contract] RR_MULT={rr_mult} ≤ 0 — 손익비는 양수여야"
+        )
+
+    # MAX_LOSS_PCT >= 0 (캡 자체는 0 허용 — 캡 없음 의미)
+    try:
+        max_loss_pct = float(row.get("MAX_LOSS_PCT", 0) or 0)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"[Recommend Contract] MAX_LOSS_PCT cast fail: {e}")
+    if max_loss_pct < 0:
+        raise ValueError(
+            f"[Recommend Contract] MAX_LOSS_PCT={max_loss_pct} < 0"
+        )
+
+    # TIME_STOP_DAYS >= 0 (0=비활성, 양수=N일 후 청산)
+    try:
+        time_stop = int(row.get("TIME_STOP_DAYS", 0) or 0)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"[Recommend Contract] TIME_STOP_DAYS cast fail: {e}")
+    if time_stop < 0:
+        raise ValueError(
+            f"[Recommend Contract] TIME_STOP_DAYS={time_stop} < 0"
+        )
+
+
+def _optional_positive_float(row: Dict[str, Any], key: str) -> Optional[float]:
+    """[v3] 선택적 양수 float 변환 — None/빈 값/0/음수는 None 반환.
+
+    명확한 에러 메시지 제공 (잘못된 값이면 ValueError).
+    """
+    v = row.get(key)
+    if v is None:
+        return None
+    sv = str(v).strip()
+    if sv == "" or sv.lower() == "nan" or sv.lower() == "none":
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"[Recommend Contract] {key} cast fail: {v!r}")
+    return f if (np.isfinite(f) and f > 0) else None
+
+
+# 별칭 (편의용 — 길게 import 안 해도 되도록)
+RECOMMEND_PRICE_KEYS = ("추천매수가", "손절가", "추천매도가1", "추천매도가2", "추천매도가3")
 
 
 # ═══════════════════════════════════════════════════

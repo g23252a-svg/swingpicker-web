@@ -440,6 +440,52 @@ class TradePlanResult:
     tp3: float = 0.0
     tp3_method: str = ""
     tp3_prob: int = 0
+    # [Phase 3+4 v3] 추천 row 메타 (이전엔 stop_reason만 보존되고 plan_reason 등 누락됐음)
+    plan_reason: str = ""           # NORMAL / GAP / SWING / EST_MCAP 등 (TradePlan.plan_reason)
+    regime: str = "normal"           # normal / high_vol / low_vol
+    time_stop_days: int = 0          # 0 = 비활성
+
+    def to_recommend_row(self) -> Dict[str, Any]:
+        """[Phase 3+4 v4] recommend_latest.csv용 한글+메타 키 생성 — SSOT.
+
+        assemble_result()에서 row.update()로 병합. 이게 진짜 SSOT 강제:
+          - 가격(추천매수가/손절가/추천매도가1/2/3)
+          - 진입 제어(ENTRY_ACTION/POSITION_PCT/EXEC_RULE_ID)
+          - 운영 메타(PLAN_REASON/STOP_PCT/MAX_LOSS_PCT/RR_MULT/REGIME/TIME_STOP_DAYS)
+          - TP 도달 확률 메타(TP1_METHOD/PROB ... TP3_METHOD/PROB)
+          - STOP_REASON
+
+        모든 키는 validate_recommend_row()에 정의된 계약을 만족하도록 출력됨.
+
+        나머지 ticker_analyzer 고유 컬럼들(시장/종목명/지표/수급 등)은
+        assemble_result에서 별도로 매핑하여 row에 합쳐짐.
+        """
+        return {
+            # ── 가격 (한글 SSOT) ──
+            "추천매수가": self.buy,
+            "손절가": self.stop,
+            "추천매도가1": self.target,
+            "추천매도가2": self.tp2,
+            "추천매도가3": self.tp3 if self.tp3 > 0 else None,
+            # ── 진입 제어 (영문 메타) ──
+            "ENTRY_ACTION": self.entry_action,
+            "POSITION_PCT": self.position_pct,
+            # ── 운영 메타 (영문 — REQUIRED_RECOMMEND_META_KEYS) ──
+            "PLAN_REASON": self.plan_reason,
+            "STOP_PCT": round(self.actual_stop_pct, 2),
+            "MAX_LOSS_PCT": round(self.max_loss_pct, 1),
+            "RR_MULT": round(self.rr_mult, 1),
+            "REGIME": self.regime,
+            "TIME_STOP_DAYS": self.time_stop_days,
+            # ── 체결 메타 ──
+            "EXEC_RULE_ID": self.exec_rule_id,
+            "STOP_REASON": self.stop_reason,
+            # ── TP 도달 확률 메타 ──
+            "TP1_METHOD": self.tp1_method, "TP1_PROB": self.tp1_prob,
+            "TP2_METHOD": self.tp2_method, "TP2_PROB": self.tp2_prob,
+            "TP3_METHOD": self.tp3_method if self.tp3 > 0 else "",
+            "TP3_PROB": self.tp3_prob if self.tp3 > 0 else 0,
+        }
 
 
 def build_ticker_plan(
@@ -545,7 +591,13 @@ def build_ticker_plan(
             _tp3_method = _rt.get("TP3_METHOD", "")
             _tp3_prob = _rt.get("TP3_PROB", 0)
     except (ImportError, Exception) as _tp_err:
-        pass  # 폴백: 기존 RR 배수 유지
+        # [Phase 3+4 v4] silent → logger 변경. 추적 가능하게.
+        # compute_realistic_targets 실패 시 RR_LEGACY로 fallback됨.
+        import logging as _logging
+        _logging.getLogger("ticker_analyzer").warning(
+            f"compute_realistic_targets 실패 → RR_LEGACY fallback: "
+            f"{ctx.code6} / {type(_tp_err).__name__}: {_tp_err}"
+        )
 
     # RR 재계산 (새 TP1 기준)
     _risk = _plan.entry - _plan.stop
@@ -579,6 +631,10 @@ def build_ticker_plan(
         tp1_method=_tp1_method, tp1_prob=_tp1_prob,
         tp2_method=_tp2_method, tp2_prob=_tp2_prob,
         tp3=_tp3_val, tp3_method=_tp3_method, tp3_prob=_tp3_prob,
+        # [Phase 3+4 v3] 추천 row 메타 보존
+        plan_reason=_plan.plan_reason,
+        regime=_plan.regime,
+        time_stop_days=_plan.time_stop_days,
     )
 
 
@@ -614,7 +670,7 @@ def assemble_result(
     rel_60 = ind.ret_60 - idx_60 if np.isfinite(idx_60) and np.isfinite(ind.ret_60) else np.nan
     rel_120 = ind.ret_120 - idx_120 if np.isfinite(idx_120) and np.isfinite(ind.ret_120) else np.nan
 
-    return {
+    row = {
         "시장": market, "종목명": name, "종목코드": code6, "업종": sector, "종가": int(last_c),
         "거래대금(억원)": round(ctx.tv_eok, 2), "시가총액(억원)": round(ctx.mcap, 1),
         "거래대금(원)": round(float(ctx.tv_eok if ctx.tv_eok is not None and not np.isnan(ctx.tv_eok) else 0.0) * 1e8, 0),
@@ -636,20 +692,11 @@ def assemble_result(
         "BB_Expanding": int(ind.bb_expanding),
         "Vol_Quality": round(ind.vol_quality, 2),
         "Range_Pos": round(ind.range_pos, 2),
-        "추천매수가": plan.buy, "손절가": plan.stop,
-        "추천매도가1": plan.target, "추천매도가2": plan.tp2,
-        "추천매도가3": plan.tp3 if plan.tp3 > 0 else None,
-        "TP1_METHOD": plan.tp1_method, "TP1_PROB": plan.tp1_prob,
-        "TP2_METHOD": plan.tp2_method, "TP2_PROB": plan.tp2_prob,
-        "TP3_METHOD": plan.tp3_method if plan.tp3 > 0 else "",
-        "TP3_PROB": plan.tp3_prob if plan.tp3 > 0 else 0,
-        "EXEC_RULE_ID": plan.exec_rule_id,
-        "STOP_PCT": round(plan.actual_stop_pct, 2),
-        "MAX_LOSS_PCT": round(plan.max_loss_pct, 1),
-        "RR_MULT": round(plan.rr_mult, 1),
-        "STOP_REASON": plan.stop_reason,
-        "ENTRY_ACTION": plan.entry_action,
-        "POSITION_PCT": plan.position_pct,
+        # [Phase 3+4 v4] 가격/체결/메타는 SSOT인 plan.to_recommend_row()에서 채움
+        # (아래 row.update(plan.to_recommend_row()) 호출로 병합)
+        "외인순매수": plan.frg_net_val,
+        "기관순매수": plan.inst_net_val,
+        "메이저순매수": plan.major_net,
         "TRIGGER": ind.trigger_str,
         "Above_MA20": 1 if ind.disp > 0 else 0,
         "SUPERTREND_DIR": ind.st_trend, "SUPERTREND_VAL": ind.st_val,
@@ -663,9 +710,6 @@ def assemble_result(
         "HMA_Trend": "▲" if ind.hma_trend_up else "▼",
         "HMA_On": "O" if last_c > ind.curr_hma else "X",
         "OBV_Div": "X",
-        "외인순매수": plan.frg_net_val,
-        "기관순매수": plan.inst_net_val,
-        "메이저순매수": plan.major_net,
         # [Fix 1] 누락 컬럼 — scoring_engine / validation 연결
         "gap_pct": round(ind.gap_pct_val, 2),
         "_data_length": ind.data_length,
@@ -674,6 +718,37 @@ def assemble_result(
         "MTF_MONTHLY_TREND": ind.mtf_monthly_trend,
         "MTF_DATA_SUFFICIENT": ind.mtf_data_sufficient,
     }
+
+    # [Phase 3+4 v4] SSOT 병합 — 가격/체결/운영 메타 18개 키
+    # 이게 진짜 SSOT 강제: ticker_analyzer가 직접 매핑하지 않고
+    # TradePlanResult.to_recommend_row()로 통일.
+    row.update(plan.to_recommend_row())
+
+    # [Phase 3+4 v4] 한글 키 계약 검증 — 환경변수로 제어
+    # STRICT_RECOMMEND_CONTRACT=1: 위반 시 ValueError → 즉시 차단
+    # STRICT_RECOMMEND_CONTRACT=0 (기본값): 위반 시 logger.warning만 → 운영 안전 우선
+    # STRICT_RECOMMEND_CONTRACT=skip: 검증 자체 스킵 (긴급 상황만)
+    #
+    # 기본값을 0으로 둔 이유: 첫 배포는 무조건 관찰 모드부터.
+    # 며칠 운영하며 [Recommend Contract] 위반 0건 확인 후
+    # Railway에 STRICT_RECOMMEND_CONTRACT=1 설정해서 strict 활성화.
+    import os as _os
+    _strict = _os.environ.get("STRICT_RECOMMEND_CONTRACT", "0")
+    if _strict != "skip":
+        try:
+            from trade_plan import validate_recommend_row as _validate
+            _validate(row)
+        except ValueError as _e:
+            if _strict == "1":
+                raise
+            else:
+                # 비-strict 모드: 경고만 찍고 진행 (운영 안정성 우선)
+                import logging as _logging
+                _logging.getLogger("ticker_analyzer").warning(
+                    f"[Recommend Contract] {ctx.code6} 검증 실패 (STRICT={_strict}이라 진행): {_e}"
+                )
+
+    return row
 
 
 # ═══════════════════════════════════════════════════
