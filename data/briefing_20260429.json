@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260429",
+  "generated_at": "2026-04-29 18:47:46",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "293580",
+      "name": "나우IB",
+      "route": "ARMED",
+      "score": 89.0,
+      "close": 2875,
+      "entry": 2275,
+      "stop": 1934,
+      "target1": 3350,
+      "target2": 3830,
+      "est_win_rate": 0.619,
+      "rr": 3.2,
+      "sector": "금융",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/293580"
+    },
+    {
+      "rank": 2,
+      "code": "035510",
+      "name": "신세계 I&C",
+      "route": "ATTACK",
+      "score": 85.6,
+      "close": 22400,
+      "entry": 22050,
+      "stop": 19680,
+      "target1": 22800,
+      "target2": 29300,
+      "est_win_rate": 0.619,
+      "rr": 0.3,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/035510"
+    },
+    {
+      "rank": 3,
+      "code": "004020",
+      "name": "현대제철",
+      "route": "ATTACK",
+      "score": 84.5,
+      "close": 45750,
+      "entry": 41300,
+      "stop": 36800,
+      "target1": 47800,
+      "target2": 50400,
+      "est_win_rate": 0.619,
+      "rr": 1.4,
+      "sector": "철강·금속",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/004020"
+    }
+  ]
+}
