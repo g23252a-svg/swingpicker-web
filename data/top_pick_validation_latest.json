@@ -1,14 +1,50 @@
 {
-  "trade_ymd": "20260429",
-  "top_pick_count": 0,
-  "top_pick_by_type": {},
-  "avg_elite": null,
-  "avg_rr": null,
-  "avg_balance": null,
-  "avg_win_rate": null,
+  "trade_ymd": "20260430",
+  "top_pick_count": 2,
+  "top_pick_by_type": {
+    "AGGRESSIVE": 1,
+    "STABLE": 1
+  },
+  "avg_elite": 79.6,
+  "avg_rr": 0.98,
+  "avg_balance": 72.0,
+  "avg_win_rate": 0.666,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
   "est_win_rate_n": 4401,
-  "routes": {},
-  "picks": []
+  "routes": {
+    "ARMED": 2
+  },
+  "picks": [
+    {
+      "종목코드": "001780",
+      "종목명": "알루코",
+      "TOP_PICK_TYPE": "AGGRESSIVE",
+      "ELITE_SCORE": 79.7,
+      "RR_NOW_TP1": 1.08,
+      "BALANCE_SCORE": 72.9,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 16.3,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.665,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 4401
+    },
+    {
+      "종목코드": "012800",
+      "종목명": "대창",
+      "TOP_PICK_TYPE": "STABLE",
+      "ELITE_SCORE": 79.4,
+      "RR_NOW_TP1": 0.87,
+      "BALANCE_SCORE": 71.0,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 8.5,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.667,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 4401
+    }
+  ]
 }

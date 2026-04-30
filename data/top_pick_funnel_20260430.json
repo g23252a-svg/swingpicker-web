@@ -1,0 +1,28 @@
+{
+  "trade_ymd": "20260430",
+  "total": 555,
+  "aggressive_funnel": {
+    "total": 555,
+    "route_active": 78,
+    "hard_gate": 62,
+    "elite_75": 2,
+    "struct_80": 2,
+    "timing_70": 2,
+    "tp1_15": 1,
+    "final": 1
+  },
+  "stable_funnel": {
+    "total": 555,
+    "route_active": 78,
+    "hard_gate": 62,
+    "elite_70": 3,
+    "tp1_7_15": 2,
+    "balance_70": 1,
+    "wr_55": 1,
+    "mature": 1,
+    "final": 1
+  },
+  "top_pick_count": 2,
+  "aggressive_count": 1,
+  "stable_count": 1
+}
