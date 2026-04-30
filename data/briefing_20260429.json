@@ -1,6 +1,6 @@
 {
   "trade_date": "20260429",
-  "generated_at": "2026-04-29 21:37:20",
+  "generated_at": "2026-04-30 16:55:01",
   "count": 3,
   "stocks": [
     {
@@ -25,7 +25,7 @@
       "code": "035510",
       "name": "신세계 I&C",
       "route": "ATTACK",
-      "score": 85.6,
+      "score": 85.8,
       "close": 22400,
       "entry": 22050,
       "stop": 19680,
@@ -42,7 +42,7 @@
       "code": "004020",
       "name": "현대제철",
       "route": "ATTACK",
-      "score": 84.5,
+      "score": 84.8,
       "close": 45750,
       "entry": 41300,
       "stop": 36800,

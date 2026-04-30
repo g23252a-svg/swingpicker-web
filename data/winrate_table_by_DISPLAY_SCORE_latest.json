@@ -81,8 +81,8 @@
       "avg_loss_ret": 10.6339,
       "b_ratio": 0.8656,
       "sufficient": true,
-      "benchmark_avg_pct": 0.2719,
-      "avg_ret_excess_pct": -3.4801,
+      "benchmark_avg_pct": 0.2811,
+      "avg_ret_excess_pct": -3.4894,
       "p_win_excess": 0.3453
     },
     {

@@ -73,16 +73,16 @@
     {
       "score_lo": 70,
       "score_hi": 80.0,
-      "p_win": 0.3529,
+      "p_win": 0.2941,
       "n_raw": 15,
       "n_effective": 14.6,
-      "avg_ret_net_pct": -1.685,
-      "avg_win_ret": 8.2357,
-      "avg_loss_ret": 6.6454,
-      "b_ratio": 1.2393,
+      "avg_ret_net_pct": -2.064,
+      "avg_win_ret": 9.9903,
+      "avg_loss_ret": 6.4473,
+      "b_ratio": 1.5495,
       "sufficient": false,
       "benchmark_avg_pct": 3.8333,
-      "avg_ret_excess_pct": -5.5183,
+      "avg_ret_excess_pct": -5.8973,
       "p_win_excess": 0.2367
     },
     {
