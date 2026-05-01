@@ -1,5 +1,5 @@
 {
-  "trade_ymd": "20260430",
+  "trade_ymd": "20260501",
   "top_pick_count": 2,
   "top_pick_by_type": {
     "AGGRESSIVE": 1,
@@ -8,10 +8,10 @@
   "avg_elite": 79.6,
   "avg_rr": 0.98,
   "avg_balance": 72.0,
-  "avg_win_rate": 0.666,
+  "avg_win_rate": 0.671,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 4401,
+  "est_win_rate_n": 4569,
   "routes": {
     "ARMED": 2
   },
@@ -26,10 +26,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 16.3,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.665,
+      "EST_WIN_RATE": 0.67,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 4401
+      "EST_WIN_RATE_N": 4569
     },
     {
       "종목코드": "012800",
@@ -41,10 +41,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 8.5,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.667,
+      "EST_WIN_RATE": 0.673,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 4401
+      "EST_WIN_RATE_N": 4569
     }
   ]
 }

@@ -11,7 +11,7 @@
     "take_px2": 421000.0,
     "trailing_high": 375500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 284000.0,
     "unrealized_pnl_pct": 3.09,
     "realized_pnl_pct": 0.0,
@@ -32,7 +32,7 @@
     "take_px2": 55500.0,
     "trailing_high": 54100.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 49550.0,
     "unrealized_pnl_pct": 18.82,
     "realized_pnl_pct": 0.0,
@@ -57,7 +57,8 @@
       "017960_20260312_TP1_HIT_20260427",
       "017960_20260312_TP1_HIT_20260428",
       "017960_20260312_TP1_HIT_20260429",
-      "017960_20260312_TP1_HIT_20260430"
+      "017960_20260312_TP1_HIT_20260430",
+      "017960_20260312_TP1_HIT_20260501"
     ]
   },
   {
@@ -72,7 +73,7 @@
     "take_px2": 75400.0,
     "trailing_high": 70700.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 59700.0,
     "unrealized_pnl_pct": 18.45,
     "realized_pnl_pct": 0.0,
@@ -95,7 +96,7 @@
     "take_px2": 9690.0,
     "trailing_high": 10770.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 6830.0,
     "unrealized_pnl_pct": -2.43,
     "realized_pnl_pct": 0.0,
@@ -119,7 +120,7 @@
     "take_px2": 5140.0,
     "trailing_high": 4530.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 2940.0,
     "unrealized_pnl_pct": -2.65,
     "realized_pnl_pct": 0.0,
@@ -142,7 +143,7 @@
     "take_px2": 9400.0,
     "trailing_high": 9600.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 9150.0,
     "unrealized_pnl_pct": 26.21,
     "realized_pnl_pct": 0.0,
@@ -156,7 +157,8 @@
       "297090_20260318_TP1_HIT_20260427",
       "297090_20260318_TP1_HIT_20260428",
       "297090_20260318_TP1_HIT_20260429",
-      "297090_20260318_TP1_HIT_20260430"
+      "297090_20260318_TP1_HIT_20260430",
+      "297090_20260318_TP1_HIT_20260501"
     ]
   },
   {
@@ -171,7 +173,7 @@
     "take_px2": 13120.0,
     "trailing_high": 13570.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 11450.0,
     "unrealized_pnl_pct": 7.21,
     "realized_pnl_pct": 0.0,
@@ -194,7 +196,7 @@
     "take_px2": 5900.0,
     "trailing_high": 6050.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 5020.0,
     "unrealized_pnl_pct": 15.67,
     "realized_pnl_pct": 0.0,
@@ -222,7 +224,7 @@
     "take_px2": 68400.0,
     "trailing_high": 55500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 53000.0,
     "unrealized_pnl_pct": 10.65,
     "realized_pnl_pct": 0.0,
@@ -248,7 +250,7 @@
     "take_px2": 9570.0,
     "trailing_high": 9300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 6680.0,
     "unrealized_pnl_pct": 2.61,
     "realized_pnl_pct": 0.0,
@@ -269,7 +271,7 @@
     "take_px2": 26350.0,
     "trailing_high": 24350.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 22500.0,
     "unrealized_pnl_pct": 12.5,
     "realized_pnl_pct": 0.0,
@@ -293,7 +295,8 @@
       "451760_20260326_TP1_HIT_20260427",
       "451760_20260326_TP1_HIT_20260428",
       "451760_20260326_TP1_HIT_20260429",
-      "451760_20260326_TP1_HIT_20260430"
+      "451760_20260326_TP1_HIT_20260430",
+      "451760_20260326_TP1_HIT_20260501"
     ]
   },
   {
@@ -308,7 +311,7 @@
     "take_px2": 5400.0,
     "trailing_high": 4480.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 3495.0,
     "unrealized_pnl_pct": -12.62,
     "realized_pnl_pct": 0.0,
@@ -330,7 +333,8 @@
       "215600_20260327_WARN_DRAWDOWN_20260427",
       "215600_20260327_WARN_DRAWDOWN_20260428",
       "215600_20260327_WARN_DRAWDOWN_20260429",
-      "215600_20260327_WARN_DRAWDOWN_20260430"
+      "215600_20260327_WARN_DRAWDOWN_20260430",
+      "215600_20260327_WARN_DRAWDOWN_20260501"
     ]
   },
   {
@@ -345,7 +349,7 @@
     "take_px2": 38400.0,
     "trailing_high": 34300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 28150.0,
     "unrealized_pnl_pct": 5.23,
     "realized_pnl_pct": 0.0,
@@ -366,7 +370,7 @@
     "take_px2": 35800.0,
     "trailing_high": 34750.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 28000.0,
     "unrealized_pnl_pct": 14.99,
     "realized_pnl_pct": 0.0,
@@ -392,7 +396,7 @@
     "take_px2": 28300.0,
     "trailing_high": 29950.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 23550.0,
     "unrealized_pnl_pct": 18.4,
     "realized_pnl_pct": 0.0,
@@ -417,7 +421,7 @@
     "take_px2": 71300.0,
     "trailing_high": 66000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 58000.0,
     "unrealized_pnl_pct": 11.54,
     "realized_pnl_pct": 0.0,
@@ -438,7 +442,7 @@
     "take_px2": 13770.0,
     "trailing_high": 11160.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 7920.0,
     "unrealized_pnl_pct": 6.17,
     "realized_pnl_pct": 0.0,
@@ -459,7 +463,7 @@
     "take_px2": 10890.0,
     "trailing_high": 9640.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 9200.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -480,7 +484,7 @@
     "take_px2": 4580.0,
     "trailing_high": 4970.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 3995.0,
     "unrealized_pnl_pct": 25.24,
     "realized_pnl_pct": 0.0,
@@ -506,7 +510,7 @@
     "take_px2": 18910.0,
     "trailing_high": 20000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 17110.0,
     "unrealized_pnl_pct": 13.24,
     "realized_pnl_pct": 0.0,
@@ -527,7 +531,7 @@
     "take_px2": 50400.0,
     "trailing_high": 34450.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 31350.0,
     "unrealized_pnl_pct": 2.96,
     "realized_pnl_pct": 0.0,
@@ -551,7 +555,7 @@
     "take_px2": 206000.0,
     "trailing_high": 198000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 188600.0,
     "unrealized_pnl_pct": 10.68,
     "realized_pnl_pct": 0.0,
@@ -570,7 +574,8 @@
       "052690_20260414_TP1_HIT_20260427",
       "052690_20260414_TP1_HIT_20260428",
       "052690_20260414_TP1_HIT_20260429",
-      "052690_20260414_TP1_HIT_20260430"
+      "052690_20260414_TP1_HIT_20260430",
+      "052690_20260414_TP1_HIT_20260501"
     ]
   },
   {
@@ -585,7 +590,7 @@
     "take_px2": 4670.0,
     "trailing_high": 4525.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 4335.0,
     "unrealized_pnl_pct": 8.92,
     "realized_pnl_pct": 0.0,
@@ -602,7 +607,8 @@
       "003620_20260414_TP1_HIT_20260427",
       "003620_20260414_TP1_HIT_20260428",
       "003620_20260414_TP1_HIT_20260429",
-      "003620_20260414_TP1_HIT_20260430"
+      "003620_20260414_TP1_HIT_20260430",
+      "003620_20260414_TP1_HIT_20260501"
     ]
   },
   {
@@ -617,7 +623,7 @@
     "take_px2": 86000.0,
     "trailing_high": 71800.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 64700.0,
     "unrealized_pnl_pct": 22.31,
     "realized_pnl_pct": 0.0,
@@ -635,7 +641,8 @@
       "389500_20260415_TP1_HIT_20260427",
       "389500_20260415_TP1_HIT_20260428",
       "389500_20260415_TP1_HIT_20260429",
-      "389500_20260415_TP1_HIT_20260430"
+      "389500_20260415_TP1_HIT_20260430",
+      "389500_20260415_TP1_HIT_20260501"
     ]
   },
   {
@@ -650,7 +657,7 @@
     "take_px2": 9440.0,
     "trailing_high": 5900.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 4615.0,
     "unrealized_pnl_pct": -5.14,
     "realized_pnl_pct": 0.0,
@@ -659,7 +666,8 @@
     "close_reason": "",
     "alerted_events": [
       "250060_20260415_WARN_DRAWDOWN_20260429",
-      "250060_20260415_WARN_DRAWDOWN_20260430"
+      "250060_20260415_WARN_DRAWDOWN_20260430",
+      "250060_20260415_WARN_DRAWDOWN_20260501"
     ]
   },
   {
@@ -674,7 +682,7 @@
     "take_px2": 24050.0,
     "trailing_high": 23500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 21100.0,
     "unrealized_pnl_pct": 14.49,
     "realized_pnl_pct": 0.0,
@@ -695,7 +703,7 @@
     "take_px2": 137200.0,
     "trailing_high": 120700.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 110200.0,
     "unrealized_pnl_pct": 18.11,
     "realized_pnl_pct": 0.0,
@@ -716,7 +724,7 @@
     "take_px2": 151200.0,
     "trailing_high": 108900.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 106700.0,
     "unrealized_pnl_pct": 4.71,
     "realized_pnl_pct": 0.0,
@@ -737,7 +745,7 @@
     "take_px2": 720000.0,
     "trailing_high": 574000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 531000.0,
     "unrealized_pnl_pct": -1.3,
     "realized_pnl_pct": 0.0,
@@ -758,7 +766,7 @@
     "take_px2": 113200.0,
     "trailing_high": 77100.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 75500.0,
     "unrealized_pnl_pct": 2.03,
     "realized_pnl_pct": 0.0,
@@ -782,7 +790,7 @@
     "take_px2": 60300.0,
     "trailing_high": 53000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 47800.0,
     "unrealized_pnl_pct": 14.22,
     "realized_pnl_pct": 0.0,
@@ -806,7 +814,7 @@
     "take_px2": 144000.0,
     "trailing_high": 124000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 102500.0,
     "unrealized_pnl_pct": 3.12,
     "realized_pnl_pct": 0.0,
@@ -835,7 +843,7 @@
     "take_px2": 84900.0,
     "trailing_high": 68200.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 62900.0,
     "unrealized_pnl_pct": -1.56,
     "realized_pnl_pct": 0.0,
@@ -856,7 +864,7 @@
     "take_px2": 121900.0,
     "trailing_high": 97600.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 89500.0,
     "unrealized_pnl_pct": -4.69,
     "realized_pnl_pct": 0.0,
@@ -877,7 +885,7 @@
     "take_px2": 23750.0,
     "trailing_high": 22700.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 20950.0,
     "unrealized_pnl_pct": 4.49,
     "realized_pnl_pct": 0.0,
@@ -887,7 +895,8 @@
     "alerted_events": [
       "126730_20260422_TP1_HIT_20260423",
       "126730_20260422_TP1_HIT_20260429",
-      "126730_20260422_TP1_HIT_20260430"
+      "126730_20260422_TP1_HIT_20260430",
+      "126730_20260422_TP1_HIT_20260501"
     ]
   },
   {
@@ -902,7 +911,7 @@
     "take_px2": 10300.0,
     "trailing_high": 8340.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 7510.0,
     "unrealized_pnl_pct": -2.34,
     "realized_pnl_pct": 0.0,
@@ -926,7 +935,7 @@
     "take_px2": 35950.0,
     "trailing_high": 32150.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 27850.0,
     "unrealized_pnl_pct": -4.3,
     "realized_pnl_pct": 0.0,
@@ -949,7 +958,7 @@
     "take_px2": 81800.0,
     "trailing_high": 62800.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 59800.0,
     "unrealized_pnl_pct": 2.57,
     "realized_pnl_pct": 0.0,
@@ -972,7 +981,7 @@
     "take_px2": 20350.0,
     "trailing_high": 18780.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 14990.0,
     "unrealized_pnl_pct": -6.31,
     "realized_pnl_pct": 0.0,
@@ -981,7 +990,8 @@
     "close_reason": "",
     "alerted_events": [
       "331920_20260424_WARN_DRAWDOWN_20260429",
-      "331920_20260424_WARN_DRAWDOWN_20260430"
+      "331920_20260424_WARN_DRAWDOWN_20260430",
+      "331920_20260424_WARN_DRAWDOWN_20260501"
     ]
   },
   {
@@ -996,7 +1006,7 @@
     "take_px2": 4180.0,
     "trailing_high": 3330.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 3045.0,
     "unrealized_pnl_pct": -3.94,
     "realized_pnl_pct": 0.0,
@@ -1017,7 +1027,7 @@
     "take_px2": 16410.0,
     "trailing_high": 12690.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 11630.0,
     "unrealized_pnl_pct": -6.81,
     "realized_pnl_pct": 0.0,
@@ -1026,7 +1036,8 @@
     "close_reason": "",
     "alerted_events": [
       "046120_20260424_WARN_DRAWDOWN_20260429",
-      "046120_20260424_WARN_DRAWDOWN_20260430"
+      "046120_20260424_WARN_DRAWDOWN_20260430",
+      "046120_20260424_WARN_DRAWDOWN_20260501"
     ]
   },
   {
@@ -1041,7 +1052,7 @@
     "take_px2": 22050.0,
     "trailing_high": 18610.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 17550.0,
     "unrealized_pnl_pct": 2.03,
     "realized_pnl_pct": 0.0,
@@ -1062,7 +1073,7 @@
     "take_px2": 4020.0,
     "trailing_high": 3460.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 3110.0,
     "unrealized_pnl_pct": -2.35,
     "realized_pnl_pct": 0.0,
@@ -1083,7 +1094,7 @@
     "take_px2": 1180000.0,
     "trailing_high": 1002000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 941000.0,
     "unrealized_pnl_pct": -0.95,
     "realized_pnl_pct": 0.0,
@@ -1104,7 +1115,7 @@
     "take_px2": 23500.0,
     "trailing_high": 17440.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 16930.0,
     "unrealized_pnl_pct": 4.12,
     "realized_pnl_pct": 0.0,
@@ -1125,7 +1136,7 @@
     "take_px2": 144300.0,
     "trailing_high": 121000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 120000.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -1146,7 +1157,7 @@
     "take_px2": 74000.0,
     "trailing_high": 62800.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 57300.0,
     "unrealized_pnl_pct": -4.98,
     "realized_pnl_pct": 0.0,
@@ -1167,7 +1178,7 @@
     "take_px2": 49450.0,
     "trailing_high": 28650.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 26650.0,
     "unrealized_pnl_pct": -3.96,
     "realized_pnl_pct": 0.0,
@@ -1188,7 +1199,7 @@
     "take_px2": 16580.0,
     "trailing_high": 14550.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 13930.0,
     "unrealized_pnl_pct": 1.31,
     "realized_pnl_pct": 0.0,
@@ -1209,7 +1220,7 @@
     "take_px2": 77000.0,
     "trailing_high": 70800.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 64800.0,
     "unrealized_pnl_pct": -5.4,
     "realized_pnl_pct": 0.0,
@@ -1218,7 +1229,8 @@
     "close_reason": "",
     "alerted_events": [
       "006800_20260428_WARN_DRAWDOWN_20260429",
-      "006800_20260428_WARN_DRAWDOWN_20260430"
+      "006800_20260428_WARN_DRAWDOWN_20260430",
+      "006800_20260428_WARN_DRAWDOWN_20260501"
     ]
   },
   {
@@ -1233,7 +1245,7 @@
     "take_px2": 2715.0,
     "trailing_high": 2240.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 1946.0,
     "unrealized_pnl_pct": -5.07,
     "realized_pnl_pct": 0.0,
@@ -1242,7 +1254,8 @@
     "close_reason": "",
     "alerted_events": [
       "033230_20260429_WARN_DRAWDOWN_20260429",
-      "033230_20260429_WARN_DRAWDOWN_20260430"
+      "033230_20260429_WARN_DRAWDOWN_20260430",
+      "033230_20260429_WARN_DRAWDOWN_20260501"
     ]
   },
   {
@@ -1257,7 +1270,7 @@
     "take_px2": 2550.0,
     "trailing_high": 1949.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 1749.0,
     "unrealized_pnl_pct": -4.79,
     "realized_pnl_pct": 0.0,
@@ -1278,7 +1291,7 @@
     "take_px2": 3000.0,
     "trailing_high": 2795.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 2655.0,
     "unrealized_pnl_pct": 6.41,
     "realized_pnl_pct": 0.0,
@@ -1299,7 +1312,7 @@
     "take_px2": 1930.0,
     "trailing_high": 1685.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 1650.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -1320,7 +1333,7 @@
     "take_px2": 50400.0,
     "trailing_high": 45000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 42550.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -1341,7 +1354,7 @@
     "take_px2": 7620.0,
     "trailing_high": 6080.0,
     "status": "OPEN",
-    "last_check_ymd": "20260430",
+    "last_check_ymd": "20260501",
     "last_close_px": 5590.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,

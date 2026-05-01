@@ -1,7 +1,7 @@
 {
-  "trade_ymd": "20260430",
+  "trade_ymd": "20260501",
   "macro_risk": "CAUTION",
-  "macro_msg": "환율 1472원 [04/28] (주의)",
+  "macro_msg": "환율 1487원 [04/29] (주의)",
   "market_breadth": 36.0,
   "pass_ebs": 5,
   "rec_limit": 5,
