@@ -298,12 +298,14 @@ def check_run_health(
 
 
 def save_health(health: RunHealth, out_dir: str, trade_ymd: str) -> str:
-    """건강 상태를 JSON으로 저장"""
+    """건강 상태를 JSON으로 저장 (dated + latest 동시 저장)"""
     import json
     import os
 
     path = os.path.join(out_dir, f"run_health_{trade_ymd}.json")
+    latest_path = os.path.join(out_dir, "run_health_latest.json")  # [v22.3] latest 추가
     data = {
+        "trade_ymd": trade_ymd,  # [v22.3] latest 파일에서 어느 날짜인지 식별용
         "status": health.status,
         "reasons": health.reasons,
         "warnings": health.warnings,
@@ -320,6 +322,12 @@ def save_health(health: RunHealth, out_dir: str, trade_ymd: str) -> str:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info(f"📊 [Health] {health.status} → {path}")
+        # [v22.3] latest 갱신 — 운영 모니터링 안정성 (날짜 추측 불필요)
+        try:
+            with open(latest_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"⚠️ [Health] latest 저장 실패: {e}")
     except Exception as e:
         logger.warning(f"⚠️ [Health] 저장 실패: {e}")
     return path

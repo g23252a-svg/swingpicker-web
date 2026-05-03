@@ -439,6 +439,9 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
     tp1_neg_count = 0
     top_pick_wait_count = 0
     top_pick_count = 0
+    # [v22.3.1] RR<1.0 검증 변수 초기화
+    top_pick_rr_lt1_count = 0
+    top_pick_min_rr = None
     
     if os.path.exists(rec_path):
         try:
@@ -477,6 +480,18 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
                     tp1_neg_count = int(
                         (pd.to_numeric(tp["TP1_PCT"], errors="coerce") <= 0).sum()
                     )
+                # [v22.3.1] RR_NOW_TP1 < 1.0 hard 검증 — scoring_engine v22.3과 일관성
+                # 평가 피드백: "로직은 막았는데 리포트가 그 조건을 감시하지 않음"
+                if "RR_NOW_TP1" in tp.columns:
+                    top_pick_rr_lt1_count = int(
+                        (pd.to_numeric(tp["RR_NOW_TP1"], errors="coerce").fillna(0) < 1.0).sum()
+                    )
+                    top_pick_min_rr = float(
+                        pd.to_numeric(tp["RR_NOW_TP1"], errors="coerce").fillna(0).min()
+                    ) if len(tp) > 0 else None
+                else:
+                    top_pick_rr_lt1_count = 0
+                    top_pick_min_rr = None
         except Exception as e:
             report["recommend_parse_error"] = str(e)
     
@@ -564,6 +579,24 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
         })
     else:
         ci_hard.append({"gate": "top_pick_tp1_positive", "status": "PASS"})
+
+    # [v22.3.1] HARD 2.5: TOP_PICK RR_NOW_TP1 >= 1.0
+    # scoring_engine v22.3 hard_gate와 일관성. 운영 리포트 차원에서 다시 한번 차단.
+    if top_pick_rr_lt1_count > 0:
+        ci_hard.append({
+            "gate": "top_pick_rr_now_tp1_1",
+            "status": "FAIL",
+            "detail": f"TOP_PICK {top_pick_rr_lt1_count}건이 RR_NOW_TP1 < 1.0 "
+                      f"(min={top_pick_min_rr:.2f})" if top_pick_min_rr is not None
+                      else f"TOP_PICK {top_pick_rr_lt1_count}건이 RR_NOW_TP1 < 1.0",
+        })
+    else:
+        _detail = f"min_rr={top_pick_min_rr:.2f}" if top_pick_min_rr is not None else "TOP_PICK 0건"
+        ci_hard.append({
+            "gate": "top_pick_rr_now_tp1_1",
+            "status": "PASS",
+            "detail": _detail,
+        })
     
     # HARD 3: 선언-실현 갭 15%p 이하 (TOP_PICK 우선, 없으면 active)
     gap = report.get("declared_vs_realized_gap_top_pick")
@@ -627,6 +660,9 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
     report["ci_hard_all_pass"] = all(c["status"] in ("PASS", "SKIP") for c in ci_hard)
     report["ci_soft_any_warn"] = any(c["status"] == "WARN" for c in ci_soft)
     report["top_pick_count"] = top_pick_count
+    # [v22.3.1] RR 검증 메트릭 — 평가 피드백: "min_rr 추가"
+    report["top_pick_rr_lt1_count"] = top_pick_rr_lt1_count
+    report["top_pick_min_rr"] = round(top_pick_min_rr, 2) if top_pick_min_rr is not None else None
     
     # 저장
     dated = os.path.join(out_dir, f"monotonicity_report_{asof_ymd}.json")

@@ -395,6 +395,17 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     # Reality Check + Rank Validation
     run_reality_check(OUT_DIR, trade_ymd)
     make_rank_validation_report(OUT_DIR, asof_ymd=trade_ymd, methods=["ELITE_SCORE","DISPLAY_SCORE","FINAL_SCORE","AI_SCORE"])
+    # [v22.3] monotonicity_report 인라인 생성 — daily_briefing.py 별도 실행 의존성 제거
+    # 평가 피드백: "ZIP 기준 최신 검증 리포트가 항상 따라오는 구조" 보장
+    try:
+        from daily_briefing import generate_monotonicity_report
+        _mono = generate_monotonicity_report(OUT_DIR, trade_ymd)
+        _mono_status = _mono.get("ci_hard", [{}])[0].get("status", "?") if _mono.get("ci_hard") else "OK"
+        log(f"📊 [v22.3] monotonicity_report → {trade_ymd} (status={_mono_status})")
+    except ImportError:
+        log("ℹ️ daily_briefing 모듈 없음 — monotonicity_report SKIP")
+    except Exception as e:
+        log(f"⚠️ monotonicity_report 생성 실패: {e}")
     # [v21.2+v22] TOP_PICK 검증 리포트 — 0건에도 latest 갱신 (CI 오독 차단)
     try:
         import json as _json2
@@ -414,6 +425,9 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 "top_pick_by_type": _by_type,
                 "avg_elite": round(float(_tp_df["ELITE_SCORE"].mean()), 1),
                 "avg_rr": round(float(_tp_df["RR_NOW_TP1"].mean()), 2),
+                # [v22.3.1] 최소 RR + RR<1 카운트 — 평균은 위장 가능, 최소가 진실
+                "min_rr": round(float(_tp_df["RR_NOW_TP1"].min()), 2),
+                "rr_lt_1_count": int((pd.to_numeric(_tp_df["RR_NOW_TP1"], errors="coerce").fillna(0) < 1.0).sum()),
                 "avg_balance": round(float(_tp_df["BALANCE_SCORE"].mean()), 1),
                 "avg_win_rate": round(float(_tp_df["EST_WIN_RATE"].mean()), 3),
                 "est_win_rate_method": (_tp_df["EST_WIN_RATE_METHOD"].iloc[0]
@@ -458,6 +472,9 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 "top_pick_by_type": {},
                 "avg_elite": None,
                 "avg_rr": None,
+                # [v22.3.1] 0건 케이스에도 동일 필드 — null 안정성
+                "min_rr": None,
+                "rr_lt_1_count": 0,
                 "avg_balance": None,
                 "avg_win_rate": None,
                 "est_win_rate_method": _meta_method,
