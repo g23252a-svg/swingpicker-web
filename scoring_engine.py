@@ -764,6 +764,13 @@ def compute_elite_score(df: pd.DataFrame,
         errors="coerce"
     ).fillna(0)
 
+    # [v22.3] RR_NOW_TP1 hard gate — 손익비 1.0 미만 TOP_PICK 차단
+    # 평가 피드백 96.5점 핵심 항목: "STABLE 타입이라도 RR<1.0이면 추천 자격 X"
+    _rr_now = pd.to_numeric(
+        x.get("RR_NOW_TP1", pd.Series(0, index=x.index)),
+        errors="coerce"
+    ).fillna(0)
+
     # 공통 하드게이트
     _hard_gate = (
         _route_active
@@ -772,6 +779,7 @@ def compute_elite_score(df: pd.DataFrame,
         & (_pass_ebs == 1)
         & (_turnover >= 50)
         & (entry_gap <= 5.0)
+        & (_rr_now >= 1.0)  # [v22.3] 손익비 하한 강제
     )
 
     # AGGRESSIVE: 손익비 우선 (TP1 15%+)
