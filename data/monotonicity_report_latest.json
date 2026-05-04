@@ -1,6 +1,6 @@
 {
   "asof_ymd": "20260504",
-  "generated_at": "2026-05-04T19:24:06.529143",
+  "generated_at": "2026-05-04T21:32:30.654643",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
@@ -13,38 +13,38 @@
       {
         "score_lo": 0,
         "score_hi": 50.0,
-        "n_raw": 0,
-        "p_win": null,
-        "p_win_lcb": null,
-        "avg_ret_net_pct": null,
-        "avg_ret_excess_pct": null
+        "n_raw": 55,
+        "p_win": 0.4912,
+        "p_win_lcb": 0.3638,
+        "avg_ret_net_pct": 0.3278,
+        "avg_ret_excess_pct": -2.8977
       },
       {
         "score_lo": 50,
         "score_hi": 60.0,
-        "n_raw": 0,
-        "p_win": null,
-        "p_win_lcb": null,
-        "avg_ret_net_pct": null,
-        "avg_ret_excess_pct": null
+        "n_raw": 14,
+        "p_win": 0.5,
+        "p_win_lcb": 0.268,
+        "avg_ret_net_pct": 0.1867,
+        "avg_ret_excess_pct": -1.5333
       },
       {
         "score_lo": 60,
         "score_hi": 70.0,
-        "n_raw": 16,
-        "p_win": 0.7778,
-        "p_win_lcb": 0.505,
-        "avg_ret_net_pct": 5.0449,
-        "avg_ret_excess_pct": -0.0688
+        "n_raw": 22,
+        "p_win": 0.6667,
+        "p_win_lcb": 0.4732,
+        "avg_ret_net_pct": 3.3801,
+        "avg_ret_excess_pct": -1.4217
       },
       {
         "score_lo": 70,
         "score_hi": 80.0,
-        "n_raw": 21,
-        "p_win": 0.3913,
-        "p_win_lcb": 0.2075,
-        "avg_ret_net_pct": -1.4626,
-        "avg_ret_excess_pct": -4.6407
+        "n_raw": 23,
+        "p_win": 0.4,
+        "p_win_lcb": 0.2216,
+        "avg_ret_net_pct": -1.6347,
+        "avg_ret_excess_pct": -4.6077
       },
       {
         "score_lo": 80,
@@ -69,11 +69,11 @@
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
-  "realized_wr": null,
-  "declared_vs_realized_gap_active": null,
+  "realized_wr": 0.4912,
+  "declared_vs_realized_gap_active": 0.1199,
   "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": null,
-  "avg_ret_excess_pct": -2.5315,
+  "declared_vs_realized_gap": 0.1199,
+  "avg_ret_excess_pct": -2.7401,
   "top_pick_funnel": {
     "trade_ymd": "20260504",
     "total": 562,
@@ -119,8 +119,8 @@
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
-      "status": "SKIP",
-      "detail": "실현 승률 또는 선언 승률 데이터 부족"
+      "status": "PASS",
+      "detail": "gap_active=12.0%"
     }
   ],
   "ci_soft": [
@@ -132,7 +132,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-2.53%"
+      "detail": "avg_ret_excess=-2.74%"
     },
     {
       "gate": "market_map_coverage_95",
