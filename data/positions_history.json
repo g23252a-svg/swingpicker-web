@@ -1666,5 +1666,44 @@
       "417200_20260421_TP1_HIT_20260429",
       "417200_20260421_TP2_HIT_20260429"
     ]
+  },
+  {
+    "code": "215600",
+    "name": "신라젠",
+    "entry_ymd": "20260327",
+    "entry_px": 4000.0,
+    "qty": 0,
+    "stop_px": 3450.0,
+    "stop_px_initial": 3450.0,
+    "take_px1": 4480.0,
+    "take_px2": 5400.0,
+    "trailing_high": 4480.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260504",
+    "last_close_px": 3390.0,
+    "unrealized_pnl_pct": -15.25,
+    "realized_pnl_pct": -15.25,
+    "close_ymd": "20260504",
+    "close_px": 3390.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "215600_20260327_WARN_DRAWDOWN_20260331",
+      "215600_20260327_WARN_DRAWDOWN_20260402",
+      "215600_20260327_WARN_DRAWDOWN_20260407",
+      "215600_20260327_WARN_DRAWDOWN_20260409",
+      "215600_20260327_WARN_DRAWDOWN_20260410",
+      "215600_20260327_WARN_DRAWDOWN_20260413",
+      "215600_20260327_WARN_DRAWDOWN_20260414",
+      "215600_20260327_WARN_DRAWDOWN_20260421",
+      "215600_20260327_WARN_DRAWDOWN_20260422",
+      "215600_20260327_WARN_DRAWDOWN_20260423",
+      "215600_20260327_WARN_DRAWDOWN_20260424",
+      "215600_20260327_WARN_DRAWDOWN_20260427",
+      "215600_20260327_WARN_DRAWDOWN_20260428",
+      "215600_20260327_WARN_DRAWDOWN_20260429",
+      "215600_20260327_WARN_DRAWDOWN_20260430",
+      "215600_20260327_WARN_DRAWDOWN_20260501",
+      "215600_20260327_STOP_HIT_20260504"
+    ]
   }
 ]

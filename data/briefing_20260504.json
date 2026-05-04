@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260504",
+  "generated_at": "2026-05-04 19:24:37",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "388050",
+      "name": "지투파워",
+      "route": "ATTACK",
+      "score": 90.9,
+      "close": 16250,
+      "entry": 14530,
+      "stop": 12350,
+      "target1": 16880,
+      "target2": 18890,
+      "est_win_rate": 0.61,
+      "rr": 1.1,
+      "sector": "인프라·에너지",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/388050"
+    },
+    {
+      "rank": 2,
+      "code": "489790",
+      "name": "한화비전",
+      "route": "ARMED",
+      "score": 88.7,
+      "close": 88700,
+      "entry": 88700,
+      "stop": 77400,
+      "target1": 92500,
+      "target2": 109800,
+      "est_win_rate": 0.61,
+      "rr": 0.3,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/489790"
+    },
+    {
+      "rank": 3,
+      "code": "044490",
+      "name": "태웅",
+      "route": "ATTACK",
+      "score": 86.5,
+      "close": 58800,
+      "entry": 52500,
+      "stop": 45550,
+      "target1": 61300,
+      "target2": 65400,
+      "est_win_rate": 0.61,
+      "rr": 1.3,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/044490"
+    }
+  ]
+}

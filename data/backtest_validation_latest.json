@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-05-01T21:18:57",
+  "generated_at": "2026-05-04T19:24:41",
   "version": "v3.7.14",
   "horizon_bdays": 10,
   "trade_cost_pct": 0.22,
-  "days_covered": 47,
-  "ohlc_coverage_note": "OHLC parquet 종목수: 1498 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
+  "days_covered": 48,
+  "ohlc_coverage_note": "OHLC parquet 종목수: 1505 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
   "methodology": {
     "horizon_days": 10,
     "fill_window_days": 3,
@@ -16,56 +16,56 @@
     "selection_mode": "top1_first_then_top3_fallback",
     "date_range": [
       "2026-02-26",
-      "2026-05-01"
+      "2026-05-04"
     ],
     "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
   },
   "daily_top3_backtest": {
-    "n": 66,
-    "n_all_picks": 82,
-    "n_not_filled": 16,
-    "fill_rate": 0.8049,
-    "tp1_rate": 0.2273,
-    "stop_rate": 0.3788,
-    "open_rate": 0.3939,
-    "avg_tp1": 18.42,
-    "avg_stop": -25.01,
-    "avg_open": -0.13,
-    "avg_all": -5.34,
-    "ev": -5.56,
-    "ohlc_coverage": 0.955
+    "n": 70,
+    "n_all_picks": 85,
+    "n_not_filled": 15,
+    "fill_rate": 0.8235,
+    "tp1_rate": 0.2714,
+    "stop_rate": 0.3143,
+    "open_rate": 0.4143,
+    "avg_tp1": 17.76,
+    "avg_stop": -10.5,
+    "avg_open": 1.6,
+    "avg_all": 2.19,
+    "ev": 1.97,
+    "ohlc_coverage": 1.0
   },
   "by_label_top3": {
     "🏆 최강": {
-      "n": 66,
-      "n_all_picks": 82,
-      "n_not_filled": 16,
-      "fill_rate": 0.8049,
-      "tp1_rate": 0.2273,
-      "stop_rate": 0.3788,
-      "open_rate": 0.3939,
-      "avg_tp1": 18.42,
-      "avg_stop": -25.01,
-      "avg_open": -0.13,
-      "avg_all": -5.34,
-      "ev": -5.56,
-      "ohlc_coverage": 0.955
+      "n": 70,
+      "n_all_picks": 85,
+      "n_not_filled": 15,
+      "fill_rate": 0.8235,
+      "tp1_rate": 0.2714,
+      "stop_rate": 0.3143,
+      "open_rate": 0.4143,
+      "avg_tp1": 17.76,
+      "avg_stop": -10.5,
+      "avg_open": 1.6,
+      "avg_all": 2.19,
+      "ev": 1.97,
+      "ohlc_coverage": 1.0
     }
   },
   "daily_top1_backtest": {
-    "n": 29,
-    "n_all_picks": 34,
-    "n_not_filled": 5,
-    "fill_rate": 0.8529,
-    "tp1_rate": 0.2414,
-    "stop_rate": 0.3103,
-    "open_rate": 0.4483,
-    "avg_tp1": 22.22,
-    "avg_stop": -20.34,
-    "avg_open": -0.83,
-    "avg_all": -1.32,
-    "ev": -1.54,
-    "ohlc_coverage": 0.966
+    "n": 31,
+    "n_all_picks": 35,
+    "n_not_filled": 4,
+    "fill_rate": 0.8857,
+    "tp1_rate": 0.2581,
+    "stop_rate": 0.2581,
+    "open_rate": 0.4839,
+    "avg_tp1": 21.71,
+    "avg_stop": -10.38,
+    "avg_open": 1.58,
+    "avg_all": 3.69,
+    "ev": 3.47,
+    "ohlc_coverage": 1.0
   },
   "all_trades_top1": [
     {
@@ -547,12 +547,12 @@
       "tp1": 371500.0,
       "stop": 261500.0,
       "outcome": "OPEN",
-      "exit_price": 284000.0,
-      "days_held": 7,
+      "exit_price": 292000.0,
+      "days_held": 8,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-22",
-      "ret_pct": -7.79,
-      "net_pct": -8.01
+      "ret_pct": -5.19,
+      "net_pct": -5.41
     },
     {
       "date": "20260422",
@@ -565,12 +565,12 @@
       "tp1": 371500.0,
       "stop": 253000.0,
       "outcome": "OPEN",
-      "exit_price": 284000.0,
-      "days_held": 6,
+      "exit_price": 292000.0,
+      "days_held": 7,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-23",
-      "ret_pct": -4.7,
-      "net_pct": -4.92
+      "ret_pct": -2.01,
+      "net_pct": -2.23
     },
     {
       "date": "20260423",
@@ -582,13 +582,13 @@
       "entry": 5670.0,
       "tp1": 6580.0,
       "stop": 4815.0,
-      "outcome": "OPEN",
-      "exit_price": 6340.0,
-      "days_held": 5,
-      "method": "ohlc_horizon_close",
+      "outcome": "WIN",
+      "exit_price": 6700.0,
+      "days_held": 6,
+      "method": "ohlc_gap_up",
       "fill_date": "2026-04-24",
-      "ret_pct": 11.82,
-      "net_pct": 11.6
+      "ret_pct": 18.17,
+      "net_pct": 17.95
     },
     {
       "date": "20260424",
@@ -601,12 +601,12 @@
       "tp1": 67500.0,
       "stop": 45300.0,
       "outcome": "OPEN",
-      "exit_price": 53000.0,
-      "days_held": 3,
+      "exit_price": 58800.0,
+      "days_held": 4,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-28",
-      "ret_pct": -0.56,
-      "net_pct": -0.78
+      "ret_pct": 10.32,
+      "net_pct": 10.1
     },
     {
       "date": "20260427",
@@ -619,12 +619,12 @@
       "tp1": 67500.0,
       "stop": 46400.0,
       "outcome": "OPEN",
-      "exit_price": 53000.0,
-      "days_held": 3,
+      "exit_price": 58800.0,
+      "days_held": 4,
       "method": "ohlc_horizon_close",
       "fill_date": "2026-04-28",
-      "ret_pct": -2.75,
-      "net_pct": -2.97
+      "ret_pct": 7.89,
+      "net_pct": 7.67
     },
     {
       "date": "20260428",
@@ -636,13 +636,13 @@
       "entry": 89100.0,
       "tp1": 116900.0,
       "stop": 75700.0,
-      "outcome": "LOSS",
-      "exit_price": 0.0,
-      "days_held": 2,
-      "method": "ohlc_gap_down",
+      "outcome": "OPEN",
+      "exit_price": 108600.0,
+      "days_held": 3,
+      "method": "ohlc_horizon_close",
       "fill_date": "2026-04-29",
-      "ret_pct": -100.0,
-      "net_pct": -100.22
+      "ret_pct": 21.89,
+      "net_pct": 21.67
     },
     {
       "date": "20260429",
@@ -654,13 +654,13 @@
       "entry": 80900.0,
       "tp1": 91600.0,
       "stop": 74700.0,
-      "outcome": "NOT_FILLED",
-      "exit_price": 0.0,
-      "days_held": 0,
-      "method": "not_filled_gap_up",
-      "fill_date": "",
+      "outcome": "OPEN",
+      "exit_price": 80900.0,
+      "days_held": 1,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-05-04",
       "ret_pct": 0.0,
-      "net_pct": 0.0
+      "net_pct": -0.22
     },
     {
       "date": "20260430",
@@ -673,12 +673,30 @@
       "tp1": 92500.0,
       "stop": 76000.0,
       "outcome": "OPEN",
-      "exit_price": 81900.0,
-      "days_held": 10,
-      "method": "close_fallback",
-      "fill_date": "",
-      "ret_pct": 0.0,
-      "net_pct": -0.22
+      "exit_price": 80900.0,
+      "days_held": 1,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-05-04",
+      "ret_pct": -1.22,
+      "net_pct": -1.44
+    },
+    {
+      "date": "20260501",
+      "code": "078930",
+      "name": "GS",
+      "sector": "기타 금융업",
+      "label": "🏆 최강",
+      "rank_score": 77.29,
+      "entry": 81900.0,
+      "tp1": 92500.0,
+      "stop": 76000.0,
+      "outcome": "OPEN",
+      "exit_price": 80900.0,
+      "days_held": 1,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-05-04",
+      "ret_pct": -1.22,
+      "net_pct": -1.44
     }
   ],
   "daily_picks_log_top1": [
@@ -981,67 +999,74 @@
       "codes": [
         "078930"
       ]
+    },
+    {
+      "date": "20260504",
+      "n_picked": 1,
+      "codes": [
+        "011170"
+      ]
     }
   ],
   "signal_top1": {
     "label": "신호 성과 (알파 품질)",
     "description": "pick_top1로 뽑힌 모든 추천을 독립적으로 horizon 추적한 결과. 자본 제약 없음 — 순수 시그널 품질 측정용.",
-    "n_signals_total": 34,
-    "n_filled": 29,
-    "fill_rate": 0.8529,
-    "tp1_rate": 0.2414,
-    "stop_rate": 0.3103,
-    "open_rate": 0.4483,
-    "avg_all_pct": -1.32,
-    "ev_net_pct": -1.54
+    "n_signals_total": 35,
+    "n_filled": 31,
+    "fill_rate": 0.8857,
+    "tp1_rate": 0.2581,
+    "stop_rate": 0.2581,
+    "open_rate": 0.4839,
+    "avg_all_pct": 3.69,
+    "ev_net_pct": 3.47
   },
   "daily_portfolio_summary": {
-    "n_days": 34,
-    "avg_daily_portfolio_ret_gross": -5.62,
-    "avg_daily_portfolio_ret_net": -5.81,
-    "avg_daily_portfolio_ret": -5.81,
-    "n_positive_days": 14,
-    "n_positive_days_gross": 14,
-    "positive_rate": 0.4118,
+    "n_days": 35,
+    "avg_daily_portfolio_ret_gross": 1.73,
+    "avg_daily_portfolio_ret_net": 1.55,
+    "avg_daily_portfolio_ret": 1.55,
+    "n_positive_days": 19,
+    "n_positive_days_gross": 19,
+    "positive_rate": 0.5429,
     "cost_basis": "net (비용 차감 후)"
   },
   "capital_portfolio": {
     "initial_capital": 10000000,
-    "final_capital": 6447260.0,
-    "total_return_pct": -35.53,
-    "max_drawdown_pct": 37.38,
+    "final_capital": 10625521.0,
+    "total_return_pct": 6.26,
+    "max_drawdown_pct": 22.62,
     "n_trades_filled": 23,
-    "n_skipped_duplicate": 11,
-    "n_skipped_not_filled": 16,
-    "positive_day_rate": 0.3,
+    "n_skipped_duplicate": 15,
+    "n_skipped_not_filled": 15,
+    "positive_day_rate": 0.4,
     "cost_basis": "net (거래당 0.22% 차감)"
   },
   "capital_portfolio_top1": {
     "label": "실집행 성과 (실전 운용 가능성)",
     "description": "Top1 신호를 max_positions=1 자본 시뮬에 실제 적용한 결과. 겹치는 시그널과 미체결 때문에 신호보다 표본이 작음.",
     "initial_capital": 10000000,
-    "final_capital": 11510014.0,
-    "total_return_pct": 15.1,
+    "final_capital": 12772149.0,
+    "total_return_pct": 27.72,
     "max_drawdown_pct": 19.83,
     "n_trades_filled": 8,
-    "n_skipped_not_filled": 5,
+    "n_skipped_not_filled": 4,
     "n_skipped_slot_full": 19,
-    "positive_day_rate": 0.2727,
+    "positive_day_rate": 0.3636,
     "cost_basis": "net (거래당 0.22% 차감)",
     "note": "Top1 전용 - 동시 1포지션, 자본 100% 투자",
     "signal_vs_capital_gap": {
-      "n_signals_total": 34,
-      "n_signals_filled_ok": 29,
+      "n_signals_total": 35,
+      "n_signals_filled_ok": 31,
       "n_capital_executed": 8,
-      "execution_rate": 0.276,
-      "explanation": "신호 29건 → 자본시뮬 8건 (슬롯풀 19건 · 미체결 5건)"
+      "execution_rate": 0.258,
+      "explanation": "신호 31건 → 자본시뮬 8건 (슬롯풀 19건 · 미체결 4건)"
     },
     "skip_reasons_summary": {
-      "NOT_FILLED": 5,
-      "SAME_TICKER_ALREADY_HELD": 2,
+      "NOT_FILLED": 4,
+      "SAME_TICKER_ALREADY_HELD": 4,
       "SLOT_FULL": 19,
       "EXECUTED": 8,
-      "total_signals": 34
+      "total_signals": 35
     }
   },
   "confidence": {
