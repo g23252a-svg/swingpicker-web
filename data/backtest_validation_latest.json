@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-05-04T21:32:57",
+  "generated_at": "2026-05-05T21:24:07",
   "version": "v3.7.14",
   "horizon_bdays": 10,
   "trade_cost_pct": 0.22,
-  "days_covered": 48,
+  "days_covered": 49,
   "ohlc_coverage_note": "OHLC parquet 종목수: 1505 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
   "methodology": {
     "horizon_days": 10,
@@ -16,56 +16,56 @@
     "selection_mode": "top1_first_then_top3_fallback",
     "date_range": [
       "2026-02-26",
-      "2026-05-04"
+      "2026-05-05"
     ],
     "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
   },
   "daily_top3_backtest": {
-    "n": 70,
-    "n_all_picks": 85,
+    "n": 73,
+    "n_all_picks": 88,
     "n_not_filled": 15,
-    "fill_rate": 0.8235,
-    "tp1_rate": 0.2714,
-    "stop_rate": 0.3143,
-    "open_rate": 0.4143,
+    "fill_rate": 0.8295,
+    "tp1_rate": 0.2603,
+    "stop_rate": 0.3014,
+    "open_rate": 0.4384,
     "avg_tp1": 17.76,
     "avg_stop": -10.5,
-    "avg_open": 1.6,
-    "avg_all": 2.19,
-    "ev": 1.97,
-    "ohlc_coverage": 1.0
+    "avg_open": 1.54,
+    "avg_all": 2.13,
+    "ev": 1.91,
+    "ohlc_coverage": 0.959
   },
   "by_label_top3": {
     "🏆 최강": {
-      "n": 70,
-      "n_all_picks": 85,
+      "n": 73,
+      "n_all_picks": 88,
       "n_not_filled": 15,
-      "fill_rate": 0.8235,
-      "tp1_rate": 0.2714,
-      "stop_rate": 0.3143,
-      "open_rate": 0.4143,
+      "fill_rate": 0.8295,
+      "tp1_rate": 0.2603,
+      "stop_rate": 0.3014,
+      "open_rate": 0.4384,
       "avg_tp1": 17.76,
       "avg_stop": -10.5,
-      "avg_open": 1.6,
-      "avg_all": 2.19,
-      "ev": 1.97,
-      "ohlc_coverage": 1.0
+      "avg_open": 1.54,
+      "avg_all": 2.13,
+      "ev": 1.91,
+      "ohlc_coverage": 0.959
     }
   },
   "daily_top1_backtest": {
-    "n": 31,
-    "n_all_picks": 35,
+    "n": 32,
+    "n_all_picks": 36,
     "n_not_filled": 4,
-    "fill_rate": 0.8857,
-    "tp1_rate": 0.2581,
-    "stop_rate": 0.2581,
-    "open_rate": 0.4839,
+    "fill_rate": 0.8889,
+    "tp1_rate": 0.25,
+    "stop_rate": 0.25,
+    "open_rate": 0.5,
     "avg_tp1": 21.71,
     "avg_stop": -10.38,
-    "avg_open": 1.58,
-    "avg_all": 3.69,
-    "ev": 3.47,
-    "ohlc_coverage": 1.0
+    "avg_open": 1.48,
+    "avg_all": 3.57,
+    "ev": 3.35,
+    "ohlc_coverage": 0.969
   },
   "all_trades_top1": [
     {
@@ -697,6 +697,24 @@
       "fill_date": "2026-05-04",
       "ret_pct": -1.22,
       "net_pct": -1.44
+    },
+    {
+      "date": "20260504",
+      "code": "011170",
+      "name": "롯데케미칼",
+      "sector": "기초 화학물질 제조업",
+      "label": "🏆 최강",
+      "rank_score": 81.55,
+      "entry": 106200.0,
+      "tp1": 119500.0,
+      "stop": 93500.0,
+      "outcome": "OPEN",
+      "exit_price": 106200.0,
+      "days_held": 10,
+      "method": "close_fallback",
+      "fill_date": "",
+      "ret_pct": 0.0,
+      "net_pct": -0.22
     }
   ],
   "daily_picks_log_top1": [
@@ -1006,74 +1024,81 @@
       "codes": [
         "011170"
       ]
+    },
+    {
+      "date": "20260505",
+      "n_picked": 1,
+      "codes": [
+        "011170"
+      ]
     }
   ],
   "signal_top1": {
     "label": "신호 성과 (알파 품질)",
     "description": "pick_top1로 뽑힌 모든 추천을 독립적으로 horizon 추적한 결과. 자본 제약 없음 — 순수 시그널 품질 측정용.",
-    "n_signals_total": 35,
-    "n_filled": 31,
-    "fill_rate": 0.8857,
-    "tp1_rate": 0.2581,
-    "stop_rate": 0.2581,
-    "open_rate": 0.4839,
-    "avg_all_pct": 3.69,
-    "ev_net_pct": 3.47
+    "n_signals_total": 36,
+    "n_filled": 32,
+    "fill_rate": 0.8889,
+    "tp1_rate": 0.25,
+    "stop_rate": 0.25,
+    "open_rate": 0.5,
+    "avg_all_pct": 3.57,
+    "ev_net_pct": 3.35
   },
   "daily_portfolio_summary": {
-    "n_days": 35,
-    "avg_daily_portfolio_ret_gross": 1.73,
-    "avg_daily_portfolio_ret_net": 1.55,
-    "avg_daily_portfolio_ret": 1.55,
-    "n_positive_days": 19,
-    "n_positive_days_gross": 19,
-    "positive_rate": 0.5429,
+    "n_days": 36,
+    "avg_daily_portfolio_ret_gross": 1.71,
+    "avg_daily_portfolio_ret_net": 1.52,
+    "avg_daily_portfolio_ret": 1.52,
+    "n_positive_days": 20,
+    "n_positive_days_gross": 20,
+    "positive_rate": 0.5556,
     "cost_basis": "net (비용 차감 후)"
   },
   "capital_portfolio": {
     "initial_capital": 10000000,
-    "final_capital": 10625521.0,
-    "total_return_pct": 6.26,
+    "final_capital": 10699192.0,
+    "total_return_pct": 6.99,
     "max_drawdown_pct": 22.62,
-    "n_trades_filled": 23,
+    "n_trades_filled": 26,
     "n_skipped_duplicate": 15,
     "n_skipped_not_filled": 15,
-    "positive_day_rate": 0.4,
+    "positive_day_rate": 0.4286,
     "cost_basis": "net (거래당 0.22% 차감)"
   },
   "capital_portfolio_top1": {
     "label": "실집행 성과 (실전 운용 가능성)",
     "description": "Top1 신호를 max_positions=1 자본 시뮬에 실제 적용한 결과. 겹치는 시그널과 미체결 때문에 신호보다 표본이 작음.",
     "initial_capital": 10000000,
-    "final_capital": 12772149.0,
-    "total_return_pct": 27.72,
+    "final_capital": 12744050.0,
+    "total_return_pct": 27.44,
     "max_drawdown_pct": 19.83,
-    "n_trades_filled": 8,
+    "n_trades_filled": 9,
     "n_skipped_not_filled": 4,
     "n_skipped_slot_full": 19,
-    "positive_day_rate": 0.3636,
+    "positive_day_rate": 0.3333,
     "cost_basis": "net (거래당 0.22% 차감)",
     "note": "Top1 전용 - 동시 1포지션, 자본 100% 투자",
     "signal_vs_capital_gap": {
-      "n_signals_total": 35,
-      "n_signals_filled_ok": 31,
-      "n_capital_executed": 8,
-      "execution_rate": 0.258,
-      "explanation": "신호 31건 → 자본시뮬 8건 (슬롯풀 19건 · 미체결 4건)"
+      "n_signals_total": 36,
+      "n_signals_filled_ok": 32,
+      "n_capital_executed": 9,
+      "execution_rate": 0.281,
+      "explanation": "신호 32건 → 자본시뮬 9건 (슬롯풀 19건 · 미체결 4건)"
     },
     "skip_reasons_summary": {
       "NOT_FILLED": 4,
       "SAME_TICKER_ALREADY_HELD": 4,
       "SLOT_FULL": 19,
-      "EXECUTED": 8,
-      "total_signals": 35
+      "EXECUTED": 9,
+      "total_signals": 36
     }
   },
   "confidence": {
     "level": "LOW",
     "color": "red",
-    "reason": "실집행 표본 8건 · rolling 미확정 (0폴드)",
-    "executed_trades": 8,
+    "reason": "실집행 표본 9건 · rolling 미확정 (0폴드)",
+    "executed_trades": 9,
     "rolling_robust": false,
     "rolling_valid_folds": 0,
     "walkforward_capital_generalizes": 0,

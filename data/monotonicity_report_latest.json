@@ -1,11 +1,11 @@
 {
-  "asof_ymd": "20260504",
-  "generated_at": "2026-05-04T21:32:30.654643",
+  "asof_ymd": "20260505",
+  "generated_at": "2026-05-05T21:23:28.613612",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
-  "declared_wr_active": 0.6111,
+  "declared_wr_active": 0.6102,
   "declared_wr_top_pick": null,
   "elite_monotonicity": {
     "valid": true,
@@ -70,12 +70,12 @@
     "monotone_avg_ret_excess": false
   },
   "realized_wr": 0.4912,
-  "declared_vs_realized_gap_active": 0.1199,
+  "declared_vs_realized_gap_active": 0.119,
   "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": 0.1199,
+  "declared_vs_realized_gap": 0.119,
   "avg_ret_excess_pct": -2.7401,
   "top_pick_funnel": {
-    "trade_ymd": "20260504",
+    "trade_ymd": "20260505",
     "total": 562,
     "aggressive_funnel": {
       "total": 562,
@@ -120,7 +120,7 @@
     {
       "gate": "declared_vs_realized_gap_15pp",
       "status": "PASS",
-      "detail": "gap_active=12.0%"
+      "detail": "gap_active=11.9%"
     }
   ],
   "ci_soft": [
