@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260506",
+  "generated_at": "2026-05-06 22:16:51",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "489790",
+      "name": "한화비전",
+      "route": "ARMED",
+      "score": 93.9,
+      "close": 89700,
+      "entry": 89700,
+      "stop": 78300,
+      "target1": 92500,
+      "target2": 111300,
+      "est_win_rate": 0.593,
+      "rr": 0.2,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/489790"
+    },
+    {
+      "rank": 2,
+      "code": "044490",
+      "name": "태웅",
+      "route": "ARMED",
+      "score": 89.1,
+      "close": 56000,
+      "entry": 56000,
+      "stop": 48800,
+      "target1": 61300,
+      "target2": 69400,
+      "est_win_rate": 0.593,
+      "rr": 0.7,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/044490"
+    },
+    {
+      "rank": 3,
+      "code": "042510",
+      "name": "라온시큐어",
+      "route": "ARMED",
+      "score": 88.3,
+      "close": 13570,
+      "entry": 13370,
+      "stop": 11360,
+      "target1": 16960,
+      "target2": 19790,
+      "est_win_rate": 0.552,
+      "rr": 1.8,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/042510"
+    }
+  ]
+}

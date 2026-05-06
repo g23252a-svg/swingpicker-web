@@ -1,50 +1,50 @@
 {
-  "asof_ymd": "20260505",
-  "generated_at": "2026-05-05T21:23:28.613612",
+  "asof_ymd": "20260506",
+  "generated_at": "2026-05-06T22:16:18.255117",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
-  "declared_wr_active": 0.6102,
-  "declared_wr_top_pick": null,
+  "declared_wr_active": 0.5973,
+  "declared_wr_top_pick": 0.6205,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
       {
         "score_lo": 0,
         "score_hi": 50.0,
-        "n_raw": 55,
-        "p_win": 0.4912,
-        "p_win_lcb": 0.3638,
-        "avg_ret_net_pct": 0.3278,
-        "avg_ret_excess_pct": -2.8977
+        "n_raw": 94,
+        "p_win": 0.3735,
+        "p_win_lcb": 0.2814,
+        "avg_ret_net_pct": -1.1289,
+        "avg_ret_excess_pct": -4.2276
       },
       {
         "score_lo": 50,
         "score_hi": 60.0,
-        "n_raw": 14,
-        "p_win": 0.5,
-        "p_win_lcb": 0.268,
-        "avg_ret_net_pct": 0.1867,
-        "avg_ret_excess_pct": -1.5333
+        "n_raw": 25,
+        "p_win": 0.5185,
+        "p_win_lcb": 0.335,
+        "avg_ret_net_pct": 0.6917,
+        "avg_ret_excess_pct": -1.3883
       },
       {
         "score_lo": 60,
         "score_hi": 70.0,
-        "n_raw": 22,
-        "p_win": 0.6667,
-        "p_win_lcb": 0.4732,
-        "avg_ret_net_pct": 3.3801,
-        "avg_ret_excess_pct": -1.4217
+        "n_raw": 34,
+        "p_win": 0.5721,
+        "p_win_lcb": 0.3945,
+        "avg_ret_net_pct": 1.9363,
+        "avg_ret_excess_pct": -2.2014
       },
       {
         "score_lo": 70,
         "score_hi": 80.0,
-        "n_raw": 23,
-        "p_win": 0.4,
-        "p_win_lcb": 0.2216,
-        "avg_ret_net_pct": -1.6347,
-        "avg_ret_excess_pct": -4.6077
+        "n_raw": 24,
+        "p_win": 0.4231,
+        "p_win_lcb": 0.2447,
+        "avg_ret_net_pct": -1.1934,
+        "avg_ret_excess_pct": -4.0768
       },
       {
         "score_lo": 80,
@@ -69,37 +69,37 @@
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
-  "realized_wr": 0.4912,
-  "declared_vs_realized_gap_active": 0.119,
-  "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": 0.119,
-  "avg_ret_excess_pct": -2.7401,
+  "realized_wr": 0.4263,
+  "declared_vs_realized_gap_active": 0.171,
+  "declared_vs_realized_gap_top_pick": 0.1942,
+  "declared_vs_realized_gap": 0.1942,
+  "avg_ret_excess_pct": -3.3703,
   "top_pick_funnel": {
-    "trade_ymd": "20260505",
-    "total": 562,
+    "trade_ymd": "20260506",
+    "total": 577,
     "aggressive_funnel": {
-      "total": 562,
-      "route_active": 78,
-      "hard_gate": 31,
-      "elite_75": 0,
-      "struct_80": 0,
-      "timing_70": 0,
-      "tp1_15": 0,
-      "final": 0
+      "total": 577,
+      "route_active": 80,
+      "hard_gate": 37,
+      "elite_75": 4,
+      "struct_80": 4,
+      "timing_70": 4,
+      "tp1_15": 3,
+      "final": 2
     },
     "stable_funnel": {
-      "total": 562,
-      "route_active": 78,
-      "hard_gate": 31,
-      "elite_70": 1,
-      "tp1_7_15": 0,
+      "total": 577,
+      "route_active": 80,
+      "hard_gate": 37,
+      "elite_70": 4,
+      "tp1_7_15": 1,
       "balance_70": 0,
       "wr_55": 0,
       "mature": 0,
       "final": 0
     },
-    "top_pick_count": 0,
-    "aggressive_count": 0,
+    "top_pick_count": 2,
+    "aggressive_count": 2,
     "stable_count": 0
   },
   "top_pick_stable_7day_avg": 0.29,
@@ -115,12 +115,12 @@
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "TOP_PICK 0건"
+      "detail": "min_rr=1.53"
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
-      "status": "PASS",
-      "detail": "gap_active=11.9%"
+      "status": "FAIL",
+      "detail": "gap_top_pick=19.4% > 15%p"
     }
   ],
   "ci_soft": [
@@ -132,7 +132,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-2.74%"
+      "detail": "avg_ret_excess=-3.37%"
     },
     {
       "gate": "market_map_coverage_95",
@@ -144,9 +144,9 @@
       "detail": "평균 0.29개"
     }
   ],
-  "ci_hard_all_pass": true,
+  "ci_hard_all_pass": false,
   "ci_soft_any_warn": true,
-  "top_pick_count": 0,
+  "top_pick_count": 2,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": null
+  "top_pick_min_rr": 1.53
 }

@@ -1705,5 +1705,58 @@
       "215600_20260327_WARN_DRAWDOWN_20260501",
       "215600_20260327_STOP_HIT_20260504"
     ]
+  },
+  {
+    "code": "161580",
+    "name": "필옵틱스",
+    "entry_ymd": "20260420",
+    "entry_px": 41850.0,
+    "qty": 0,
+    "stop_px": 35900.0,
+    "stop_px_initial": 35900.0,
+    "take_px1": 49700.0,
+    "take_px2": 60300.0,
+    "trailing_high": 63200.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260506",
+    "last_close_px": 63000.0,
+    "unrealized_pnl_pct": 50.54,
+    "realized_pnl_pct": 50.54,
+    "close_ymd": "20260506",
+    "close_px": 63000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "161580_20260420_TP1_HIT_20260422",
+      "161580_20260420_TP1_HIT_20260427",
+      "161580_20260420_TP1_HIT_20260506",
+      "161580_20260420_TP2_HIT_20260506"
+    ]
+  },
+  {
+    "code": "006800",
+    "name": "미래에셋증권",
+    "entry_ymd": "20260428",
+    "entry_px": 68500.0,
+    "qty": 0,
+    "stop_px": 63700.0,
+    "stop_px_initial": 63700.0,
+    "take_px1": 74100.0,
+    "take_px2": 77000.0,
+    "trailing_high": 87800.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260506",
+    "last_close_px": 83800.0,
+    "unrealized_pnl_pct": 22.34,
+    "realized_pnl_pct": 22.34,
+    "close_ymd": "20260506",
+    "close_px": 83800.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "006800_20260428_WARN_DRAWDOWN_20260429",
+      "006800_20260428_WARN_DRAWDOWN_20260430",
+      "006800_20260428_WARN_DRAWDOWN_20260501",
+      "006800_20260428_TP1_HIT_20260506",
+      "006800_20260428_TP2_HIT_20260506"
+    ]
   }
 ]
