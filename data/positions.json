@@ -1118,7 +1118,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "038500_20260427_WARN_DRAWDOWN_20260507"
+    ]
   },
   {
     "code": "012510",
@@ -1181,7 +1183,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "056080_20260428_WARN_DRAWDOWN_20260507"
+    ]
   },
   {
     "code": "102120",
@@ -1227,7 +1231,8 @@
       "033230_20260429_WARN_DRAWDOWN_20260429",
       "033230_20260429_WARN_DRAWDOWN_20260430",
       "033230_20260429_WARN_DRAWDOWN_20260501",
-      "033230_20260429_WARN_DRAWDOWN_20260506"
+      "033230_20260429_WARN_DRAWDOWN_20260506",
+      "033230_20260429_WARN_DRAWDOWN_20260507"
     ]
   },
   {
@@ -1250,7 +1255,8 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "018470_20260429_WARN_DRAWDOWN_20260506"
+      "018470_20260429_WARN_DRAWDOWN_20260506",
+      "018470_20260429_WARN_DRAWDOWN_20260507"
     ]
   },
   {
@@ -1272,7 +1278,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "100130_20260429_WARN_DRAWDOWN_20260507"
+    ]
   },
   {
     "code": "012800",
@@ -1377,7 +1385,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "241520_20260504_WARN_DRAWDOWN_20260507"
+    ]
   },
   {
     "code": "001720",
