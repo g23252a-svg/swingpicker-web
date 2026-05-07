@@ -1,52 +1,36 @@
 {
-  "trade_ymd": "20260506",
-  "top_pick_count": 2,
+  "trade_ymd": "20260507",
+  "top_pick_count": 1,
   "top_pick_by_type": {
-    "AGGRESSIVE": 2
+    "AGGRESSIVE": 1
   },
-  "avg_elite": 81.0,
-  "avg_rr": 2.64,
-  "min_rr": 1.53,
+  "avg_elite": 75.4,
+  "avg_rr": 1.0,
+  "min_rr": 1.0,
   "rr_lt_1_count": 0,
-  "avg_balance": 78.0,
-  "avg_win_rate": 0.621,
+  "avg_balance": 56.1,
+  "avg_win_rate": 0.713,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 5027,
+  "est_win_rate_n": 5178,
   "routes": {
-    "ATTACK": 1,
     "ARMED": 1
   },
   "picks": [
     {
-      "종목코드": "001720",
-      "종목명": "신영증권",
+      "종목코드": "389020",
+      "종목명": "자람테크놀로지",
       "TOP_PICK_TYPE": "AGGRESSIVE",
-      "ELITE_SCORE": 76.6,
-      "RR_NOW_TP1": 3.74,
-      "BALANCE_SCORE": 67.5,
+      "ELITE_SCORE": 75.4,
+      "RR_NOW_TP1": 1.0,
+      "BALANCE_SCORE": 56.1,
       "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 28.0,
-      "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.689,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 5027
-    },
-    {
-      "종목코드": "042510",
-      "종목명": "라온시큐어",
-      "TOP_PICK_TYPE": "AGGRESSIVE",
-      "ELITE_SCORE": 85.5,
-      "RR_NOW_TP1": 1.53,
-      "BALANCE_SCORE": 88.6,
-      "ENTRY_GAP_PCT": 1.5,
-      "TP1_PCT": 25.0,
+      "TP1_PCT": 15.1,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.552,
+      "EST_WIN_RATE": 0.713,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 5027
+      "EST_WIN_RATE_N": 5178
     }
   ]
 }
