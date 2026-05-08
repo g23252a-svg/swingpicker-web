@@ -3,7 +3,6 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260331,078350,한양디지텍,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260401,001780,알루코,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260402,001780,알루코,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
-20260506,042510,라온시큐어,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260227,309710,아이티켐,🏆 최강,EXECUTE,EXECUTED,,2026-03-03,0,
 20260302,309710,아이티켐,🏆 최강,SKIP,SAME_TICKER_ALREADY_HELD,이미 보유 중,2026-03-03,1,309710
 20260313,003310,대주산업,🏆 최강,EXECUTE,EXECUTED,,2026-03-16,0,
@@ -35,5 +34,7 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260429,078930,GS,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-05-04,1,044490
 20260430,078930,GS,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-05-04,1,044490
 20260501,078930,GS,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-05-04,1,044490
-20260504,011170,롯데케미칼,🏆 최강,EXECUTE,EXECUTED,,2026-05-06,0,
-20260505,011170,롯데케미칼,🏆 최강,SKIP,SAME_TICKER_ALREADY_HELD,이미 보유 중,2026-05-06,1,011170
+20260504,011170,롯데케미칼,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-05-06,1,044490
+20260505,011170,롯데케미칼,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-05-06,1,044490
+20260506,042510,라온시큐어,🏆 최강,EXECUTE,EXECUTED,,2026-05-08,0,
+20260507,322310,오로스테크놀로지,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-05-08,1,042510

@@ -1,0 +1,51 @@
+{
+  "trade_ymd": "20260508",
+  "top_pick_count": 2,
+  "top_pick_by_type": {
+    "AGGRESSIVE": 2
+  },
+  "avg_elite": 77.9,
+  "avg_rr": 1.38,
+  "min_rr": 1.33,
+  "rr_lt_1_count": 0,
+  "avg_balance": 68.2,
+  "avg_win_rate": 0.663,
+  "est_win_rate_method": "ELITE_SCORE",
+  "est_win_rate_mode": "MATURE",
+  "est_win_rate_n": 5320,
+  "routes": {
+    "ARMED": 2
+  },
+  "picks": [
+    {
+      "종목코드": "018880",
+      "종목명": "한온시스템",
+      "TOP_PICK_TYPE": "AGGRESSIVE",
+      "ELITE_SCORE": 79.4,
+      "RR_NOW_TP1": 1.42,
+      "BALANCE_SCORE": 67.6,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 17.0,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.633,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 5320
+    },
+    {
+      "종목코드": "003530",
+      "종목명": "한화투자증권",
+      "TOP_PICK_TYPE": "AGGRESSIVE",
+      "ELITE_SCORE": 76.4,
+      "RR_NOW_TP1": 1.33,
+      "BALANCE_SCORE": 68.9,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 15.6,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.694,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 5320
+    }
+  ]
+}

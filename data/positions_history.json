@@ -1758,5 +1758,30 @@
       "006800_20260428_TP1_HIT_20260506",
       "006800_20260428_TP2_HIT_20260506"
     ]
+  },
+  {
+    "code": "439260",
+    "name": "대한조선",
+    "entry_ymd": "20260422",
+    "entry_px": 93900.0,
+    "qty": 0,
+    "stop_px": 84700.0,
+    "stop_px_initial": 84700.0,
+    "take_px1": 109700.0,
+    "take_px2": 121900.0,
+    "trailing_high": 97600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260508",
+    "last_close_px": 82600.0,
+    "unrealized_pnl_pct": -12.03,
+    "realized_pnl_pct": -12.03,
+    "close_ymd": "20260508",
+    "close_px": 82600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "439260_20260422_WARN_DRAWDOWN_20260506",
+      "439260_20260422_WARN_DRAWDOWN_20260507",
+      "439260_20260422_STOP_HIT_20260508"
+    ]
   }
 ]
