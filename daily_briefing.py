@@ -406,6 +406,50 @@ def _avg_stable_7day(out_dir: str, asof_ymd: str) -> Optional[float]:
     return round(sum(stable_counts) / len(stable_counts), 2)
 
 
+def _realized_wr_for_score_range(
+    wt_table: list,
+    lo: float,
+    hi: float,
+) -> tuple:
+    """[v22.3.2] 특정 ELITE_SCORE 범위의 historical realized win rate.
+
+    declared와 같은 모집단(점수 범위)에서 realized를 계산해야 fair 비교.
+    예: TOP_PICK이 ELITE_SCORE 79.4~79.7 → [70-80) bin만 사용
+        (전체 bin 가중평균을 쓰던 기존 방식은 영구 양수 gap 유발)
+
+    sufficient=false bin은 제외 — winrate_table.meta.min_n 정책 존중.
+
+    Args:
+        wt_table: winrate_table["table"] (list of bin dicts)
+        lo: 점수 하한 (포함)
+        hi: 점수 상한 (미포함)
+
+    Returns:
+        (realized_wr, n_total)
+        - realized_wr: 가중평균 승률 (전체 bin sufficient=false면 None)
+        - n_total: 매칭된 effective n (HARD 게이트의 표본 가드용)
+    """
+    total_n = 0
+    w_sum = 0.0
+    try:
+        for b in wt_table:
+            b_lo = float(b.get("score_lo", -1))
+            b_hi = float(b.get("score_hi", -1))
+            # bin이 [lo, hi) 와 겹치는지
+            if b_hi <= lo or b_lo >= hi:
+                continue
+            n = int(b.get("n_raw", 0))
+            p = b.get("p_win")
+            if n > 0 and p is not None and b.get("sufficient"):
+                total_n += n
+                w_sum += n * float(p)
+    except Exception:
+        return None, 0
+    if total_n > 0:
+        return round(w_sum / total_n, 4), total_n
+    return None, 0
+
+
 def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
     """[v22] 일일 단조성/커버리지/갭 리포트.
     
@@ -505,7 +549,45 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
         mono = _compute_monotonicity(wt_elite["table"])
         report["elite_monotonicity"] = mono
         
-        # 실현 승률 평균 (top bin n_raw 가중)
+        # ─────────────────────────────────────────────────────────
+        # [v22.3.2] 모집단 일치 realized — declared와 같은 점수 범위에서만 계산
+        # 기존 버그: declared_top_pick(상위 점수 평균)과 realized(전체 bin 가중)
+        #          비교 → 모델이 정확해도 영구 양수 gap → HARD FAIL
+        # 수정: TOP_PICK / active의 ELITE_SCORE 범위로 매칭 bin만 가중평균
+        # ─────────────────────────────────────────────────────────
+        table = wt_elite["table"]
+        realized_wr_top_pick = None
+        realized_wr_top_pick_n = 0
+        realized_wr_active = None
+        realized_wr_active_n = 0
+        try:
+            if os.path.exists(rec_path):
+                rec_for_match = pd.read_csv(rec_path, dtype={"종목코드": str})
+                if "ELITE_SCORE" in rec_for_match.columns:
+                    if "TOP_PICK" in rec_for_match.columns:
+                        tp_for_range = rec_for_match[
+                            rec_for_match["TOP_PICK"].astype(int) == 1
+                        ]
+                        if len(tp_for_range) > 0:
+                            tp_lo = float(tp_for_range["ELITE_SCORE"].min())
+                            tp_hi = float(tp_for_range["ELITE_SCORE"].max()) + 0.01
+                            realized_wr_top_pick, realized_wr_top_pick_n = (
+                                _realized_wr_for_score_range(table, tp_lo, tp_hi)
+                            )
+                    if "ROUTE" in rec_for_match.columns:
+                        act_for_range = rec_for_match[
+                            rec_for_match["ROUTE"].astype(str).isin(["ATTACK", "ARMED"])
+                        ]
+                        if len(act_for_range) > 0:
+                            a_lo = float(act_for_range["ELITE_SCORE"].min())
+                            a_hi = float(act_for_range["ELITE_SCORE"].max()) + 0.01
+                            realized_wr_active, realized_wr_active_n = (
+                                _realized_wr_for_score_range(table, a_lo, a_hi)
+                            )
+        except Exception as e:
+            report["matched_realized_calc_error"] = str(e)
+        
+        # 호환용 — 전체 bin 가중평균 (기존 키 유지)
         realized_wr = None
         total_n = 0
         w_sum = 0.0
@@ -519,22 +601,27 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             realized_wr = round(w_sum / total_n, 4)
         report["realized_wr"] = realized_wr
         
-        # 3. 선언 vs 실현 갭 — 두 축 모두 계산
+        # [v22.3.2] 모집단 일치 realized 신규 키
+        report["realized_wr_top_pick"] = realized_wr_top_pick
+        report["realized_wr_top_pick_n"] = realized_wr_top_pick_n
+        report["realized_wr_active"] = realized_wr_active
+        report["realized_wr_active_n"] = realized_wr_active_n
+        
+        # 3. 선언 vs 실현 갭 — [v22.3.2] 같은 모집단끼리만 비교
         gap_active = None
         gap_top_pick = None
-        if realized_wr is not None:
-            if declared_wr_active is not None:
-                gap_active = round(declared_wr_active - realized_wr, 4)
-            if declared_wr_top_pick is not None:
-                gap_top_pick = round(declared_wr_top_pick - realized_wr, 4)
+        if realized_wr_top_pick is not None and declared_wr_top_pick is not None:
+            gap_top_pick = round(declared_wr_top_pick - realized_wr_top_pick, 4)
+        if realized_wr_active is not None and declared_wr_active is not None:
+            gap_active = round(declared_wr_active - realized_wr_active, 4)
         report["declared_vs_realized_gap_active"] = gap_active
         report["declared_vs_realized_gap_top_pick"] = gap_top_pick
-        # 호환용 alias (기존 키도 유지) — TOP_PICK 우선, 없으면 active
+        # 호환용 alias — TOP_PICK 우선, 없으면 active
         report["declared_vs_realized_gap"] = (
             gap_top_pick if gap_top_pick is not None else gap_active
         )
         
-        # avg_ret_excess 집계 (전체 bin 가중평균)
+        # avg_ret_excess 집계 (전체 bin 가중평균) — 기존 그대로
         total_n2 = 0
         e_sum = 0.0
         for b in wt_elite["table"]:
@@ -598,24 +685,39 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             "detail": _detail,
         })
     
-    # HARD 3: 선언-실현 갭 15%p 이하 (TOP_PICK 우선, 없으면 active)
+    # HARD 3: 선언-실현 갭 15%p 이하 — [v22.3.2] 표본 크기 가드
+    # TOP_PICK 우선, 없으면 active. matched n < MIN_N_FOR_HARD_GAP이면 SKIP.
+    # winrate_table.meta.min_n과 일관성 유지 (기본 30).
+    MIN_N_FOR_HARD_GAP = 30
     gap = report.get("declared_vs_realized_gap_top_pick")
     gap_basis = "top_pick"
+    gap_n = report.get("realized_wr_top_pick_n", 0) or 0
     if gap is None:
         gap = report.get("declared_vs_realized_gap_active")
         gap_basis = "active"
-    if gap is not None and gap > 0.15:
+        gap_n = report.get("realized_wr_active_n", 0) or 0
+    if gap is None:
+        ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
+                        "detail": "matched 모집단 데이터 부족 (sufficient bin 없음)"})
+    elif gap_n < MIN_N_FOR_HARD_GAP:
+        # 표본 부족 → HARD에서 제외, 추세는 SOFT에 별도 기록
+        ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
+                        "detail": f"matched n={gap_n} < {MIN_N_FOR_HARD_GAP} (표본 부족)"})
+        if abs(gap) > 0.15:
+            ci_soft.append({
+                "gate": "declared_vs_realized_gap_small_n",
+                "status": "WARN",
+                "detail": f"gap_{gap_basis}={gap:.1%} (n={gap_n}, 표본 부족 → 추세 모니터링)",
+            })
+    elif gap > 0.15:
         ci_hard.append({
             "gate": "declared_vs_realized_gap_15pp",
             "status": "FAIL",
-            "detail": f"gap_{gap_basis}={gap:.1%} > 15%p",
+            "detail": f"gap_{gap_basis}={gap:.1%} > 15%p (n={gap_n})",
         })
-    elif gap is not None:
-        ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "PASS",
-                        "detail": f"gap_{gap_basis}={gap:.1%}"})
     else:
-        ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
-                        "detail": "실현 승률 또는 선언 승률 데이터 부족"})
+        ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "PASS",
+                        "detail": f"gap_{gap_basis}={gap:.1%} (n={gap_n})"})
     
     # SOFT 1: Wilson LCB 단조성
     mono = report.get("elite_monotonicity", {})
