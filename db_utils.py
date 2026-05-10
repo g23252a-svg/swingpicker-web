@@ -6,6 +6,7 @@
 #   #3 DuckDB는 OLAP 전용 (daily_recommend, price_snapshots)으로 분리 유지
 # ═══════════════════════════════════════════════════
 
+import hashlib  # [v22.3] inquiry_id deterministic 생성
 import sqlite3
 import duckdb
 import json
@@ -62,7 +63,9 @@ TABLE_COLUMNS = {
         "session_token", "prime_expire_date", "login_fail_count", "lock_until",
     ],
     "inquiries": [
-        "id", "nickname", "title", "content", "created_at",
+        # [v22.3] v2 스키마 — 프론트(tab_inquiry.py / tab_pricing.py) 계약 일치
+        "inquiry_id", "id", "nickname", "title", "content", "created_at",
+        "category", "status", "admin_reply", "admin_reply_at",
     ],
     "admin_actions": [
         "id", "admin_email", "action_type", "target_email",
@@ -295,6 +298,9 @@ class LDYDBManager:
             )
         """)
 
+        # [v22.3] inquiries 테이블 v2 in-place 마이그레이션 (멱등 + 빠른 경로)
+        self._migrate_inquiries_to_v2()
+
         # [v22 Step W+BA] 결제 기록 테이블 — orderId UNIQUE로 중복 방지
         # status: success / failed / amount_mismatch / duplicate / refunded
         self._exec_sqlite("""
@@ -504,18 +510,72 @@ class LDYDBManager:
         """, vals)
 
     def _insert_gist_inquiries(self, data):
+        """[v22.3] Gist → SQLite 복구 (멱등).
+
+        이전 버그: 무조건 INSERT → 재시작/배경 갱신 때마다 누적
+                  (10건 → 20 → 40 → 80 → 160건 폭발)
+        현재: inquiry_id UNIQUE INDEX + INSERT OR IGNORE + 빈 글 차단
+        입력: list[dict] 또는 {"inquiries": [...]} 둘 다 허용 (users 패턴 일치)
+        """
+        # dict 형태도 허용
+        if isinstance(data, dict):
+            data = data.get("inquiries", [])
         if not data or not isinstance(data, list):
             return
-        try:
-            for item in data:
-                self._exec_sqlite(
-                    "INSERT INTO inquiries VALUES (?,?,?,?,?)",
-                    (item.get('id'), item.get('nickname'), item.get('title'),
-                     item.get('content'), item.get('created_at'))
+
+        inserted, skipped, empty = 0, 0, 0
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            email      = item.get("id") or item.get("email") or ""
+            nickname   = item.get("nickname") or "익명"
+            # [v22.3 hotfix] "None"/"null"/"nan"/"-" 문자열도 빈글로 처리
+            title      = self._clean_inquiry_text(item.get("title"))
+            content    = self._clean_inquiry_text(item.get("content"))
+            created_at = item.get("created_at") or ""
+
+            # 빈 글 차단 (DB 진입 자체 거부)
+            if not title or not content:
+                empty += 1
+                continue
+
+            # inquiry_id 결정 — Gist에 있으면 그대로, 없으면 deterministic 생성
+            inquiry_id = (item.get("inquiry_id") or "").strip()
+            if not inquiry_id:
+                seed = f"{email}|{title}|{content}|{created_at}"
+                inquiry_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+            cur = None
+            try:
+                cur = self._exec_sqlite(
+                    """
+                    INSERT OR IGNORE INTO inquiries
+                        (id, nickname, title, content, created_at,
+                         inquiry_id, category, status, admin_reply, admin_reply_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (email, nickname, title, content, created_at, inquiry_id,
+                     item.get("category")       or "general",
+                     item.get("status")         or "open",
+                     item.get("admin_reply")    or "",
+                     item.get("admin_reply_at") or ""),
                 )
-            _logger.info(f" inquiries 적용 완료 ({len(data)}건)")
-        except Exception as e:
-            _logger.warning(f" inquiries INSERT 실패: {e}")
+                if getattr(cur, "rowcount", 0) > 0:
+                    inserted += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                _logger.warning(f"[gist→inquiries] INSERT 실패: {e}")
+                skipped += 1
+            finally:
+                # cursor 누수 방지
+                if cur is not None:
+                    try: cur.close()
+                    except Exception: pass
+
+        _logger.info(
+            f"[gist→inquiries] 신규 {inserted} / 중복 {skipped} / 빈글차단 {empty}"
+        )
 
     def _ensure_admin_actions_table(self):
         """[Step AY] admin_actions 테이블 멱등 생성 (Gist 로드 전 보장)
@@ -771,23 +831,39 @@ class LDYDBManager:
         """[v6.0] 즉시 업로드 대신 dirty 플래그만 세움 → 배치 루프가 처리"""
         _gist_sync.mark_dirty(tablename)
 
+    @staticmethod
+    def _quote_sqlite_ident(name: str) -> str:
+        """[v22.3 hotfix] SQLite identifier 안전 인용 (예약어 / 특수문자 방어)."""
+        return '"' + str(name).replace('"', '""') + '"'
+
     def _do_gist_upload(self, tablename: str, filename: str) -> bool:
         """실제 업로드 (배치 루프에서 호출). 성공 시 True, 실패 시 False.
-        
-        [Step AX] TABLE_COLUMNS 통일 매핑 사용 (admin_actions 포함).
+
+        [v22.3 hotfix] SELECT * 금지 — TABLE_COLUMNS 순서로 명시 SELECT.
+            기존 버그: ALTER ADD COLUMN 후 SELECT * 컬럼 순서와
+                      TABLE_COLUMNS 순서가 다르면 zip()이 키-값을 어긋나게
+                      매핑해서 Gist JSON이 통째로 밀림 (제목↔내용↔이메일).
+            수정: SELECT col1, col2, ... 로 순서 강제 → JSON 무결성 보장.
         """
         if not GIST_ID or not GIST_TOKEN:
             return True  # Gist 미설정은 실패가 아님
         try:
-            rows = self._exec_sqlite(f"SELECT * FROM {tablename}", fetch=True)
-            # [Step AX] 통일 매핑에서 컬럼 가져오기
             cols = TABLE_COLUMNS.get(tablename)
             if not cols:
-                # 안전망 — 매핑 없으면 inquiries 기본 컬럼 (구버전 호환)
                 _logger.warning(
-                    f" Gist 업로드: {tablename} 컬럼 매핑 없음 → 기본 사용"
+                    f" Gist 업로드: {tablename} 컬럼 매핑 없음 → 스킵 (안전)"
                 )
-                cols = TABLE_COLUMNS.get("inquiries", [])
+                return False  # 매핑 없으면 업로드 자체 거부 (이전엔 inquiries 컬럼으로 폴백 → 위험)
+
+            # [핵심] 명시 컬럼 SELECT — 순서 일치 보장
+            select_cols = ", ".join(
+                self._quote_sqlite_ident(c) for c in cols
+            )
+            quoted_table = self._quote_sqlite_ident(tablename)
+            rows = self._exec_sqlite(
+                f"SELECT {select_cols} FROM {quoted_table}",
+                fetch=True,
+            ) or []
 
             data = [dict(zip(cols, r)) for r in rows]
             json_str = json.dumps(data, ensure_ascii=False, indent=2, default=str)
@@ -800,7 +876,9 @@ class LDYDBManager:
                 _logger.debug(f" Gist 배치 업로드 완료: {tablename}")
                 return True
             else:
-                _logger.warning(f" Gist 배치 업로드 실패 ({resp.status_code}): {tablename}")
+                _logger.warning(
+                    f" Gist 배치 업로드 실패 ({resp.status_code}): {tablename}"
+                )
                 return False
         except Exception as e:
             _logger.warning(f" Gist 배치 업로드 에러: {e}", exc_info=True)
@@ -816,7 +894,8 @@ class LDYDBManager:
             if check:
                 return False, "이미 존재하는 이메일입니다."
 
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # [v22.3 hotfix-2] UTC 명시 — update_login_timestamp 등과 일관성 유지
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             self._exec_sqlite("""
                 INSERT INTO users
                 (id, password, salt, nickname, role, join_date, last_login,
@@ -881,7 +960,8 @@ class LDYDBManager:
             new_count = (curr[0] or 0) + 1
             lock_time = None
             if new_count >= 5:
-                lock_time = (datetime.now() + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+                # [v22.3 hotfix-2] UTC 명시 — get_login_failures의 tz_localize('UTC')와 일관
+                lock_time = (datetime.now(timezone.utc) + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
                 _logger.warning(f"🔒 {email} 계정 10분 잠금 발동")
 
             self._exec_sqlite(
@@ -1023,7 +1103,8 @@ class LDYDBManager:
             True if recorded successfully
         """
         try:
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # [v22.3 hotfix-2] UTC 명시 — payments.created_at 통일
+            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             self._exec_sqlite(
                 """INSERT OR REPLACE INTO payments
                 (order_id, payment_key, email, plan, amount, status,
@@ -1205,7 +1286,8 @@ class LDYDBManager:
 
     def grant_all_users_trial(self, days=14):
         try:
-            new_expire = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            # [v22.3 hotfix-2] UTC 명시 — prime_expire_date 통일
+            new_expire = (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
             self._exec_sqlite(
                 "UPDATE users SET role = 'prime', prime_expire_date = ? WHERE role != 'admin'",
                 (new_expire,)
@@ -1216,31 +1298,533 @@ class LDYDBManager:
             return False, f"DB Error: {e}"
 
     # --- Inquiry Methods ---
-    def get_all_inquiries(self):
+    # ═══════════════════════════════════════════
+    #  Inquiry Methods v2 — [v22.3]
+    #  ─────────────────────────────────────────
+    #  프론트(tab_inquiry.py / tab_pricing.py) 계약:
+    #    - add_inquiry / get_user_inquiries / get_inquiry_stats
+    #    - update_inquiry_reply / delete_inquiry
+    #  멱등성 보장:
+    #    - inquiry_id UNIQUE INDEX + INSERT OR IGNORE
+    #  데이터 무결성:
+    #    - 빈 title/content DB 진입 차단
+    #    - 서버사이드 길이 검증 (프론트 우회 차단)
+    #  [v22.3 hotfix]
+    #    - "None"/"null"/"nan"/"-" 문자열 무효화
+    #    - 60초 자연 중복 차단 (inquiry_id 우회 방어)
+    # ═══════════════════════════════════════════
+
+    _INQUIRY_COLS = (
+        "id", "nickname", "title", "content", "created_at",
+        "inquiry_id", "category", "status", "admin_reply", "admin_reply_at",
+    )
+
+    # 서버사이드 입력 한계 (프론트 tab_inquiry.py와 동기화)
+    _MAX_TITLE_LEN   = 100
+    _MAX_CONTENT_LEN = 2000
+    _MIN_CONTENT_LEN = 5
+
+    # [v22.3 hotfix] 무효 텍스트 — 진짜 None / 빈 글뿐 아니라 문자열 "None" 등도 차단
+    _BAD_TEXT = frozenset({"", "none", "null", "nan", "-"})
+
+    @classmethod
+    def _clean_inquiry_text(cls, value) -> str:
+        """[v22.3 hotfix] 입력 텍스트 정규화 — 무효값은 빈 문자열로.
+
+        대응:
+          - 진짜 None → ""
+          - 빈 문자열 / 공백만 → ""
+          - 문자열 "None", "null", "NaN", "-" → ""  (대소문자 무관)
+        """
+        text = str(value or "").strip()
+        if text.lower() in cls._BAD_TEXT:
+            return ""
+        return text
+
+    def _row_to_inquiry(self, row):
+        d = dict(zip(self._INQUIRY_COLS, row))
+        d["email"] = d["id"]  # 프론트는 'email' 키도 사용
+        return d
+
+    def _close_cursor(self, cur):
+        if cur is not None:
+            try: cur.close()
+            except Exception: pass
+
+    # ── 조회 ──
+    def get_all_inquiries(self, *, limit=None, offset=0):
+        """관리자 — 전체 문의 (최신순). limit/offset 페이징 옵션."""
         try:
-            cols = ["id", "nickname", "title", "content", "created_at"]
-            rows = self._exec_sqlite("SELECT * FROM inquiries", fetch=True)
-            result = []
-            for r in rows:
-                d = dict(zip(cols, r))
-                d['email'] = d['id']
-                result.append(d)
-            return result
+            sql = (
+                f"SELECT {', '.join(self._INQUIRY_COLS)} FROM inquiries "
+                "ORDER BY created_at DESC"
+            )
+            params: tuple = ()
+            if limit is not None:
+                sql += " LIMIT ? OFFSET ?"
+                params = (int(limit), int(offset))
+            rows = self._exec_sqlite(sql, params, fetch=True) or []
+            return [self._row_to_inquiry(r) for r in rows]
         except Exception as e:
             _logger.warning(f"문의 조회 실패: {e}", exc_info=True)
             return []
 
-    def save_inquiries(self, items):
-        self._exec_sqlite("DELETE FROM inquiries")
-        if items:
-            for i in items:
-                self._exec_sqlite(
-                    "INSERT INTO inquiries VALUES (?, ?, ?, ?, ?)",
-                    (i.get('email', i.get('id')), i.get('nickname'), i.get('title'),
-                     i.get('content'), i.get('created_at'))
+    def get_user_inquiries(self, email: str):
+        """일반 유저 — 본인 문의만 (idx_inquiries_email 사용)."""
+        if not email:
+            return []
+        try:
+            rows = self._exec_sqlite(
+                f"SELECT {', '.join(self._INQUIRY_COLS)} FROM inquiries "
+                "WHERE id = ? ORDER BY created_at DESC",
+                (email,),
+                fetch=True,
+            ) or []
+            return [self._row_to_inquiry(r) for r in rows]
+        except Exception as e:
+            _logger.warning(f"내 문의 조회 실패: {e}")
+            return []
+
+    def get_inquiry_stats(self):
+        """관리자 통계 — total / open / in_progress / replied / closed."""
+        out = {"total": 0, "open": 0, "in_progress": 0, "replied": 0, "closed": 0}
+        try:
+            rows = self._exec_sqlite(
+                "SELECT COALESCE(NULLIF(TRIM(status),''), 'open'), COUNT(*) "
+                "FROM inquiries GROUP BY 1",
+                fetch=True,
+            ) or []
+            for status, cnt in rows:
+                out["total"] += cnt
+                if status in out:
+                    out[status] = cnt
+        except Exception as e:
+            _logger.warning(f"문의 통계 실패: {e}")
+        return out
+
+    # ── 등록 ──
+    def add_inquiry(self, *, inquiry_id, email, nickname, title, content,
+                    created_at, category: str = "general") -> bool:
+        """[v22.3] 신규 문의 등록 (3중 중복 방어).
+
+        중복 방어:
+          1. 무효 텍스트 차단 ("None"/"null"/"nan"/"-" 포함)
+          2. 60초 자연 중복 차단 (같은 email+title+content 내 직전 글)
+             → 프론트가 매번 새 inquiry_id 만들어도 막힘
+          3. inquiry_id UNIQUE INDEX + INSERT OR IGNORE
+
+        반환:
+            True  — 정상 등록
+            False — 중복 또는 입력 검증 실패
+        """
+        # [v22.3 hotfix] "None" 문자열도 무효화
+        title   = self._clean_inquiry_text(title)
+        content = self._clean_inquiry_text(content)
+
+        # 서버사이드 검증
+        if not inquiry_id or not title or not content:
+            return False
+        if len(title) > self._MAX_TITLE_LEN:
+            _logger.info(f"add_inquiry 거부: title 길이 {len(title)}")
+            return False
+        if len(content) < self._MIN_CONTENT_LEN or len(content) > self._MAX_CONTENT_LEN:
+            _logger.info(f"add_inquiry 거부: content 길이 {len(content)}")
+            return False
+
+        # [v22.3 hotfix] 60초 자연 중복 — inquiry_id 우회(매번 새 ID) 시에도 차단
+        try:
+            dup = self._exec_sqlite_one("""
+                SELECT inquiry_id FROM inquiries
+                 WHERE id = ?
+                   AND title = ?
+                   AND content = ?
+                   AND datetime(created_at) >= datetime(?, '-60 seconds')
+                 LIMIT 1
+            """, (email or "", title, content, created_at))
+            if dup:
+                _logger.info(
+                    f"add_inquiry 거부: 60초 내 동일 글 (기존 inquiry_id={dup[0]})"
                 )
+                return False
+        except Exception as e:
+            # 중복 검사 실패는 등록 자체를 막지 않음 (UNIQUE INDEX가 보호)
+            _logger.warning(f"60초 중복 검사 실패 (계속 진행): {e}")
+
+        cur = None
+        try:
+            cur = self._exec_sqlite(
+                """
+                INSERT OR IGNORE INTO inquiries
+                    (id, nickname, title, content, created_at,
+                     inquiry_id, category, status, admin_reply, admin_reply_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                """,
+                (email or "", nickname or "익명", title, content, created_at,
+                 inquiry_id, category or "general", "open", "", ""),
+            )
+            if getattr(cur, "rowcount", 0) == 0:
+                return False  # UNIQUE 충돌 = 더블 클릭
+            self._mark_gist_dirty("inquiries")
+            return True
+        except Exception as e:
+            _logger.warning(f"add_inquiry 실패: {e}", exc_info=True)
+            return False
+        finally:
+            self._close_cursor(cur)
+
+    # ── 답변 / 삭제 ──
+    def update_inquiry_reply(self, inquiry_id: str, reply: str) -> bool:
+        """관리자 답변 등록 → status를 'replied'로 자동 전환."""
+        reply = (reply or "").strip()
+        if not inquiry_id or not reply:
+            return False
+        cur = None
+        try:
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            cur = self._exec_sqlite(
+                "UPDATE inquiries SET admin_reply = ?, admin_reply_at = ?, "
+                "status = 'replied' WHERE inquiry_id = ?",
+                (reply, now_utc, inquiry_id),
+            )
+            if getattr(cur, "rowcount", 0) == 0:
+                return False
+            self._mark_gist_dirty("inquiries")
+            return True
+        except Exception as e:
+            _logger.warning(f"update_inquiry_reply 실패: {e}")
+            return False
+        finally:
+            self._close_cursor(cur)
+
+    def delete_inquiry(self, inquiry_id: str) -> bool:
+        """문의 삭제 (관리자 / 본인)."""
+        if not inquiry_id:
+            return False
+        cur = None
+        try:
+            cur = self._exec_sqlite(
+                "DELETE FROM inquiries WHERE inquiry_id = ?", (inquiry_id,)
+            )
+            if getattr(cur, "rowcount", 0) == 0:
+                return False
+            self._mark_gist_dirty("inquiries")
+            return True
+        except Exception as e:
+            _logger.warning(f"delete_inquiry 실패: {e}")
+            return False
+        finally:
+            self._close_cursor(cur)
+
+    # ── 호환 (DEPRECATED) ──
+    def save_inquiries(self, items, *, force: bool = False):
+        """[DEPRECATED v22.3] 통째 교체 — 데이터 손실 위험.
+
+        force=True 명시 호출만 허용. 신규 코드는 add_inquiry 사용.
+        """
+        _logger.warning(
+            "save_inquiries() DEPRECATED — add_inquiry/update_inquiry_reply 권장"
+        )
+        if not force:
+            existing = self._exec_sqlite_one("SELECT COUNT(*) FROM inquiries")
+            if existing and existing[0] > 0:
+                _logger.error(
+                    f"save_inquiries(force=False) 거부 — 기존 {existing[0]}건 보호"
+                )
+                return False
+
+        self._exec_sqlite("DELETE FROM inquiries")
+        for i in (items or []):
+            email   = i.get("email") or i.get("id") or ""
+            # [v22.3 hotfix-2] deprecated 경로에도 무효 텍스트 차단
+            title   = self._clean_inquiry_text(i.get("title"))
+            content = self._clean_inquiry_text(i.get("content"))
+            if not title or not content:
+                continue
+            created_at = i.get("created_at") or ""
+            iid = i.get("inquiry_id") or hashlib.sha256(
+                f"{email}|{title}|{content}|{created_at}".encode("utf-8")
+            ).hexdigest()[:16]
+            self._exec_sqlite(
+                """INSERT OR IGNORE INTO inquiries
+                   (id, nickname, title, content, created_at,
+                    inquiry_id, category, status, admin_reply, admin_reply_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (email, i.get("nickname") or "익명", title, content, created_at,
+                 iid, i.get("category") or "general",
+                 i.get("status") or "open",
+                 i.get("admin_reply") or "",
+                 i.get("admin_reply_at") or ""),
+            )
         self._mark_gist_dirty("inquiries")
         return True
+
+    # ── 진단 (관리자 전용) ──
+    def verify_inquiries_health(self) -> dict:
+        """[v22.3] 관리자 진단 — 무효/중복/스키마 상태 한눈에.
+
+        반환 dict 예시:
+          {
+            "schema_version": 2,
+            "total": 12,
+            "empty_title_or_content": 0,
+            "missing_inquiry_id": 0,
+            "duplicate_inquiry_id_groups": 0,
+            "indexes_ok": True,
+          }
+        """
+        out = {
+            "schema_version": self._get_schema_version("inquiries"),
+            "total": 0,
+            "empty_title_or_content": 0,
+            "missing_inquiry_id": 0,
+            "duplicate_inquiry_id_groups": 0,
+            "indexes_ok": False,
+        }
+        try:
+            r = self._exec_sqlite_one("SELECT COUNT(*) FROM inquiries")
+            out["total"] = int(r[0]) if r else 0
+
+            r = self._exec_sqlite_one("""
+                SELECT COUNT(*) FROM inquiries
+                 WHERE LOWER(TRIM(COALESCE(title, '')))   IN ('', 'none', 'null', 'nan', '-')
+                    OR LOWER(TRIM(COALESCE(content, ''))) IN ('', 'none', 'null', 'nan', '-')
+            """)
+            out["empty_title_or_content"] = int(r[0]) if r else 0
+
+            r = self._exec_sqlite_one("""
+                SELECT COUNT(*) FROM inquiries
+                 WHERE COALESCE(inquiry_id, '') = ''
+            """)
+            out["missing_inquiry_id"] = int(r[0]) if r else 0
+
+            rows = self._exec_sqlite("""
+                SELECT inquiry_id, COUNT(*) FROM inquiries
+                 WHERE COALESCE(inquiry_id, '') <> ''
+                 GROUP BY inquiry_id
+                HAVING COUNT(*) > 1
+            """, fetch=True) or []
+            out["duplicate_inquiry_id_groups"] = len(rows)
+
+            idx_rows = self._exec_sqlite(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='index' AND tbl_name='inquiries'",
+                fetch=True,
+            ) or []
+            idx_names = {r[0] for r in idx_rows}
+            out["indexes_ok"] = (
+                "idx_inquiries_inquiry_id" in idx_names
+                and "idx_inquiries_email" in idx_names
+                and "idx_inquiries_created_at" in idx_names
+            )
+        except Exception as e:
+            _logger.warning(f"verify_inquiries_health 실패: {e}")
+        return out
+
+    # ═══════════════════════════════════════════
+    #  Schema Versioning — 컴포넌트별 마이그레이션 관리
+    # ═══════════════════════════════════════════
+
+    _INQUIRY_TARGET_VERSION = 2
+
+    def _ensure_schema_versions_table(self):
+        self._exec_sqlite("""
+            CREATE TABLE IF NOT EXISTS schema_versions (
+                component  TEXT PRIMARY KEY,
+                version    INTEGER NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+        """)
+
+    def _get_schema_version(self, component: str) -> int:
+        self._ensure_schema_versions_table()
+        row = self._exec_sqlite_one(
+            "SELECT version FROM schema_versions WHERE component = ?",
+            (component,),
+        )
+        return int(row[0]) if row else 0
+
+    def _set_schema_version(self, component: str, version: int):
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self._exec_sqlite("""
+            INSERT INTO schema_versions (component, version, applied_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(component) DO UPDATE SET
+                version    = excluded.version,
+                applied_at = excluded.applied_at
+        """, (component, version, now_utc))
+
+    def _ensure_inquiry_indexes(self):
+        """[v22.3] 멱등 인덱스 — 매 재시작 호출 안전."""
+        # UNIQUE: idempotency 보장 (부분 인덱스로 NULL 다중 허용)
+        self._exec_sqlite(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_inquiries_inquiry_id "
+            "ON inquiries(inquiry_id) WHERE COALESCE(inquiry_id, '') <> ''"
+        )
+        # 쿼리 성능: get_user_inquiries(email)
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_inquiries_email "
+            "ON inquiries(id)"
+        )
+        # 쿼리 성능: ORDER BY created_at DESC
+        self._exec_sqlite(
+            "CREATE INDEX IF NOT EXISTS idx_inquiries_created_at "
+            "ON inquiries(created_at DESC)"
+        )
+
+    def _cleanup_invalid_inquiries(self) -> int:
+        """[v22.3 hotfix] 무효/중복 문의 정리 — fast path에서도 호출.
+
+        v2 마이그레이션 후 Gist에 폴루션이 새로 들어오는 경우를 위해
+        매 재시작마다 실행 (LOWER(TRIM(...))는 인덱스 안 타지만
+        평소엔 0~수 건만 매치되므로 비용 무시 가능).
+
+        [v22.3 hotfix-2] 정리 후 Gist dirty 마킹 — 로컬/Gist 동기화 보장.
+
+        반환: 삭제된 행 수 (0이면 dirty 마킹 스킵 → 무의미한 Gist 업로드 방지)
+        """
+        deleted_total = 0
+        try:
+            before = self._exec_sqlite_one("SELECT COUNT(*) FROM inquiries")
+            before_count = before[0] if before else 0
+
+            # 1. 무효 텍스트 정리 — "None" / "null" / "nan" / "-" 포함
+            self._exec_sqlite("""
+                DELETE FROM inquiries
+                 WHERE LOWER(TRIM(COALESCE(title, '')))   IN ('', 'none', 'null', 'nan', '-')
+                    OR LOWER(TRIM(COALESCE(content, ''))) IN ('', 'none', 'null', 'nan', '-')
+            """)
+            # 2. inquiry_id 중복 잔재 — fast path 진입 후 새로 생긴 중복 정리
+            self._exec_sqlite("""
+                DELETE FROM inquiries
+                 WHERE COALESCE(inquiry_id, '') <> ''
+                   AND rowid NOT IN (
+                       SELECT MIN(rowid) FROM inquiries
+                        WHERE COALESCE(inquiry_id, '') <> ''
+                        GROUP BY inquiry_id
+                   )
+            """)
+
+            after = self._exec_sqlite_one("SELECT COUNT(*) FROM inquiries")
+            after_count = after[0] if after else 0
+            deleted_total = max(0, before_count - after_count)
+
+            # 정리된 결과를 Gist에 반영 — 안 그러면 다음 sync에서 폴루션이 다시 내려옴
+            if deleted_total > 0:
+                self._mark_gist_dirty("inquiries")
+                _logger.info(
+                    f"[cleanup-inquiries] {before_count} → {after_count} "
+                    f"(-{deleted_total}) → Gist dirty 마킹"
+                )
+        except Exception as e:
+            _logger.warning(f"[cleanup-inquiries] 실패: {e}")
+
+        return deleted_total
+
+    def _migrate_inquiries_to_v2(self):
+        """[v22.3] inquiries 5컬럼 → 10컬럼 in-place 마이그레이션.
+
+        ─────────────────────────────────────────
+        멱등성 3중 안전망:
+          1. schema_versions 가드 — 빠른 경로 (1회만 실행)
+          2. ALTER/INDEX는 IF NOT EXISTS / 컬럼 존재 체크
+          3. DELETE/UPDATE는 조건절로 0행 시 no-op
+        [v22.3 hotfix]
+          fast path에서도 _cleanup_invalid_inquiries 실행 →
+          v2 도달 후 Gist에서 들어온 "None" 폴루션 즉시 청소
+        ─────────────────────────────────────────
+        """
+        # ── [빠른 경로] 이미 v2: cleanup + 인덱스만 보강하고 종료 ──
+        if self._get_schema_version("inquiries") >= self._INQUIRY_TARGET_VERSION:
+            self._cleanup_invalid_inquiries()  # [hotfix] 매 재시작 정리
+            self._ensure_inquiry_indexes()
+            return
+
+        _logger.info("[migrate-v2] inquiries v1 → v2 시작")
+
+        # 1. 현재 컬럼 확인
+        try:
+            rows = self._exec_sqlite("PRAGMA table_info(inquiries)", fetch=True)
+        except Exception as e:
+            _logger.error(f"[migrate-v2] PRAGMA 실패 → 중단: {e}")
+            return
+        existing_cols = {r[1] for r in rows}
+
+        # 2. 빠진 v2 컬럼 추가
+        v2_cols = [
+            ("inquiry_id",     "TEXT"),
+            ("category",       "TEXT NOT NULL DEFAULT 'general'"),
+            ("status",         "TEXT NOT NULL DEFAULT 'open'"),
+            ("admin_reply",    "TEXT NOT NULL DEFAULT ''"),
+            ("admin_reply_at", "TEXT NOT NULL DEFAULT ''"),
+        ]
+        for col, ddl in v2_cols:
+            if col not in existing_cols:
+                try:
+                    self._exec_sqlite(
+                        f"ALTER TABLE inquiries ADD COLUMN {col} {ddl}"
+                    )
+                    _logger.info(f"[migrate-v2] +{col}")
+                except Exception as e:
+                    _logger.warning(f"[migrate-v2] {col} ADD 실패: {e}")
+
+        # 3. 빈 / 무효 텍스트 정리 (📌 None 문의 + "None" 문자열 동시 처리)
+        try:
+            before = self._exec_sqlite_one("SELECT COUNT(*) FROM inquiries")
+            self._cleanup_invalid_inquiries()
+            after = self._exec_sqlite_one("SELECT COUNT(*) FROM inquiries")
+            if before and after and before[0] != after[0]:
+                _logger.info(
+                    f"[migrate-v2] 무효 문의 정리 {before[0]} → {after[0]} "
+                    f"(-{before[0] - after[0]})"
+                )
+        except Exception as e:
+            _logger.warning(f"[migrate-v2] 무효 글 정리 실패: {e}")
+
+        # 4. 레거시 행에 deterministic inquiry_id 백필
+        try:
+            legacy = self._exec_sqlite("""
+                SELECT rowid, COALESCE(id,''), COALESCE(title,''),
+                       COALESCE(content,''), COALESCE(created_at,'')
+                  FROM inquiries
+                 WHERE COALESCE(inquiry_id, '') = ''
+            """, fetch=True) or []
+            for rowid, email, title, content, created_at in legacy:
+                seed = f"{email}|{title}|{content}|{created_at}"
+                iid = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+                self._exec_sqlite(
+                    "UPDATE inquiries SET inquiry_id = ? "
+                    "WHERE rowid = ? AND COALESCE(inquiry_id,'') = ''",
+                    (iid, rowid),
+                )
+            if legacy:
+                _logger.info(f"[migrate-v2] inquiry_id 백필 {len(legacy)}건")
+        except Exception as e:
+            _logger.warning(f"[migrate-v2] 백필 실패: {e}")
+
+        # 5. inquiry_id 중복 제거 (가장 빠른 rowid만 유지)
+        try:
+            self._exec_sqlite("""
+                DELETE FROM inquiries
+                 WHERE COALESCE(inquiry_id, '') <> ''
+                   AND rowid NOT IN (
+                       SELECT MIN(rowid) FROM inquiries
+                        WHERE COALESCE(inquiry_id, '') <> ''
+                        GROUP BY inquiry_id
+                   )
+            """)
+        except Exception as e:
+            _logger.warning(f"[migrate-v2] 중복 제거 실패: {e}")
+
+        # 6. 인덱스 (UNIQUE 포함) 생성
+        self._ensure_inquiry_indexes()
+
+        # 7. 스키마 버전 마킹 — 다음 재시작부터 빠른 경로
+        self._set_schema_version("inquiries", self._INQUIRY_TARGET_VERSION)
+
+        # 8. 정리 결과를 Gist에도 전파
+        self._mark_gist_dirty("inquiries")
+
+        _logger.info("[migrate-v2] 완료 → schema_versions['inquiries'] = 2")
 
     # ═══════════════════════════════════════════
     #  OLAP Methods — DuckDB (변경 없음)
