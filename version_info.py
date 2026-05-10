@@ -15,6 +15,22 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.3.2",
+        "date": "2026-05-10",
+        "type": "patch",
+        "title": "v22.3.2 — 운영 안정성 핫픽스 4종 + v23 추천 엔진 재설계 시작",
+        "items": [
+            "🚨 **DB 컬럼 밀림 핫픽스:** Gist 동기화에서 SELECT * + ALTER TABLE 후 컬럼 순서 어긋나 inquiries JSON이 통째로 밀리던 치명 버그 해결 — 명시 컬럼 SELECT로 변경, 데이터 무결성 보장",
+            "🛡️ **inquiries v2 마이그레이션:** 5컬럼 → 10컬럼 in-place 자동 마이그레이션 + inquiry_id UNIQUE INDEX + INSERT OR IGNORE 멱등화 + 'None'/'null'/'nan' 문자열 자동 차단 — 'None / None' 문의 160건 자동 증식 버그 해결",
+            "🔬 **CI Monotonicity 정상화:** declared_wr_top_pick(상위 점수)와 realized_wr(전체 평균) 비교로 영구 양수 gap 발생하던 HARD gate 영구 FAIL → 모집단 일치 매칭 + 표본 가드(MIN_N=30) + active fallback SOFT 강등으로 GREEN 회복",
+            "📊 **추천 데이터 신선화:** main의 May 8까지 데이터 일제 동기화 (162 파일) — RR_NOW_TP1 hard gate 자연 통과, calibration 정상화",
+            "🧠 **v23 추천 엔진 4-Tier 재설계 시작 (Phase 1):** 🟢즉시진입(NOW_BUY) / 🟡매집후보(ACCUMULATION_READY) / 🟠눌림대기(PULLBACK_WAIT) / 🔴추격금지(NO_CHASE) 분류 도입 준비 — 'Top 3 강제' 제거, 무사용자 노출로 검증 후 단계 도입",
+            "🔭 **v23 신호 수집 시작 (V23_* 컬럼):** ATR_Pct / OBV_Slope / Upper_Shadow_Ratio + 커버리지 추적 컬럼 추가 — 추천 로직 변경 0, ML_SCORE 영향 0, 사용자 UI 노출 0 (Phase 5까지 데이터만 누적)",
+            "📐 **점수 변화:** PR-A 안전성 96점 (helper 분리 + ML 독립 + V23_ prefix + 종목코드 zfill 정규화 + read-only 검증)",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.2",
         "date": "2026-04-29",
         "type": "patch",
