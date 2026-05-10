@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260507",
+  "generated_at": "2026-05-07 22:15:40",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "018880",
+      "name": "한온시스템",
+      "route": "ARMED",
+      "score": 91.1,
+      "close": 4900,
+      "entry": 4900,
+      "stop": 4335,
+      "target1": 5580,
+      "target2": 6060,
+      "est_win_rate": 0.562,
+      "rr": 1.2,
+      "sector": "조선·기계·설비",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/018880"
+    },
+    {
+      "rank": 2,
+      "code": "050890",
+      "name": "쏠리드",
+      "route": "ARMED",
+      "score": 88.3,
+      "close": 18850,
+      "entry": 18850,
+      "stop": 16020,
+      "target1": 20900,
+      "target2": 24450,
+      "est_win_rate": 0.539,
+      "rr": 0.7,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/050890"
+    },
+    {
+      "rank": 3,
+      "code": "017550",
+      "name": "수산세보틱스",
+      "route": "ATTACK",
+      "score": 86.5,
+      "close": 3860,
+      "entry": 3365,
+      "stop": 2855,
+      "target1": 4045,
+      "target2": 4560,
+      "est_win_rate": 0.539,
+      "rr": 1.3,
+      "sector": "조선·기계·설비",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/017550"
+    }
+  ]
+}

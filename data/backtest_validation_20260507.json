@@ -1,0 +1,1098 @@
+{
+  "generated_at": "2026-05-07T22:15:45",
+  "version": "v3.7.14",
+  "horizon_bdays": 10,
+  "trade_cost_pct": 0.22,
+  "days_covered": 51,
+  "ohlc_coverage_note": "OHLC parquet 종목수: 1514 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
+  "methodology": {
+    "horizon_days": 10,
+    "fill_window_days": 3,
+    "fee_pct_roundtrip": 0.22,
+    "max_positions_top1": 1,
+    "max_positions_top3": 3,
+    "dedup_same_ticker": true,
+    "reentry_after_exit": true,
+    "selection_mode": "top1_first_then_top3_fallback",
+    "date_range": [
+      "2026-02-26",
+      "2026-05-07"
+    ],
+    "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
+  },
+  "daily_top3_backtest": {
+    "n": 78,
+    "n_all_picks": 94,
+    "n_not_filled": 16,
+    "fill_rate": 0.8298,
+    "tp1_rate": 0.2692,
+    "stop_rate": 0.3077,
+    "open_rate": 0.4231,
+    "avg_tp1": 18.92,
+    "avg_stop": -10.22,
+    "avg_open": -1.92,
+    "avg_all": 1.13,
+    "ev": 0.91,
+    "ohlc_coverage": 1.0
+  },
+  "by_label_top3": {
+    "🏆 최강": {
+      "n": 78,
+      "n_all_picks": 94,
+      "n_not_filled": 16,
+      "fill_rate": 0.8298,
+      "tp1_rate": 0.2692,
+      "stop_rate": 0.3077,
+      "open_rate": 0.4231,
+      "avg_tp1": 18.92,
+      "avg_stop": -10.22,
+      "avg_open": -1.92,
+      "avg_all": 1.13,
+      "ev": 0.91,
+      "ohlc_coverage": 1.0
+    }
+  },
+  "daily_top1_backtest": {
+    "n": 33,
+    "n_all_picks": 38,
+    "n_not_filled": 5,
+    "fill_rate": 0.8684,
+    "tp1_rate": 0.2727,
+    "stop_rate": 0.303,
+    "open_rate": 0.4242,
+    "avg_tp1": 22.77,
+    "avg_stop": -9.75,
+    "avg_open": -1.86,
+    "avg_all": 2.47,
+    "ev": 2.25,
+    "ohlc_coverage": 1.0
+  },
+  "all_trades_top1": [
+    {
+      "date": "20260227",
+      "code": "309710",
+      "name": "아이티켐",
+      "sector": "기초 의약물질 제조업",
+      "label": "🏆 최강",
+      "rank_score": 65.71,
+      "entry": 37200.0,
+      "tp1": 42900.0,
+      "stop": 35300.0,
+      "outcome": "LOSS",
+      "exit_price": 35300.0,
+      "days_held": 1,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-03-03",
+      "ret_pct": -5.11,
+      "net_pct": -5.33
+    },
+    {
+      "date": "20260302",
+      "code": "309710",
+      "name": "아이티켐",
+      "sector": "기초 의약물질 제조업",
+      "label": "🏆 최강",
+      "rank_score": 65.71,
+      "entry": 37200.0,
+      "tp1": 42900.0,
+      "stop": 35300.0,
+      "outcome": "LOSS",
+      "exit_price": 35300.0,
+      "days_held": 1,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-03-03",
+      "ret_pct": -5.11,
+      "net_pct": -5.33
+    },
+    {
+      "date": "20260313",
+      "code": "003310",
+      "name": "대주산업",
+      "sector": "동물용 사료 및 조제식품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 57.78,
+      "entry": 4140.0,
+      "tp1": 4945.0,
+      "stop": 3515.0,
+      "outcome": "LOSS",
+      "exit_price": 3515.0,
+      "days_held": 8,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-03-16",
+      "ret_pct": -15.1,
+      "net_pct": -15.32
+    },
+    {
+      "date": "20260317",
+      "code": "327260",
+      "name": "RF머트리얼즈",
+      "sector": "전자부품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 76.35,
+      "entry": 56300.0,
+      "tp1": 70500.0,
+      "stop": 47850.0,
+      "outcome": "WIN",
+      "exit_price": 70500.0,
+      "days_held": 3,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-03-18",
+      "ret_pct": 25.22,
+      "net_pct": 25.0
+    },
+    {
+      "date": "20260318",
+      "code": "327260",
+      "name": "RF머트리얼즈",
+      "sector": "전자부품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 67.63,
+      "entry": 55700.0,
+      "tp1": 70500.0,
+      "stop": 47300.0,
+      "outcome": "WIN",
+      "exit_price": 70500.0,
+      "days_held": 2,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-03-19",
+      "ret_pct": 26.57,
+      "net_pct": 26.35
+    },
+    {
+      "date": "20260319",
+      "code": "448900",
+      "name": "한국피아이엠",
+      "sector": "자동차 신품 부품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 63.75,
+      "entry": 112500.0,
+      "tp1": 178400.0,
+      "stop": 95600.0,
+      "outcome": "LOSS",
+      "exit_price": 95600.0,
+      "days_held": 2,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-03-23",
+      "ret_pct": -15.02,
+      "net_pct": -15.24
+    },
+    {
+      "date": "20260320",
+      "code": "226950",
+      "name": "올릭스",
+      "sector": "자연과학 및 공학 연구개발업",
+      "label": "🏆 최강",
+      "rank_score": 60.44,
+      "entry": 186900.0,
+      "tp1": 217000.0,
+      "stop": 169500.0,
+      "outcome": "LOSS",
+      "exit_price": 169500.0,
+      "days_held": 1,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-03-23",
+      "ret_pct": -9.31,
+      "net_pct": -9.53
+    },
+    {
+      "date": "20260323",
+      "code": "278470",
+      "name": "에이피알",
+      "sector": "기타 화학제품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 76.8,
+      "entry": 324500.0,
+      "tp1": 377000.0,
+      "stop": 290500.0,
+      "outcome": "NOT_FILLED",
+      "exit_price": 0.0,
+      "days_held": 0,
+      "method": "not_filled_gap_up",
+      "fill_date": "",
+      "ret_pct": 0.0,
+      "net_pct": 0.0
+    },
+    {
+      "date": "20260324",
+      "code": "298020",
+      "name": "효성티앤씨",
+      "sector": "화학섬유 제조업",
+      "label": "🏆 최강",
+      "rank_score": 44.14,
+      "entry": 392000.0,
+      "tp1": 440000.0,
+      "stop": 333000.0,
+      "outcome": "OPEN",
+      "exit_price": 409000.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-03-26",
+      "ret_pct": 4.34,
+      "net_pct": 4.12
+    },
+    {
+      "date": "20260326",
+      "code": "098070",
+      "name": "한텍",
+      "sector": "일반 목적용 기계 제조업",
+      "label": "🏆 최강",
+      "rank_score": 66.71,
+      "entry": 45900.0,
+      "tp1": 62200.0,
+      "stop": 39000.0,
+      "outcome": "OPEN",
+      "exit_price": 45250.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-03-27",
+      "ret_pct": -1.42,
+      "net_pct": -1.64
+    },
+    {
+      "date": "20260327",
+      "code": "356860",
+      "name": "티엘비",
+      "sector": "전자부품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 67.57,
+      "entry": 73100.0,
+      "tp1": 82600.0,
+      "stop": 62100.0,
+      "outcome": "LOSS",
+      "exit_price": 62100.0,
+      "days_held": 2,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-03-30",
+      "ret_pct": -15.05,
+      "net_pct": -15.27
+    },
+    {
+      "date": "20260330",
+      "code": "078350",
+      "name": "한양디지텍",
+      "sector": "반도체 제조업",
+      "label": "🏆 최강",
+      "rank_score": 69.98,
+      "entry": 29650.0,
+      "tp1": 35500.0,
+      "stop": 25200.0,
+      "outcome": "OPEN",
+      "exit_price": 28450.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-03-31",
+      "ret_pct": -4.05,
+      "net_pct": -4.27
+    },
+    {
+      "date": "20260331",
+      "code": "078350",
+      "name": "한양디지텍",
+      "sector": "반도체 제조업",
+      "label": "🏆 최강",
+      "rank_score": 69.03,
+      "entry": 27950.0,
+      "tp1": 35500.0,
+      "stop": 23750.0,
+      "outcome": "NOT_FILLED",
+      "exit_price": 0.0,
+      "days_held": 0,
+      "method": "not_filled_gap_up",
+      "fill_date": "",
+      "ret_pct": 0.0,
+      "net_pct": 0.0
+    },
+    {
+      "date": "20260401",
+      "code": "001780",
+      "name": "알루코",
+      "sector": "1차 비철금속 제조업",
+      "label": "🏆 최강",
+      "rank_score": 77.49,
+      "entry": 2415.0,
+      "tp1": 2740.0,
+      "stop": 2105.0,
+      "outcome": "NOT_FILLED",
+      "exit_price": 0.0,
+      "days_held": 0,
+      "method": "not_filled_gap_up",
+      "fill_date": "",
+      "ret_pct": 0.0,
+      "net_pct": 0.0
+    },
+    {
+      "date": "20260402",
+      "code": "001780",
+      "name": "알루코",
+      "sector": "1차 비철금속 제조업",
+      "label": "🏆 최강",
+      "rank_score": 72.72,
+      "entry": 2385.0,
+      "tp1": 2740.0,
+      "stop": 2075.0,
+      "outcome": "NOT_FILLED",
+      "exit_price": 0.0,
+      "days_held": 0,
+      "method": "not_filled_gap_up",
+      "fill_date": "",
+      "ret_pct": 0.0,
+      "net_pct": 0.0
+    },
+    {
+      "date": "20260403",
+      "code": "054920",
+      "name": "한컴위드",
+      "sector": "소프트웨어 개발 및 공급업",
+      "label": "🏆 최강",
+      "rank_score": 66.91,
+      "entry": 4850.0,
+      "tp1": 6010.0,
+      "stop": 4120.0,
+      "outcome": "WIN",
+      "exit_price": 6010.0,
+      "days_held": 8,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-04-06",
+      "ret_pct": 23.92,
+      "net_pct": 23.7
+    },
+    {
+      "date": "20260406",
+      "code": "289930",
+      "name": "웨이비스",
+      "sector": "반도체 제조업",
+      "label": "🏆 최강",
+      "rank_score": 48.8,
+      "entry": 19600.0,
+      "tp1": 21300.0,
+      "stop": 16660.0,
+      "outcome": "OPEN",
+      "exit_price": 19020.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-07",
+      "ret_pct": -2.96,
+      "net_pct": -3.18
+    },
+    {
+      "date": "20260408",
+      "code": "054920",
+      "name": "한컴위드",
+      "sector": "소프트웨어 개발 및 공급업",
+      "label": "🏆 최강",
+      "rank_score": 66.91,
+      "entry": 4850.0,
+      "tp1": 6010.0,
+      "stop": 4120.0,
+      "outcome": "WIN",
+      "exit_price": 6010.0,
+      "days_held": 5,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-04-09",
+      "ret_pct": 23.92,
+      "net_pct": 23.7
+    },
+    {
+      "date": "20260409",
+      "code": "373220",
+      "name": "LG에너지솔루션",
+      "sector": "일차전지 및 이차전지 제조업",
+      "label": "🏆 최강",
+      "rank_score": 61.07,
+      "entry": 414500.0,
+      "tp1": 491000.0,
+      "stop": 376500.0,
+      "outcome": "WIN",
+      "exit_price": 491500.0,
+      "days_held": 9,
+      "method": "ohlc_gap_up",
+      "fill_date": "2026-04-10",
+      "ret_pct": 18.58,
+      "net_pct": 18.36
+    },
+    {
+      "date": "20260410",
+      "code": "175330",
+      "name": "JB금융지주",
+      "sector": "기타 금융업",
+      "label": "🏆 최강",
+      "rank_score": 72.85,
+      "entry": 30950.0,
+      "tp1": 38500.0,
+      "stop": 27750.0,
+      "outcome": "OPEN",
+      "exit_price": 28700.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-13",
+      "ret_pct": -7.27,
+      "net_pct": -7.49
+    },
+    {
+      "date": "20260413",
+      "code": "175330",
+      "name": "JB금융지주",
+      "sector": "기타 금융업",
+      "label": "🏆 최강",
+      "rank_score": 60.06,
+      "entry": 31150.0,
+      "tp1": 38500.0,
+      "stop": 27750.0,
+      "outcome": "LOSS",
+      "exit_price": 27750.0,
+      "days_held": 10,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-04-14",
+      "ret_pct": -10.91,
+      "net_pct": -11.13
+    },
+    {
+      "date": "20260414",
+      "code": "139130",
+      "name": "iM금융지주",
+      "sector": "기타 금융업",
+      "label": "🏆 최강",
+      "rank_score": 65.66,
+      "entry": 18290.0,
+      "tp1": 22000.0,
+      "stop": 16900.0,
+      "outcome": "OPEN",
+      "exit_price": 19280.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-15",
+      "ret_pct": 5.41,
+      "net_pct": 5.19
+    },
+    {
+      "date": "20260415",
+      "code": "252990",
+      "name": "샘씨엔에스",
+      "sector": "전자부품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 66.53,
+      "entry": 10650.0,
+      "tp1": 13010.0,
+      "stop": 9260.0,
+      "outcome": "WIN",
+      "exit_price": 13010.0,
+      "days_held": 3,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-04-16",
+      "ret_pct": 22.16,
+      "net_pct": 21.94
+    },
+    {
+      "date": "20260416",
+      "code": "017800",
+      "name": "현대엘리베이터",
+      "sector": "일반 목적용 기계 제조업",
+      "label": "🏆 최강",
+      "rank_score": 76.39,
+      "entry": 99500.0,
+      "tp1": 113400.0,
+      "stop": 92000.0,
+      "outcome": "OPEN",
+      "exit_price": 98700.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-17",
+      "ret_pct": -0.8,
+      "net_pct": -1.02
+    },
+    {
+      "date": "20260417",
+      "code": "096770",
+      "name": "SK이노베이션",
+      "sector": "석유 정제품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 61.48,
+      "entry": 129400.0,
+      "tp1": 149000.0,
+      "stop": 118000.0,
+      "outcome": "WIN",
+      "exit_price": 149000.0,
+      "days_held": 8,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-04-20",
+      "ret_pct": 15.15,
+      "net_pct": 14.93
+    },
+    {
+      "date": "20260420",
+      "code": "017800",
+      "name": "현대엘리베이터",
+      "sector": "일반 목적용 기계 제조업",
+      "label": "🏆 최강",
+      "rank_score": 60.62,
+      "entry": 102200.0,
+      "tp1": 116500.0,
+      "stop": 94600.0,
+      "outcome": "LOSS",
+      "exit_price": 94600.0,
+      "days_held": 4,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-04-21",
+      "ret_pct": -7.44,
+      "net_pct": -7.66
+    },
+    {
+      "date": "20260421",
+      "code": "310210",
+      "name": "보로노이",
+      "sector": "자연과학 및 공학 연구개발업",
+      "label": "🏆 최강",
+      "rank_score": 66.45,
+      "entry": 308000.0,
+      "tp1": 371500.0,
+      "stop": 261500.0,
+      "outcome": "OPEN",
+      "exit_price": 295000.0,
+      "days_held": 10,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-22",
+      "ret_pct": -4.22,
+      "net_pct": -4.44
+    },
+    {
+      "date": "20260422",
+      "code": "310210",
+      "name": "보로노이",
+      "sector": "자연과학 및 공학 연구개발업",
+      "label": "🏆 최강",
+      "rank_score": 62.33,
+      "entry": 298000.0,
+      "tp1": 371500.0,
+      "stop": 253000.0,
+      "outcome": "OPEN",
+      "exit_price": 295000.0,
+      "days_held": 9,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-23",
+      "ret_pct": -1.01,
+      "net_pct": -1.23
+    },
+    {
+      "date": "20260423",
+      "code": "307180",
+      "name": "아이엘",
+      "sector": "전구 및 조명장치 제조업",
+      "label": "🏆 최강",
+      "rank_score": 83.63,
+      "entry": 5670.0,
+      "tp1": 6580.0,
+      "stop": 4815.0,
+      "outcome": "WIN",
+      "exit_price": 6700.0,
+      "days_held": 6,
+      "method": "ohlc_gap_up",
+      "fill_date": "2026-04-24",
+      "ret_pct": 18.17,
+      "net_pct": 17.95
+    },
+    {
+      "date": "20260424",
+      "code": "044490",
+      "name": "태웅",
+      "sector": "기타 금속 가공제품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 66.7,
+      "entry": 53300.0,
+      "tp1": 67500.0,
+      "stop": 45300.0,
+      "outcome": "OPEN",
+      "exit_price": 53800.0,
+      "days_held": 6,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-28",
+      "ret_pct": 0.94,
+      "net_pct": 0.72
+    },
+    {
+      "date": "20260427",
+      "code": "044490",
+      "name": "태웅",
+      "sector": "기타 금속 가공제품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 66.97,
+      "entry": 54500.0,
+      "tp1": 67500.0,
+      "stop": 46400.0,
+      "outcome": "OPEN",
+      "exit_price": 53800.0,
+      "days_held": 6,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-04-28",
+      "ret_pct": -1.28,
+      "net_pct": -1.5
+    },
+    {
+      "date": "20260428",
+      "code": "327260",
+      "name": "RF머트리얼즈",
+      "sector": "전자부품 제조업",
+      "label": "🏆 최강",
+      "rank_score": 60.5,
+      "entry": 89100.0,
+      "tp1": 116900.0,
+      "stop": 75700.0,
+      "outcome": "WIN",
+      "exit_price": 116900.0,
+      "days_held": 5,
+      "method": "ohlc_high_touch",
+      "fill_date": "2026-04-29",
+      "ret_pct": 31.2,
+      "net_pct": 30.98
+    },
+    {
+      "date": "20260429",
+      "code": "078930",
+      "name": "GS",
+      "sector": "기타 금융업",
+      "label": "🏆 최강",
+      "rank_score": 79.21,
+      "entry": 80900.0,
+      "tp1": 91600.0,
+      "stop": 74700.0,
+      "outcome": "OPEN",
+      "exit_price": 78600.0,
+      "days_held": 3,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-05-04",
+      "ret_pct": -2.84,
+      "net_pct": -3.06
+    },
+    {
+      "date": "20260430",
+      "code": "078930",
+      "name": "GS",
+      "sector": "기타 금융업",
+      "label": "🏆 최강",
+      "rank_score": 77.35,
+      "entry": 81900.0,
+      "tp1": 92500.0,
+      "stop": 76000.0,
+      "outcome": "LOSS",
+      "exit_price": 76000.0,
+      "days_held": 2,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-05-04",
+      "ret_pct": -7.2,
+      "net_pct": -7.42
+    },
+    {
+      "date": "20260501",
+      "code": "078930",
+      "name": "GS",
+      "sector": "기타 금융업",
+      "label": "🏆 최강",
+      "rank_score": 77.29,
+      "entry": 81900.0,
+      "tp1": 92500.0,
+      "stop": 76000.0,
+      "outcome": "LOSS",
+      "exit_price": 76000.0,
+      "days_held": 2,
+      "method": "ohlc_low_touch",
+      "fill_date": "2026-05-04",
+      "ret_pct": -7.2,
+      "net_pct": -7.42
+    },
+    {
+      "date": "20260504",
+      "code": "011170",
+      "name": "롯데케미칼",
+      "sector": "기초 화학물질 제조업",
+      "label": "🏆 최강",
+      "rank_score": 81.55,
+      "entry": 106200.0,
+      "tp1": 119500.0,
+      "stop": 93500.0,
+      "outcome": "OPEN",
+      "exit_price": 100400.0,
+      "days_held": 2,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-05-06",
+      "ret_pct": -5.46,
+      "net_pct": -5.68
+    },
+    {
+      "date": "20260505",
+      "code": "011170",
+      "name": "롯데케미칼",
+      "sector": "기초 화학물질 제조업",
+      "label": "🏆 최강",
+      "rank_score": 81.26,
+      "entry": 106200.0,
+      "tp1": 119500.0,
+      "stop": 93500.0,
+      "outcome": "OPEN",
+      "exit_price": 100400.0,
+      "days_held": 2,
+      "method": "ohlc_horizon_close",
+      "fill_date": "2026-05-06",
+      "ret_pct": -5.46,
+      "net_pct": -5.68
+    },
+    {
+      "date": "20260506",
+      "code": "042510",
+      "name": "라온시큐어",
+      "sector": "소프트웨어 개발 및 공급업",
+      "label": "🏆 최강",
+      "rank_score": 78.08,
+      "entry": 13370.0,
+      "tp1": 16960.0,
+      "stop": 11360.0,
+      "outcome": "NOT_FILLED",
+      "exit_price": 0.0,
+      "days_held": 0,
+      "method": "not_filled_gap_up",
+      "fill_date": "",
+      "ret_pct": 0.0,
+      "net_pct": 0.0
+    }
+  ],
+  "daily_picks_log_top1": [
+    {
+      "date": "20260227",
+      "n_picked": 1,
+      "codes": [
+        "309710"
+      ]
+    },
+    {
+      "date": "20260302",
+      "n_picked": 1,
+      "codes": [
+        "309710"
+      ]
+    },
+    {
+      "date": "20260303",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260304",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260305",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260306",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260309",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260310",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260311",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260312",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260313",
+      "n_picked": 1,
+      "codes": [
+        "003310"
+      ]
+    },
+    {
+      "date": "20260316",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260317",
+      "n_picked": 1,
+      "codes": [
+        "327260"
+      ]
+    },
+    {
+      "date": "20260318",
+      "n_picked": 1,
+      "codes": [
+        "327260"
+      ]
+    },
+    {
+      "date": "20260319",
+      "n_picked": 1,
+      "codes": [
+        "448900"
+      ]
+    },
+    {
+      "date": "20260320",
+      "n_picked": 1,
+      "codes": [
+        "226950"
+      ]
+    },
+    {
+      "date": "20260323",
+      "n_picked": 1,
+      "codes": [
+        "278470"
+      ]
+    },
+    {
+      "date": "20260324",
+      "n_picked": 1,
+      "codes": [
+        "298020"
+      ]
+    },
+    {
+      "date": "20260325",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260326",
+      "n_picked": 1,
+      "codes": [
+        "098070"
+      ]
+    },
+    {
+      "date": "20260327",
+      "n_picked": 1,
+      "codes": [
+        "356860"
+      ]
+    },
+    {
+      "date": "20260330",
+      "n_picked": 1,
+      "codes": [
+        "078350"
+      ]
+    },
+    {
+      "date": "20260331",
+      "n_picked": 1,
+      "codes": [
+        "078350"
+      ]
+    },
+    {
+      "date": "20260401",
+      "n_picked": 1,
+      "codes": [
+        "001780"
+      ]
+    },
+    {
+      "date": "20260402",
+      "n_picked": 1,
+      "codes": [
+        "001780"
+      ]
+    },
+    {
+      "date": "20260403",
+      "n_picked": 1,
+      "codes": [
+        "054920"
+      ]
+    },
+    {
+      "date": "20260406",
+      "n_picked": 1,
+      "codes": [
+        "289930"
+      ]
+    },
+    {
+      "date": "20260407",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260408",
+      "n_picked": 1,
+      "codes": [
+        "054920"
+      ]
+    },
+    {
+      "date": "20260409",
+      "n_picked": 1,
+      "codes": [
+        "373220"
+      ]
+    },
+    {
+      "date": "20260410",
+      "n_picked": 1,
+      "codes": [
+        "175330"
+      ]
+    },
+    {
+      "date": "20260413",
+      "n_picked": 1,
+      "codes": [
+        "175330"
+      ]
+    },
+    {
+      "date": "20260414",
+      "n_picked": 1,
+      "codes": [
+        "139130"
+      ]
+    },
+    {
+      "date": "20260415",
+      "n_picked": 1,
+      "codes": [
+        "252990"
+      ]
+    },
+    {
+      "date": "20260416",
+      "n_picked": 1,
+      "codes": [
+        "017800"
+      ]
+    },
+    {
+      "date": "20260417",
+      "n_picked": 1,
+      "codes": [
+        "096770"
+      ]
+    },
+    {
+      "date": "20260420",
+      "n_picked": 1,
+      "codes": [
+        "017800"
+      ]
+    },
+    {
+      "date": "20260421",
+      "n_picked": 1,
+      "codes": [
+        "310210"
+      ]
+    },
+    {
+      "date": "20260422",
+      "n_picked": 1,
+      "codes": [
+        "310210"
+      ]
+    },
+    {
+      "date": "20260423",
+      "n_picked": 1,
+      "codes": [
+        "307180"
+      ]
+    },
+    {
+      "date": "20260424",
+      "n_picked": 1,
+      "codes": [
+        "044490"
+      ]
+    },
+    {
+      "date": "20260427",
+      "n_picked": 1,
+      "codes": [
+        "044490"
+      ]
+    },
+    {
+      "date": "20260428",
+      "n_picked": 1,
+      "codes": [
+        "327260"
+      ]
+    },
+    {
+      "date": "20260429",
+      "n_picked": 1,
+      "codes": [
+        "078930"
+      ]
+    },
+    {
+      "date": "20260430",
+      "n_picked": 1,
+      "codes": [
+        "078930"
+      ]
+    },
+    {
+      "date": "20260501",
+      "n_picked": 1,
+      "codes": [
+        "078930"
+      ]
+    },
+    {
+      "date": "20260504",
+      "n_picked": 1,
+      "codes": [
+        "011170"
+      ]
+    },
+    {
+      "date": "20260505",
+      "n_picked": 1,
+      "codes": [
+        "011170"
+      ]
+    },
+    {
+      "date": "20260506",
+      "n_picked": 1,
+      "codes": [
+        "042510"
+      ]
+    },
+    {
+      "date": "20260507",
+      "n_picked": 1,
+      "codes": [
+        "322310"
+      ]
+    }
+  ],
+  "signal_top1": {
+    "label": "신호 성과 (알파 품질)",
+    "description": "pick_top1로 뽑힌 모든 추천을 독립적으로 horizon 추적한 결과. 자본 제약 없음 — 순수 시그널 품질 측정용.",
+    "n_signals_total": 38,
+    "n_filled": 33,
+    "fill_rate": 0.8684,
+    "tp1_rate": 0.2727,
+    "stop_rate": 0.303,
+    "open_rate": 0.4242,
+    "avg_all_pct": 2.47,
+    "ev_net_pct": 2.25
+  }
+}
