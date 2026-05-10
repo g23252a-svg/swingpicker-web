@@ -1235,6 +1235,122 @@ def _save_meta(in_dim, pos_ratio, best_kpi):
 
 # ====================== 추론 ======================
 
+# ─────────────────────────────────────────────────────
+# [v23 Phase 1] 4-Tier 분류용 신호 attach
+# ─────────────────────────────────────────────────────
+# 목적: ATR_Pct / OBV_Slope / Upper_Shadow_Ratio 마지막 row를 V23_* 컬럼으로 노출.
+# 원칙:
+#   1) 추천 영향 0 — 기존 컬럼 한 글자도 안 건드림 (V23_ prefix 사용)
+#   2) ML 독립 — 모델 로드 실패해도 신호 attach 시도
+#   3) read-only — feature_cache 갱신 / 저장 안 함
+#   4) Feature Contract 안전 — hardcoded index 안 씀 (FEATURE_COLS 인덱스 동적)
+# ─────────────────────────────────────────────────────
+
+V23_SIGNAL_MAP = {
+    # 내부 FEATURE_COLS 이름 → recommend_latest.csv 출력 컬럼명
+    "ATR_Pct":            "V23_ATR_Pct",
+    "OBV_Slope":          "V23_OBV_Slope",
+    "Upper_Shadow_Ratio": "V23_Upper_Shadow_Ratio",
+}
+
+
+def attach_v23_phase1_signals(current_df: pd.DataFrame,
+                               full_ohlcv_map: dict) -> pd.DataFrame:
+    """
+    [v23 Phase 1] V23_* 신호 컬럼 attach (read-only, ML 독립).
+
+    각 종목의 OHLCV에서 add_technical_features 마지막 row의
+    ATR_Pct / OBV_Slope / Upper_Shadow_Ratio를 V23_* 컬럼으로 attach.
+
+    호출 시점 권장: apply_ml_score 진입부 (모델 로드 체크 전).
+
+    Side effects: 없음 (feature_cache, ML seq cache 모두 안 건드림).
+
+    종목코드 정규화:
+        current_df["종목코드"]와 full_ohlcv_map 키가 zfill(6) 차이로
+        매칭 실패하면 coverage가 잘못 측정됨. 양쪽 모두 6자리 정규화.
+
+    Returns: current_df (V23_ATR_Pct / V23_OBV_Slope / V23_Upper_Shadow_Ratio
+             / V23_SIGNAL_STATUS 4컬럼 추가).
+    """
+    if current_df.empty or "종목코드" not in current_df.columns:
+        return current_df
+
+    # 종목코드 정규화 (양쪽 모두 6자리 zfill)
+    code_series_raw = current_df["종목코드"]
+    code_series_norm = code_series_raw.astype(str).str.zfill(6)
+
+    # full_ohlcv_map의 키도 zfill 적용한 정규화 lookup 만들기
+    norm_ohlcv = {}
+    for k, v in full_ohlcv_map.items():
+        try:
+            norm_ohlcv[str(k).zfill(6)] = v
+        except Exception:
+            continue
+
+    # 각 raw 종목코드별로 처리 (df attach는 raw key로)
+    v23_signals_norm = {}  # {normalized_code: {V23_*: float|nan}}
+    status_map_norm = {}   # {normalized_code: status_str}
+
+    for code_norm in code_series_norm.unique():
+        if code_norm not in norm_ohlcv:
+            status_map_norm[code_norm] = "NO_OHLCV"
+            continue
+
+        try:
+            raw_df = norm_ohlcv[code_norm]
+            df = clean_ohlcv(raw_df)
+            if df.empty or len(df) < 60:
+                status_map_norm[code_norm] = "SHORT_HISTORY"
+                continue
+
+            # add_technical_features는 단일 종목용 (학습 코드와 동일 함수).
+            # PR-A 원칙: ML 추론 path와 분리. 학습 식 그대로 사용.
+            # parity 버그 회피 — batch 함수와의 차이 영향 받지 않음.
+            df_feat = add_technical_features(df)
+            if df_feat.empty:
+                status_map_norm[code_norm] = "FEATURE_FAIL"
+                continue
+
+            last_row = df_feat.iloc[-1]
+            sig = {}
+            for internal, v23_col in V23_SIGNAL_MAP.items():
+                val = last_row.get(internal, np.nan)
+                if pd.notna(val) and np.isfinite(float(val)):
+                    sig[v23_col] = float(val)
+                else:
+                    sig[v23_col] = np.nan
+            v23_signals_norm[code_norm] = sig
+            status_map_norm[code_norm] = "OK"
+        except Exception:
+            status_map_norm[code_norm] = "FEATURE_FAIL"
+
+    # attach — 정규화된 코드로 lookup, 결과는 원래 row index에 매칭
+    for internal, v23_col in V23_SIGNAL_MAP.items():
+        current_df[v23_col] = code_series_norm.map(
+            {c: sig.get(v23_col, np.nan) for c, sig in v23_signals_norm.items()}
+        )
+
+    # status 컬럼 — Phase 2/3 검증용 커버리지 추적
+    current_df["V23_SIGNAL_STATUS"] = code_series_norm.map(status_map_norm).fillna("NO_OHLCV")
+
+    # coverage 로그 — Phase 2 검증 인프라
+    try:
+        atr_col = V23_SIGNAL_MAP["ATR_Pct"]
+        coverage = float(current_df[atr_col].notna().mean())
+        n_ok = int((current_df["V23_SIGNAL_STATUS"] == "OK").sum())
+        n_total = len(current_df)
+        breakdown = dict(current_df["V23_SIGNAL_STATUS"].value_counts())
+        logger.info(
+            f"[v23 Phase 1] signal coverage: {coverage:.1%} "
+            f"(OK={n_ok}/{n_total}, breakdown={breakdown})"
+        )
+    except Exception:
+        pass
+
+    return current_df
+
+
 def apply_ml_score(current_df: pd.DataFrame, full_ohlcv_map: dict) -> pd.DataFrame:
     """
     [v19.0] 5-Fix 통합 추론
@@ -1243,9 +1359,17 @@ def apply_ml_score(current_df: pd.DataFrame, full_ohlcv_map: dict) -> pd.DataFra
     - [Fix 2] add_technical_features_batch로 일괄 피처 계산
     - [Fix 4] 동적 앙상블 가중치 적용
     - [Fix 5] Rolling Z-score 스케일링 (v19 모델일 때)
+
+    [v23 Phase 1] V23_* 신호 attach — 모델 로드 성공/실패와 독립.
     """
     global _loaded_lstm_model, _loaded_scaler, _loaded_xgb_model
     global _loaded_seq_length, _loaded_use_rolling_zscore
+
+    # [v23 Phase 1] V23_* 신호 attach — ML 추론 전에 먼저 (모델 없어도 작동)
+    try:
+        current_df = attach_v23_phase1_signals(current_df, full_ohlcv_map)
+    except Exception as e:
+        logger.warning(f"⚠️ [v23] signal attach 실패 (무해): {e}")
 
     if _loaded_lstm_model is None or _loaded_scaler is None:
         load_model()
