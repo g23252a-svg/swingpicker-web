@@ -685,39 +685,58 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             "detail": _detail,
         })
     
-    # HARD 3: 선언-실현 갭 15%p 이하 — [v22.3.2] 표본 크기 가드
-    # TOP_PICK 우선, 없으면 active. matched n < MIN_N_FOR_HARD_GAP이면 SKIP.
-    # winrate_table.meta.min_n과 일관성 유지 (기본 30).
+    # HARD 3: 선언-실현 갭 15%p 이하 — [v22.3.2-A] TOP_PICK 전용
+    # ─────────────────────────────────────────────────────────
+    # active fallback 제거 이유:
+    #   active 모집단(ATTACK/ARMED ~수십~수백 종목)은 EST_WIN_RATE가 거의 fallback
+    #   상수(~0.539)에 가까워서, 매칭 realized와의 gap이 "모델 over-confidence"가
+    #   아니라 "fallback 정책의 보정값"을 측정하게 됨. HARD gate 본래 의도(개별
+    #   예측 calibration 검증)와 어긋나므로 active는 SOFT WARN 모니터링으로 강등.
+    # ─────────────────────────────────────────────────────────
     MIN_N_FOR_HARD_GAP = 30
-    gap = report.get("declared_vs_realized_gap_top_pick")
-    gap_basis = "top_pick"
-    gap_n = report.get("realized_wr_top_pick_n", 0) or 0
-    if gap is None:
-        gap = report.get("declared_vs_realized_gap_active")
-        gap_basis = "active"
-        gap_n = report.get("realized_wr_active_n", 0) or 0
-    if gap is None:
+    gap_top_pick = report.get("declared_vs_realized_gap_top_pick")
+    gap_top_pick_n = report.get("realized_wr_top_pick_n", 0) or 0
+
+    if gap_top_pick is None:
         ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
-                        "detail": "matched 모집단 데이터 부족 (sufficient bin 없음)"})
-    elif gap_n < MIN_N_FOR_HARD_GAP:
-        # 표본 부족 → HARD에서 제외, 추세는 SOFT에 별도 기록
+                        "detail": "TOP_PICK 매칭 sufficient bin 없음"})
+    elif gap_top_pick_n < MIN_N_FOR_HARD_GAP:
         ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
-                        "detail": f"matched n={gap_n} < {MIN_N_FOR_HARD_GAP} (표본 부족)"})
-        if abs(gap) > 0.15:
+                        "detail": f"TOP_PICK matched n={gap_top_pick_n} < {MIN_N_FOR_HARD_GAP}"})
+        if abs(gap_top_pick) > 0.15:
             ci_soft.append({
-                "gate": "declared_vs_realized_gap_small_n",
+                "gate": "declared_vs_realized_gap_top_pick_small_n",
                 "status": "WARN",
-                "detail": f"gap_{gap_basis}={gap:.1%} (n={gap_n}, 표본 부족 → 추세 모니터링)",
+                "detail": f"gap_top_pick={gap_top_pick:.1%} (n={gap_top_pick_n}, 표본 부족 → 추세 모니터링)",
             })
-    elif gap > 0.15:
+    elif gap_top_pick > 0.15:
         ci_hard.append({
             "gate": "declared_vs_realized_gap_15pp",
             "status": "FAIL",
-            "detail": f"gap_{gap_basis}={gap:.1%} > 15%p (n={gap_n})",
+            "detail": f"gap_top_pick={gap_top_pick:.1%} > 15%p (n={gap_top_pick_n})",
         })
     else:
         ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "PASS",
-                        "detail": f"gap_{gap_basis}={gap:.1%} (n={gap_n})"})
+                        "detail": f"gap_top_pick={gap_top_pick:.1%} (n={gap_top_pick_n})"})
+
+    # SOFT (신규) — active gap은 모니터링 신호로 분리
+    gap_active = report.get("declared_vs_realized_gap_active")
+    gap_active_n = report.get("realized_wr_active_n", 0) or 0
+    if gap_active is None:
+        ci_soft.append({"gate": "declared_vs_realized_gap_active", "status": "OK",
+                        "detail": "active 매칭 sufficient bin 없음"})
+    elif gap_active_n < MIN_N_FOR_HARD_GAP:
+        ci_soft.append({"gate": "declared_vs_realized_gap_active", "status": "OK",
+                        "detail": f"n={gap_active_n} 표본 부족"})
+    elif abs(gap_active) > 0.15:
+        ci_soft.append({
+            "gate": "declared_vs_realized_gap_active",
+            "status": "WARN",
+            "detail": f"gap_active={gap_active:.1%} (n={gap_active_n}) — fallback 보정 또는 calibration drift 모니터링",
+        })
+    else:
+        ci_soft.append({"gate": "declared_vs_realized_gap_active", "status": "OK",
+                        "detail": f"gap_active={gap_active:.1%} (n={gap_active_n})"})
     
     # SOFT 1: Wilson LCB 단조성
     mono = report.get("elite_monotonicity", {})
@@ -780,7 +799,8 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
         f"📊 [v22] monotonicity_report: "
         f"HARD={'PASS' if report['ci_hard_all_pass'] else 'FAIL'}, "
         f"SOFT={'WARN' if report['ci_soft_any_warn'] else 'OK'}, "
-        f"gap={gap}, excess={excess}, coverage={cov}"
+        f"gap={report.get('declared_vs_realized_gap')}, "
+        f"excess={excess}, coverage={cov}"
     )
     
     return report
