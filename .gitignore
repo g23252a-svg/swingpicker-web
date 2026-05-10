@@ -48,3 +48,7 @@ Thumbs.db
 !data/backtest_top1_capital_curve_latest.csv
 !data/backtest_walkforward_latest.json
 !data/backtest_rolling_latest.json
+
+# Local backup files
+*.before_*
+*.bak
