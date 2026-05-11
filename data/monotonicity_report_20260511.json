@@ -1,6 +1,6 @@
 {
   "asof_ymd": "20260511",
-  "generated_at": "2026-05-11T21:35:42.644847",
+  "generated_at": "2026-05-11T23:00:21.976590",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
@@ -23,7 +23,7 @@
         "score_lo": 50,
         "score_hi": 60.0,
         "n_raw": 61,
-        "p_win": 0.3635,
+        "p_win": 0.3636,
         "p_win_lcb": 0.2517,
         "avg_ret_net_pct": -1.1648,
         "avg_ret_excess_pct": -5.0336
@@ -40,11 +40,11 @@
       {
         "score_lo": 70,
         "score_hi": 80.0,
-        "n_raw": 29,
-        "p_win": 0.4194,
-        "p_win_lcb": 0.2551,
-        "avg_ret_net_pct": -1.4867,
-        "avg_ret_excess_pct": -5.0549
+        "n_raw": 31,
+        "p_win": 0.4287,
+        "p_win_lcb": 0.2642,
+        "avg_ret_net_pct": -1.5611,
+        "avg_ret_excess_pct": -6.0953
       },
       {
         "score_lo": 80,
@@ -69,15 +69,15 @@
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
-  "realized_wr": 0.3313,
+  "realized_wr": 0.34,
   "realized_wr_top_pick": null,
   "realized_wr_top_pick_n": 0,
-  "realized_wr_active": 0.3313,
-  "realized_wr_active_n": 316,
-  "declared_vs_realized_gap_active": 0.2115,
+  "realized_wr_active": 0.34,
+  "realized_wr_active_n": 347,
+  "declared_vs_realized_gap_active": 0.2028,
   "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": 0.2115,
-  "avg_ret_excess_pct": -5.1193,
+  "declared_vs_realized_gap": 0.2028,
+  "avg_ret_excess_pct": -5.2108,
   "top_pick_funnel": {
     "trade_ymd": "20260511",
     "total": 601,
@@ -106,7 +106,7 @@
     "aggressive_count": 1,
     "stable_count": 0
   },
-  "top_pick_stable_7day_avg": 0.29,
+  "top_pick_stable_7day_avg": 0.14,
   "ci_hard": [
     {
       "gate": "top_pick_route_positive",
@@ -131,7 +131,7 @@
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "WARN",
-      "detail": "gap_active=21.1% (n=316) — fallback 보정 또는 calibration drift 모니터링"
+      "detail": "gap_active=20.3% (n=347) — fallback 보정 또는 calibration drift 모니터링"
     },
     {
       "gate": "wilson_monotonicity",
@@ -141,7 +141,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-5.12%"
+      "detail": "avg_ret_excess=-5.21%"
     },
     {
       "gate": "market_map_coverage_95",
@@ -150,7 +150,7 @@
     {
       "gate": "stable_7day_avg_1",
       "status": "WARN",
-      "detail": "평균 0.29개"
+      "detail": "평균 0.14개"
     }
   ],
   "ci_hard_all_pass": true,
