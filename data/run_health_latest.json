@@ -1,5 +1,5 @@
 {
-  "trade_ymd": "20260508",
+  "trade_ymd": "20260511",
   "status": "OK",
   "reasons": [],
   "warnings": [],
@@ -15,7 +15,7 @@
   "confidence_score": 100.0,
   "max_allowed_route": "ATTACK",
   "macro_risk": "NORMAL",
-  "market_breadth": 48.8,
+  "market_breadth": 44.1,
   "axis_status": {
     "MCAP": "OK",
     "BENCH": "OK",
