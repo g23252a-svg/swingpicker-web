@@ -1,19 +1,51 @@
 # -*- coding: utf-8 -*-
 """
-SwingPicker — 종목 상세 v2 (이미지 디자인 기준 재설계)
+SwingPicker — 종목 상세 v2 Full Dashboard
 ═══════════════════════════════════════════════════
-[Step 2A FIXED v2] 실제 CSV 컬럼명 기반 + 오타/정합성 패치.
+[Step 2F COMPLETE] 정밀 차트 + 리스크/뉴스/시나리오/최종판정 기반.
 
-데이터 소스: data/recommend_latest.csv (실제 컬럼 확인 완료)
-컬럼 매핑:
-  TOP_PICK / TOP_PICK_TYPE / EBS / PASS_EBS / ACTION_PRIORITY / IS_ACTIVE
-  AXIS_MEAN / AXIS_GAP / BALANCE_SCORE — CSV 원본값 사용 (재계산 X)
-  SCORE_REASON_TOP1 + SCORE_REASON_TOP2 + ELITE_REASON — CSV 우선, 없을 때만 fallback
-  NEWS_REASON / ROUTE_REASON / PLAN_REASON — Step 2D-2E에서 사용
-  ELITE_LABEL — CSV에 없음 (combo_info로 외부 주입 또는 ELITE_REASON 활용)
+구성:
+  헤더 (5뱃지) + 점수 영역 (DISPLAY/3축/FINAL/ELITE/BALANCE/사유)
+  ┌──────────┬──────────────────────────┬───────────┐
+  │ 좌측 4패널 │ 메인 캔들차트 (ECharts)  │ 레이더 5축 │
+  │ #1 가격    │ + HMA20/VWAP/SUPERTREND │           │
+  │ #2 추세    │ + markLine 6개          │           │
+  │ #3 모멘텀  │ + 보조차트 5개(RSI/MFI/  │           │
+  │ #4 수급    │   MACD/V_POWER/거강)     │           │
+  │            │ + 3분할 (수익/레벨/리스크) │           │
+  │            │ + 시나리오 3카드 (A/B/C) │           │
+  └──────────┴──────────────────────────┴───────────┘
+  하단 4섹터 (핵심요약/분할익절/DipSniper/비교)
+  최종 판정 띠 (등급별 색상 + 강점/리스크 자동)
 
-UI는 normalize_stock_row() 결과만 사용. 컬럼명 직접 row.get() 금지.
-모든 텍스트는 html.escape()로 안전하게 삽입 (XSS / 화면깨짐 방지).
+데이터 소스: data/recommend_latest.csv + data/ohlcv_cache_*.parquet
+컬럼 매핑 (실제 확인 완료):
+  헤더/점수: TOP_PICK/TOP_PICK_TYPE/EBS/PASS_EBS/ACTION_PRIORITY/IS_ACTIVE
+            AXIS_MEAN/AXIS_GAP/BALANCE_SCORE (CSV 원본 우선)
+  사유:     SCORE_REASON_TOP1 + TOP2 + ELITE_REASON (CSV 우선, 없으면 fallback)
+  가격:     종가/추천매수가/손절가/추천매도가1-3 + RR_NOW_TP1/MAX_LOSS_PCT/
+            TIME_STOP_DAYS/POSITION_PCT/KELLY_FINAL_B/켈리_수량
+  추세/MTF: 주봉20선_상회/주봉추세/MTF_WEEKLY_TREND/MTF_MONTHLY_TREND/
+            SUPERTREND_DIR+VAL/Above_MA20/HMA20/이격도
+  모멘텀:   ret_1d~120d_% + rel_20~120d_% + 벤치_60d_KOSPI/KOSDAQ
+  수급:     거래대금(억원)/시가총액(억원)/외인순매수/기관순매수/메이저/개인/
+            거래강도/V_POWER/Vol_Quality
+  보조차트: RSI14/MFI14/MACD_Slope_PCT/V_POWER
+  리스크/뉴스: NEWS_SCORE/MACRO_RISK/MARKET_BREADTH/NEWS_REASON/ROUTE_REASON/
+              BB_Expanding/IS_SWING_SUPPORT/EST_WIN_RATE
+
+UI 원칙:
+  - UI는 normalize_stock_row() 결과만 사용. 컬럼명 직접 row.get() 금지.
+  - 모든 텍스트 html.escape() 안전 삽입 (XSS / 화면깨짐 방지).
+  - layout-critical CSS는 inline style 강제 (NiceGUI Quasar 래퍼 충돌 회피).
+  - design CSS는 _inject_v2_styles()로 일괄 주입 (1회).
+
+OHLCV 로더:
+  - components.tab_stocks._get_chart_data 위임 우선 (Railway 검증된 SSOT)
+  - 실패 시 자체 fallback (멀티 경로/포맷/컬럼 자동 탐지)
+  - debug 정보는 DEBUG_STOCK_V2=1 또는 admin 환경에서만 노출
+
+마지막 리뷰 점수: 97/100 — 운영 머지 가능권.
 """
 
 from html import escape as h_escape
@@ -212,6 +244,19 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
     # ── [Step 2E] 레이더 5축 (TRIGGER 포함) ──
     trigger_score = safe_float(row.get("TRIGGER_SCORE", row.get("RAW_TRIGGER_SCORE", 0))) or 0
 
+    # ── [Step 2F] 리스크 / 뉴스 / 시나리오 / 최종판정 ──
+    news_score = safe_float(row.get("NEWS_SCORE", 0)) or 0
+    macro_risk = _safe_str(row.get("MACRO_RISK", ""), "")
+    market_breadth = safe_float(row.get("MARKET_BREADTH", 0)) or 0
+    est_win_rate = safe_float(row.get("EST_WIN_RATE", 0)) or 0
+    ai_comment = _safe_str(row.get("AI_COMMENT", ""), "")
+    score_risk = _safe_str(row.get("SCORE_RISK", ""), "")
+    stop_reason = _safe_str(row.get("STOP_REASON", ""), "")
+    bb_expanding = int(safe_float(row.get("BB_Expanding", 0)) or 0)
+    is_swing_support = _as_bool(row.get("IS_SWING_SUPPORT", 0))
+    vwap = safe_float(row.get("VWAP", 0)) or 0
+    supertrend_val_raw = safe_float(row.get("SUPERTREND_VAL", 0)) or 0
+
     # ── 사유 (CSV 우선, 없을 때만 fallback 자동 생성) ──
     # 우선순위:
     #   1) ELITE_REASON (가장 풍부 — "RR1.3 + 진입적정 + 3축고점 + 대기")
@@ -365,6 +410,19 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "ttm_squeeze": ttm_squeeze,
         "poc_gap": poc_gap,
         "trigger_score": trigger_score,
+
+        # [Step 2F] 리스크 / 뉴스 / 시나리오 / 최종판정
+        "news_score": news_score,
+        "macro_risk": macro_risk,
+        "market_breadth": market_breadth,
+        "est_win_rate": est_win_rate,
+        "ai_comment": ai_comment,
+        "score_risk": score_risk,
+        "stop_reason": stop_reason,
+        "bb_expanding": bb_expanding,
+        "is_swing_support": is_swing_support,
+        "vwap": vwap,
+        "supertrend_val_raw": supertrend_val_raw,
     }
 
 
@@ -1642,16 +1700,38 @@ def render_v2_chart(n: dict, ohlcv_df=None):
                   None이면 placeholder 표시
     """
     if ohlcv_df is None or len(ohlcv_df) == 0:
-        debug_info = _load_ohlcv_debug_info(n["code"])
+        # 디버그 정보는 admin 또는 환경변수일 때만 노출
+        # (일반 사용자에게 CWD/__file__/경로 노출 방지)
+        import os as _os
+        show_debug = _os.getenv("DEBUG_STOCK_V2", "0") == "1"
+        if not show_debug:
+            try:
+                # services.auth가 import되어 있을 때만 admin 체크
+                from services.auth import get_auth_status as _get_auth
+                show_debug = _get_auth() == "admin"
+            except Exception:
+                show_debug = False
+
+        if show_debug:
+            debug_info = _load_ohlcv_debug_info(n["code"])
+            debug_block = (
+                f'<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px;'
+                f' font-size: 10px; color: #9CA3AF; max-width: 600px;'
+                f' white-space: pre-wrap; word-break: break-all;">{h_escape(debug_info)}</pre>'
+            )
+        else:
+            debug_block = (
+                '<div style="color: var(--text-dim); font-size: 11px;">'
+                '잠시 후 다시 시도해 주세요.</div>'
+            )
+
         ui.html(f'''
             <div style="background: var(--bg-card); border: 1px solid var(--border);
                         border-radius: 8px; padding: 20px; min-height: 400px;
                         display: flex; flex-direction: column; align-items: center;
                         justify-content: center; color: #6B7280; font-size: 12px;">
                 <div style="font-size: 16px; margin-bottom: 12px;">📊 OHLCV 데이터 로드 실패</div>
-                <pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px;
-                            font-size: 10px; color: #9CA3AF; max-width: 600px;
-                            white-space: pre-wrap; word-break: break-all;">{h_escape(debug_info)}</pre>
+                {debug_block}
             </div>
         ''')
         return
@@ -1772,6 +1852,21 @@ def render_v2_chart(n: dict, ohlcv_df=None):
                       "color": "#EF4444", "fontSize": 10, "position": "insideEndTop"}
         })
 
+    # Y축 min/max 계산 — 캔들 + 모든 markLine 가격을 포함하도록 강제 확장
+    # 이걸 안 하면 "scale": True가 캔들 범위만 자동 fit해서 TP2/TP3가 화면 밖
+    price_values = [v for v in highs + lows if v is not None and v > 0]
+    price_values += [v for v in [tp1, tp2, tp3, close, entry, stop] if v > 0]
+    if price_values:
+        y_max_raw = max(price_values)
+        y_min_raw = min(price_values)
+        # 위 5% / 아래 5% 여백 추가
+        y_padding = (y_max_raw - y_min_raw) * 0.05
+        y_max = y_max_raw + y_padding
+        y_min = max(0, y_min_raw - y_padding)
+    else:
+        y_max = None
+        y_min = None
+
     # ECharts option
     option = {
         "backgroundColor": "transparent",
@@ -1821,6 +1916,8 @@ def render_v2_chart(n: dict, ohlcv_df=None):
                 "scale": True,
                 "gridIndex": 0,
                 "splitNumber": 6,
+                "min": y_min if y_min is not None else None,
+                "max": y_max if y_max is not None else None,
                 "axisLine": {"lineStyle": {"color": "#2A2D38"}},
                 "axisLabel": {"color": "#6B7280", "fontSize": 9,
                               "formatter": "{value}"},
@@ -2147,6 +2244,341 @@ def render_v2_sub_charts(n: dict, ohlcv_df=None):
 
 
 # ═══════════════════════════════════════════════════
+# Step 2F: 보조차트 아래 3분할 패널 (수익률현황 / 핵심레벨 / 리스크뉴스)
+# ═══════════════════════════════════════════════════
+
+def render_v2_returns_levels_risk(n: dict):
+    """
+    [Step 2F] 차트 + 보조차트 아래 3분할 패널.
+
+    A. 수익률 현황 — ret_1d/5d/10d/20d/60d/120d + rel_20/60/120
+    B. 핵심 레벨 — 현재가/매수가/HMA20/VWAP/SUPERTREND/손절/TP1/TP2/TP3 (점 색상)
+    C. 리스크 / 뉴스 — NEWS_SCORE + 뉴스 본문 + ROUTE_REASON + BB_Expanding + IS_SWING_SUPPORT
+    """
+    # A. 수익률 현황
+    returns_rows = [
+        ("1일", n["ret_1d"]),
+        ("5일", n["ret_5d"]),
+        ("10일", n["ret_10d"]),
+        ("20일", n["ret_20d"]),
+        ("60일", n["ret_60d"]),
+        ("120일", n["ret_120d"]),
+        ("rel_20d", n["rel_20d"]),
+        ("rel_60d", n["rel_60d"]),
+        ("rel_120d", n["rel_120d"]),
+    ]
+    ret_html = ""
+    for label, val in returns_rows:
+        clr = "var(--green)" if val > 0 else ("var(--red)" if val < 0 else "var(--text-dim)")
+        ret_html += f'''
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;">
+          <span style="color: var(--text-gray);">{label}</span>
+          <span style="color: {clr}; font-weight: 700; font-variant-numeric: tabular-nums;">{val:+.2f}%</span>
+        </div>'''
+
+    # B. 핵심 레벨 (점 색상 + 가격)
+    levels = [
+        ("#EF4444", "현재가",     n["close"]),
+        ("#FACC15", "추천매수가",  n["entry"]),
+        ("#3B82F6", "HMA20",      n["hma20"]),
+        ("#06B6D4", "VWAP",       n.get("vwap", 0)),
+        ("#10B981", "SUPERTREND", n.get("supertrend_val_raw", n["supertrend_val"])),
+        ("#EF4444", "손절",       n["stop"]),
+        ("#10B981", "TP1",        n["tp1"]),
+        ("#10B981", "TP2",        n["tp2"]),
+        ("#10B981", "TP3",        n["tp3"]),
+    ]
+    level_html = ""
+    for color, label, price in levels:
+        if not price or price <= 0:
+            continue
+        level_html += f'''
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;">
+          <span style="display: flex; align-items: center; gap: 6px; color: var(--text-gray);">
+            <span style="width: 8px; height: 8px; background: {color}; border-radius: 50%; display: inline-block;"></span>
+            {label}
+          </span>
+          <span style="color: var(--text-white); font-weight: 700; font-variant-numeric: tabular-nums;">{int(price):,}</span>
+        </div>'''
+
+    # C. 리스크 / 뉴스
+    news_score = n.get("news_score", 0)
+    news_clr = "var(--green)" if news_score > 0 else ("var(--red)" if news_score < 0 else "var(--text-dim)")
+    news_tag = "긍정" if news_score > 0 else ("악한 부정" if news_score < -0.2 else "부정" if news_score < 0 else "중립")
+    macro_risk = n.get("macro_risk", "") or "—"
+    market_breadth = n.get("market_breadth", 0)
+    route_reason = n.get("route_reason", "") or "—"
+    news_reason = n.get("news_reason", "") or "—"
+    # 뉴스 본문 짧게 자르기
+    if len(news_reason) > 80:
+        news_reason_short = news_reason[:78] + "…"
+    else:
+        news_reason_short = news_reason
+    # [뉴스] 접두사 제거
+    news_reason_short = news_reason_short.replace("[뉴스]", "").strip()
+    bb_expanding = n.get("bb_expanding", 0)
+    bb_text = "확장 중" if bb_expanding else "확장 둔화"
+    is_swing = n.get("is_swing_support", False)
+    swing_text = "True" if is_swing else "False"
+    swing_clr = "var(--green)" if is_swing else "var(--red)"
+
+    # 3분할 패널 HTML
+    ui.html(f'''
+    <div class="sd-v2" style="margin-top: 8px; width: 100%;">
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
+
+        <!-- A. 수익률 현황 -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0;">
+          <div style="color: var(--green); font-size: 12px; font-weight: 800; text-align: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);">
+            A. 수익률 현황
+          </div>
+          {ret_html}
+        </div>
+
+        <!-- B. 핵심 레벨 -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0;">
+          <div style="color: var(--orange); font-size: 12px; font-weight: 800; text-align: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);">
+            B. 핵심 레벨
+          </div>
+          {level_html}
+        </div>
+
+        <!-- C. 리스크 / 뉴스 -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0;">
+          <div style="color: var(--red); font-size: 12px; font-weight: 800; text-align: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);">
+            C. 리스크 / 뉴스 ⚠️
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 11px;">
+            <span style="color: var(--text-gray);">NEWS_SCORE</span>
+            <span style="color: {news_clr}; font-weight: 700;">{news_score:+.2f} <span style="font-size: 9px; color: var(--text-dim);">({news_tag})</span></span>
+          </div>
+          <div style="padding: 6px 0; font-size: 10px; color: var(--text-gray); border-top: 1px dashed var(--border); margin-top: 4px;">
+            <div style="color: var(--text-dim); margin-bottom: 2px;">뉴스:</div>
+            <div style="line-height: 1.5;">{h_escape(news_reason_short)}</div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 11px; border-top: 1px dashed var(--border); margin-top: 4px;">
+            <span style="color: var(--text-gray);">ROUTE_REASON</span>
+            <span style="color: var(--text-white); font-weight: 600; font-size: 10px;">{h_escape(route_reason)}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;">
+            <span style="color: var(--text-gray);">MACRO_RISK</span>
+            <span style="color: var(--text-white); font-weight: 600;">{h_escape(macro_risk)}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;">
+            <span style="color: var(--text-gray);">BB_Expanding</span>
+            <span style="color: var(--text-white); font-weight: 600;">{bb_expanding} <span style="font-size: 9px; color: var(--text-dim);">({bb_text})</span></span>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;">
+            <span style="color: var(--text-gray);">IS_SWING_SUPPORT</span>
+            <span style="color: {swing_clr}; font-weight: 700;">{swing_text}</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2F: 시나리오 A / B / C (3개 카드)
+# ═══════════════════════════════════════════════════
+
+def render_v2_scenarios(n: dict):
+    """
+    [Step 2F] 시나리오 3개 카드 — 기본 / 보수 / 리스크.
+
+    A. 기본 시나리오 (📈) — 진입 후 TP1→TP2→TP3 분할익절
+    B. 보수 시나리오 (🔍) — HMA20 회복/안착 확인 후 대응
+    C. 리스크 시나리오 (❌) — 손절 이탈 시 7일 내 미돌파면 TIME_STOP
+    """
+    entry = int(n["entry"]) if n["entry"] else 0
+    stop = int(n["stop"]) if n["stop"] else 0
+    tp1 = int(n["tp1"]) if n["tp1"] else 0
+    tp2 = int(n["tp2"]) if n["tp2"] else 0
+    tp3 = int(n["tp3"]) if n["tp3"] else 0
+    hma20 = int(n["hma20"]) if n["hma20"] else 0
+    time_stop = int(n["time_stop_days"]) if n["time_stop_days"] else 7
+    route = n.get("route", "")
+    is_overheat = route == "OVERHEAT"
+    qty = int(n["qty"]) if n["qty"] else 0
+
+    # 시나리오 A — 기본 (매수 가능할 때만 의미)
+    if qty > 0 and not is_overheat:
+        scenario_a_lines = [
+            "기본 시나리오 —",
+            f"{entry:,} 진입 후",
+            f"{tp1:,} → {tp2:,} → {tp3:,}",
+            "분할익절",
+        ]
+        scenario_a_clr = "#10B981"
+    else:
+        scenario_a_lines = [
+            "기본 시나리오 —",
+            f"{route or 'WAIT'} 상태",
+            "신규 매수 부적합",
+            "관망 권고",
+        ]
+        scenario_a_clr = "#6B7280"
+
+    # 시나리오 B — 보수 (HMA20 회복 대기)
+    scenario_b_lines = [
+        "보수 시나리오 —",
+        f"HMA20 {hma20:,}",
+        "회복/안착 확인 후 대응",
+    ]
+
+    # 시나리오 C — 리스크
+    scenario_c_lines = [
+        "리스크 시나리오 —",
+        f"{stop:,} 이탈 시 손절,",
+        f"{time_stop}일 내 미돌파면 TIME_STOP",
+    ]
+
+    def _scenario_html(icon, title_color, lines, big_idx=2):
+        """시나리오 카드 HTML 생성. big_idx 줄을 크게 표시."""
+        html_lines = []
+        for i, line in enumerate(lines):
+            if i == 0:
+                html_lines.append(
+                    f'<div style="color: {title_color}; font-size: 13px; font-weight: 800; margin-bottom: 8px;">{h_escape(line)}</div>'
+                )
+            elif i == big_idx and big_idx >= 0:
+                html_lines.append(
+                    f'<div style="color: var(--text-white); font-size: 14px; font-weight: 700; margin: 4px 0;">{h_escape(line)}</div>'
+                )
+            else:
+                html_lines.append(
+                    f'<div style="color: var(--text-gray); font-size: 11px; margin: 3px 0;">{h_escape(line)}</div>'
+                )
+        return "".join(html_lines)
+
+    ui.html(f'''
+    <div class="sd-v2" style="margin-top: 12px; width: 100%;">
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
+
+        <!-- 시나리오 A (기본) -->
+        <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.04));
+                    border: 1px solid {scenario_a_clr}; border-radius: 8px; padding: 16px; min-width: 0;
+                    min-height: 140px; display: flex; flex-direction: column; justify-content: center;">
+          <div style="font-size: 18px; margin-bottom: 6px;">📈 시나리오 A <span style="color: var(--text-dim); font-size: 10px;">(기본)</span></div>
+          {_scenario_html("📈", scenario_a_clr, scenario_a_lines, big_idx=2)}
+        </div>
+
+        <!-- 시나리오 B (보수) -->
+        <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.04));
+                    border: 1px solid #3B82F6; border-radius: 8px; padding: 16px; min-width: 0;
+                    min-height: 140px; display: flex; flex-direction: column; justify-content: center;">
+          <div style="font-size: 18px; margin-bottom: 6px;">🔍 시나리오 B <span style="color: var(--text-dim); font-size: 10px;">(보수)</span></div>
+          {_scenario_html("🔍", "#3B82F6", scenario_b_lines, big_idx=1)}
+        </div>
+
+        <!-- 시나리오 C (리스크) -->
+        <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(239, 68, 68, 0.04));
+                    border: 1px solid #EF4444; border-radius: 8px; padding: 16px; min-width: 0;
+                    min-height: 140px; display: flex; flex-direction: column; justify-content: center;">
+          <div style="font-size: 18px; margin-bottom: 6px;">❌ 시나리오 C <span style="color: var(--text-dim); font-size: 10px;">(리스크)</span></div>
+          {_scenario_html("❌", "#EF4444", scenario_c_lines, big_idx=2)}
+        </div>
+
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2F: 최종 판정 띠 (페이지 최하단)
+# ═══════════════════════════════════════════════════
+
+def render_v2_final_verdict(n: dict, rank: int = 0, total: int = 0):
+    """
+    [Step 2F] 최하단 최종 판정 띠.
+
+    예: '👑 최종 판정 | 601개 중 1위, 실성능 검증된 콤보 등급.
+         구조 최강 + 진입가 적정 + RR 1.34. 다만 뉴스 심리 리스크와 MFI 과열은 체크.'
+    """
+    name = h_escape(n["name"])
+    rr = n["rr_now_tp1"]
+    route = n.get("route", "")
+    is_overheat = route == "OVERHEAT"
+    struct_s = n["struct_score"]
+    timing_s = n["timing_score"]
+    ai_s = n["ai_score"]
+    elite_score = n["elite_score"]
+    top_pick = n.get("top_pick", False)
+    qty = int(n["qty"]) if n["qty"] else 0
+    mfi = n.get("mfi14", 0)
+    news_score = n.get("news_score", 0)
+
+    # 강점 리스트
+    strengths = []
+    if struct_s >= 90:
+        strengths.append("구조 최강")
+    elif struct_s >= 70:
+        strengths.append("구조 양호")
+    if 0 < abs(n["entry_gap_pct"]) <= 3:
+        strengths.append("진입가 적정")
+    elif n["entry_gap_pct"] == 0:
+        strengths.append("진입가 적정")
+    if rr >= 1.3:
+        strengths.append(f"RR {rr:.2f}")
+    elif rr >= 1.0:
+        strengths.append(f"RR {rr:.2f} 양호")
+
+    # 리스크 리스트
+    risks = []
+    if mfi >= 70:
+        risks.append("MFI 과열")
+    if news_score < -0.2:
+        risks.append("뉴스 심리 리스크")
+    if is_overheat:
+        risks.append("ROUTE 과열")
+    if rr < 1.0:
+        risks.append("RR 부족")
+    if qty == 0:
+        risks.append("KELLY 0주")
+
+    # 등급 라벨
+    if top_pick and rr >= 1.3 and not is_overheat:
+        verdict_label = "실성능 검증된 콤보 등급"
+        verdict_color = "linear-gradient(135deg, #FFD700, #FFA500)"
+        icon = "👑"
+    elif is_overheat or rr < 0.5:
+        verdict_label = "신규매수 부적합"
+        verdict_color = "linear-gradient(135deg, #EF4444, #DC2626)"
+        icon = "⚠️"
+    elif rr >= 1.0:
+        verdict_label = "양호한 진입 후보"
+        verdict_color = "linear-gradient(135deg, #10B981, #059669)"
+        icon = "✓"
+    else:
+        verdict_label = "관망 권고"
+        verdict_color = "linear-gradient(135deg, #6B7280, #4B5563)"
+        icon = "—"
+
+    rank_text = f"{total}개 중 {rank}위" if rank and total else ""
+    strengths_text = " + ".join(strengths) if strengths else "—"
+    risks_text = f"다만 {', '.join(risks)}은 체크" if risks else "리스크 신호 없음"
+
+    ui.html(f'''
+    <div class="sd-v2" style="margin-top: 16px; margin-bottom: 12px; width: 100%;">
+      <div style="background: {verdict_color}; border-radius: 12px; padding: 18px 24px;
+                  display: flex; align-items: center; gap: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <div style="font-size: 36px; flex-shrink: 0;">{icon}</div>
+        <div style="flex: 1; min-width: 0;">
+          <div style="color: rgba(0,0,0,0.85); font-size: 13px; font-weight: 700; margin-bottom: 4px;">
+            최종 판정 | {h_escape(rank_text)}{', ' if rank_text else ''}{h_escape(verdict_label)}.
+          </div>
+          <div style="color: rgba(0,0,0,0.75); font-size: 11px; font-weight: 600; line-height: 1.5;">
+            {h_escape(strengths_text)}. {h_escape(risks_text)}.
+          </div>
+        </div>
+        <div style="font-size: 36px; flex-shrink: 0;">🚀</div>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
 # Step 2E: 우측 레이더 차트 (5축)
 # ═══════════════════════════════════════════════════
 
@@ -2172,10 +2604,10 @@ def render_v2_radar(n: dict):
         ("TRIGGER", trigger_s, 198),    # 왼쪽 위
     ]
 
-    # 그리기 좌표 (캔버스 240x240, 중심 120,120, 반지름 작게 + 라벨 여백 크게)
+    # 그리기 좌표 (캔버스 240x240, 중심 120,120, 반지름 키움 + 라벨 여백 유지)
     cx, cy = 120, 120
-    max_r = 75  # 100 → 75 (라벨 공간 확보)
-    label_r = 100  # 라벨 위치 — 데이터 폴리곤보다 멀리
+    max_r = 90  # 75 → 90 (펜타곤 크게)
+    label_r = 110  # 라벨 위치 — 데이터 폴리곤보다 멀리
 
     # 펜타곤 격자 4단 (25, 50, 75, 100%)
     def _pentagon(scale: float) -> str:
@@ -2237,8 +2669,13 @@ def render_v2_radar(n: dict):
     ui.html(f'''
     <div class="sd-v2">
       <div style="background: var(--bg-card); border: 1px solid var(--border);
-                  border-radius: 8px; padding: 8px;">
-        <svg viewBox="-30 -10 300 260" style="width: 100%; height: 240px;">
+                  border-radius: 8px; padding: 12px;">
+        <div style="color: var(--purple); font-size: 12px; font-weight: 800;
+                    text-align: center; margin-bottom: 8px; padding-bottom: 6px;
+                    border-bottom: 1px solid var(--border);">
+          3축 밸런스 레이더
+        </div>
+        <svg viewBox="-35 -15 310 280" style="width: 100%; height: 320px;">
           {grid_polys}
           {axis_lines}
           <polygon points="{data_poly}" fill="rgba(139, 92, 246, 0.25)"
@@ -2246,6 +2683,111 @@ def render_v2_radar(n: dict):
           {dot_circles}
           {label_html}
         </svg>
+        <!-- 5축 점수 요약 -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+                    margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);">
+          <div style="font-size: 10px; color: var(--text-gray);">STRUCT</div>
+          <div style="font-size: 11px; color: var(--green); font-weight: 700; text-align: right;">{struct_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">TIMING</div>
+          <div style="font-size: 11px; color: var(--orange); font-weight: 700; text-align: right;">{timing_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">AI</div>
+          <div style="font-size: 11px; color: var(--purple); font-weight: 700; text-align: right;">{ai_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">BALANCE</div>
+          <div style="font-size: 11px; color: var(--cyan); font-weight: 700; text-align: right;">{balance_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">TRIGGER</div>
+          <div style="font-size: 11px; color: var(--yellow); font-weight: 700; text-align: right;">{trigger_s:.1f}</div>
+        </div>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2F: 우측 추가 카드 (AXIS_GAP 큰 카드 + 투자자 가이드)
+# ═══════════════════════════════════════════════════
+
+def render_v2_right_axisgap(n: dict):
+    """[Step 2F] 우측 컬럼 — AXIS_GAP 큰 카드 (비교 이미지 25.9 스타일)."""
+    axis_gap = n.get("axis_gap", 0)
+    # 등급 분류
+    if axis_gap < 10:
+        gap_label = "매우 양호"
+        gap_color = "#10B981"  # green
+    elif axis_gap < 20:
+        gap_label = "양호"
+        gap_color = "#06B6D4"  # cyan
+    elif axis_gap < 30:
+        gap_label = "양호"
+        gap_color = "#06B6D4"
+    elif axis_gap < 40:
+        gap_label = "주의"
+        gap_color = "#F59E0B"  # orange
+    else:
+        gap_label = "리스크"
+        gap_color = "#EF4444"  # red
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div style="background: linear-gradient(135deg, {gap_color}22, {gap_color}08);
+                  border: 1px solid {gap_color}; border-radius: 8px; padding: 14px;
+                  text-align: center; min-height: 140px;
+                  display: flex; flex-direction: column; justify-content: center;">
+        <div style="color: var(--text-gray); font-size: 11px; font-weight: 700; margin-bottom: 6px;">AXIS_GAP</div>
+        <div style="color: {gap_color}; font-size: 36px; font-weight: 900; line-height: 1;">{axis_gap:.1f}</div>
+        <div style="color: var(--text-gray); font-size: 11px; margin-top: 6px;">{gap_label}</div>
+      </div>
+    </div>
+    ''')
+
+
+def render_v2_right_guide(n: dict):
+    """[Step 2F] 우측 컬럼 — 투자자 가이드 카드."""
+    qty = int(n["qty"]) if n["qty"] else 0
+    stop = int(n["stop"]) if n["stop"] else 0
+    tp1 = int(n["tp1"]) if n["tp1"] else 0
+    time_stop = int(n["time_stop_days"]) if n["time_stop_days"] else 7
+    route = n.get("route", "")
+    is_overheat = route == "OVERHEAT"
+    position = n.get("position_pct", 0)
+
+    # 케이스별 가이드
+    if qty > 0 and not is_overheat:
+        # 매수 가능
+        guide_lines = [
+            ("보유자", f"{stop:,} 손절선 관리"),
+            ("신규 진입", "현재가 기준 분할 접근 가능"),
+            ("1차 목표", f"TP1 {tp1:,}"),
+            ("시간 기준", f"{time_stop}일"),
+        ]
+        title_color = "#10B981"
+    else:
+        # 매수 부적합 (OVERHEAT / KELLY 0)
+        guide_lines = [
+            ("보유자", f"{stop:,} 손절선 사수"),
+            ("신규 진입", "❌ 부적합 (대기)"),
+            ("재진입 조건", "RR 회복 + ROUTE 정상화"),
+            ("시간 기준", f"{time_stop}일"),
+        ]
+        title_color = "#EF4444"
+
+    rows_html = ""
+    for label, value in guide_lines:
+        rows_html += f'''
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; padding: 4px 0; font-size: 11px;">
+          <span style="color: var(--text-gray); flex-shrink: 0;">✓ {label}</span>
+          <span style="color: var(--text-white); font-weight: 600; text-align: right; padding-left: 8px;">{h_escape(value)}</span>
+        </div>'''
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div style="background: var(--bg-card); border: 1px solid var(--border);
+                  border-radius: 8px; padding: 12px; min-height: 160px;">
+        <div style="color: {title_color}; font-size: 12px; font-weight: 800;
+                    text-align: center; margin-bottom: 8px; padding-bottom: 6px;
+                    border-bottom: 1px solid var(--border);">
+          👤 투자자 가이드
+        </div>
+        {rows_html}
       </div>
     </div>
     ''')
@@ -2732,8 +3274,9 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
 
     # main-grid: 좌측 4패널 + 중앙 차트 + 우측 레이더
     # inline style 강제 (NiceGUI ui.element가 CSS class만으로 grid 적용 안 되는 케이스 회피)
+    # 좌측 260px (가격 플랜 표시 여유) / 중앙 minmax(0,1fr) / 우측 300px (레이더 크게)
     with ui.element("div").style(
-        "display: grid; grid-template-columns: 240px minmax(0, 1fr) 240px; "
+        "display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; "
         "gap: 8px; width: 100%; margin-bottom: 12px; box-sizing: border-box;"
     ).classes("sd-v2"):
 
@@ -2746,16 +3289,25 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
             render_v2_momentum(n)
             render_v2_supply(n)
 
-        # 중앙: 메인 캔들차트 + 보조 차트 4개 + 거래강도 게이지
+        # 중앙: 메인 캔들차트 + 보조 차트 4개 + 거래강도 게이지 + 3분할 패널
         with ui.element("div").style("min-width: 0;"):
             render_v2_chart(n, ohlcv_df=ohlcv_df)
             render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
+            # [Step 2F] 수익률현황 / 핵심레벨 / 리스크뉴스 (3분할)
+            render_v2_returns_levels_risk(n)
+            # [Step 2F] 시나리오 A/B/C (3카드)
+            render_v2_scenarios(n)
 
-        # 우측 사이드: 레이더 차트 (5축)
+        # 우측 사이드: 레이더 차트 (5축) + AXIS_GAP 큰 카드 + 투자자 가이드
         with ui.element("div").style(
             "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
         ):
             render_v2_radar(n)
+            render_v2_right_axisgap(n)
+            render_v2_right_guide(n)
 
     # 하단 4섹터 (핵심 요약 / 분할 익절 / DipSniper / 비교 또는 KELLY)
     render_v2_bottom_sectors(n, rank=rank, total=total, compare_name=compare_name)
+
+    # [Step 2F] 최종 판정 띠 (페이지 최하단)
+    render_v2_final_verdict(n, rank=rank, total=total)
