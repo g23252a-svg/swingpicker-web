@@ -549,25 +549,30 @@ def _inject_v2_styles():
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 8px 10px;
+      padding: 10px 12px;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 4px;
+      min-height: 96px;       /* 모든 박스 높이 동일 */
+      text-align: center;
+      box-sizing: border-box;
     }
     .sd-v2 .h-badge .lbl {
       color: var(--text-gray);
-      font-size: 9px;
-      font-weight: 600;
+      font-size: 10px;
+      font-weight: 700;
       letter-spacing: 0.5px;
+      text-transform: uppercase;
     }
     .sd-v2 .h-badge .val {
       font-size: 14px;
       font-weight: 800;
       letter-spacing: -0.3px;
+      line-height: 1.2;
     }
-    .sd-v2 .h-badge .sub { color: var(--text-dim); font-size: 9px; }
+    .sd-v2 .h-badge .sub { color: var(--text-dim); font-size: 9px; line-height: 1.4; }
     .sd-v2 .h-badge.core {
       background: linear-gradient(135deg, var(--purple-dim), rgba(236, 72, 153, 0.1));
       border-color: var(--purple);
@@ -819,25 +824,29 @@ def _inject_v2_styles():
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 4px 0;
-      font-size: 10px;
+      padding: 5px 0;
+      font-size: 11px;
+      line-height: 1.4;
+      gap: 12px;            /* 라벨과 값 사이 최소 간격 보장 */
     }
     .sd-v2 .panel-row .lbl {
       color: var(--text-gray);
       display: flex;
       align-items: center;
       gap: 4px;
+      flex-shrink: 0;
     }
     .sd-v2 .panel-row .lbl::before {
       content: "✓";
       color: var(--green);
-      font-size: 9px;
+      font-size: 10px;
     }
     .sd-v2 .panel-row.note .lbl::before { content: ""; }
     .sd-v2 .panel-row .val {
       color: var(--text-white);
       font-weight: 700;
       font-variant-numeric: tabular-nums;
+      text-align: right;
     }
     .sd-v2 .panel-row .val.green  { color: var(--green); }
     .sd-v2 .panel-row .val.red    { color: var(--red); }
@@ -940,8 +949,9 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
 
     with ui.element("div").classes("sd-v2").style("width: 100%;"):
         with ui.element("div").classes("header").style(
-            "display: grid; grid-template-columns: 1fr 200px 130px 130px 110px; "
-            "gap: 8px; margin-bottom: 12px; width: 100%;"
+            # 종목명은 넓게 (1fr), 나머지 4박스는 동일 폭 (140px) — 균일한 외관
+            "display: grid; grid-template-columns: 1fr 180px 140px 140px 140px; "
+            "gap: 8px; margin-bottom: 12px; width: 100%; align-items: stretch;"
         ):
 
             # 1. 종목명 + LDY_RANK
@@ -1239,62 +1249,62 @@ def render_v2_price_plan(n: dict):
         <div class="panel-title"><span class="num">1</span>가격 플랜</div>
 
         <div class="panel-row">
-          <span class="lbl">종가</span>
+          <span class="lbl" title="전일 종가 (기준일 마감가)">종가</span>
           <span class="val">{_fmt_won(close)}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">추천매수가</span>
+          <span class="lbl" title="시스템이 추천하는 분할 매수 진입가. GAP은 종가 대비 % 차이">추천매수가</span>
           <span class="val">{_fmt_won(entry)} <span class="pct-small">(GAP {_fmt_pct_signed(entry_gap)})</span></span>
         </div>
         <div class="panel-row stop">
-          <span class="lbl">손절가</span>
+          <span class="lbl" title="이 가격을 이탈하면 즉시 전량 손절. MAX_LOSS와 직결">손절가</span>
           <span class="val red">{_fmt_won(stop)} <span class="pct-small">({_fmt_pct_signed(stop_loss)})</span></span>
         </div>
 
         <div class="panel-row tp">
-          <span class="lbl">TP1</span>
+          <span class="lbl" title="1차 익절 목표가 (SWING_20D 기반, 도달 확률 표시)">TP1</span>
           <span class="val">{_fmt_won(tp1)} <span style="color: var(--green);">({_fmt_pct_signed(tp1_gain)})</span></span>
         </div>
         <div class="tp-prob-line">{h_escape(n["tp1_method"]) or "—"} · {int(tp1_prob)}%</div>
 
         <div class="panel-row tp">
-          <span class="lbl">TP2</span>
+          <span class="lbl" title="2차 익절 목표가 (ATR x 배수 기반)">TP2</span>
           <span class="val">{_fmt_won(tp2)} <span style="color: var(--green);">({_fmt_pct_signed(tp2_gain)})</span></span>
         </div>
         <div class="tp-prob-line">{h_escape(n["tp2_method"]) or "—"} · {int(tp2_prob)}%</div>
 
         <div class="panel-row tp">
-          <span class="lbl">TP3</span>
+          <span class="lbl" title="3차 익절 목표가 (피보나치 1.618 확장 기반)">TP3</span>
           <span class="val">{_fmt_won(tp3)} <span style="color: var(--green);">({_fmt_pct_signed(tp3_gain)})</span></span>
         </div>
         <div class="tp-prob-line">{h_escape(n["tp3_method"]) or "—"} · {int(tp3_prob)}%</div>
 
         <div class="panel-row divider">
-          <span class="lbl">RR_NOW_TP1</span>
+          <span class="lbl" title="현재 시점 Risk:Reward 비율 (TP1까지 기대수익 ÷ 손절 시 손실). 1.0 이상이면 양호">RR_NOW_TP1</span>
           <span class="val orange">{rr_now:.2f} ({rr_tag})</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">RR_MULT</span>
+          <span class="lbl" title="원래 플랜의 RR 배수. RR_NOW가 이것보다 작으면 진입 매력도 떨어짐">RR_MULT</span>
           <span class="val">{rr_mult:.1f}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">MAX_LOSS</span>
+          <span class="lbl" title="포지션당 최대 손실율. 손절 발동 시 잃을 자본 비중">MAX_LOSS</span>
           <span class="val red">{_fmt_pct(max_loss)}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">TIME_STOP</span>
+          <span class="lbl" title="이 일수 안에 TP1 미돌파 시 시간 손절 (TIME_STOP) 발동">TIME_STOP</span>
           <span class="val">{time_stop}일</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">POSITION</span>
+          <span class="lbl" title="추천 보유 포지션 비중. 100% = 풀포지션, 0% = 신규매수 부적합">POSITION</span>
           <span class="val">{_fmt_pct(position, 0)}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">KELLY_B</span>
+          <span class="lbl" title="켈리 공식 기반 베팅 사이즈 (B = bankroll fraction). plan은 이론값, emp는 실측 보정값">KELLY_B</span>
           <span class="val orange">{kelly_final:.1f} <span class="pct-small">(plan {kelly_planned:.3f} / emp {kelly_empirical:.1f})</span></span>
         </div>
         <div class="panel-row">
-          <span class="lbl">KELLY_수량</span>
+          <span class="lbl" title="실제 매수 권장 수량 및 금액 (KELLY_B × 가용 자본 / 진입가)">KELLY_수량</span>
           <span class="val">{qty}주 <span class="pct-small">({amount:.1f}만원)</span></span>
         </div>
       </div>
@@ -1352,35 +1362,35 @@ def render_v2_trend_mtf(n: dict):
         <div class="panel-title"><span class="num">2</span>추세 / MTF</div>
 
         <div class="panel-row">
-          <span class="lbl">주봉 20선 상회</span>
+          <span class="lbl" title="주봉 종가가 주봉 20일선 위에 있는가 (장기 추세 필터)">주봉 20선 상회</span>
           <span class="val {wma_clr}">{wma_arrow}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">주봉 추세</span>
+          <span class="lbl" title="주봉 캔들의 방향성 (3주 연속 상승/하락 등)">주봉 추세</span>
           <span class="val {wtr_clr}">{wtr_arrow}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">MTF 주봉</span>
+          <span class="lbl" title="Multi-Timeframe 주봉 차원의 정렬 신호 (+1=상승, 0=중립, -1=하락)">MTF 주봉</span>
           <span class="val {mtf_w_clr}">{mtf_w_text}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">MTF 월봉</span>
+          <span class="lbl" title="Multi-Timeframe 월봉 차원의 정렬 신호">MTF 월봉</span>
           <span class="val {mtf_m_clr}">{mtf_m_text}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">SUPERTREND</span>
+          <span class="lbl" title="SuperTrend 지표값 (ATR x multiplier 기반 추세선). ▲=매수, ▼=매도">SUPERTREND</span>
           <span class="val {st_clr}">{st_arrow} {_fmt_won(st_val).replace("원","")}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">MA20 상회</span>
+          <span class="lbl" title="현재가가 20일 이동평균선 위에 있는가 (단기 추세 필터)">MA20 상회</span>
           <span class="val {ma20_clr}">{ma20_text}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">HMA20</span>
+          <span class="lbl" title="Hull Moving Average 20 (HMA — 부드러운 추세선). HMA_On은 종가가 HMA 위에 있는지">HMA20</span>
           <span class="val">{_fmt_won(hma20).replace("원","")} <span class="pct-small">(HMA_On {h_escape(hma_on or "—")})</span></span>
         </div>
         <div class="panel-row">
-          <span class="lbl">이격도</span>
+          <span class="lbl" title="종가/20일선 괴리율 %. 양수=상승 괴리, 너무 크면 단기 과열 신호">이격도</span>
           <span class="val">{igyukdo:.2f}</span>
         </div>
       </div>
@@ -1524,40 +1534,40 @@ def render_v2_supply(n: dict):
         <div class="panel-title"><span class="num">4</span>수급 / 유동성</div>
 
         <div class="panel-row">
-          <span class="lbl">거래대금</span>
+          <span class="lbl" title="당일 거래대금 (가격 x 수량). 100억 이상이면 유동성 양호">거래대금</span>
           <span class="val">{_fmt_eok(turnover)}{turnover_icon}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">시가총액</span>
+          <span class="lbl" title="시가총액 (전체 발행주식수 x 현재가)">시가총액</span>
           <span class="val">{_fmt_eok(mcap)}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">외인 순매수</span>
+          <span class="lbl" title="외국인 당일 순매수 금액. + 매수 우위, − 매도 우위">외인 순매수</span>
           <span class="val {_net_color_class(foreign)}">{_fmt_net(foreign)}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">기관 순매수</span>
+          <span class="lbl" title="기관 당일 순매수 금액 (연기금/보험/투신 등 합산)">기관 순매수</span>
           <span class="val {_net_color_class(institution)}">{_fmt_net(institution)}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">메이저 순매수</span>
+          <span class="lbl" title="메이저 = 외인 + 기관. 스마트머니 흐름 추정">메이저 순매수</span>
           <span class="val {_net_color_class(major)}">{_fmt_net(major)}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">개인 순매수</span>
+          <span class="lbl" title="개인 당일 순매수 금액. 보통 메이저와 반대 방향">개인 순매수</span>
           <span class="val {_net_color_class(individual)}">{_fmt_net(individual)}</span>
         </div>
 
         <div class="panel-row divider">
-          <span class="lbl">거래강도</span>
+          <span class="lbl" title="당일 거래량 / 평균 거래량 비율. 1.0 = 평균, 2.0+ = 거래 폭발">거래강도</span>
           <span class="val {strength_clr}">{strength:.2f}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">V_POWER</span>
+          <span class="lbl" title="Volume Power. 상승 거래량 비중 - 하락 거래량 비중. + 매수세, − 매도세">V_POWER</span>
           <span class="val {vp_clr}">{v_power:+.2f}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl">Vol_Quality</span>
+          <span class="lbl" title="거래량 품질 점수. 높을수록 추세 동반 거래 (단순 급등락 거래와 구분)">Vol_Quality</span>
           <span class="val">{vol_quality:.2f}</span>
         </div>
       </div>
@@ -2453,30 +2463,30 @@ def render_v2_scenarios(n: dict):
         return "".join(html_lines)
 
     ui.html(f'''
-    <div class="sd-v2" style="margin-top: 12px; width: 100%;">
+    <div class="sd-v2" style="margin-top: 8px; width: 100%;">
       <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
 
         <!-- 시나리오 A (기본) -->
         <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.04));
-                    border: 1px solid {scenario_a_clr}; border-radius: 8px; padding: 16px; min-width: 0;
-                    min-height: 140px; display: flex; flex-direction: column; justify-content: center;">
-          <div style="font-size: 18px; margin-bottom: 6px;">📈 시나리오 A <span style="color: var(--text-dim); font-size: 10px;">(기본)</span></div>
+                    border: 1px solid {scenario_a_clr}; border-radius: 8px; padding: 14px; min-width: 0;
+                    min-height: 130px; display: flex; flex-direction: column; justify-content: center;">
+          <div style="font-size: 16px; margin-bottom: 6px;">📈 시나리오 A <span style="color: var(--text-dim); font-size: 10px;">(기본)</span></div>
           {_scenario_html("📈", scenario_a_clr, scenario_a_lines, big_idx=2)}
         </div>
 
         <!-- 시나리오 B (보수) -->
         <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.04));
-                    border: 1px solid #3B82F6; border-radius: 8px; padding: 16px; min-width: 0;
-                    min-height: 140px; display: flex; flex-direction: column; justify-content: center;">
-          <div style="font-size: 18px; margin-bottom: 6px;">🔍 시나리오 B <span style="color: var(--text-dim); font-size: 10px;">(보수)</span></div>
+                    border: 1px solid #3B82F6; border-radius: 8px; padding: 14px; min-width: 0;
+                    min-height: 130px; display: flex; flex-direction: column; justify-content: center;">
+          <div style="font-size: 16px; margin-bottom: 6px;">🔍 시나리오 B <span style="color: var(--text-dim); font-size: 10px;">(보수)</span></div>
           {_scenario_html("🔍", "#3B82F6", scenario_b_lines, big_idx=1)}
         </div>
 
         <!-- 시나리오 C (리스크) -->
         <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(239, 68, 68, 0.04));
-                    border: 1px solid #EF4444; border-radius: 8px; padding: 16px; min-width: 0;
-                    min-height: 140px; display: flex; flex-direction: column; justify-content: center;">
-          <div style="font-size: 18px; margin-bottom: 6px;">❌ 시나리오 C <span style="color: var(--text-dim); font-size: 10px;">(리스크)</span></div>
+                    border: 1px solid #EF4444; border-radius: 8px; padding: 14px; min-width: 0;
+                    min-height: 130px; display: flex; flex-direction: column; justify-content: center;">
+          <div style="font-size: 16px; margin-bottom: 6px;">❌ 시나리오 C <span style="color: var(--text-dim); font-size: 10px;">(리스크)</span></div>
           {_scenario_html("❌", "#EF4444", scenario_c_lines, big_idx=2)}
         </div>
 
@@ -2675,7 +2685,7 @@ def render_v2_radar(n: dict):
                     border-bottom: 1px solid var(--border);">
           3축 밸런스 레이더
         </div>
-        <svg viewBox="-35 -15 310 280" style="width: 100%; height: 320px;">
+        <svg viewBox="-70 -20 380 290" style="width: 100%; height: 320px;">
           {grid_polys}
           {axis_lines}
           <polygon points="{data_poly}" fill="rgba(139, 92, 246, 0.25)"
@@ -3015,7 +3025,7 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
       .sd-v2 .tp-weight::before {{ content: "→ "; }}
     </style>
 
-    <div class="sd-v2 bottom-grid-wrapper" style="display: block; width: 100%; margin-top: 12px;">
+    <div class="sd-v2 bottom-grid-wrapper" style="display: block; width: 100%; margin-top: 8px;">
       <div class="bottom-grid" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: 100%;">
 
         <!-- 1. 핵심 요약 -->
