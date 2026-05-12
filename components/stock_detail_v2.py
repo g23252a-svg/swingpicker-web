@@ -1772,6 +1772,21 @@ def render_v2_chart(n: dict, ohlcv_df=None):
                       "color": "#EF4444", "fontSize": 10, "position": "insideEndTop"}
         })
 
+    # Y축 min/max 계산 — 캔들 + 모든 markLine 가격을 포함하도록 강제 확장
+    # 이걸 안 하면 "scale": True가 캔들 범위만 자동 fit해서 TP2/TP3가 화면 밖
+    price_values = [v for v in highs + lows if v is not None and v > 0]
+    price_values += [v for v in [tp1, tp2, tp3, close, entry, stop] if v > 0]
+    if price_values:
+        y_max_raw = max(price_values)
+        y_min_raw = min(price_values)
+        # 위 5% / 아래 5% 여백 추가
+        y_padding = (y_max_raw - y_min_raw) * 0.05
+        y_max = y_max_raw + y_padding
+        y_min = max(0, y_min_raw - y_padding)
+    else:
+        y_max = None
+        y_min = None
+
     # ECharts option
     option = {
         "backgroundColor": "transparent",
@@ -1821,6 +1836,8 @@ def render_v2_chart(n: dict, ohlcv_df=None):
                 "scale": True,
                 "gridIndex": 0,
                 "splitNumber": 6,
+                "min": y_min if y_min is not None else None,
+                "max": y_max if y_max is not None else None,
                 "axisLine": {"lineStyle": {"color": "#2A2D38"}},
                 "axisLabel": {"color": "#6B7280", "fontSize": 9,
                               "formatter": "{value}"},
