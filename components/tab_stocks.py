@@ -1787,9 +1787,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         match = df[df["종목코드"].astype(str).str.zfill(6) == code]
         if match.empty:
             return
+        # v2/v1 둘 다 내부에서 'with detail_area:' 사용. 여기서 중첩 with 없이 clear만.
         detail_area.clear()
-        with detail_area:
-            _render_stock_detail(code, match.iloc[0])
+        _render_stock_detail(code, match.iloc[0], df)
 
     # ── [v3.7] Top 3 헤더 카드 (백테스트 검증 기반) ──
     _render_top3_card(df, top3_codes, on_card_click=_on_top_pick_click)
@@ -2426,35 +2426,62 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         if match.empty:
             return
         row = match.iloc[0]
-        _render_stock_detail(code, row)
+        _render_stock_detail(code, row, full_df)
 
-    def _render_stock_detail(code: str, row):
+    def _render_stock_detail(code: str, row, full_df: pd.DataFrame = None):
+        # html escape helper (XSS 방지 + 디버그 메시지에 안전한 텍스트 삽입)
+        def h_escape_safe(s):
+            try:
+                from html import escape as _esc
+                return _esc(str(s))
+            except Exception:
+                return str(s).replace("<", "&lt;").replace(">", "&gt;")
         # ═══════════════════════════════════════════════════
         #  [v2 토글] Prime/admin 회원 또는 USE_STOCK_DETAIL_V2=1 환경변수면 v2
         #  실패 시 자동 v1 fallback (운영 안전성)
         # ═══════════════════════════════════════════════════
+        # 부모 스코프 auth 우선 사용 (render_tab_stocks의 auth 인자).
+        # 클로저 캡처 실패 시에만 services.auth 호출 fallback.
         try:
-            from services.auth import get_auth_status as _get_auth
-            _auth = _get_auth()
-        except Exception:
-            _auth = "guest"
-        _use_v2 = (
-            os.getenv("USE_STOCK_DETAIL_V2", "0") == "1"
-            or _auth in ("prime", "admin")
-        )
+            _auth = auth  # render_tab_stocks(df, auth, store)의 auth 인자
+        except NameError:
+            try:
+                from services.auth import get_auth_status as _get_auth
+                _auth = _get_auth()
+            except Exception as _auth_e:
+                _auth = f"guest (auth import 실패: {_auth_e})"
+
+        _use_v2_env = os.getenv("USE_STOCK_DETAIL_V2", "0") == "1"
+        _use_v2_member = isinstance(_auth, str) and _auth in ("prime", "admin")
+        _use_v2 = _use_v2_env or _use_v2_member
+
+        # 디버그 배지는 admin 전용 (Prime 사용자 화면 polish 보호)
+        _show_debug = isinstance(_auth, str) and _auth == "admin"
+
         if _use_v2:
             try:
                 from components.stock_detail_v2 import render_stock_detail_v2_partial
-                # 비교 종목 자동 매핑: 같은 라벨/ROUTE 중 다음 순위 종목
+                # full_df 인자 우선, 없으면 부모 스코프 df 클로저 사용
+                # NameError 방어 (혹시 클로저 캡처 실패 시 None으로 안전 처리)
+                if full_df is not None:
+                    _full_df = full_df
+                else:
+                    try:
+                        _full_df = df  # render_tab_stocks(df, auth, store)의 df
+                    except NameError:
+                        _full_df = None
+
+                # 비교 종목 자동 매핑: 같은 라벨 중 다른 종목
                 _compare = ""
                 try:
                     code_norm = str(code).zfill(6)
-                    same_label = full_df[
-                        (full_df["ELITE_LABEL"] == row.get("ELITE_LABEL", ""))
-                        & (full_df["종목코드"].astype(str).str.zfill(6) != code_norm)
-                    ]
-                    if not same_label.empty:
-                        _compare = str(same_label.iloc[0].get("종목명", ""))
+                    if _full_df is not None and "ELITE_LABEL" in _full_df.columns:
+                        same_label = _full_df[
+                            (_full_df["ELITE_LABEL"] == row.get("ELITE_LABEL", ""))
+                            & (_full_df["종목코드"].astype(str).str.zfill(6) != code_norm)
+                        ]
+                        if not same_label.empty:
+                            _compare = str(same_label.iloc[0].get("종목명", ""))
                 except Exception:
                     pass
 
@@ -2463,16 +2490,27 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     _rank = int(row.get("LDY_RANK", 0) or 0)
                 except Exception:
                     _rank = 0
-                _total = len(full_df) if full_df is not None else 0
+                _total = len(_full_df) if _full_df is not None else 0
 
                 with detail_area:
                     # NiceGUI Quasar 컨테이너 폭 제약 해제 (v2 레이아웃 요구사항)
-                    ui.add_head_html('''
-                        <style>
-                          .q-page-container, .q-page, .nicegui-content { max-width: none !important; }
-                          .nicegui-content > * { width: 100% !important; max-width: none !important; }
-                        </style>
-                    ''')
+                    # 중복 주입 방지 플래그 (메모리 효율)
+                    if not hasattr(_render_stock_detail, "_v2_css_injected"):
+                        ui.add_head_html('''
+                            <style>
+                              .q-page-container, .q-page, .nicegui-content { max-width: none !important; }
+                              .nicegui-content > * { width: 100% !important; max-width: none !important; }
+                            </style>
+                        ''')
+                        _render_stock_detail._v2_css_injected = True
+                    # admin/prime에게 v2 활성 표시 (작은 배지)
+                    if _show_debug:
+                        ui.html(
+                            f'<div style="padding: 4px 10px; background: #10B981; '
+                            f'color: white; font-size: 11px; font-weight: 700; '
+                            f'border-radius: 4px; display: inline-block; margin-bottom: 4px;">'
+                            f'✨ v2 풀 대시보드 ({_auth})</div>'
+                        )
                     render_stock_detail_v2_partial(
                         row.to_dict() if hasattr(row, "to_dict") else dict(row),
                         rank=_rank,
@@ -2486,11 +2524,29 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     f"stock_detail_v2 렌더링 실패, v1 fallback [{code}]: {_e}",
                     exc_info=True,
                 )
-                # v2 실패 시 detail_area 비우고 v1으로 계속 진행
+                # v2 실패 시 detail_area 비우고 v1으로 계속 진행 + 화면에 사유 표시
                 try:
                     detail_area.clear()
+                    if _show_debug:
+                        with detail_area:
+                            ui.html(
+                                f'<div style="padding: 8px 12px; background: #EF4444; '
+                                f'color: white; font-size: 11px; font-weight: 600; '
+                                f'border-radius: 4px; margin-bottom: 8px;">'
+                                f'⚠️ v2 렌더링 실패 → v1으로 fallback. 사유: {h_escape_safe(str(_e))}</div>'
+                            )
                 except Exception:
                     pass
+        else:
+            # v2 미활성 사유 표시 (admin인데 v2 안 뜨는 경우 진단)
+            if _show_debug and isinstance(_auth, str):
+                with detail_area:
+                    ui.html(
+                        f'<div style="padding: 4px 10px; background: #6B7280; '
+                        f'color: white; font-size: 10px; '
+                        f'border-radius: 4px; display: inline-block; margin-bottom: 4px;">'
+                        f'v1 (auth={h_escape_safe(_auth)}, env={_use_v2_env})</div>'
+                    )
 
         # ═══════════════════════════════════════════════════
         #  v1 기본 렌더링 (기존 코드)
