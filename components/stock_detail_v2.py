@@ -2604,10 +2604,10 @@ def render_v2_radar(n: dict):
         ("TRIGGER", trigger_s, 198),    # 왼쪽 위
     ]
 
-    # 그리기 좌표 (캔버스 240x240, 중심 120,120, 반지름 작게 + 라벨 여백 크게)
+    # 그리기 좌표 (캔버스 240x240, 중심 120,120, 반지름 키움 + 라벨 여백 유지)
     cx, cy = 120, 120
-    max_r = 75  # 100 → 75 (라벨 공간 확보)
-    label_r = 100  # 라벨 위치 — 데이터 폴리곤보다 멀리
+    max_r = 90  # 75 → 90 (펜타곤 크게)
+    label_r = 110  # 라벨 위치 — 데이터 폴리곤보다 멀리
 
     # 펜타곤 격자 4단 (25, 50, 75, 100%)
     def _pentagon(scale: float) -> str:
@@ -2669,8 +2669,13 @@ def render_v2_radar(n: dict):
     ui.html(f'''
     <div class="sd-v2">
       <div style="background: var(--bg-card); border: 1px solid var(--border);
-                  border-radius: 8px; padding: 8px;">
-        <svg viewBox="-30 -10 300 260" style="width: 100%; height: 240px;">
+                  border-radius: 8px; padding: 12px;">
+        <div style="color: var(--purple); font-size: 12px; font-weight: 800;
+                    text-align: center; margin-bottom: 8px; padding-bottom: 6px;
+                    border-bottom: 1px solid var(--border);">
+          3축 밸런스 레이더
+        </div>
+        <svg viewBox="-35 -15 310 280" style="width: 100%; height: 320px;">
           {grid_polys}
           {axis_lines}
           <polygon points="{data_poly}" fill="rgba(139, 92, 246, 0.25)"
@@ -2678,6 +2683,111 @@ def render_v2_radar(n: dict):
           {dot_circles}
           {label_html}
         </svg>
+        <!-- 5축 점수 요약 -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+                    margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);">
+          <div style="font-size: 10px; color: var(--text-gray);">STRUCT</div>
+          <div style="font-size: 11px; color: var(--green); font-weight: 700; text-align: right;">{struct_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">TIMING</div>
+          <div style="font-size: 11px; color: var(--orange); font-weight: 700; text-align: right;">{timing_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">AI</div>
+          <div style="font-size: 11px; color: var(--purple); font-weight: 700; text-align: right;">{ai_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">BALANCE</div>
+          <div style="font-size: 11px; color: var(--cyan); font-weight: 700; text-align: right;">{balance_s:.1f}</div>
+          <div style="font-size: 10px; color: var(--text-gray);">TRIGGER</div>
+          <div style="font-size: 11px; color: var(--yellow); font-weight: 700; text-align: right;">{trigger_s:.1f}</div>
+        </div>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2F: 우측 추가 카드 (AXIS_GAP 큰 카드 + 투자자 가이드)
+# ═══════════════════════════════════════════════════
+
+def render_v2_right_axisgap(n: dict):
+    """[Step 2F] 우측 컬럼 — AXIS_GAP 큰 카드 (비교 이미지 25.9 스타일)."""
+    axis_gap = n.get("axis_gap", 0)
+    # 등급 분류
+    if axis_gap < 10:
+        gap_label = "매우 양호"
+        gap_color = "#10B981"  # green
+    elif axis_gap < 20:
+        gap_label = "양호"
+        gap_color = "#06B6D4"  # cyan
+    elif axis_gap < 30:
+        gap_label = "양호"
+        gap_color = "#06B6D4"
+    elif axis_gap < 40:
+        gap_label = "주의"
+        gap_color = "#F59E0B"  # orange
+    else:
+        gap_label = "리스크"
+        gap_color = "#EF4444"  # red
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div style="background: linear-gradient(135deg, {gap_color}22, {gap_color}08);
+                  border: 1px solid {gap_color}; border-radius: 8px; padding: 14px;
+                  text-align: center; min-height: 140px;
+                  display: flex; flex-direction: column; justify-content: center;">
+        <div style="color: var(--text-gray); font-size: 11px; font-weight: 700; margin-bottom: 6px;">AXIS_GAP</div>
+        <div style="color: {gap_color}; font-size: 36px; font-weight: 900; line-height: 1;">{axis_gap:.1f}</div>
+        <div style="color: var(--text-gray); font-size: 11px; margin-top: 6px;">{gap_label}</div>
+      </div>
+    </div>
+    ''')
+
+
+def render_v2_right_guide(n: dict):
+    """[Step 2F] 우측 컬럼 — 투자자 가이드 카드."""
+    qty = int(n["qty"]) if n["qty"] else 0
+    stop = int(n["stop"]) if n["stop"] else 0
+    tp1 = int(n["tp1"]) if n["tp1"] else 0
+    time_stop = int(n["time_stop_days"]) if n["time_stop_days"] else 7
+    route = n.get("route", "")
+    is_overheat = route == "OVERHEAT"
+    position = n.get("position_pct", 0)
+
+    # 케이스별 가이드
+    if qty > 0 and not is_overheat:
+        # 매수 가능
+        guide_lines = [
+            ("보유자", f"{stop:,} 손절선 관리"),
+            ("신규 진입", "현재가 기준 분할 접근 가능"),
+            ("1차 목표", f"TP1 {tp1:,}"),
+            ("시간 기준", f"{time_stop}일"),
+        ]
+        title_color = "#10B981"
+    else:
+        # 매수 부적합 (OVERHEAT / KELLY 0)
+        guide_lines = [
+            ("보유자", f"{stop:,} 손절선 사수"),
+            ("신규 진입", "❌ 부적합 (대기)"),
+            ("재진입 조건", "RR 회복 + ROUTE 정상화"),
+            ("시간 기준", f"{time_stop}일"),
+        ]
+        title_color = "#EF4444"
+
+    rows_html = ""
+    for label, value in guide_lines:
+        rows_html += f'''
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; padding: 4px 0; font-size: 11px;">
+          <span style="color: var(--text-gray); flex-shrink: 0;">✓ {label}</span>
+          <span style="color: var(--text-white); font-weight: 600; text-align: right; padding-left: 8px;">{h_escape(value)}</span>
+        </div>'''
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div style="background: var(--bg-card); border: 1px solid var(--border);
+                  border-radius: 8px; padding: 12px; min-height: 160px;">
+        <div style="color: {title_color}; font-size: 12px; font-weight: 800;
+                    text-align: center; margin-bottom: 8px; padding-bottom: 6px;
+                    border-bottom: 1px solid var(--border);">
+          👤 투자자 가이드
+        </div>
+        {rows_html}
       </div>
     </div>
     ''')
@@ -3164,8 +3274,9 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
 
     # main-grid: 좌측 4패널 + 중앙 차트 + 우측 레이더
     # inline style 강제 (NiceGUI ui.element가 CSS class만으로 grid 적용 안 되는 케이스 회피)
+    # 좌측 260px (가격 플랜 표시 여유) / 중앙 minmax(0,1fr) / 우측 300px (레이더 크게)
     with ui.element("div").style(
-        "display: grid; grid-template-columns: 240px minmax(0, 1fr) 240px; "
+        "display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; "
         "gap: 8px; width: 100%; margin-bottom: 12px; box-sizing: border-box;"
     ).classes("sd-v2"):
 
@@ -3187,11 +3298,13 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
             # [Step 2F] 시나리오 A/B/C (3카드)
             render_v2_scenarios(n)
 
-        # 우측 사이드: 레이더 차트 (5축)
+        # 우측 사이드: 레이더 차트 (5축) + AXIS_GAP 큰 카드 + 투자자 가이드
         with ui.element("div").style(
             "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
         ):
             render_v2_radar(n)
+            render_v2_right_axisgap(n)
+            render_v2_right_guide(n)
 
     # 하단 4섹터 (핵심 요약 / 분할 익절 / DipSniper / 비교 또는 KELLY)
     render_v2_bottom_sectors(n, rank=rank, total=total, compare_name=compare_name)
