@@ -426,7 +426,10 @@ def _inject_v2_styles():
       color: var(--text-white);
       font-size: 12px;
       line-height: 1.4;
+      width: 100%;
+      box-sizing: border-box;
     }
+    .sd-v2 *, .sd-v2 *::before, .sd-v2 *::after { box-sizing: border-box; }
 
     /* ── 헤더 영역 ── */
     .sd-v2 .header {
@@ -709,9 +712,13 @@ def _inject_v2_styles():
     /* ═══════════ [Step 2B+] 메인 그리드 + 좌측 사이드 패널 ═══════════ */
     .sd-v2 .main-grid {
       display: grid;
-      grid-template-columns: 240px 1fr 240px;
+      grid-template-columns: 240px minmax(0, 1fr) 240px;
       gap: 8px;
       margin-bottom: 12px;
+      width: 100%;
+    }
+    .sd-v2 .center-area {
+      min-width: 0;  /* 1fr 컬럼이 콘텐츠 폭에 갇히지 않도록 */
     }
     .sd-v2 .side-panel {
       display: flex;
@@ -1626,12 +1633,16 @@ def render_v2_chart(n: dict, ohlcv_df=None):
                   None이면 placeholder 표시
     """
     if ohlcv_df is None or len(ohlcv_df) == 0:
-        ui.html('''
+        debug_info = _load_ohlcv_debug_info(n["code"])
+        ui.html(f'''
             <div style="background: var(--bg-card); border: 1px solid var(--border);
-                        border-radius: 8px; padding: 40px; text-align: center;
-                        color: #6B7280; font-size: 12px; min-height: 400px;
-                        display: flex; align-items: center; justify-content: center;">
-                📊 OHLCV 데이터 로드 실패
+                        border-radius: 8px; padding: 20px; min-height: 400px;
+                        display: flex; flex-direction: column; align-items: center;
+                        justify-content: center; color: #6B7280; font-size: 12px;">
+                <div style="font-size: 16px; margin-bottom: 12px;">📊 OHLCV 데이터 로드 실패</div>
+                <pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px;
+                            font-size: 10px; color: #9CA3AF; max-width: 600px;
+                            white-space: pre-wrap; word-break: break-all;">{h_escape(debug_info)}</pre>
             </div>
         ''')
         return
@@ -2152,8 +2163,10 @@ def render_v2_radar(n: dict):
         ("TRIGGER", trigger_s, 198),    # 왼쪽 위
     ]
 
+    # 그리기 좌표 (캔버스 240x240, 중심 120,120, 반지름 작게 + 라벨 여백 크게)
     cx, cy = 120, 120
-    max_r = 100
+    max_r = 75  # 100 → 75 (라벨 공간 확보)
+    label_r = 100  # 라벨 위치 — 데이터 폴리곤보다 멀리
 
     # 펜타곤 격자 4단 (25, 50, 75, 100%)
     def _pentagon(scale: float) -> str:
@@ -2184,10 +2197,10 @@ def render_v2_radar(n: dict):
             f'<line x1="{cx}" y1="{cy}" x2="{ex:.1f}" y2="{ey:.1f}" '
             f'stroke="rgba(255,255,255,0.1)" stroke-width="1"/>'
         )
-        # 라벨 위치 (축 끝에서 살짝 바깥)
-        lr = max_r + 14
+        # 라벨 위치 (축 끝보다 살짝 바깥 — 잘림 방지)
+        lr = label_r
         lx = cx + lr * math.cos(rad)
-        ly = cy + lr * math.sin(rad)
+        ly = cy + lr * math.sin(rad) + 4  # +4: baseline 보정
         # 라벨 정렬 보정 (각도에 따라)
         anchor = "middle"
         if math.cos(rad) > 0.3:
@@ -2196,7 +2209,7 @@ def render_v2_radar(n: dict):
             anchor = "end"
         label_html += (
             f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" '
-            f'fill="white" font-size="11" font-weight="700">{label} {val:.1f}</text>'
+            f'fill="white" font-size="10" font-weight="700">{label} {val:.1f}</text>'
         )
 
     # 데이터 폴리곤
@@ -2216,7 +2229,7 @@ def render_v2_radar(n: dict):
     <div class="sd-v2">
       <div style="background: var(--bg-card); border: 1px solid var(--border);
                   border-radius: 8px; padding: 8px;">
-        <svg viewBox="0 0 240 240" style="width: 100%; height: 220px;">
+        <svg viewBox="-30 -10 300 260" style="width: 100%; height: 240px;">
           {grid_polys}
           {axis_lines}
           <polygon points="{data_poly}" fill="rgba(139, 92, 246, 0.25)"
@@ -2300,15 +2313,41 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
         </div>
         '''
 
-    # DipSniper 체크포인트
-    dipsniper_lines = [
-        f"진입가 {int(entry):,} / 손절가 {int(stop):,} 사수 (필수)",
-        f"분할매수 1주씩 (KELLY {qty}주까지)",
-        f"TP1 {int(tp1):,} 도달 시 자동 익절",
-        f"{int(stop):,} 깨면 즉시 손절",
-        f"{time_stop}일 내 미돌파 시 TIME_STOP 발동",
-        "주요 뉴스 모니터링 필수",
-    ]
+    # DipSniper 체크포인트 (KELLY 0주 / POSITION 0% / OVERHEAT 케이스 분기)
+    is_overheat = n.get("route", "") == "OVERHEAT"
+    is_buyable = qty > 0 and n.get("position_pct", 0) > 0 and not is_overheat
+
+    if is_buyable:
+        # 매수 가능 케이스 (와이투솔루션 등)
+        dipsniper_lines = [
+            f"진입가 {int(entry):,} / 손절가 {int(stop):,} 사수 (필수)",
+            f"분할매수 1주씩 (KELLY {qty}주까지)",
+            f"TP1 {int(tp1):,} 도달 시 자동 익절",
+            f"{int(stop):,} 깨면 즉시 손절",
+            f"{time_stop}일 내 미돌파 시 TIME_STOP 발동",
+            "주요 뉴스 모니터링 필수",
+        ]
+    else:
+        # 매수 부적합 케이스 (한온시스템 OVERHEAT / KELLY 0주 등)
+        reasons = []
+        if is_overheat:
+            reasons.append("OVERHEAT 상태")
+        if qty <= 0:
+            reasons.append("KELLY 0주")
+        if n.get("position_pct", 0) <= 0:
+            reasons.append("POSITION 0%")
+        reason_txt = " · ".join(reasons) if reasons else "신규매수 부적합"
+        rr_now = n.get("rr_now_tp1", 0)
+
+        dipsniper_lines = [
+            f"⚠️ 신규매수 제외: {reason_txt}",
+            f"RR {rr_now:.2f} (목표 1.0 이상 필요)",
+            f"현재 추세 진정 대기 권장",
+            f"기존 보유자: TP1 {int(tp1):,} 도달 시 분할 익절",
+            f"손절 {int(stop):,} 이탈 시 전량 정리",
+            "재진입은 RR 회복 + ROUTE 정상화 후",
+        ]
+
     dipsniper_html = "".join(
         f'<div class="b-row cyan"><span>{h_escape(line)}</span></div>'
         for line in dipsniper_lines
@@ -2358,17 +2397,24 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
 
     ui.html(f'''
     <style>
+      .sd-v2 .bottom-grid-wrapper {{
+        width: 100%;
+        margin-top: 12px;
+      }}
       .sd-v2 .bottom-grid {{
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 8px;
-        margin-top: 12px;
+        width: 100%;
       }}
       .sd-v2 .bottom-panel {{
         background: var(--bg-card);
         border: 1px solid var(--border);
         border-radius: 8px;
         padding: 12px;
+        min-height: 200px;
+        overflow: hidden;
+        min-width: 0;  /* 1fr 컬럼이 콘텐츠 폭에 갇히지 않도록 */
       }}
       .sd-v2 .bottom-panel .b-title {{
         color: var(--orange);
@@ -2388,6 +2434,7 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
         font-size: 10px;
         padding: 3px 0;
         color: var(--text-gray);
+        line-height: 1.5;
       }}
       .sd-v2 .bottom-panel .b-row::before {{
         content: "✓";
@@ -2417,7 +2464,7 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
       .sd-v2 .tp-weight::before {{ content: "→ "; }}
     </style>
 
-    <div class="sd-v2">
+    <div class="sd-v2 bottom-grid-wrapper">
       <div class="bottom-grid">
 
         <!-- 1. 핵심 요약 -->
@@ -2456,9 +2503,16 @@ def _load_ohlcv_for_v2(code: str, days: int = 120):
     """
     종목코드 → 최근 N일 OHLCV DataFrame.
 
-    구현: data/ohlcv_cache_*.parquet에서 로드.
-    최신 캐시에 종목이 없으면 최대 5개 이전 캐시까지 탐색 (fallback).
-    모두 실패 시 None 반환 → 차트 placeholder 표시.
+    구현 (다중 fallback):
+      1) data/ohlcv_cache_*.parquet (최대 5개)
+      2) data/ohlcv_cache_*.pkl / *.pickle (dict 또는 long-format 모두 대응)
+      3) 컬럼명 자동 탐지: 종목코드/code/Code/ticker/symbol
+      4) 날짜 컬럼 자동 탐지: Date/날짜/date/일자
+      5) 경로: __file__ 기준 + cwd 기준 둘 다 시도
+
+    Returns:
+        DataFrame [시가, 고가, 저가, 종가, 거래량] indexed by date
+        실패 시: (None, debug_reason: str) 튜플 반환 안 함, 단순 None
     """
     import os, glob
     try:
@@ -2467,35 +2521,140 @@ def _load_ohlcv_for_v2(code: str, days: int = 120):
         return None
 
     code_norm = str(code).zfill(6)
+    code_int_str = str(int(code_norm)) if code_norm.isdigit() else code_norm  # 011690 → "11690"
     cols_needed = ["시가", "고가", "저가", "종가", "거래량"]
+    code_col_candidates = ["종목코드", "code", "Code", "ticker", "Ticker", "symbol", "Symbol"]
+    date_col_candidates = ["Date", "date", "날짜", "일자", "DATE"]
 
-    try:
-        here = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.join(here, "..", "data")
-        files = sorted(
-            glob.glob(os.path.join(data_dir, "ohlcv_cache_*.parquet")),
-            reverse=True,
-        )
-        if not files:
+    # 가능한 data 디렉토리 후보 (Railway 작업 디렉토리 차이 대응)
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidate_dirs = [
+        os.path.join(here, "..", "data"),       # components/../data
+        os.path.join(os.getcwd(), "data"),      # CWD/data (Railway 진입점 기준)
+        "data",                                 # 상대경로 fallback
+        os.path.join(here, "data"),             # components/data (혹시 모를 위치)
+    ]
+
+    # 모든 후보 디렉토리에서 발견된 캐시 파일을 합쳐서 최신순 탐색
+    # (첫 번째 디렉토리에 오래된 캐시가 있고 정작 정상 캐시는 다른 곳에 있는 경우 대응)
+    files = []
+    seen = set()  # 중복 경로 제거 (심볼릭 링크 등)
+    for d in candidate_dirs:
+        if not os.path.isdir(d):
+            continue
+        d_real = os.path.realpath(d)
+        if d_real in seen:
+            continue
+        seen.add(d_real)
+        files.extend(glob.glob(os.path.join(d, "ohlcv_cache_*.parquet")))
+        files.extend(glob.glob(os.path.join(d, "ohlcv_cache_*.pkl")))
+        files.extend(glob.glob(os.path.join(d, "ohlcv_cache_*.pickle")))
+    # 파일명 기준 최신순 정렬 (ohlcv_cache_YYYYMMDD 패턴이라 lexical 정렬 = 시간 정렬)
+    files = sorted(set(files), reverse=True)
+
+    if not files:
+        return None
+
+    def _try_extract(df, fp):
+        """DataFrame에서 code_norm 종목의 OHLCV 추출 시도. 못 찾으면 None."""
+        if df is None or df.empty:
             return None
 
-        # 최대 5개 캐시까지 fallback 탐색
-        for fp in files[:5]:
-            try:
-                df = pd.read_parquet(fp).reset_index()
-                df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
-                sub = df[df["종목코드"] == code_norm].copy()
-                if sub.empty:
-                    continue
-                sub = sub.sort_values("Date").tail(days).set_index("Date")
-                if all(c in sub.columns for c in cols_needed):
-                    return sub[cols_needed].copy()
-                return sub
-            except Exception:
-                continue
+        # 1) index가 date면 reset
+        idx_is_date = (df.index.name in date_col_candidates) or (
+            hasattr(df.index, "dtype") and "datetime" in str(df.index.dtype)
+        )
+        if idx_is_date:
+            df = df.reset_index()
+
+        # 2) 종목코드 컬럼 탐지
+        code_col = next((c for c in code_col_candidates if c in df.columns), None)
+        if code_col is None:
+            return None
+
+        # 3) 종목코드 zfill 후 필터
+        df_local = df.copy()
+        df_local[code_col] = df_local[code_col].astype(str).str.replace(".0", "", regex=False).str.zfill(6)
+        sub = df_local[df_local[code_col] == code_norm].copy()
+        if sub.empty:
+            # int 비교도 시도 (11690 vs 011690 케이스)
+            sub = df_local[df_local[code_col].astype(str).str.lstrip("0") == code_int_str.lstrip("0")].copy()
+            if sub.empty:
+                return None
+
+        # 4) 날짜 컬럼 탐지 후 정렬
+        date_col = next((c for c in date_col_candidates if c in sub.columns), None)
+        if date_col:
+            sub = sub.sort_values(date_col).set_index(date_col)
+
+        # 5) 필요 컬럼 모두 있는지 확인
+        if all(c in sub.columns for c in cols_needed):
+            return sub[cols_needed].tail(days).copy()
+        # 영어 컬럼 (Open/High/Low/Close/Volume) 호환
+        eng_map = {"Open": "시가", "High": "고가", "Low": "저가", "Close": "종가", "Volume": "거래량"}
+        if all(c in sub.columns for c in eng_map.keys()):
+            sub_kr = sub[list(eng_map.keys())].rename(columns=eng_map)
+            return sub_kr.tail(days).copy()
         return None
-    except Exception:
-        return None
+
+    # 최대 5개 캐시 탐색 (parquet 우선, 그 다음 pkl)
+    for fp in files[:5]:
+        try:
+            if fp.endswith(".parquet"):
+                df = pd.read_parquet(fp)
+                result = _try_extract(df, fp)
+                if result is not None and not result.empty:
+                    return result
+            else:
+                obj = pd.read_pickle(fp)
+                # dict 형태: {code: DataFrame}
+                if isinstance(obj, dict):
+                    sub = obj.get(code_norm) or obj.get(code_int_str)
+                    if sub is not None and not sub.empty:
+                        result = _try_extract(sub, fp)
+                        if result is not None and not result.empty:
+                            return result
+                        # dict의 값은 보통 종목코드 컬럼 없음 — 한글/영어 OHLCV 직접 매핑
+                        if all(c in sub.columns for c in cols_needed):
+                            return sub[cols_needed].tail(days).copy()
+                        # 영어 컬럼 (Open/High/Low/Close/Volume) → 한글 변환
+                        eng_map = {"Open": "시가", "High": "고가", "Low": "저가",
+                                   "Close": "종가", "Volume": "거래량"}
+                        if all(c in sub.columns for c in eng_map.keys()):
+                            sub_kr = sub[list(eng_map.keys())].rename(columns=eng_map)
+                            return sub_kr.tail(days).copy()
+                elif hasattr(obj, "columns"):
+                    result = _try_extract(obj, fp)
+                    if result is not None and not result.empty:
+                        return result
+        except Exception:
+            continue
+
+    return None
+
+
+def _load_ohlcv_debug_info(code: str) -> str:
+    """차트 실패 시 진단 정보 (관리자용)."""
+    import os, glob
+    code_norm = str(code).zfill(6)
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidate_dirs = [
+        ("__file__ 기준", os.path.join(here, "..", "data")),
+        ("CWD 기준",      os.path.join(os.getcwd(), "data")),
+        ("상대경로",       "data"),
+        ("__file__ 동일", os.path.join(here, "data")),
+    ]
+    lines = [f"종목코드: {code_norm}", f"CWD: {os.getcwd()}", f"__file__: {here}"]
+    for label, d in candidate_dirs:
+        exists = os.path.isdir(d)
+        if exists:
+            n_parquet = len(glob.glob(os.path.join(d, "ohlcv_cache_*.parquet")))
+            n_pkl     = len(glob.glob(os.path.join(d, "ohlcv_cache_*.pkl")))
+            n_pickle  = len(glob.glob(os.path.join(d, "ohlcv_cache_*.pickle")))
+            lines.append(f"  {label}: {d} ✓ parquet={n_parquet} pkl={n_pkl} pickle={n_pickle}")
+        else:
+            lines.append(f"  {label}: {d} ✗ (디렉토리 없음)")
+    return "\n".join(lines)
 
 
 def render_stock_detail_v2_partial(row: Dict[str, Any],
