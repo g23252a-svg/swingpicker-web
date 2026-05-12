@@ -48,7 +48,46 @@ def _ret_color(val):
 
 
 async def render_stock_page(code: str, store):
-    """종목 개별 페이지 렌더링"""
+    """종목 개별 페이지 렌더링.
+
+    [v2 토글] USE_STOCK_DETAIL_V2=1 환경변수 또는 ?v2=1 쿼리스트링이면
+    components.stock_detail_v2.render_stock_detail_v2_partial로 위임.
+    실패 시 즉시 v1 fallback (운영 안전성 보장).
+    """
+    # ═══════════════════════════════════════════
+    #  [v2 토글] 환경변수 또는 쿼리스트링으로 v2 활성화
+    # ═══════════════════════════════════════════
+    use_v2_env = os.getenv("USE_STOCK_DETAIL_V2", "0") == "1"
+    use_v2_query = False
+    try:
+        from nicegui import context
+        req = context.client.request
+        if req and req.query_params.get("v2") == "1":
+            use_v2_query = True
+    except Exception:
+        pass
+
+    if use_v2_env or use_v2_query:
+        try:
+            await _render_stock_page_v2(code, store)
+            return
+        except Exception as e:
+            # v2 실패 시 v1으로 graceful fallback (운영 안전성)
+            logger.warning(
+                f"stock_detail_v2 렌더링 실패, v1 fallback [{code}]: {e}",
+                exc_info=True,
+            )
+            # 페이지가 비어있어야 v1이 정상 렌더 (이미 일부 그려졌다면 메시지 추가)
+            try:
+                ui.label("⚠️ v2 렌더링 실패, 기본 화면으로 전환합니다").classes(
+                    "text-yellow-400 text-xs p-2"
+                )
+            except Exception:
+                pass
+
+    # ═══════════════════════════════════════════
+    #  v1 기본 렌더링 (기존 코드)
+    # ═══════════════════════════════════════════
     ui.add_head_html(DARK_CSS)
 
     # 데이터 로드
@@ -350,3 +389,103 @@ async def render_stock_page(code: str, store):
         ui.label(f"📅 데이터 기준: {store.data_ts} · 분석일: {datetime.now().strftime('%Y-%m-%d')}").classes("text-xs text-gray-500")
         ui.label("⚠️ 본 자료는 투자 권유가 아닌 AI 분석 참고 자료입니다. 투자 판단은 본인 책임.").classes("text-xs text-gray-600")
         ui.label("© SwingPicker by LDY Pro Trader").classes("text-xs text-gray-600 mt-1")
+
+
+# ═══════════════════════════════════════════════════════════
+#  [v2] 종목 상세 v2 — Full Dashboard 렌더링
+#  활성화: USE_STOCK_DETAIL_V2=1 환경변수 또는 ?v2=1 쿼리스트링
+#  실패 시 자동으로 v1 fallback (render_stock_page 상단에서 처리)
+# ═══════════════════════════════════════════════════════════
+async def _render_stock_page_v2(code: str, store):
+    """[v2] stock_detail_v2 풀 대시보드로 렌더링."""
+    from components.stock_detail_v2 import render_stock_detail_v2_partial
+
+    # NiceGUI Quasar 컨테이너 폭 제약 해제 + 다크 배경 (v2 레이아웃 요구사항)
+    ui.add_head_html('''
+        <style>
+          body { background: #0F1117; margin: 0; padding: 0; }
+          .q-page-container, .q-page, .nicegui-content { max-width: none !important; }
+          .nicegui-content { padding: 16px !important; gap: 0 !important; }
+          .nicegui-content > * { width: 100% !important; max-width: none !important; }
+        </style>
+    ''')
+
+    # 데이터 로드
+    if not store.loaded:
+        await run_sync(store.refresh)
+    df = store.scored
+
+    if df.empty:
+        ui.label("⚠️ 데이터 로드 실패").classes("text-yellow-400 text-lg p-8")
+        return
+
+    # 종목 검색
+    code_norm = str(code).zfill(6)
+    row_df = df[df["종목코드"].astype(str).str.zfill(6) == code_norm]
+    if row_df.empty:
+        with ui.column().classes("w-full items-center justify-center p-12"):
+            ui.label("❌ 종목을 찾을 수 없습니다").classes("text-2xl text-red-400")
+            ui.label(f"종목코드: {code_norm}").classes("text-gray-400 mt-2")
+            ui.button("← 메인으로", on_click=lambda: ui.navigate.to("/")).props(
+                "outline"
+            ).classes("mt-4")
+        return
+
+    row = row_df.iloc[0].to_dict()
+
+    # OG 메타태그 (소셜 미리보기 — v1과 동일)
+    name = str(row.get("종목명", code_norm))
+    score = safe_float(row.get("DISPLAY_SCORE", 0))
+    route = str(row.get("ROUTE", "NEUTRAL"))
+    close = int(nz_num(row.get("종가", 0)))
+    _og_meta(name, code_norm, score, route, close)
+
+    # 상단 네비게이션 헤더 (v1 스타일 유지 — 사용자에게 일관된 네비)
+    with ui.row().classes(
+        "w-full items-center justify-between px-4 py-3 mb-2 "
+        "bg-gradient-to-r from-[#1a1a2e] via-[#16213e] to-[#0f3460] rounded-xl"
+    ):
+        with ui.row().classes("items-center gap-3 cursor-pointer").on(
+            "click", lambda: ui.navigate.to("/")
+        ):
+            ui.label("💎 SwingPicker").classes(
+                "text-xl font-bold text-transparent bg-clip-text "
+                "bg-gradient-to-r from-blue-400 to-purple-400"
+            ).style("font-family:Outfit,sans-serif")
+        with ui.row().classes("gap-2"):
+            ui.button(
+                "← 전체 종목", on_click=lambda: ui.navigate.to("/")
+            ).props("flat dense").classes("text-white text-sm")
+            ui.button(
+                "🔐 로그인", on_click=lambda: ui.navigate.to("/login")
+            ).props("flat dense").classes("text-white text-sm")
+
+    # 랭크/총개수 계산
+    try:
+        rank = int(row.get("LDY_RANK", 0) or 0)
+    except Exception:
+        rank = 0
+    total = len(df)
+
+    # v2 풀 대시보드 렌더링
+    render_stock_detail_v2_partial(
+        row,
+        rank=rank,
+        total=total,
+        timestamp=str(row.get("기준일", "")),
+        compare_name="",  # 운영에서는 일반적으로 빈값 (테스트 라우트만 자동 매핑)
+    )
+
+    # 푸터 (v1 스타일 유지)
+    with ui.column().classes("w-full items-center mt-8 mb-4 gap-1"):
+        ui.label(
+            f"📅 데이터 기준: {store.data_ts} · "
+            f"분석일: {datetime.now().strftime('%Y-%m-%d')}"
+        ).classes("text-xs text-gray-500")
+        ui.label(
+            "⚠️ 본 자료는 투자 권유가 아닌 AI 분석 참고 자료입니다. "
+            "투자 판단은 본인 책임."
+        ).classes("text-xs text-gray-600")
+        ui.label("© SwingPicker by LDY Pro Trader").classes(
+            "text-xs text-gray-600 mt-1"
+        )
