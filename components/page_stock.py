@@ -23,6 +23,13 @@ from components.tab_stocks import (
 from shared_utils import nz_num, safe_float
 from components.ui_utils import DARK_CSS
 
+# [v2 토글] Prime/admin 자동 v2 활성화용
+try:
+    from services.auth import get_auth_status
+except Exception:
+    def get_auth_status():
+        return "guest"
+
 logger = logging.getLogger("ldy-nicegui")
 
 
@@ -50,14 +57,27 @@ def _ret_color(val):
 async def render_stock_page(code: str, store):
     """종목 개별 페이지 렌더링.
 
-    [v2 토글] USE_STOCK_DETAIL_V2=1 환경변수 또는 ?v2=1 쿼리스트링이면
-    components.stock_detail_v2.render_stock_detail_v2_partial로 위임.
+    [v2 토글] 다음 조건 중 하나라도 만족 시 v2 풀 대시보드 렌더링:
+      1) USE_STOCK_DETAIL_V2=1 환경변수 (모든 사용자)
+      2) ?v2=1 쿼리스트링 (특정 URL만)
+      3) Prime / admin 회원 (자동 v2)
     실패 시 즉시 v1 fallback (운영 안전성 보장).
     """
     # ═══════════════════════════════════════════
-    #  [v2 토글] 환경변수 또는 쿼리스트링으로 v2 활성화
+    #  [v2 토글] 환경변수 / 쿼리스트링 / Prime·admin 자동 활성화
     # ═══════════════════════════════════════════
     use_v2_env = os.getenv("USE_STOCK_DETAIL_V2", "0") == "1"
+
+    # Prime / admin 자동 v2 (유료 회원 혜택)
+    use_v2_member = False
+    try:
+        auth = get_auth_status()
+        if auth in ("prime", "admin"):
+            use_v2_member = True
+    except Exception:
+        pass
+
+    # ?v2=1 쿼리스트링 (개발/베타 검증용)
     use_v2_query = False
     try:
         from nicegui import context
@@ -67,7 +87,19 @@ async def render_stock_page(code: str, store):
     except Exception:
         pass
 
-    if use_v2_env or use_v2_query:
+    # ?v2=0 명시적 비활성화 (Prime이라도 v1 보고 싶을 때 escape hatch)
+    force_v1 = False
+    try:
+        from nicegui import context
+        req = context.client.request
+        if req and req.query_params.get("v2") == "0":
+            force_v1 = True
+    except Exception:
+        pass
+
+    use_v2 = (use_v2_env or use_v2_member or use_v2_query) and not force_v1
+
+    if use_v2:
         try:
             await _render_stock_page_v2(code, store)
             return
@@ -77,7 +109,6 @@ async def render_stock_page(code: str, store):
                 f"stock_detail_v2 렌더링 실패, v1 fallback [{code}]: {e}",
                 exc_info=True,
             )
-            # 페이지가 비어있어야 v1이 정상 렌더 (이미 일부 그려졌다면 메시지 추가)
             try:
                 ui.label("⚠️ v2 렌더링 실패, 기본 화면으로 전환합니다").classes(
                     "text-yellow-400 text-xs p-2"
@@ -400,13 +431,17 @@ async def _render_stock_page_v2(code: str, store):
     """[v2] stock_detail_v2 풀 대시보드로 렌더링."""
     from components.stock_detail_v2 import render_stock_detail_v2_partial
 
-    # NiceGUI Quasar 컨테이너 폭 제약 해제 + 다크 배경 (v2 레이아웃 요구사항)
+    # NiceGUI Quasar 컨테이너 폭 제약 해제 + 다크 배경 + viewport (v2 레이아웃 요구사항)
     ui.add_head_html('''
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
           body { background: #0F1117; margin: 0; padding: 0; }
           .q-page-container, .q-page, .nicegui-content { max-width: none !important; }
           .nicegui-content { padding: 16px !important; gap: 0 !important; }
           .nicegui-content > * { width: 100% !important; max-width: none !important; }
+          @media (max-width: 768px) {
+            .nicegui-content { padding: 8px !important; }
+          }
         </style>
     ''')
 

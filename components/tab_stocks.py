@@ -2493,13 +2493,17 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 _total = len(_full_df) if _full_df is not None else 0
 
                 with detail_area:
-                    # NiceGUI Quasar 컨테이너 폭 제약 해제 (v2 레이아웃 요구사항)
+                    # NiceGUI Quasar 컨테이너 폭 제약 해제 + viewport (v2 레이아웃 요구사항)
                     # 중복 주입 방지 플래그 (메모리 효율)
                     if not hasattr(_render_stock_detail, "_v2_css_injected"):
                         ui.add_head_html('''
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
                             <style>
                               .q-page-container, .q-page, .nicegui-content { max-width: none !important; }
                               .nicegui-content > * { width: 100% !important; max-width: none !important; }
+                              @media (max-width: 768px) {
+                                .nicegui-content { padding: 8px !important; }
+                              }
                             </style>
                         ''')
                         _render_stock_detail._v2_css_injected = True

@@ -885,6 +885,141 @@ def _inject_v2_styles():
 
     /* 수급 패널 — 아이콘 추가 */
     .sd-v2 .panel-row .ice::after { content: " 🧊"; }
+
+    /* ═══════════════════════════════════════════════════
+       모바일 대응 (≤768px) — 1컬럼 세로 적층 + 폰트 축소
+       inline style로 박힌 grid도 !important로 덮어쓰기
+       ═══════════════════════════════════════════════════ */
+    @media (max-width: 768px) {
+      /* 페이지 폭 자체를 모바일 viewport에 맞춤 */
+      .sd-v2 {
+        font-size: 11px !important;
+      }
+
+      /* 헤더 5박스: 종목명 + 4뱃지 → 1컬럼 세로 적층 */
+      .sd-v2 .header,
+      .sd-v2 div[style*="grid-template-columns: 1fr 180px 140px 140px 140px"] {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;  /* 2x3 격자 */
+        gap: 4px !important;
+      }
+      .sd-v2 .h-title {
+        grid-column: 1 / -1 !important;  /* 종목명은 전체 폭 */
+      }
+      .sd-v2 .h-badge {
+        min-height: 70px !important;
+        padding: 6px 8px !important;
+      }
+      .sd-v2 .h-badge .val { font-size: 12px !important; }
+      .sd-v2 .h-badge .lbl { font-size: 9px !important; }
+
+      /* 점수 영역: DISPLAY + 3축 + FINAL/ELITE/BALANCE → 1컬럼 */
+      .sd-v2 .scores,
+      .sd-v2 div[style*="grid-template-columns: 140px 1fr 130px 130px 130px"] {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 4px !important;
+      }
+      .sd-v2 .score-display,
+      .sd-v2 .score-axis {
+        grid-column: 1 / -1 !important;
+      }
+      .sd-v2 .score-card .v { font-size: 24px !important; }
+
+      /* 메인 그리드 (좌측 4패널 + 차트 + 우측 레이더) → 1컬럼 적층 */
+      .sd-v2 div[style*="grid-template-columns: 260px minmax(0, 1fr) 300px"] {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+      }
+      .sd-v2 div[style*="grid-template-columns: 260px minmax(0, 1fr) 300px"] > div {
+        width: 100% !important;
+      }
+
+      /* 좌측 4패널: 가로 2x2 격자로 압축 (4개 다 세로면 너무 김) */
+      .sd-v2 div[style*="display: flex; flex-direction: column; gap: 8px; min-width: 0;"] {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 6px !important;
+      }
+      .sd-v2 .panel {
+        padding: 8px !important;
+      }
+      .sd-v2 .panel-row {
+        font-size: 10px !important;
+        padding: 3px 0 !important;
+      }
+      .sd-v2 .panel-title {
+        font-size: 11px !important;
+      }
+
+      /* 보조차트 5개: 4 + 130px → 2x3 격자 */
+      .sd-v2 div[style*="repeat(4, minmax(0, 1fr)) 130px"] {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 4px !important;
+      }
+
+      /* 3분할 패널 (수익률/레벨/리스크): 3컬럼 → 1컬럼 */
+      .sd-v2 div[style*="grid-template-columns: repeat(3, minmax(0, 1fr))"] {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 6px !important;
+      }
+
+      /* 하단 4섹터: 4컬럼 → 2x2 */
+      .sd-v2 .bottom-grid {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 4px !important;
+      }
+      .sd-v2 .bottom-panel {
+        min-height: 160px !important;
+        padding: 8px !important;
+      }
+      .sd-v2 .bottom-panel .b-row {
+        font-size: 9px !important;
+      }
+      .sd-v2 .bottom-panel .b-title {
+        font-size: 11px !important;
+      }
+
+      /* 레이더 SVG: 모바일에선 폭 100%, 높이 줄임 */
+      .sd-v2 svg[viewBox*="-70 -20 380 290"] {
+        height: 240px !important;
+      }
+
+      /* 최종 판정 띠: 모바일 폰트 축소 */
+      .sd-v2 div[style*="border-radius: 12px; padding: 18px 24px"],
+      .sd-v2 div[style*="display: flex; align-items: center; gap: 20px"] {
+        padding: 12px 14px !important;
+        gap: 10px !important;
+      }
+    }
+
+    /* 초소형 모바일 (≤480px) — 더 압축 */
+    @media (max-width: 480px) {
+      /* 좌측 4패널: 2x2 격자도 너무 좁으면 1컬럼으로 */
+      .sd-v2 div[style*="display: flex; flex-direction: column; gap: 8px; min-width: 0;"] {
+        grid-template-columns: 1fr !important;
+      }
+      /* 보조차트: 2x3도 좁으면 1컬럼 */
+      .sd-v2 div[style*="repeat(4, minmax(0, 1fr)) 130px"] {
+        grid-template-columns: 1fr !important;
+      }
+      /* 헤더 뱃지: 2x3도 좁으면 1컬럼 */
+      .sd-v2 .header,
+      .sd-v2 div[style*="grid-template-columns: 1fr 180px 140px 140px 140px"] {
+        grid-template-columns: 1fr !important;
+      }
+      .sd-v2 .h-badge {
+        min-height: 50px !important;
+      }
+      /* 하단 4섹터: 2x2도 좁으면 1컬럼 */
+      .sd-v2 .bottom-grid {
+        grid-template-columns: 1fr !important;
+      }
+    }
     </style>
     """)
 

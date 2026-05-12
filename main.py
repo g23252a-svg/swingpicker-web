@@ -110,8 +110,9 @@ async def stock_v2_test_page(code: str):
     import pandas as pd
     from components.stock_detail_v2 import render_stock_detail_v2_partial
 
-    # NiceGUI Quasar 기본 컨테이너 폭 제약 해제 + 다크 배경
+    # NiceGUI Quasar 기본 컨테이너 폭 제약 해제 + 다크 배경 + viewport meta (모바일 인식)
     ui.add_head_html('''
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
           body { background: #0F1117; margin: 0; padding: 0; }
           /* NiceGUI/Quasar 기본 max-width 해제 — 전체 폭 사용 */
@@ -119,6 +120,10 @@ async def stock_v2_test_page(code: str):
           .nicegui-content { padding: 16px !important; gap: 0 !important; }
           /* 페이지 최상위 column이 전체 폭 사용하도록 */
           .nicegui-content > * { width: 100% !important; max-width: none !important; }
+          /* 모바일에선 padding 축소 */
+          @media (max-width: 768px) {
+            .nicegui-content { padding: 8px !important; }
+          }
         </style>
     ''')
 
