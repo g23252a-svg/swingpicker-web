@@ -2429,6 +2429,72 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         _render_stock_detail(code, row)
 
     def _render_stock_detail(code: str, row):
+        # ═══════════════════════════════════════════════════
+        #  [v2 토글] Prime/admin 회원 또는 USE_STOCK_DETAIL_V2=1 환경변수면 v2
+        #  실패 시 자동 v1 fallback (운영 안전성)
+        # ═══════════════════════════════════════════════════
+        try:
+            from services.auth import get_auth_status as _get_auth
+            _auth = _get_auth()
+        except Exception:
+            _auth = "guest"
+        _use_v2 = (
+            os.getenv("USE_STOCK_DETAIL_V2", "0") == "1"
+            or _auth in ("prime", "admin")
+        )
+        if _use_v2:
+            try:
+                from components.stock_detail_v2 import render_stock_detail_v2_partial
+                # 비교 종목 자동 매핑: 같은 라벨/ROUTE 중 다음 순위 종목
+                _compare = ""
+                try:
+                    code_norm = str(code).zfill(6)
+                    same_label = full_df[
+                        (full_df["ELITE_LABEL"] == row.get("ELITE_LABEL", ""))
+                        & (full_df["종목코드"].astype(str).str.zfill(6) != code_norm)
+                    ]
+                    if not same_label.empty:
+                        _compare = str(same_label.iloc[0].get("종목명", ""))
+                except Exception:
+                    pass
+
+                # rank/total 계산
+                try:
+                    _rank = int(row.get("LDY_RANK", 0) or 0)
+                except Exception:
+                    _rank = 0
+                _total = len(full_df) if full_df is not None else 0
+
+                with detail_area:
+                    # NiceGUI Quasar 컨테이너 폭 제약 해제 (v2 레이아웃 요구사항)
+                    ui.add_head_html('''
+                        <style>
+                          .q-page-container, .q-page, .nicegui-content { max-width: none !important; }
+                          .nicegui-content > * { width: 100% !important; max-width: none !important; }
+                        </style>
+                    ''')
+                    render_stock_detail_v2_partial(
+                        row.to_dict() if hasattr(row, "to_dict") else dict(row),
+                        rank=_rank,
+                        total=_total,
+                        timestamp=str(row.get("기준일", "")),
+                        compare_name=_compare,
+                    )
+                return
+            except Exception as _e:
+                _logger.warning(
+                    f"stock_detail_v2 렌더링 실패, v1 fallback [{code}]: {_e}",
+                    exc_info=True,
+                )
+                # v2 실패 시 detail_area 비우고 v1으로 계속 진행
+                try:
+                    detail_area.clear()
+                except Exception:
+                    pass
+
+        # ═══════════════════════════════════════════════════
+        #  v1 기본 렌더링 (기존 코드)
+        # ═══════════════════════════════════════════════════
         name = row.get("종목명", "")
         _close = _nz(row.get("종가", 0))
         _entry = _nz(row.get("추천매수가", 0))
