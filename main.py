@@ -110,9 +110,17 @@ async def stock_v2_test_page(code: str):
     import pandas as pd
     from components.stock_detail_v2 import render_stock_detail_v2_partial
 
-    ui.add_head_html(
-        '<style>body{background:#0F1117;margin:0;padding:16px;}</style>'
-    )
+    # NiceGUI Quasar 기본 컨테이너 폭 제약 해제 + 다크 배경
+    ui.add_head_html('''
+        <style>
+          body { background: #0F1117; margin: 0; padding: 0; }
+          /* NiceGUI/Quasar 기본 max-width 해제 — 전체 폭 사용 */
+          .q-page-container, .q-page, .nicegui-content { max-width: none !important; }
+          .nicegui-content { padding: 16px !important; gap: 0 !important; }
+          /* 페이지 최상위 column이 전체 폭 사용하도록 */
+          .nicegui-content > * { width: 100% !important; max-width: none !important; }
+        </style>
+    ''')
 
     # ── CSV 인코딩 fallback (utf-8 → utf-8-sig → cp949) ──
     df = None
