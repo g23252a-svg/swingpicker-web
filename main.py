@@ -72,6 +72,93 @@ logger = logging.getLogger("ldy-nicegui")
 
 
 # ═══════════════════════════════════════════
+#  [임시] 종목 상세 v2 테스트 (/stock-v2-test/{code})
+#  머지 직후 화면 검증용 — 와이투솔루션(011690) / 한온시스템(018880)
+#  production 통합 후 제거 예정
+#
+#  보안:
+#    - admin 로그인 OR (non-production 환경에서) ENABLE_STOCK_V2_TEST=1 일 때 접근 가능
+#    - APP_ENV=production 에서는 환경변수 무시, admin 만 허용
+#    - 그 외는 차단 메시지 표시
+# ═══════════════════════════════════════════
+@ui.page('/stock-v2-test/{code}')
+async def stock_v2_test_page(code: str):
+    """[임시] 종목 상세 v2 — Step 2A-2E 풀 대시보드 화면 검증용."""
+    # ── 보안 가드 (무거운 import 전에 먼저 체크) ──
+    is_prod = os.getenv("APP_ENV", "production").lower() == "production"
+    is_env_enabled = os.getenv("ENABLE_STOCK_V2_TEST", "0") == "1"
+    is_admin = False
+    try:
+        is_admin = get_auth_status() == "admin"
+    except Exception:
+        pass
+
+    # production에서는 환경변수 무시, admin만 허용 (실수 토글 방지)
+    if is_prod:
+        is_env_enabled = False
+
+    if not (is_env_enabled or is_admin):
+        ui.add_head_html('<style>body{background:#0F1117;}</style>')
+        with ui.column().classes("w-full items-center p-12"):
+            ui.label("🔒").classes("text-6xl mb-3")
+            ui.label(
+                "이 페이지는 관리자 전용 테스트 페이지입니다"
+            ).classes("text-base text-gray-300 text-center")
+        return
+
+    # ── 보안 통과 후에만 무거운 import 수행 ──
+    import pandas as pd
+    from components.stock_detail_v2 import render_stock_detail_v2_partial
+
+    ui.add_head_html(
+        '<style>body{background:#0F1117;margin:0;padding:16px;}</style>'
+    )
+
+    # ── CSV 인코딩 fallback (utf-8 → utf-8-sig → cp949) ──
+    df = None
+    last_err = None
+    for enc in ("utf-8", "utf-8-sig", "cp949"):
+        try:
+            df = pd.read_csv(
+                "data/recommend_latest.csv",
+                dtype={"종목코드": str},
+                encoding=enc,
+            )
+            break
+        except Exception as e:
+            last_err = e
+            continue
+    if df is None:
+        ui.label(f"CSV 로드 실패 (모든 인코딩): {last_err}").style("color: red")
+        return
+
+    sub = df[df["종목코드"] == code.zfill(6)]
+    if sub.empty:
+        ui.label(
+            f"종목코드 {code} 가 recommend_latest.csv 에 없음"
+        ).style("color: orange")
+        return
+
+    row = sub.iloc[0].to_dict()
+
+    # 비교 종목 자동 매핑 (하단 4섹터의 compare 패널 검증용)
+    code_norm = code.zfill(6)
+    compare_map = {
+        "011690": "한온시스템",      # 와이투솔루션 → 한온시스템
+        "018880": "와이투솔루션",    # 한온시스템 → 와이투솔루션
+    }
+    compare_name = compare_map.get(code_norm, "")
+
+    render_stock_detail_v2_partial(
+        row,
+        rank=int(row.get("LDY_RANK", 0) or 0),
+        total=len(df),
+        timestamp=str(row.get("기준일", "")),
+        compare_name=compare_name,
+    )
+
+
+# ═══════════════════════════════════════════
 #  종목 개별 페이지 (/stock/{code}) — 공유 가능 URL
 # ═══════════════════════════════════════════
 @ui.page('/stock/{code}')
