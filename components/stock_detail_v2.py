@@ -380,6 +380,9 @@ KOREA_DOWN = "#3B82F6"   # 하락 파랑
 # CSS 중복 주입 방지 플래그 (context 접근 실패 시 fallback)
 _V2_STYLE_INJECTED = False
 
+# OHLCV 로더의 v1 위임 실패 사유 추적 (debug_info에서 노출)
+_last_v1_error = None
+
 
 def _inject_v2_styles():
     """v2 디자인 토큰 CSS 주입 (세션당 1회만, 중복 방지)."""
@@ -877,8 +880,11 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
     active_class = "active" if is_active else "inactive"
     active_text = "True" if is_active else "False"
 
-    with ui.element("div").classes("sd-v2"):
-        with ui.element("div").classes("header"):
+    with ui.element("div").classes("sd-v2").style("width: 100%;"):
+        with ui.element("div").classes("header").style(
+            "display: grid; grid-template-columns: 1fr 200px 130px 130px 110px; "
+            "gap: 8px; margin-bottom: 12px; width: 100%;"
+        ):
 
             # 1. 종목명 + LDY_RANK
             ui.html(f'''
@@ -1022,8 +1028,11 @@ def render_v2_scores(n: dict):
     else:
         gap_tag = "주의"
 
-    with ui.element("div").classes("sd-v2"):
-        with ui.element("div").classes("scores"):
+    with ui.element("div").classes("sd-v2").style("width: 100%;"):
+        with ui.element("div").classes("scores").style(
+            "display: grid; grid-template-columns: 140px 1fr 130px 130px 130px; "
+            "gap: 8px; margin-bottom: 12px; width: 100%;"
+        ):
 
             ui.html(f'''
                 <div class="display-score">
@@ -2078,8 +2087,8 @@ def render_v2_sub_charts(n: dict, ohlcv_df=None):
     strength_clr = "#10B981" if strength >= 1.0 else ("#F59E0B" if strength >= 0.7 else "#EF4444")
 
     ui.html(f'''
-    <div class="sd-v2" style="margin-top: 8px;">
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr) 130px; gap: 8px;">
+    <div class="sd-v2" style="margin-top: 8px; width: 100%;">
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 130px; gap: 8px; width: 100%;">
 
         <!-- RSI -->
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
@@ -2357,7 +2366,7 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
     compare_html = ""
     if compare_name:
         compare_html = f'''
-        <div class="bottom-panel compare">
+        <div class="bottom-panel compare" style="background: #1A1D26; border: 1px solid #2A2D38; border-radius: 8px; padding: 12px; min-height: 200px; min-width: 0;">
             <div class="b-title">{h_escape(compare_name)} 비교</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <div style="text-align: center;">
@@ -2384,7 +2393,7 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
     else:
         # compare_name 없으면 KELLY 요약으로 대체
         compare_html = f'''
-        <div class="bottom-panel">
+        <div class="bottom-panel" style="background: #1A1D26; border: 1px solid #2A2D38; border-radius: 8px; padding: 12px; min-height: 200px; min-width: 0;">
             <div class="b-title">KELLY 권고</div>
             <div class="b-row"><span>플랜 B: {n["kelly_planned_b"]:.3f}</span></div>
             <div class="b-row"><span>실측 B: {n["kelly_empirical_b"]:.1f}</span></div>
@@ -2464,17 +2473,17 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
       .sd-v2 .tp-weight::before {{ content: "→ "; }}
     </style>
 
-    <div class="sd-v2 bottom-grid-wrapper">
-      <div class="bottom-grid">
+    <div class="sd-v2 bottom-grid-wrapper" style="display: block; width: 100%; margin-top: 12px;">
+      <div class="bottom-grid" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: 100%;">
 
         <!-- 1. 핵심 요약 -->
-        <div class="bottom-panel">
+        <div class="bottom-panel" style="background: #1A1D26; border: 1px solid #2A2D38; border-radius: 8px; padding: 12px; min-height: 200px; min-width: 0;">
           <div class="b-title">핵심 요약</div>
           {summary_html}
         </div>
 
         <!-- 2. 분할 익절 플랜 -->
-        <div class="bottom-panel">
+        <div class="bottom-panel" style="background: #1A1D26; border: 1px solid #2A2D38; border-radius: 8px; padding: 12px; min-height: 200px; min-width: 0;">
           <div class="b-title">분할 익절 플랜</div>
           <div class="split-tp">
             {tp_blocks}
@@ -2482,7 +2491,7 @@ def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
         </div>
 
         <!-- 3. DipSniper 체크포인트 -->
-        <div class="bottom-panel dipsniper">
+        <div class="bottom-panel dipsniper" style="background: #1A1D26; border: 1px solid #2A2D38; border-radius: 8px; padding: 12px; min-height: 200px; min-width: 0;">
           <div class="b-title">DipSniper 체크포인트</div>
           {dipsniper_html}
         </div>
@@ -2503,17 +2512,31 @@ def _load_ohlcv_for_v2(code: str, days: int = 120):
     """
     종목코드 → 최근 N일 OHLCV DataFrame.
 
-    구현 (다중 fallback):
-      1) data/ohlcv_cache_*.parquet (최대 5개)
-      2) data/ohlcv_cache_*.pkl / *.pickle (dict 또는 long-format 모두 대응)
-      3) 컬럼명 자동 탐지: 종목코드/code/Code/ticker/symbol
-      4) 날짜 컬럼 자동 탐지: Date/날짜/date/일자
-      5) 경로: __file__ 기준 + cwd 기준 둘 다 시도
+    [최종 전략]
+      1) tab_stocks._get_chart_data 위임 (Railway에서 검증된 v1 로더 — SSOT)
+      2) 실패 시: 자체 로컬 fallback (멀티 경로/포맷/컬럼 자동 탐지)
 
-    Returns:
-        DataFrame [시가, 고가, 저가, 종가, 거래량] indexed by date
-        실패 시: (None, debug_reason: str) 튜플 반환 안 함, 단순 None
+    이렇게 가는 이유:
+      - v1 _get_chart_data가 같은 parquet 캐시를 잘 읽고 있음 (검증됨)
+      - v2가 따로 로더를 만들면 환경 차이로 빗나갈 위험 (실제로 0개 보고)
+      - SSOT 원칙: 같은 데이터, 같은 로더
     """
+    # ── 1) v1 _get_chart_data 위임 (SSOT) ──
+    _v1_error = None
+    try:
+        from components.tab_stocks import _get_chart_data
+        result = _get_chart_data(str(code).zfill(6), days=days)
+        if result is not None and len(result) > 0:
+            return result
+        _v1_error = f"v1 _get_chart_data returned {type(result).__name__} len={0 if result is None else len(result)}"
+    except Exception as e:
+        _v1_error = f"v1 import/call exception: {type(e).__name__}: {e}"
+
+    # 디버그 정보 모듈 변수에 저장 (debug_info 함수에서 사용)
+    global _last_v1_error
+    _last_v1_error = _v1_error
+
+    # ── 2) 자체 fallback (v1 호출 실패 시) ──
     import os, glob
     try:
         import pandas as pd
@@ -2521,24 +2544,21 @@ def _load_ohlcv_for_v2(code: str, days: int = 120):
         return None
 
     code_norm = str(code).zfill(6)
-    code_int_str = str(int(code_norm)) if code_norm.isdigit() else code_norm  # 011690 → "11690"
+    code_int_str = str(int(code_norm)) if code_norm.isdigit() else code_norm
     cols_needed = ["시가", "고가", "저가", "종가", "거래량"]
     code_col_candidates = ["종목코드", "code", "Code", "ticker", "Ticker", "symbol", "Symbol"]
     date_col_candidates = ["Date", "date", "날짜", "일자", "DATE"]
 
-    # 가능한 data 디렉토리 후보 (Railway 작업 디렉토리 차이 대응)
     here = os.path.dirname(os.path.abspath(__file__))
     candidate_dirs = [
-        os.path.join(here, "..", "data"),       # components/../data
-        os.path.join(os.getcwd(), "data"),      # CWD/data (Railway 진입점 기준)
-        "data",                                 # 상대경로 fallback
-        os.path.join(here, "data"),             # components/data (혹시 모를 위치)
+        os.path.join(here, "..", "data"),
+        os.path.join(os.getcwd(), "data"),
+        "data",
+        os.path.join(here, "data"),
     ]
 
-    # 모든 후보 디렉토리에서 발견된 캐시 파일을 합쳐서 최신순 탐색
-    # (첫 번째 디렉토리에 오래된 캐시가 있고 정작 정상 캐시는 다른 곳에 있는 경우 대응)
     files = []
-    seen = set()  # 중복 경로 제거 (심볼릭 링크 등)
+    seen = set()
     for d in candidate_dirs:
         if not os.path.isdir(d):
             continue
@@ -2549,55 +2569,40 @@ def _load_ohlcv_for_v2(code: str, days: int = 120):
         files.extend(glob.glob(os.path.join(d, "ohlcv_cache_*.parquet")))
         files.extend(glob.glob(os.path.join(d, "ohlcv_cache_*.pkl")))
         files.extend(glob.glob(os.path.join(d, "ohlcv_cache_*.pickle")))
-    # 파일명 기준 최신순 정렬 (ohlcv_cache_YYYYMMDD 패턴이라 lexical 정렬 = 시간 정렬)
     files = sorted(set(files), reverse=True)
 
     if not files:
         return None
 
     def _try_extract(df, fp):
-        """DataFrame에서 code_norm 종목의 OHLCV 추출 시도. 못 찾으면 None."""
         if df is None or df.empty:
             return None
-
-        # 1) index가 date면 reset
         idx_is_date = (df.index.name in date_col_candidates) or (
             hasattr(df.index, "dtype") and "datetime" in str(df.index.dtype)
         )
         if idx_is_date:
             df = df.reset_index()
-
-        # 2) 종목코드 컬럼 탐지
         code_col = next((c for c in code_col_candidates if c in df.columns), None)
         if code_col is None:
             return None
-
-        # 3) 종목코드 zfill 후 필터
         df_local = df.copy()
         df_local[code_col] = df_local[code_col].astype(str).str.replace(".0", "", regex=False).str.zfill(6)
         sub = df_local[df_local[code_col] == code_norm].copy()
         if sub.empty:
-            # int 비교도 시도 (11690 vs 011690 케이스)
             sub = df_local[df_local[code_col].astype(str).str.lstrip("0") == code_int_str.lstrip("0")].copy()
             if sub.empty:
                 return None
-
-        # 4) 날짜 컬럼 탐지 후 정렬
         date_col = next((c for c in date_col_candidates if c in sub.columns), None)
         if date_col:
             sub = sub.sort_values(date_col).set_index(date_col)
-
-        # 5) 필요 컬럼 모두 있는지 확인
         if all(c in sub.columns for c in cols_needed):
             return sub[cols_needed].tail(days).copy()
-        # 영어 컬럼 (Open/High/Low/Close/Volume) 호환
         eng_map = {"Open": "시가", "High": "고가", "Low": "저가", "Close": "종가", "Volume": "거래량"}
         if all(c in sub.columns for c in eng_map.keys()):
             sub_kr = sub[list(eng_map.keys())].rename(columns=eng_map)
             return sub_kr.tail(days).copy()
         return None
 
-    # 최대 5개 캐시 탐색 (parquet 우선, 그 다음 pkl)
     for fp in files[:5]:
         try:
             if fp.endswith(".parquet"):
@@ -2607,17 +2612,14 @@ def _load_ohlcv_for_v2(code: str, days: int = 120):
                     return result
             else:
                 obj = pd.read_pickle(fp)
-                # dict 형태: {code: DataFrame}
                 if isinstance(obj, dict):
                     sub = obj.get(code_norm) or obj.get(code_int_str)
                     if sub is not None and not sub.empty:
                         result = _try_extract(sub, fp)
                         if result is not None and not result.empty:
                             return result
-                        # dict의 값은 보통 종목코드 컬럼 없음 — 한글/영어 OHLCV 직접 매핑
                         if all(c in sub.columns for c in cols_needed):
                             return sub[cols_needed].tail(days).copy()
-                        # 영어 컬럼 (Open/High/Low/Close/Volume) → 한글 변환
                         eng_map = {"Open": "시가", "High": "고가", "Low": "저가",
                                    "Close": "종가", "Volume": "거래량"}
                         if all(c in sub.columns for c in eng_map.keys()):
@@ -2645,6 +2647,11 @@ def _load_ohlcv_debug_info(code: str) -> str:
         ("__file__ 동일", os.path.join(here, "data")),
     ]
     lines = [f"종목코드: {code_norm}", f"CWD: {os.getcwd()}", f"__file__: {here}"]
+    # v1 위임 실패 사유 노출
+    if _last_v1_error:
+        lines.append(f"v1 위임 결과: {_last_v1_error}")
+    else:
+        lines.append("v1 위임: 시도 안 됨")
     for label, d in candidate_dirs:
         exists = os.path.isdir(d)
         if exists:
@@ -2724,24 +2731,31 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
         ohlcv_df = _load_ohlcv_for_v2(n["code"], days=120)
 
     # main-grid: 좌측 4패널 + 중앙 차트 + 우측 레이더
-    with ui.element("div").classes("sd-v2"):
-        with ui.element("div").classes("main-grid"):
+    # inline style 강제 (NiceGUI ui.element가 CSS class만으로 grid 적용 안 되는 케이스 회피)
+    with ui.element("div").style(
+        "display: grid; grid-template-columns: 240px minmax(0, 1fr) 240px; "
+        "gap: 8px; width: 100%; margin-bottom: 12px; box-sizing: border-box;"
+    ).classes("sd-v2"):
 
-            # 좌측 사이드: 패널 #1-4
-            with ui.element("div").classes("side-panel"):
-                render_v2_price_plan(n)
-                render_v2_trend_mtf(n)
-                render_v2_momentum(n)
-                render_v2_supply(n)
+        # 좌측 사이드: 패널 #1-4
+        with ui.element("div").style(
+            "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
+        ):
+            render_v2_price_plan(n)
+            render_v2_trend_mtf(n)
+            render_v2_momentum(n)
+            render_v2_supply(n)
 
-            # 중앙: 메인 캔들차트 + 보조 차트 4개 + 거래강도 게이지
-            with ui.element("div").classes("center-area"):
-                render_v2_chart(n, ohlcv_df=ohlcv_df)
-                render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
+        # 중앙: 메인 캔들차트 + 보조 차트 4개 + 거래강도 게이지
+        with ui.element("div").style("min-width: 0;"):
+            render_v2_chart(n, ohlcv_df=ohlcv_df)
+            render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
 
-            # 우측 사이드: 레이더 차트 (5축)
-            with ui.element("div").classes("side-panel"):
-                render_v2_radar(n)
+        # 우측 사이드: 레이더 차트 (5축)
+        with ui.element("div").style(
+            "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
+        ):
+            render_v2_radar(n)
 
     # 하단 4섹터 (핵심 요약 / 분할 익절 / DipSniper / 비교 또는 KELLY)
     render_v2_bottom_sectors(n, rank=rank, total=total, compare_name=compare_name)
