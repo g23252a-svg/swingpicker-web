@@ -1,0 +1,2588 @@
+# -*- coding: utf-8 -*-
+"""
+SwingPicker — 종목 상세 v2 (이미지 디자인 기준 재설계)
+═══════════════════════════════════════════════════
+[Step 2A FIXED v2] 실제 CSV 컬럼명 기반 + 오타/정합성 패치.
+
+데이터 소스: data/recommend_latest.csv (실제 컬럼 확인 완료)
+컬럼 매핑:
+  TOP_PICK / TOP_PICK_TYPE / EBS / PASS_EBS / ACTION_PRIORITY / IS_ACTIVE
+  AXIS_MEAN / AXIS_GAP / BALANCE_SCORE — CSV 원본값 사용 (재계산 X)
+  SCORE_REASON_TOP1 + SCORE_REASON_TOP2 + ELITE_REASON — CSV 우선, 없을 때만 fallback
+  NEWS_REASON / ROUTE_REASON / PLAN_REASON — Step 2D-2E에서 사용
+  ELITE_LABEL — CSV에 없음 (combo_info로 외부 주입 또는 ELITE_REASON 활용)
+
+UI는 normalize_stock_row() 결과만 사용. 컬럼명 직접 row.get() 금지.
+모든 텍스트는 html.escape()로 안전하게 삽입 (XSS / 화면깨짐 방지).
+"""
+
+from html import escape as h_escape
+from typing import Optional, Dict, Any
+from nicegui import ui
+from shared_utils import safe_float
+
+
+# ═══════════════════════════════════════════════════
+# 정규화 어댑터 (UI는 이것만 사용)
+# ═══════════════════════════════════════════════════
+
+def _as_bool(v) -> bool:
+    """다양한 truthy 표현을 bool로 정규화."""
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    try:
+        if isinstance(v, (int, float)):
+            return v != 0 and not (isinstance(v, float) and v != v)  # NaN 방어
+    except Exception:
+        pass
+    return str(v).strip().lower() in ("1", "true", "yes", "y", "o")
+
+
+def _safe_str(v, default="—") -> str:
+    """문자열 변환 (None/nan 안전)."""
+    if v is None:
+        return default
+    try:
+        if isinstance(v, float) and v != v:  # NaN
+            return default
+    except Exception:
+        pass
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "none", "null"):
+        return default
+    return s
+
+
+ROUTE_KR_MAP = {
+    "ATTACK":   "매수검토",
+    "ARMED":    "진입대기",
+    "WAIT":     "관망",
+    "NEUTRAL":  "중립",
+    "OVERHEAT": "과열주의",
+    "CARRY":    "보유유지",
+}
+
+
+def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    recommend_latest.csv 한 행을 UI용 dict로 정규화.
+
+    실제 CSV 컬럼명 확인 후 매핑:
+      TOP_PICK / EBS / PASS_EBS / ACTION_PRIORITY / IS_ACTIVE — 직접 사용
+      AXIS_MEAN / AXIS_GAP / BALANCE_SCORE — CSV 원본값 우선 (재계산 fallback만)
+      ret_1d_% / ret_5d_% 등 — '_%' 접미사 포함
+
+    Args:
+        row: pandas Series 또는 dict (recommend_latest.csv 한 행)
+
+    Returns:
+        정규화된 dict — UI는 이것만 참조해야 함
+    """
+    # ── 기본 정보 ──
+    route = _safe_str(row.get("ROUTE", "NEUTRAL"), "NEUTRAL").upper()
+    top_pick = _as_bool(row.get("TOP_PICK", 0))
+    top_pick_type = _safe_str(row.get("TOP_PICK_TYPE", ""), "")
+
+    # ── EBS (실제 컬럼: EBS + PASS_EBS) ──
+    ebs = int(safe_float(row.get("EBS", 0)) or 0)
+    pass_ebs = _as_bool(row.get("PASS_EBS", ebs >= 5))
+
+    # ── ACTION_PRIORITY / IS_ACTIVE (CSV 원본) ──
+    action_priority = int(safe_float(row.get("ACTION_PRIORITY", 0)) or 0)
+    is_active = _as_bool(row.get("IS_ACTIVE", route in ("ARMED", "ATTACK")))
+
+    # ── 점수 (CSV 원본값 우선, 0이면 폴백) ──
+    display_score = safe_float(row.get("DISPLAY_SCORE", 0)) or 0
+    final_score = safe_float(row.get("FINAL_SCORE", 0)) or 0
+    elite_score = safe_float(row.get("ELITE_SCORE", 0)) or 0
+    struct_s = safe_float(row.get("STRUCT_SCORE", 0)) or 0
+    timing_s = safe_float(row.get("TIMING_SCORE", 0)) or 0
+    ai_s = safe_float(row.get("AI_SCORE", 0)) or 0
+
+    # AXIS_MEAN/AXIS_GAP — CSV 원본 우선, 없을 때만 재계산
+    axis_mean = safe_float(row.get("AXIS_MEAN", 0))
+    if not axis_mean or axis_mean == 0:
+        if any([struct_s, timing_s, ai_s]):
+            axis_mean = (struct_s + timing_s + ai_s) / 3
+        else:
+            axis_mean = 0
+
+    axis_gap = safe_float(row.get("AXIS_GAP", 0))
+    if not axis_gap or axis_gap == 0:
+        non_zero = [s for s in [struct_s, timing_s, ai_s] if s > 0]
+        axis_gap = (max(non_zero) - min(non_zero)) if len(non_zero) >= 2 else 0
+
+    balance_score = safe_float(row.get("BALANCE_SCORE", 0)) or 0
+
+    # ── [Step 2B] 가격 플랜 필드 ──
+    close = safe_float(row.get("종가", 0)) or 0
+    entry = safe_float(row.get("추천매수가", 0)) or 0
+    stop = safe_float(row.get("손절가", 0)) or 0
+    tp1 = safe_float(row.get("추천매도가1", 0)) or 0
+    tp2 = safe_float(row.get("추천매도가2", 0)) or 0
+    tp3 = safe_float(row.get("추천매도가3", 0)) or 0
+    rr_now_tp1 = safe_float(row.get("RR_NOW_TP1", 0)) or 0
+    rr_mult = safe_float(row.get("RR_MULT", 0)) or 0
+    # ENTRY_GAP_PCT 우선, 없으면 GAP_PCT(대문자), gap_pct(소문자) fallback
+    entry_gap_pct = safe_float(
+        row.get("ENTRY_GAP_PCT", row.get("GAP_PCT", row.get("gap_pct", 0)))
+    ) or 0
+    stop_pct = safe_float(row.get("STOP_PCT", 0)) or 0
+    max_loss_pct = safe_float(row.get("MAX_LOSS_PCT", 0)) or 0
+    tp1_pct = safe_float(row.get("TP1_PCT", 0)) or 0
+    tp1_prob = safe_float(row.get("TP1_PROB", 0)) or 0
+    tp2_prob = safe_float(row.get("TP2_PROB", 0)) or 0
+    tp3_prob = safe_float(row.get("TP3_PROB", 0)) or 0
+    time_stop_days = safe_float(row.get("TIME_STOP_DAYS", row.get("TIME_STOP", 0))) or 0
+    position_pct = safe_float(row.get("POSITION_PCT", 0)) or 0
+    kelly_fraction = safe_float(row.get("KELLY_FRACTION", 0)) or 0
+    kelly_final_b = safe_float(row.get("KELLY_FINAL_B", 0)) or 0
+    kelly_planned_b = safe_float(row.get("KELLY_PLANNED_B", 0)) or 0
+    kelly_empirical_b = safe_float(row.get("KELLY_EMPIRICAL_B", 0)) or 0
+    # 수량/금액 (켈리_수량 우선, 추천수량 fallback)
+    qty = safe_float(row.get("켈리_수량", row.get("추천수량", 0))) or 0
+    # 추천금액(만원) 우선, 없으면 켈리_금액(원) / 10000 으로 계산
+    amount_man = safe_float(row.get("추천금액(만원)", 0)) or 0
+    if not amount_man:
+        amount_won = safe_float(row.get("켈리_금액(원)", 0)) or 0
+        if amount_won:
+            amount_man = amount_won / 10000
+    tp1_method = _safe_str(row.get("TP1_METHOD", ""), "")
+    tp2_method = _safe_str(row.get("TP2_METHOD", ""), "")
+    tp3_method = _safe_str(row.get("TP3_METHOD", ""), "")
+
+    # TP1~3 상승률 자동 계산 (매수가 기준)
+    tp1_gain_pct = ((tp1 / entry - 1) * 100) if entry > 0 and tp1 > 0 else 0
+    tp2_gain_pct = ((tp2 / entry - 1) * 100) if entry > 0 and tp2 > 0 else 0
+    tp3_gain_pct = ((tp3 / entry - 1) * 100) if entry > 0 and tp3 > 0 else 0
+    # 손절 손실률 (음수)
+    stop_loss_pct = ((stop / entry - 1) * 100) if entry > 0 and stop > 0 else 0
+
+    # ── [Step 2C] 추세/MTF 필드 ──
+    weekly_ma20_above = _safe_str(row.get("주봉20선_상회", ""), "")
+    weekly_trend = _safe_str(row.get("주봉추세", ""), "")
+    mtf_weekly = int(safe_float(row.get("MTF_WEEKLY_TREND", row.get("MTF_WEEKLY", 0))) or 0)
+    mtf_monthly = int(safe_float(row.get("MTF_MONTHLY_TREND", row.get("MTF_MONTHLY", 0))) or 0)
+    mtf_sufficient = _as_bool(row.get("MTF_DATA_SUFFICIENT", 0))
+    supertrend_dir = int(safe_float(row.get("SUPERTREND_DIR", 0)) or 0)
+    supertrend_val = safe_float(row.get("SUPERTREND_VAL", 0)) or 0
+    above_ma20 = int(safe_float(row.get("Above_MA20", 0)) or 0)
+    hma20 = safe_float(row.get("HMA20", 0)) or 0
+    hma_trend = _safe_str(row.get("HMA_Trend", ""), "")
+    hma_on = _safe_str(row.get("HMA_On", ""), "")
+    igyukdo = safe_float(row.get("이격도", 0)) or 0
+    vwap_gap = safe_float(row.get("VWAP_GAP", 0)) or 0
+
+    # ── [Step 2C] 모멘텀/수익률 필드 ──
+    ret_1d = safe_float(row.get("ret_1d_%", 0)) or 0
+    ret_5d = safe_float(row.get("ret_5d_%", 0)) or 0
+    ret_10d = safe_float(row.get("ret_10d_%", 0)) or 0
+    ret_20d = safe_float(row.get("ret_20d_%", 0)) or 0
+    ret_60d = safe_float(row.get("ret_60d_%", 0)) or 0
+    ret_120d = safe_float(row.get("ret_120d_%", 0)) or 0
+    rel_20d = safe_float(row.get("rel_20d_%", 0)) or 0
+    rel_60d = safe_float(row.get("rel_60d_%", 0)) or 0
+    rel_120d = safe_float(row.get("rel_120d_%", 0)) or 0
+    bench_kospi = safe_float(row.get("벤치_60d_KOSPI_%", 0)) or 0
+    bench_kosdaq = safe_float(row.get("벤치_60d_KOSDAQ_%", 0)) or 0
+
+    # ── [Step 2C] 수급/유동성 필드 ──
+    turnover_eok = safe_float(row.get("거래대금(억원)", 0)) or 0
+    mcap_eok = safe_float(row.get("시가총액(억원)", 0)) or 0
+    foreign_net = safe_float(row.get("외인순매수", 0)) or 0
+    institution_net = safe_float(row.get("기관순매수", 0)) or 0
+    major_net = safe_float(row.get("메이저순매수", 0)) or 0
+    individual_net = safe_float(row.get("개인순매수", 0)) or 0
+    trade_strength = safe_float(row.get("거래강도", 0)) or 0
+    v_power = safe_float(row.get("V_POWER", 0)) or 0
+    vol_quality = safe_float(row.get("Vol_Quality", 0)) or 0
+
+    # ── [Step 2E] 기술지표 (보조 차트용) ──
+    rsi14 = safe_float(row.get("RSI14", 0)) or 0
+    mfi14 = safe_float(row.get("MFI14", 0)) or 0
+    macd_slope_pct = safe_float(row.get("MACD_Slope_PCT", 0)) or 0
+    rsi_rising = int(safe_float(row.get("RSI_Rising", 0)) or 0)
+    bb_expanding = int(safe_float(row.get("BB_Expanding", 0)) or 0)
+    bb_bw = safe_float(row.get("BB_BW", 0)) or 0
+    ttm_squeeze = int(safe_float(row.get("TTM_SQUEEZE_CNT", row.get("TTM_SQUEEZE", 0))) or 0)
+    poc_gap = safe_float(row.get("POC_GAP", 0)) or 0
+
+    # ── [Step 2E] 레이더 5축 (TRIGGER 포함) ──
+    trigger_score = safe_float(row.get("TRIGGER_SCORE", row.get("RAW_TRIGGER_SCORE", 0))) or 0
+
+    # ── 사유 (CSV 우선, 없을 때만 fallback 자동 생성) ──
+    # 우선순위:
+    #   1) ELITE_REASON (가장 풍부 — "RR1.3 + 진입적정 + 3축고점 + 대기")
+    #   2) SCORE_REASON_TOP1 + SCORE_REASON_TOP2 (결합)
+    #   3) 자동 fallback
+    elite_reason = _safe_str(row.get("ELITE_REASON", ""), "")
+    reason_top1 = _safe_str(row.get("SCORE_REASON_TOP1", ""), "")
+    reason_top2 = _safe_str(row.get("SCORE_REASON_TOP2", ""), "")
+    news_reason = _safe_str(row.get("NEWS_REASON", ""), "")
+    route_reason = _safe_str(row.get("ROUTE_REASON", ""), "")
+    plan_reason = _safe_str(row.get("PLAN_REASON", ""), "")
+
+    if elite_reason and elite_reason != "—":
+        score_reason = elite_reason
+    elif reason_top1 and reason_top1 != "—":
+        # TOP1 + TOP2 결합 ("STRUCT 강점 + TIMING 보조")
+        if reason_top2 and reason_top2 != "—":
+            score_reason = f"{reason_top1} + {reason_top2}"
+        else:
+            score_reason = reason_top1
+    else:
+        # fallback 자동 생성 (CSV에 사유 컬럼이 전혀 없을 때만)
+        parts = []
+        if struct_s >= 90:
+            parts.append("STRUCT 강점")
+        elif struct_s >= 70:
+            parts.append("STRUCT 양호")
+        if timing_s >= 80:
+            parts.append("TIMING 양호")
+        if axis_gap > 0 and axis_gap < 25:
+            parts.append("3축 균형")  # [v2] 3측 → 3축 오타 수정
+        if route == "ARMED":
+            parts.append("대기")
+        elif route == "ATTACK":
+            parts.append("진입검토")
+        score_reason = " + ".join(parts) if parts else "—"
+
+    return {
+        # 기본
+        "name": _safe_str(row.get("종목명", "?"), "?"),
+        "code": _safe_str(row.get("종목코드", "?"), "?").zfill(6),
+        "route": route,
+        "route_kr": ROUTE_KR_MAP.get(route, "중립"),
+
+        # status 뱃지
+        "top_pick": top_pick,
+        "top_pick_type": top_pick_type or ("AGGRESSIVE" if top_pick else "—"),
+        "ebs": ebs,
+        "ebs_total": 8,
+        "pass_ebs": pass_ebs,
+        "action_priority": action_priority,
+        "is_active": is_active,
+
+        # 점수
+        "display_score": display_score,
+        "final_score": final_score,
+        "elite_score": elite_score,
+        "struct_score": struct_s,
+        "timing_score": timing_s,
+        "ai_score": ai_s,
+        "axis_mean": axis_mean,
+        "axis_gap": axis_gap,
+        "balance_score": balance_score,
+
+        # 사유 (UI 표시용 — score_reason은 우선순위 적용 후 결과)
+        "score_reason": score_reason,
+        # 원본 사유들 (Step 2D-2E 패널에서 직접 표시용)
+        "elite_reason": elite_reason,
+        "reason_top1": reason_top1,
+        "reason_top2": reason_top2,
+        "news_reason": news_reason,
+        "route_reason": route_reason,
+        "plan_reason": plan_reason,
+
+        # [Step 2B] 가격 플랜
+        "close": close,
+        "entry": entry,
+        "stop": stop,
+        "tp1": tp1, "tp2": tp2, "tp3": tp3,
+        "rr_now_tp1": rr_now_tp1,
+        "rr_mult": rr_mult,
+        "entry_gap_pct": entry_gap_pct,
+        "stop_pct": stop_pct,
+        "stop_loss_pct": stop_loss_pct,
+        "max_loss_pct": max_loss_pct,
+        "tp1_pct": tp1_pct,
+        "tp1_gain_pct": tp1_gain_pct,
+        "tp2_gain_pct": tp2_gain_pct,
+        "tp3_gain_pct": tp3_gain_pct,
+        "tp1_prob": tp1_prob,
+        "tp2_prob": tp2_prob,
+        "tp3_prob": tp3_prob,
+        "time_stop_days": time_stop_days,
+        "position_pct": position_pct,
+        "kelly_fraction": kelly_fraction,
+        "kelly_final_b": kelly_final_b,
+        "kelly_planned_b": kelly_planned_b,
+        "kelly_empirical_b": kelly_empirical_b,
+        "qty": qty,
+        "amount_man": amount_man,
+        "tp1_method": tp1_method,
+        "tp2_method": tp2_method,
+        "tp3_method": tp3_method,
+
+        # [Step 2C] 추세/MTF
+        "weekly_ma20_above": weekly_ma20_above,
+        "weekly_trend": weekly_trend,
+        "mtf_weekly": mtf_weekly,
+        "mtf_monthly": mtf_monthly,
+        "mtf_sufficient": mtf_sufficient,
+        "supertrend_dir": supertrend_dir,
+        "supertrend_val": supertrend_val,
+        "above_ma20": above_ma20,
+        "hma20": hma20,
+        "hma_trend": hma_trend,
+        "hma_on": hma_on,
+        "igyukdo": igyukdo,
+        "vwap_gap": vwap_gap,
+
+        # [Step 2C] 모멘텀/수익률
+        "ret_1d": ret_1d,
+        "ret_5d": ret_5d,
+        "ret_10d": ret_10d,
+        "ret_20d": ret_20d,
+        "ret_60d": ret_60d,
+        "ret_120d": ret_120d,
+        "rel_20d": rel_20d,
+        "rel_60d": rel_60d,
+        "rel_120d": rel_120d,
+        "bench_kospi": bench_kospi,
+        "bench_kosdaq": bench_kosdaq,
+
+        # [Step 2C] 수급/유동성
+        "turnover_eok": turnover_eok,
+        "mcap_eok": mcap_eok,
+        "foreign_net": foreign_net,
+        "institution_net": institution_net,
+        "major_net": major_net,
+        "individual_net": individual_net,
+        "trade_strength": trade_strength,
+        "v_power": v_power,
+        "vol_quality": vol_quality,
+
+        # [Step 2E] 기술지표 (보조 차트용)
+        "rsi14": rsi14,
+        "mfi14": mfi14,
+        "macd_slope_pct": macd_slope_pct,
+        "rsi_rising": rsi_rising,
+        "bb_expanding": bb_expanding,
+        "bb_bw": bb_bw,
+        "ttm_squeeze": ttm_squeeze,
+        "poc_gap": poc_gap,
+        "trigger_score": trigger_score,
+    }
+
+
+# ═══════════════════════════════════════════════════
+# 디자인 토큰 (mockup HTML과 1:1 매칭)
+# ═══════════════════════════════════════════════════
+
+# 한국식 캔들 색상 (차트 Step 2C에서 사용)
+KOREA_UP = "#EF4444"     # 상승 빨강
+KOREA_DOWN = "#3B82F6"   # 하락 파랑
+
+
+# CSS 중복 주입 방지 플래그 (context 접근 실패 시 fallback)
+_V2_STYLE_INJECTED = False
+
+
+def _inject_v2_styles():
+    """v2 디자인 토큰 CSS 주입 (세션당 1회만, 중복 방지)."""
+    # NiceGUI client 컨텍스트 단위로 1회만 주입
+    # 같은 페이지에서 여러 번 render_stock_detail_v2_*가 호출되어도 안전
+    try:
+        from nicegui import context
+        client = context.client
+        # client 객체에 플래그 부착 (스레드/요청 분리됨)
+        if getattr(client, "_sd_v2_style_injected", False):
+            return
+        client._sd_v2_style_injected = True
+    except Exception:
+        # context 접근 실패 시 fallback — module-level 1회만
+        global _V2_STYLE_INJECTED
+        if _V2_STYLE_INJECTED:
+            return
+        _V2_STYLE_INJECTED = True
+
+    ui.add_head_html("""
+    <style>
+    .sd-v2 {
+      --bg-deep: #0F1117;
+      --bg-card: #1A1D26;
+      --bg-card-2: #232631;
+      --border: #2A2D38;
+      --border-light: #353845;
+      --text-white: #FFFFFF;
+      --text-gray: #9CA3AF;
+      --text-dim: #6B7280;
+      --red: #EF4444;
+      --red-dim: rgba(239, 68, 68, 0.15);
+      --green: #10B981;
+      --green-dim: rgba(16, 185, 129, 0.15);
+      --orange: #F59E0B;
+      --orange-dim: rgba(245, 158, 11, 0.15);
+      --yellow: #FACC15;
+      --purple: #8B5CF6;
+      --purple-dim: rgba(139, 92, 246, 0.18);
+      --cyan: #06B6D4;
+      --cyan-dim: rgba(6, 182, 212, 0.15);
+      --blue: #3B82F6;
+      --pink: #EC4899;
+      color: var(--text-white);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    /* ── 헤더 영역 ── */
+    .sd-v2 .header {
+      display: grid;
+      grid-template-columns: 1fr 200px 130px 130px 110px;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .sd-v2 .h-title {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .sd-v2 .h-title .name {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    .sd-v2 .h-title .name .code {
+      color: var(--text-gray);
+      font-size: 18px;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+    .sd-v2 .h-title .meta {
+      color: var(--text-dim);
+      font-size: 10px;
+      margin-top: 4px;
+    }
+    .sd-v2 .h-title .rank {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .sd-v2 .h-title .rank .label {
+      background: linear-gradient(135deg, #FFD700, #FFA500);
+      color: #1A1D26;
+      font-weight: 800;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .sd-v2 .h-title .rank .rank-num {
+      color: var(--yellow);
+      font-weight: 800;
+      font-size: 14px;
+    }
+    .sd-v2 .h-title .rank .rank-total {
+      color: var(--text-gray);
+      font-size: 11px;
+    }
+
+    .sd-v2 .h-badge {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .sd-v2 .h-badge .lbl {
+      color: var(--text-gray);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .sd-v2 .h-badge .val {
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+    }
+    .sd-v2 .h-badge .sub { color: var(--text-dim); font-size: 9px; }
+    .sd-v2 .h-badge.core {
+      background: linear-gradient(135deg, var(--purple-dim), rgba(236, 72, 153, 0.1));
+      border-color: var(--purple);
+    }
+    .sd-v2 .h-badge.core .val { color: var(--purple); }
+    .sd-v2 .h-badge.toppick {
+      background: var(--orange-dim);
+      border-color: var(--orange);
+    }
+    .sd-v2 .h-badge.toppick .val { color: var(--orange); }
+    .sd-v2 .h-badge.toppick.dim { background: var(--bg-card); border-color: var(--border); }
+    .sd-v2 .h-badge.toppick.dim .val { color: var(--text-dim); }
+
+    .sd-v2 .h-badge.route {
+      background: var(--orange-dim);
+      border-color: var(--orange);
+    }
+    .sd-v2 .h-badge.route .val { color: var(--orange); }
+    .sd-v2 .h-badge.route.attack {
+      background: var(--red-dim);
+      border-color: var(--red);
+    }
+    .sd-v2 .h-badge.route.attack .val { color: var(--red); }
+    .sd-v2 .h-badge.route.wait {
+      background: var(--blue-dim);
+      border-color: var(--blue);
+    }
+    .sd-v2 .h-badge.route.wait .val { color: var(--blue); }
+
+    .sd-v2 .h-badge.ebs {
+      background: var(--green-dim);
+      border-color: var(--green);
+    }
+    .sd-v2 .h-badge.ebs .val { color: var(--green); font-size: 16px; }
+    .sd-v2 .h-badge.ebs .pass {
+      background: var(--green);
+      color: #0F1117;
+      font-weight: 800;
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 3px;
+    }
+    .sd-v2 .h-badge.ebs.fail {
+      background: var(--red-dim);
+      border-color: var(--red);
+    }
+    .sd-v2 .h-badge.ebs.fail .val { color: var(--red); }
+    .sd-v2 .h-badge.ebs.fail .pass {
+      background: var(--red);
+      color: white;
+    }
+    .sd-v2 .h-badge .priority { color: var(--text-dim); font-size: 9px; }
+    .sd-v2 .h-badge .priority strong { color: var(--orange); }
+    .sd-v2 .h-badge .active { color: var(--green); font-size: 9px; }
+    .sd-v2 .h-badge .active::before { content: "● "; }
+    .sd-v2 .h-badge .inactive { color: var(--text-dim); font-size: 9px; }
+    .sd-v2 .h-badge .inactive::before { content: "○ "; }
+
+    /* ── 점수 영역 ── */
+    .sd-v2 .scores {
+      display: grid;
+      grid-template-columns: 140px 1fr 130px 130px 130px;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .sd-v2 .display-score {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .sd-v2 .display-score .lbl {
+      color: var(--text-gray);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .sd-v2 .display-score .val {
+      font-size: 38px;
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--purple), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1;
+    }
+    .sd-v2 .display-score .arc {
+      width: 80px;
+      height: 6px;
+      background: linear-gradient(90deg, var(--red), var(--orange), var(--yellow), var(--green));
+      border-radius: 3px;
+      position: relative;
+    }
+    .sd-v2 .display-score .arc::after {
+      content: "▲";
+      position: absolute;
+      color: var(--purple);
+      font-size: 8px;
+      top: 5px;
+      left: 70%;
+      transform: translateX(-50%);
+    }
+
+    .sd-v2 .axis-mean {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      position: relative;
+    }
+    .sd-v2 .axis-mean .axis-title {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-deep);
+      padding: 0 8px;
+      color: var(--text-gray);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .sd-v2 .axis-cell { text-align: center; padding-top: 4px; }
+    .sd-v2 .axis-cell .axis-lbl {
+      font-size: 10px;
+      color: var(--text-gray);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .sd-v2 .axis-cell .axis-val {
+      font-size: 26px;
+      font-weight: 900;
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+    .sd-v2 .axis-cell .axis-sub { font-size: 10px; color: var(--text-dim); }
+    .sd-v2 .axis-cell.struct .axis-val { color: var(--green); }
+    .sd-v2 .axis-cell.struct .axis-sub { color: var(--green); }
+    .sd-v2 .axis-cell.timing .axis-val { color: var(--blue); }
+    .sd-v2 .axis-cell.ai .axis-val { color: var(--purple); }
+
+    .sd-v2 .score-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .sd-v2 .score-card .lbl {
+      color: var(--text-gray);
+      font-size: 10px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .sd-v2 .score-card .val {
+      font-size: 28px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .sd-v2 .score-card .sub {
+      color: var(--text-dim);
+      font-size: 10px;
+      margin-top: 4px;
+    }
+    .sd-v2 .score-card.final .val { color: var(--orange); }
+    .sd-v2 .score-card.elite .val { color: var(--yellow); }
+    .sd-v2 .score-card.balance .val { color: var(--cyan); }
+    .sd-v2 .score-card.balance .sub { color: var(--cyan); }
+
+    .sd-v2 .score-reason {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      margin-bottom: 12px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .sd-v2 .score-reason .lbl {
+      color: var(--text-gray);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .sd-v2 .score-reason .val {
+      color: var(--pink);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* var(--blue-dim) 추가 정의 */
+    .sd-v2 { --blue-dim: rgba(59, 130, 246, 0.15); }
+
+    /* ═══════════ [Step 2B+] 메인 그리드 + 좌측 사이드 패널 ═══════════ */
+    .sd-v2 .main-grid {
+      display: grid;
+      grid-template-columns: 240px 1fr 240px;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .sd-v2 .side-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sd-v2 .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .sd-v2 .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-white);
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sd-v2 .panel-title .num {
+      background: var(--purple-dim);
+      color: var(--purple);
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 10px;
+    }
+    .sd-v2 .panel-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+      font-size: 10px;
+    }
+    .sd-v2 .panel-row .lbl {
+      color: var(--text-gray);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .sd-v2 .panel-row .lbl::before {
+      content: "✓";
+      color: var(--green);
+      font-size: 9px;
+    }
+    .sd-v2 .panel-row.note .lbl::before { content: ""; }
+    .sd-v2 .panel-row .val {
+      color: var(--text-white);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .sd-v2 .panel-row .val.green  { color: var(--green); }
+    .sd-v2 .panel-row .val.red    { color: var(--red); }
+    .sd-v2 .panel-row .val.orange { color: var(--orange); }
+    .sd-v2 .panel-row .val.cyan   { color: var(--cyan); }
+    .sd-v2 .panel-row .val.muted  { color: var(--text-dim); }
+
+    .sd-v2 .panel-row.tp {
+      background: rgba(16, 185, 129, 0.05);
+      margin: 2px -4px;
+      padding: 4px 6px;
+      border-radius: 4px;
+    }
+    .sd-v2 .panel-row.tp .lbl { color: var(--text-white); font-weight: 600; }
+    .sd-v2 .panel-row.stop .val { color: var(--red); }
+
+    .sd-v2 .tp-prob-line {
+      text-align: right;
+      font-size: 9px;
+      color: var(--text-dim);
+      padding-right: 4px;
+      margin-top: -2px;
+    }
+
+    .sd-v2 .panel-row.divider {
+      border-top: 1px dashed var(--border);
+      margin-top: 6px;
+      padding-top: 6px;
+    }
+    .sd-v2 .panel-row .pct-small {
+      color: var(--text-dim);
+      font-size: 9px;
+      margin-left: 3px;
+    }
+    .sd-v2 .panel-row.dot .lbl::before { content: "●"; color: var(--purple); }
+
+    /* 수급 패널 — 아이콘 추가 */
+    .sd-v2 .panel-row .ice::after { content: " 🧊"; }
+    </style>
+    """)
+
+
+# ═══════════════════════════════════════════════════
+# 포맷 헬퍼
+# ═══════════════════════════════════════════════════
+
+def _fmt_score(v, decimals=1):
+    """점수 포맷 (소수 1자리)."""
+    n = safe_float(v) or 0
+    return f"{n:.{decimals}f}"
+
+
+# ═══════════════════════════════════════════════════
+# Step 2A: 헤더 행 (종목명 + 5개 status 뱃지)
+# ═══════════════════════════════════════════════════
+
+def render_v2_header(n: dict, rank: int = 0, total: int = 0,
+                     timestamp: str = "", combo_info: Optional[dict] = None):
+    """
+    상단 헤더 행 렌더링.
+
+    Args:
+        n: normalize_stock_row()의 결과 dict
+        rank: LDY_RANK 순위
+        total: 전체 종목 수
+        timestamp: 분석 시각
+        combo_info: 콤보 정보 dict {color, name, n, ev, win_rate, rank}
+            (CSV에 없는 정보 — 외부 데이터 또는 콤보 분석 결과)
+    """
+    name = h_escape(n["name"])
+    code = h_escape(n["code"])
+    route = n["route"]
+    route_kr = n["route_kr"]
+    top_pick = n["top_pick"]
+    top_pick_type = h_escape(n["top_pick_type"])
+    ebs = n["ebs"]
+    ebs_total = n["ebs_total"]
+    pass_ebs = n["pass_ebs"]
+    is_active = n["is_active"]
+    action_priority = n["action_priority"]
+
+    # ROUTE 색상 클래스
+    if route == "ATTACK":
+        route_class = "route attack"
+    elif route in ("WAIT", "NEUTRAL"):
+        route_class = "route wait"
+    else:  # ARMED, OVERHEAT
+        route_class = "route"
+
+    # TOP_PICK 클래스 (꺼져있으면 dim)
+    top_pick_class = "toppick" if top_pick else "toppick dim"
+
+    # EBS 클래스
+    ebs_class = "ebs" if pass_ebs else "ebs fail"
+    ebs_pass_text = "PASS" if pass_ebs else "WAIT"
+
+    # IS_ACTIVE 클래스
+    active_class = "active" if is_active else "inactive"
+    active_text = "True" if is_active else "False"
+
+    with ui.element("div").classes("sd-v2"):
+        with ui.element("div").classes("header"):
+
+            # 1. 종목명 + LDY_RANK
+            ui.html(f'''
+                <div class="h-title">
+                    <div class="name">{name} <span class="code">({code})</span></div>
+                    <div class="meta">{h_escape(timestamp) if timestamp else "—"} / SwingPicker v22</div>
+                    <div class="rank">
+                        <span class="label">LDY_RANK</span>
+                        <span>🏆</span>
+                        <span class="rank-num">{rank}위</span>
+                        <span class="rank-total">/ {total}개</span>
+                    </div>
+                </div>
+            ''')
+
+            # 2. 핵심매수 콤보 (combo_info 있으면 풍성, 없으면 CSV fallback)
+            ci = combo_info or {}
+            # combo_info가 없거나 비어있을 때 CSV의 elite 정보로 fallback
+            if not ci:
+                # ELITE_REASON 우선 (compact descriptive), 없으면 단순 ELITE
+                fallback_name = n.get("elite_reason") or "ELITE"
+                # ELITE_REASON이 너무 길면 잘라서 표시 (헤더 카드 폭 한계)
+                if fallback_name and len(fallback_name) > 24:
+                    fallback_name = fallback_name[:22] + "…"
+                ci = {
+                    "name": fallback_name,
+                    "color": "#8B5CF6",
+                    # ELITE_SCORE / FINAL_SCORE 등으로 sub 채우기
+                    "_elite_score": n.get("elite_score", 0),
+                    "_final_score": n.get("final_score", 0),
+                }
+
+            combo_color = ci.get("color", "#8B5CF6")
+            combo_n = ci.get("n", 0)
+            combo_ev = ci.get("ev", 0)
+            combo_win = ci.get("win_rate", 0)
+            combo_name = h_escape(str(ci.get("name", "ELITE")))
+            combo_rank = ci.get("rank", None)
+            # color는 hex 코드만 허용 (CSS 주입 방어)
+            import re
+            if not re.match(r"^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$", combo_color):
+                combo_color = "#8B5CF6"
+
+            ci_lines = []
+            if combo_color:
+                ci_lines.append(f'<div class="sub" style="color: {combo_color};">콤보 {combo_color}</div>')
+            if combo_rank:
+                ci_lines.append(f'<div class="sub" style="color: var(--text-gray);">실성능 {combo_rank}위</div>')
+            if combo_n:
+                ci_lines.append(f'<div class="sub">n={combo_n}, EV {combo_ev:+.2f}%</div>')
+            if combo_win:
+                ci_lines.append(f'<div class="sub">승률 {combo_win:.1f}%</div>')
+            # combo_info fallback 모드: ELITE_SCORE / FINAL_SCORE로 sub 채움
+            if ci.get("_elite_score") or ci.get("_final_score"):
+                if ci.get("_elite_score"):
+                    ci_lines.append(f'<div class="sub" style="color: var(--text-gray);">ELITE {ci["_elite_score"]:.1f}</div>')
+                if ci.get("_final_score"):
+                    ci_lines.append(f'<div class="sub">FINAL {ci["_final_score"]:.1f}</div>')
+            ci_html = "\n".join(ci_lines)
+
+            ui.html(f'''
+                <div class="h-badge core">
+                    <div class="lbl">🌑 핵심매수</div>
+                    <div class="val">{combo_name}</div>
+                    {ci_html}
+                </div>
+            ''')
+
+            # 3. TOP_PICK
+            top_pick_display = top_pick_type if top_pick else "—"
+            ui.html(f'''
+                <div class="h-badge {top_pick_class}">
+                    <div class="lbl">TOP_PICK</div>
+                    <div class="val">{top_pick_display}</div>
+                </div>
+            ''')
+
+            # 4. ROUTE
+            ui.html(f'''
+                <div class="h-badge {route_class}">
+                    <div class="lbl">ROUTE</div>
+                    <div class="val">{route}</div>
+                    <div class="sub" style="color: var(--text-dim);">({route_kr})</div>
+                </div>
+            ''')
+
+            # 5. EBS
+            ui.html(f'''
+                <div class="h-badge {ebs_class}">
+                    <div class="lbl">EBS <span style="color: white;">{ebs}</span>/{ebs_total}</div>
+                    <div class="pass">{ebs_pass_text}</div>
+                    <div class="priority">ACTION_PRIORITY <strong>{action_priority}</strong></div>
+                    <div class="{active_class}">IS_ACTIVE {active_text}</div>
+                </div>
+            ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2A: 점수 영역
+# ═══════════════════════════════════════════════════
+
+def render_v2_scores(n: dict):
+    """
+    점수 영역 렌더링.
+
+    CSV 원본값 사용:
+      DISPLAY_SCORE / FINAL_SCORE / ELITE_SCORE / BALANCE_SCORE
+      STRUCT_SCORE / TIMING_SCORE / AI_SCORE
+      AXIS_MEAN / AXIS_GAP (재계산 X, CSV 우선)
+      SCORE_REASON_TOP1 / ELITE_REASON (자동 생성 X)
+    """
+    display_score = n["display_score"]
+    final_score = n["final_score"]
+    elite_score = n["elite_score"]
+    balance_score = n["balance_score"]
+    struct_s = n["struct_score"]
+    timing_s = n["timing_score"]
+    ai_s = n["ai_score"]
+    axis_mean = n["axis_mean"]
+    axis_gap = n["axis_gap"]
+    score_reason = n["score_reason"]
+
+    # 강점 표기: 가장 높은 축이 85+ 일 때만 "강점 ★"
+    scores_dict = {"STRUCT": struct_s, "TIMING": timing_s, "AI": ai_s}
+    max_axis = max(scores_dict, key=scores_dict.get) if any(scores_dict.values()) else None
+
+    def _axis_tag(name, val):
+        if name == max_axis and val >= 85:
+            return ("강점 ★", "var(--green)")
+        return ("보조", "var(--text-dim)")
+
+    struct_tag, struct_clr = _axis_tag("STRUCT", struct_s)
+    timing_tag, timing_clr = _axis_tag("TIMING", timing_s)
+    ai_tag, ai_clr = _axis_tag("AI", ai_s)
+
+    # AXIS_GAP 평가
+    if axis_gap < 15:
+        gap_tag = "우수"
+    elif axis_gap < 25:
+        gap_tag = "양호"
+    else:
+        gap_tag = "주의"
+
+    with ui.element("div").classes("sd-v2"):
+        with ui.element("div").classes("scores"):
+
+            ui.html(f'''
+                <div class="display-score">
+                    <div class="lbl">DISPLAY_SCORE</div>
+                    <div class="val">{_fmt_score(display_score)}</div>
+                    <div class="arc"></div>
+                </div>
+            ''')
+
+            ui.html(f'''
+                <div class="axis-mean">
+                    <div class="axis-title">3축 점수 (AXIS_MEAN {_fmt_score(axis_mean)})</div>
+                    <div class="axis-cell struct">
+                        <div class="axis-lbl">STRUCT</div>
+                        <div class="axis-val">{_fmt_score(struct_s)}</div>
+                        <div class="axis-sub" style="color: {struct_clr};">{struct_tag}</div>
+                    </div>
+                    <div class="axis-cell timing">
+                        <div class="axis-lbl">TIMING</div>
+                        <div class="axis-val">{_fmt_score(timing_s)}</div>
+                        <div class="axis-sub" style="color: {timing_clr};">{timing_tag}</div>
+                    </div>
+                    <div class="axis-cell ai">
+                        <div class="axis-lbl">AI</div>
+                        <div class="axis-val">{_fmt_score(ai_s)}</div>
+                        <div class="axis-sub" style="color: {ai_clr};">{ai_tag}</div>
+                    </div>
+                </div>
+            ''')
+
+            ui.html(f'''
+                <div class="score-card final">
+                    <div class="lbl">FINAL_SCORE</div>
+                    <div class="val">{_fmt_score(final_score)}</div>
+                </div>
+            ''')
+
+            ui.html(f'''
+                <div class="score-card elite">
+                    <div class="lbl">ELITE_SCORE</div>
+                    <div class="val">{_fmt_score(elite_score)}</div>
+                </div>
+            ''')
+
+            ui.html(f'''
+                <div class="score-card balance">
+                    <div class="lbl">BALANCE_SCORE</div>
+                    <div class="val">{_fmt_score(balance_score)}</div>
+                    <div class="sub">AXIS_GAP {_fmt_score(axis_gap)} ({gap_tag})</div>
+                </div>
+            ''')
+
+        ui.html(f'''
+            <div class="score-reason">
+                <div class="lbl">점수사유:</div>
+                <div class="val">{h_escape(score_reason)}</div>
+            </div>
+        ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2B: 좌측 사이드 패널 #1 — 가격 플랜
+# ═══════════════════════════════════════════════════
+
+def _fmt_won(v) -> str:
+    """원화 정수 포맷 (천단위 콤마). 0이면 '—'."""
+    n = safe_float(v) or 0
+    if n == 0:
+        return "—"
+    return f"{int(round(n)):,}원"
+
+
+def _fmt_pct_signed(v, decimals=1) -> str:
+    """부호 포함 퍼센트."""
+    n = safe_float(v)
+    if n is None:
+        return "—"
+    return f"{n:+.{decimals}f}%"
+
+
+def _fmt_pct(v, decimals=1) -> str:
+    """부호 없는 퍼센트."""
+    n = safe_float(v)
+    if n is None:
+        return "—"
+    return f"{n:.{decimals}f}%"
+
+
+def render_v2_price_plan(n: dict):
+    """
+    [Step 2B] 좌측 사이드 패널 #1 — 가격 플랜.
+
+    이미지 1번 패널 100% 재현:
+        종가/매수가 (GAP)
+        손절가 (-XX%)
+        TP1 / 비중%
+        TP2 / 비중%
+        TP3 / 비중%
+        ─────
+        RR_NOW_TP1
+        RR_MULT
+        MAX_LOSS
+        TIME_STOP
+        POSITION
+        KELLY_B
+        KELLY_수량
+
+    데이터 소스: normalize_stock_row() 결과 (CSV 원본값 우선).
+    """
+    close = n["close"]
+    entry = n["entry"]
+    stop = n["stop"]
+    tp1, tp2, tp3 = n["tp1"], n["tp2"], n["tp3"]
+    rr_now = n["rr_now_tp1"]
+    rr_mult = n["rr_mult"]
+    entry_gap = n["entry_gap_pct"]
+    stop_loss = n["stop_loss_pct"]
+    max_loss = n["max_loss_pct"]
+    tp1_gain = n["tp1_gain_pct"]
+    tp2_gain = n["tp2_gain_pct"]
+    tp3_gain = n["tp3_gain_pct"]
+    tp1_prob = n["tp1_prob"]
+    tp2_prob = n["tp2_prob"]
+    tp3_prob = n["tp3_prob"]
+    time_stop = int(n["time_stop_days"]) if n["time_stop_days"] else 0
+    position = n["position_pct"]
+    kelly_final = n["kelly_final_b"]
+    kelly_planned = n["kelly_planned_b"]
+    kelly_empirical = n["kelly_empirical_b"]
+    qty = int(n["qty"]) if n["qty"] else 0
+    amount = n["amount_man"]
+
+    # RR 평가
+    if rr_now >= 1.5:
+        rr_tag = "우수"
+    elif rr_now >= 1.0:
+        rr_tag = "양호"
+    elif rr_now > 0:
+        rr_tag = "부족"
+    else:
+        rr_tag = "—"
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div class="panel">
+        <div class="panel-title"><span class="num">1</span>가격 플랜</div>
+
+        <div class="panel-row">
+          <span class="lbl">종가</span>
+          <span class="val">{_fmt_won(close)}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">추천매수가</span>
+          <span class="val">{_fmt_won(entry)} <span class="pct-small">(GAP {_fmt_pct_signed(entry_gap)})</span></span>
+        </div>
+        <div class="panel-row stop">
+          <span class="lbl">손절가</span>
+          <span class="val red">{_fmt_won(stop)} <span class="pct-small">({_fmt_pct_signed(stop_loss)})</span></span>
+        </div>
+
+        <div class="panel-row tp">
+          <span class="lbl">TP1</span>
+          <span class="val">{_fmt_won(tp1)} <span style="color: var(--green);">({_fmt_pct_signed(tp1_gain)})</span></span>
+        </div>
+        <div class="tp-prob-line">{h_escape(n["tp1_method"]) or "—"} · {int(tp1_prob)}%</div>
+
+        <div class="panel-row tp">
+          <span class="lbl">TP2</span>
+          <span class="val">{_fmt_won(tp2)} <span style="color: var(--green);">({_fmt_pct_signed(tp2_gain)})</span></span>
+        </div>
+        <div class="tp-prob-line">{h_escape(n["tp2_method"]) or "—"} · {int(tp2_prob)}%</div>
+
+        <div class="panel-row tp">
+          <span class="lbl">TP3</span>
+          <span class="val">{_fmt_won(tp3)} <span style="color: var(--green);">({_fmt_pct_signed(tp3_gain)})</span></span>
+        </div>
+        <div class="tp-prob-line">{h_escape(n["tp3_method"]) or "—"} · {int(tp3_prob)}%</div>
+
+        <div class="panel-row divider">
+          <span class="lbl">RR_NOW_TP1</span>
+          <span class="val orange">{rr_now:.2f} ({rr_tag})</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">RR_MULT</span>
+          <span class="val">{rr_mult:.1f}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">MAX_LOSS</span>
+          <span class="val red">{_fmt_pct(max_loss)}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">TIME_STOP</span>
+          <span class="val">{time_stop}일</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">POSITION</span>
+          <span class="val">{_fmt_pct(position, 0)}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">KELLY_B</span>
+          <span class="val orange">{kelly_final:.1f} <span class="pct-small">(plan {kelly_planned:.3f} / emp {kelly_empirical:.1f})</span></span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">KELLY_수량</span>
+          <span class="val">{qty}주 <span class="pct-small">({amount:.1f}만원)</span></span>
+        </div>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2C: 좌측 사이드 패널 #2 — 추세 / MTF
+# ═══════════════════════════════════════════════════
+
+def _trend_arrow(val_str: str, fallback_int: int = 0) -> tuple:
+    """추세 표시 문자열 → (화살표, 색상클래스)."""
+    s = (val_str or "").strip()
+    if s in ("▲", "O", "상승", "상"):
+        return ("▲", "green")
+    if s in ("▼", "X", "하락", "하"):
+        return ("▼", "red")
+    if fallback_int > 0:
+        return ("▲", "green")
+    if fallback_int < 0:
+        return ("▼", "red")
+    return ("—", "muted")
+
+
+def render_v2_trend_mtf(n: dict):
+    """[Step 2C] 좌측 사이드 패널 #2 — 추세 / MTF."""
+    weekly_ma = n["weekly_ma20_above"]
+    weekly_tr = n["weekly_trend"]
+    mtf_w = n["mtf_weekly"]
+    mtf_m = n["mtf_monthly"]
+    st_dir = n["supertrend_dir"]
+    st_val = n["supertrend_val"]
+    above_ma20 = n["above_ma20"]
+    hma20 = n["hma20"]
+    hma_trend = n["hma_trend"]
+    hma_on = n["hma_on"]
+    igyukdo = n["igyukdo"]
+
+    # 화살표 + 색상
+    wma_arrow, wma_clr = _trend_arrow(weekly_ma)
+    wtr_arrow, wtr_clr = _trend_arrow(weekly_tr)
+    mtf_w_text = f"상승({mtf_w})" if mtf_w > 0 else (f"하락({mtf_w})" if mtf_w < 0 else "중립")
+    mtf_w_clr = "green" if mtf_w > 0 else ("red" if mtf_w < 0 else "muted")
+    mtf_m_text = f"상승({mtf_m})" if mtf_m > 0 else (f"하락({mtf_m})" if mtf_m < 0 else "중립")
+    mtf_m_clr = "green" if mtf_m > 0 else ("red" if mtf_m < 0 else "muted")
+    st_arrow, st_clr = _trend_arrow("", st_dir)
+    ma20_arrow, ma20_clr = ("▲", "green") if above_ma20 > 0 else ("▼", "red")
+    ma20_text = f"상 {ma20_arrow}" if above_ma20 > 0 else f"하 {ma20_arrow}"
+    hma_arrow, hma_clr = _trend_arrow(hma_trend)
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div class="panel">
+        <div class="panel-title"><span class="num">2</span>추세 / MTF</div>
+
+        <div class="panel-row">
+          <span class="lbl">주봉 20선 상회</span>
+          <span class="val {wma_clr}">{wma_arrow}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">주봉 추세</span>
+          <span class="val {wtr_clr}">{wtr_arrow}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">MTF 주봉</span>
+          <span class="val {mtf_w_clr}">{mtf_w_text}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">MTF 월봉</span>
+          <span class="val {mtf_m_clr}">{mtf_m_text}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">SUPERTREND</span>
+          <span class="val {st_clr}">{st_arrow} {_fmt_won(st_val).replace("원","")}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">MA20 상회</span>
+          <span class="val {ma20_clr}">{ma20_text}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">HMA20</span>
+          <span class="val">{_fmt_won(hma20).replace("원","")} <span class="pct-small">(HMA_On {h_escape(hma_on or "—")})</span></span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">이격도</span>
+          <span class="val">{igyukdo:.2f}</span>
+        </div>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2C: 좌측 사이드 패널 #3 — 모멘텀 & 수익률
+# ═══════════════════════════════════════════════════
+
+def _ret_color_class(val) -> str:
+    """수익률 색상 클래스."""
+    v = safe_float(val) or 0
+    if v > 0:
+        return "green"
+    if v < 0:
+        return "red"
+    return "muted"
+
+
+def render_v2_momentum(n: dict):
+    """[Step 2C] 좌측 사이드 패널 #3 — 모멘텀 & 수익률."""
+    rows = [
+        ("ret_1d",   n["ret_1d"]),
+        ("ret_5d",   n["ret_5d"]),
+        ("ret_10d",  n["ret_10d"]),
+        ("ret_20d",  n["ret_20d"]),
+        ("ret_60d",  n["ret_60d"]),
+        ("ret_120d", n["ret_120d"]),
+    ]
+    rel_rows = [
+        ("rel_20d",  n["rel_20d"],  "시장대비"),
+        ("rel_60d",  n["rel_60d"],  ""),
+        ("rel_120d", n["rel_120d"], ""),
+    ]
+    bench_kospi = n["bench_kospi"]
+    bench_kosdaq = n["bench_kosdaq"]
+    # 보통 KOSPI/KOSDAQ 동일하면 합쳐서 표시
+    if abs(bench_kospi - bench_kosdaq) < 0.01:
+        bench_text = f"KOSPI/KOSDAQ {_fmt_pct_signed(bench_kospi)}"
+    else:
+        bench_text = f"KOSPI {_fmt_pct_signed(bench_kospi)} / KOSDAQ {_fmt_pct_signed(bench_kosdaq)}"
+
+    rows_html = ""
+    for label, val in rows:
+        clr = _ret_color_class(val)
+        rows_html += f'''
+        <div class="panel-row dot">
+          <span class="lbl">{label}</span>
+          <span class="val {clr}">{_fmt_pct_signed(val, 2)}</span>
+        </div>'''
+
+    rel_html = ""
+    for label, val, note in rel_rows:
+        clr = _ret_color_class(val)
+        note_html = f' <span class="pct-small">({note})</span>' if note else ''
+        rel_html += f'''
+        <div class="panel-row dot">
+          <span class="lbl">{label}</span>
+          <span class="val {clr}">{_fmt_pct_signed(val, 2)}{note_html}</span>
+        </div>'''
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div class="panel">
+        <div class="panel-title"><span class="num">3</span>모멘텀 & 수익률</div>
+        {rows_html}
+        {rel_html}
+        <div class="panel-row divider note">
+          <span class="lbl" style="color: var(--text-dim);">벤치 60d</span>
+          <span class="val muted">{bench_text}</span>
+        </div>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2C: 좌측 사이드 패널 #4 — 수급 / 유동성
+# ═══════════════════════════════════════════════════
+
+def _fmt_eok(v) -> str:
+    """억 단위 포맷. 0이면 '—'."""
+    n = safe_float(v) or 0
+    if n == 0:
+        return "—"
+    if n >= 10000:
+        return f"{n/10000:.1f}조"
+    if n >= 1000:
+        return f"{n:,.0f}억"  # 1000억 이상은 정수
+    if n >= 1:
+        return f"{n:.1f}억"   # 1~999.9억은 소수 1자리 (이미지: 173.8억)
+    return f"{n:.2f}억"
+
+
+def _net_color_class(val) -> str:
+    """순매수 색상 — 매매 판단용:
+       양수: 초록 (매수)
+       음수: 빨강 (매도)
+       0:    회색 (중립/데이터 없음)
+    """
+    v = safe_float(val) or 0
+    if v > 0:
+        return "green"
+    if v < 0:
+        return "red"
+    return "muted"
+
+
+def render_v2_supply(n: dict):
+    """[Step 2C] 좌측 사이드 패널 #4 — 수급 / 유동성."""
+    turnover = n["turnover_eok"]
+    mcap = n["mcap_eok"]
+    foreign = n["foreign_net"]
+    institution = n["institution_net"]
+    major = n["major_net"]
+    individual = n["individual_net"]
+    strength = n["trade_strength"]
+    v_power = n["v_power"]
+    vol_quality = n["vol_quality"]
+
+    # 거래대금 아이콘 (큰 거래는 🧊)
+    turnover_icon = " 🧊" if turnover >= 100 else ""
+
+    # 거래강도 색상 (1.0 이상 주황, 미만 회색)
+    strength_clr = "orange" if strength >= 1.0 else "muted"
+    # V_POWER 색상
+    vp_clr = _ret_color_class(v_power)
+
+    def _fmt_net(v):
+        """순매수 금액 표시. 0이면 '0', 만 단위 이상이면 정수."""
+        x = safe_float(v) or 0
+        if x == 0:
+            return "0"
+        return f"{int(round(x)):+,}"
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div class="panel">
+        <div class="panel-title"><span class="num">4</span>수급 / 유동성</div>
+
+        <div class="panel-row">
+          <span class="lbl">거래대금</span>
+          <span class="val">{_fmt_eok(turnover)}{turnover_icon}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">시가총액</span>
+          <span class="val">{_fmt_eok(mcap)}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">외인 순매수</span>
+          <span class="val {_net_color_class(foreign)}">{_fmt_net(foreign)}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">기관 순매수</span>
+          <span class="val {_net_color_class(institution)}">{_fmt_net(institution)}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">메이저 순매수</span>
+          <span class="val {_net_color_class(major)}">{_fmt_net(major)}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">개인 순매수</span>
+          <span class="val {_net_color_class(individual)}">{_fmt_net(individual)}</span>
+        </div>
+
+        <div class="panel-row divider">
+          <span class="lbl">거래강도</span>
+          <span class="val {strength_clr}">{strength:.2f}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">V_POWER</span>
+          <span class="val {vp_clr}">{v_power:+.2f}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl">Vol_Quality</span>
+          <span class="val">{vol_quality:.2f}</span>
+        </div>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2D: 중앙 메인 캔들차트 (ECharts + markLine)
+# ═══════════════════════════════════════════════════
+
+# Indicator SSOT — 가능하면 백엔드 함수 사용 (차트 라인 = 시스템 점수 일치)
+_use_backend_indicators = False
+_backend_hma = None
+try:
+    from indicators import calc_supertrend as _backend_supertrend, calc_vwap as _backend_vwap
+    _use_backend_indicators = True
+    # HMA는 백엔드에 있을 수도 없을 수도 있음 — 시도
+    try:
+        from indicators import calc_hma as _backend_hma_fn
+        _backend_hma = _backend_hma_fn
+    except ImportError:
+        pass
+except ImportError:
+    _backend_supertrend = None
+    _backend_vwap = None
+
+
+def _calc_hma(values: list, period: int = 20) -> list:
+    """Hull Moving Average — 부드러운 추세선."""
+    import math
+    n = len(values)
+    if n < period:
+        return [None] * n
+    half = period // 2
+    sqrt_p = int(math.sqrt(period))
+
+    def _wma(vals, p):
+        """가중이동평균."""
+        result = []
+        for i in range(len(vals)):
+            if i + 1 < p:
+                result.append(None)
+                continue
+            window = vals[i + 1 - p: i + 1]
+            weights = list(range(1, p + 1))
+            wsum = sum(w * v for w, v in zip(weights, window))
+            result.append(wsum / sum(weights))
+        return result
+
+    wma_half = _wma(values, half)
+    wma_full = _wma(values, period)
+    raw = []
+    for h, f in zip(wma_half, wma_full):
+        if h is None or f is None:
+            raw.append(None)
+        else:
+            raw.append(2 * h - f)
+    # raw의 None 제외 부분에 sqrt_p WMA
+    non_none = [v for v in raw if v is not None]
+    if len(non_none) < sqrt_p:
+        return [None] * n
+    raw_wma = _wma(non_none, sqrt_p)
+    # 결과를 원래 인덱스로 매핑
+    result = [None] * n
+    start = n - len(raw_wma)
+    for i, v in enumerate(raw_wma):
+        result[start + i] = v
+    return result
+
+
+def _calc_supertrend(highs, lows, closes, period=10, multiplier=3.0):
+    """SUPERTREND 계산."""
+    n = len(closes)
+    if n < period + 1:
+        return [None] * n
+    # True Range
+    tr = []
+    for i in range(n):
+        if i == 0:
+            tr.append(highs[i] - lows[i])
+        else:
+            tr.append(max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i-1]),
+                abs(lows[i] - closes[i-1])
+            ))
+    # ATR (단순평균)
+    atr = [None] * n
+    for i in range(period - 1, n):
+        atr[i] = sum(tr[i - period + 1: i + 1]) / period
+
+    # SUPERTREND
+    st = [None] * n
+    direction = [1] * n  # 1=상승, -1=하락
+    for i in range(period, n):
+        if atr[i] is None:
+            continue
+        hl2 = (highs[i] + lows[i]) / 2
+        up = hl2 - multiplier * atr[i]
+        dn = hl2 + multiplier * atr[i]
+        prev_st = st[i-1] if st[i-1] is not None else up
+
+        if closes[i] > prev_st:
+            direction[i] = 1
+            st[i] = max(up, prev_st) if direction[i-1] == 1 else up
+        else:
+            direction[i] = -1
+            st[i] = min(dn, prev_st) if direction[i-1] == -1 else dn
+    return st
+
+
+def _calc_vwap(highs, lows, closes, volumes) -> list:
+    """VWAP (Volume Weighted Average Price) — 누적."""
+    cum_pv = 0.0
+    cum_v = 0.0
+    result = []
+    for h, l, c, v in zip(highs, lows, closes, volumes):
+        typical = (h + l + c) / 3
+        cum_pv += typical * v
+        cum_v += v
+        if cum_v > 0:
+            result.append(cum_pv / cum_v)
+        else:
+            result.append(None)
+    return result
+
+
+def render_v2_chart(n: dict, ohlcv_df=None):
+    """
+    [Step 2D] 중앙 메인 캔들차트 — ECharts + markLine.
+
+    한국식 색상: 상승 빨강 (#EF4444), 하락 파랑 (#3B82F6)
+    오버레이: HMA20 (노랑), VWAP (흰 점선), SUPERTREND (초록)
+    markLine: TP1/TP2/TP3 (파랑), 현재가/손절 (빨강), 매수가 (노랑)
+
+    Args:
+        n: normalize_stock_row() 결과
+        ohlcv_df: pandas DataFrame with [시가, 고가, 저가, 종가, 거래량] columns
+                  None이면 placeholder 표시
+    """
+    if ohlcv_df is None or len(ohlcv_df) == 0:
+        ui.html('''
+            <div style="background: var(--bg-card); border: 1px solid var(--border);
+                        border-radius: 8px; padding: 40px; text-align: center;
+                        color: #6B7280; font-size: 12px; min-height: 400px;
+                        display: flex; align-items: center; justify-content: center;">
+                📊 OHLCV 데이터 로드 실패
+            </div>
+        ''')
+        return
+
+    # 데이터 추출
+    df = ohlcv_df.copy()
+    if hasattr(df.index, 'strftime'):
+        dates = df.index.strftime("%Y-%m-%d").tolist()
+    else:
+        dates = [str(d) for d in df.index.tolist()]
+
+    opens = df["시가"].tolist()
+    highs = df["고가"].tolist()
+    lows = df["저가"].tolist()
+    closes = df["종가"].tolist()
+    volumes = df["거래량"].tolist()
+
+    # 캔들 데이터: [open, close, low, high]
+    candle_data = [[o, c, l, h] for o, c, l, h in zip(opens, closes, lows, highs)]
+
+    # 거래량 색상 (양봉 빨강 / 음봉 파랑)
+    vol_data = []
+    for i, v in enumerate(volumes):
+        color = KOREA_UP if closes[i] >= opens[i] else KOREA_DOWN
+        vol_data.append({"value": v, "itemStyle": {"color": color}})
+
+    # 지표 계산 — SSOT 우선 (백엔드 indicators.py 사용 가능 시)
+
+    # HMA — 백엔드 시도 후 로컬 fallback
+    if _backend_hma is not None:
+        try:
+            import pandas as _pd
+            c_ser = _pd.Series(closes, index=df.index)
+            hma_ser = _backend_hma(c_ser, period=20)
+            hma20 = [None if (v is None or (isinstance(v, float) and v != v)) else float(v)
+                     for v in hma_ser.tolist()]
+        except Exception:
+            hma20 = _calc_hma(closes, 20)
+    else:
+        hma20 = _calc_hma(closes, 20)  # 로컬 fallback
+
+    if _use_backend_indicators and _backend_vwap is not None and _backend_supertrend is not None:
+        try:
+            import pandas as _pd
+            h_ser = _pd.Series(highs, index=df.index)
+            l_ser = _pd.Series(lows, index=df.index)
+            c_ser = _pd.Series(closes, index=df.index)
+            v_ser = _pd.Series(volumes, index=df.index)
+            # 백엔드 VWAP은 20일 롤링 (SSOT)
+            vwap_ser = _backend_vwap(h_ser, l_ser, c_ser, v_ser, window=20)
+            vwap = [None if (v is None or (isinstance(v, float) and v != v)) else float(v)
+                    for v in vwap_ser.tolist()]
+            # 백엔드 SUPERTREND
+            st_ser, _trend = _backend_supertrend(h_ser, l_ser, c_ser, period=10, multiplier=3.0)
+            supertrend = [None if (v is None or (isinstance(v, float) and v != v)) else float(v)
+                          for v in st_ser.tolist()]
+        except Exception:
+            # 백엔드 호출 실패 시 로컬 fallback
+            vwap = _calc_vwap(highs, lows, closes, volumes)
+            supertrend = _calc_supertrend(highs, lows, closes, period=10, multiplier=3.0)
+    else:
+        # indicators.py import 실패 시 로컬 계산 fallback
+        vwap = _calc_vwap(highs, lows, closes, volumes)
+        supertrend = _calc_supertrend(highs, lows, closes, period=10, multiplier=3.0)
+
+    # 가격 레벨 (markLine)
+    entry = n["entry"]
+    stop = n["stop"]
+    tp1, tp2, tp3 = n["tp1"], n["tp2"], n["tp3"]
+    close = n["close"]
+    hma20_last = n["hma20"]
+    supertrend_val = n["supertrend_val"]
+
+    # markLine 데이터 (가격 + 라벨)
+    marklines = []
+    if tp3 > 0:
+        marklines.append({
+            "yAxis": tp3,
+            "lineStyle": {"color": "#3B82F6", "type": "dashed", "width": 1, "opacity": 0.7},
+            "label": {"formatter": f"TP3 {int(tp3):,} (+{n['tp3_gain_pct']:.1f}%)",
+                      "color": "#3B82F6", "fontSize": 10, "position": "insideEndTop"}
+        })
+    if tp2 > 0:
+        marklines.append({
+            "yAxis": tp2,
+            "lineStyle": {"color": "#3B82F6", "type": "dashed", "width": 1, "opacity": 0.7},
+            "label": {"formatter": f"TP2 {int(tp2):,} (+{n['tp2_gain_pct']:.1f}%)",
+                      "color": "#3B82F6", "fontSize": 10, "position": "insideEndTop"}
+        })
+    if tp1 > 0:
+        marklines.append({
+            "yAxis": tp1,
+            "lineStyle": {"color": "#EF4444", "type": "dashed", "width": 1, "opacity": 0.8},
+            "label": {"formatter": f"TP1 {int(tp1):,} (+{n['tp1_gain_pct']:.1f}%)",
+                      "color": "#EF4444", "fontSize": 10, "position": "insideEndTop"}
+        })
+    if close > 0:
+        marklines.append({
+            "yAxis": close,
+            "lineStyle": {"color": "#EF4444", "type": "solid", "width": 1.5, "opacity": 0.9},
+            "label": {"formatter": f"종가 {int(close):,}",
+                      "color": "#EF4444", "fontSize": 10, "fontWeight": "bold",
+                      "position": "insideEndTop"}
+        })
+    if entry > 0 and abs(entry - close) > 1:
+        # 매수가가 종가와 다를 때만 별도 표시
+        marklines.append({
+            "yAxis": entry,
+            "lineStyle": {"color": "#FACC15", "type": "dashed", "width": 1, "opacity": 0.7},
+            "label": {"formatter": f"매수가 {int(entry):,} (GAP {n['entry_gap_pct']:+.1f}%)",
+                      "color": "#FACC15", "fontSize": 10, "position": "insideEndTop"}
+        })
+    if stop > 0:
+        marklines.append({
+            "yAxis": stop,
+            "lineStyle": {"color": "#EF4444", "type": "dashed", "width": 1.2, "opacity": 0.8},
+            "label": {"formatter": f"손절 {int(stop):,} ({n['stop_loss_pct']:+.1f}%)",
+                      "color": "#EF4444", "fontSize": 10, "position": "insideEndTop"}
+        })
+
+    # ECharts option
+    option = {
+        "backgroundColor": "transparent",
+        "animation": False,
+        "legend": {
+            "show": True,
+            "top": 5,
+            "left": 60,
+            "textStyle": {"color": "#9CA3AF", "fontSize": 10},
+            "icon": "roundRect",
+            "data": ["캔들", f"HMA20 ({int(hma20_last):,})" if hma20_last else "HMA20",
+                    "VWAP", f"SUPERTREND ({int(supertrend_val):,})" if supertrend_val else "SUPERTREND"],
+        },
+        "tooltip": {
+            "trigger": "axis",
+            "axisPointer": {"type": "cross"},
+            "backgroundColor": "rgba(15, 17, 23, 0.95)",
+            "borderColor": "#2A2D38",
+            "textStyle": {"color": "#fff", "fontSize": 11},
+        },
+        "grid": [
+            {"left": 60, "right": 100, "top": 35, "height": "62%"},
+            {"left": 60, "right": 100, "top": "72%", "height": "20%"},
+        ],
+        "xAxis": [
+            {
+                "type": "category",
+                "data": dates,
+                "gridIndex": 0,
+                "boundaryGap": True,
+                "axisLine": {"lineStyle": {"color": "#2A2D38"}},
+                "axisLabel": {"show": False},
+                "splitLine": {"show": False},
+            },
+            {
+                "type": "category",
+                "data": dates,
+                "gridIndex": 1,
+                "boundaryGap": True,
+                "axisLine": {"lineStyle": {"color": "#2A2D38"}},
+                "axisLabel": {"color": "#6B7280", "fontSize": 9},
+                "splitLine": {"show": False},
+            },
+        ],
+        "yAxis": [
+            {
+                "scale": True,
+                "gridIndex": 0,
+                "splitNumber": 6,
+                "axisLine": {"lineStyle": {"color": "#2A2D38"}},
+                "axisLabel": {"color": "#6B7280", "fontSize": 9,
+                              "formatter": "{value}"},
+                "splitLine": {"lineStyle": {"color": "rgba(255,255,255,0.04)"}},
+                "position": "right",
+            },
+            {
+                "scale": True,
+                "gridIndex": 1,
+                "splitNumber": 3,
+                "axisLine": {"lineStyle": {"color": "#2A2D38"}},
+                "axisLabel": {
+                    "color": "#6B7280",
+                    "fontSize": 9,
+                    # NiceGUI ECharts: ':formatter' 콜론 prefix = JS 함수로 평가됨
+                    ":formatter": (
+                        "function(v){"
+                        "if(v>=100000000) return (v/100000000).toFixed(0)+'억';"
+                        "if(v>=10000) return (v/10000).toFixed(0)+'만';"
+                        "return v.toFixed(0);"
+                        "}"
+                    ),
+                },
+                "splitLine": {"show": False},
+                "position": "right",
+            },
+        ],
+        "dataZoom": [
+            {"type": "inside", "xAxisIndex": [0, 1], "start": 0, "end": 100},
+        ],
+        "series": [
+            {
+                "name": "캔들",
+                "type": "candlestick",
+                "data": candle_data,
+                "itemStyle": {
+                    "color": KOREA_UP,         # 상승 (양봉) 빨강
+                    "color0": KOREA_DOWN,      # 하락 (음봉) 파랑
+                    "borderColor": KOREA_UP,
+                    "borderColor0": KOREA_DOWN,
+                },
+                "markLine": {
+                    "symbol": ["none", "none"],
+                    "data": marklines,
+                    "silent": True,
+                },
+            },
+            {
+                "name": f"HMA20 ({int(hma20_last):,})" if hma20_last else "HMA20",
+                "type": "line",
+                "data": hma20,
+                "smooth": True,
+                "showSymbol": False,
+                "lineStyle": {"color": "#FACC15", "width": 1.5, "opacity": 0.9},
+                "z": 5,
+            },
+            {
+                "name": "VWAP",
+                "type": "line",
+                "data": vwap,
+                "showSymbol": False,
+                "lineStyle": {"color": "white", "width": 1, "opacity": 0.7, "type": "dashed"},
+                "z": 4,
+            },
+            {
+                "name": f"SUPERTREND ({int(supertrend_val):,})" if supertrend_val else "SUPERTREND",
+                "type": "line",
+                "data": supertrend,
+                "showSymbol": False,
+                "lineStyle": {"color": "#10B981", "width": 1.2, "opacity": 0.85},
+                "z": 4,
+            },
+            {
+                "name": "거래량",
+                "type": "bar",
+                "xAxisIndex": 1,
+                "yAxisIndex": 1,
+                "data": vol_data,
+            },
+        ],
+    }
+
+    # 차트 헤더
+    ret_1d = n["ret_1d"]
+    ret_clr = "var(--red)" if ret_1d < 0 else "var(--green)" if ret_1d > 0 else "var(--text-dim)"
+    ui.html(f'''
+    <div class="sd-v2">
+      <div class="chart-card" style="background: var(--bg-card); border: 1px solid var(--border);
+                                     border-radius: 8px; padding: 8px 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;
+                    margin-bottom: 6px; font-size: 10px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span style="color: white; font-weight: 700;">📊 일봉 차트 (한국식 캔들)</span>
+            <span style="color: {ret_clr}; font-weight: 700;">
+              종가 {int(close):,}원 ({n["ret_1d"]:+.2f}%)
+            </span>
+          </div>
+          <div style="color: var(--text-dim);">거래대금 {_fmt_eok(n["turnover_eok"])}</div>
+        </div>
+    ''')
+
+    # ECharts 차트 렌더링
+    chart = ui.echart(option).style("width: 100%; height: 400px; background: #15171F; border-radius: 4px;")
+
+    ui.html('</div></div>')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2E: 보조 차트 4개 (RSI/MFI/MACD/V_POWER) + 거래강도 게이지
+# ═══════════════════════════════════════════════════
+
+def _mini_sparkline_svg(values: list, color: str = "#10B981",
+                        baseline: float = None, height: int = 50) -> str:
+    """미니 sparkline SVG 생성 (보조 차트용)."""
+    if not values or len(values) < 2:
+        return ""
+    vals = [v for v in values if v is not None and not (isinstance(v, float) and v != v)]
+    if len(vals) < 2:
+        return ""
+    vmin = min(vals)
+    vmax = max(vals)
+    rng = vmax - vmin if vmax > vmin else 1
+    n = len(vals)
+    pts = []
+    for i, v in enumerate(vals):
+        x = i / (n - 1) * 100
+        y = height - ((v - vmin) / rng * (height - 8)) - 4
+        pts.append(f"{x:.1f},{y:.1f}")
+    path = "M " + " L ".join(pts)
+    baseline_line = ""
+    if baseline is not None and vmin <= baseline <= vmax:
+        by = height - ((baseline - vmin) / rng * (height - 8)) - 4
+        baseline_line = (
+            f'<line x1="0" y1="{by:.1f}" x2="100" y2="{by:.1f}" '
+            f'stroke="rgba(255,255,255,0.1)" stroke-dasharray="2,2" stroke-width="0.5"/>'
+        )
+    return (
+        f'<svg viewBox="0 0 100 {height}" preserveAspectRatio="none" '
+        f'style="width: 100%; height: {height}px;">'
+        f'{baseline_line}'
+        f'<path d="{path}" stroke="{color}" stroke-width="1.5" fill="none"/>'
+        f'</svg>'
+    )
+
+
+def _mini_histogram_svg(values: list, height: int = 50) -> str:
+    """히스토그램 (MACD slope, V_POWER용)."""
+    if not values or len(values) < 2:
+        return ""
+    vals = [v for v in values if v is not None and not (isinstance(v, float) and v != v)]
+    if len(vals) < 2:
+        return ""
+    vmax_abs = max(abs(min(vals)), abs(max(vals)), 0.1)
+    n = len(vals)
+    bar_w = 100 / n
+    bars = []
+    for i, v in enumerate(vals):
+        x = i * bar_w
+        if v >= 0:
+            h = (v / vmax_abs) * (height / 2 - 2)
+            y = height / 2 - h
+            color = "#10B981"
+        else:
+            h = (abs(v) / vmax_abs) * (height / 2 - 2)
+            y = height / 2
+            color = "#EF4444"
+        bars.append(
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w * 0.7:.1f}" '
+            f'height="{h:.1f}" fill="{color}"/>'
+        )
+    zero_line = (
+        f'<line x1="0" y1="{height/2}" x2="100" y2="{height/2}" '
+        f'stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/>'
+    )
+    return (
+        f'<svg viewBox="0 0 100 {height}" preserveAspectRatio="none" '
+        f'style="width: 100%; height: {height}px;">'
+        f'{zero_line}{"".join(bars)}</svg>'
+    )
+
+
+def render_v2_sub_charts(n: dict, ohlcv_df=None):
+    """
+    [Step 2E] 보조 차트 4개 + 거래강도 게이지 (가로 5분할).
+
+    RSI(14) / MFI(14) / MACD Slope / V_POWER + 거래강도 게이지
+    """
+    rsi14 = n["rsi14"]
+    mfi14 = n["mfi14"]
+    macd_slope = n["macd_slope_pct"]
+    v_power = n["v_power"]
+    strength = n["trade_strength"]
+
+    # OHLCV에서 sparkline 시계열 추출 (간이 계산)
+    rsi_series = []
+    mfi_series = []
+    macd_series = []
+    vpow_series = []
+
+    if ohlcv_df is not None and len(ohlcv_df) > 30:
+        try:
+            import pandas as pd
+            closes = ohlcv_df["종가"]
+            highs = ohlcv_df["고가"]
+            lows = ohlcv_df["저가"]
+            vols = ohlcv_df["거래량"]
+
+            # RSI 간이 계산 (최근 30일)
+            delta = closes.diff()
+            up = delta.where(delta > 0, 0).rolling(14).mean()
+            down = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = up / down.replace(0, 1e-10)
+            rsi_full = (100 - 100 / (1 + rs))
+            rsi_series = rsi_full.tail(30).tolist()
+
+            # MACD slope 간이 (12-26 EMA)
+            ema12 = closes.ewm(span=12, adjust=False).mean()
+            ema26 = closes.ewm(span=26, adjust=False).mean()
+            macd_line = ema12 - ema26
+            macd_hist = (macd_line - macd_line.ewm(span=9, adjust=False).mean())
+            macd_series = macd_hist.tail(20).tolist()
+
+            # MFI 간이 (close 기반 spark)
+            mfi_series = closes.tail(30).pct_change().fillna(0).rolling(3).mean().fillna(0).tolist()
+
+            # V_POWER 시계열 (거래량 기반 단순 추정)
+            vol_norm = (vols - vols.rolling(20).mean()) / vols.rolling(20).std().replace(0, 1)
+            vpow_series = vol_norm.tail(20).fillna(0).tolist()
+        except Exception:
+            pass
+
+    # 폴백: 빈 값일 때 일관된 점선
+    if not rsi_series:
+        rsi_series = [rsi14] * 20
+    if not mfi_series:
+        mfi_series = [mfi14] * 20
+    if not macd_series:
+        macd_series = [macd_slope] * 10
+    if not vpow_series:
+        vpow_series = [v_power] * 10
+
+    # 색상
+    rsi_clr = "#F59E0B"
+    mfi_clr = "#10B981"
+    macd_clr = "#EF4444" if macd_slope < 0 else "#10B981"
+    vpow_clr = "#EF4444" if v_power < 0 else "#10B981"
+
+    # 태그
+    rsi_tag = f"RSI_Rising {n['rsi_rising']}" if n.get("rsi_rising") else "—"
+    mfi_tag = "강세 진입" if mfi14 >= 70 else ("약세" if mfi14 < 30 else "중립")
+    macd_tag = "음전 시작" if macd_slope < 0 else "양전"
+    vpow_tag = "매수세 약화" if v_power < 0 else "매수세 강화"
+
+    # 게이지 SVG (반원, 거래강도)
+    # 1.22 / 2.0 max 기준
+    strength_pct = min(strength / 2.0, 1.0)
+    # 반원: 180° (왼쪽 -90° ~ 오른쪽 +90°)
+    angle = -90 + 180 * strength_pct
+    import math
+    angle_rad = math.radians(angle)
+    needle_x = 60 + 38 * math.cos(angle_rad - math.radians(90))
+    needle_y = 60 - 38 * math.sin(angle_rad + math.radians(90)) + 38
+
+    strength_clr = "#10B981" if strength >= 1.0 else ("#F59E0B" if strength >= 0.7 else "#EF4444")
+
+    ui.html(f'''
+    <div class="sd-v2" style="margin-top: 8px;">
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr) 130px; gap: 8px;">
+
+        <!-- RSI -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
+          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">RSI(14)</div>
+          <div style="color: {rsi_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{rsi14:.1f}</div>
+          {_mini_sparkline_svg(rsi_series, rsi_clr, baseline=50)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{rsi_tag}</div>
+        </div>
+
+        <!-- MFI -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
+          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">MFI(14)</div>
+          <div style="color: {mfi_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{mfi14:.1f}</div>
+          {_mini_sparkline_svg(mfi_series, mfi_clr)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{mfi_tag}</div>
+        </div>
+
+        <!-- MACD Slope -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
+          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">MACD Slope</div>
+          <div style="color: {macd_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{macd_slope:+.2f}%</div>
+          {_mini_histogram_svg(macd_series)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{macd_tag}</div>
+        </div>
+
+        <!-- V_POWER -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
+          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">V_POWER</div>
+          <div style="color: {vpow_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{v_power:+.2f}</div>
+          {_mini_histogram_svg(vpow_series)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{vpow_tag}</div>
+        </div>
+
+        <!-- 거래강도 게이지 -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+                    padding: 8px; display: flex; flex-direction: column; align-items: center;">
+          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700; margin-bottom: 4px;">거래강도</div>
+          <svg viewBox="0 0 120 70" style="height: 60px; width: 110px;">
+            <!-- 반원 배경 -->
+            <path d="M 10 60 A 50 50 0 0 1 110 60" stroke="rgba(255,255,255,0.08)" stroke-width="10" fill="none"/>
+            <!-- 색 구간: 빨강(0-0.7) / 주황(0.7-1.0) / 초록(1.0+) -->
+            <path d="M 10 60 A 50 50 0 0 1 45 16" stroke="#EF4444" stroke-width="10" fill="none" opacity="0.75"/>
+            <path d="M 45 16 A 50 50 0 0 1 75 13" stroke="#F59E0B" stroke-width="10" fill="none" opacity="0.75"/>
+            <path d="M 75 13 A 50 50 0 0 1 110 60" stroke="#10B981" stroke-width="10" fill="none" opacity="0.75"/>
+            <!-- 바늘 -->
+            <line x1="60" y1="60" x2="{needle_x:.1f}" y2="{needle_y:.1f}" stroke="white" stroke-width="2"/>
+            <circle cx="60" cy="60" r="3" fill="white"/>
+          </svg>
+          <div style="color: {strength_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin-top: -4px;">{strength:.2f}</div>
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 2px;">평균 {strength:.1f}배</div>
+        </div>
+
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2E: 우측 레이더 차트 (5축)
+# ═══════════════════════════════════════════════════
+
+def render_v2_radar(n: dict):
+    """
+    [Step 2E] 우측 레이더 차트 — 5축: STRUCT/TIMING/AI/BALANCE/TRIGGER.
+
+    SVG 직접 그리기 (Plotly보다 가벼움, 정확한 위치 제어).
+    """
+    import math
+    struct_s = n["struct_score"]
+    timing_s = n["timing_score"]
+    ai_s = n["ai_score"]
+    balance_s = n["balance_score"]
+    trigger_s = n["trigger_score"]
+
+    # 5축, 각각 0-100 스케일
+    axes = [
+        ("STRUCT",  struct_s,  -90),    # 최상단
+        ("TIMING",  timing_s,  -18),    # 오른쪽 위
+        ("AI",      ai_s,       54),    # 오른쪽 아래
+        ("BALANCE", balance_s, 126),    # 왼쪽 아래
+        ("TRIGGER", trigger_s, 198),    # 왼쪽 위
+    ]
+
+    cx, cy = 120, 120
+    max_r = 100
+
+    # 펜타곤 격자 4단 (25, 50, 75, 100%)
+    def _pentagon(scale: float) -> str:
+        r = max_r * scale
+        pts = []
+        for i, (_, _, angle) in enumerate(axes):
+            rad = math.radians(angle)
+            x = cx + r * math.cos(rad)
+            y = cy + r * math.sin(rad)
+            pts.append(f"{x:.1f},{y:.1f}")
+        return " ".join(pts)
+
+    grid_polys = ""
+    for scale in [1.0, 0.75, 0.5, 0.25]:
+        grid_polys += (
+            f'<polygon points="{_pentagon(scale)}" fill="none" '
+            f'stroke="rgba(255,255,255,0.08)" stroke-width="1"/>'
+        )
+
+    # 축 라인
+    axis_lines = ""
+    label_html = ""
+    for label, val, angle in axes:
+        rad = math.radians(angle)
+        ex = cx + max_r * math.cos(rad)
+        ey = cy + max_r * math.sin(rad)
+        axis_lines += (
+            f'<line x1="{cx}" y1="{cy}" x2="{ex:.1f}" y2="{ey:.1f}" '
+            f'stroke="rgba(255,255,255,0.1)" stroke-width="1"/>'
+        )
+        # 라벨 위치 (축 끝에서 살짝 바깥)
+        lr = max_r + 14
+        lx = cx + lr * math.cos(rad)
+        ly = cy + lr * math.sin(rad)
+        # 라벨 정렬 보정 (각도에 따라)
+        anchor = "middle"
+        if math.cos(rad) > 0.3:
+            anchor = "start"
+        elif math.cos(rad) < -0.3:
+            anchor = "end"
+        label_html += (
+            f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" '
+            f'fill="white" font-size="11" font-weight="700">{label} {val:.1f}</text>'
+        )
+
+    # 데이터 폴리곤
+    data_pts = []
+    dot_circles = ""
+    for label, val, angle in axes:
+        rad = math.radians(angle)
+        r = max_r * (val / 100)
+        x = cx + r * math.cos(rad)
+        y = cy + r * math.sin(rad)
+        data_pts.append(f"{x:.1f},{y:.1f}")
+        dot_circles += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="#8B5CF6"/>'
+
+    data_poly = " ".join(data_pts)
+
+    ui.html(f'''
+    <div class="sd-v2">
+      <div style="background: var(--bg-card); border: 1px solid var(--border);
+                  border-radius: 8px; padding: 8px;">
+        <svg viewBox="0 0 240 240" style="width: 100%; height: 220px;">
+          {grid_polys}
+          {axis_lines}
+          <polygon points="{data_poly}" fill="rgba(139, 92, 246, 0.25)"
+                   stroke="#8B5CF6" stroke-width="2"/>
+          {dot_circles}
+          {label_html}
+        </svg>
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# Step 2E: 하단 4섹터 (핵심요약 / 분할익절 / DipSniper / 비교)
+# ═══════════════════════════════════════════════════
+
+def render_v2_bottom_sectors(n: dict, rank: int = 0, total: int = 0,
+                             compare_name: str = ""):
+    """
+    [Step 2E] 하단 4섹터.
+
+    1. 핵심 요약 (rank + 점수 + 가격 + RR + KELLY + TIME_STOP)
+    2. 분할 익절 플랜 (TP1-3 + 비중%)
+    3. DipSniper 체크포인트 (전략 핵심 7개)
+    4. 비교 종목 (선택적, compare_name 있으면)
+    """
+    name = h_escape(n["name"])
+    code = h_escape(n["code"])
+    struct_s = n["struct_score"]
+    timing_s = n["timing_score"]
+    ai_s = n["ai_score"]
+    axis_gap = n["axis_gap"]
+    balance = n["balance_score"]
+    entry = n["entry"]
+    stop = n["stop"]
+    tp1, tp2, tp3 = n["tp1"], n["tp2"], n["tp3"]
+    tp1_prob = n["tp1_prob"]
+    tp2_prob = n["tp2_prob"]
+    tp3_prob = n["tp3_prob"]
+    tp1_gain = n["tp1_gain_pct"]
+    tp2_gain = n["tp2_gain_pct"]
+    tp3_gain = n["tp3_gain_pct"]
+    rr = n["rr_now_tp1"]
+    qty = int(n["qty"]) if n["qty"] else 0
+    amount = n["amount_man"]
+    position = n["position_pct"]
+    time_stop = int(n["time_stop_days"]) if n["time_stop_days"] else 7
+    stop_pct_text = f"{n['stop_loss_pct']:.0f}%" if n["stop_loss_pct"] else "—"
+
+    # 핵심 요약 줄
+    summary_lines = []
+    if rank and total:
+        summary_lines.append(f"{total}개 중 {rank}위")
+    summary_lines.append(f"STRUCT {struct_s:.0f} · TIMING {timing_s:.0f} · AI {ai_s:.0f}")
+    summary_lines.append(f"AXIS_GAP {axis_gap:.1f} · BALANCE {balance:.1f}")
+    summary_lines.append(f"진입가={int(entry):,} / 손절 {int(stop):,} ({stop_pct_text})")
+    summary_lines.append(f"RR {rr:.2f} (TP1 {tp1_gain:+.1f}% vs 손절 {stop_pct_text})")
+    summary_lines.append(f"KELLY {qty}주 · {amount:.1f}만원 ({position:.0f}%)")
+    summary_lines.append(f"{time_stop}일 내 미돌파 시 TIME_STOP 발동")
+    summary_html = "".join(
+        f'<div class="b-row"><span>{h_escape(line)}</span></div>'
+        for line in summary_lines
+    )
+
+    # 분할 익절
+    tp_blocks = ""
+    for icon, lbl, price, gain, prob in [
+        ("🎯", "TP1", tp1, tp1_gain, tp1_prob),
+        ("🎯", "TP2", tp2, tp2_gain, tp2_prob),
+        ("🏆", "TP3", tp3, tp3_gain, tp3_prob),
+    ]:
+        tp_blocks += f'''
+        <div class="tp-block">
+            <div class="tp-icon">{icon}</div>
+            <div class="tp-info">
+                <div class="tp-price">{lbl} <span style="color: var(--green);">{int(price):,}원</span>
+                    <span class="gain">{gain:+.1f}%</span>
+                </div>
+                <div class="tp-weight">익절 비중 {int(prob)}%</div>
+            </div>
+        </div>
+        '''
+
+    # DipSniper 체크포인트
+    dipsniper_lines = [
+        f"진입가 {int(entry):,} / 손절가 {int(stop):,} 사수 (필수)",
+        f"분할매수 1주씩 (KELLY {qty}주까지)",
+        f"TP1 {int(tp1):,} 도달 시 자동 익절",
+        f"{int(stop):,} 깨면 즉시 손절",
+        f"{time_stop}일 내 미돌파 시 TIME_STOP 발동",
+        "주요 뉴스 모니터링 필수",
+    ]
+    dipsniper_html = "".join(
+        f'<div class="b-row cyan"><span>{h_escape(line)}</span></div>'
+        for line in dipsniper_lines
+    )
+
+    # 비교 섹션 (compare_name 있을 때만)
+    compare_html = ""
+    if compare_name:
+        compare_html = f'''
+        <div class="bottom-panel compare">
+            <div class="b-title">{h_escape(compare_name)} 비교</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div style="text-align: center;">
+                    <div style="color: var(--purple); font-size: 11px; font-weight: 700;
+                                padding-bottom: 4px; border-bottom: 1px dashed var(--border);">
+                        {name}
+                    </div>
+                    <div style="color: var(--text-gray); font-size: 10px; padding: 4px 0;">
+                        ELITE {n["elite_score"]:.1f}
+                    </div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="color: var(--orange); font-size: 11px; font-weight: 700;
+                                padding-bottom: 4px; border-bottom: 1px dashed var(--border);">
+                        {h_escape(compare_name)}
+                    </div>
+                    <div style="color: var(--text-gray); font-size: 10px; padding: 4px 0;">
+                        (비교 데이터)
+                    </div>
+                </div>
+            </div>
+        </div>
+        '''
+    else:
+        # compare_name 없으면 KELLY 요약으로 대체
+        compare_html = f'''
+        <div class="bottom-panel">
+            <div class="b-title">KELLY 권고</div>
+            <div class="b-row"><span>플랜 B: {n["kelly_planned_b"]:.3f}</span></div>
+            <div class="b-row"><span>실측 B: {n["kelly_empirical_b"]:.1f}</span></div>
+            <div class="b-row"><span>최종 B: {n["kelly_final_b"]:.1f}</span></div>
+            <div class="b-row"><span>수량: {qty}주</span></div>
+            <div class="b-row"><span>금액: {amount:.1f}만원</span></div>
+            <div class="b-row"><span>포지션: {position:.0f}%</span></div>
+        </div>
+        '''
+
+    ui.html(f'''
+    <style>
+      .sd-v2 .bottom-grid {{
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-top: 12px;
+      }}
+      .sd-v2 .bottom-panel {{
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+      }}
+      .sd-v2 .bottom-panel .b-title {{
+        color: var(--orange);
+        font-size: 12px;
+        font-weight: 800;
+        text-align: center;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+      }}
+      .sd-v2 .bottom-panel.dipsniper .b-title {{ color: var(--cyan); }}
+      .sd-v2 .bottom-panel.compare .b-title {{ color: var(--purple); }}
+      .sd-v2 .bottom-panel .b-row {{
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        font-size: 10px;
+        padding: 3px 0;
+        color: var(--text-gray);
+      }}
+      .sd-v2 .bottom-panel .b-row::before {{
+        content: "✓";
+        color: var(--green);
+        font-size: 9px;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }}
+      .sd-v2 .bottom-panel .b-row.cyan::before {{ color: var(--cyan); }}
+      .sd-v2 .split-tp {{ display: flex; flex-direction: column; gap: 8px; }}
+      .sd-v2 .tp-block {{
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 8px;
+        align-items: center;
+      }}
+      .sd-v2 .tp-icon {{ font-size: 18px; text-align: center; }}
+      .sd-v2 .tp-info {{ display: flex; flex-direction: column; }}
+      .sd-v2 .tp-price {{ font-size: 11px; font-weight: 700; color: var(--text-white); }}
+      .sd-v2 .tp-price .gain {{ color: var(--orange); margin-left: 4px; }}
+      .sd-v2 .tp-weight {{
+        color: var(--orange);
+        font-size: 10px;
+        font-weight: 600;
+        margin-top: 2px;
+      }}
+      .sd-v2 .tp-weight::before {{ content: "→ "; }}
+    </style>
+
+    <div class="sd-v2">
+      <div class="bottom-grid">
+
+        <!-- 1. 핵심 요약 -->
+        <div class="bottom-panel">
+          <div class="b-title">핵심 요약</div>
+          {summary_html}
+        </div>
+
+        <!-- 2. 분할 익절 플랜 -->
+        <div class="bottom-panel">
+          <div class="b-title">분할 익절 플랜</div>
+          <div class="split-tp">
+            {tp_blocks}
+          </div>
+        </div>
+
+        <!-- 3. DipSniper 체크포인트 -->
+        <div class="bottom-panel dipsniper">
+          <div class="b-title">DipSniper 체크포인트</div>
+          {dipsniper_html}
+        </div>
+
+        <!-- 4. 비교/KELLY -->
+        {compare_html}
+
+      </div>
+    </div>
+    ''')
+
+
+# ═══════════════════════════════════════════════════
+# 메인 진입점 (Step 2A 부분)
+# ═══════════════════════════════════════════════════
+
+def _load_ohlcv_for_v2(code: str, days: int = 120):
+    """
+    종목코드 → 최근 N일 OHLCV DataFrame.
+
+    구현: data/ohlcv_cache_*.parquet에서 로드.
+    최신 캐시에 종목이 없으면 최대 5개 이전 캐시까지 탐색 (fallback).
+    모두 실패 시 None 반환 → 차트 placeholder 표시.
+    """
+    import os, glob
+    try:
+        import pandas as pd
+    except ImportError:
+        return None
+
+    code_norm = str(code).zfill(6)
+    cols_needed = ["시가", "고가", "저가", "종가", "거래량"]
+
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(here, "..", "data")
+        files = sorted(
+            glob.glob(os.path.join(data_dir, "ohlcv_cache_*.parquet")),
+            reverse=True,
+        )
+        if not files:
+            return None
+
+        # 최대 5개 캐시까지 fallback 탐색
+        for fp in files[:5]:
+            try:
+                df = pd.read_parquet(fp).reset_index()
+                df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+                sub = df[df["종목코드"] == code_norm].copy()
+                if sub.empty:
+                    continue
+                sub = sub.sort_values("Date").tail(days).set_index("Date")
+                if all(c in sub.columns for c in cols_needed):
+                    return sub[cols_needed].copy()
+                return sub
+            except Exception:
+                continue
+        return None
+    except Exception:
+        return None
+
+
+def render_stock_detail_v2_partial(row: Dict[str, Any],
+                                    rank: int = 0,
+                                    total: int = 0,
+                                    timestamp: str = "",
+                                    combo_info: Optional[dict] = None,
+                                    ohlcv_df=None,
+                                    compare_name: str = ""):
+    """
+    [Step 2E COMPLETE] 종목 상세 v2 — 풀 대시보드 (placeholder 0개).
+
+    구성:
+        헤더 (종목명 + LDY_RANK + 5개 status 뱃지)
+        점수 영역 (DISPLAY + 3축 + FINAL/ELITE/BALANCE + 사유)
+        main-grid:
+            좌측: 가격플랜 / 추세MTF / 모멘텀 / 수급 (4패널)
+            중앙: 메인 캔들차트 (ECharts + markLine) + 보조 차트 4개 + 게이지
+            우측: 레이더 5축 (SVG)
+        하단 4섹터: 핵심요약 / 분할익절 / DipSniper체크 / KELLY권고(또는 비교)
+
+    Args:
+        row: recommend_latest.csv 한 행 (pandas Series.to_dict() 또는 dict)
+        rank: LDY_RANK 순위 (별도 전달 권장, row의 LDY_RANK 사용 가능)
+        total: 전체 종목 수
+        timestamp: 분석 시각 (row의 기준일 사용 가능)
+        combo_info: 콤보 정보 dict {color, name, n, ev, win_rate, rank}.
+                    None이면 ELITE_REASON으로 fallback 자동 표시.
+        ohlcv_df: 종목 OHLCV DataFrame [시가/고가/저가/종가/거래량].
+                  None이면 종목코드 기준으로 parquet 캐시에서 자동 로드.
+        compare_name: 하단 4섹터의 비교 종목명. 비어있으면 KELLY 요약 표시.
+
+    Usage:
+        import pandas as pd
+        from components.stock_detail_v2 import render_stock_detail_v2_partial
+
+        df = pd.read_csv("data/recommend_latest.csv", dtype={"종목코드": str})
+        row = df[df["종목코드"] == "011690"].iloc[0].to_dict()
+
+        render_stock_detail_v2_partial(
+            row,
+            rank=int(row.get("LDY_RANK", 0)),
+            total=len(df),
+            timestamp=str(row.get("기준일", "")),
+        )
+
+    Implementation status:
+        ✅ Step 2A: 헤더 + 점수 영역 (CSV 정규화 어댑터)
+        ✅ Step 2B: 좌측 패널 #1 — 가격 플랜
+        ✅ Step 2C: 좌측 패널 #2-4 — 추세/MTF, 모멘텀, 수급
+        ✅ Step 2D: 메인 캔들차트 (ECharts + HMA/VWAP/SUPERTREND + markLine)
+        ✅ Step 2E: 보조 차트 4개 + 게이지 + 레이더 + 하단 4섹터
+
+    Last review score: 95/100 (운영 머지 후보권)
+    """
+    # 정규화
+    n = normalize_stock_row(row)
+
+    _inject_v2_styles()
+
+    render_v2_header(n, rank=rank, total=total,
+                     timestamp=timestamp, combo_info=combo_info)
+    render_v2_scores(n)
+
+    # OHLCV 자동 로드 (외부 전달 안 했을 때)
+    if ohlcv_df is None:
+        ohlcv_df = _load_ohlcv_for_v2(n["code"], days=120)
+
+    # main-grid: 좌측 4패널 + 중앙 차트 + 우측 레이더
+    with ui.element("div").classes("sd-v2"):
+        with ui.element("div").classes("main-grid"):
+
+            # 좌측 사이드: 패널 #1-4
+            with ui.element("div").classes("side-panel"):
+                render_v2_price_plan(n)
+                render_v2_trend_mtf(n)
+                render_v2_momentum(n)
+                render_v2_supply(n)
+
+            # 중앙: 메인 캔들차트 + 보조 차트 4개 + 거래강도 게이지
+            with ui.element("div").classes("center-area"):
+                render_v2_chart(n, ohlcv_df=ohlcv_df)
+                render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
+
+            # 우측 사이드: 레이더 차트 (5축)
+            with ui.element("div").classes("side-panel"):
+                render_v2_radar(n)
+
+    # 하단 4섹터 (핵심 요약 / 분할 익절 / DipSniper / 비교 또는 KELLY)
+    render_v2_bottom_sectors(n, rank=rank, total=total, compare_name=compare_name)
