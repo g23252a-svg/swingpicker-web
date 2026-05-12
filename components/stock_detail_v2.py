@@ -887,25 +887,20 @@ def _inject_v2_styles():
     .sd-v2 .panel-row .ice::after { content: " 🧊"; }
 
     /* ═══════════════════════════════════════════════════
-       모바일 대응 (≤768px) — 1컬럼 세로 적층 + 폰트 축소
-       inline style로 박힌 grid도 !important로 덮어쓰기
+       모바일 대응 (≤768px) — 명시적 클래스 기반 (attribute selector X)
+       inline grid도 클래스에서 display 재정의 + !important로 덮어쓰기
        ═══════════════════════════════════════════════════ */
     @media (max-width: 768px) {
-      /* 페이지 폭 자체를 모바일 viewport에 맞춤 */
-      .sd-v2 {
-        font-size: 11px !important;
-      }
+      .sd-v2 { font-size: 11px !important; }
 
-      /* 헤더 5박스: 종목명 + 4뱃지 → 1컬럼 세로 적층 */
-      .sd-v2 .header,
-      .sd-v2 div[style*="grid-template-columns: 1fr 180px 140px 140px 140px"] {
+      /* 헤더: 1fr 180 140x3 → 2컬럼 격자 */
+      .sd-v2 .header {
         display: grid !important;
-        grid-template-columns: 1fr 1fr !important;  /* 2x3 격자 */
+        grid-template-columns: 1fr 1fr !important;
+        grid-template-rows: auto !important;
         gap: 4px !important;
       }
-      .sd-v2 .h-title {
-        grid-column: 1 / -1 !important;  /* 종목명은 전체 폭 */
-      }
+      .sd-v2 .h-title { grid-column: 1 / -1 !important; }
       .sd-v2 .h-badge {
         min-height: 70px !important;
         padding: 6px 8px !important;
@@ -913,55 +908,67 @@ def _inject_v2_styles():
       .sd-v2 .h-badge .val { font-size: 12px !important; }
       .sd-v2 .h-badge .lbl { font-size: 9px !important; }
 
-      /* 점수 영역: DISPLAY + 3축 + FINAL/ELITE/BALANCE → 1컬럼 */
-      .sd-v2 .scores,
-      .sd-v2 div[style*="grid-template-columns: 140px 1fr 130px 130px 130px"] {
+      /* 점수 영역: 140 1fr 130x3 → 2컬럼 격자 */
+      .sd-v2 .scores {
         display: grid !important;
         grid-template-columns: 1fr 1fr !important;
         gap: 4px !important;
       }
-      .sd-v2 .score-display,
-      .sd-v2 .score-axis {
+      .sd-v2 .scores > *:first-child,
+      .sd-v2 .scores > *:nth-child(2) {
         grid-column: 1 / -1 !important;
       }
-      .sd-v2 .score-card .v { font-size: 24px !important; }
 
-      /* 메인 그리드 (좌측 4패널 + 차트 + 우측 레이더) → 1컬럼 적층 */
-      .sd-v2 div[style*="grid-template-columns: 260px minmax(0, 1fr) 300px"] {
+      /* 메인 그리드: 260 1fr 300 → 1컬럼 세로 적층 */
+      .sd-v2.v2-main-grid {
         display: flex !important;
         flex-direction: column !important;
+        grid-template-columns: 1fr !important;
         gap: 8px !important;
       }
-      .sd-v2 div[style*="grid-template-columns: 260px minmax(0, 1fr) 300px"] > div {
-        width: 100% !important;
-      }
+      .sd-v2.v2-main-grid > * { width: 100% !important; }
 
-      /* 좌측 4패널: 가로 2x2 격자로 압축 (4개 다 세로면 너무 김) */
-      .sd-v2 div[style*="display: flex; flex-direction: column; gap: 8px; min-width: 0;"] {
+      /* 좌측 4패널: 세로 → 2x2 격자 (모바일에서도 너무 길어지지 않게) */
+      .sd-v2 .v2-left-panels {
         display: grid !important;
         grid-template-columns: 1fr 1fr !important;
+        flex-direction: row !important;
         gap: 6px !important;
       }
       .sd-v2 .panel {
         padding: 8px !important;
+        min-width: 0 !important;
       }
       .sd-v2 .panel-row {
         font-size: 10px !important;
         padding: 3px 0 !important;
+        gap: 6px !important;
       }
       .sd-v2 .panel-title {
         font-size: 11px !important;
       }
 
-      /* 보조차트 5개: 4 + 130px → 2x3 격자 */
-      .sd-v2 div[style*="repeat(4, minmax(0, 1fr)) 130px"] {
+      /* 우측 컬럼: 그대로 세로 유지 (레이더+AXIS_GAP+가이드) */
+      .sd-v2 .v2-right-col {
+        gap: 6px !important;
+      }
+
+      /* 보조차트 5개: 4 + 130 → 2x3 */
+      .sd-v2 .v2-sub-charts {
         display: grid !important;
         grid-template-columns: 1fr 1fr !important;
         gap: 4px !important;
       }
 
       /* 3분할 패널 (수익률/레벨/리스크): 3컬럼 → 1컬럼 */
-      .sd-v2 div[style*="grid-template-columns: repeat(3, minmax(0, 1fr))"] {
+      .sd-v2 .v2-three-split {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 6px !important;
+      }
+
+      /* 시나리오 A/B/C: 3컬럼 → 1컬럼 */
+      .sd-v2 .v2-scenarios {
         display: grid !important;
         grid-template-columns: 1fr !important;
         gap: 6px !important;
@@ -977,48 +984,43 @@ def _inject_v2_styles():
         min-height: 160px !important;
         padding: 8px !important;
       }
-      .sd-v2 .bottom-panel .b-row {
-        font-size: 9px !important;
+      .sd-v2 .bottom-panel .b-row { font-size: 9px !important; }
+      .sd-v2 .bottom-panel .b-title { font-size: 11px !important; }
+
+      /* 레이더 SVG: 모바일 높이 축소 */
+      .sd-v2 svg { max-width: 100% !important; }
+
+      /* 3분할 패널 카드 내부: 좁아도 글자가 세로로 쪼개지지 않게 */
+      .sd-v2 .v2-three-split > div {
+        min-width: 0 !important;
+        overflow: hidden !important;
       }
-      .sd-v2 .bottom-panel .b-title {
-        font-size: 11px !important;
+      .sd-v2 .v2-three-split > div > div {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+      }
+      /* 단, 값/숫자가 들어가는 child div는 nowrap 해제 (필요시 줄바꿈 허용) */
+      .sd-v2 .v2-three-split > div > div[style*="display: grid"] {
+        white-space: normal !important;
       }
 
-      /* 레이더 SVG: 모바일에선 폭 100%, 높이 줄임 */
-      .sd-v2 svg[viewBox*="-70 -20 380 290"] {
-        height: 240px !important;
-      }
-
-      /* 최종 판정 띠: 모바일 폰트 축소 */
-      .sd-v2 div[style*="border-radius: 12px; padding: 18px 24px"],
-      .sd-v2 div[style*="display: flex; align-items: center; gap: 20px"] {
+      /* 최종 판정 띠 모바일 */
+      .sd-v2 .v2-final-verdict {
         padding: 12px 14px !important;
         gap: 10px !important;
       }
     }
 
-    /* 초소형 모바일 (≤480px) — 더 압축 */
+    /* 초소형 모바일 (≤480px) — 모든 격자 1컬럼 */
     @media (max-width: 480px) {
-      /* 좌측 4패널: 2x2 격자도 너무 좁으면 1컬럼으로 */
-      .sd-v2 div[style*="display: flex; flex-direction: column; gap: 8px; min-width: 0;"] {
-        grid-template-columns: 1fr !important;
-      }
-      /* 보조차트: 2x3도 좁으면 1컬럼 */
-      .sd-v2 div[style*="repeat(4, minmax(0, 1fr)) 130px"] {
-        grid-template-columns: 1fr !important;
-      }
-      /* 헤더 뱃지: 2x3도 좁으면 1컬럼 */
-      .sd-v2 .header,
-      .sd-v2 div[style*="grid-template-columns: 1fr 180px 140px 140px 140px"] {
-        grid-template-columns: 1fr !important;
-      }
-      .sd-v2 .h-badge {
-        min-height: 50px !important;
-      }
-      /* 하단 4섹터: 2x2도 좁으면 1컬럼 */
-      .sd-v2 .bottom-grid {
-        grid-template-columns: 1fr !important;
-      }
+      .sd-v2 .header { grid-template-columns: 1fr !important; }
+      .sd-v2 .scores { grid-template-columns: 1fr !important; }
+      .sd-v2 .scores > * { grid-column: 1 / -1 !important; }
+      .sd-v2 .v2-left-panels { grid-template-columns: 1fr !important; }
+      .sd-v2 .v2-sub-charts { grid-template-columns: 1fr !important; }
+      .sd-v2 .bottom-grid { grid-template-columns: 1fr !important; }
+      .sd-v2 .h-badge { min-height: 50px !important; }
     }
     </style>
     """)
@@ -2330,7 +2332,7 @@ def render_v2_sub_charts(n: dict, ohlcv_df=None):
 
     ui.html(f'''
     <div class="sd-v2" style="margin-top: 8px; width: 100%;">
-      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 130px; gap: 8px; width: 100%;">
+      <div class="v2-sub-charts" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 130px; gap: 8px; width: 100%;">
 
         <!-- RSI -->
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
@@ -2470,7 +2472,7 @@ def render_v2_returns_levels_risk(n: dict):
     # 3분할 패널 HTML
     ui.html(f'''
     <div class="sd-v2" style="margin-top: 8px; width: 100%;">
-      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
+      <div class="v2-three-split" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
 
         <!-- A. 수익률 현황 -->
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0;">
@@ -2599,7 +2601,7 @@ def render_v2_scenarios(n: dict):
 
     ui.html(f'''
     <div class="sd-v2" style="margin-top: 8px; width: 100%;">
-      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
+      <div class="v2-scenarios" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
 
         <!-- 시나리오 A (기본) -->
         <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.04));
@@ -2706,7 +2708,7 @@ def render_v2_final_verdict(n: dict, rank: int = 0, total: int = 0):
 
     ui.html(f'''
     <div class="sd-v2" style="margin-top: 16px; margin-bottom: 12px; width: 100%;">
-      <div style="background: {verdict_color}; border-radius: 12px; padding: 18px 24px;
+      <div class="v2-final-verdict" style="background: {verdict_color}; border-radius: 12px; padding: 18px 24px;
                   display: flex; align-items: center; gap: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
         <div style="font-size: 36px; flex-shrink: 0;">{icon}</div>
         <div style="flex: 1; min-width: 0;">
@@ -3420,22 +3422,23 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
     # main-grid: 좌측 4패널 + 중앙 차트 + 우측 레이더
     # inline style 강제 (NiceGUI ui.element가 CSS class만으로 grid 적용 안 되는 케이스 회피)
     # 좌측 260px (가격 플랜 표시 여유) / 중앙 minmax(0,1fr) / 우측 300px (레이더 크게)
+    # v2-main-grid 클래스 추가 → 모바일 미디어 쿼리에서 명시적으로 타겟 가능
     with ui.element("div").style(
         "display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; "
         "gap: 8px; width: 100%; margin-bottom: 12px; box-sizing: border-box;"
-    ).classes("sd-v2"):
+    ).classes("sd-v2 v2-main-grid"):
 
-        # 좌측 사이드: 패널 #1-4
+        # 좌측 사이드: 패널 #1-4 (v2-left-panels 클래스)
         with ui.element("div").style(
             "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
-        ):
+        ).classes("v2-left-panels"):
             render_v2_price_plan(n)
             render_v2_trend_mtf(n)
             render_v2_momentum(n)
             render_v2_supply(n)
 
         # 중앙: 메인 캔들차트 + 보조 차트 4개 + 거래강도 게이지 + 3분할 패널
-        with ui.element("div").style("min-width: 0;"):
+        with ui.element("div").style("min-width: 0;").classes("v2-center-col"):
             render_v2_chart(n, ohlcv_df=ohlcv_df)
             render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
             # [Step 2F] 수익률현황 / 핵심레벨 / 리스크뉴스 (3분할)
@@ -3446,7 +3449,7 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
         # 우측 사이드: 레이더 차트 (5축) + AXIS_GAP 큰 카드 + 투자자 가이드
         with ui.element("div").style(
             "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
-        ):
+        ).classes("v2-right-col"):
             render_v2_radar(n)
             render_v2_right_axisgap(n)
             render_v2_right_guide(n)
