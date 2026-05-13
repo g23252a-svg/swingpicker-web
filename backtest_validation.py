@@ -1022,7 +1022,13 @@ def summarize_trades(trades: list) -> dict:
     if n == 0:
         return {"n": 0, "n_all": n_all, "n_not_filled": len(not_filled),
                 "note": "no_filled_trades",
-                "ladder": {"ladder_n": 0, "note": "no_filled_trades"}}
+                "ladder": {"ladder_n": 0, "note": "no_filled_trades"},
+                # v3.8.3 top-level alias (no-filled 케이스 — UI KeyError 방지)
+                "tp2_rate": 0.0,
+                "tp3_rate": 0.0,
+                "tp3_before_stop_rate": 0.0,
+                "avg_max_high_pct": 0.0,
+                "avg_max_high_pct_tp3_miss": 0.0}
     wins = [t for t in filled if t["outcome"] == "WIN"]
     losses = [t for t in filled if t["outcome"] == "LOSS"]
     opens = [t for t in filled if t["outcome"] == "OPEN"]
@@ -1109,6 +1115,15 @@ def summarize_trades(trades: list) -> dict:
         "ev": round(ev, 2),
         "ohlc_coverage": round(ohlc_count / n, 3),
         "ladder": ladder_summary,
+        # v3.8.3 top-level alias — downstream(combo_optimizer/tab_perf/check_contract_gate)
+        # 에서 summary["ladder"]["..."] 깊은 lookup 없이 직접 접근하도록 노출.
+        # 주의: tp1_rate(=first-touch WIN rate, 기존 의미) vs tp2_rate/tp3_rate(=ladder
+        # reach rate, 신규 의미) 는 의미가 다르다. 같은 어휘지만 다른 정의임.
+        "tp2_rate":                  ladder_summary.get("tp2_reach_rate", 0.0),
+        "tp3_rate":                  ladder_summary.get("tp3_reach_rate", 0.0),
+        "tp3_before_stop_rate":      ladder_summary.get("tp3_before_stop_rate", 0.0),
+        "avg_max_high_pct":          ladder_summary.get("avg_max_high_pct", 0.0),
+        "avg_max_high_pct_tp3_miss": ladder_summary.get("avg_max_high_pct_tp3_miss", 0.0),
     }
 
 
