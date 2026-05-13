@@ -1021,7 +1021,8 @@ def summarize_trades(trades: list) -> dict:
     n = len(filled)
     if n == 0:
         return {"n": 0, "n_all": n_all, "n_not_filled": len(not_filled),
-                "note": "no_filled_trades"}
+                "note": "no_filled_trades",
+                "ladder": {"ladder_n": 0, "note": "no_filled_trades"}}
     wins = [t for t in filled if t["outcome"] == "WIN"]
     losses = [t for t in filled if t["outcome"] == "LOSS"]
     opens = [t for t in filled if t["outcome"] == "OPEN"]
