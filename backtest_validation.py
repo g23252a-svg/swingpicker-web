@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-backtest_validation.py  (v2 — 2026-04-17)
+backtest_validation.py  (v3.8.3 — 2026-05-13)
 ═══════════════════════════════════════════════════
 v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
@@ -8,12 +8,22 @@ v1과 달리 이번 버전은 3가지를 실제로 구현한다.
       매일 compute_elite_labels → pick_top3() 을 돌려 실제 3종목을 뽑고,
       그 종목들만 horizon 10일 추적하여 성능 집계. (v3.7.10 이후 horizon 20→10 축소)
 
-  (2) OHLC 기반 TP1/Stop 터치 판정
+  (2) OHLC 기반 TP1/TP2/TP3 + Stop 터치 판정  ← v3.8.3 확장
       ohlcv_cache_*.parquet 에서 장중 고가/저가를 읽어 정확한 터치 판정.
+      체결 이후 전체 horizon을 스캔해 TP ladder + 극값(max_high/min_low/max_close)
+      을 동시에 기록한다. 첫 터치 outcome(WIN/LOSS/OPEN)의 의미는 v3.7.x와 불변.
       OHLC 없는 종목은 종가 폴백 (명시적 기록).
 
   (3) 최강 라벨 튜닝 그리드서치 (--tune 옵션)
       평균/밸런스/갭/RR 임계값을 여러 조합으로 돌려 최적 조합 실측.
+
+[v3.8.3 — TP3 실측 학습 루프]
+  · 추천 CSV의 추천매도가2/추천매도가3를 pick에 포함
+  · simulate_ohlc/simulate_close_only 에 ladder 12필드 추가:
+      tp1_hit/tp1_day, tp2_hit/tp2_day, tp3_hit/tp3_day,
+      stop_hit/stop_day, tp{1,2,3}_before_stop, max_high_pct/min_low_pct/max_close_pct
+  · summarize_trades 에 tp2_rate, tp3_rate, tp3_before_stop_rate, avg_max_high_pct 추가
+  · 기존 컬럼/지표 의미 불변 → tab_stocks.py, tab_perf.py, kelly 등 downstream 호환
 
 출력:
   data/backtest_validation_latest.json   (tab_stocks.py 헤더가 읽음)
@@ -158,6 +168,8 @@ def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "score":  score,
             "entry":  _fnum(row.get("추천매수가", 0)),
             "tp1":    _fnum(row.get("추천매도가1", 0)),
+            "tp2":    _fnum(row.get("추천매도가2", 0)),  # v3.8.3
+            "tp3":    _fnum(row.get("추천매도가3", 0)),  # v3.8.3
             "stop":   _fnum(row.get("손절가", 0)),
             "close":  _fnum(row.get("종가", 0)),
         })
@@ -191,6 +203,8 @@ def pick_top3_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "score":  score,
             "entry":  _fnum(row.get("추천매수가", 0)),
             "tp1":    _fnum(row.get("추천매도가1", 0)),
+            "tp2":    _fnum(row.get("추천매도가2", 0)),  # v3.8.3
+            "tp3":    _fnum(row.get("추천매도가3", 0)),  # v3.8.3
             "stop":   _fnum(row.get("손절가", 0)),
             "close":  _fnum(row.get("종가", 0)),
         })
@@ -249,31 +263,51 @@ def load_ohlc(data_dir: Path) -> pd.DataFrame:
     return df
 
 
+def _empty_ladder() -> dict:
+    """v3.8.3: ladder 빈 상태. simulate_* 모든 return에 동일 키 구조 보장."""
+    return {
+        "tp1_hit": False, "tp1_day": 0,
+        "tp2_hit": False, "tp2_day": 0,
+        "tp3_hit": False, "tp3_day": 0,
+        "stop_hit": False, "stop_day": 0,
+        "tp1_before_stop": False,
+        "tp2_before_stop": False,
+        "tp3_before_stop": False,
+        "max_high_pct": 0.0,
+        "min_low_pct": 0.0,
+        "max_close_pct": 0.0,
+    }
+
+
 def simulate_ohlc(code: str, entry_date: pd.Timestamp, entry: float, tp1: float,
                   stop: float, horizon: int, ohlc_df: pd.DataFrame,
-                  fill_window: int = 3) -> dict:
-    """OHLC 기반 TP1/Stop 터치 판정 — 체결 검증 포함.
+                  fill_window: int = 3, tp2: float = 0.0, tp3: float = 0.0) -> dict:
+    """OHLC 기반 TP ladder + Stop 터치 판정 — 체결 검증 포함.
 
-    [v3.7.8] 체결 검증 단계 추가:
-    추천일 다음날부터 fill_window일 안에 '저가 ≤ 추천매수가 ≤ 고가' 조건을
-    만족하는 날에 체결. 체결 못 되면 NOT_FILLED 반환.
+    [v3.8.3] TP ladder 확장:
+      - 체결 이후 horizon 전체를 스캔해 TP1/TP2/TP3/Stop 도달일과 극값을 기록한다.
+      - 기존 outcome(WIN/LOSS/OPEN/NOT_FILLED/NODATA) 의미는 v3.7.x와 동일하게 유지
+        (첫 터치 우선, 동일 바 TP+Stop 동시 도달 시 LOSS 보수적).
+      - 새 ladder 필드들은 첫 터치 이후에도 누적 기록되므로 "Stop 맞고 그 뒤
+        TP3까지 갔는지", "TP1 맞은 후 TP2/TP3까지 갔는지" 분석이 가능해진다.
 
-    단, 시가가 이미 추천매수가보다 크게 위에 있으면(gap-up) 체결 불가로 간주
-    — 지정가 주문 관점에서 정확.
+    [v3.7.8] 체결 검증 단계 (변경 없음):
+      추천일 다음날부터 fill_window일 안에 '저가 ≤ 추천매수가 ≤ 고가' 또는
+      '시가 ≤ 추천매수가 + 2%' 조건 만족 시 체결. 못 되면 NOT_FILLED 반환.
     """
+    nodata = {
+        "outcome": "NODATA", "exit_price": 0.0, "days_held": 0,
+        "method": "none", "fill_date": None,
+        **_empty_ladder(),
+    }
     if ohlc_df is None or ohlc_df.empty:
-        return {"outcome": "NODATA", "exit_price": 0.0, "days_held": 0, "method": "none",
-                "fill_date": None}
-
+        return nodata
     code_df = ohlc_df[ohlc_df["종목코드"] == code]
     if code_df.empty:
-        return {"outcome": "NODATA", "exit_price": 0.0, "days_held": 0, "method": "none",
-                "fill_date": None}
-
+        return nodata
     future = code_df[code_df["Date"] > entry_date].sort_values("Date")
     if future.empty:
-        return {"outcome": "NODATA", "exit_price": 0.0, "days_held": 0, "method": "none",
-                "fill_date": None}
+        return nodata
 
     # ── 1단계: 체결 검증 (fill_window일 안에 지정가 체결됐는지) ──
     fill_idx = None
@@ -284,97 +318,211 @@ def simulate_ohlc(code: str, entry_date: pd.Timestamp, entry: float, tp1: float,
         low = _fnum(bar["저가"])
         if low <= 0 or high <= 0:
             continue
-        # gap-up 시가 > entry+2%: 체결 불가 (가격이 이미 지나감)
-        # 시가가 entry 근처거나 아래면 시가 체결, 장중 entry 터치면 entry 체결
+        # gap-up 시가 > entry+2%: 체결 불가
         if op <= entry * 1.02:
             if low <= entry:  # 장중 entry 도달
                 fill_idx = i
                 fill_date = bar["Date"]
                 break
-            elif op <= entry:  # 시가가 entry 이하 = 시가 체결
+            elif op <= entry:  # 시가 체결
                 fill_idx = i
                 fill_date = bar["Date"]
-                # 시가 자체가 entry보다 낮으면 entry 대신 시가로 체결된 것
-                # 하지만 단순화를 위해 entry 기준 수익률 계산
                 break
 
     if fill_idx is None:
-        return {"outcome": "NOT_FILLED", "exit_price": 0.0, "days_held": 0,
-                "method": "not_filled_gap_up", "fill_date": None}
+        return {
+            "outcome": "NOT_FILLED", "exit_price": 0.0, "days_held": 0,
+            "method": "not_filled_gap_up", "fill_date": None,
+            **_empty_ladder(),
+        }
 
-    # ── 2단계: 체결된 날부터 TP1/Stop 터치 추적 (체결일 당일도 포함) ──
+    # ── 2단계: 체결일부터 horizon 끝까지 단일 패스 ──
+    # ladder는 끝까지 누적, outcome은 첫 터치에서 결정 (이후 변경 없음)
     tracking = future.iloc[fill_idx:fill_idx + horizon]
+    ladder = _empty_ladder()
+    ladder_max_h: Optional[float] = None
+    ladder_min_l: Optional[float] = None
+    ladder_max_c: Optional[float] = None
+    outcome_state: Optional[tuple] = None  # (outcome, exit_price, days_held, method)
+
+    if tracking.empty:
+        return {
+            "outcome": "NODATA", "exit_price": 0.0, "days_held": 0,
+            "method": "none", "fill_date": str(fill_date)[:10],
+            **ladder,
+        }
 
     for i, (_, bar) in enumerate(tracking.iterrows()):
         op = _fnum(bar["시가"])
         high = _fnum(bar["고가"])
         low = _fnum(bar["저가"])
+        close_p = _fnum(bar["종가"])
         if low <= 0 or high <= 0:
             continue
-        # 체결일 당일의 경우: 체결 이후 가격만 봐야 하나 단순화
-        # (실제로는 entry 체결 후 남은 시간 기준 — 고가/저가 범위로 근사)
-        if i == 0:
-            # 체결일: 체결 이후 TP1/Stop 터치만 판단
-            # 고가가 TP1 넘었으면 WIN, 저가가 stop 깨졌으면 LOSS (보수적)
-            if low <= stop and high >= tp1:
-                return {"outcome": "LOSS", "exit_price": stop, "days_held": 1,
-                        "method": "ohlc_both_touched", "fill_date": str(fill_date)[:10]}
-            if high >= tp1:
-                return {"outcome": "WIN", "exit_price": tp1, "days_held": 1,
-                        "method": "ohlc_high_touch", "fill_date": str(fill_date)[:10]}
-            if low <= stop:
-                return {"outcome": "LOSS", "exit_price": stop, "days_held": 1,
-                        "method": "ohlc_low_touch", "fill_date": str(fill_date)[:10]}
-            continue
 
-        # 다음날부터는 gap 처리 포함
-        if op >= tp1:
-            return {"outcome": "WIN", "exit_price": op, "days_held": i + 1,
-                    "method": "ohlc_gap_up", "fill_date": str(fill_date)[:10]}
-        if op <= stop:
-            return {"outcome": "LOSS", "exit_price": op, "days_held": i + 1,
-                    "method": "ohlc_gap_down", "fill_date": str(fill_date)[:10]}
-        if low <= stop and high >= tp1:
-            return {"outcome": "LOSS", "exit_price": stop, "days_held": i + 1,
-                    "method": "ohlc_both_touched", "fill_date": str(fill_date)[:10]}
-        if low <= stop:
-            return {"outcome": "LOSS", "exit_price": stop, "days_held": i + 1,
-                    "method": "ohlc_low_touch", "fill_date": str(fill_date)[:10]}
-        if high >= tp1:
-            return {"outcome": "WIN", "exit_price": tp1, "days_held": i + 1,
-                    "method": "ohlc_high_touch", "fill_date": str(fill_date)[:10]}
+        day_n = i + 1
 
-    # horizon 마감 = OPEN (종가 마감)
-    if tracking.empty:
-        return {"outcome": "NODATA", "exit_price": 0.0, "days_held": 0,
-                "method": "none", "fill_date": str(fill_date)[:10]}
-    last_close = _fnum(tracking.iloc[-1]["종가"])
-    if last_close <= 0:
-        return {"outcome": "NODATA", "exit_price": 0.0, "days_held": horizon,
-                "method": "none", "fill_date": str(fill_date)[:10]}
-    return {"outcome": "OPEN", "exit_price": last_close, "days_held": len(tracking),
-            "method": "ohlc_horizon_close", "fill_date": str(fill_date)[:10]}
+        # 극값 갱신 (entry 기준 %)
+        if entry > 0:
+            h_pct = (high / entry - 1.0) * 100.0
+            l_pct = (low / entry - 1.0) * 100.0
+            if ladder_max_h is None or h_pct > ladder_max_h:
+                ladder_max_h = h_pct
+            if ladder_min_l is None or l_pct < ladder_min_l:
+                ladder_min_l = l_pct
+            if close_p > 0:
+                c_pct = (close_p / entry - 1.0) * 100.0
+                if ladder_max_c is None or c_pct > ladder_max_c:
+                    ladder_max_c = c_pct
+
+        # ── Ladder 기록 (전체 horizon 누적) ──
+        stop_today = stop > 0 and low <= stop
+        stop_already = ladder["stop_hit"]
+        # 보수적: 같은 날 TP과 Stop 동시 닿으면 stop 우선 → tp_before_stop = False
+        tp_before_stop_today = (not stop_already) and (not stop_today)
+
+        if tp1 > 0 and high >= tp1 and not ladder["tp1_hit"]:
+            ladder["tp1_hit"] = True
+            ladder["tp1_day"] = day_n
+            ladder["tp1_before_stop"] = tp_before_stop_today
+        if tp2 > 0 and high >= tp2 and not ladder["tp2_hit"]:
+            ladder["tp2_hit"] = True
+            ladder["tp2_day"] = day_n
+            ladder["tp2_before_stop"] = tp_before_stop_today
+        if tp3 > 0 and high >= tp3 and not ladder["tp3_hit"]:
+            ladder["tp3_hit"] = True
+            ladder["tp3_day"] = day_n
+            ladder["tp3_before_stop"] = tp_before_stop_today
+        if stop_today and not ladder["stop_hit"]:
+            ladder["stop_hit"] = True
+            ladder["stop_day"] = day_n
+
+        # ── 첫 터치 outcome 결정 (v3.7.x 로직 그대로, outcome_state가 None일 때만) ──
+        if outcome_state is None:
+            if i == 0:
+                # 체결일: 시가 gap 미사용, 고가/저가만 (기존)
+                if low <= stop and high >= tp1:
+                    outcome_state = ("LOSS", stop, 1, "ohlc_both_touched")
+                elif high >= tp1:
+                    outcome_state = ("WIN", tp1, 1, "ohlc_high_touch")
+                elif low <= stop:
+                    outcome_state = ("LOSS", stop, 1, "ohlc_low_touch")
+            else:
+                # 다음날부터 gap 처리 (기존)
+                if op >= tp1:
+                    outcome_state = ("WIN", op, day_n, "ohlc_gap_up")
+                elif op <= stop:
+                    outcome_state = ("LOSS", op, day_n, "ohlc_gap_down")
+                elif low <= stop and high >= tp1:
+                    outcome_state = ("LOSS", stop, day_n, "ohlc_both_touched")
+                elif low <= stop:
+                    outcome_state = ("LOSS", stop, day_n, "ohlc_low_touch")
+                elif high >= tp1:
+                    outcome_state = ("WIN", tp1, day_n, "ohlc_high_touch")
+
+    # 극값 None → 0.0 방어
+    ladder["max_high_pct"]  = round(ladder_max_h, 2) if ladder_max_h is not None else 0.0
+    ladder["min_low_pct"]   = round(ladder_min_l, 2) if ladder_min_l is not None else 0.0
+    ladder["max_close_pct"] = round(ladder_max_c, 2) if ladder_max_c is not None else 0.0
+
+    fd = str(fill_date)[:10]
+
+    # outcome 결정
+    if outcome_state is None:
+        # horizon 마감 = OPEN (마지막 종가)
+        last_close = _fnum(tracking.iloc[-1]["종가"])
+        if last_close <= 0:
+            return {
+                "outcome": "NODATA", "exit_price": 0.0, "days_held": horizon,
+                "method": "none", "fill_date": fd, **ladder,
+            }
+        return {
+            "outcome": "OPEN", "exit_price": last_close,
+            "days_held": len(tracking), "method": "ohlc_horizon_close",
+            "fill_date": fd, **ladder,
+        }
+
+    return {
+        "outcome": outcome_state[0], "exit_price": outcome_state[1],
+        "days_held": outcome_state[2], "method": outcome_state[3],
+        "fill_date": fd, **ladder,
+    }
 
 
 def simulate_close_only(code: str, entry_idx: int, entry: float, tp1: float,
-                        stop: float, horizon: int, days_dict_seq: list) -> dict:
-    """종가 폴백 — OHLC 없는 종목용"""
+                        stop: float, horizon: int, days_dict_seq: list,
+                        tp2: float = 0.0, tp3: float = 0.0) -> dict:
+    """종가 폴백 — OHLC 없는 종목용.
+
+    [v3.8.3] ladder 필드를 종가 기준으로 최소 기록.
+      tp_hit_n = close >= tp_n (장중 고가 정보 없어서 보수적, 실제보다 낮게 잡힘)
+      max_high_pct / min_low_pct 는 0.0 (정보 없음)
+      max_close_pct 만 의미 있음
+    """
+    ladder = _empty_ladder()
+    ladder_max_c: Optional[float] = None
+
     future = days_dict_seq[entry_idx + 1: entry_idx + 1 + horizon]
+    outcome_state: Optional[tuple] = None
+
     for day_i, (_, day_data) in enumerate(future, 1):
-        if code not in day_data: continue
+        if code not in day_data:
+            continue
         px = _fnum(day_data[code].get("종가", 0))
-        if px <= 0: continue
-        if px <= stop:
-            return {"outcome": "LOSS", "exit_price": stop, "days_held": day_i, "method": "close_fallback"}
-        if px >= tp1:
-            return {"outcome": "WIN", "exit_price": tp1, "days_held": day_i, "method": "close_fallback"}
+        if px <= 0:
+            continue
+
+        if entry > 0:
+            c_pct = (px / entry - 1.0) * 100.0
+            if ladder_max_c is None or c_pct > ladder_max_c:
+                ladder_max_c = c_pct
+
+        stop_today = stop > 0 and px <= stop
+        stop_already = ladder["stop_hit"]
+        tp_before_stop_today = (not stop_already) and (not stop_today)
+
+        if tp1 > 0 and px >= tp1 and not ladder["tp1_hit"]:
+            ladder["tp1_hit"] = True
+            ladder["tp1_day"] = day_i
+            ladder["tp1_before_stop"] = tp_before_stop_today
+        if tp2 > 0 and px >= tp2 and not ladder["tp2_hit"]:
+            ladder["tp2_hit"] = True
+            ladder["tp2_day"] = day_i
+            ladder["tp2_before_stop"] = tp_before_stop_today
+        if tp3 > 0 and px >= tp3 and not ladder["tp3_hit"]:
+            ladder["tp3_hit"] = True
+            ladder["tp3_day"] = day_i
+            ladder["tp3_before_stop"] = tp_before_stop_today
+        if stop_today and not ladder["stop_hit"]:
+            ladder["stop_hit"] = True
+            ladder["stop_day"] = day_i
+
+        if outcome_state is None:
+            if px <= stop:
+                outcome_state = ("LOSS", stop, day_i, "close_fallback")
+            elif px >= tp1:
+                outcome_state = ("WIN", tp1, day_i, "close_fallback")
+
+    ladder["max_close_pct"] = round(ladder_max_c, 2) if ladder_max_c is not None else 0.0
+
+    if outcome_state is not None:
+        return {
+            "outcome": outcome_state[0], "exit_price": outcome_state[1],
+            "days_held": outcome_state[2], "method": outcome_state[3],
+            **ladder,
+        }
     if future:
         last = future[-1][1]
         if code in last:
             px = _fnum(last[code].get("종가", 0))
             if px > 0:
-                return {"outcome": "OPEN", "exit_price": px, "days_held": horizon, "method": "close_fallback"}
-    return {"outcome": "NODATA", "exit_price": 0.0, "days_held": 0, "method": "none"}
+                return {
+                    "outcome": "OPEN", "exit_price": px,
+                    "days_held": horizon, "method": "close_fallback",
+                    **ladder,
+                }
+    return {"outcome": "NODATA", "exit_price": 0.0, "days_held": 0,
+            "method": "none", **ladder}
 
 
 # ═══════════════════════════════════════════════════
@@ -443,12 +591,35 @@ def daily_top1_backtest(days: list, ohlc_df: pd.DataFrame,
         for pick in top1:
             code = pick["code"]
             result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
-                                   pick["stop"], HORIZON, ohlc_df)
+                                   pick["stop"], HORIZON, ohlc_df,
+                                   tp2=pick.get("tp2", 0.0), tp3=pick.get("tp3", 0.0))
             if result["outcome"] == "NODATA":
                 result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
-                                             pick["stop"], HORIZON, days_dict_seq)
+                                             pick["stop"], HORIZON, days_dict_seq,
+                                             tp2=pick.get("tp2", 0.0),
+                                             tp3=pick.get("tp3", 0.0))
             if result["outcome"] == "NODATA":
                 continue
+
+            # v3.8.3 ladder 필드 추출
+            ladder_cols = {
+                "tp2":              pick.get("tp2", 0.0),
+                "tp3":              pick.get("tp3", 0.0),
+                "tp1_hit":          result.get("tp1_hit", False),
+                "tp1_day":          result.get("tp1_day", 0),
+                "tp2_hit":          result.get("tp2_hit", False),
+                "tp2_day":          result.get("tp2_day", 0),
+                "tp3_hit":          result.get("tp3_hit", False),
+                "tp3_day":          result.get("tp3_day", 0),
+                "stop_hit":         result.get("stop_hit", False),
+                "stop_day":         result.get("stop_day", 0),
+                "tp1_before_stop":  result.get("tp1_before_stop", False),
+                "tp2_before_stop":  result.get("tp2_before_stop", False),
+                "tp3_before_stop":  result.get("tp3_before_stop", False),
+                "max_high_pct":     result.get("max_high_pct", 0.0),
+                "min_low_pct":      result.get("min_low_pct", 0.0),
+                "max_close_pct":    result.get("max_close_pct", 0.0),
+            }
 
             if result["outcome"] == "NOT_FILLED":
                 trades.append({
@@ -459,6 +630,7 @@ def daily_top1_backtest(days: list, ohlc_df: pd.DataFrame,
                     "outcome": "NOT_FILLED", "exit_price": 0.0, "days_held": 0,
                     "method": result["method"], "fill_date": "",
                     "ret_pct": 0.0, "net_pct": 0.0,
+                    **ladder_cols,
                 })
                 continue
 
@@ -475,6 +647,7 @@ def daily_top1_backtest(days: list, ohlc_df: pd.DataFrame,
                 "fill_date": result.get("fill_date", "") or "",
                 "ret_pct": round(ret_pct, 2),
                 "net_pct": round(ret_pct - COST_PCT, 2),
+                **ladder_cols,
             })
 
     return {"trades": trades, "daily_picks": daily_picks_log}
@@ -509,12 +682,35 @@ def daily_top3_backtest(days: list, ohlc_df: pd.DataFrame,
         for pick in top3:
             code = pick["code"]
             result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
-                                   pick["stop"], HORIZON, ohlc_df)
+                                   pick["stop"], HORIZON, ohlc_df,
+                                   tp2=pick.get("tp2", 0.0), tp3=pick.get("tp3", 0.0))
             if result["outcome"] == "NODATA":
                 result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
-                                             pick["stop"], HORIZON, days_dict_seq)
+                                             pick["stop"], HORIZON, days_dict_seq,
+                                             tp2=pick.get("tp2", 0.0),
+                                             tp3=pick.get("tp3", 0.0))
             if result["outcome"] == "NODATA":
                 continue
+
+            # v3.8.3 ladder 필드 추출 (top1과 동일 구조)
+            ladder_cols = {
+                "tp2":              pick.get("tp2", 0.0),
+                "tp3":              pick.get("tp3", 0.0),
+                "tp1_hit":          result.get("tp1_hit", False),
+                "tp1_day":          result.get("tp1_day", 0),
+                "tp2_hit":          result.get("tp2_hit", False),
+                "tp2_day":          result.get("tp2_day", 0),
+                "tp3_hit":          result.get("tp3_hit", False),
+                "tp3_day":          result.get("tp3_day", 0),
+                "stop_hit":         result.get("stop_hit", False),
+                "stop_day":         result.get("stop_day", 0),
+                "tp1_before_stop":  result.get("tp1_before_stop", False),
+                "tp2_before_stop":  result.get("tp2_before_stop", False),
+                "tp3_before_stop":  result.get("tp3_before_stop", False),
+                "max_high_pct":     result.get("max_high_pct", 0.0),
+                "min_low_pct":      result.get("min_low_pct", 0.0),
+                "max_close_pct":    result.get("max_close_pct", 0.0),
+            }
 
             # [v3.7.8] NOT_FILLED — 추천매수가에 체결 못 된 경우는 거래 안 된 것
             # 거래 기록에는 남기되, ret_pct=0으로 성과 통계에서 자연스럽게 중성
@@ -536,6 +732,7 @@ def daily_top3_backtest(days: list, ohlc_df: pd.DataFrame,
                     "fill_date":   "",
                     "ret_pct":     0.0,
                     "net_pct":     0.0,
+                    **ladder_cols,
                 })
                 continue
 
@@ -557,6 +754,7 @@ def daily_top3_backtest(days: list, ohlc_df: pd.DataFrame,
                 "fill_date":   result.get("fill_date", "") or "",
                 "ret_pct":     round(ret_pct, 2),
                 "net_pct":     round(ret_pct - COST_PCT, 2),
+                **ladder_cols,
             })
 
     return {"trades": trades, "daily_picks": daily_picks_log}
@@ -837,6 +1035,64 @@ def summarize_trades(trades: list) -> dict:
     ev = (tp1_r * avg_tp1 + stop_r * avg_stop + open_r * avg_open) - COST_PCT
     ohlc_count = sum(1 for t in filled if t["method"].startswith("ohlc"))
     fill_rate = n / n_all if n_all > 0 else 1.0
+
+    # ── v3.8.3: TP ladder 집계 ──
+    # ladder 필드가 있는 trade에만 집계 (예전 trade list와의 호환 위해)
+    ladder_trades = [t for t in filled if "tp3_hit" in t]
+    ladder_n = len(ladder_trades)
+    if ladder_n > 0:
+        # 도달률 (체결된 거래 기준, 손절 무관 — 전체 horizon 내 도달 여부)
+        tp1_hit_n = sum(1 for t in ladder_trades if t.get("tp1_hit"))
+        tp2_hit_n = sum(1 for t in ladder_trades if t.get("tp2_hit"))
+        tp3_hit_n = sum(1 for t in ladder_trades if t.get("tp3_hit"))
+        # tp3 has valid target? (추천매도가3 = 0/NaN인 종목은 분모 제외)
+        ladder_tp3_avail = [t for t in ladder_trades if _fnum(t.get("tp3", 0)) > 0]
+        ladder_tp2_avail = [t for t in ladder_trades if _fnum(t.get("tp2", 0)) > 0]
+        # 손절 이전 도달 (실전 트레이딩 기준)
+        tp1_before_stop_n = sum(1 for t in ladder_trades if t.get("tp1_before_stop"))
+        tp2_before_stop_n = sum(1 for t in ladder_trades if t.get("tp2_before_stop"))
+        tp3_before_stop_n = sum(1 for t in ladder_trades if t.get("tp3_before_stop"))
+        # 전환율 (계단별)
+        tp1_to_tp2 = (
+            sum(1 for t in ladder_trades if t.get("tp1_hit") and t.get("tp2_hit"))
+            / tp1_hit_n if tp1_hit_n > 0 else 0.0
+        )
+        tp2_to_tp3 = (
+            sum(1 for t in ladder_trades if t.get("tp2_hit") and t.get("tp3_hit"))
+            / tp2_hit_n if tp2_hit_n > 0 else 0.0
+        )
+        # 극값 평균
+        avg_max_high = (
+            sum(_fnum(t.get("max_high_pct", 0)) for t in ladder_trades) / ladder_n
+        )
+        avg_min_low = (
+            sum(_fnum(t.get("min_low_pct", 0)) for t in ladder_trades) / ladder_n
+        )
+        # TP3 실패 종목(=tp3_hit False)의 평균 최대상승률
+        tp3_miss = [t for t in ladder_trades if not t.get("tp3_hit")]
+        avg_max_high_tp3_miss = (
+            sum(_fnum(t.get("max_high_pct", 0)) for t in tp3_miss) / len(tp3_miss)
+            if tp3_miss else 0.0
+        )
+        ladder_summary = {
+            "ladder_n": ladder_n,
+            "tp1_reach_rate":   round(tp1_hit_n / ladder_n, 4),
+            "tp2_reach_rate":   round(tp2_hit_n / len(ladder_tp2_avail), 4) if ladder_tp2_avail else 0.0,
+            "tp3_reach_rate":   round(tp3_hit_n / len(ladder_tp3_avail), 4) if ladder_tp3_avail else 0.0,
+            "tp1_before_stop_rate": round(tp1_before_stop_n / ladder_n, 4),
+            "tp2_before_stop_rate": round(tp2_before_stop_n / len(ladder_tp2_avail), 4) if ladder_tp2_avail else 0.0,
+            "tp3_before_stop_rate": round(tp3_before_stop_n / len(ladder_tp3_avail), 4) if ladder_tp3_avail else 0.0,
+            "tp1_to_tp2_conv":  round(tp1_to_tp2, 4),
+            "tp2_to_tp3_conv":  round(tp2_to_tp3, 4),
+            "avg_max_high_pct": round(avg_max_high, 2),
+            "avg_min_low_pct":  round(avg_min_low, 2),
+            "avg_max_high_pct_tp3_miss": round(avg_max_high_tp3_miss, 2),
+            "n_tp2_avail":      len(ladder_tp2_avail),
+            "n_tp3_avail":      len(ladder_tp3_avail),
+        }
+    else:
+        ladder_summary = {"ladder_n": 0, "note": "no_ladder_data"}
+
     return {
         "n": n,
         "n_all_picks": n_all,
@@ -851,6 +1107,7 @@ def summarize_trades(trades: list) -> dict:
         "avg_all": round(avg_all, 2),
         "ev": round(ev, 2),
         "ohlc_coverage": round(ohlc_count / n, 3),
+        "ladder": ladder_summary,
     }
 
 
