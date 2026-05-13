@@ -2033,5 +2033,87 @@
       "001720_20260506_WARN_DRAWDOWN_20260511",
       "001720_20260506_STOP_HIT_20260512"
     ]
+  },
+  {
+    "code": "331920",
+    "name": "셀레믹스",
+    "entry_ymd": "20260424",
+    "entry_px": 16000.0,
+    "qty": 0,
+    "stop_px": 13600.0,
+    "stop_px_initial": 13600.0,
+    "take_px1": 19840.0,
+    "take_px2": 20350.0,
+    "trailing_high": 18780.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260513",
+    "last_close_px": 13330.0,
+    "unrealized_pnl_pct": -16.69,
+    "realized_pnl_pct": -16.69,
+    "close_ymd": "20260513",
+    "close_px": 13330.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "331920_20260424_WARN_DRAWDOWN_20260429",
+      "331920_20260424_WARN_DRAWDOWN_20260430",
+      "331920_20260424_WARN_DRAWDOWN_20260501",
+      "331920_20260424_WARN_DRAWDOWN_20260504",
+      "331920_20260424_WARN_DRAWDOWN_20260505",
+      "331920_20260424_WARN_DRAWDOWN_20260506",
+      "331920_20260424_WARN_DRAWDOWN_20260507",
+      "331920_20260424_WARN_DRAWDOWN_20260508",
+      "331920_20260424_WARN_DRAWDOWN_20260511",
+      "331920_20260424_WARN_DRAWDOWN_20260512",
+      "331920_20260424_STOP_HIT_20260513"
+    ]
+  },
+  {
+    "code": "096350",
+    "name": "대창솔루션",
+    "entry_ymd": "20260424",
+    "entry_px": 3170.0,
+    "qty": 0,
+    "stop_px": 2700.0,
+    "stop_px_initial": 2700.0,
+    "take_px1": 3355.0,
+    "take_px2": 4180.0,
+    "trailing_high": 3350.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260513",
+    "last_close_px": 2590.0,
+    "unrealized_pnl_pct": -18.3,
+    "realized_pnl_pct": -18.3,
+    "close_ymd": "20260513",
+    "close_px": 2590.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "096350_20260424_WARN_DRAWDOWN_20260511",
+      "096350_20260424_WARN_DRAWDOWN_20260512",
+      "096350_20260424_STOP_HIT_20260513"
+    ]
+  },
+  {
+    "code": "456160",
+    "name": "지투지바이오",
+    "entry_ymd": "20260506",
+    "entry_px": 77800.0,
+    "qty": 0,
+    "stop_px": 71500.0,
+    "stop_px_initial": 71500.0,
+    "take_px1": 89300.0,
+    "take_px2": 124000.0,
+    "trailing_high": 82700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260513",
+    "last_close_px": 68600.0,
+    "unrealized_pnl_pct": -11.83,
+    "realized_pnl_pct": -11.83,
+    "close_ymd": "20260513",
+    "close_px": 68600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "456160_20260506_WARN_DRAWDOWN_20260511",
+      "456160_20260506_WARN_DRAWDOWN_20260512"
+    ]
   }
 ]

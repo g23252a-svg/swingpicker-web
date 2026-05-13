@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20260513",
+  "macro_risk": "CAUTION",
+  "macro_msg": "환율 1474원 [05/11] (주의)",
+  "market_breadth": 46.3,
+  "pass_ebs": 5,
+  "rec_limit": 5,
+  "n_stocks": 611,
+  "run_status": "OK",
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK",
+  "scoring_axes": "STRUCT+TIMING+AI+SECTOR",
+  "w_struct": 0.4,
+  "w_timing": 0.4,
+  "w_ai": 0.2
+}
