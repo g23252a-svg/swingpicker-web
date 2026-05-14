@@ -290,6 +290,16 @@ async def index():
         return
 
     # ─── 탭 정의 ───
+    # [업데이트 알림] 회원이 아직 안 본 새 버전이 있으면 업데이트 탭에 🔴 표시
+    #   - app.storage.user["last_seen_version"] 와 APP_VERSION 비교
+    #   - 업데이트 탭 클릭 시 last_seen_version 갱신 → 🔴 사라짐
+    try:
+        _last_seen = app.storage.user.get("last_seen_version", "")
+    except Exception:
+        _last_seen = ""
+    _has_new_update = bool(_last_seen != APP_VERSION)
+    _update_label = "🧩 업데이트 🔴" if _has_new_update else "🧩 업데이트"
+
     TAB_DEFS = [
         ("t1", "📊 시장"),
         ("t2", "🔭 종목 분석"),
@@ -297,7 +307,7 @@ async def index():
         ("t11", "💎 멤버십"),
         ("t4", "📮 문의"),
         ("t5", "⚖️ 약관"),
-        ("t6", "🧩 업데이트"),
+        ("t6", _update_label),
         ("t7", "📈 성과"),
         ("t10", "🧪 전략 샌드박스"),
         ("t9", "📓 매매 일지"),
@@ -367,6 +377,20 @@ async def index():
         key = label_to_key.get(tab_val)
         if key:
             load_tab(key)
+        # [업데이트 알림] 업데이트 탭 클릭 시 → 현재 버전을 '본 것'으로 저장 + 🔴 제거
+        #   set_label()은 탭의 label(표시 텍스트)만 바꾸고 name(라우팅 키)은 유지하므로
+        #   label_to_key 매핑이 깨지지 않는다.
+        if key == "t6":
+            try:
+                app.storage.user["last_seen_version"] = APP_VERSION
+            except Exception as exc:
+                logger.warning(f"last_seen_version 저장 실패: {exc}")
+            try:
+                t6_tab = tab_refs.get("t6")
+                if t6_tab is not None:
+                    t6_tab.set_label("🧩 업데이트")
+            except Exception as exc:
+                logger.warning(f"업데이트 탭 라벨 갱신 실패: {exc}")
 
     tabs.on_value_change(on_tab_change)
 
