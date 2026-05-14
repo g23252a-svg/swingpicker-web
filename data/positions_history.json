@@ -2115,5 +2115,58 @@
       "456160_20260506_WARN_DRAWDOWN_20260511",
       "456160_20260506_WARN_DRAWDOWN_20260512"
     ]
+  },
+  {
+    "code": "033230",
+    "name": "인성정보",
+    "entry_ymd": "20260429",
+    "entry_px": 2050.0,
+    "qty": 0,
+    "stop_px": 1746.0,
+    "stop_px_initial": 1746.0,
+    "take_px1": 2430.0,
+    "take_px2": 2715.0,
+    "trailing_high": 2240.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260514",
+    "last_close_px": 1738.0,
+    "unrealized_pnl_pct": -15.22,
+    "realized_pnl_pct": -15.22,
+    "close_ymd": "20260514",
+    "close_px": 1738.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "033230_20260429_WARN_DRAWDOWN_20260429",
+      "033230_20260429_WARN_DRAWDOWN_20260430",
+      "033230_20260429_WARN_DRAWDOWN_20260501",
+      "033230_20260429_WARN_DRAWDOWN_20260506",
+      "033230_20260429_WARN_DRAWDOWN_20260507",
+      "033230_20260429_WARN_DRAWDOWN_20260508",
+      "033230_20260429_WARN_DRAWDOWN_20260511",
+      "033230_20260429_WARN_DRAWDOWN_20260512",
+      "033230_20260429_WARN_DRAWDOWN_20260513",
+      "033230_20260429_STOP_HIT_20260514"
+    ]
+  },
+  {
+    "code": "080220",
+    "name": "제주반도체",
+    "entry_ymd": "20260512",
+    "entry_px": 55200.0,
+    "qty": 0,
+    "stop_px": 50700.0,
+    "stop_px_initial": 50700.0,
+    "take_px1": 62600.0,
+    "take_px2": 65600.0,
+    "trailing_high": 76500.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260514",
+    "last_close_px": 75600.0,
+    "unrealized_pnl_pct": 36.96,
+    "realized_pnl_pct": 36.96,
+    "close_ymd": "20260514",
+    "close_px": 75600.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": []
   }
 ]
