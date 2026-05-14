@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-backtest_validation.py  (v3.9.0 — 2026-05-14)
+backtest_validation.py  (v3.9.1 — 2026-05-14)
 ═══════════════════════════════════════════════════
 v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
@@ -16,6 +16,14 @@ v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
   (3) 최강 라벨 튜닝 그리드서치 (--tune 옵션)
       평균/밸런스/갭/RR 임계값을 여러 조합으로 돌려 최적 조합 실측.
+
+[v3.9.1 — STRUCT risk shadow backtest]
+  · compute_struct_risk_shadow(): STRUCT_SCORE 70~85 종목을 Top3 후보 풀에서
+    제외했을 때의 성과를 병렬 계산. rolling walk-forward 3/3 fold ΔEV 양수,
+    non_win 평균손익 3/3 개선으로 검증됨 (메커니즘: 손절 감소가 아니라
+    LOSS+OPEN 비승리 구간의 EV 누수 축소).
+  · **baseline / 추천 / 매수가 절대 불변** — out["struct_risk_shadow"]에만 저장.
+    production exclude 미적용 (Top3 구성 변경률 30~50%로 전략 변경급).
 
 [v3.9.0 — ENTRY_MODE shadow backtest]
   · compute_entry_mode_shadow(): NOT_FILLED 종목 중 STRUCT≥90 & VWAP_GAP≤8
@@ -1237,6 +1245,255 @@ def compute_entry_mode_shadow(trades: list, ohlc_df: pd.DataFrame,
     }
 
 
+# ═══════════════════════════════════════════════════
+#  [v3.9.1] STRUCT risk shadow backtest
+# ═══════════════════════════════════════════════════
+# 목적: STRUCT_SCORE 70~85 종목을 Top3 후보 풀에서 제외했으면 어땠을지
+#       병렬 계산. **baseline / 추천 / 매수가 절대 불변.**
+#
+# 검증 근거 (simulate_struct_risk_shadow.py --mode rwf, 2026-05-14):
+#   rolling walk-forward 3-fold — 3/3 fold 모두 ΔEV 양수
+#   (weak 평균 +2.90, favorable +0.11), non_win 평균손익 3/3 개선.
+#   메커니즘: 손절률 감소가 아니라 LOSS+OPEN 비승리 구간의 EV 누수 축소.
+#
+# production 미적용 이유: Top3 구성 변경률 30~50% — 단순 필터가 아니라
+#   전략 변경급. shadow 측정으로 상승장 표본 추가 확보 후 재판단.
+STRUCT_RISK_SHADOW_ENABLED = True
+STRUCT_RISK_BAND_LO = 70.0   # STRUCT_SCORE 위험 구간 하한
+STRUCT_RISK_BAND_HI = 85.0   # STRUCT_SCORE 위험 구간 상한 (이 미만)
+
+
+def _pick_top3_exclude_struct_band(day_csv_rows: list,
+                                   thresholds: Optional[dict] = None,
+                                   min_rank: float = 40.0) -> list:
+    """pick_top3_codes 로직 복제 — STRUCT 70~85 종목만 후보에서 제외.
+
+    pick_top3_codes를 수정하지 않기 위해 여기서 재구현 (shadow 전용).
+    원본과 동일한 elite_label / rank_score / 섹터 dedup 사용.
+    """
+    candidates = []
+    for row in day_csv_rows:
+        stats = compute_axis_stats(row)
+        lbl = elite_label(stats, thresholds)
+        if lbl != "🏆 최강":
+            continue
+        # ── STRUCT 70~85 제외 (shadow rule) ──
+        if STRUCT_RISK_BAND_LO <= stats["S"] < STRUCT_RISK_BAND_HI:
+            continue
+        score = rank_score(stats, lbl)
+        if score < min_rank:
+            continue
+        candidates.append({
+            "code":   str(row.get("종목코드", "")).zfill(6),
+            "name":   str(row.get("종목명", "")),
+            "sector": str(row.get("업종", "")),
+            "label":  lbl,
+            "score":  score,
+            "entry":  _fnum(row.get("추천매수가", 0)),
+            "tp1":    _fnum(row.get("추천매도가1", 0)),
+            "tp2":    _fnum(row.get("추천매도가2", 0)),
+            "tp3":    _fnum(row.get("추천매도가3", 0)),
+            "stop":   _fnum(row.get("손절가", 0)),
+            "close":  _fnum(row.get("종가", 0)),
+        })
+    candidates.sort(key=lambda r: -r["score"])
+    picked = []
+    seen_sectors: set = set()
+    for c in candidates:
+        if len(picked) >= 3:
+            break
+        if c["sector"] and c["sector"] in seen_sectors:
+            continue
+        picked.append(c)
+        if c["sector"]:
+            seen_sectors.add(c["sector"])
+    return picked
+
+
+def _summarize_shadow_trades(trades: list) -> dict:
+    """STRUCT shadow 전용 요약 — non_win 평균손익 포함.
+
+    summarize_trades를 수정하지 않기 위해 shadow 전용 경량 요약을 별도 구현.
+    핵심: ev, tp1_rate, stop_rate, fill_rate, avg_non_win.
+    """
+    filled = [t for t in trades if t["outcome"] != "NOT_FILLED"]
+    n_all = len(trades)
+    n = len(filled)
+    if n == 0:
+        return {"n_all": n_all, "n_filled": 0, "note": "no_filled"}
+    wins = [t for t in filled if t["outcome"] == "WIN"]
+    losses = [t for t in filled if t["outcome"] == "LOSS"]
+    opens = [t for t in filled if t["outcome"] == "OPEN"]
+    tp1_r = len(wins) / n
+    stop_r = len(losses) / n
+    open_r = len(opens) / n
+    avg_win = sum(t["ret_pct"] for t in wins) / len(wins) if wins else 0.0
+    avg_loss = sum(t["ret_pct"] for t in losses) / len(losses) if losses else 0.0
+    avg_open = sum(t["ret_pct"] for t in opens) / len(opens) if opens else 0.0
+    ev = (tp1_r * avg_win + stop_r * avg_loss + open_r * avg_open) - COST_PCT
+    non_win = losses + opens
+    avg_non_win = (
+        sum(t["ret_pct"] for t in non_win) / len(non_win) if non_win else 0.0
+    )
+    avg_all = sum(t["ret_pct"] for t in filled) / n
+    return {
+        "n_all": n_all,
+        "n_filled": n,
+        "fill_rate": round(n / n_all, 4) if n_all > 0 else 0.0,
+        "tp1_rate": round(tp1_r, 4),
+        "stop_rate": round(stop_r, 4),
+        "open_rate": round(open_r, 4),
+        "ev": round(ev, 2),
+        "avg_non_win": round(avg_non_win, 2),
+        "avg_all": round(avg_all, 2),
+    }
+
+
+def compute_struct_risk_shadow(days: list, ohlc_df: pd.DataFrame,
+                               baseline_trades: list,
+                               thresholds: Optional[dict] = None,
+                               min_rank: float = 40.0) -> dict:
+    """STRUCT 70~85 제외 shadow 백테스트.
+
+    [중요] baseline_trades 는 읽기 전용 — 변경하지 않는다.
+    shadow Top3를 자체적으로 다시 뽑아 동일 OHLC로 백테스트한 뒤,
+    baseline 대비 ΔEV / Δnon_win / 구성변경률 등을 계산해 dict로 반환.
+    반환값은 out["struct_risk_shadow"]에만 저장된다.
+
+    measurement-only: ranking / picks / buy price / production 추천에
+    어떤 영향도 주지 않는다.
+    """
+    if not STRUCT_RISK_SHADOW_ENABLED:
+        return {"enabled": False}
+
+    rule_str = (
+        f"exclude STRUCT_SCORE {STRUCT_RISK_BAND_LO:.0f}~{STRUCT_RISK_BAND_HI:.0f} "
+        f"from Top3 candidate pool"
+    )
+
+    # ── shadow Top3 백테스트 (STRUCT 70~85 제외) ──
+    shadow_trades = []
+    shadow_picks_by_day = {}
+    days_dict_seq = [(d[0], d[2]) for d in days]
+
+    for i in range(1, len(days)):
+        ymd, rows_list, _ = days[i]
+        top3 = _pick_top3_exclude_struct_band(rows_list, thresholds, min_rank)
+        shadow_picks_by_day[ymd] = [c["code"] for c in top3]
+        if not top3:
+            continue
+        entry_date = pd.Timestamp(ymd[:4] + "-" + ymd[4:6] + "-" + ymd[6:])
+        for pick in top3:
+            code = pick["code"]
+            result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
+                                   pick["stop"], HORIZON, ohlc_df,
+                                   tp2=pick.get("tp2", 0.0), tp3=pick.get("tp3", 0.0))
+            if result["outcome"] == "NODATA":
+                result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
+                                             pick["stop"], HORIZON, days_dict_seq,
+                                             tp2=pick.get("tp2", 0.0),
+                                             tp3=pick.get("tp3", 0.0))
+            if result["outcome"] == "NODATA":
+                continue
+            if result["outcome"] == "NOT_FILLED":
+                shadow_trades.append({
+                    "date": ymd, "code": code, "outcome": "NOT_FILLED",
+                    "ret_pct": 0.0,
+                })
+                continue
+            ret_pct = (result["exit_price"] / pick["entry"] - 1) * 100
+            shadow_trades.append({
+                "date": ymd, "code": code, "outcome": result["outcome"],
+                "ret_pct": round(ret_pct, 2),
+            })
+
+    # ── baseline trades 요약 (읽기 전용) ──
+    base_summ = _summarize_shadow_trades(baseline_trades)
+    shadow_summ = _summarize_shadow_trades(shadow_trades)
+
+    if base_summ.get("n_filled", 0) == 0 or shadow_summ.get("n_filled", 0) == 0:
+        return {
+            "enabled": True, "rule": rule_str,
+            "note": "insufficient_filled_trades",
+            "baseline": base_summ, "shadow": shadow_summ,
+        }
+
+    # ── 구성 변경률 (baseline picks vs shadow picks) ──
+    # baseline picks는 trade record의 (date, code)에서 역산
+    base_picks_by_day: dict = {}
+    for t in baseline_trades:
+        base_picks_by_day.setdefault(str(t.get("date", "")), set()).add(
+            str(t.get("code", "")).zfill(6))
+    changed = 0
+    total = 0
+    for ymd, codes in shadow_picks_by_day.items():
+        bc = base_picks_by_day.get(ymd, set())
+        if bc or codes:
+            total += 1
+            if set(codes) != bc:
+                changed += 1
+    changed_pick_rate = round(changed / total, 4) if total > 0 else 0.0
+
+    d_ev = round(shadow_summ["ev"] - base_summ["ev"], 2)
+    d_tp1 = round(shadow_summ["tp1_rate"] - base_summ["tp1_rate"], 4)
+    d_stop = round(shadow_summ["stop_rate"] - base_summ["stop_rate"], 4)
+    d_fill = round(shadow_summ["fill_rate"] - base_summ["fill_rate"], 4)
+    d_non_win = round(shadow_summ["avg_non_win"] - base_summ["avg_non_win"], 2)
+
+    # single_backtest_ok — 단일 백테스트에서 조건 만족 여부.
+    # ★ 이것은 "좋은 신호"일 뿐 "production 승인"이 아니다. ★
+    # production_candidate 는 항상 False — RWF(rolling walk-forward) 검증이
+    # 리포트에 배선되기 전까지는 운영 적용 금지.
+    # RWF 검증은 simulate_struct_risk_shadow.py --mode rwf 가 담당하며,
+    # 그 결과는 rwf_validated / rwf_folds_passed / rwf_avg_delta_ev 에 채워질 예정.
+    single_backtest_ok = bool(
+        d_ev > 0
+        and d_non_win > 0
+        and d_fill >= -0.07
+        and changed_pick_rate <= 0.50
+    )
+
+    return {
+        "enabled": True,
+        "mode": "single_backtest_shadow",
+        "rule": rule_str,
+        "baseline_ev": base_summ["ev"],
+        "shadow_ev": shadow_summ["ev"],
+        "delta_ev": d_ev,
+        "baseline_tp1_rate": base_summ["tp1_rate"],
+        "shadow_tp1_rate": shadow_summ["tp1_rate"],
+        "delta_tp1_rate": d_tp1,
+        "baseline_stop_rate": base_summ["stop_rate"],
+        "shadow_stop_rate": shadow_summ["stop_rate"],
+        "delta_stop_rate": d_stop,
+        "baseline_fill_rate": base_summ["fill_rate"],
+        "shadow_fill_rate": shadow_summ["fill_rate"],
+        "delta_fill_rate": d_fill,
+        # ★ 핵심 메커니즘 지표 — 손절 감소가 아니라 비승리 구간 EV 누수 축소
+        "baseline_non_win_avg_ret": base_summ["avg_non_win"],
+        "shadow_non_win_avg_ret": shadow_summ["avg_non_win"],
+        "delta_non_win_avg_ret": d_non_win,
+        "changed_pick_rate": changed_pick_rate,
+        "n_baseline_filled": base_summ["n_filled"],
+        "n_shadow_filled": shadow_summ["n_filled"],
+        # ── production 게이트 — B안: 단일 백테스트 통과 ≠ 운영 승인 ──
+        "single_backtest_ok": single_backtest_ok,
+        "rwf_required": True,
+        "production_candidate": False,   # RWF 배선 전까지 항상 False
+        "production_gate_reason": "single_backtest_only__rwf_required",
+        # ── RWF 검증 결과 placeholder (외부 스크립트가 채울 예정) ──
+        "rwf_validated": False,
+        "rwf_folds_passed": None,
+        "rwf_avg_delta_ev": None,
+        "note": (
+            "measurement-only; does not alter ranking, picks, buy price, "
+            "or production recommendations. single_backtest_ok is a positive "
+            "signal, NOT a production approval. RWF fold validation via "
+            "simulate_struct_risk_shadow.py --mode rwf."
+        ),
+    }
+
+
 def summarize_trades(trades: list) -> dict:
     # NOT_FILLED는 별도 집계 — EV는 체결된 거래만
     not_filled = [t for t in trades if t["outcome"] == "NOT_FILLED"]
@@ -1682,6 +1939,23 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     except Exception as e:
         print(f"     ⚠ entry_mode_shadow 계산 실패 (baseline 영향 없음): {e}")
         out["entry_mode_shadow"] = {"enabled": False, "error": str(e)}
+
+    # [v3.9.1] STRUCT risk shadow — baseline 불변, STRUCT 70~85 제외 병렬 계산
+    print("  ▶ [v3.9.1] STRUCT risk shadow 백테스트 (STRUCT 70~85 제외 시뮬)...")
+    try:
+        out["struct_risk_shadow"] = compute_struct_risk_shadow(
+            days, ohlc_df, bt["trades"], thresholds=None, min_rank=40.0)
+        _sr = out["struct_risk_shadow"]
+        if _sr.get("enabled") and "delta_ev" in _sr:
+            print(f"     shadow: ΔEV {_sr['delta_ev']:+.2f} "
+                  f"(baseline {_sr['baseline_ev']} → shadow {_sr['shadow_ev']}), "
+                  f"Δnon_win {_sr['delta_non_win_avg_ret']:+.2f}, "
+                  f"구성변경 {_sr['changed_pick_rate']*100:.1f}%, "
+                  f"single_backtest_ok={_sr['single_backtest_ok']} "
+                  f"(production_candidate={_sr['production_candidate']} — RWF 검증 필요)")
+    except Exception as e:
+        print(f"     ⚠ struct_risk_shadow 계산 실패 (baseline 영향 없음): {e}")
+        out["struct_risk_shadow"] = {"enabled": False, "error": str(e)}
 
     by_label: dict[str, list] = defaultdict(list)
     for t in bt["trades"]:
