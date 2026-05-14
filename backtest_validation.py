@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-backtest_validation.py  (v3.8.3 — 2026-05-13)
+backtest_validation.py  (v3.9.0 — 2026-05-14)
 ═══════════════════════════════════════════════════
 v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
@@ -16,6 +16,14 @@ v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
   (3) 최강 라벨 튜닝 그리드서치 (--tune 옵션)
       평균/밸런스/갭/RR 임계값을 여러 조합으로 돌려 최적 조합 실측.
+
+[v3.9.0 — ENTRY_MODE shadow backtest]
+  · compute_entry_mode_shadow(): NOT_FILLED 종목 중 STRUCT≥90 & VWAP_GAP≤8
+    조건을 만족하는 것에 chase-entry(시가 ≤ entry×1.03)를 적용했으면
+    어떻게 됐을지 병렬 계산. chase 체결가 기준으로 stop/RR 재산정.
+  · **기존 baseline 백테스트는 절대 불변** — shadow 결과는 out["entry_mode_shadow"]
+    별도 섹션에만 저장. summarize_trades / simulate_ohlc / daily_*_backtest 무수정.
+  · downstream(tab_stocks/tab_perf/kelly/combo_optimizer) 영향 0.
 
 [v3.8.3 — TP3 실측 학습 루프]
   · 추천 CSV의 추천매도가2/추천매도가3를 pick에 포함
@@ -1013,6 +1021,222 @@ def simulate_capital_portfolio(trades: list, initial_capital: float = 10_000_000
     }
 
 
+# ═══════════════════════════════════════════════════
+#  [v3.9.0] ENTRY_MODE shadow backtest
+# ═══════════════════════════════════════════════════
+# 목적: 기존 백테스트가 NOT_FILLED로 버린 종목 중, 강한 종목(STRUCT≥90)이
+#       다음날 갭상승으로 못 잡힌 케이스(P1 패턴)에 chase-entry를 적용했으면
+#       어떻게 됐을지 병렬 계산. **baseline 백테스트는 절대 불변.**
+#
+# provisional rule (2026-05-14 시뮬레이션 기반 — simulate_entry_mode_v2.py):
+#   - 대상: NOT_FILLED & STRUCT_SCORE≥90 & VWAP_GAP≤8
+#   - chase 체결: 다음날 시가 ≤ entry × (1 + CHASE_CAP_PCT/100)
+#   - chase 체결가 = 다음날 시가
+#   - chase stop = chase_price × (1 - CHASE_STOP_PCT/100)   ← B_fixed6 방식
+#   - rr_chase = (tp1 - chase_price) / (chase_price - chase_stop)
+#   - rr_chase ≥ RR_CHASE_MIN 일 때만 chase 체결로 인정
+# 시뮬 결과: cap+3% / stop-6% / VWAP≤8 → sum_ret +70%, stop_rate 0% (n=8)
+ENTRY_MODE_SHADOW_ENABLED = True
+CHASE_CAP_PCT = 3.0          # 다음날 시가가 entry +3% 이내면 chase
+CHASE_STOP_PCT = 6.0         # chase 체결가 기준 -6% 손절
+RR_CHASE_MIN = 0.8           # chase 손익비 하한
+SHADOW_STRUCT_FLOOR = 90.0   # STRUCT_SCORE 하한
+SHADOW_VWAP_GAP_CAP = 8.0    # VWAP_GAP 상한 (이 초과면 chase 금지)
+
+
+def _load_recommend_features(days: list) -> dict:
+    """recommend rows에서 (date, code) → {STRUCT_SCORE, VWAP_GAP} 맵 생성.
+
+    days는 load_all_days() 결과: [(ymd, rows_list, rows_dict), ...]
+    trade record에는 STRUCT/VWAP_GAP이 없으므로 원본 recommend에서 다시 읽는다.
+    """
+    feat = {}
+    for ymd, rows_list, _ in days:
+        for row in rows_list:
+            code = str(row.get("종목코드", "")).zfill(6)
+            feat[(ymd, code)] = {
+                "STRUCT_SCORE": _fnum(row.get("STRUCT_SCORE", 0)),
+                "VWAP_GAP":     _fnum(row.get("VWAP_GAP", 0)),
+            }
+    return feat
+
+
+def compute_entry_mode_shadow(trades: list, ohlc_df: pd.DataFrame,
+                              days: list) -> dict:
+    """NOT_FILLED 종목에 chase-entry를 적용했을 때의 shadow 성과 계산.
+
+    [중요] 이 함수는 baseline trades를 변경하지 않는다. 읽기만 한다.
+    반환된 dict는 out["entry_mode_shadow"]에만 저장된다.
+
+    Returns
+    -------
+    dict with keys:
+      enabled, rule, n_not_filled_total, n_shadow_eligible,
+      extra_fills, extra_wins, extra_losses, extra_opens,
+      extra_sum_ret, extra_avg_ret, shadow_stop_rate,
+      avg_rr_chase, shadow_trades (list of per-trade detail)
+    """
+    if not ENTRY_MODE_SHADOW_ENABLED:
+        return {"enabled": False}
+
+    rule_str = (
+        f"NOT_FILLED & STRUCT≥{SHADOW_STRUCT_FLOOR:.0f} & VWAP_GAP≤{SHADOW_VWAP_GAP_CAP:.0f} "
+        f"& chase_cap=+{CHASE_CAP_PCT:.0f}% & chase_stop=-{CHASE_STOP_PCT:.0f}% "
+        f"& rr_chase≥{RR_CHASE_MIN}"
+    )
+
+    feat_map = _load_recommend_features(days)
+    not_filled = [t for t in trades if t.get("outcome") == "NOT_FILLED"]
+
+    shadow_trades = []
+    n_eligible = 0
+    for t in not_filled:
+        ymd = str(t.get("date", ""))
+        code = str(t.get("code", "")).zfill(6)
+        entry = _fnum(t.get("entry", 0))
+        tp1 = _fnum(t.get("tp1", 0))
+        if entry <= 0 or tp1 <= 0:
+            continue
+
+        feat = feat_map.get((ymd, code), {})
+        struct = feat.get("STRUCT_SCORE", 0.0)
+        vwap_gap = feat.get("VWAP_GAP", 0.0)
+
+        # provisional rule 게이트
+        if struct < SHADOW_STRUCT_FLOOR:
+            continue
+        if vwap_gap > SHADOW_VWAP_GAP_CAP:
+            continue
+        n_eligible += 1
+
+        # OHLC 다음날 시가 확인
+        entry_date = pd.Timestamp(ymd[:4] + "-" + ymd[4:6] + "-" + ymd[6:])
+        code_df = ohlc_df[ohlc_df["종목코드"] == code]
+        future = code_df[code_df["Date"] > entry_date].sort_values("Date").head(HORIZON)
+        if future.empty:
+            continue
+        d1 = future.iloc[0]
+        next_open = _fnum(d1["시가"])
+        if next_open <= 0:
+            continue
+
+        # chase 체결 조건: 시가가 chase cap 이내
+        chase_limit = entry * (1 + CHASE_CAP_PCT / 100.0)
+        if next_open > chase_limit:
+            continue  # cap 초과 → chase 못 함
+
+        chase_price = next_open
+        chase_stop = chase_price * (1 - CHASE_STOP_PCT / 100.0)
+        if chase_stop >= chase_price:
+            continue
+
+        # rr_chase 필터
+        reward = tp1 - chase_price
+        risk = chase_price - chase_stop
+        rr_chase = reward / risk if risk > 0 else 0.0
+        if rr_chase < RR_CHASE_MIN:
+            continue
+
+        # chase 체결가 + chase_stop 기준 TP1/Stop 첫 터치 판정
+        outcome = "OPEN"
+        exit_price = chase_price
+        days_held = 0
+        for i, (_, bar) in enumerate(future.iterrows()):
+            op = _fnum(bar["시가"])
+            high = _fnum(bar["고가"])
+            low = _fnum(bar["저가"])
+            if low <= 0 or high <= 0:
+                continue
+            day_n = i + 1
+            if i == 0:
+                # chase 체결 당일: 고가/저가만
+                if low <= chase_stop and high >= tp1:
+                    outcome, exit_price, days_held = "LOSS", chase_stop, day_n
+                    break
+                if high >= tp1:
+                    outcome, exit_price, days_held = "WIN", tp1, day_n
+                    break
+                if low <= chase_stop:
+                    outcome, exit_price, days_held = "LOSS", chase_stop, day_n
+                    break
+            else:
+                if op >= tp1:
+                    outcome, exit_price, days_held = "WIN", op, day_n
+                    break
+                if op <= chase_stop:
+                    outcome, exit_price, days_held = "LOSS", op, day_n
+                    break
+                if low <= chase_stop and high >= tp1:
+                    outcome, exit_price, days_held = "LOSS", chase_stop, day_n
+                    break
+                if low <= chase_stop:
+                    outcome, exit_price, days_held = "LOSS", chase_stop, day_n
+                    break
+                if high >= tp1:
+                    outcome, exit_price, days_held = "WIN", tp1, day_n
+                    break
+        else:
+            # horizon 마감 = OPEN
+            last_close = _fnum(future.iloc[-1]["종가"])
+            if last_close > 0:
+                exit_price = last_close
+                days_held = len(future)
+
+        ret_pct = (exit_price / chase_price - 1) * 100 - COST_PCT
+
+        shadow_trades.append({
+            "date": ymd, "code": code, "name": t.get("name", ""),
+            "sector": t.get("sector", ""),
+            "STRUCT_SCORE": round(struct, 1),
+            "VWAP_GAP": round(vwap_gap, 2),
+            "baseline_outcome": "NOT_FILLED",
+            "entry": entry, "tp1": tp1,
+            "chase_price": round(chase_price, 1),
+            "chase_stop": round(chase_stop, 1),
+            "rr_chase": round(rr_chase, 3),
+            "shadow_outcome": outcome,
+            "shadow_exit_price": round(exit_price, 1),
+            "shadow_ret_pct": round(ret_pct, 2),
+            "shadow_days_held": days_held,
+        })
+
+    # 집계
+    extra_fills = len(shadow_trades)
+    extra_wins = sum(1 for s in shadow_trades if s["shadow_outcome"] == "WIN")
+    extra_losses = sum(1 for s in shadow_trades if s["shadow_outcome"] == "LOSS")
+    extra_opens = sum(1 for s in shadow_trades if s["shadow_outcome"] == "OPEN")
+    extra_sum_ret = round(sum(s["shadow_ret_pct"] for s in shadow_trades), 2)
+    extra_avg_ret = round(extra_sum_ret / extra_fills, 2) if extra_fills > 0 else 0.0
+    shadow_stop_rate = round(extra_losses / extra_fills, 4) if extra_fills > 0 else 0.0
+    avg_rr_chase = (
+        round(sum(s["rr_chase"] for s in shadow_trades) / extra_fills, 3)
+        if extra_fills > 0 else 0.0
+    )
+
+    return {
+        "enabled": True,
+        "rule": rule_str,
+        "n_not_filled_total": len(not_filled),
+        "n_shadow_eligible": n_eligible,       # rule 게이트 통과 (chase 체결 전)
+        "extra_fills": extra_fills,            # 실제 chase 체결된 수
+        "extra_wins": extra_wins,
+        "extra_losses": extra_losses,
+        "extra_opens": extra_opens,
+        "extra_sum_ret": extra_sum_ret,
+        "extra_avg_ret": extra_avg_ret,
+        "shadow_stop_rate": shadow_stop_rate,
+        "avg_rr_chase": avg_rr_chase,
+        "shadow_trades": shadow_trades,
+        # production 후보 판정 (참고용 — 자동 적용 아님)
+        "production_candidate": bool(
+            extra_fills >= 8
+            and extra_wins > extra_losses
+            and extra_sum_ret > 0
+            and avg_rr_chase >= RR_CHASE_MIN
+        ),
+    }
+
+
 def summarize_trades(trades: list) -> dict:
     # NOT_FILLED는 별도 집계 — EV는 체결된 거래만
     not_filled = [t for t in trades if t["outcome"] == "NOT_FILLED"]
@@ -1442,6 +1666,22 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     out["daily_top3_backtest"] = summarize_trades(bt["trades"])
     out["daily_picks_log"] = bt["daily_picks"]
     out["all_trades"] = bt["trades"]
+
+    # [v3.9.0] ENTRY_MODE shadow — baseline 불변, 병렬 계산만
+    print("  ▶ [v3.9.0] ENTRY_MODE shadow 백테스트 (NOT_FILLED chase 시뮬)...")
+    try:
+        out["entry_mode_shadow"] = compute_entry_mode_shadow(
+            bt["trades"], ohlc_df, days)
+        _sh = out["entry_mode_shadow"]
+        if _sh.get("enabled"):
+            print(f"     shadow: eligible {_sh['n_shadow_eligible']} → "
+                  f"chase 체결 {_sh['extra_fills']} "
+                  f"(WIN {_sh['extra_wins']} / LOSS {_sh['extra_losses']}), "
+                  f"sum_ret {_sh['extra_sum_ret']}%, "
+                  f"production_candidate={_sh['production_candidate']}")
+    except Exception as e:
+        print(f"     ⚠ entry_mode_shadow 계산 실패 (baseline 영향 없음): {e}")
+        out["entry_mode_shadow"] = {"enabled": False, "error": str(e)}
 
     by_label: dict[str, list] = defaultdict(list)
     for t in bt["trades"]:
