@@ -12,7 +12,7 @@
   "avg_win_rate": 0.518,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 5935,
+  "est_win_rate_n": 6098,
   "routes": {
     "ARMED": 1
   },
@@ -30,7 +30,7 @@
       "EST_WIN_RATE": 0.518,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 5935
+      "EST_WIN_RATE_N": 6098
     }
   ]
 }
