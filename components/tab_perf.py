@@ -689,6 +689,140 @@ def _build_chart_by_mode(
 # ═══════════════════════════════════════════════════
 #  메인 렌더링
 # ═══════════════════════════════════════════════════
+def _load_backtest_validation() -> dict:
+    """backtest_validation_latest.json 로드 — shadow 섹션 읽기용."""
+    import json
+    for d in (DATA_DIR, os.path.join(os.path.dirname(__file__), "..", "data")):
+        path = os.path.join(d, "backtest_validation_latest.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                _logger.warning(f"backtest_validation_latest.json 로드 실패: {e}")
+                return {}
+    return {}
+
+
+def _render_shadow_lab_card():
+    """[v3.9.1] Shadow 실험실 — ENTRY_MODE / STRUCT risk shadow 측정 결과 표시.
+
+    추천 로직을 바꾸지 않고 "바꿨다면 어땠을지"를 매일 자동 측정한 결과.
+    measurement-only — production 적용 아님을 명시.
+    """
+    j = _load_backtest_validation()
+    em = j.get("entry_mode_shadow", {})
+    sr = j.get("struct_risk_shadow", {})
+
+    # 둘 다 없거나 비활성이면 카드 자체를 안 그림
+    if not (em.get("enabled") or sr.get("enabled")):
+        return
+
+    with ui.row().classes("w-full items-center gap-2 mb-2 mt-2"):
+        ui.label("🧪").classes("text-2xl")
+        with ui.column().classes("gap-0 flex-1"):
+            ui.label("Shadow 실험실 (measurement-only)").classes(
+                "text-lg font-bold text-purple-300"
+            )
+            ui.label(
+                "추천 로직을 바꾸지 않고 '바꿨다면 어땠을지'를 매일 자동 측정한 "
+                "결과입니다. 운영 추천에는 아직 반영되지 않습니다."
+            ).classes("text-xs text-gray-400")
+
+    # ─── ENTRY_MODE shadow ───
+    if em.get("enabled"):
+        with ui.card().classes(
+            "w-full p-3 bg-[#1a1a2e] border border-purple-700/30 "
+            "rounded-lg mb-2"
+        ):
+            ui.label("🎯 ENTRY_MODE shadow — 강한 종목 미체결 chase 회수").classes(
+                "text-sm font-bold text-purple-200 mb-1"
+            )
+            if "extra_fills" in em:
+                with ui.row().classes("w-full flex-wrap gap-x-6 gap-y-1"):
+                    _shadow_stat("추가 체결", f"{em['extra_fills']}건")
+                    _shadow_stat("WIN", f"{em['extra_wins']}건",
+                                 good=em["extra_wins"] > 0)
+                    _shadow_stat("LOSS", f"{em['extra_losses']}건",
+                                 bad=em["extra_losses"] > 0)
+                    _shadow_stat("합산 수익", f"{em.get('extra_sum_ret', 0):+.2f}%",
+                                 good=em.get("extra_sum_ret", 0) > 0,
+                                 bad=em.get("extra_sum_ret", 0) < 0)
+                    _shadow_stat("평균 RR", f"{em.get('avg_rr_chase', 0):.2f}")
+                _shadow_gate_label(em.get("production_candidate", False))
+            else:
+                ui.label("측정 데이터 누적 중 — 표본 부족").classes(
+                    "text-xs text-gray-500"
+                )
+            ui.label(f"규칙: {em.get('rule', '')}").classes(
+                "text-[10px] text-gray-600 mt-1 leading-tight"
+            )
+
+    # ─── STRUCT risk shadow ───
+    if sr.get("enabled"):
+        with ui.card().classes(
+            "w-full p-3 bg-[#1a1a2e] border border-purple-700/30 "
+            "rounded-lg mb-2"
+        ):
+            ui.label(
+                "🛡️ STRUCT risk shadow — STRUCT 70~85 제외 시뮬"
+            ).classes("text-sm font-bold text-purple-200 mb-1")
+            if "delta_ev" in sr:
+                with ui.row().classes("w-full flex-wrap gap-x-6 gap-y-1"):
+                    _shadow_stat(
+                        "ΔEV",
+                        f"{sr['delta_ev']:+.2f}",
+                        good=sr["delta_ev"] > 0,
+                        bad=sr["delta_ev"] < 0,
+                    )
+                    _shadow_stat(
+                        "Δ비승리 평균손익",
+                        f"{sr.get('delta_non_win_avg_ret', 0):+.2f}",
+                        good=sr.get("delta_non_win_avg_ret", 0) > 0,
+                        bad=sr.get("delta_non_win_avg_ret", 0) < 0,
+                    )
+                    _shadow_stat(
+                        "Top3 구성변경",
+                        f"{sr.get('changed_pick_rate', 0) * 100:.1f}%",
+                    )
+                    _shadow_stat(
+                        "단일 백테스트",
+                        "통과" if sr.get("single_backtest_ok") else "미통과",
+                        good=sr.get("single_backtest_ok", False),
+                    )
+                _shadow_gate_label(
+                    sr.get("production_candidate", False),
+                    extra=" (RWF 검증 필요)" if sr.get("rwf_required") else "",
+                )
+            else:
+                ui.label("측정 데이터 누적 중 — 표본 부족").classes(
+                    "text-xs text-gray-500"
+                )
+            ui.label(f"규칙: {sr.get('rule', '')}").classes(
+                "text-[10px] text-gray-600 mt-1 leading-tight"
+            )
+
+
+def _shadow_stat(label: str, value: str, good: bool = False, bad: bool = False):
+    """shadow 카드용 미니 스탯 (라벨 + 값)."""
+    color = "text-emerald-400" if good else ("text-rose-400" if bad else "text-gray-200")
+    with ui.column().classes("gap-0"):
+        ui.label(label).classes("text-[10px] text-gray-500")
+        ui.label(value).classes(f"text-sm font-bold {color}")
+
+
+def _shadow_gate_label(production_candidate: bool, extra: str = ""):
+    """production 게이트 상태 라벨 — 항상 보수적 표시."""
+    if production_candidate:
+        ui.label(
+            f"⚠️ production_candidate=True{extra} — 그래도 검토 후 적용"
+        ).classes("text-[11px] text-amber-400 mt-1")
+    else:
+        ui.label(
+            f"🔒 production 미적용{extra} — 측정 단계입니다"
+        ).classes("text-[11px] text-gray-500 mt-1")
+
+
 def render_tab_perf():
     """[Step AK+AL+AM] 시스템 성과 추세 — 면책 + 6개 메트릭 + 모바일 + KOSPI 알파"""
     
@@ -924,6 +1058,13 @@ def render_tab_perf():
         if w:
             w.on("update:model-value", lambda _: _build_chart())
     _build_chart()
+
+    # [v3.9.1] Shadow 실험실 — ENTRY_MODE / STRUCT risk shadow 측정 결과
+    try:
+        ui.separator().classes("my-6")
+        _render_shadow_lab_card()
+    except Exception as e:
+        _logger.warning(f"shadow lab 카드 렌더 실패 (페이지 영향 없음): {e}")
 
     # ─── Research Workbench 통합 정리 ───
     try:
