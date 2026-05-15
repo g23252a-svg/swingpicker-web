@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260515",
+  "generated_at": "2026-05-15 22:19:51",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "396270",
+      "name": "넥스트칩",
+      "route": "ATTACK",
+      "score": 90.3,
+      "close": 6270,
+      "entry": 6270,
+      "stop": 5320,
+      "target1": 7570,
+      "target2": 8750,
+      "est_win_rate": 0.467,
+      "rr": 1.4,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/396270"
+    },
+    {
+      "rank": 2,
+      "code": "307950",
+      "name": "현대오토에버",
+      "route": "ATTACK",
+      "score": 86.9,
+      "close": 648000,
+      "entry": 531000,
+      "stop": 451000,
+      "target1": 723000,
+      "target2": 739000,
+      "est_win_rate": 0.536,
+      "rr": 2.4,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/307950"
+    },
+    {
+      "rank": 3,
+      "code": "000880",
+      "name": "한화",
+      "route": "ARMED",
+      "score": 83.8,
+      "close": 141400,
+      "entry": 141400,
+      "stop": 127600,
+      "target1": 166400,
+      "target2": 174500,
+      "est_win_rate": 0.606,
+      "rr": 1.8,
+      "sector": "화학·소재",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/000880"
+    }
+  ]
+}
