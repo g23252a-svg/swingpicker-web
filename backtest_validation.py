@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-backtest_validation.py  (v3.9.1 — 2026-05-14)
+backtest_validation.py  (v3.9.2 — 2026-05-16)
 ═══════════════════════════════════════════════════
 v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
@@ -16,6 +16,20 @@ v1과 달리 이번 버전은 3가지를 실제로 구현한다.
 
   (3) 최강 라벨 튜닝 그리드서치 (--tune 옵션)
       평균/밸런스/갭/RR 임계값을 여러 조합으로 돌려 최적 조합 실측.
+
+[v3.9.2 — PRE_ENTRY_RISK shadow backtest]
+  · 5/15 폭락에서 손실 4건 attribution 결과, 모든 손실 종목이 STRUCT 70~85
+    + VWAP_GAP > 8 조합 또는 VWAP_GAP > 15 과열 신호를 갖고 있었음 확인.
+  · compute_pre_entry_risk_shadow(): 진입 시점의 위험 플래그(STRUCT 70~85 &
+    VWAP_GAP>8 = RED / STRUCT<90 & VWAP_GAP>15 = ORANGE)에 해당하는 종목을
+    Top3 후보 풀에서 제외했을 때 성과 차이를 측정. 4개 룰 비교:
+      Rule A: STRUCT 70~85 단독 제외 (= 기존 struct_risk_shadow와 동일, 비교 기준선)
+      Rule B: STRUCT 70~85 AND VWAP_GAP>8 제외 (RED만)
+      Rule C: STRUCT<90 AND VWAP_GAP>15 제외 (ORANGE만)
+      Rule D: B + C 합집합 (RED + ORANGE)
+  · 목표: 구성변경률은 낮으면서 손실 회피 효과는 큰 룰 발견.
+  · **baseline / 추천 / 매수가 절대 불변** — out["pre_entry_risk_shadow"]에만 저장.
+    production 미적용 (위험 플래그 CSV 컬럼 추가는 별도 패치).
 
 [v3.9.1 — STRUCT risk shadow backtest]
   · compute_struct_risk_shadow(): STRUCT_SCORE 70~85 종목을 Top3 후보 풀에서
@@ -1494,6 +1508,290 @@ def compute_struct_risk_shadow(days: list, ohlc_df: pd.DataFrame,
     }
 
 
+# ═══════════════════════════════════════════════════
+#  [v3.9.2] PRE_ENTRY_RISK shadow backtest
+# ═══════════════════════════════════════════════════
+# 배경: 5/15 폭락에서 손실 4건 attribution 결과
+#   삼성증권 5/11: STRUCT 79.4 / VWAP_GAP 18.7  → −10.28%
+#   삼성E&A  5/11: STRUCT 76.3 / VWAP_GAP 26.6  → −13.02%
+#   삼성E&A  5/12: STRUCT 86.6 / VWAP_GAP 17.8  → −8.42%
+#   HD현대   5/13: STRUCT 85.8 / VWAP_GAP 19.6  → −8.27%
+# 4건 모두 (STRUCT 70~85 ∨ STRUCT 85~90 경계) + VWAP_GAP > 15 과열 조합.
+# 즉 STRUCT 70~85 단독보다 (STRUCT + VWAP_GAP) 결합이 더 정확한 위험 신호.
+#
+# 4개 룰 비교 — 어느 룰이 구성변경률 적으면서 손실 회피 효과 큰가:
+#   Rule A: STRUCT 70~85 단독 제외             (= 기존 struct_risk_shadow와 동일)
+#   Rule B: STRUCT 70~85 AND VWAP_GAP > 8 제외  (RED — 본인 정의)
+#   Rule C: STRUCT < 90  AND VWAP_GAP > 15 제외 (ORANGE — 본인 정의)
+#   Rule D: B ∪ C 합집합                        (RED + ORANGE)
+#
+# **baseline / 추천 / 매수가 절대 불변** — out["pre_entry_risk_shadow"]에만 저장.
+# production exclude 미적용 — 위험 플래그 CSV 컬럼 추가는 별도 패치.
+PRE_ENTRY_RISK_SHADOW_ENABLED = True
+PRE_RISK_STRUCT_LO = 70.0   # RED 하한
+PRE_RISK_STRUCT_HI = 85.0   # RED 상한 (이 미만)
+PRE_RISK_VWAP_RED = 8.0     # RED VWAP_GAP 임계
+PRE_RISK_STRUCT_TOP = 90.0  # ORANGE STRUCT 상한 (이 미만)
+PRE_RISK_VWAP_ORANGE = 15.0  # ORANGE VWAP_GAP 임계
+
+
+def _classify_pre_entry_risk(struct_score: float, vwap_gap: float) -> str:
+    """진입 시점의 위험 레벨 분류.
+    
+    Returns: "RED" / "ORANGE" / "GREEN"
+      RED:    STRUCT 70~85 AND VWAP_GAP > 8   (위험구간 + 과열)
+      ORANGE: STRUCT < 90 AND VWAP_GAP > 15   (강한 종목 아닌데 VWAP 멀리)
+              (RED와 겹치면 RED 우선)
+      GREEN:  나머지
+    """
+    in_red = (PRE_RISK_STRUCT_LO <= struct_score < PRE_RISK_STRUCT_HI
+              and vwap_gap > PRE_RISK_VWAP_RED)
+    if in_red:
+        return "RED"
+    in_orange = (struct_score < PRE_RISK_STRUCT_TOP
+                 and vwap_gap > PRE_RISK_VWAP_ORANGE)
+    if in_orange:
+        return "ORANGE"
+    return "GREEN"
+
+
+def _make_risk_exclude_fn(rule: str):
+    """룰 이름 → "이 종목 제외해야 하는가" 판정 함수.
+    
+    True = 제외. False = 유지.
+    """
+    def _A_struct_only(s, v):
+        return PRE_RISK_STRUCT_LO <= s < PRE_RISK_STRUCT_HI
+    def _B_red_only(s, v):
+        return (PRE_RISK_STRUCT_LO <= s < PRE_RISK_STRUCT_HI
+                and v > PRE_RISK_VWAP_RED)
+    def _C_orange_only(s, v):
+        return (s < PRE_RISK_STRUCT_TOP and v > PRE_RISK_VWAP_ORANGE)
+    def _D_red_or_orange(s, v):
+        return _B_red_only(s, v) or _C_orange_only(s, v)
+    return {
+        "A_struct70_85": _A_struct_only,
+        "B_red":         _B_red_only,
+        "C_orange":      _C_orange_only,
+        "D_red_orange":  _D_red_or_orange,
+    }[rule]
+
+
+def _pick_top3_with_risk_exclude(day_csv_rows: list, exclude_fn,
+                                  thresholds: Optional[dict] = None,
+                                  min_rank: float = 40.0) -> list:
+    """pick_top3_codes 로직 복제 — exclude_fn이 True 반환하는 종목만 제외.
+    
+    원본 pick_top3_codes 무수정. shadow 전용.
+    """
+    candidates = []
+    for row in day_csv_rows:
+        stats = compute_axis_stats(row)
+        lbl = elite_label(stats, thresholds)
+        if lbl != "🏆 최강":
+            continue
+        struct = stats["S"]
+        vwap_gap = _fnum(row.get("VWAP_GAP", 0))
+        if exclude_fn(struct, vwap_gap):
+            continue  # shadow rule에 의한 제외
+        score = rank_score(stats, lbl)
+        if score < min_rank:
+            continue
+        candidates.append({
+            "code":   str(row.get("종목코드", "")).zfill(6),
+            "name":   str(row.get("종목명", "")),
+            "sector": str(row.get("업종", "")),
+            "label":  lbl,
+            "score":  score,
+            "entry":  _fnum(row.get("추천매수가", 0)),
+            "tp1":    _fnum(row.get("추천매도가1", 0)),
+            "tp2":    _fnum(row.get("추천매도가2", 0)),
+            "tp3":    _fnum(row.get("추천매도가3", 0)),
+            "stop":   _fnum(row.get("손절가", 0)),
+            "close":  _fnum(row.get("종가", 0)),
+        })
+    candidates.sort(key=lambda r: -r["score"])
+    picked = []
+    seen_sectors: set = set()
+    for c in candidates:
+        if len(picked) >= 3:
+            break
+        if c["sector"] and c["sector"] in seen_sectors:
+            continue
+        picked.append(c)
+        if c["sector"]:
+            seen_sectors.add(c["sector"])
+    return picked
+
+
+def _run_shadow_top3(days: list, ohlc_df: pd.DataFrame, exclude_fn,
+                     thresholds: Optional[dict] = None,
+                     min_rank: float = 40.0) -> tuple:
+    """한 룰에 대해 shadow Top3 백테스트. returns (trades, picks_by_day)."""
+    trades = []
+    picks_by_day = {}
+    days_dict_seq = [(d[0], d[2]) for d in days]
+    for i in range(1, len(days)):
+        ymd, rows_list, _ = days[i]
+        top3 = _pick_top3_with_risk_exclude(rows_list, exclude_fn,
+                                             thresholds, min_rank)
+        picks_by_day[ymd] = [c["code"] for c in top3]
+        if not top3:
+            continue
+        entry_date = pd.Timestamp(ymd[:4] + "-" + ymd[4:6] + "-" + ymd[6:])
+        for pick in top3:
+            code = pick["code"]
+            result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
+                                   pick["stop"], HORIZON, ohlc_df,
+                                   tp2=pick.get("tp2", 0.0),
+                                   tp3=pick.get("tp3", 0.0))
+            if result["outcome"] == "NODATA":
+                result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
+                                             pick["stop"], HORIZON, days_dict_seq,
+                                             tp2=pick.get("tp2", 0.0),
+                                             tp3=pick.get("tp3", 0.0))
+            if result["outcome"] == "NODATA":
+                continue
+            if result["outcome"] == "NOT_FILLED":
+                trades.append({"date": ymd, "code": code,
+                               "outcome": "NOT_FILLED", "ret_pct": 0.0})
+                continue
+            ret_pct = (result["exit_price"] / pick["entry"] - 1) * 100
+            trades.append({"date": ymd, "code": code,
+                           "outcome": result["outcome"],
+                           "ret_pct": round(ret_pct, 2)})
+    return trades, picks_by_day
+
+
+def compute_pre_entry_risk_shadow(days: list, ohlc_df: pd.DataFrame,
+                                  baseline_trades: list,
+                                  thresholds: Optional[dict] = None,
+                                  min_rank: float = 40.0) -> dict:
+    """4개 위험 제외 룰 비교 shadow 백테스트.
+    
+    [중요] baseline_trades 는 읽기 전용. shadow Top3를 룰마다 다시 뽑아
+    백테스트한 뒤 baseline 대비 ΔEV / 구성변경률 비교.
+    
+    measurement-only: ranking / picks / buy price / production 추천에
+    어떤 영향도 주지 않는다.
+    """
+    if not PRE_ENTRY_RISK_SHADOW_ENABLED:
+        return {"enabled": False}
+
+    rules = ["A_struct70_85", "B_red", "C_orange", "D_red_orange"]
+    rule_desc = {
+        "A_struct70_85": f"STRUCT {PRE_RISK_STRUCT_LO:.0f}~{PRE_RISK_STRUCT_HI:.0f} (struct_risk와 동일, 비교 기준)",
+        "B_red":         f"STRUCT {PRE_RISK_STRUCT_LO:.0f}~{PRE_RISK_STRUCT_HI:.0f} AND VWAP_GAP>{PRE_RISK_VWAP_RED:.0f}",
+        "C_orange":      f"STRUCT<{PRE_RISK_STRUCT_TOP:.0f} AND VWAP_GAP>{PRE_RISK_VWAP_ORANGE:.0f}",
+        "D_red_orange":  f"B ∪ C",
+    }
+
+    base_summ = _summarize_shadow_trades(baseline_trades)
+    if base_summ.get("n_filled", 0) == 0:
+        return {"enabled": True, "note": "baseline_no_filled_trades"}
+
+    base_picks_by_day: dict = {}
+    for t in baseline_trades:
+        base_picks_by_day.setdefault(str(t.get("date", "")), set()).add(
+            str(t.get("code", "")).zfill(6))
+
+    results_by_rule = {}
+    for rule in rules:
+        ex_fn = _make_risk_exclude_fn(rule)
+        shadow_trades, shadow_picks = _run_shadow_top3(
+            days, ohlc_df, ex_fn, thresholds, min_rank)
+        shadow_summ = _summarize_shadow_trades(shadow_trades)
+
+        if shadow_summ.get("n_filled", 0) == 0:
+            results_by_rule[rule] = {
+                "description": rule_desc[rule],
+                "note": "shadow_no_filled_trades",
+            }
+            continue
+
+        # 구성 변경률
+        changed = 0
+        total = 0
+        for ymd, codes in shadow_picks.items():
+            bc = base_picks_by_day.get(ymd, set())
+            if bc or codes:
+                total += 1
+                if set(codes) != bc:
+                    changed += 1
+        changed_pick_rate = round(changed / total, 4) if total > 0 else 0.0
+
+        d_ev = round(shadow_summ["ev"] - base_summ["ev"], 2)
+        d_tp1 = round(shadow_summ["tp1_rate"] - base_summ["tp1_rate"], 4)
+        d_stop = round(shadow_summ["stop_rate"] - base_summ["stop_rate"], 4)
+        d_fill = round(shadow_summ["fill_rate"] - base_summ["fill_rate"], 4)
+        d_non_win = round(shadow_summ["avg_non_win"] - base_summ["avg_non_win"], 2)
+
+        # 단일 백테스트 통과 — production_candidate 아님
+        single_ok = bool(
+            d_ev > 0
+            and d_non_win > 0
+            and d_fill >= -0.07
+            and changed_pick_rate <= 0.50
+        )
+
+        results_by_rule[rule] = {
+            "description": rule_desc[rule],
+            "shadow_ev": shadow_summ["ev"],
+            "delta_ev": d_ev,
+            "shadow_tp1_rate": shadow_summ["tp1_rate"],
+            "delta_tp1_rate": d_tp1,
+            "shadow_stop_rate": shadow_summ["stop_rate"],
+            "delta_stop_rate": d_stop,
+            "shadow_fill_rate": shadow_summ["fill_rate"],
+            "delta_fill_rate": d_fill,
+            "shadow_non_win_avg_ret": shadow_summ["avg_non_win"],
+            "delta_non_win_avg_ret": d_non_win,
+            "changed_pick_rate": changed_pick_rate,
+            "n_shadow_filled": shadow_summ["n_filled"],
+            "single_backtest_ok": single_ok,
+        }
+
+    # 최적 룰 추천 — sum_ret 아니라 (ΔEV * efficiency) 같은 단순 지표 안 만들고,
+    # 정직하게 후보만 표시. 판단은 RWF + 사람이.
+    best_by_ev = None
+    best_by_efficiency = None  # ΔEV / changed_pick_rate (변경 1%당 EV 개선)
+    for rule, r in results_by_rule.items():
+        if "delta_ev" not in r:
+            continue
+        if best_by_ev is None or r["delta_ev"] > results_by_rule[best_by_ev]["delta_ev"]:
+            best_by_ev = rule
+        eff = r["delta_ev"] / max(r["changed_pick_rate"], 0.01)
+        if best_by_efficiency is None:
+            best_by_efficiency = (rule, eff)
+        elif eff > best_by_efficiency[1]:
+            best_by_efficiency = (rule, eff)
+
+    return {
+        "enabled": True,
+        "mode": "single_backtest_shadow",
+        "baseline_ev": base_summ["ev"],
+        "baseline_tp1_rate": base_summ["tp1_rate"],
+        "baseline_stop_rate": base_summ["stop_rate"],
+        "baseline_fill_rate": base_summ["fill_rate"],
+        "baseline_non_win_avg_ret": base_summ["avg_non_win"],
+        "n_baseline_filled": base_summ["n_filled"],
+        "rules": results_by_rule,
+        "best_by_delta_ev": best_by_ev,
+        "best_by_efficiency": best_by_efficiency[0] if best_by_efficiency else None,
+        # ── production 게이트: 항상 False (별도 RWF + 사람 검토 필요) ──
+        "rwf_required": True,
+        "production_candidate": False,
+        "production_gate_reason": "single_backtest_only__rwf_required",
+        "rwf_validated": False,
+        "note": (
+            "measurement-only; does not alter ranking, picks, buy price, "
+            "or production recommendations. Compares 4 risk-exclusion rules "
+            "to find one with minimal pick-change while maximizing loss "
+            "avoidance. RWF validation required before production."
+        ),
+    }
+
+
 def summarize_trades(trades: list) -> dict:
     # NOT_FILLED는 별도 집계 — EV는 체결된 거래만
     not_filled = [t for t in trades if t["outcome"] == "NOT_FILLED"]
@@ -1956,6 +2254,29 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     except Exception as e:
         print(f"     ⚠ struct_risk_shadow 계산 실패 (baseline 영향 없음): {e}")
         out["struct_risk_shadow"] = {"enabled": False, "error": str(e)}
+
+    # [v3.9.2] PRE_ENTRY_RISK shadow — 4개 룰 비교 (RED/ORANGE 제외 효과)
+    print("  ▶ [v3.9.2] PRE_ENTRY_RISK shadow 백테스트 (4개 룰 비교)...")
+    try:
+        out["pre_entry_risk_shadow"] = compute_pre_entry_risk_shadow(
+            days, ohlc_df, bt["trades"], thresholds=None, min_rank=40.0)
+        _pr = out["pre_entry_risk_shadow"]
+        if _pr.get("enabled") and "rules" in _pr:
+            print(f"     baseline EV: {_pr['baseline_ev']:+.2f}")
+            for rule_name in ["A_struct70_85", "B_red", "C_orange", "D_red_orange"]:
+                r = _pr["rules"].get(rule_name, {})
+                if "delta_ev" in r:
+                    mark = "★" if rule_name == _pr.get("best_by_efficiency") else " "
+                    print(f"     {mark} {rule_name:14s}: ΔEV {r['delta_ev']:+.2f}, "
+                          f"Δnon_win {r['delta_non_win_avg_ret']:+.2f}, "
+                          f"구성변경 {r['changed_pick_rate']*100:.1f}%, "
+                          f"ok={r['single_backtest_ok']}")
+            print(f"     best_by_ΔEV: {_pr.get('best_by_delta_ev')} / "
+                  f"best_by_efficiency: {_pr.get('best_by_efficiency')} "
+                  f"(production_candidate={_pr['production_candidate']})")
+    except Exception as e:
+        print(f"     ⚠ pre_entry_risk_shadow 계산 실패 (baseline 영향 없음): {e}")
+        out["pre_entry_risk_shadow"] = {"enabled": False, "error": str(e)}
 
     by_label: dict[str, list] = defaultdict(list)
     for t in bt["trades"]:
