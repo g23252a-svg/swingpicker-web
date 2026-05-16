@@ -1,6 +1,6 @@
 {
   "trade_date": "20260515",
-  "generated_at": "2026-05-15 22:19:51",
+  "generated_at": "2026-05-16 19:41:56",
   "count": 3,
   "stocks": [
     {
@@ -25,7 +25,7 @@
       "code": "307950",
       "name": "현대오토에버",
       "route": "ATTACK",
-      "score": 86.9,
+      "score": 85.9,
       "close": 648000,
       "entry": 531000,
       "stop": 451000,

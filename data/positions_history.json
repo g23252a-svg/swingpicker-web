@@ -2467,5 +2467,34 @@
     "alerted_events": [
       "232680_20260513_WARN_DRAWDOWN_20260514"
     ]
+  },
+  {
+    "code": "011930",
+    "name": "신성이엔지",
+    "entry_ymd": "20260413",
+    "entry_px": 3190.0,
+    "qty": 0,
+    "stop_px": 2710.0,
+    "stop_px_initial": 2710.0,
+    "take_px1": 4095.0,
+    "take_px2": 4580.0,
+    "trailing_high": 49000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260515",
+    "last_close_px": 39950.0,
+    "unrealized_pnl_pct": 1152.35,
+    "realized_pnl_pct": 1152.35,
+    "close_ymd": "20260515",
+    "close_px": 39950.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "011930_20260413_TP1_HIT_20260415",
+      "011930_20260413_TP1_HIT_20260416",
+      "011930_20260413_TP1_HIT_20260417",
+      "011930_20260413_TP1_HIT_20260422",
+      "011930_20260413_CORPORATE_ACTION_20260515",
+      "011930_20260413_TP1_HIT_20260515",
+      "011930_20260413_TP2_HIT_20260515"
+    ]
   }
 ]

@@ -1,6 +1,6 @@
 {
   "asof_ymd": "20260515",
-  "generated_at": "2026-05-15T22:19:03.639389",
+  "generated_at": "2026-05-16T19:41:23.357030",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
@@ -32,7 +32,7 @@
         "score_lo": 60,
         "score_hi": 70.0,
         "n_raw": 68,
-        "p_win": 0.3556,
+        "p_win": 0.3557,
         "p_win_lcb": 0.25,
         "avg_ret_net_pct": -2.426,
         "avg_ret_excess_pct": -6.0842
@@ -40,11 +40,11 @@
       {
         "score_lo": 70,
         "score_hi": 80.0,
-        "n_raw": 34,
-        "p_win": 0.4202,
-        "p_win_lcb": 0.2637,
-        "avg_ret_net_pct": -1.8712,
-        "avg_ret_excess_pct": -6.0339
+        "n_raw": 35,
+        "p_win": 0.4078,
+        "p_win_lcb": 0.2555,
+        "avg_ret_net_pct": -2.4387,
+        "avg_ret_excess_pct": -6.2982
       },
       {
         "score_lo": 80,
@@ -67,17 +67,17 @@
     ],
     "monotone_p_win_lcb": true,
     "monotone_avg_ret": true,
-    "monotone_avg_ret_excess": true
+    "monotone_avg_ret_excess": false
   },
-  "realized_wr": 0.287,
+  "realized_wr": 0.2864,
   "realized_wr_top_pick": null,
   "realized_wr_top_pick_n": 0,
-  "realized_wr_active": 0.287,
-  "realized_wr_active_n": 496,
-  "declared_vs_realized_gap_active": 0.2532,
+  "realized_wr_active": 0.2864,
+  "realized_wr_active_n": 497,
+  "declared_vs_realized_gap_active": 0.2538,
   "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": 0.2532,
-  "avg_ret_excess_pct": -6.8289,
+  "declared_vs_realized_gap": 0.2538,
+  "avg_ret_excess_pct": -6.8457,
   "top_pick_funnel": {
     "trade_ymd": "20260515",
     "total": 629,
@@ -131,7 +131,7 @@
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "WARN",
-      "detail": "gap_active=25.3% (n=496) — fallback 보정 또는 calibration drift 모니터링"
+      "detail": "gap_active=25.4% (n=497) — fallback 보정 또는 calibration drift 모니터링"
     },
     {
       "gate": "wilson_monotonicity",
@@ -140,7 +140,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-6.83%"
+      "detail": "avg_ret_excess=-6.85%"
     },
     {
       "gate": "market_map_coverage_95",

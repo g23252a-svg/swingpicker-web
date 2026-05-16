@@ -5,9 +5,9 @@
     "score_lo":0,
     "score_hi":50.0,
     "score_center":25.0,
-    "p_calibrated":0.5394,
-    "n_effective":56.6,
-    "n_raw":81
+    "p_calibrated":0.4784,
+    "n_effective":66.4,
+    "n_raw":92
   },
   {
     "method":"DISPLAY_SCORE",
@@ -15,9 +15,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.7025,
-    "n_effective":414.1,
-    "n_raw":539
+    "p_calibrated":0.7032,
+    "n_effective":415.0,
+    "n_raw":540
   },
   {
     "method":"DISPLAY_SCORE",

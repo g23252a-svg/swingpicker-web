@@ -424,33 +424,6 @@
     ]
   },
   {
-    "code": "011930",
-    "name": "신성이엔지",
-    "entry_ymd": "20260413",
-    "entry_px": 3190.0,
-    "qty": 0,
-    "stop_px": 2710.0,
-    "stop_px_initial": 2710.0,
-    "take_px1": 4095.0,
-    "take_px2": 4580.0,
-    "trailing_high": 4970.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260515",
-    "last_close_px": 39950.0,
-    "unrealized_pnl_pct": 25.24,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": [
-      "011930_20260413_TP1_HIT_20260415",
-      "011930_20260413_TP1_HIT_20260416",
-      "011930_20260413_TP1_HIT_20260417",
-      "011930_20260413_TP1_HIT_20260422",
-      "011930_20260413_CORPORATE_ACTION_20260515"
-    ]
-  },
-  {
     "code": "050890",
     "name": "쏠리드",
     "entry_ymd": "20260413",
@@ -830,7 +803,8 @@
       "079550_20260427_WARN_DRAWDOWN_20260511",
       "079550_20260427_WARN_DRAWDOWN_20260512",
       "079550_20260427_WARN_DRAWDOWN_20260513",
-      "079550_20260427_WARN_DRAWDOWN_20260514"
+      "079550_20260427_WARN_DRAWDOWN_20260514",
+      "079550_20260427_WARN_DRAWDOWN_20260515"
     ]
   },
   {
@@ -899,7 +873,8 @@
     "close_reason": "",
     "alerted_events": [
       "102120_20260428_WARN_DRAWDOWN_20260512",
-      "102120_20260428_WARN_DRAWDOWN_20260513"
+      "102120_20260428_WARN_DRAWDOWN_20260513",
+      "102120_20260428_WARN_DRAWDOWN_20260515"
     ]
   },
   {
@@ -1009,7 +984,8 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "042510_20260506_WARN_DRAWDOWN_20260514"
+      "042510_20260506_WARN_DRAWDOWN_20260514",
+      "042510_20260506_WARN_DRAWDOWN_20260515"
     ]
   },
   {
@@ -1054,7 +1030,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "089010_20260508_WARN_DRAWDOWN_20260515"
+    ]
   },
   {
     "code": "028670",
@@ -1138,7 +1116,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "348340_20260513_WARN_DRAWDOWN_20260515"
+    ]
   },
   {
     "code": "482630",
@@ -1159,7 +1139,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "482630_20260513_WARN_DRAWDOWN_20260515"
+    ]
   },
   {
     "code": "012030",
@@ -1180,7 +1162,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "012030_20260514_WARN_DRAWDOWN_20260515"
+    ]
   },
   {
     "code": "082920",
@@ -1201,7 +1185,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "082920_20260514_WARN_DRAWDOWN_20260515"
+    ]
   },
   {
     "code": "396270",
