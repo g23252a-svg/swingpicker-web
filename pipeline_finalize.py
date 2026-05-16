@@ -86,6 +86,73 @@ _SORT_ROUTE_PRIORITY = {
 }
 
 
+# ═══════════════════════════════════════════════════════════
+# [v3.9.6] PRE_ENTRY_RISK 컬럼 부여
+# ═══════════════════════════════════════════════════════════
+# 검증된 룰 (simulate_pre_entry_risk_shadow.py --mode rwf, B_red 5/5 통과):
+#   RED:    STRUCT_SCORE 70 ≤ s ≤ 85 AND VWAP_GAP > 8
+#   ORANGE: STRUCT_SCORE < 90 AND VWAP_GAP > 15  (RED와 겹치면 RED 우선)
+#   GREEN:  그 외
+# 표시 전용 — 자동 제외/감점 없음. 회원이 "이 종목 위험" 인지하게.
+# [v3.9.7] 경계값 보정: 코드와 문구 일치 — STRUCT == 85.0도 RED에 포함
+PRE_RISK_STRUCT_LO_CSV = 70.0
+PRE_RISK_STRUCT_HI_CSV = 85.0   # 포함 (<=)
+PRE_RISK_VWAP_RED_CSV = 8.0
+PRE_RISK_STRUCT_TOP_CSV = 90.0
+PRE_RISK_VWAP_ORANGE_CSV = 15.0
+
+
+def add_entry_risk_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """[v3.9.6] recommend CSV에 ENTRY_RISK_FLAG / LEVEL / REASON / RULE 컬럼 부여.
+    
+    원본 df는 보존, 컬럼만 추가. STRUCT_SCORE / VWAP_GAP 없는 행은 GREEN 처리.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    # 안전 추출 (없으면 NaN → 0)
+    struct = pd.to_numeric(df.get("STRUCT_SCORE", 0), errors="coerce").fillna(0)
+    vwap = pd.to_numeric(df.get("VWAP_GAP", 0), errors="coerce").fillna(0)
+
+    # RED 마스크: STRUCT 70 ≤ s ≤ 85 AND VWAP>8
+    # ([v3.9.7] HI를 inclusive로 — 문구 "70~85"와 코드 일치, 85.0 경계 누락 방지)
+    red_mask = (
+        (struct >= PRE_RISK_STRUCT_LO_CSV)
+        & (struct <= PRE_RISK_STRUCT_HI_CSV)
+        & (vwap > PRE_RISK_VWAP_RED_CSV)
+    )
+    # ORANGE 마스크: STRUCT<90 AND VWAP>15 (RED와 겹치면 RED 우선)
+    orange_mask = (
+        (struct < PRE_RISK_STRUCT_TOP_CSV)
+        & (vwap > PRE_RISK_VWAP_ORANGE_CSV)
+        & ~red_mask
+    )
+
+    level = np.where(red_mask, "RED",
+                     np.where(orange_mask, "ORANGE", "GREEN"))
+    flag = np.where((red_mask | orange_mask), 1, 0)
+    rule = np.where(red_mask, "B_RED",
+                    np.where(orange_mask, "C_ORANGE", ""))
+
+    # REASON — 한글 설명 (회원이 읽기 좋게)
+    reason = np.where(
+        red_mask,
+        "STRUCT 70~85 위험 구간 + VWAP_GAP > 8% 과열",
+        np.where(
+            orange_mask,
+            "STRUCT < 90 + VWAP_GAP > 15% 강한 과열",
+            "",
+        )
+    )
+
+    df = df.copy()
+    df["ENTRY_RISK_FLAG"] = flag.astype(int)
+    df["ENTRY_RISK_LEVEL"] = level
+    df["ENTRY_RISK_RULE"] = rule
+    df["ENTRY_RISK_REASON"] = reason
+    return df
+
+
 def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
     """IS_NOW_ENTRY — shared_utils.compute_is_now_entry 벡터 적용.
     
@@ -294,6 +361,15 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"🎯 [v22] SORT_SPEC 적용 완료 (TOP_PICK × IS_NOW_ENTRY × ELITE × RR ...)")
     except Exception as e:
         logger.warning(f"⚠️ finalize_sort 실패 (무해 — 기존 순서 유지): {e}")
+
+    # [v3.9.6] PRE_ENTRY_RISK 컬럼 부여 — 표시 전용, 추천 제외 아님
+    try:
+        df_out = add_entry_risk_columns(df_out)
+        n_red = int((df_out["ENTRY_RISK_LEVEL"] == "RED").sum())
+        n_orange = int((df_out["ENTRY_RISK_LEVEL"] == "ORANGE").sum())
+        log(f"🚨 [v3.9.6] ENTRY_RISK 컬럼 부여 완료 — RED {n_red} · ORANGE {n_orange}")
+    except Exception as e:
+        logger.warning(f"⚠️ add_entry_risk_columns 실패 (무해): {e}")
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
