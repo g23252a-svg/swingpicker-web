@@ -36,6 +36,16 @@ def fake_data_dir(tmp_path, monkeypatch):
         if "benchmarks" in mod or mod.startswith("services"):
             del sys.modules[mod]
 
+    # [v3.9.15e + 6 hotfix] services.benchmarks.DATA_DIR을 가짜 경로로 교체.
+    # services.benchmarks의 dirs_to_try는 [DATA_DIR, os.getcwd()+"/data", "data"]
+    # 순서로 시도하는데, DATA_DIR은 모듈 import 시점에 절대경로로 박힘
+    # (`_HERE = os.path.dirname(os.path.abspath(__file__))` 기반).
+    # monkeypatch.chdir만 하면 2번 dirs_to_try만 바뀌고 1번 절대경로는 그대로 →
+    # 실제 repo의 data/bench_cache_latest.json이 우선 hit되어 fixture 무시됨.
+    # (Linux CI tmp 환경에선 1번이 빈 디렉토리라 우연히 통과, Windows 본인 repo에선 fail)
+    import services.benchmarks as _bench
+    monkeypatch.setattr(_bench, "DATA_DIR", str(data_dir))
+
     # [v3.9.15e + 4] tab_backtest는 모듈 캐시 유지 (재import 비용 큼).
     # 대신 services.benchmarks의 lru_cache만 클리어해서 stale 캐시 제거.
     # tab_backtest._calc_kospi_alpha는 함수 내부에서 services를 import하므로
