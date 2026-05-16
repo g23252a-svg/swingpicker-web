@@ -159,6 +159,143 @@ def check_json_meta_versions():
     return errors
 
 
+def check_alpha_schema_integrity():
+    """[v3.9.15e + 4] components/tab_backtest.py의 _calc_kospi_alpha가
+    trades_df 컬럼명을 정합하게 쓰는지 정적 검사.
+
+    v3.9.15d 사례: trades_df에 "date"/"net_pct" 컬럼이 없는데 그걸 lookup
+    → real 경로 영원히 작동 0%. 누군가 다시 옛 컬럼명으로 되돌리면 즉시 차단.
+
+    [v3.9.15e + 5] AST 기반으로 승격 (이전 라인 단위 문자열 매칭 → AST 노드).
+    이전 방식 한계: `row.get("date")` 같은 변수 alias나 dict subscript 우회는
+    못 잡음. AST 기반은 _calc_kospi_alpha 본문 안의 모든 Constant 노드 중
+    값이 "date" 또는 "net_pct"인 것을 잡아냄. 이 두 문자열이 함수 안에
+    string literal로 등장할 합법적 이유가 거의 없으므로 false positive 최소.
+
+    검출 케이스 (전부 fail):
+      · `"date" in trades.columns`             [v3.9.15d 원래 버그]
+      · `r.get("date", "")`                    [원래 버그 + 다른 alias]
+      · `r["date"]`                            [Subscript]
+      · `row["date"]`                          [변수명 alias]
+      · `col_name = "date"; r.get(col_name)`   [문자열 변수에 저장해 우회 시도]
+      · `pd.to_datetime(t["net_pct"])`         [중첩 호출]
+    """
+    errors = []
+    fpath = os.path.join(PROJECT_ROOT, "components", "tab_backtest.py")
+    if not os.path.exists(fpath):
+        return errors
+
+    FORBIDDEN_LITERALS = {"date", "net_pct"}
+
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            source = f.read()
+        tree = ast.parse(source, filename=fpath)
+    except SyntaxError as e:
+        return [f"components/tab_backtest.py 구문 오류 — gate 검사 불가: {e}"]
+    except Exception as e:
+        print(f"  ⚠️ tab_backtest.py 파싱 스킵: {e}")
+        return errors
+
+    # _calc_kospi_alpha 함수 노드 찾기
+    target_func = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_calc_kospi_alpha":
+            target_func = node
+            break
+
+    if target_func is None:
+        # 함수 자체가 없으면 알파 기능 미사용 환경 (스킵)
+        return errors
+
+    # 함수 본문 내의 모든 Constant 노드 순회
+    for sub_node in ast.walk(target_func):
+        if isinstance(sub_node, ast.Constant) and isinstance(sub_node.value, str):
+            if sub_node.value in FORBIDDEN_LITERALS:
+                lineno = getattr(sub_node, "lineno", "?")
+                errors.append(
+                    f"components/tab_backtest.py:{lineno} — "
+                    f'_calc_kospi_alpha 내부에 금지 string literal "{sub_node.value}" 발견 '
+                    f"(trades_df 실제 컬럼: rec_date / net_ret). "
+                    f"v3.9.15d 회귀 의심."
+                )
+
+    return errors
+
+
+def check_benchmark_cache_completeness():
+    """[v3.9.15e + 4] data/bench_cache_latest.json의 필수 키 검증.
+
+    슬라이더 1~60일을 모두 지원하려면 KOSPI cache에 [1, 3, 5, 10, 20, 60]
+    키가 모두 있어야 함. 60 키 누락 시 슬라이더 41~60일 알파 미산출.
+
+    [v3.9.15e + 5] warning → hard fail 승격.
+    이유: 41~60일 전략의 알파가 빠지는 건 무시 못 할 정합성 위반.
+    macro_filter._BENCH_LOOKBACK_BDAYS=130 적용 후엔 60 키 누락이 발생하면
+    안 됨. 만약 발생하면 collector 회귀 가능성 — 배포 차단이 맞다.
+
+    파일 자체가 없는 케이스 (collector 미실행 CI 환경)는 여전히 스킵
+    (파일 부재 != 키 누락).
+    """
+    errors = []
+    fpath = os.path.join(PROJECT_ROOT, "data", "bench_cache_latest.json")
+    if not os.path.exists(fpath):
+        # 캐시 파일 자체가 없는 건 collector 미실행 환경 (CI) — 스킵
+        return errors
+
+    required_keys = {1, 3, 5, 10, 20, 60}
+    try:
+        import json
+        with open(fpath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        kospi = data.get("KOSPI", {})
+        present = {int(k) for k in kospi.keys() if str(k).isdigit()}
+        missing = required_keys - present
+        if missing:
+            errors.append(
+                f"data/bench_cache_latest.json — KOSPI 키 누락: "
+                f"{sorted(missing)} (collector lookback 확장 필요. "
+                f"macro_filter._BENCH_LOOKBACK_BDAYS=130 적용 확인)"
+            )
+    except Exception as e:
+        errors.append(f"data/bench_cache_latest.json 파싱 실패: {e}")
+    return errors
+
+
+def check_kospi_daily_csv_schema():
+    """[v3.9.15e + 4] data/kospi_daily.csv 스키마 검증 (있을 경우).
+
+    파일이 있으면 필수 컬럼 [date, close, ret_1d_%, ret_3d_%, ret_5d_%,
+    ret_10d_%, ret_20d_%, ret_60d_%] 모두 존재해야 함.
+
+    파일 없는 경우는 OK (real 알파 미사용 환경) — simple 알파로 폴백.
+    """
+    errors = []
+    fpath = os.path.join(PROJECT_ROOT, "data", "kospi_daily.csv")
+    if not os.path.exists(fpath):
+        return errors
+
+    required_cols = [
+        "date", "close",
+        "ret_1d_%", "ret_3d_%", "ret_5d_%",
+        "ret_10d_%", "ret_20d_%", "ret_60d_%",
+    ]
+    try:
+        # csv 헤더만 읽기 (pandas 의존 회피 — CI 가벼움)
+        with open(fpath, "r", encoding="utf-8-sig") as f:
+            header = f.readline().strip().split(",")
+        header = [h.strip().strip('"') for h in header]
+        missing = [c for c in required_cols if c not in header]
+        if missing:
+            errors.append(
+                f"data/kospi_daily.csv — 필수 컬럼 누락: {missing} "
+                f"(scripts/collect_kospi_daily.py 재실행 필요)"
+            )
+    except Exception as e:
+        errors.append(f"data/kospi_daily.csv 파싱 실패: {e}")
+    return errors
+
+
 def main():
     print("🔍 Contract Gate Check")
     print("=" * 50)
@@ -196,6 +333,32 @@ def main():
             print(f"      {e}")
     else:
         print(f"   ✅ OK")
+
+    # ─────────────────────────────────────────────────────────
+    # [v3.9.15e + 4] Alpha 게이트 — KOSPI 알파 산출물 무결성
+    # ─────────────────────────────────────────────────────────
+    print("\n6. [GUARD_ALPHA_SCHEMA] _calc_kospi_alpha 컬럼명 정합...")
+    errs = check_alpha_schema_integrity()
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:5]:
+        print(f"      {e}")
+
+    print("\n7. [GUARD_BENCHMARK] bench_cache_latest.json 필수 키 (1·3·5·10·20·60)...")
+    errs = check_benchmark_cache_completeness()
+    # [v3.9.15e + 5] warning → hard fail 승격.
+    # 41~60일 전략의 알파 정합성 보호. CI 환경 (파일 부재)은 함수 자체가 스킵.
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:3]:
+        print(f"      {e}")
+
+    print("\n8. [GUARD_ALPHA_REAL] kospi_daily.csv 스키마 (필수 컬럼)...")
+    errs = check_kospi_daily_csv_schema()
+    all_errors.extend(errs)  # 파일 있으면서 스키마 깨진 건 hard fail
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:3]:
+        print(f"      {e}")
 
     print("\n" + "=" * 50)
     if all_errors:

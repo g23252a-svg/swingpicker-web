@@ -49,7 +49,17 @@ _RISK_LEVELS = {"NORMAL": 0, "CAUTION": 1, "CRITICAL": 2}
 _RISK_NAMES = {v: k for k, v in _RISK_LEVELS.items()}
 
 # [v2.0 #2] 데이터 조회 영업일 수 (50 BDay ≈ 약 2.5개월)
-_LOOKBACK_BDAYS = 50
+_LOOKBACK_BDAYS = 50  # 기본 macro 분석용 (60일 미만 보유기간만 필요)
+
+# [v3.9.15e + 2] 벤치마크 수익률 전용 lookback.
+# get_benchmark_returns()가 [1, 3, 5, 10, 20, 60, 120] 보유기간 모두 계산하지만
+# _LOOKBACK_BDAYS=50으로는 if len(close) > 60 통과 못 해서 60·120 키가 dict에
+# 안 들어감 → bench_cache_latest.json에 60일 키 누락 → 슬라이더 41~60일 알파
+# 미산출. 130일이면 60일 보유기간은 안정적으로 산출 가능 (120일은 데이터
+# 양에 따라 조건부). KRX 영업일 기준 약 6.5개월 분량.
+#
+# 주의: services/benchmarks.py의 _BENCH_HOLD_MAP과 정합 유지.
+_BENCH_LOOKBACK_BDAYS = 130
 
 
 def _risk_max(current: str, candidate: str) -> str:
@@ -315,7 +325,9 @@ def get_benchmark_returns(
     # ── 1순위: FDR ──
     if HAS_FDR:
         for name, code in [("KOSPI", "KS11"), ("KOSDAQ", "KQ11")]:
-            df = _safe_fdr_fetch(code, end_dt, lookback_bdays=_LOOKBACK_BDAYS, min_rows=2)
+            # [v3.9.15e + 2] _LOOKBACK_BDAYS(50) → _BENCH_LOOKBACK_BDAYS(130)
+            # 60일 보유기간 수익률 계산을 위한 lookback 확장
+            df = _safe_fdr_fetch(code, end_dt, lookback_bdays=_BENCH_LOOKBACK_BDAYS, min_rows=2)
             if df is None:
                 logger.warning(f"벤치마크 {name}({code}) FDR 조회 실패")
                 continue
@@ -336,7 +348,8 @@ def get_benchmark_returns(
             if name in result:
                 continue
             try:
-                yf_df = yf.download(ticker, period="6mo", interval="1d",
+                # [v3.9.15e + 2] 6mo → 1y (60일 보유기간 안정 계산)
+                yf_df = yf.download(ticker, period="1y", interval="1d",
                                      progress=False, timeout=10)
                 if yf_df is not None and len(yf_df) > 20:
                     close = yf_df["Close"].dropna()

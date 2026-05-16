@@ -1136,11 +1136,322 @@ def render_tab_backtest(df, auth):
 # ═══════════════════════════════════════════════════
 #  [Step AO] 결과 렌더링 (확장)
 # ═══════════════════════════════════════════════════
+def _calc_kospi_alpha(result: dict, cfg: dict):
+    """[v3.9.15b] 전략 vs KOSPI 알파 계산.
+    
+    [v3.9.15d] 2단계 폴백:
+    1. daily KOSPI CSV 있으면 → 진짜 거래일별 알파
+       (각 trade의 추천일에서 hold_days 보유 KOSPI 수익률 차감)
+    2. 없으면 → 간이 알파 (전략 거래당 평균 vs KOSPI 단일 시점)
+    
+    [v3.9.15e] critical bug fix — trades_df 실제 스키마 정합:
+    - _run_backtest():446-454에서 만드는 trades_df의 실제 컬럼은
+      rec_date / code / name / score / raw_ret / net_ret / status.
+    - v3.9.15d에서 "date" / "net_pct"로 lookup 하던 코드는 영원히
+      매칭 0건 → if len(kospi_rets) >= 10 실패 → 항상 simple fallback.
+    - 즉 v3.9.15d의 "real" 경로는 코드만 있고 실제 작동 0%였음.
+    - 수정: trades.columns에 "rec_date" 확인, row.get("rec_date"), row.get("net_ret").
+    - 단위: net_ret도 % 단위(_run_backtest:444), KOSPI 수익률도 %라 직접 차감 OK.
+    
+    [v3.9.15e] 표본 부족(<10) 시 명시적 simple fallback:
+    - 이전엔 if 블록 통과 못 하면 자동으로 simple로 떨어졌지만
+      매칭은 됐는데 표본만 부족한 경우 vs 컬럼 자체가 없는 경우를
+      구분 못 했음. 이제 두 케이스 모두 simple로 가지만 로그가 다름.
+    
+    Returns: (alpha_pp, mode) 튜플 — mode는 "real" 또는 "simple"
+             또는 (None, None) — 데이터 없음
+    """
+    try:
+        from services.benchmarks import (
+            load_bench_cache, get_kospi_return,
+            load_kospi_daily, get_kospi_return_for_date,
+        )
+        hold_days = int(cfg.get("hold_days", 5) or 5)
+
+        # === 1단계: 진짜 거래일별 알파 시도 ===
+        daily = load_kospi_daily()
+        if daily is not None:
+            trades = result.get("trades_df")
+            # [v3.9.15e fix] "date" → "rec_date" (trades_df 실제 컬럼명)
+            if trades is not None and not trades.empty and "rec_date" in trades.columns:
+                # 각 trade의 추천일 기준 KOSPI 수익률 매칭
+                kospi_rets = []
+                strat_rets = []
+                for _, r in trades.iterrows():
+                    # [v3.9.15e fix] "date" → "rec_date"
+                    date_str = str(r.get("rec_date", "")).replace("-", "")
+                    if not date_str:
+                        continue
+                    kr = get_kospi_return_for_date(date_str, hold_days)
+                    # [v3.9.15e fix] "net_pct" → "net_ret"
+                    sr = r.get("net_ret")
+                    try:
+                        sr_val = float(sr) if sr is not None and not pd.isna(sr) else None
+                    except Exception:
+                        sr_val = None
+                    if kr is not None and sr_val is not None:
+                        kospi_rets.append(float(kr))
+                        strat_rets.append(sr_val)
+
+                n_matched = len(kospi_rets)
+                if n_matched >= 10:  # 최소 표본
+                    import statistics as _s
+                    avg_strat = _s.mean(strat_rets)
+                    avg_kospi = _s.mean(kospi_rets)
+                    _logger.info(
+                        f"📊 real alpha 산출: 매칭 {n_matched}건 / "
+                        f"전체 {len(trades)}건 / 전략 {avg_strat:+.2f}% "
+                        f"KOSPI {avg_kospi:+.2f}% → 알파 {avg_strat-avg_kospi:+.2f}%p"
+                    )
+                    return (avg_strat - avg_kospi, "real")
+                else:
+                    _logger.info(
+                        f"real alpha 표본 부족 (매칭 {n_matched} < 10) → simple fallback"
+                    )
+            else:
+                _logger.debug(
+                    "trades_df 없음 또는 rec_date 컬럼 없음 → simple fallback"
+                )
+
+        # === 2단계: 간이 알파 (fallback) ===
+        bench = load_bench_cache()
+        kospi_ret = get_kospi_return(bench, hold_days)
+        if kospi_ret is None:
+            return (None, None)
+        win_rate = float(result.get("win_rate", 0) or 0) / 100.0
+        avg_win = float(result.get("avg_win", 0) or 0)
+        avg_loss = float(result.get("avg_loss", 0) or 0)
+        strat_per_trade = avg_win * win_rate + avg_loss * (1.0 - win_rate)
+        return (strat_per_trade - float(kospi_ret), "simple")
+    except Exception as e:
+        _logger.debug(f"KOSPI 알파 계산 실패: {e}", exc_info=True)
+        return (None, None)
+
+
+def _render_strategy_verdict_card(result: dict, cfg: dict):
+    """[v3.9.15] 전략 판정 카드 — 결과 최상단에 등급 표시.
+    
+    [v3.9.15b 보정 5건] KOSPI 알파 + 🟢 강화 + logger + cfg + 검증 부족 표현
+    [v3.9.15c 보정 4건] 간이 알파 명시 / 벤치 None 차단 / logger / services SSOT
+    [v3.9.15d 보정 3건]:
+        1. hold_days 슬라이더 ↔ bench key 매핑 (12일 → KOSPI 10일)
+        2. services lru_cache (프리셋 비교 시 4회 호출 → 1회 read)
+        3. 진짜 일자별 알파 시도 (kospi_daily.csv 있을 때) → 없으면 간이 fallback
+    [v3.9.15e 보정 1건 — critical]:
+        1. _calc_kospi_alpha의 trades_df 컬럼명 정합화
+           "date"→"rec_date", "net_pct"→"net_ret".
+           v3.9.15d의 real alpha 경로는 실제 컬럼명과 안 맞아서 항상
+           매칭 0건 → simple로만 떨어졌음. 이번 수정으로 daily CSV 추가 시
+           실제로 real 경로 활성화.
+    
+    4단계 판정:
+      🟢 실전 후보   : 수익≥5% AND 승률≥55 AND MDD≥-15 AND 거래≥100 AND
+                       알파≥0 (None 허용 안 함) AND Sharpe≥0.8
+      🟡 관찰 후보   : 수익+ but 위 중 일부 미달 OR 벤치 데이터 없음
+      🟠 검증 부족   : 수익+ but MDD<-20 OR 거래<50 OR Sharpe<0.5
+      🔴 실전 부적합 : 수익- OR MDD<-25 OR 알파<0 (시장 열위)
+    """
+    total_ret = float(result.get("total_return", 0) or 0)
+    win_rate = float(result.get("win_rate", 0) or 0)
+    mdd = float(result.get("mdd", 0) or 0)
+    n_trades = int(result.get("total_trades", 0) or 0)
+    sharpe = result.get("sharpe")
+    sharpe_val = float(sharpe) if sharpe is not None and not pd.isna(sharpe) else None
+
+    # [v3.9.15b 보정 1 → v3.9.15c 보정 1 → v3.9.15d 보정 1] 알파 계산
+    # 반환: (alpha_pp, mode) — mode는 "real" / "simple" / None
+    alpha, alpha_mode = _calc_kospi_alpha(result, cfg)
+
+    if total_ret < 0 or mdd < -25:
+        icon = "🔴"
+        title = "실전 부적합"
+        color = "text-red-400"
+        bg = "bg-red-900/15 border-red-500/40"
+        if total_ret < 0:
+            body = (
+                f"누적 수익률이 {total_ret:+.2f}%로 손실입니다. "
+                "현재 설정은 실전 적용에 적합하지 않습니다."
+            )
+        else:
+            body = (
+                f"최대 낙폭이 {mdd:.1f}%로 너무 큽니다. "
+                "실전 적용 시 큰 손실 위험이 있습니다."
+            )
+    elif alpha is not None and alpha < 0:
+        icon = "🔴"
+        title = "실전 부적합 · 시장 열위"
+        color = "text-red-400"
+        bg = "bg-red-900/15 border-red-500/40"
+        mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
+        body = (
+            f"전략 거래당 평균이 KOSPI 동일 보유기간보다 {alpha:+.2f}%p 낮습니다 "
+            f"({mode_label} 기준). 수익이 양수여도 시장보다 못하면 "
+            "인덱스 매수가 더 유리합니다."
+        )
+    elif mdd < -20 or n_trades < 50 or (sharpe_val is not None and sharpe_val < 0.5):
+        icon = "🟠"
+        title = "검증 부족"
+        color = "text-orange-400"
+        bg = "bg-orange-900/15 border-orange-500/40"
+        reasons = []
+        if mdd < -20:
+            reasons.append(f"낙폭 큼 (MDD {mdd:.1f}%)")
+        if n_trades < 50:
+            reasons.append(f"거래 표본 부족 ({n_trades}건)")
+        if sharpe_val is not None and sharpe_val < 0.5:
+            reasons.append(f"Sharpe 낮음 ({sharpe_val:.2f})")
+        body = (
+            f"수익은 양수({total_ret:+.2f}%)지만 {' · '.join(reasons)} — "
+            "주변 조합/기간 분할 검증 후 적용을 권합니다."
+        )
+    elif (
+        total_ret >= 5
+        and win_rate >= 55
+        and mdd >= -15
+        and n_trades >= 100
+        # [v3.9.15c 보정 2] alpha is None 차단 — 벤치 없으면 🟢 안 됨
+        and alpha is not None
+        and alpha >= 0
+        and (sharpe_val is None or sharpe_val >= 0.8)
+    ):
+        icon = "🟢"
+        title = "실전 후보"
+        color = "text-emerald-400"
+        bg = "bg-emerald-900/15 border-emerald-500/40"
+        mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
+        body = (
+            f"수익률 {total_ret:+.2f}%, 승률 {win_rate:.1f}%, MDD {mdd:.1f}%, "
+            f"거래 {n_trades}건, {mode_label} {alpha:+.2f}%p — 모든 기준 통과. "
+            "과거 데이터 기반이므로 주변 조합 강건성 검증 후 실전 적용 권장."
+        )
+    else:
+        icon = "🟡"
+        title = "관찰 후보"
+        color = "text-yellow-400"
+        bg = "bg-yellow-900/15 border-yellow-500/40"
+        misses = []
+        if total_ret < 5:
+            misses.append(f"수익률 작음 ({total_ret:+.2f}%)")
+        if win_rate < 55:
+            misses.append(f"승률 낮음 ({win_rate:.1f}%)")
+        if mdd < -15:
+            misses.append(f"낙폭 큼 ({mdd:.1f}%)")
+        if n_trades < 100:
+            misses.append(f"거래 부족 ({n_trades}건)")
+        if sharpe_val is not None and sharpe_val < 0.8:
+            misses.append(f"Sharpe 보통 ({sharpe_val:.2f})")
+        # [v3.9.15c 보정 2] 벤치 없음도 미달 사유에 포함
+        if alpha is None:
+            misses.append("벤치 데이터 없음")
+        miss_str = ", ".join(misses) if misses else "일부 지표 미달"
+        body = (
+            f"수익은 양호({total_ret:+.2f}%)하지만 {miss_str} — "
+            "실전 적용 전 추가 검증이 필요합니다."
+        )
+
+    with ui.card().classes(f"w-full p-3 mb-3 {bg} rounded-lg"):
+        with ui.row().classes("w-full items-center gap-2 mb-1"):
+            ui.label(icon).classes("text-2xl")
+            ui.label(f"전략 판정: {title}").classes(f"text-lg font-bold {color}")
+        summary_parts = [
+            f"수익률 {total_ret:+.2f}%",
+            f"승률 {win_rate:.1f}%",
+            f"MDD {mdd:.1f}%",
+            f"거래 {n_trades}건",
+        ]
+        if sharpe_val is not None:
+            summary_parts.append(f"Sharpe {sharpe_val:.2f}")
+        if alpha is not None:
+            mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
+            summary_parts.append(f"{mode_label} {alpha:+.2f}%p")
+        else:
+            summary_parts.append("KOSPI 알파 데이터 없음")
+        ui.label("결과: " + " · ".join(summary_parts)).classes(
+            "text-xs text-gray-300 mb-1"
+        )
+        ui.label(body).classes("text-sm text-gray-200 leading-relaxed")
+
+        good_pts = []
+        bad_pts = []
+        if total_ret >= 5:
+            good_pts.append("수익 양호")
+        elif total_ret > 0:
+            good_pts.append("수익 양수")
+        else:
+            bad_pts.append("수익 음수")
+        if win_rate >= 55:
+            good_pts.append("승률 양호")
+        elif win_rate < 50:
+            bad_pts.append("승률 낮음")
+        if mdd >= -15:
+            good_pts.append("낙폭 안정")
+        elif mdd < -20:
+            bad_pts.append("낙폭 큼")
+        if n_trades >= 100:
+            good_pts.append("표본 충분")
+        elif n_trades < 50:
+            bad_pts.append("표본 부족")
+        if alpha is not None:
+            if alpha >= 0:
+                good_pts.append("시장 초과")
+            else:
+                bad_pts.append("시장 열위")
+
+        with ui.row().classes("gap-3 mt-2 flex-wrap"):
+            if good_pts:
+                ui.label(f"✅ 장점: {' · '.join(good_pts)}").classes(
+                    "text-[11px] text-emerald-300"
+                )
+            if bad_pts:
+                ui.label(f"⚠️ 주의: {' · '.join(bad_pts)}").classes(
+                    "text-[11px] text-amber-300"
+                )
+
+        try:
+            cfg_summary = (
+                f"조건: {cfg.get('min_score', '?')}점↑ / "
+                f"Top-{cfg.get('top_k', '?')} / "
+                f"보유 {cfg.get('hold_days', '?')}일 / "
+                f"+{cfg.get('target_pct', '?')}/{cfg.get('stop_pct', '?')} / "
+                f"비용 {cfg.get('cost_pct', '?')}%"
+            )
+            ui.label(cfg_summary).classes(
+                "text-[10px] text-gray-400 mt-2 font-mono"
+            )
+        except Exception:
+            pass
+
+        # [v3.9.15c → v3.9.15d 보정 1] 알파 모드별 동적 footnote
+        if alpha_mode == "real":
+            note_alpha = (
+                "정확 알파: 각 거래 추천일에서 hold_days 동안 KOSPI 수익률을 "
+                "차감한 진짜 일자별 알파."
+            )
+        elif alpha_mode == "simple":
+            note_alpha = (
+                "간이 알파는 KOSPI 단일 시점 기준 — 거래일별 정확 알파는 "
+                "daily KOSPI 데이터 추가 후 제공."
+            )
+        else:
+            note_alpha = "KOSPI 데이터 없음 — 알파 미산정."
+        ui.label(
+            f"※ 백테스트 결과는 과거 데이터 기반입니다. 미래 수익을 보장하지 않습니다. {note_alpha}"
+        ).classes("text-[10px] text-gray-500 italic mt-1")
+
+
 def _render_results(result: dict, cfg: dict):
     """결과 메트릭 + 차트 모드 + 다운로드"""
     
+    # [v3.9.15] 전략 판정 카드 — 결과 최상단에 등급 표시
+    # [v3.9.15b 보정 3] 무음 except → logger.warning
+    try:
+        _render_strategy_verdict_card(result, cfg)
+    except Exception as _e:
+        _logger.warning(f"전략 판정 카드 렌더 실패: {_e}", exc_info=True)
+    
     # [Step AP] 신뢰도 배지 (가장 먼저 — 표본 부족 시 즉시 인지)
     _render_confidence_badge(result)
+
     
     # ─── 핵심 메트릭 5개 ───
     with ui.row().classes("w-full gap-2 flex-wrap mb-3"):
