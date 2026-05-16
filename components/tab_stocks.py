@@ -1379,6 +1379,141 @@ def _load_backtest_stats() -> dict:
         return {}
 
 
+def _render_member_summary(capital_top1: dict, signal_top1: dict,
+                            daily_top1: dict, confidence: dict) -> None:
+    """[v3.9.3] 회원용 요약 카드 — 결론 우선, 한글 용어.
+
+    상태 판정:
+      ⚠️ 신규 매수 주의 : ev < 0 AND capital_return < 0
+      ✅ 추천 신뢰 양호  : ev > 0 AND tp1_rate >= 35%
+      🟡 선택적 진입    : 그 외
+
+    핵심 4지표 (한글):
+      - 1차 목표 도달률 (= tp1_rate)
+      - 기대값 (= ev)
+      - 실전 운용 결과 (= capital_top1.total_return_pct)
+      - 검증 신뢰도 (= confidence.level)
+    """
+    # 데이터가 거의 없으면 카드 자체 안 그림 (혼란 방지)
+    sig_src = signal_top1 if signal_top1 else daily_top1
+    if not sig_src:
+        return
+
+    # ── 지표 추출 ──
+    if signal_top1:
+        ev = signal_top1.get("ev_net_pct", 0)
+        tp1_rate = signal_top1.get("tp1_rate", 0)  # 0~1
+    else:
+        ev = daily_top1.get("ev", 0)
+        tp1_rate = daily_top1.get("tp1_rate", 0)
+    cap_ret = capital_top1.get("total_return_pct", 0) if capital_top1 else 0
+    cap_n = capital_top1.get("n_trades_filled", 0) if capital_top1 else 0
+    conf_level = (confidence or {}).get("level", "LOW")
+
+    # ── 상태 판정 ──
+    if ev < 0 and cap_ret < 0:
+        status_icon = "⚠️"
+        status_txt = "신규 매수 주의"
+        status_color = "text-amber-400"
+        action_txt = (
+            "최근 추천 성과가 약합니다. 무리한 신규 매수보다 관망 또는 소액 진입을 "
+            "권장합니다. 진입하더라도 손절 기준을 엄격히 지키는 것이 좋습니다."
+        )
+        bg_class = "bg-amber-900/20 border-amber-500/40"
+    elif ev > 0 and tp1_rate >= 0.35:
+        status_icon = "✅"
+        status_txt = "추천 신뢰 양호"
+        status_color = "text-emerald-400"
+        action_txt = (
+            "최근 추천이 양호한 성과를 보이고 있습니다. 조건이 맞는 종목에 분할 진입을 "
+            "검토해볼 수 있습니다. 다만 시장 변동성에 따라 결과는 달라질 수 있습니다."
+        )
+        bg_class = "bg-emerald-900/20 border-emerald-500/40"
+    else:
+        status_icon = "🟡"
+        status_txt = "선택적 진입"
+        status_color = "text-yellow-400"
+        action_txt = (
+            "추천 성과가 강하지도 약하지도 않은 구간입니다. 강한 종목만 골라 "
+            "소액으로 분할 진입하는 것이 안전합니다."
+        )
+        bg_class = "bg-yellow-900/10 border-yellow-500/30"
+
+    # ── 검증 신뢰도 한글 ──
+    conf_kor = {"HIGH": "높음", "MEDIUM": "보통", "LOW": "낮음"}.get(conf_level, "낮음")
+    conf_color = {"HIGH": "text-emerald-400", "MEDIUM": "text-yellow-400",
+                  "LOW": "text-red-400"}.get(conf_level, "text-red-400")
+
+    # ── 한 줄 결론 ──
+    headline_parts = []
+    if ev < 0:
+        headline_parts.append(f"기대값 {ev:+.2f}%")
+    else:
+        headline_parts.append(f"기대값 {ev:+.2f}%")
+    headline_parts.append(f"1차 목표 도달률 {tp1_rate*100:.1f}%")
+    if cap_n > 0:
+        headline_parts.append(f"실전 운용 {cap_ret:+.2f}%")
+    headline_txt = " · ".join(headline_parts)
+
+    # ── 렌더 ──
+    with ui.card().classes(
+        f"w-full p-3 mb-3 {bg_class} rounded-lg"
+    ):
+        with ui.row().classes("w-full items-center gap-2 mb-2"):
+            ui.label(status_icon).classes("text-2xl")
+            ui.label(status_txt).classes(
+                f"text-lg font-bold {status_color}"
+            )
+        ui.label(f"최근 검증 기준 — {headline_txt}").classes(
+            "text-xs text-gray-300 mb-2"
+        )
+        ui.label(action_txt).classes(
+            "text-sm text-gray-200 mb-3 leading-relaxed"
+        )
+
+        # 핵심 4지표 그리드 (작은 카드 4개)
+        with ui.row().classes("w-full gap-2 flex-wrap"):
+            _member_stat_box("1차 목표 도달률", f"{tp1_rate*100:.1f}%",
+                             good=tp1_rate >= 0.35,
+                             bad=tp1_rate < 0.20)
+            _member_stat_box("기대값", f"{ev:+.2f}%",
+                             good=ev > 0, bad=ev < 0)
+            if cap_n > 0:
+                _member_stat_box("실전 운용 결과", f"{cap_ret:+.2f}%",
+                                 good=cap_ret > 0, bad=cap_ret < 0,
+                                 sub=f"{cap_n}건 시뮬")
+            else:
+                _member_stat_box("실전 운용 결과", "데이터 부족",
+                                 sub="누적 중")
+            _member_stat_box("검증 신뢰도", conf_kor,
+                             good=conf_level == "HIGH",
+                             bad=conf_level == "LOW",
+                             override_color=conf_color)
+
+
+def _member_stat_box(label: str, value: str,
+                     good: bool = False, bad: bool = False,
+                     sub: str = "",
+                     override_color: str = None) -> None:
+    """회원용 미니 지표 박스."""
+    if override_color:
+        clr = override_color
+    elif good:
+        clr = "text-emerald-400"
+    elif bad:
+        clr = "text-red-400"
+    else:
+        clr = "text-gray-200"
+    with ui.card().classes(
+        "flex-1 min-w-[120px] p-2 bg-[#0d0d1a]/60 "
+        "border border-gray-700/40 rounded"
+    ):
+        ui.label(label).classes("text-[10px] text-gray-400")
+        ui.label(value).classes(f"text-base font-bold {clr}")
+        if sub:
+            ui.label(sub).classes("text-[9px] text-gray-500")
+
+
 def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None):
     """Tab 2 상단 헤더 카드 — 오늘의 검증 Top 3 표시."""
     # [v3.7.8] 확장 JSON 스키마
@@ -1454,6 +1589,31 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None):
                     badge_color = "#6B7280"
                 ui.badge(badge_txt, color=badge_color).classes("text-xs")
             ui.label(summary_text).classes("text-xs text-gray-500")
+
+        # ═══════════════════════════════════════════════════
+        # [v3.9.3] 회원용 요약 카드 — 어려운 지표 대신 결론 우선
+        # ─────────────────────────────────────────────────
+        # 회원이 알고 싶은 건 3개:
+        #   1. 오늘 추천 신뢰도가 높은가?
+        #   2. 지금 매수해도 되는 장인가?
+        #   3. 조심해야 할 이유는?
+        # 결론과 4지표를 상단에 명확히 표시. 그 아래 기존 상세 검증은
+        # "상세 검증 정보(검증 데이터)"라는 명시적 라벨 아래 둠.
+        # ═══════════════════════════════════════════════════
+        _render_member_summary(
+            capital_top1=capital_top1,
+            signal_top1=signal_top1,
+            daily_top1=daily_top1,
+            confidence=confidence,
+        )
+
+        # ───────────────────────────────────────────
+        # 📊 아래는 상세 검증 정보 — 어렵게 느껴지면 위 요약만 봐도 OK
+        # ───────────────────────────────────────────
+        ui.label("📊 상세 검증 정보 (참고용 — 위 요약으로 충분합니다)").classes(
+            "text-[11px] text-gray-500 font-bold mt-3 mb-1 uppercase tracking-wider "
+            "border-t border-gray-700/40 pt-2"
+        )
 
         # ═══════════════════════════════════════════════════
         # [v3.7.23] 정보 재배치 — 사용자 읽기 순서 최적화
