@@ -59,6 +59,30 @@ _RET_MAP = [
 ]
 
 
+# ═══════════════════════════════════════════════════════════════
+# [v3.9.15e + 10] anomaly 정책 — services.backtest_policy SSOT 사용
+# ═══════════════════════════════════════════════════════════════
+# 이전엔 tab_backtest 내부 상수였지만, 정책값은 UI보다 전략 검증 영역이라
+# services로 분리. v3.9.16 프리셋 비교표 / v3.9.17 강건성 테스트 /
+# v3.9.18 Train/Test 분할이 모두 같은 임계값 공유.
+#
+# Backward compat: 기존 ANOMALY_* / TP_SAT_* 이름을 re-export 형태로 유지.
+# 외부 모듈/테스트가 tab_backtest의 이 상수를 직접 import하던 경우에도 동작.
+from services.backtest_policy import (
+    ANOMALY_TOTAL_RET_ABS,
+    ANOMALY_SHARPE_MAX,
+    ANOMALY_CAGR_MAX,
+    ANOMALY_SHORT_DAYS_RET,
+    ANOMALY_SHORT_RET,
+    ANOMALY_SHORT_DAYS_CAGR,
+    TP_SAT_THRESH_LOW_TARGET,
+    TP_SAT_THRESH_MID_TARGET,
+    TP_SAT_THRESH_HIGH_TARGET,
+    tp_saturation_threshold as _tp_saturation_threshold,
+    detect_anomaly_flags as _detect_anomaly_flags,
+)
+
+
 # ═══════════════════════════════════════════════════
 #  [Step AO] 사용자 친화 라벨
 # ═══════════════════════════════════════════════════
@@ -1243,11 +1267,21 @@ def _render_strategy_verdict_card(result: dict, cfg: dict):
            v3.9.15d의 real alpha 경로는 실제 컬럼명과 안 맞아서 항상
            매칭 0건 → simple로만 떨어졌음. 이번 수정으로 daily CSV 추가 시
            실제로 real 경로 활성화.
+    [v3.9.15e + 7 보정 3건 — 과대추정 방어]:
+        1. 비현실 수익률 anomaly 검사 (total_ret>300 / sharpe>5 / cagr>300)
+           → 🟢이라도 자동 🟡 다운그레이드. 간이 백테스트 구조상 lookahead /
+             동시 보유 자금 제약 미반영 / TP·SL 도달 순서 미반영으로 인한
+             과대평가를 화면에 명시적으로 경고.
+        2. TP 포화율 표시 (WIN 비율) — 70%+ 시 경고. recommend CSV의
+           ret_NNd_% 사후 수익률을 사용하므로 익절가 도달 추정이 과한 비율이면
+           장중 도달 순서 검증 필요.
+        3. 자금제약 경고 강화 — 본문에 직접 표시 (5일 보유 Top-5 = 동시 최대
+           ~25 슬롯이지만 화면은 매일 Top-K 평균을 독립 복리 누적).
     
     4단계 판정:
       🟢 실전 후보   : 수익≥5% AND 승률≥55 AND MDD≥-15 AND 거래≥100 AND
-                       알파≥0 (None 허용 안 함) AND Sharpe≥0.8
-      🟡 관찰 후보   : 수익+ but 위 중 일부 미달 OR 벤치 데이터 없음
+                       알파≥0 (None 허용 안 함) AND Sharpe≥0.8 AND anomaly 없음
+      🟡 관찰 후보   : 수익+ but 위 중 일부 미달 OR 벤치 데이터 없음 OR anomaly 검출
       🟠 검증 부족   : 수익+ but MDD<-20 OR 거래<50 OR Sharpe<0.5
       🔴 실전 부적합 : 수익- OR MDD<-25 OR 알파<0 (시장 열위)
     """
@@ -1257,10 +1291,55 @@ def _render_strategy_verdict_card(result: dict, cfg: dict):
     n_trades = int(result.get("total_trades", 0) or 0)
     sharpe = result.get("sharpe")
     sharpe_val = float(sharpe) if sharpe is not None and not pd.isna(sharpe) else None
+    cagr_raw = result.get("cagr")
+    cagr_val = float(cagr_raw) if cagr_raw is not None and not pd.isna(cagr_raw) else None
+    # [v3.9.15e + 8 보정 2] trading_days 추가 — 기간 가중 anomaly 임계값
+    trading_days = int(result.get("trading_days", 0) or 0)
 
     # [v3.9.15b 보정 1 → v3.9.15c 보정 1 → v3.9.15d 보정 1] 알파 계산
     # 반환: (alpha_pp, mode) — mode는 "real" / "simple" / None
     alpha, alpha_mode = _calc_kospi_alpha(result, cfg)
+
+    # ──────────────────────────────────────────────────────────────
+    # [v3.9.15e + 7~10] 비현실 수익률 anomaly 검사
+    # ──────────────────────────────────────────────────────────────
+    # [v3.9.15e + 10] services.backtest_policy.detect_anomaly_flags() 위임.
+    # 검출 로직은 SSOT(services)에 두고 UI는 결과만 받아서 렌더.
+    # 이로써 v3.9.16 프리셋 비교 / v3.9.17 강건성 / v3.9.18 Train/Test
+    # 모두 같은 anomaly 정의 공유.
+    #
+    # 검출 룰 (services/backtest_policy.py 참조):
+    # - 절대: total_ret > 300, sharpe > 5, cagr > 300
+    # - 단기 가중: trading_days<120 + total_ret>100, trading_days<252 + cagr>300
+    # 메시지는 raw 수치 노출 안 함 ("300% 초과" 형식).
+    anomaly_flags = _detect_anomaly_flags(
+        total_ret=total_ret,
+        sharpe_val=sharpe_val,
+        cagr_val=cagr_val,
+        trading_days=trading_days,
+    )
+    is_anomaly = bool(anomaly_flags)
+
+    # ──────────────────────────────────────────────────────────────
+    # [v3.9.15e + 7/9] TP 포화율 계산 + 익절선별 임계
+    # ──────────────────────────────────────────────────────────────
+    # status_dist: {"WIN": N, "HOLD_EXIT": M, "STOP": K}
+    # [v3.9.15e + 9] 익절선(target_pct) tier별 임계값 적용:
+    #   target_pct ≤ 5  (단타/소익절): 80%+ 경고 (작은 익절은 자주 도달, 자연스러움)
+    #   5 < target_pct < 10 (균형):    70%+ 경고
+    #   target_pct ≥ 10 (공격/큰익절): 60%+ 경고 (큰 익절을 70%+ 도달 = 비현실)
+    # ret_NNd_% 사후수익률 기반 시뮬이므로 익절가 도달 추정이 과한 비율이면
+    # 장중 도달 순서 검증 필요.
+    status_dist = result.get("status_dist", {}) or {}
+    n_win = int(status_dist.get("WIN", 0) or 0)
+    n_stop = int(status_dist.get("STOP", 0) or 0)
+    n_hold = int(status_dist.get("HOLD_EXIT", 0) or 0)
+    n_total_status = n_win + n_stop + n_hold
+    tp_saturation = (n_win / n_total_status * 100) if n_total_status > 0 else 0.0
+    # [v3.9.15e + 9] target_pct별 임계
+    target_pct = float(cfg.get("target_pct", 5) or 5)
+    tp_threshold = _tp_saturation_threshold(target_pct)
+    tp_saturation_warn = tp_saturation >= tp_threshold
 
     if total_ret < 0 or mdd < -25:
         icon = "🔴"
@@ -1313,6 +1392,8 @@ def _render_strategy_verdict_card(result: dict, cfg: dict):
         and alpha is not None
         and alpha >= 0
         and (sharpe_val is None or sharpe_val >= 0.8)
+        # [v3.9.15e + 7 보정 1] anomaly 검출 시 🟢 차단
+        and not is_anomaly
     ):
         icon = "🟢"
         title = "실전 후보"
@@ -1325,29 +1406,43 @@ def _render_strategy_verdict_card(result: dict, cfg: dict):
             "과거 데이터 기반이므로 주변 조합 강건성 검증 후 실전 적용 권장."
         )
     else:
+        # [v3.9.15e + 7 보정 1] anomaly 케이스를 🟡 안에서 차별 표시
         icon = "🟡"
-        title = "관찰 후보"
-        color = "text-yellow-400"
-        bg = "bg-yellow-900/15 border-yellow-500/40"
-        misses = []
-        if total_ret < 5:
-            misses.append(f"수익률 작음 ({total_ret:+.2f}%)")
-        if win_rate < 55:
-            misses.append(f"승률 낮음 ({win_rate:.1f}%)")
-        if mdd < -15:
-            misses.append(f"낙폭 큼 ({mdd:.1f}%)")
-        if n_trades < 100:
-            misses.append(f"거래 부족 ({n_trades}건)")
-        if sharpe_val is not None and sharpe_val < 0.8:
-            misses.append(f"Sharpe 보통 ({sharpe_val:.2f})")
-        # [v3.9.15c 보정 2] 벤치 없음도 미달 사유에 포함
-        if alpha is None:
-            misses.append("벤치 데이터 없음")
-        miss_str = ", ".join(misses) if misses else "일부 지표 미달"
-        body = (
-            f"수익은 양호({total_ret:+.2f}%)하지만 {miss_str} — "
-            "실전 적용 전 추가 검증이 필요합니다."
-        )
+        if is_anomaly:
+            title = "관찰 후보 · 과대추정 가능성"
+            color = "text-yellow-400"
+            bg = "bg-yellow-900/15 border-yellow-500/40"
+            body = (
+                f"기본 지표는 모두 통과({total_ret:+.2f}% / 승률 {win_rate:.1f}% / "
+                f"MDD {mdd:.1f}% / 거래 {n_trades}건)지만 "
+                f"비현실적 수치 발견: {' · '.join(anomaly_flags)}. "
+                "간이 백테스트 구조상 lookahead, 동시 보유 자금 제약 미반영, "
+                "TP/SL 장중 도달 순서 미반영으로 인한 과대평가 가능성이 큽니다. "
+                "실전 적용 전 OHLCV 기반 정밀 백테스트 + Train/Test 분할 검증 필수."
+            )
+        else:
+            title = "관찰 후보"
+            color = "text-yellow-400"
+            bg = "bg-yellow-900/15 border-yellow-500/40"
+            misses = []
+            if total_ret < 5:
+                misses.append(f"수익률 작음 ({total_ret:+.2f}%)")
+            if win_rate < 55:
+                misses.append(f"승률 낮음 ({win_rate:.1f}%)")
+            if mdd < -15:
+                misses.append(f"낙폭 큼 ({mdd:.1f}%)")
+            if n_trades < 100:
+                misses.append(f"거래 부족 ({n_trades}건)")
+            if sharpe_val is not None and sharpe_val < 0.8:
+                misses.append(f"Sharpe 보통 ({sharpe_val:.2f})")
+            # [v3.9.15c 보정 2] 벤치 없음도 미달 사유에 포함
+            if alpha is None:
+                misses.append("벤치 데이터 없음")
+            miss_str = ", ".join(misses) if misses else "일부 지표 미달"
+            body = (
+                f"수익은 양호({total_ret:+.2f}%)하지만 {miss_str} — "
+                "실전 적용 전 추가 검증이 필요합니다."
+            )
 
     with ui.card().classes(f"w-full p-3 mb-3 {bg} rounded-lg"):
         with ui.row().classes("w-full items-center gap-2 mb-1"):
@@ -1360,16 +1455,71 @@ def _render_strategy_verdict_card(result: dict, cfg: dict):
             f"거래 {n_trades}건",
         ]
         if sharpe_val is not None:
-            summary_parts.append(f"Sharpe {sharpe_val:.2f}")
+            # [v3.9.15e + 8/9] summary에도 Sharpe cap (상수 사용)
+            if sharpe_val > ANOMALY_SHARPE_MAX:
+                summary_parts.append(f"Sharpe 비정상 ({ANOMALY_SHARPE_MAX} 초과)")
+            else:
+                summary_parts.append(f"Sharpe {sharpe_val:.2f}")
         if alpha is not None:
             mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
             summary_parts.append(f"{mode_label} {alpha:+.2f}%p")
         else:
             summary_parts.append("KOSPI 알파 데이터 없음")
+        # [v3.9.15e + 7 보정 2] TP 포화율 summary에 추가
+        if n_total_status > 0:
+            summary_parts.append(f"TP 포화율 {tp_saturation:.1f}%")
         ui.label("결과: " + " · ".join(summary_parts)).classes(
             "text-xs text-gray-300 mb-1"
         )
         ui.label(body).classes("text-sm text-gray-200 leading-relaxed")
+
+        # [v3.9.15e + 7 보정 1] anomaly 검출 시 별도 경고 박스
+        if is_anomaly:
+            with ui.card().classes(
+                "w-full p-2 mt-2 bg-orange-900/25 border border-orange-500/50 rounded"
+            ):
+                ui.label("🚨 결과 과열 경고 — 간이 백테스트 과대추정 가능성").classes(
+                    "text-sm font-bold text-orange-300"
+                )
+                ui.label(
+                    "수익률/CAGR/Sharpe 중 하나 이상이 비정상 수준입니다. "
+                    "간이 백테스트는 다음을 단순화/미반영합니다:"
+                ).classes("text-[11px] text-orange-100 mt-1")
+                ui.label(
+                    "  · 보유기간 중 동시 보유 슬롯 제약 (5일 보유 Top-5 = 최대 ~25 슬롯)"
+                ).classes("text-[11px] text-orange-100")
+                ui.label(
+                    "  · 매일 Top-K 평균을 독립 복리로 누적 → 실제 자금 제약 시 크게 낮아짐"
+                ).classes("text-[11px] text-orange-100")
+                ui.label(
+                    "  · TP/SL 장중 도달 순서 (시작가 대비 종가 기반 ret_NNd_% 사용)"
+                ).classes("text-[11px] text-orange-100")
+                ui.label(
+                    "→ 실전 수치는 화면 표시값보다 현저히 낮을 가능성이 높습니다. "
+                    "OHLCV 기반 정밀 백테스트 + Train/Test 분할 검증을 권장합니다."
+                ).classes("text-[11px] text-orange-200 mt-1")
+
+        # [v3.9.15e + 7/9] TP 포화율 임계 초과 시 경고 박스
+        if tp_saturation_warn:
+            with ui.card().classes(
+                "w-full p-2 mt-2 bg-amber-900/20 border border-amber-500/40 rounded"
+            ):
+                ui.label(
+                    f"⚠️ TP 포화율 {tp_saturation:.1f}% — 대부분 익절 캡(+{target_pct:.0f}%)에 도달 "
+                    f"(임계 {tp_threshold}%)"
+                ).classes("text-xs font-bold text-amber-300")
+                tier_note = (
+                    f"익절선 +{target_pct:.0f}% tier 임계 {tp_threshold}% 초과."
+                    if target_pct >= 10
+                    else f"균형 tier 임계 {tp_threshold}% 초과."
+                    if target_pct >= 6
+                    else f"단타 tier 임계 {tp_threshold}% 초과 — 작은 익절도 80%+면 의심."
+                )
+                ui.label(
+                    f"WIN {n_win}건 / HOLD_EXIT {n_hold}건 / STOP {n_stop}건. {tier_note} "
+                    "ret_NNd_% 사후수익률 기반 시뮬이라 실제 장중 도달 순서 검증 필요. "
+                    "고가 도달 후 손절가도 같은 날 찍었을 가능성이 시뮬엔 반영 안 됨."
+                ).classes("text-[11px] text-amber-100 mt-1")
 
         good_pts = []
         bad_pts = []
@@ -1393,9 +1543,14 @@ def _render_strategy_verdict_card(result: dict, cfg: dict):
             bad_pts.append("표본 부족")
         if alpha is not None:
             if alpha >= 0:
-                good_pts.append("시장 초과")
+                # [v3.9.15e + 7 보정 1] anomaly 검출 시 "시장 초과"는 신뢰 못 함
+                if not is_anomaly:
+                    good_pts.append("시장 초과")
             else:
                 bad_pts.append("시장 열위")
+        # [v3.9.15e + 7 보정 2] TP 포화율 매우 높으면 bad_pts에도
+        if tp_saturation_warn:
+            bad_pts.append(f"TP 포화 {tp_saturation:.0f}%")
 
         with ui.row().classes("gap-3 mt-2 flex-wrap"):
             if good_pts:
@@ -1497,21 +1652,45 @@ def _render_results(result: dict, cfg: dict):
         )
         with ui.row().classes("w-full gap-2 flex-wrap"):
             if cagr is not None:
+                # [v3.9.15e + 8/9] CAGR 표시값 cap — 상수 ANOMALY_CAGR_MAX 사용
+                if cagr > ANOMALY_CAGR_MAX:
+                    cagr_display = f"비정상 과열 ({ANOMALY_CAGR_MAX}% 초과)"
+                    cagr_tooltip = (
+                        f"연복리 수익률 — 실제 값 {cagr:+.2f}% "
+                        f"(비현실적 — 간이 백테스트 과대추정 가능성)"
+                    )
+                    cagr_is_positive = False
+                else:
+                    cagr_display = f"{cagr:+.2f}%"
+                    cagr_tooltip = "연복리 수익률 — 투자 기간을 1년으로 환산"
+                    cagr_is_positive = cagr >= 0
                 _stat_card(
                     "📅 CAGR (연환산)",
-                    f"{cagr:+.2f}%",
-                    cagr >= 0,
-                    tooltip="연복리 수익률 — 투자 기간을 1년으로 환산",
+                    cagr_display,
+                    cagr_is_positive,
+                    tooltip=cagr_tooltip,
                 )
             if sharpe is not None:
-                _stat_card(
-                    "⚡ Sharpe ratio",
-                    f"{sharpe:.2f}",
-                    sharpe >= 1.0,
-                    tooltip=(
+                # [v3.9.15e + 8/9] Sharpe cap — 상수 ANOMALY_SHARPE_MAX 사용
+                if sharpe > ANOMALY_SHARPE_MAX:
+                    sharpe_display = f"비정상 ({ANOMALY_SHARPE_MAX} 초과)"
+                    sharpe_tooltip = (
+                        f"샤프 비율 — 실제 값 {sharpe:.2f} "
+                        f"(비현실적 — lookahead 의심)"
+                    )
+                    sharpe_is_good = False
+                else:
+                    sharpe_display = f"{sharpe:.2f}"
+                    sharpe_tooltip = (
                         "샤프 비율 — 위험 대비 수익. "
                         "1.0 이상 양호, 2.0 이상 우수"
-                    ),
+                    )
+                    sharpe_is_good = sharpe >= 1.0
+                _stat_card(
+                    "⚡ Sharpe ratio",
+                    sharpe_display,
+                    sharpe_is_good,
+                    tooltip=sharpe_tooltip,
                 )
             if vol is not None:
                 _stat_card(
