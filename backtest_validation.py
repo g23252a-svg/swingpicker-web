@@ -594,6 +594,10 @@ HORIZON = 10
 # 이전 0.4%는 보수적 과다 설정 → 실전 근사치 0.22%로 조정
 COST_PCT = 0.22
 
+# [v3.9.2] 엔진 버전 단일 출처 — JSON 메타 + 디버그 추적용.
+#   파일 헤더 docstring과 일치해야 함. 새 버전 올릴 때 함께 갱신.
+BACKTEST_ENGINE_VERSION = "v3.9.2"
+
 
 def daily_top1_backtest(days: list, ohlc_df: pd.DataFrame,
                          thresholds: Optional[dict] = None,
@@ -2188,7 +2192,8 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
 
     out: dict[str, Any] = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "version": "v3.7.14",
+        "version": BACKTEST_ENGINE_VERSION,        # [v3.9.2] 단일 출처 사용
+        "engine_version": BACKTEST_ENGINE_VERSION, # [v3.9.2] 명시적 alias
         "horizon_bdays": HORIZON,
         "trade_cost_pct": COST_PCT,
         "days_covered": len(days),
