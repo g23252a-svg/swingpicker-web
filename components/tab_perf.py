@@ -734,6 +734,18 @@ def _render_shadow_lab_card():
                 "추천 로직을 바꾸지 않고 '바꿨다면 어땠을지'를 매일 자동 측정한 "
                 "결과입니다. 운영 추천에는 아직 반영되지 않습니다."
             ).classes("text-xs text-gray-400")
+            # 위쪽 핵심 지표(Top5, 5영업일, 47일)와 Shadow(Top3, 10영업일, 57일)의
+            # 백테스트 기준이 다름을 명시. 회원 혼란 방지.
+            ui.label(
+                "※ Shadow 실험실은 위쪽 핵심 지표와 별도로, daily Top3 실전 "
+                "백테스트(10영업일 보유) 기준으로 계산됩니다."
+            ).classes("text-[10px] text-gray-500 mt-1 italic")
+
+    # [v3.9.12] Shadow 종합 판정 카드 — 3개 shadow 상태 한눈에
+    try:
+        _render_shadow_summary_card(j)
+    except Exception as _e:
+        pass  # 안전 폴백
 
     # ─── ENTRY_MODE shadow ───
     if em.get("enabled"):
@@ -900,8 +912,821 @@ def _shadow_gate_label(production_candidate: bool, extra: str = ""):
         ).classes("text-[11px] text-gray-500 mt-1")
 
 
-def render_tab_perf():
-    """[Step AK+AL+AM] 시스템 성과 추세 — 면책 + 6개 메트릭 + 모바일 + KOSPI 알파"""
+# ═══════════════════════════════════════════════════
+# [v3.9.12] 성과탭 회원용 요약 카드들
+# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
+# [v3.9.14d] 손실/수익 카드 공통 helper (중복 로딩 제거)
+# ═══════════════════════════════════════════════════
+def _date_key_top1(x):
+    """[v3.9.14b 보정 1] date 키 정규화 — '2026-05-15' / '20260515' / 20260515(int) 모두 처리"""
+    s = str(x).strip()
+    s_digits = s.replace("-", "").replace("/", "").replace(".0", "")
+    if len(s_digits) == 8 and s_digits.isdigit():
+        return s_digits
+    try:
+        return pd.to_datetime(x).strftime("%Y%m%d")
+    except Exception:
+        return s.replace("-", "").replace("/", "")[:8]
+
+
+def _code6_top1(x):
+    """[v3.9.14b 보정 4] 종목코드 6자리 정규화 — '5930.0' / 5930 / '005930' 모두 처리"""
+    s = str(x).strip()
+    try:
+        if s.endswith(".0") or "." in s:
+            s = str(int(float(s)))
+    except Exception:
+        pass
+    return s.zfill(6)
+
+
+def _load_top1_trades() -> pd.DataFrame:
+    """[v3.9.14d] backtest_top1_trades 최근 15일치 로딩 + 정규화.
+    
+    Returns: 정규화된 trades DataFrame 또는 빈 DataFrame.
+    컬럼 추가: fill_date(datetime), net_pct_num(float), outcome_norm(upper str)
+    """
+    import glob as _g
+    try:
+        trade_files = sorted(_g.glob(os.path.join(DATA_DIR, "backtest_top1_trades_*.csv")))
+        trade_files = [f for f in trade_files if "latest" not in os.path.basename(f)]
+        if len(trade_files) < 3:
+            return pd.DataFrame()
+        trades = pd.concat(
+            [pd.read_csv(f) for f in trade_files[-15:]],
+            ignore_index=True,
+        )
+        trades.columns = [c.lstrip("\ufeff") for c in trades.columns]
+        trades = trades.drop_duplicates(subset=["date", "code"])
+
+        if "fill_date" not in trades.columns or "outcome" not in trades.columns:
+            return pd.DataFrame()
+        if "net_pct" not in trades.columns:
+            return pd.DataFrame()
+        trades["fill_date"] = pd.to_datetime(trades["fill_date"], errors="coerce")
+        # [v3.9.14b 보정 2] net_pct 숫자 변환
+        trades["net_pct_num"] = pd.to_numeric(trades["net_pct"], errors="coerce")
+        # [v3.9.14b 보정 3] outcome 대소문자/공백 정규화
+        trades["outcome_norm"] = trades["outcome"].astype(str).str.strip().str.upper()
+        return trades
+    except Exception:
+        return pd.DataFrame()
+
+
+def _load_recommend_cache(days: int = 90) -> dict:
+    """[v3.9.14d] recommend_*.csv 최근 N일 캐시 로딩.
+    
+    Returns: {date_key("YYYYMMDD"): DataFrame with __code6 column} 또는 빈 dict.
+    """
+    import glob as _g
+    rec_files = sorted(_g.glob(os.path.join(DATA_DIR, "recommend_*.csv")))
+    rec_files = [f for f in rec_files if "latest" not in os.path.basename(f)]
+    recs = {}
+    for f in rec_files[-days:]:
+        raw_d = os.path.basename(f).replace("recommend_", "").replace(".csv", "")
+        d = _date_key_top1(raw_d)
+        try:
+            df = pd.read_csv(f, encoding="utf-8-sig", low_memory=False)
+            df.columns = [c.lstrip("\ufeff") for c in df.columns]
+            if "종목코드" in df.columns:
+                df["__code6"] = df["종목코드"].apply(_code6_top1)
+                recs[d] = df
+        except Exception:
+            pass
+    return recs
+
+
+def _load_macro_risk_cache() -> dict:
+    """[v3.9.14e] run_meta_YYYYMMDD.json 일자별 macro_risk 로딩.
+    
+    Returns: {"20260515": "CAUTION", "20260514": "NORMAL", ...}
+    
+    GREEN 손실 분석에서 손실 시점의 시장 모드를 정확히 매칭.
+    최신 1개만 쓰면 "2주 전 손실에 오늘 CAUTION 적용"되는 부정확 차단.
+    """
+    import glob as _g, json as _j
+    out = {}
+    meta_files = sorted(_g.glob(os.path.join(DATA_DIR, "run_meta_*.json")))
+    meta_files = [f for f in meta_files if "latest" not in os.path.basename(f)]
+    for f in meta_files[-90:]:  # 90일치
+        raw_d = os.path.basename(f).replace("run_meta_", "").replace(".json", "")
+        d = _date_key_top1(raw_d)
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                j = _j.load(fh)
+            risk = str(j.get("macro_risk", "") or "").strip().upper()
+            if risk:
+                out[d] = risk
+        except Exception:
+            pass
+    return out
+
+
+def _enrich_trade_with_risk(row, recs: dict) -> dict:
+    """[v3.9.14d] 단일 trade row에 STRUCT/VWAP/ENTRY_RISK 정보 부착.
+    
+    ENTRY_RISK_LEVEL SSOT 우선 — 컬럼 있으면 그대로, 없으면 STRUCT/VWAP로 재계산.
+    
+    Returns: {fill_date, name, net_pct, struct, vwap, risk}
+    """
+    d = _date_key_top1(row["date"])
+    code6 = _code6_top1(row["code"])
+    rec_df = recs.get(d)
+    risk_str = "데이터 없음"
+    s_val, v_val = None, None
+    if rec_df is not None:
+        rr = rec_df[rec_df["__code6"] == code6]
+        if not rr.empty:
+            r2 = rr.iloc[0]
+            s_raw = pd.to_numeric(r2.get("STRUCT_SCORE"), errors="coerce")
+            v_raw = pd.to_numeric(r2.get("VWAP_GAP"), errors="coerce")
+            if pd.notna(s_raw) and pd.notna(v_raw):
+                s_val, v_val = float(s_raw), float(v_raw)
+            # ENTRY_RISK_LEVEL SSOT 우선
+            csv_risk = str(r2.get("ENTRY_RISK_LEVEL", "") or "").strip().upper()
+            if csv_risk in ("RED", "ORANGE", "GREEN"):
+                risk_str = {
+                    "RED": "🔴 RED",
+                    "ORANGE": "🟠 ORANGE",
+                    "GREEN": "🟢 GREEN",
+                }[csv_risk]
+            elif s_val is not None and v_val is not None:
+                red = (s_val >= 70 and s_val <= 85 and v_val > 8)
+                orange = (s_val < 90 and v_val > 15 and not red)
+                risk_str = (
+                    "🔴 RED" if red else ("🟠 ORANGE" if orange else "🟢 GREEN")
+                )
+
+    net_val = float(row.get("net_pct_num") or 0)
+    return {
+        "fill_date": row["fill_date"],
+        "name": row.get("name", ""),
+        "net_pct": net_val,
+        "struct": s_val,
+        "vwap": v_val,
+        "risk": risk_str,
+    }
+
+
+def _render_profit_attribution_card(
+    trades: pd.DataFrame = None,
+    recs: dict = None,
+) -> None:
+    """[v3.9.14c] 최근 수익 기여 Top — 손실 카드와 균형용.
+    
+    [v3.9.14d] 공통 helper 사용 — _load_top1_trades / _load_recommend_cache /
+    _enrich_trade_with_risk.
+    
+    [v3.9.14e] trades / recs 외부 주입 가능 — render_tab_perf에서 한 번만
+    로딩 후 두 카드에 공유 (이전엔 각 카드가 따로 로딩 → 2회 중복).
+    None이면 자체 로딩 (단독 호출 호환).
+    """
+    try:
+        if trades is None:
+            trades = _load_top1_trades()
+        if trades.empty:
+            return
+
+        recent = trades.dropna(subset=["fill_date"]).sort_values("fill_date").tail(60)
+        wins = (
+            recent[recent["outcome_norm"] == "WIN"]
+            .dropna(subset=["net_pct_num"])
+            .sort_values("net_pct_num", ascending=False)
+            .head(5)
+        )
+        if wins.empty:
+            return
+
+        if recs is None:
+            recs = _load_recommend_cache(days=90)
+        enriched = [_enrich_trade_with_risk(r, recs) for _, r in wins.iterrows()]
+        if not enriched:
+            return
+
+        # 렌더
+        with ui.card().classes(
+            "w-full p-3 mb-3 bg-[rgba(16,185,129,0.06)] "
+            "border border-emerald-500/30 rounded-lg"
+        ):
+            with ui.row().classes("items-center gap-2 mb-2"):
+                ui.label("📈").classes("text-xl")
+                ui.label("최근 수익 기여 Top — Top1 실전 검증").classes(
+                    "text-base font-bold text-emerald-300"
+                )
+            with ui.column().classes("gap-1 pl-5"):
+                for e in enriched:
+                    parts = [
+                        f"{e['fill_date'].strftime('%m/%d')} {e['name']}",
+                        f"{e['net_pct']:+.2f}%",
+                    ]
+                    if e["struct"] is not None and e["vwap"] is not None:
+                        parts.append(
+                            f"STRUCT {e['struct']:.0f} · VWAP_GAP {e['vwap']:+.1f}"
+                        )
+                    parts.append(e["risk"])
+                    color = (
+                        "text-emerald-200" if "🟢" in e["risk"]
+                        else "text-gray-300"
+                    )
+                    ui.label("• " + " / ".join(parts)).classes(f"text-xs {color}")
+            ui.label(
+                "※ Top1 실전 검증 기준 · 최근 fill 60건 중 수익 Top 5 · "
+                "추천 당시 STRUCT/VWAP 기준 (ENTRY_RISK_LEVEL CSV 컬럼 SSOT 우선)"
+            ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
+    except Exception:
+        return
+
+
+def _render_loss_attribution_card(
+    trades: pd.DataFrame = None,
+    recs: dict = None,
+) -> None:
+    """[v3.9.14] 최근 손실 기여 자동 리포트.
+    
+    [v3.9.14d] 공통 helper 사용.
+    [v3.9.14e] trades / recs 외부 주입 가능 — 수익 카드와 캐시 공유.
+    
+    추가 진단:
+    - 공통 원인 (RED/ORANGE 집중 / VWAP 과열 / STRUCT 애매)
+    - GREEN 손실 패턴 (TP 거리 과도 / 짧은 days_held / 모델승률 /
+      RR / 시장 모드)
+    """
+    try:
+        if trades is None:
+            trades = _load_top1_trades()
+        if trades.empty:
+            return
+
+        recent = trades.dropna(subset=["fill_date"]).sort_values("fill_date").tail(60)
+        losses = (
+            recent[recent["outcome_norm"] == "LOSS"]
+            .dropna(subset=["net_pct_num"])
+            .sort_values("net_pct_num")
+            .head(5)
+        )
+        if losses.empty:
+            return
+
+        if recs is None:
+            recs = _load_recommend_cache(days=90)
+        enriched = [_enrich_trade_with_risk(r, recs) for _, r in losses.iterrows()]
+        if not enriched:
+            return
+
+        # 위험 통계 추출 (data 매칭 성공한 것만)
+        struct_vals, vwap_vals, risk_levels = [], [], []
+        for e in enriched:
+            if e["struct"] is not None and e["vwap"] is not None and e["risk"] != "데이터 없음":
+                struct_vals.append(e["struct"])
+                vwap_vals.append(e["vwap"])
+                risk_levels.append(e["risk"])
+
+        # 5. 공통 패턴 진단
+        diagnosis = None
+        green_pattern = None
+        if struct_vals and vwap_vals:
+            n_risk = sum(1 for x in risk_levels if x in ("🔴 RED", "🟠 ORANGE"))
+            n_green = sum(1 for x in risk_levels if "🟢" in x)
+            n_high_vwap = sum(1 for v in vwap_vals if v > 8)
+            n_70_85 = sum(1 for s in struct_vals if 70 <= s <= 85)
+            total = len(struct_vals)
+            if n_risk >= max(2, total // 2):
+                diagnosis = (
+                    f"위험 패턴(RED/ORANGE)에 손실 집중 — {n_risk}/{total}건. "
+                    "ENTRY_RISK 표시를 확인하세요."
+                )
+            elif n_high_vwap >= total * 0.6:
+                diagnosis = (
+                    f"VWAP 과열 구간에 손실 집중 — VWAP>8% {n_high_vwap}/{total}건"
+                )
+            elif n_70_85 >= total * 0.6:
+                diagnosis = (
+                    f"STRUCT 70~85 애매 구간에 손실 집중 — {n_70_85}/{total}건"
+                )
+            else:
+                diagnosis = "특정 위험 패턴 집중은 보이지 않습니다."
+
+            # [v3.9.14c → v3.9.14d 확장 → v3.9.14e 정밀화] GREEN 손실 추가 진단
+            # 본인 짚은 5개 잠재 원인 중 5개 활용:
+            #   - TP 거리 (entry → tp1 gap > 15%)
+            #   - days_held (짧은 손절 ≤ 2일)
+            #   - 개별 모델 승률 (EST_WIN_RATE < 0.50)
+            #   - RR (RR_NOW_TP1 < 1.2)
+            #   - 시장 모드 (macro_risk CAUTION/WARNING) — 손실 시점별 매칭
+            # 섹터 수익률은 별도 데이터 필요 (다음 패치)
+            if n_green >= 2:
+                green_items = [e for e in enriched if "🟢" in e.get("risk", "")]
+                excessive_tp = 0
+                short_held = 0
+                low_model_wr = 0
+                low_rr = 0
+                market_caution_at_loss = 0
+                green_count = len(green_items)
+
+                # [v3.9.14e] 시장 모드 — 손실 시점별 정확 매칭 (이전엔 최신 1개만)
+                macro_cache = _load_macro_risk_cache()
+
+                for gi in green_items:
+                    match = losses[
+                        (losses["name"].astype(str) == gi.get("name", ""))
+                        & (losses["fill_date"] == gi.get("fill_date"))
+                    ]
+                    if match.empty:
+                        continue
+                    mr = match.iloc[0]
+                    entry = pd.to_numeric(mr.get("entry"), errors="coerce")
+                    tp1 = pd.to_numeric(mr.get("tp1"), errors="coerce")
+                    days = pd.to_numeric(mr.get("days_held"), errors="coerce")
+                    if pd.notna(entry) and pd.notna(tp1) and entry > 0:
+                        gap = (float(tp1) / float(entry) - 1) * 100
+                        if gap > 15:
+                            excessive_tp += 1
+                    if pd.notna(days) and float(days) <= 2:
+                        short_held += 1
+
+                    # [v3.9.14e] 손실 시점 (추천일 = mr["date"]) macro_risk 매칭
+                    d_at_entry = _date_key_top1(mr["date"])
+                    risk_at_entry = macro_cache.get(d_at_entry, "")
+                    if risk_at_entry in ("CAUTION", "WARNING", "CRITICAL"):
+                        market_caution_at_loss += 1
+
+                    # 같은 (date, code) recommend 행에서 EST_WIN_RATE / RR_NOW_TP1
+                    code6 = _code6_top1(mr["code"])
+                    rec_df = recs.get(d_at_entry)
+                    if rec_df is not None:
+                        rr = rec_df[rec_df["__code6"] == code6]
+                        if not rr.empty:
+                            r2 = rr.iloc[0]
+                            ewr = pd.to_numeric(r2.get("EST_WIN_RATE"), errors="coerce")
+                            rrv = pd.to_numeric(r2.get("RR_NOW_TP1"), errors="coerce")
+                            if pd.notna(ewr) and float(ewr) < 0.50:
+                                low_model_wr += 1
+                            if pd.notna(rrv) and float(rrv) < 1.2:
+                                low_rr += 1
+
+                # 우선순위 (가장 강한 패턴 1개만 표시)
+                threshold = max(2, green_count // 2)
+                if excessive_tp >= threshold:
+                    green_pattern = (
+                        f"GREEN 손실 {green_count}건 중 {excessive_tp}건이 "
+                        f"목표가 차이 15% 초과 — TP 거리 과도가 원인일 수 있음"
+                    )
+                elif short_held >= threshold:
+                    green_pattern = (
+                        f"GREEN 손실 {green_count}건 중 {short_held}건이 "
+                        f"2일 이내 손절 — 급락일 진입 가능성"
+                    )
+                elif low_model_wr >= threshold:
+                    green_pattern = (
+                        f"GREEN 손실 {green_count}건 중 {low_model_wr}건이 "
+                        f"개별 모델 승률 50% 미만 — 모델 신뢰도 낮은 종목 진입"
+                    )
+                elif low_rr >= threshold:
+                    green_pattern = (
+                        f"GREEN 손실 {green_count}건 중 {low_rr}건이 "
+                        f"수익:손실 1.2 미만 — 손익비 불리한 진입"
+                    )
+                elif market_caution_at_loss >= threshold:
+                    green_pattern = (
+                        f"GREEN 손실 {green_count}건 중 {market_caution_at_loss}건이 "
+                        "시장 주의/위험 구간에 진입 — 시장 모드 영향 가능"
+                    )
+                elif green_count >= 3:
+                    green_pattern = (
+                        f"GREEN 손실 {green_count}건은 현재 RED/ORANGE 룰로 "
+                        "설명 안 됨 — 시장 환경/섹터 요인 점검 필요"
+                    )
+
+        # 6. 렌더
+        with ui.card().classes(
+            "w-full p-3 mb-3 bg-[rgba(239,68,68,0.06)] "
+            "border border-red-500/30 rounded-lg"
+        ):
+            with ui.row().classes("items-center gap-2 mb-2"):
+                ui.label("📉").classes("text-xl")
+                ui.label("최근 손실 기여 Top — Top1 실전 검증").classes(
+                    "text-base font-bold text-red-300"
+                )
+            with ui.column().classes("gap-1 pl-5"):
+                for e in enriched:
+                    parts = [
+                        f"{e['fill_date'].strftime('%m/%d')} {e['name']}",
+                        f"{e['net_pct']:+.2f}%",
+                    ]
+                    if e["struct"] is not None and e["vwap"] is not None:
+                        parts.append(
+                            f"STRUCT {e['struct']:.0f} · VWAP_GAP {e['vwap']:+.1f}"
+                        )
+                    parts.append(e["risk"])
+                    color = "text-red-300" if "🔴" in e["risk"] else (
+                        "text-orange-300" if "🟠" in e["risk"]
+                        else "text-gray-300"
+                    )
+                    ui.label("• " + " / ".join(parts)).classes(f"text-xs {color}")
+            if diagnosis:
+                ui.label(f"공통 원인: {diagnosis}").classes(
+                    "text-xs text-amber-200 mt-2 pl-5 leading-relaxed"
+                )
+            if green_pattern:
+                ui.label(f"추가 분석: {green_pattern}").classes(
+                    "text-xs text-cyan-200 mt-1 pl-5 leading-relaxed"
+                )
+            ui.label(
+                "※ Top1 실전 검증 기준 · 최근 fill 60건 중 손실 Top 5 · "
+                "추천 당시 STRUCT/VWAP 기준 (ENTRY_RISK_LEVEL CSV 컬럼 SSOT 우선)"
+            ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
+    except Exception:
+        return
+
+
+def _render_recent_trend_card(history: pd.DataFrame) -> None:
+    """[v3.9.13] 최근 7거래일 성과 변화 카드.
+    
+    누적 평균만 보면 최근 악화를 못 잡음. 5/15 같은 폭락 이후엔 특히 중요.
+    최근 7거래일 vs 직전 7거래일 비교로 추세 표시.
+    
+    [v3.9.13b] 정확히는 "최근 7개 검증일"이지만 회원 이해도 위해 "7거래일"로 표기.
+    
+    지표:
+      WIN_RATE_% / AVG_RET_% / AVG_MDD_%
+    METHOD/TOPK/H는 perf judgment와 동일 기준 (ELITE/Top5/5영업일).
+    """
+    if history is None or history.empty or "Date" not in history.columns:
+        return
+
+    try:
+        h = history.copy()
+        # 동일 기준
+        if "METHOD" in h.columns and (h["METHOD"] == "ELITE_SCORE").any():
+            h = h[h["METHOD"] == "ELITE_SCORE"]
+        if "TOPK" in h.columns:
+            topk_num = pd.to_numeric(h["TOPK"], errors="coerce")
+            h_topk = h[topk_num == 5]
+            if not h_topk.empty:
+                h = h_topk
+        if "H(영업일)" in h.columns:
+            hold_num = pd.to_numeric(h["H(영업일)"], errors="coerce")
+            h_hold = h[hold_num == 5]
+            if not h_hold.empty:
+                h = h_hold
+        if h.empty or "Date" not in h.columns:
+            return
+
+        h = h.sort_values("Date").drop_duplicates(subset=["Date"], keep="last")
+        if len(h) < 8:
+            return  # 표본 부족 (최근 7 + 직전 7 비교 안 됨)
+
+        recent = h.tail(7)
+        prev = h.iloc[-14:-7] if len(h) >= 14 else h.iloc[:-7]
+        if len(prev) < 3:
+            return  # 직전 표본 부족
+
+        # 3개 지표 비교
+        def _safe_mean(s):
+            # [v3.9.13b] NaN 안전성 — 전부 NaN인 구간이면 None 반환
+            try:
+                v = pd.to_numeric(s, errors="coerce").mean()
+                return None if pd.isna(v) else float(v)
+            except Exception:
+                return None
+
+        recent_win = _safe_mean(recent["WIN_RATE_%"])
+        prev_win = _safe_mean(prev["WIN_RATE_%"])
+        recent_ret = _safe_mean(recent["AVG_RET_%"])
+        prev_ret = _safe_mean(prev["AVG_RET_%"])
+
+        # MDD는 음수일수록 나쁨 (절댓값 클수록 나쁨)
+        recent_mdd = _safe_mean(recent.get("AVG_MDD_%", pd.Series()))
+        prev_mdd = _safe_mean(prev.get("AVG_MDD_%", pd.Series()))
+
+        if any(x is None for x in [recent_win, prev_win, recent_ret, prev_ret]):
+            return
+
+        d_win = recent_win - prev_win
+        d_ret = recent_ret - prev_ret
+        d_mdd = (recent_mdd - prev_mdd) if (recent_mdd is not None and prev_mdd is not None) else None
+
+        # 추세 판정 — 평균 수익률 변화 위주
+        # 악화: 수익률 -2%p 이상 하락
+        # 개선: 수익률 +2%p 이상 상승
+        # 보합: 그 외
+        if d_ret <= -2.0:
+            icon = "📉"
+            title = "최근 7거래일 성과 약화"
+            color = "text-red-400"
+            bg = "bg-red-900/15 border-red-500/30"
+            body = (
+                "최근 시장 변동 또는 임계값 영향으로 단기 실전 성과가 약화되었습니다. "
+                "장기 평균은 양호해도 신규 진입은 보수적으로 접근하세요."
+            )
+        elif d_ret >= 2.0:
+            icon = "📈"
+            title = "최근 7거래일 성과 개선"
+            color = "text-emerald-400"
+            bg = "bg-emerald-900/15 border-emerald-500/30"
+            body = (
+                "최근 7거래일 평균이 직전 대비 개선되었습니다. 다만 단기 변동은 "
+                "장세 영향이 크므로 지속성은 계속 관찰해야 합니다."
+            )
+        else:
+            icon = "➡️"
+            title = "최근 7거래일 성과 보합"
+            color = "text-gray-300"
+            bg = "bg-gray-800/40 border-gray-600/30"
+            body = (
+                "최근 7거래일 평균이 직전과 비슷한 수준입니다. 시장 모드와 종목 위험 "
+                "신호를 함께 확인하세요."
+            )
+
+        with ui.card().classes(f"w-full p-3 mb-3 {bg} rounded-lg"):
+            with ui.row().classes("w-full items-center gap-2 mb-1"):
+                ui.label(icon).classes("text-xl")
+                ui.label(title).classes(f"text-base font-bold {color}")
+            # 3개 지표 한 줄 변화
+            def _arrow(d, reverse=False):
+                """기본은 양수=좋음(↑녹), 음수=나쁨(↓빨). reverse=True면 반대 (MDD)"""
+                if abs(d) < 0.1:
+                    return "→", "text-gray-400"
+                up = d > 0
+                good = up if not reverse else not up
+                if good:
+                    return ("↑" if up else "↓"), "text-emerald-400"
+                return ("↑" if up else "↓"), "text-red-400"
+
+            with ui.column().classes("gap-0.5 pl-5 mt-1"):
+                a_w, c_w = _arrow(d_win)
+                ui.label(
+                    f"승률: {prev_win:.1f}% → {recent_win:.1f}% "
+                    f"({d_win:+.1f}%p {a_w})"
+                ).classes(f"text-xs {c_w}")
+                a_r, c_r = _arrow(d_ret)
+                ui.label(
+                    f"평균 수익률: {prev_ret:+.2f}% → {recent_ret:+.2f}% "
+                    f"({d_ret:+.2f}%p {a_r})"
+                ).classes(f"text-xs {c_r}")
+                if d_mdd is not None:
+                    # MDD는 0에 가까울수록 좋음. 더 음수가 되면 악화.
+                    a_m, c_m = _arrow(d_mdd, reverse=False)  # 양수 변화 = MDD 완화 = 좋음
+                    ui.label(
+                        f"평균 낙폭: {prev_mdd:.2f}% → {recent_mdd:.2f}% "
+                        f"({d_mdd:+.2f}%p {a_m})"
+                    ).classes(f"text-xs {c_m}")
+            ui.label(body).classes("text-xs text-gray-300 mt-2 leading-relaxed")
+            ui.label(
+                f"※ 최근 7거래일({len(recent)}개) vs 직전 7거래일({len(prev)}개) 비교 "
+                "— 백테스트 검증일 기준"
+            ).classes("text-[10px] text-gray-500 italic mt-1")
+    except Exception:
+        return
+
+
+def _render_perf_judgment_card(history: pd.DataFrame, bench_data: dict) -> None:
+    """성과탭 최상단 — 시스템 성과 판정 카드.
+
+    상태 판정 (회원 카드와 유사 로직):
+      🟢 장기 검증 성과 양호  : avg_ret>0 AND alpha 양수 명시 AND win>=60
+      🟡 성과 양호 · 시장 비교 데이터 부족: avg_ret>0, alpha 계산 안 됨
+      🟡 성과 양호 · 신뢰도 관찰: avg_ret>0 AND alpha>0 (win<60)
+      ⚠️ 성과 약화 · 점검 필요  : 그 외
+    
+    [v3.9.12b 정합성 보정]
+    - alpha: _get_kospi_return() 헬퍼 사용 (bench_data["KOSPI"]는 dict, 
+      DataFrame 아님 — 직접 .columns 접근 시 silent except로 alpha=None
+      되어 잘못 양호 판정될 위험 차단)
+    - TOPK/H 타입 안전성: pd.to_numeric으로 변환 후 비교
+    - METHOD 정합성: ELITE_SCORE 가능하면 우선 (상단 기본 필터와 일치)
+    """
+    if history is None or history.empty:
+        return
+
+    # 디폴트 view (METHOD=ELITE_SCORE 가능하면 / Top5 / 5영업일) 기준 평균
+    try:
+        h = history.copy()
+        # [v3.9.12b] METHOD 정합성 — 가능하면 ELITE_SCORE만
+        if "METHOD" in h.columns and (h["METHOD"] == "ELITE_SCORE").any():
+            h = h[h["METHOD"] == "ELITE_SCORE"]
+        # [v3.9.12b] TOPK 타입 안전성 — "5" 문자열도 처리
+        if "TOPK" in h.columns:
+            topk_num = pd.to_numeric(h["TOPK"], errors="coerce")
+            h_topk = h[topk_num == 5]
+            if not h_topk.empty:
+                h = h_topk
+        # [v3.9.12b] H(영업일) 타입 안전성
+        if "H(영업일)" in h.columns:
+            hold_num = pd.to_numeric(h["H(영업일)"], errors="coerce")
+            h_hold = h[hold_num == 5]
+            if not h_hold.empty:
+                h = h_hold
+        if h.empty:
+            return
+        win = float(h["WIN_RATE_%"].mean())
+        avg_ret = float(h["AVG_RET_%"].mean())
+    except Exception:
+        return
+
+    # [v3.9.12b] alpha — 기존 _get_kospi_return() 헬퍼 사용 (dict 구조 호환)
+    alpha = None
+    try:
+        kospi_ret = _get_kospi_return(bench_data, 5)
+        if kospi_ret is not None:
+            alpha = avg_ret - float(kospi_ret)
+    except Exception:
+        pass
+
+    # [v3.9.12b] 상태 판정 — alpha None일 때 잘못 양호 판정 차단
+    # alpha 없으면 양호 단정 금지, "시장 비교 데이터 부족" 상태로
+    if avg_ret > 0 and alpha is not None and alpha > 0 and win >= 60:
+        icon = "🟢"
+        title = "장기 검증 성과 양호"
+        color = "text-emerald-400"
+        bg = "bg-emerald-900/15 border-emerald-500/30"
+        body = (
+            "Top5 / 5영업일 기준으로 시장 대비 초과 성과가 확인됩니다. "
+            "다만 Top1 실전 운용과 Shadow 실험은 별도 기준이므로, "
+            "신규 진입은 시장 모드와 종목 위험 신호를 함께 확인하세요."
+        )
+    elif avg_ret > 0 and alpha is None:
+        # 평균 수익률은 양수지만 KOSPI 비교 데이터 없음 — 단정 금지
+        icon = "🟡"
+        title = "성과 양호 · 시장 비교 데이터 부족"
+        color = "text-yellow-400"
+        bg = "bg-yellow-900/15 border-yellow-500/30"
+        body = (
+            "Top5 / 5영업일 평균 수익률은 양호하지만 KOSPI 비교 데이터가 "
+            "확인되지 않아 시장 대비 초과 성과 여부는 단정할 수 없습니다. "
+            "신규 진입은 시장 모드와 종목 위험 신호를 함께 확인하세요."
+        )
+    elif avg_ret > 0 and alpha is not None and alpha > 0:
+        # 알파 양수지만 승률 60% 미만
+        icon = "🟡"
+        title = "성과 양호 · 신뢰도 관찰"
+        color = "text-yellow-400"
+        bg = "bg-yellow-900/15 border-yellow-500/30"
+        body = (
+            "시장 대비 초과 성과는 확인되지만, 승률이 60% 미만이라 "
+            "신뢰도는 관찰 단계입니다. 시장 모드와 종목 위험 신호를 "
+            "함께 확인하세요."
+        )
+    else:
+        icon = "⚠️"
+        title = "성과 약화 · 점검 필요"
+        color = "text-amber-400"
+        bg = "bg-amber-900/20 border-amber-500/40"
+        body = (
+            "최근 누적 성과가 약화되었거나 시장 대비 초과 성과가 확인되지 "
+            "않습니다. 임계값/룰 점검이 필요한 구간입니다."
+        )
+
+    with ui.card().classes(f"w-full p-3 mb-3 {bg} rounded-lg"):
+        with ui.row().classes("w-full items-center gap-2 mb-1"):
+            ui.label(icon).classes("text-2xl")
+            ui.label(title).classes(f"text-lg font-bold {color}")
+        # 한 줄 지표 요약
+        summary_parts = [f"평균 승률 {win:.1f}%", f"평균 수익률 {avg_ret:+.2f}%"]
+        if alpha is not None:
+            summary_parts.append(f"KOSPI 알파 {alpha:+.2f}%p")
+        else:
+            summary_parts.append("KOSPI 알파 데이터 없음")
+        ui.label("기준: " + " · ".join(summary_parts)).classes(
+            "text-xs text-gray-300 mb-1"
+        )
+        ui.label(body).classes(
+            "text-sm text-gray-200 leading-relaxed"
+        )
+        # [v3.9.12c] 아래 필터 변경해도 판정 카드는 고정 기준임을 명시
+        ui.label(
+            "※ 위 판정은 기본 기준(ELITE_SCORE / Top5 / 5영업일) 고정입니다. "
+            "아래 필터를 바꿔도 이 카드는 변하지 않습니다."
+        ).classes("text-[10px] text-gray-500 italic mt-2")
+
+
+def _render_validation_basis_card() -> None:
+    """[v3.9.12] 검증 기준 안내 — Top5/Top3/Top1 혼선 해소.
+    
+    성과탭 +7% / 종목탭 신규 매수 주의 같은 충돌이 검증 기준 차이임을 명시.
+    """
+    with ui.card().classes(
+        "w-full p-3 mb-3 bg-[rgba(59,130,246,0.08)] "
+        "border border-blue-500/30 rounded-lg"
+    ):
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.label("📌").classes("text-sm")
+            ui.label("검증 기준 안내").classes("text-sm font-bold text-blue-200")
+        with ui.column().classes("gap-0.5 pl-5 mt-1"):
+            ui.label(
+                "• 상단 성과 요약 — Top5 후보를 5영업일 보유했을 때의 평균 검증"
+            ).classes("text-xs text-gray-300")
+            ui.label(
+                "• 종목탭 Top Pick — 실제 하루 1종목 운용에 가까운 Top1 실전 검증 (10영업일)"
+            ).classes("text-xs text-gray-300")
+            ui.label(
+                "• Shadow 실험실 — 추천 로직을 바꾸지 않고 \"바꿨다면 어땠을지\"를 측정한 실험 결과"
+            ).classes("text-xs text-gray-300")
+        ui.label(
+            "※ 각 영역의 숫자가 다른 이유는 \"검증 기준\"이 다르기 때문이며, "
+            "성과탭 +X%인데 종목탭은 매수 주의인 경우 충돌이 아닙니다."
+        ).classes("text-[10px] text-gray-500 italic mt-2 pl-5")
+
+
+def _render_shadow_summary_card(j: dict) -> None:
+    """[v3.9.12] Shadow 실험실 상단 종합 판정 + 각 shadow 상태 배지.
+    
+    각 shadow의 single_backtest_ok/RWF 통과/구성변경률 기반으로
+    🟢 적용 후보 / 🟡 관찰 중 / 🔒 측정만 / 🚫 폐기 후보 판정.
+    """
+    em = j.get("entry_mode_shadow", {})
+    sr = j.get("struct_risk_shadow", {})
+    pe = j.get("pre_entry_risk_shadow", {})
+
+    if not (em.get("enabled") or sr.get("enabled") or pe.get("enabled")):
+        return
+
+    # 각 shadow 상태 판정
+    statuses = []
+
+    # ENTRY_MODE — chase 체결 수가 적으면 표본 부족
+    # [v3.9.13] 회원 친화 한글 — 관리자 용어 → 회원이 이해 가능한 문구
+    if em.get("enabled"):
+        extra_n = em.get("extra_fills", em.get("n_chase_filled", 0)) or 0
+        if extra_n < 5:
+            statuses.append(("미체결 회수 실험", "🟡 표본 부족 — 더 관찰 필요",
+                             "text-yellow-300"))
+        elif em.get("production_candidate"):
+            statuses.append(("미체결 회수 실험", "🟢 적용 후보 — 관찰 통과",
+                             "text-emerald-300"))
+        else:
+            statuses.append(("미체결 회수 실험", "🔒 측정 단계 — 반복 검증 전",
+                             "text-gray-300"))
+
+    # STRUCT risk — 효과는 있는데 구성변경 큼
+    if sr.get("enabled"):
+        d_ev = sr.get("delta_ev", 0) or 0
+        change_pct = (sr.get("changed_pick_rate", 0) or 0) * 100
+        if d_ev > 0 and change_pct >= 40:
+            statuses.append(("구조점수 위험구간 제외 실험",
+                             f"🟡 효과 있음 · 추천 후보가 많이 바뀜 ({change_pct:.0f}%)",
+                             "text-yellow-300"))
+        elif d_ev > 0:
+            statuses.append(("구조점수 위험구간 제외 실험",
+                             "🟢 효과 양호 · 추천 후보 변화 적음",
+                             "text-emerald-300"))
+        else:
+            statuses.append(("구조점수 위험구간 제외 실험",
+                             "🔒 측정 단계 — 효과 미확정",
+                             "text-gray-300"))
+
+    # PRE_ENTRY_RISK — B_red RWF 통과 + 화면 표시 단계 완료
+    if pe.get("enabled") and "rules" in pe:
+        b_red = pe.get("rules", {}).get("B_red", {})
+        b_red_ok = b_red.get("single_backtest_ok", False)
+        b_red_dev = b_red.get("delta_ev", 0) or 0
+        if b_red_ok and b_red_dev > 0:
+            statuses.append(("진입 위험 사전 식별 실험",
+                             "🟢 위험 표시 단계 완료 · 반복 검증 통과",
+                             "text-emerald-300"))
+        else:
+            statuses.append(("진입 위험 사전 식별 실험", "🟡 관찰 중",
+                             "text-yellow-300"))
+
+    if not statuses:
+        return
+
+    # 종합 판정 한 줄
+    # [v3.9.12c] 변수명 정정 — 실제 의미는 has_green (🟢 검사)
+    has_green = any("🟢" in s[1] for s in statuses)
+    has_yellow = any("🟡" in s[1] for s in statuses)
+    if has_green and not has_yellow:
+        overall = ("🟢", "Shadow 실험 — 적용 후보 다수", "text-emerald-400")
+    elif has_green and has_yellow:
+        overall = ("🟡", "Shadow 실험 — 유망하나 일부 관찰 필요", "text-yellow-400")
+    else:
+        overall = ("🔒", "Shadow 실험 — 측정 단계 유지", "text-gray-400")
+
+    with ui.card().classes(
+        "w-full p-3 mb-2 bg-[rgba(139,92,246,0.08)] "
+        "border border-purple-500/30 rounded-lg"
+    ):
+        with ui.row().classes("items-center gap-2 mb-2"):
+            ui.label(overall[0]).classes("text-lg")
+            ui.label(overall[1]).classes(f"text-sm font-bold {overall[2]}")
+        with ui.column().classes("gap-0.5 pl-5"):
+            for name, status, color in statuses:
+                # [v3.9.12c] 줄바꿈 안전성 — name과 status를 한 라벨로
+                ui.label(f"• {name}: {status}").classes(
+                    f"text-[11px] {color}"
+                )
+        ui.label(
+            "ℹ️ 모든 Shadow 결과는 운영 추천에 자동 반영되지 않습니다. "
+            "PRE_ENTRY_RISK는 화면 위험 표시까지만 적용된 상태입니다."
+        ).classes("text-[10px] text-gray-500 italic mt-2 pl-5")
+
+
+def render_tab_perf(auth: str = "free"):
+    """[Step AK+AL+AM] 시스템 성과 추세 — 면책 + 6개 메트릭 + 모바일 + KOSPI 알파
+    
+    [v3.9.13b] auth 추가 — 관리자는 Research Workbench 기본 펼침
+    """
     
     # ─── 헤더 ───
     with ui.row().classes("w-full items-center justify-between mb-3 flex-wrap gap-2"):
@@ -953,6 +1778,23 @@ def render_tab_perf():
             "text-amber-400 p-4"
         )
         return
+
+    # [v3.9.12] 회원용 요약 카드 (성과 판정 + 검증 기준 안내)
+    # [v3.9.13] 최근 7거래일 성과 변화 카드 추가
+    # [v3.9.14] 최근 손실 기여 자동 리포트 추가
+    # [v3.9.14c] 균형용 — 최근 수익 기여 카드도 함께 (손실만 보면 부정적 인상)
+    # [v3.9.14e] 캐시 공유 — trades/recs를 1회만 로딩 후 두 카드에 전달
+    try:
+        _render_perf_judgment_card(history, bench_data)
+        _render_recent_trend_card(history)
+        # 두 카드가 공유할 캐시 (한 번만 로딩)
+        _top1_trades = _load_top1_trades()
+        _rec_cache = _load_recommend_cache(days=90) if not _top1_trades.empty else {}
+        _render_profit_attribution_card(_top1_trades, _rec_cache)
+        _render_loss_attribution_card(_top1_trades, _rec_cache)
+        _render_validation_basis_card()
+    except Exception as e:
+        _logger.warning(f"perf 요약 카드 렌더 실패 (페이지 영향 없음): {e}")
 
     # ─── 데이터 표본 안내 ───
     n_files = len(history.groupby('Date')) if 'Date' in history.columns else 0
@@ -1144,22 +1986,38 @@ def render_tab_perf():
         _logger.warning(f"shadow lab 카드 렌더 실패 (페이지 영향 없음): {e}")
 
     # ─── Research Workbench 통합 정리 ───
+    # [v3.9.13] 기본 접기 — 회원 기본 화면에서 숨김. 펼치면 고급 분석 도구 표시.
+    # [v3.9.13b] 관리자는 기본 펼침 (시장/종목 탭과 동일 패턴)
     try:
         from research_tab import render_research_tab
         ui.separator().classes("my-6")
-        
-        with ui.row().classes("w-full items-center gap-2 mb-2"):
-            ui.label("🔬").classes("text-2xl")
-            with ui.column().classes("gap-0 flex-1"):
-                ui.label("심화 분석 (Research Workbench)").classes(
-                    "text-lg font-bold text-cyan-300"
-                )
-                ui.label(
-                    "위 차트는 핵심 지표 요약입니다. "
-                    "더 깊이 분석하려면 아래 도구를 사용하세요."
-                ).classes("text-xs text-gray-400")
-        
-        render_research_tab(data_dir=DATA_DIR)
+
+        _rw_is_admin = (auth == "admin")
+        _rw_title = (
+            "🔬 심화 분석 (관리자 — 기본 펼침)"
+            if _rw_is_admin
+            else "🔬 심화 분석 보기 (Research Workbench — 고급 사용자용)"
+        )
+        with ui.expansion(
+            _rw_title,
+            icon="science",
+            value=_rw_is_admin,  # 관리자만 기본 열림
+        ).classes(
+            "w-full bg-[rgba(34,211,238,0.05)] "
+            "border border-[rgba(34,211,238,0.2)] rounded"
+        ).props("dense"):
+            with ui.row().classes("w-full items-center gap-2 mb-2 mt-2"):
+                ui.label("🔬").classes("text-2xl")
+                with ui.column().classes("gap-0 flex-1"):
+                    ui.label("심화 분석 (Research Workbench)").classes(
+                        "text-lg font-bold text-cyan-300"
+                    )
+                    ui.label(
+                        "위 차트는 핵심 지표 요약입니다. "
+                        "더 깊이 분석하려면 아래 도구를 사용하세요."
+                    ).classes("text-xs text-gray-400")
+
+            render_research_tab(data_dir=DATA_DIR)
     except ImportError:
         # research_tab 없어도 정상 작동
         pass
