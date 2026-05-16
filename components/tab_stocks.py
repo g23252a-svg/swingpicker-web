@@ -2141,6 +2141,19 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             },
             value="전체", label="라벨",
         ).classes("min-w-[140px]")
+        # [v3.9.8] 위험 필터 — ENTRY_RISK_LEVEL 기반
+        # 기본값은 "전체" — 회원이 직접 필터 선택하게 (숨김으로 인한 혼란 방지)
+        # 가장 유용한 옵션: "RED 제외" (실전에서 자주 쓸 가능성 큼)
+        risk_filter = ui.select(
+            {
+                "전체": "전체",
+                "RED 제외": "RED 제외",
+                "GREEN만": "GREEN만",
+                "RED만 보기": "RED만 보기",
+                "ORANGE 이상": "ORANGE 이상",
+            },
+            value="전체", label="위험",
+        ).classes("min-w-[130px]")
         # [v3.7.24] "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준 명확화)
         sort_mode = ui.toggle(
             ["🔢 점수순", "🧱 3축최저순", "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"],
@@ -2191,6 +2204,37 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ).classes("text-xs text-orange-400")
             if n_none > 0:
                 ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
+
+    # [v3.9.8] 진입 위험 표시 기준 (ENTRY_RISK 범례)
+    # 회원이 종목 카드/테이블의 🔴/🟠 뱃지를 보고 "이게 뭐지?" 못 알게 만들기 위한 범례
+    if "ENTRY_RISK_LEVEL" in df.columns:
+        n_red = int((df["ENTRY_RISK_LEVEL"] == "RED").sum())
+        n_orange = int((df["ENTRY_RISK_LEVEL"] == "ORANGE").sum())
+        n_green = int((df["ENTRY_RISK_LEVEL"] == "GREEN").sum())
+        with ui.card().classes(
+            "w-full p-2 mb-3 bg-[rgba(255,80,80,0.04)] "
+            "border border-[rgba(239,68,68,0.2)] rounded"
+        ):
+            with ui.row().classes("w-full items-start gap-2 mb-1"):
+                ui.label("🚨").classes("text-sm")
+                ui.label("진입 위험 표시 기준").classes(
+                    "text-xs text-rose-300 font-bold"
+                )
+            with ui.column().classes("gap-0.5 pl-5"):
+                ui.label(
+                    f"🔴 진입 위험 ({n_red}): STRUCT 70~85 구간 + VWAP 8% 이상 떠 있음 "
+                    f"— 최근 검증에서 손실 위험 높게 나타난 조합"
+                ).classes("text-[11px] text-red-300")
+                ui.label(
+                    f"🟠 과열 주의 ({n_orange}): STRUCT 최상급 아닌데 VWAP 15% 이상 — "
+                    f"강한 모멘텀일 수 있으나 추격 진입 주의"
+                ).classes("text-[11px] text-orange-300")
+                ui.label(
+                    f"— 특이 위험 없음 ({n_green}): 현재 기준 별도 진입 위험 신호 없음"
+                ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "※ 위험 표시는 자동 제외가 아니라 진입 전 확인 신호입니다."
+            ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
 
     # [v3.7.26] 스코어 용어집 (접이식) — 사용자 지적: "스코어 너무 많음" 해결
     # 기본 닫힘 · 펼치면 각 스코어의 정체 + 공식을 한눈에
@@ -2466,6 +2510,18 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         # [v3.7.18] 라벨 필터 적용
         if label_filter.value != "전체" and "ELITE_LABEL" in fdf.columns:
             fdf = fdf[fdf["ELITE_LABEL"] == label_filter.value]
+        # [v3.9.8] 위험 필터 적용 — ENTRY_RISK_LEVEL 기준
+        if risk_filter.value != "전체" and "ENTRY_RISK_LEVEL" in fdf.columns:
+            rv = risk_filter.value
+            lvl = fdf["ENTRY_RISK_LEVEL"].astype(str)
+            if rv == "RED 제외":
+                fdf = fdf[lvl != "RED"]
+            elif rv == "GREEN만":
+                fdf = fdf[lvl == "GREEN"]
+            elif rv == "RED만 보기":
+                fdf = fdf[lvl == "RED"]
+            elif rv == "ORANGE 이상":
+                fdf = fdf[lvl.isin(["RED", "ORANGE"])]
         # [v3.7] 정렬 로직 확장
         if sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
@@ -3192,7 +3248,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # ── 이벤트 바인딩 ──
     # [v3.7.26] view_table_mode 추가 — 기본/고급 전환 시 테이블 재구성
-    for widget in [view_mode, route_filter, label_filter, sort_mode, view_table_mode]:
+    # [v3.9.8] risk_filter 추가
+    for widget in [view_mode, route_filter, label_filter, risk_filter, sort_mode, view_table_mode]:
         widget.on("update:model-value", lambda _: _build_view())
 
     _build_view()
