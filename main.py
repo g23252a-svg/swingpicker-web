@@ -337,7 +337,7 @@ async def index():
             ui.label("⚠️ trade_journal_tab 모듈 없음").classes("text-yellow-400")
 
     render_map = {
-        "t1": lambda: render_tab_market(df),
+        "t1": lambda: render_tab_market(df, auth),
         "t2": lambda: render_tab_stocks(df, auth, store),
         "t3": lambda: render_tab_portfolio(df, auth),
         "t11": lambda: render_tab_pricing(auth, user),

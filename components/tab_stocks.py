@@ -2040,8 +2040,9 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                         ui.badge(_ae_label_disp(lbl, short=True), color=color).classes("text-xs")
                         # [v3.9.7] 종목별 ENTRY_RISK 뱃지 우선, 없으면 v3.9.5 시스템 뱃지
                         # 우선순위: RED > ORANGE > 시스템 "오늘 보수 접근" > 없음
-                        _risk_level = str(r.get("ENTRY_RISK_LEVEL", "")).strip()
-                        _risk_reason = str(r.get("ENTRY_RISK_REASON", "")).strip()
+                        # [v3.9.11 hotfix] strip().upper() — 소문자/공백 데이터 silent miss 방지
+                        _risk_level = str(r.get("ENTRY_RISK_LEVEL", "") or "").strip().upper()
+                        _risk_reason = str(r.get("ENTRY_RISK_REASON", "") or "").strip()
                         if _risk_level == "RED":
                             ui.label("🔴 진입 위험").classes(
                                 "text-[10px] text-red-300 font-semibold "
@@ -2208,9 +2209,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     # [v3.9.8] 진입 위험 표시 기준 (ENTRY_RISK 범례)
     # 회원이 종목 카드/테이블의 🔴/🟠 뱃지를 보고 "이게 뭐지?" 못 알게 만들기 위한 범례
     if "ENTRY_RISK_LEVEL" in df.columns:
-        n_red = int((df["ENTRY_RISK_LEVEL"] == "RED").sum())
-        n_orange = int((df["ENTRY_RISK_LEVEL"] == "ORANGE").sum())
-        n_green = int((df["ENTRY_RISK_LEVEL"] == "GREEN").sum())
+        # [v3.9.11 hotfix] strip().upper() — silent miss 방지
+        _lvl_norm = df["ENTRY_RISK_LEVEL"].astype(str).str.strip().str.upper()
+        n_red = int((_lvl_norm == "RED").sum())
+        n_orange = int((_lvl_norm == "ORANGE").sum())
+        n_green = int((_lvl_norm == "GREEN").sum())
         with ui.card().classes(
             "w-full p-2 mb-3 bg-[rgba(255,80,80,0.04)] "
             "border border-[rgba(239,68,68,0.2)] rounded"
@@ -2511,9 +2514,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         if label_filter.value != "전체" and "ELITE_LABEL" in fdf.columns:
             fdf = fdf[fdf["ELITE_LABEL"] == label_filter.value]
         # [v3.9.8] 위험 필터 적용 — ENTRY_RISK_LEVEL 기준
+        # [v3.9.11 hotfix] strip().upper() — 소문자/공백 데이터 silent miss 방지
         if risk_filter.value != "전체" and "ENTRY_RISK_LEVEL" in fdf.columns:
             rv = risk_filter.value
-            lvl = fdf["ENTRY_RISK_LEVEL"].astype(str)
+            lvl = fdf["ENTRY_RISK_LEVEL"].astype(str).str.strip().str.upper()
             if rv == "RED 제외":
                 fdf = fdf[lvl != "RED"]
             elif rv == "GREEN만":
@@ -2645,7 +2649,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             _r_label = str(r.get("ELITE_LABEL", "") or "")
             _r_route = str(r.get("ROUTE", ""))
             # [v3.9.7] ENTRY_RISK_LEVEL을 짧은 이모지로 표시
-            _r_risk_lvl = str(r.get("ENTRY_RISK_LEVEL", "")).strip()
+            # [v3.9.11 hotfix] strip().upper() — 소문자/공백 데이터 silent miss 방지
+            _r_risk_lvl = str(r.get("ENTRY_RISK_LEVEL", "") or "").strip().upper()
             _r_risk_emoji = {"RED": "🔴", "ORANGE": "🟠"}.get(_r_risk_lvl, "—")
             rows.append({
                 "code": str(r.get("종목코드", "")).zfill(6),
@@ -2770,8 +2775,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     elite_lbl = str(r.get("ELITE_LABEL", "") or "")
                     elite_color = str(r.get("ELITE_LABEL_COLOR", "") or "")
                     # [v3.9.7] 칸반 카드에도 RED/ORANGE 위험 뱃지
-                    _risk_lvl_kb = str(r.get("ENTRY_RISK_LEVEL", "")).strip()
-                    _risk_reason_kb = str(r.get("ENTRY_RISK_REASON", "")).strip()
+                    # [v3.9.11 hotfix] strip().upper() — silent miss 방지
+                    _risk_lvl_kb = str(r.get("ENTRY_RISK_LEVEL", "") or "").strip().upper()
+                    _risk_reason_kb = str(r.get("ENTRY_RISK_REASON", "") or "").strip()
                     with ui.row().classes("items-center gap-1 mb-1 flex-wrap"):
                         if elite_lbl:
                             # [Step AF-1] 칸반 카드 내부 라벨 뱃지 한글 표시 (raw 비교 X)

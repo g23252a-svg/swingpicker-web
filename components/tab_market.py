@@ -50,10 +50,13 @@ except Exception as _ui_terms_err:
     def kelly_engine_label(x):
         s = str(x or "").strip()
         if not s or s.lower() in ("nan", "none"):
-            return ("", "")
+            return ("", "", "")
+        # [v3.9.10] 회원에게 "v22_calibrated" 같은 내부 이름은 의미 없음
+        # → "권장 비중 계산: 정상/보수모드"로 단순화. 내부 코드는 tooltip으로
+        # [v3.9.11] 3-tuple — 관리자 tooltip용 raw 엔진명 추가
         if "fallback" in s.lower():
-            return (f"⚠️ 매수금액 모델 보수모드 ({s})", "text-xs text-red-300")
-        return (f"매수금액 모델 정상 ({s})", "text-xs text-gray-500")
+            return ("⚠️ 권장 비중 계산: 보수모드", "text-xs text-red-300", s)
+        return ("권장 비중 계산: 정상", "text-xs text-gray-500", s)
     def gap_direction(g):
         try: v = float(g)
         except (TypeError, ValueError): return ""
@@ -303,7 +306,7 @@ def _sort_top_picks_for_hero(top_picks: pd.DataFrame) -> pd.DataFrame:
     return sorted_x.drop(columns=["_is_now", "_rr", "_bal", "_gap", "_elite"])
 
 
-def _render_today_hero(df: pd.DataFrame, meta: dict = None):
+def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
     """첫 화면 최상단 Hero 카드.
     
     [v22 UI Step D] meta 인자 추가 — macro risk 기반 verdict
@@ -516,10 +519,30 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                         ).classes("text-xs text-purple-300 mb-1")
                         
                         # [v22 UI Step C] IS_NOW_ENTRY 배지
+                        # [v3.9.9] 시장 모드가 종목 카드 문구를 덮어씀
+                        # — 종목 추천가 도달 + 시장 위험 → 표현 강도 조정
                         if is_now_entry:
-                            ui.label("✅ 지금 매수 OK").classes(
-                                "text-xs text-emerald-400 font-bold mb-1"
-                            )
+                            if is_macro_dangerous:
+                                # 🔴 WARNING/CRITICAL → 신규 매수 보류
+                                ui.label("🚫 신규 매수 보류").classes(
+                                    "text-xs text-red-400 font-bold mb-1"
+                                )
+                                ui.label(
+                                    "시장 위험 구간 — 신규 진입보다 보유 리스크 관리 우선"
+                                ).classes("text-[10px] text-red-300/80 mb-1")
+                            elif is_macro_caution:
+                                # 🟠 CAUTION → 조건부 소액 매수
+                                ui.label("🟠 조건부 소액 매수").classes(
+                                    "text-xs text-orange-400 font-bold mb-1"
+                                )
+                                ui.label(
+                                    "시장 주의 구간 — 평소 비중의 50% 이하로 제한"
+                                ).classes("text-[10px] text-orange-300/80 mb-1")
+                            else:
+                                # 🟢 NORMAL → 기존 그대로
+                                ui.label("✅ 지금 매수 OK").classes(
+                                    "text-xs text-emerald-400 font-bold mb-1"
+                                )
                         else:
                             ui.label("⏳ 추천가 도달 대기").classes(
                                 "text-xs text-amber-400 mb-1"
@@ -555,14 +578,22 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                                         "text-sm font-bold text-amber-300"
                                     )
                             if ewr > 0:
-                                ui.label(f"승률 {ewr*100:.0f}%").classes(
+                                # [v3.9.10] 종목 카드 "승률 47%" vs 조합 분석 "승률 76%" 충돌
+                                # → 명시적으로 "개별 모델 승률"로 표기 + 툴팁
+                                ui.label(f"개별 모델 승률 {ewr*100:.0f}%").classes(
                                     "text-xs text-gray-400"
+                                ).tooltip(
+                                    "이 종목 현재 조건의 모델 예측 승률입니다. "
+                                    "아래 '조합별 성과'의 승률은 과거 유사 패턴 평균이라 의미가 다릅니다."
                                 )
                         
                         # [Step E4 + F3 + I] Kelly engine 표시 → ui_terms.kelly_engine_label
-                        kelly_text, kelly_cls = kelly_engine_label(kelly_engine)
+                        # [v3.9.11] 3-tuple: (text, css, raw). admin이면 raw 엔진명 tooltip
+                        kelly_text, kelly_cls, kelly_raw = kelly_engine_label(kelly_engine)
                         if kelly_text:
-                            ui.label(kelly_text).classes(f"{kelly_cls} mt-1")
+                            _lbl_k = ui.label(kelly_text).classes(f"{kelly_cls} mt-1")
+                            if auth == "admin" and kelly_raw:
+                                _lbl_k.tooltip(f"engine: {kelly_raw}")
                             # [F3] fallback일 때 KELLY_ERROR 요약 (있을 때만, 80자)
                             if 'fallback' in kelly_engine.lower():
                                 if kelly_error and kelly_error.lower() not in ("nan", "none", ""):
@@ -691,10 +722,20 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
                 ).classes("text-xs text-gray-400 mb-1")
                 
                 # [Step D3] IS_NOW_ENTRY 배지 (관찰모드는 보통 ⏳)
+                # [v3.9.9] 시장 모드 덮어쓰기 (관찰 후보도 동일하게)
                 if cand_is_now:
-                    ui.label("✅ 지금 매수 OK (조건 미달이지만 가격은 OK)").classes(
-                        "text-xs text-emerald-400 mb-1"
-                    )
+                    if is_macro_dangerous:
+                        ui.label("🚫 신규 매수 보류 (시장 위험)").classes(
+                            "text-xs text-red-400 font-bold mb-1"
+                        )
+                    elif is_macro_caution:
+                        ui.label("🟠 조건부 소액 매수 (시장 주의 — 비중 50% 이하)").classes(
+                            "text-xs text-orange-400 font-bold mb-1"
+                        )
+                    else:
+                        ui.label("✅ 지금 매수 OK (조건 미달이지만 가격은 OK)").classes(
+                            "text-xs text-emerald-400 mb-1"
+                        )
                 else:
                     ui.label("⏳ 추천가 도달 대기").classes(
                         "text-xs text-amber-400 mb-1"
@@ -737,8 +778,11 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None):
 
 # ── 메인 렌더 ──
 
-def render_tab_market(df):
-    """Tab 1: 시장 현황"""
+def render_tab_market(df, auth: str = "free"):
+    """Tab 1: 시장 현황
+    
+    [v3.9.11] auth 추가 — 관리자에게 kelly engine 내부명 등 디버그 정보 노출
+    """
     import os, json
 
     fg_score, fg_label = _get_fear_greed(df)
@@ -760,7 +804,7 @@ def render_tab_market(df):
     # [v22 UI] 오늘의 결론 Hero 카드 — 가장 먼저 (1초 답변)
     # [Step D] meta 인자 추가 → macro risk 기반 verdict
     # ═══════════════════════════════════════════════════
-    _render_today_hero(df, meta)
+    _render_today_hero(df, meta, auth)
 
     # ═══════════════════════════════════════════════════
     # [v22 UI Step A] 12개 분석 섹션을 expansion으로 접기 — 첫 화면 깔끔
@@ -807,13 +851,29 @@ def render_tab_market(df):
                     ui.label(f"최대허용: {_max_route_disp}").classes("text-xs text-gray-500")
 
                 # ELITE/TOP_PICK 요약
+                # [v3.9.10] 회원이 "오늘의 추천 종목 / 평균 점수 32" 보고
+                # "넥스트칩 E87인데 왜 평균이 32?" 혼란 → TOP_PICK 평균만 계산
+                # [v3.9.10 hotfix] TOP_PICK 값이 "1"/1.0/True 등 다양해서
+                # is_truthy_flag로 통일 (다른 코드와 일관성)
                 if "ELITE_SCORE" in df.columns:
-                    elite_avg = df["ELITE_SCORE"].mean()
-                    tp_count = int(df.get("TOP_PICK", pd.Series(0)).sum()) if "TOP_PICK" in df.columns else 0
+                    if "TOP_PICK" in df.columns:
+                        _tp_mask = df["TOP_PICK"].apply(is_truthy_flag)
+                        tp_count = int(_tp_mask.sum())
+                    else:
+                        _tp_mask = None
+                        tp_count = 0
+                    # TOP_PICK 종목들의 ELITE_SCORE 평균 (없으면 표시 생략)
+                    if _tp_mask is not None and tp_count > 0:
+                        elite_avg = df.loc[_tp_mask, "ELITE_SCORE"].mean()
+                        avg_label = f"평균 ELITE {elite_avg:.0f}"
+                    else:
+                        # TOP_PICK 없으면 표시 안 함 (혼란 방지)
+                        avg_label = ""
                     with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
                         ui.label("오늘의 추천 종목").classes("text-xs text-gray-400")
                         ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
-                        ui.label(f"평균 점수 {elite_avg:.0f}").classes("text-xs text-gray-500")
+                        if avg_label:
+                            ui.label(avg_label).classes("text-xs text-gray-500")
 
         # ── [v22 UI Step B + K] 점수 우수 후보 더 보기 — TOP_PICK 제외 ──
         # Hero 카드에 이미 TOP_PICK이 표시되므로, 여기서는 TOP_PICK 제외한 후보만
@@ -825,7 +885,9 @@ def render_tab_market(df):
                 if "TOP_PICK" in _top_df.columns:
                     _tp_mask = _top_df["TOP_PICK"].apply(is_truthy_flag)
                     _candidates = _top_df[~_tp_mask].copy()
-                    _label_text = "👀 점수 우수 후보 더 보기 (오늘의 추천 제외)"
+                    # [v3.9.10] "점수 우수 후보 더 보기" → "관찰 후보 — 오늘 매매 제외"
+                    # CAUTION 시장에서 회원이 후보를 추천으로 오해 방지
+                    _label_text = "👀 관찰 후보 — 오늘 매매 제외"
                 else:
                     _candidates = _top_df.copy()
                     _label_text = "🏆 오늘의 점수 우수 종목 Top"
@@ -835,7 +897,13 @@ def render_tab_market(df):
 
                 if not _picks.empty:
                     with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
-                        ui.label(_label_text).classes("text-xs text-gray-400 mb-2")
+                        ui.label(_label_text).classes("text-xs text-gray-400 mb-1")
+                        # [v3.9.10] 회원 혼란 방지 — 왜 추천이 아닌지 한 줄 안내
+                        # [v3.9.11] 종목별 개별 제외 사유는 각 카드에 별도 표시
+                        ui.label(
+                            "점수는 좋지만 현재 진입 조건/시장 상태상 오늘의 추천에서는 제외된 종목입니다. "
+                            "각 종목 카드 하단에 제외 사유가 표시됩니다."
+                        ).classes("text-[10px] text-gray-500 italic mb-2")
                         with ui.row().classes("w-full gap-3 flex-wrap"):
                             for _, s in _picks.iterrows():
                                 route = str(s.get("ROUTE", ""))
@@ -847,15 +915,43 @@ def render_tab_market(df):
                                 rr = safe_float(s.get("RR_NOW_TP1", 0))
                                 wr = safe_float(s.get("EST_WIN_RATE", 0))
                                 bal = safe_float(s.get("BALANCE_SCORE", 0))
+                                gap_pct = safe_float(s.get("GAP_PCT", 0))
+                                elite_lbl = str(s.get("ELITE_LABEL", "") or "")
+                                # [v3.9.11 hotfix] 비교용 키는 strip().upper() — 데이터에
+                                # 공백/소문자 들어와도 silent miss 방지
+                                risk_lvl = str(s.get("ENTRY_RISK_LEVEL", "") or "").strip().upper()
+                                route_key = str(s.get("ROUTE", "") or "").strip().upper()
                                 tp_flag = ""   # [Step B] TOP_PICK 제외했으므로 항상 빈 문자열
                                 tp1_pct = (tp1 / close - 1) * 100 if close > 0 else 0
+
+                                # [v3.9.11] 개별 제외 사유 — 우선순위 순서로 첫 매칭 표시
+                                _reason = ""
+                                if risk_lvl == "RED":
+                                    _reason = "🔴 RED 위험 — 진입 위험 패턴"
+                                elif risk_lvl == "ORANGE":
+                                    _reason = "🟠 ORANGE — 과열 주의"
+                                elif "추격" in elite_lbl:
+                                    _reason = "⚠️ 추격 위험 — 추천가 위에서 매수 비추"
+                                elif abs(gap_pct) > 5:
+                                    _reason = f"📏 추천가 차이 큼 ({gap_pct:+.1f}%)"
+                                elif route_key in ("WAIT", "NEUTRAL"):
+                                    _reason = "👀 진입 시점 아님 — 관망 구간"
+                                elif is_macro_caution:
+                                    _reason = "⚠️ 시장 CAUTION — 보수 접근 구간"
+                                elif is_macro_dangerous:
+                                    _reason = "🚫 시장 위험 구간"
 
                                 with ui.card().classes("flex-1 min-w-[200px] p-3 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
                                     with ui.row().classes("items-center gap-2"):
                                         ui.label(f"{_route_icon} {tp_flag}{s.get('종목명', '')}").classes("text-white font-bold text-sm")
                                         ui.badge(f"E{elite:.0f}", color="#10B981" if elite >= 80 else "#3B82F6").classes("text-xs")
                                     ui.label(f"구조 {safe_float(s.get('STRUCT_SCORE', 0)):.0f} · 타이밍 {safe_float(s.get('TIMING_SCORE', 0)):.0f} · AI {safe_float(s.get('AI_SCORE', 0)):.0f} | 3축 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
-                                    ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | 수익:손실 {rr:.1f}:1 | 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")
+                                    ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | 수익:손실 {rr:.1f}:1 | 개별 모델 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")
+                                    # [v3.9.11] 종목별 개별 제외 사유 — 하단에 한 줄
+                                    if _reason:
+                                        ui.label(f"└ 제외 사유: {_reason}").classes(
+                                            "text-[10px] text-amber-300/80 mt-1 italic"
+                                        )
         except Exception as _te:
             _logger.warning(f"Top 추천 렌더 실패: {_te}")
 
@@ -898,6 +994,12 @@ def render_tab_market(df):
         # ── [v21.3] 지표별 승률 분석 ──
         if "EST_WIN_RATE" in df.columns and len(df) >= 20:
             _section_title("📊 지표별 승률 분석")
+            # [v3.9.10] "조합 승률 76%" vs "개별 모델 승률 47%" 충돌 해소
+            # 회원이 두 승률이 다른 의미임을 알 수 있게 한 줄 안내
+            ui.label(
+                "ℹ️ 아래 \"승률\"은 과거 유사 패턴(조합)의 평균이며, "
+                "위 종목 카드의 \"개별 모델 승률\"과는 다른 의미입니다."
+            ).classes("text-[11px] text-blue-300 italic mb-2")
 
             # 최적 조합 표시
             try:

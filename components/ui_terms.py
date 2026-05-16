@@ -155,22 +155,30 @@ SCORE_LABELS = {
 
 
 # ═══════════════════════════════════════════════════
-# Kelly engine (매수금액 모델)
+# Kelly engine (권장 비중 계산)
 # ═══════════════════════════════════════════════════
 def kelly_engine_label(engine: str) -> tuple:
-    """KELLY_ENGINE 값을 (표시문, 색깔클래스) 반환.
+    """KELLY_ENGINE 값을 (표시문, 색깔클래스, 내부엔진명) 반환.
+    
+    [v3.9.10] 회원에게 "v22_calibrated" 같은 내부 이름은 의미 없음.
+    "권장 비중 계산: 정상/보수모드"로 단순화.
+    
+    [v3.9.11] 관리자/디버그용으로 3번째 반환값에 내부 엔진명 원문 추가.
+    호출부에서 admin이면 tooltip(raw)을 붙여 표시 가능.
     
     사용:
-        text, css_cls = kelly_engine_label(row.get('KELLY_ENGINE', ''))
+        text, css_cls, raw = kelly_engine_label(row.get('KELLY_ENGINE', ''))
         if text:
-            ui.label(text).classes(css_cls)
+            lbl = ui.label(text).classes(css_cls)
+            if is_admin and raw:
+                lbl.tooltip(f"engine: {raw}")
     """
     engine = (engine or "").strip()
     if not engine or engine.lower() in ("nan", "none"):
-        return ("", "")
+        return ("", "", "")
     if "fallback" in engine.lower():
-        return (f"⚠️ 매수금액 모델 보수모드 ({engine})", "text-xs text-red-300")
-    return (f"매수금액 모델 정상 ({engine})", "text-xs text-gray-500")
+        return ("⚠️ 권장 비중 계산: 보수모드", "text-xs text-red-300", engine)
+    return ("권장 비중 계산: 정상", "text-xs text-gray-500", engine)
 
 
 # ═══════════════════════════════════════════════════
