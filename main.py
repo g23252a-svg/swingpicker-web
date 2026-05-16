@@ -344,7 +344,7 @@ async def index():
         "t4": lambda: render_tab_inquiry(auth, user),
         "t5": lambda: render_tab_terms(),
         "t6": lambda: render_tab_updates(),
-        "t7": lambda: render_tab_perf(),
+        "t7": lambda: render_tab_perf(auth),
         "t10": lambda: render_tab_backtest(df, auth),
         "t9": _render_journal,
     }
