@@ -262,6 +262,93 @@ def check_benchmark_cache_completeness():
     return errors
 
 
+def check_anomaly_thresholds():
+    """[v3.9.15e + 10] services/backtest_policy.py의 anomaly 임계값 정합 검증.
+
+    임계값이 실수로 완화/제거되어도 게이트가 잡지 않으면 화면에 비현실
+    수익률(예: Sharpe 100)이 그대로 표시될 수 있음. 따라서 핵심 임계값을
+    contract gate가 정적으로 검사.
+
+    검사 룰:
+    - services/backtest_policy.py 파일 존재
+    - 핵심 상수 6개 존재 + 기대값 일치
+    - tp_saturation_threshold / detect_anomaly_flags 함수 존재
+
+    의도적으로 임계값을 바꾸려면 services/backtest_policy.py와 이 함수의
+    EXPECTED 둘 다 같이 업데이트 — 의도적 변경 감지 가능.
+    """
+    errors = []
+    fpath = os.path.join(PROJECT_ROOT, "services", "backtest_policy.py")
+    if not os.path.exists(fpath):
+        errors.append(
+            "services/backtest_policy.py 누락 — v3.9.15e + 10 SSOT 모듈 부재"
+        )
+        return errors
+
+    # 기대값 (정책 결정 — 변경 시 의도적이어야 함)
+    EXPECTED = {
+        "ANOMALY_TOTAL_RET_ABS": 300,
+        "ANOMALY_SHARPE_MAX": 5,
+        "ANOMALY_CAGR_MAX": 300,
+        "ANOMALY_SHORT_DAYS_RET": 120,
+        "ANOMALY_SHORT_RET": 100,
+        "ANOMALY_SHORT_DAYS_CAGR": 252,
+        "TP_SAT_THRESH_LOW_TARGET": 80,
+        "TP_SAT_THRESH_MID_TARGET": 70,
+        "TP_SAT_THRESH_HIGH_TARGET": 60,
+    }
+    REQUIRED_FUNCS = {"tp_saturation_threshold", "detect_anomaly_flags"}
+
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            source = f.read()
+        tree = ast.parse(source, filename=fpath)
+    except SyntaxError as e:
+        return [f"services/backtest_policy.py 구문 오류: {e}"]
+    except Exception as e:
+        print(f"  ⚠️ backtest_policy.py 파싱 스킵: {e}")
+        return errors
+
+    # 모듈 top-level의 상수 할당 수집
+    found_constants = {}
+    found_funcs = set()
+    for node in tree.body:
+        # 상수 할당: `NAME = <int>` 형태
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
+                if isinstance(node.value.value, (int, float)):
+                    found_constants[target.id] = node.value.value
+        # 함수 정의
+        if isinstance(node, ast.FunctionDef):
+            found_funcs.add(node.name)
+
+    # 누락된 상수
+    missing_consts = set(EXPECTED.keys()) - set(found_constants.keys())
+    for c in sorted(missing_consts):
+        errors.append(
+            f"services/backtest_policy.py — 상수 누락: {c}"
+        )
+
+    # 값 불일치
+    for name, expected_val in EXPECTED.items():
+        if name in found_constants and found_constants[name] != expected_val:
+            errors.append(
+                f"services/backtest_policy.py — {name} 값 변경: "
+                f"{found_constants[name]} (기대: {expected_val}). "
+                f"의도적 변경이면 check_contract_gate.EXPECTED도 같이 업데이트."
+            )
+
+    # 누락된 함수
+    missing_funcs = REQUIRED_FUNCS - found_funcs
+    for f in sorted(missing_funcs):
+        errors.append(
+            f"services/backtest_policy.py — 함수 누락: {f}()"
+        )
+
+    return errors
+
+
 def check_kospi_daily_csv_schema():
     """[v3.9.15e + 4] data/kospi_daily.csv 스키마 검증 (있을 경우).
 
@@ -358,6 +445,13 @@ def main():
     all_errors.extend(errs)  # 파일 있으면서 스키마 깨진 건 hard fail
     print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
     for e in errs[:3]:
+        print(f"      {e}")
+
+    print("\n9. [GUARD_ANOMALY_THRESHOLDS] backtest_policy anomaly 임계값 정합...")
+    errs = check_anomaly_thresholds()
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:5]:
         print(f"      {e}")
 
     print("\n" + "=" * 50)
