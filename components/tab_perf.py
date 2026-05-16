@@ -705,17 +705,23 @@ def _load_backtest_validation() -> dict:
 
 
 def _render_shadow_lab_card():
-    """[v3.9.1] Shadow 실험실 — ENTRY_MODE / STRUCT risk shadow 측정 결과 표시.
+    """[v3.9.1 / v3.9.2] Shadow 실험실 — 3개 shadow 측정 결과 표시.
 
     추천 로직을 바꾸지 않고 "바꿨다면 어땠을지"를 매일 자동 측정한 결과.
     measurement-only — production 적용 아님을 명시.
+
+    카드:
+      🎯 ENTRY_MODE shadow    (v3.9.0) — 강한 종목 미체결 chase 회수
+      🛡️ STRUCT risk shadow   (v3.9.1) — STRUCT 70~85 제외 시뮬
+      🚨 PRE_ENTRY_RISK shadow (v3.9.2) — 4개 룰 비교 (B_red 등)
     """
     j = _load_backtest_validation()
     em = j.get("entry_mode_shadow", {})
     sr = j.get("struct_risk_shadow", {})
+    pe = j.get("pre_entry_risk_shadow", {})  # [v3.9.2]
 
-    # 둘 다 없거나 비활성이면 카드 자체를 안 그림
-    if not (em.get("enabled") or sr.get("enabled")):
+    # 셋 다 없거나 비활성이면 카드 자체를 안 그림
+    if not (em.get("enabled") or sr.get("enabled") or pe.get("enabled")):
         return
 
     with ui.row().classes("w-full items-center gap-2 mb-2 mt-2"):
@@ -801,6 +807,77 @@ def _render_shadow_lab_card():
             ui.label(f"규칙: {sr.get('rule', '')}").classes(
                 "text-[10px] text-gray-600 mt-1 leading-tight"
             )
+
+    # ─── PRE_ENTRY_RISK shadow [v3.9.2] ───
+    if pe.get("enabled") and "rules" in pe:
+        with ui.card().classes(
+            "w-full p-3 bg-[#1a1a2e] border border-purple-700/30 "
+            "rounded-lg mb-2"
+        ):
+            ui.label(
+                "🚨 PRE_ENTRY_RISK shadow — 4개 룰 비교 (위험 종목 사전 식별)"
+            ).classes("text-sm font-bold text-purple-200 mb-1")
+
+            rules = pe.get("rules", {})
+            best_rule_key = pe.get("best_by_efficiency") or pe.get("best_by_delta_ev")
+            # 추천 룰(B_red 기본 — RWF 통과 룰) 우선 표시
+            highlight_rule = best_rule_key or "B_red"
+            best = rules.get(highlight_rule, {})
+
+            if "delta_ev" in best:
+                ui.label(
+                    f"⭐ 추천 룰: {highlight_rule} — {best.get('description','')}"
+                ).classes("text-xs text-emerald-300 mb-1")
+                with ui.row().classes("w-full flex-wrap gap-x-6 gap-y-1"):
+                    _shadow_stat(
+                        "ΔEV",
+                        f"{best['delta_ev']:+.2f}",
+                        good=best["delta_ev"] > 0,
+                        bad=best["delta_ev"] < 0,
+                    )
+                    _shadow_stat(
+                        "Δ비승리 평균손익",
+                        f"{best.get('delta_non_win_avg_ret', 0):+.2f}",
+                        good=best.get("delta_non_win_avg_ret", 0) > 0,
+                        bad=best.get("delta_non_win_avg_ret", 0) < 0,
+                    )
+                    _shadow_stat(
+                        "Top3 구성변경",
+                        f"{best.get('changed_pick_rate', 0) * 100:.1f}%",
+                    )
+                    _shadow_stat(
+                        "단일 백테스트",
+                        "통과" if best.get("single_backtest_ok") else "미통과",
+                        good=best.get("single_backtest_ok", False),
+                    )
+
+                # 4개 룰 한 줄 요약 (작은 글씨)
+                lines = []
+                for rule_key in ["A_struct70_85", "B_red", "C_orange", "D_red_orange"]:
+                    r = rules.get(rule_key, {})
+                    if "delta_ev" not in r:
+                        continue
+                    mark = "★ " if rule_key == highlight_rule else "  "
+                    ok = "✅" if r.get("single_backtest_ok") else "❌"
+                    lines.append(
+                        f"{mark}{rule_key:14s}: ΔEV {r['delta_ev']:+.2f} / "
+                        f"구성변경 {r.get('changed_pick_rate', 0) * 100:.1f}% {ok}"
+                    )
+                if lines:
+                    ui.label("4개 룰 비교:").classes("text-[10px] text-gray-400 mt-2")
+                    for line in lines:
+                        ui.label(line).classes(
+                            "text-[10px] text-gray-500 font-mono leading-tight"
+                        )
+
+                _shadow_gate_label(
+                    pe.get("production_candidate", False),
+                    extra=" (RWF B_red 5/5 통과)" if pe.get("rwf_required") else "",
+                )
+            else:
+                ui.label("측정 데이터 누적 중 — 표본 부족").classes(
+                    "text-xs text-gray-500"
+                )
 
 
 def _shadow_stat(label: str, value: str, good: bool = False, bad: bool = False):
