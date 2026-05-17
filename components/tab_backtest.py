@@ -1160,6 +1160,35 @@ def render_tab_backtest(df, auth):
             "과최적화/lookahead 의심 검증. (10~30초)"
         )
 
+        # [v3.9.18] Train/Test 분할 검증 — 4프리셋 드롭다운
+        # 평가 v3.9.17 "lookahead bias 결정타"
+        with ui.button(
+            "🔬 Train/Test 분할 ▾",
+        ).props("color=teal-7 size=lg").classes(
+            "flex-1 min-w-[200px]"
+        ) as tt_btn:
+            with ui.menu():
+                ui.menu_item(
+                    "🛡️ 보수형 Train/Test",
+                    on_click=lambda: run_train_test("conservative"),
+                )
+                ui.menu_item(
+                    "⚖️ 균형형 Train/Test (기본)",
+                    on_click=lambda: run_train_test("balanced"),
+                )
+                ui.menu_item(
+                    "🚀 공격형 Train/Test",
+                    on_click=lambda: run_train_test("aggressive"),
+                )
+                ui.menu_item(
+                    "⚡ 단타형 Train/Test",
+                    on_click=lambda: run_train_test("scalping"),
+                )
+        tt_btn.tooltip(
+            "rec_date 기준 70/30 분할 — Train(과거 70%)으로만 좋은 전략인지, "
+            "Test(최근 30%)에서도 살아남는지 검증. (5~10초)"
+        )
+
         save_btn = ui.button(
             "💾 현재 설정 저장",
         ).props("flat color=purple size=md")
@@ -1328,6 +1357,67 @@ def render_tab_backtest(df, auth):
 
     # [v3.9.17b] 드롭다운 메뉴가 직접 run_robustness(preset_key)를 호출하므로
     # 별도 on_click 불필요. ui.menu_item의 on_click 람다에서 호출.
+
+    # ─── [v3.9.18] Train/Test 분할 검증 ───
+    async def run_train_test(preset_key: str = "balanced"):
+        """[v3.9.18] rec_date 70/30 분할 검증.
+
+        Args:
+            preset_key: "conservative" / "balanced" / "aggressive" / "scalping"
+        """
+        preset_label_map = {
+            "conservative": "🛡️ 보수형",
+            "balanced": "⚖️ 균형형",
+            "aggressive": "🚀 공격형",
+            "scalping": "⚡ 단타형",
+        }
+        label = preset_label_map.get(preset_key, "균형형")
+
+        result_container.clear()
+        with result_container:
+            ui.spinner("dots", size="lg", color="teal")
+            ui.label(
+                f"{label} Train/Test 분할 검증 중... (5~10초)"
+            ).classes("text-xs text-gray-400 mt-2")
+
+        from async_helpers import run_sync
+
+        all_recs = await run_sync(_load_recommend_files)
+        if all_recs.empty:
+            result_container.clear()
+            with result_container:
+                ui.label(
+                    "❌ data/ 폴더에 recommend_*.csv 파일이 없습니다"
+                ).classes("text-red-400")
+            return
+
+        try:
+            from components.backtest_train_test import (
+                _run_train_test_split,
+                _render_train_test_result,
+            )
+            tt_data = await run_sync(
+                lambda: _run_train_test_split(all_recs, preset_key)
+            )
+        except Exception as e:
+            _logger.warning(f"[Train/Test] 실행 실패: {e}", exc_info=True)
+            result_container.clear()
+            with result_container:
+                ui.label(f"⚠️ Train/Test 검증 실행 실패: {e}").classes(
+                    "text-red-400 p-3"
+                )
+            return
+
+        result_container.clear()
+        with result_container:
+            _render_train_test_result(tt_data)
+
+            ui.label(
+                "※ Train/Test 분할은 시간 순서를 기준으로 합니다. "
+                "Test가 최근 30% 구간에서도 살아남으면 일반화 양호. "
+                "다음 단계 v3.9.19 — 시장 국면별 성과 분석."
+            ).classes("text-[10px] text-gray-500 italic mt-3")
+
     
     # 즐겨찾기 저장 버튼
     def save_current():
