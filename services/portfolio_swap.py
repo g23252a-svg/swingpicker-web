@@ -261,6 +261,17 @@ def _row_to_pick_dict(row: pd.Series) -> dict:
                 return default
         return v if not pd.isna(v) else default
 
+    def _get_first(fields, default=None, num=True):
+        """[v3.9.21d 평가 3] alias 컬럼 순회 — 첫 번째 유효 값 반환.
+
+        예: ENTRY_GAP_PCT 없으면 GAP_PCT → entry_gap → ENTRY_GAP 순으로 탐색.
+        """
+        for f in fields:
+            v = _get(f, default=None, num=num)
+            if v is not None:
+                return v
+        return default
+
     # [v3.9.21b] anomaly 정보도 함께 추출
     # recommend CSV에 IS_ANOMALY / ANOMALY_FLAG / TP_SATURATION 컬럼이 있을 수 있음
     # [v3.9.21c 평가 2] list/tuple 판단을 pd.isna보다 먼저 — array truth ambiguity 방지
@@ -295,9 +306,8 @@ def _row_to_pick_dict(row: pd.Series) -> dict:
                 _logger.debug(f"[swap] anomaly bool 변환 실패: {e}")
                 pass
 
-    tp_saturation = _get("TP_SATURATION")
-    if tp_saturation is None:
-        tp_saturation = _get("TP_포화율")
+    # [v3.9.21d 평가 3] alias fallback — 다양한 컬럼명 안전 처리
+    tp_saturation = _get_first(("TP_SATURATION", "TP_포화율", "tp_saturation"))
 
     # [v3.9.21b 평가 2] EBS 파서 — 다양한 형식 안전 처리
     ebs_val = _parse_ebs(row)
@@ -305,20 +315,26 @@ def _row_to_pick_dict(row: pd.Series) -> dict:
     return {
         "name": str(row.get("종목명", "")),
         "code": str(row.get("종목코드", "")),
-        "final_score": _get("FINAL_SCORE") or _get("DISPLAY_SCORE"),
+        "final_score": _get_first(("FINAL_SCORE", "DISPLAY_SCORE", "final_score")),
         "display_score": _get("DISPLAY_SCORE"),
-        "elite_score": _get("ELITE_SCORE"),
+        "elite_score": _get_first(("ELITE_SCORE", "elite_score")),
         "route": _normalize_route(row.get("ROUTE")),
         "ebs": ebs_val,
-        "rr_now_tp1": _get("RR_NOW_TP1"),
-        "entry_gap_pct": _get("ENTRY_GAP_PCT"),
-        "close_price": _get("종가"),
+        "rr_now_tp1": _get_first(("RR_NOW_TP1", "RR_TP1", "rr_now_tp1", "rr")),
+        # [v3.9.21d 평가 3] entry_gap alias 확장
+        "entry_gap_pct": _get_first((
+            "ENTRY_GAP_PCT", "GAP_PCT", "ENTRY_GAP",
+            "ENTRY_GAP_TO_BUY", "entry_gap_pct", "gap_pct",
+        )),
+        "close_price": _get_first(("종가", "close", "close_price")),
         "macro_risk": str(row.get("MACRO_RISK", "")) or None,
         # [v3.9.21b 평가 1] anomaly 정보
         "is_anomaly": is_anomaly,
         "tp_saturation": tp_saturation,
         # 비현실 수익률도 anomaly로 분류 (있으면)
-        "total_return_abs": _get("TOTAL_RETURN") or _get("total_return"),
+        "total_return_abs": _get_first((
+            "TOTAL_RETURN", "total_return", "TOTAL_RET", "total_ret",
+        )),
     }
 
 
@@ -338,6 +354,21 @@ def _parse_ebs(row) -> int:
     if "EBS_PASS" in row:
         v = row["EBS_PASS"]
         if v is not None and not pd.isna(v):
+            # [v3.9.21d 평가 1] 문자열 "False"/"0"/"FAIL"이 bool("False")=True로
+            # 오해석되는 버그 차단 — 명시 화이트리스트 우선
+            if isinstance(v, str):
+                s = v.strip().lower()
+                if s in ("1", "true", "yes", "y", "pass", "t"):
+                    return 1
+                if s in ("0", "false", "no", "n", "fail", "none", "", "f"):
+                    return 0
+                # 알 수 없는 문자열은 fallthrough — bool 처리에 맡김
+                # 단 빈 문자열이 아니라면 bool로는 True가 됨 — 보수적으로 0
+                _logger.debug(
+                    f"[swap] EBS_PASS 문자열 인식 실패: {v!r} → 0 fallback"
+                )
+                return 0
+            # 비문자열 (bool/int/float) 처리
             try:
                 return 1 if bool(v) else 0
             except Exception as e:

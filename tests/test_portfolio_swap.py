@@ -905,4 +905,162 @@ class TestTwoPassWeightCalculation:
         )
 
 
+# ════════════════════════════════════════════════════════════════
+# G. [v3.9.21d] 평가 보정 회귀 가드 — EBS 문자열 + alias fallback
+# ════════════════════════════════════════════════════════════════
+class TestEbsPassStringBug:
+    """[v3.9.21d 평가 1] EBS_PASS 문자열 'False'/'0'/'FAIL' 정확 처리."""
+
+    def test_ebs_pass_string_false_returns_zero(self, fake_env, swap_svc):
+        """[v3.9.21d 평가 1] EBS_PASS='False' (문자열) → 0.
+
+        Python의 bool('False')=True 함정 차단.
+        """
+        row = pd.Series({"EBS_PASS": "False"})
+        assert swap_svc._parse_ebs(row) == 0, (
+            "EBS_PASS='False' 문자열은 0이어야 함 (bool 함정 차단)"
+        )
+
+    def test_ebs_pass_string_true_returns_one(self, fake_env, swap_svc):
+        """EBS_PASS='True' 문자열 → 1."""
+        row = pd.Series({"EBS_PASS": "True"})
+        assert swap_svc._parse_ebs(row) == 1
+
+    def test_ebs_pass_string_pass_returns_one(self, fake_env, swap_svc):
+        """EBS_PASS='PASS' → 1."""
+        row = pd.Series({"EBS_PASS": "PASS"})
+        assert swap_svc._parse_ebs(row) == 1
+
+    def test_ebs_pass_string_fail_returns_zero(self, fake_env, swap_svc):
+        """EBS_PASS='FAIL' → 0."""
+        row = pd.Series({"EBS_PASS": "FAIL"})
+        assert swap_svc._parse_ebs(row) == 0
+
+    def test_ebs_pass_string_zero_returns_zero(self, fake_env, swap_svc):
+        """EBS_PASS='0' (문자열) → 0."""
+        row = pd.Series({"EBS_PASS": "0"})
+        assert swap_svc._parse_ebs(row) == 0
+
+    def test_ebs_pass_string_one_returns_one(self, fake_env, swap_svc):
+        """EBS_PASS='1' (문자열) → 1."""
+        row = pd.Series({"EBS_PASS": "1"})
+        assert swap_svc._parse_ebs(row) == 1
+
+    def test_ebs_pass_string_yes_no(self, fake_env, swap_svc):
+        """EBS_PASS='yes' → 1, 'no' → 0."""
+        assert swap_svc._parse_ebs(pd.Series({"EBS_PASS": "yes"})) == 1
+        assert swap_svc._parse_ebs(pd.Series({"EBS_PASS": "no"})) == 0
+
+    def test_ebs_pass_string_unknown_returns_zero(self, fake_env, swap_svc):
+        """알 수 없는 문자열 → 0 (보수적).
+
+        bool("xyz") = True 함정 회피.
+        """
+        row = pd.Series({"EBS_PASS": "xyz"})
+        assert swap_svc._parse_ebs(row) == 0
+
+    def test_ebs_pass_bool_true_still_works(self, fake_env, swap_svc):
+        """기존 bool True 케이스 회귀 확인."""
+        row = pd.Series({"EBS_PASS": True})
+        assert swap_svc._parse_ebs(row) == 1
+
+    def test_ebs_pass_bool_false_still_works(self, fake_env, swap_svc):
+        """기존 bool False 케이스 회귀 확인."""
+        row = pd.Series({"EBS_PASS": False})
+        assert swap_svc._parse_ebs(row) == 0
+
+
+class TestEntryGapAliasFallback:
+    """[v3.9.21d 평가 3] entry_gap 컬럼명 alias fallback."""
+
+    def test_entry_gap_pct_primary(self, fake_env, swap_svc):
+        """ENTRY_GAP_PCT 우선 — 가장 표준 컬럼명."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "ENTRY_GAP_PCT": 2.5,
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["entry_gap_pct"] == 2.5
+
+    def test_gap_pct_alias(self, fake_env, swap_svc):
+        """GAP_PCT 알리아스 — ENTRY_GAP_PCT 없을 때 fallback."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "GAP_PCT": 3.5,  # ENTRY_GAP_PCT 없음
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["entry_gap_pct"] == 3.5
+
+    def test_entry_gap_alias(self, fake_env, swap_svc):
+        """ENTRY_GAP (PCT 없는 alias)."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "ENTRY_GAP": 4.2,
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["entry_gap_pct"] == 4.2
+
+    def test_lowercase_entry_gap_pct(self, fake_env, swap_svc):
+        """소문자 entry_gap_pct."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "entry_gap_pct": 1.5,
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["entry_gap_pct"] == 1.5
+
+    def test_entry_gap_priority_when_multiple(self, fake_env, swap_svc):
+        """여러 alias 동시 존재 시 ENTRY_GAP_PCT 우선."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "ENTRY_GAP_PCT": 2.5,  # 표준
+            "GAP_PCT": 8.0,        # 다른 값 — 무시되어야 함
+            "ENTRY_GAP": 6.0,
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        # ENTRY_GAP_PCT 우선 (2.5)
+        assert pick["entry_gap_pct"] == 2.5
+
+    def test_entry_gap_none_when_no_alias(self, fake_env, swap_svc):
+        """모든 alias 없으면 None."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["entry_gap_pct"] is None
+
+    def test_safety_uses_alias_value(self, fake_env, swap_svc):
+        """alias로 들어온 ENTRY_GAP도 _is_recommend_safe에서 차단 검사."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "GAP_PCT": 7.0,  # > 5% 임계, ENTRY_GAP_PCT 컬럼 없음
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        # alias로 추출됐어야 함
+        assert pick["entry_gap_pct"] == 7.0
+        # 7.0 > NEW_DANGER_ENTRY_GAP_PCT(5.0) → unsafe
+        assert swap_svc._is_recommend_safe(pick) is False
+
+
 
