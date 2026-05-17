@@ -1189,6 +1189,35 @@ def render_tab_backtest(df, auth):
             "Test(최근 30%)에서도 살아남는지 검증. (5~10초)"
         )
 
+        # [v3.9.19] 시장 국면별 성과 — 4프리셋 드롭다운
+        # 평가 로드맵: Train/Test가 시간 분할이면 국면별은 조건 분할
+        with ui.button(
+            "🌡️ 시장 국면별 성과 ▾",
+        ).props("color=purple-7 size=lg").classes(
+            "flex-1 min-w-[200px]"
+        ) as regime_btn:
+            with ui.menu():
+                ui.menu_item(
+                    "🛡️ 보수형 국면별",
+                    on_click=lambda: run_regime("conservative"),
+                )
+                ui.menu_item(
+                    "⚖️ 균형형 국면별 (기본)",
+                    on_click=lambda: run_regime("balanced"),
+                )
+                ui.menu_item(
+                    "🚀 공격형 국면별",
+                    on_click=lambda: run_regime("aggressive"),
+                )
+                ui.menu_item(
+                    "⚡ 단타형 국면별",
+                    on_click=lambda: run_regime("scalping"),
+                )
+        regime_btn.tooltip(
+            "run_health의 macro_risk(NORMAL/CAUTION/CRITICAL) 기준 — "
+            "활황/주의/위험 시장에서도 살아남는지 검증. (5~10초)"
+        )
+
         save_btn = ui.button(
             "💾 현재 설정 저장",
         ).props("flat color=purple size=md")
@@ -1416,6 +1445,65 @@ def render_tab_backtest(df, auth):
                 "※ Train/Test 분할은 시간 순서를 기준으로 합니다. "
                 "Test가 최근 30% 구간에서도 살아남으면 일반화 양호. "
                 "다음 단계 v3.9.19 — 시장 국면별 성과 분석."
+            ).classes("text-[10px] text-gray-500 italic mt-3")
+
+    # ─── [v3.9.19] 시장 국면별 성과 ───
+    async def run_regime(preset_key: str = "balanced"):
+        """[v3.9.19] macro_risk 기준 NORMAL/CAUTION/CRITICAL 백테스트.
+
+        Args:
+            preset_key: "conservative" / "balanced" / "aggressive" / "scalping"
+        """
+        preset_label_map = {
+            "conservative": "🛡️ 보수형",
+            "balanced": "⚖️ 균형형",
+            "aggressive": "🚀 공격형",
+            "scalping": "⚡ 단타형",
+        }
+        label = preset_label_map.get(preset_key, "균형형")
+
+        result_container.clear()
+        with result_container:
+            ui.spinner("dots", size="lg", color="purple")
+            ui.label(
+                f"{label} 시장 국면별 검증 중... (5~10초)"
+            ).classes("text-xs text-gray-400 mt-2")
+
+        from async_helpers import run_sync
+
+        all_recs = await run_sync(_load_recommend_files)
+        if all_recs.empty:
+            result_container.clear()
+            with result_container:
+                ui.label(
+                    "❌ data/ 폴더에 recommend_*.csv 파일이 없습니다"
+                ).classes("text-red-400")
+            return
+
+        try:
+            from components.backtest_regime import (
+                _run_regime_split,
+                _render_regime_table,
+            )
+            regime_data = await run_sync(
+                lambda: _run_regime_split(all_recs, preset_key)
+            )
+        except Exception as e:
+            _logger.warning(f"[국면별] 실행 실패: {e}", exc_info=True)
+            result_container.clear()
+            with result_container:
+                ui.label(f"⚠️ 시장 국면별 검증 실행 실패: {e}").classes(
+                    "text-red-400 p-3"
+                )
+            return
+
+        result_container.clear()
+        with result_container:
+            _render_regime_table(regime_data)
+
+            ui.label(
+                "※ 국면 분류는 run_health JSON의 macro_risk 기준입니다. "
+                "표본이 부족한 국면은 자동으로 ⚪ 표시됩니다."
             ).classes("text-[10px] text-gray-500 italic mt-3")
 
     
