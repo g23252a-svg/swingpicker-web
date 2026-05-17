@@ -59,6 +59,12 @@ REGIME_GREEN_POSITIVE_REGIMES = 3       # 3국면 모두 수익 양수
 REGIME_GREEN_MIN_RET = 0.0              # 각 국면 수익 ≥ 0
 REGIME_GREEN_MDD_MIN = -15.0            # 각 국면 MDD ≥ -15%
 
+# [v3.9.19b 평가 1] alpha 평가 기준 — v3.9.17c / v3.9.18b 패턴 일관
+# coverage가 부족하면 🟢 차단, 🟡 yellow_candidate
+# 0.65 = 3국면 중 최소 2국면 alpha 필요 (2/3 = 66.67% ≥ 0.65)
+REGIME_GREEN_ALPHA_COVERAGE = 0.65
+REGIME_GREEN_ALPHA_MIN = 0.0             # 산출된 alpha는 모두 ≥ 0
+
 # 🔴 하락장 취약 — CRITICAL/CAUTION에서 큰 손실
 REGIME_RED_DOWNTURN_RET = -5.0          # CAUTION 또는 CRITICAL < -5% → 🔴
 REGIME_RED_DOWNTURN_MDD = -20.0         # 또는 MDD < -20%
@@ -189,7 +195,16 @@ def run_regime_split(
 
     # ─── 3. 국면별 partition ───
     sorted_recs = all_recs.copy()
-    sorted_recs["rec_date_str"] = sorted_recs["rec_date"].astype(str)
+    # [v3.9.19b 평가 2] rec_date 정규화 — YYYYMMDD / YYYY-MM-DD / datetime 혼합 안전
+    # 이전: astype(str)만 → "2026-05-15" 입력 시 "20260515"와 매칭 실패
+    # 변경: pd.to_datetime 통해 항상 YYYYMMDD 형태로 표준화
+    rec_date_dt = pd.to_datetime(
+        sorted_recs["rec_date"], errors="coerce", format="mixed"
+    )
+    # NaT는 원본 문자열 fallback (날짜 파싱 실패 시 매칭 시도)
+    rec_date_norm = rec_date_dt.dt.strftime("%Y%m%d")
+    rec_date_str_raw = sorted_recs["rec_date"].astype(str)
+    sorted_recs["rec_date_str"] = rec_date_norm.fillna(rec_date_str_raw)
     sorted_recs["regime"] = sorted_recs["rec_date_str"].map(regime_map)
 
     regimes_out = {}
@@ -335,7 +350,7 @@ def derive_regime_verdict(regimes_out: dict) -> dict:
             "reasons": downturn_failures[:3],
         }
 
-    # ─── 🟢 전천후 ───
+    # ─── 🟢 전천후 또는 🟡 전천후 후보 ───
     all_positive = all(
         float(valid_regimes[r]["result"].get("total_return", 0) or 0)
         >= REGIME_GREEN_MIN_RET
@@ -350,35 +365,67 @@ def derive_regime_verdict(regimes_out: dict) -> dict:
         not valid_regimes[r]["result"].get("anomaly_flags", [])
         for r in valid_regimes
     )
-    # alpha — 산출된 국면만 검사
+    # alpha — 산출된 국면만 모음
     alphas = [
         valid_regimes[r]["result"].get("alpha")
         for r in valid_regimes
     ]
     valid_alphas = [a for a in alphas if a is not None]
-    alpha_ok = len(valid_alphas) == 0 or all(a >= 0 for a in valid_alphas)
     alpha_coverage = (
         len(valid_alphas) / n_valid if n_valid > 0 else 0
     )
+    alpha_all_nonneg = (
+        len(valid_alphas) == 0
+        or all(a >= REGIME_GREEN_ALPHA_MIN for a in valid_alphas)
+    )
 
-    if all_positive and all_mdd_safe and no_anomaly and alpha_ok and n_valid == 3:
-        # 평가 시나리오: 3국면 모두 양호
-        alpha_clause = (
-            f"alpha 평균 {sum(valid_alphas)/len(valid_alphas):+.2f}%p"
-            if valid_alphas
-            else "alpha 미산출 (벤치 부족)"
-        )
-        return {
-            "icon": "🟢",
-            "level": "green",
-            "title": "전천후 · 모든 국면 양호",
-            "color_class": "text-emerald-400",
-            "body": (
-                f"3국면 모두 수익 양수, MDD 안정, anomaly 없음. {alpha_clause}. "
-                "활황·정상·하락 모든 시장에서 살아남는 전략 — 실전 후보."
-            ),
-            "reasons": ["전 국면 일관 양호"],
-        }
+    basic_pass = (
+        all_positive
+        and all_mdd_safe
+        and no_anomaly
+        and alpha_all_nonneg
+        and n_valid == 3
+    )
+
+    if basic_pass:
+        # [v3.9.19b 평가 1] alpha coverage 분기 — v3.9.17c / v3.9.18b 패턴 일관
+        # 시장 대비 검증 없으면 초록 확정 금지 → 🟡 전천후 후보
+        if alpha_coverage >= REGIME_GREEN_ALPHA_COVERAGE:
+            # 🟢 전천후 — coverage 충분 + alpha 양수
+            alpha_clause = (
+                f"alpha 평균 {sum(valid_alphas)/len(valid_alphas):+.2f}%p"
+                f" (산출 {len(valid_alphas)}/{n_valid})"
+            )
+            return {
+                "icon": "🟢",
+                "level": "green",
+                "title": "전천후 · 모든 국면 양호",
+                "color_class": "text-emerald-400",
+                "body": (
+                    f"3국면 모두 수익 양수, MDD 안정, anomaly 없음. "
+                    f"{alpha_clause}. 활황·정상·하락 모든 시장에서 살아남는 "
+                    "전략 — 실전 후보."
+                ),
+                "reasons": ["전 국면 일관 양호"],
+            }
+        else:
+            # 🟡 전천후 후보 · alpha 평가 보류 — coverage 부족
+            return {
+                "icon": "🟡",
+                "level": "yellow_candidate",
+                "title": "전천후 후보 · alpha 평가 보류",
+                "color_class": "text-yellow-400",
+                "body": (
+                    f"3국면 모두 절대수익/MDD는 양호. 다만 alpha coverage "
+                    f"{alpha_coverage*100:.0f}% (기준 65% 미달 — 산출 "
+                    f"{len(valid_alphas)}/{n_valid}). KOSPI 대비 검증 부족 — "
+                    "bench_cache 또는 kospi_daily.csv 보강 후 재평가 권장."
+                ),
+                "reasons": [
+                    f"alpha coverage {alpha_coverage*100:.0f}% "
+                    f"(기준 {REGIME_GREEN_ALPHA_COVERAGE*100:.0f}%)"
+                ],
+            }
 
     # ─── 🟡 국면 의존 (그 외) ───
     misses = []
