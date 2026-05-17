@@ -666,6 +666,394 @@ def _build_chart_by_mode(result: dict, mode: str):
 # ═══════════════════════════════════════════════════
 #  [Step AO] 면책 + 과적합 경고
 # ═══════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════
+# [v3.9.16] 프리셋 비교 — 4프리셋 동시 실행 + 비교표 + 하이라이트
+# ═══════════════════════════════════════════════════════════════════
+# 평가에서 1순위로 제안한 기능. 사용자가 보수/균형/공격/단타를
+# 각각 눌러보는 대신 한 번에 비교 가능.
+#
+# 설계 원칙:
+# - 새 산식/배지 만들지 않음 (scope creep 방지 — v3.9.16b로 분리)
+# - 기존 services.backtest_policy SSOT (detect_anomaly_flags,
+#   tp_saturation_threshold) 그대로 재사용
+# - 기존 _calc_kospi_alpha / _run_backtest 그대로 재사용
+# - 추천/매수가/Top3 baseline 변경 0
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _run_preset_comparison(all_recs: pd.DataFrame) -> dict:
+    """[v3.9.16] 4개 프리셋 동시 실행 → 비교용 dict 반환.
+
+    Args:
+        all_recs: 누적 추천 CSV 데이터프레임
+
+    Returns:
+        {
+          "conservative": {
+              "label": "🛡️ 보수형",
+              "cfg": {min_score, top_k, hold_days, target_pct, stop_pct, cost_pct},
+              "result": {total_return, win_rate, mdd, ..., alpha, alpha_mode,
+                         anomaly_flags, tp_saturation, tp_threshold} 또는 {"error":...}
+          },
+          "balanced": ...,
+          "aggressive": ...,
+          "scalping": ...,
+        }
+
+    각 result에 비교용 메타 데이터 추가:
+        alpha          : KOSPI 알파 (%p)  ← _calc_kospi_alpha
+        alpha_mode     : "real" / "simple" / None
+        anomaly_flags  : list[str]  ← services.backtest_policy.detect_anomaly_flags
+        tp_saturation  : float (%)
+        tp_threshold   : int (60/70/80, target_pct tier별)
+    """
+    from services.backtest_policy import (
+        detect_anomaly_flags,
+        tp_saturation_threshold,
+    )
+
+    out = {}
+    for key, preset in PRESETS.items():
+        cfg = {
+            "min_score": preset["min_score"],
+            "top_k": preset["top_k"],
+            "hold_days": preset["hold_days"],
+            "target_pct": preset["target_pct"],
+            "stop_pct": preset["stop_pct"],
+            "cost_pct": preset["cost_pct"],
+        }
+        try:
+            result = _run_backtest(
+                all_recs,
+                cfg["min_score"], cfg["hold_days"],
+                cfg["stop_pct"], cfg["target_pct"],
+                cfg["top_k"], cfg["cost_pct"],
+            )
+        except Exception as e:
+            _logger.warning(f"[preset_comparison] {key} 백테스트 실패: {e}")
+            result = {"error": f"백테스트 실행 실패: {e}"}
+
+        if "error" not in result:
+            # alpha (real or simple)
+            try:
+                alpha, alpha_mode = _calc_kospi_alpha(result, cfg)
+            except Exception as e:
+                _logger.debug(f"[preset_comparison] {key} alpha 계산 실패: {e}")
+                alpha, alpha_mode = None, None
+            result["alpha"] = alpha
+            result["alpha_mode"] = alpha_mode
+
+            # anomaly flags (services SSOT 사용)
+            result["anomaly_flags"] = detect_anomaly_flags(
+                total_ret=float(result.get("total_return", 0) or 0),
+                sharpe_val=result.get("sharpe"),
+                cagr_val=result.get("cagr"),
+                trading_days=int(result.get("trading_days", 0) or 0),
+            )
+
+            # TP 포화율 + tier 임계
+            sd = result.get("status_dist", {}) or {}
+            n_win = int(sd.get("WIN", 0) or 0)
+            n_stop = int(sd.get("STOP", 0) or 0)
+            n_hold = int(sd.get("HOLD_EXIT", 0) or 0)
+            n_total = n_win + n_stop + n_hold
+            result["tp_saturation"] = (
+                (n_win / n_total * 100) if n_total > 0 else 0.0
+            )
+            result["tp_threshold"] = tp_saturation_threshold(cfg["target_pct"])
+
+        out[key] = {
+            "label": preset["label"],
+            "cfg": cfg,
+            "result": result,
+        }
+    return out
+
+
+def _render_preset_comparison_table(results_by_preset: dict) -> None:
+    """[v3.9.16] 프리셋 비교 표 + 최고/최저 하이라이트.
+
+    하이라이트 규칙 (각 컬럼별 베스트):
+        🔥 수익률 최고
+        🛡️ MDD 최저 (-3% > -10%)
+        ⚡ Sharpe 최고
+        📈 alpha 최고
+
+    경고:
+        🚨 anomaly 있음 → 행 전체 amber 배경
+        ⚠️ TP 포화율 임계 초과
+        ⚪ alpha 없음 (간이 알파 미산출) → 회색 표시
+    """
+    # 유효 결과만 추출
+    valid = {
+        k: v for k, v in results_by_preset.items() if "error" not in v["result"]
+    }
+    if not valid:
+        ui.label("⚠️ 모든 프리셋이 백테스트 실패").classes(
+            "text-red-400 p-3"
+        )
+        for k, v in results_by_preset.items():
+            err = v["result"].get("error", "알 수 없는 오류")
+            ui.label(f"  · {v['label']}: {err}").classes(
+                "text-xs text-red-300 ml-3"
+            )
+        return
+
+    # 하이라이트 베스트 결정
+    def _max_by(key, prefer_lower=False, allow_none=False):
+        """key 기준 최고 (또는 최저) 프리셋 키 반환."""
+        scored = []
+        for k, v in valid.items():
+            val = v["result"].get(key)
+            if val is None:
+                if allow_none:
+                    continue
+                continue
+            try:
+                scored.append((k, float(val)))
+            except (TypeError, ValueError):
+                continue
+        if not scored:
+            return None
+        if prefer_lower:
+            return min(scored, key=lambda x: x[1])[0]
+        return max(scored, key=lambda x: x[1])[0]
+
+    best_ret = _max_by("total_return")
+    # MDD는 음수 — 절대값 작은(0에 가까운) 게 좋음 → max 사용 (-3 > -10)
+    best_mdd = _max_by("mdd")
+    best_sharpe = _max_by("sharpe", allow_none=True)
+    best_alpha = _max_by("alpha", allow_none=True)
+
+    # ─── 비교표 헤더 ───
+    ui.label("📊 프리셋 비교 (4종 동시 실행)").classes(
+        "text-lg font-bold text-cyan-300 mb-2"
+    )
+    ui.label(
+        "각 컬럼 베스트: 🔥수익률 · 🛡️MDD · ⚡Sharpe · 📈alpha. "
+        "🚨 anomaly 있음 / ⚠️ TP 포화율 임계 초과."
+    ).classes("text-xs text-gray-400 mb-3")
+
+    # ─── 표 본체 (NiceGUI grid 기반 — column flex로 안전 렌더) ───
+    headers = [
+        ("프리셋", "left"),
+        ("조건", "left"),
+        ("수익률", "right"),
+        ("MDD", "right"),
+        ("승률", "right"),
+        ("Sharpe", "right"),
+        ("alpha", "right"),
+        ("TP포화", "right"),
+        ("판정", "left"),
+    ]
+    # grid-template-columns: 9 컬럼 자동 폭
+    grid_cols = (
+        "minmax(140px, 1.2fr) minmax(180px, 1.5fr) "
+        "minmax(100px, 1fr) minmax(80px, 0.8fr) minmax(70px, 0.7fr) "
+        "minmax(80px, 0.8fr) minmax(100px, 1fr) minmax(80px, 0.8fr) "
+        "minmax(180px, 1.5fr)"
+    )
+
+    with ui.element("div").classes(
+        "w-full overflow-x-auto border border-gray-700 rounded-lg"
+    ).style(f"background: rgba(20, 20, 35, 0.6);"):
+        # 헤더 행
+        with ui.element("div").classes("w-full").style(
+            f"display: grid; grid-template-columns: {grid_cols}; "
+            f"background: rgba(0, 100, 150, 0.25); "
+            f"border-bottom: 1px solid #4b5563;"
+        ):
+            for name, align in headers:
+                ui.label(name).classes(
+                    f"p-2 font-bold text-cyan-200 text-{align} text-xs"
+                ).style("white-space: nowrap;")
+
+        # 본체 — 프리셋별 행
+        preset_order = ["conservative", "balanced", "aggressive", "scalping"]
+        for key in preset_order:
+            if key not in results_by_preset:
+                continue
+            v = results_by_preset[key]
+            r = v["result"]
+
+            if "error" in r:
+                # 에러 행 — 단순 한 줄
+                with ui.element("div").classes("w-full p-2").style(
+                    "background: rgba(100, 30, 30, 0.25); "
+                    "border-bottom: 1px solid #374151;"
+                ):
+                    ui.label(
+                        f"❌ {v['label']}: {r['error']}"
+                    ).classes("text-xs text-red-300")
+                continue
+
+            # anomaly 시 행 배경 amber
+            row_bg = (
+                "background: rgba(120, 70, 0, 0.18);"
+                if r.get("anomaly_flags")
+                else ""
+            )
+
+            total_ret = float(r.get("total_return", 0) or 0)
+            mdd = float(r.get("mdd", 0) or 0)
+            win_rate = float(r.get("win_rate", 0) or 0)
+            sharpe = r.get("sharpe")
+            alpha = r.get("alpha")
+            alpha_mode = r.get("alpha_mode")
+            tp_sat = float(r.get("tp_saturation", 0) or 0)
+            tp_th = int(r.get("tp_threshold", 70) or 70)
+            anom = r.get("anomaly_flags", [])
+            cfg = v["cfg"]
+
+            with ui.element("div").classes("w-full").style(
+                f"display: grid; grid-template-columns: {grid_cols}; "
+                f"border-bottom: 1px solid #374151; {row_bg}"
+            ):
+                # 1. 프리셋 이름
+                with ui.column().classes("p-2 gap-0"):
+                    ui.label(v["label"]).classes(
+                        "font-bold text-gray-100 text-sm"
+                    )
+                    if anom:
+                        ui.label("🚨 anomaly").classes(
+                            "text-[10px] text-amber-300"
+                        )
+
+                # 2. 조건 요약
+                with ui.column().classes("p-2 gap-0"):
+                    ui.label(
+                        f"{cfg['min_score']}점↑ / Top-{cfg['top_k']} / "
+                        f"보유 {cfg['hold_days']}일"
+                    ).classes("text-[11px] text-gray-300")
+                    ui.label(
+                        f"+{cfg['target_pct']:.0f}/{cfg['stop_pct']:.0f}% / "
+                        f"비용 {cfg['cost_pct']:.1f}%"
+                    ).classes("text-[10px] text-gray-400")
+
+                # 3. 수익률 (anomaly 시 raw 노출 차단)
+                from services.backtest_policy import (
+                    ANOMALY_TOTAL_RET_ABS as _RA,
+                    ANOMALY_SHARPE_MAX as _SM,
+                )
+                with ui.column().classes("p-2 gap-0 items-end"):
+                    if total_ret > _RA:
+                        disp = f"{_RA}%+ 비정상"
+                        color = "text-amber-400"
+                    else:
+                        disp = f"{total_ret:+.1f}%"
+                        color = (
+                            "text-emerald-400" if total_ret >= 0
+                            else "text-red-400"
+                        )
+                    # [v3.9.16b 보정] anomaly 행이면 🔥 대신 🚨 — 사용자 혼란 방지
+                    # 최고 수익률 정보 자체는 정보로 가치 있어서 베스트에서 빼지 않음.
+                    # 다만 🔥(자랑)과 🚨(경고)를 겹치지 않게 후자만 표시.
+                    if key == best_ret and total_ret > 0:
+                        prefix = "🚨 " if anom else "🔥 "
+                    else:
+                        prefix = ""
+                    ui.label(f"{prefix}{disp}").classes(
+                        f"{color} font-bold text-sm"
+                    )
+
+                # 4. MDD
+                with ui.column().classes("p-2 gap-0 items-end"):
+                    prefix = "🛡️ " if key == best_mdd else ""
+                    color = (
+                        "text-emerald-400" if mdd >= -10
+                        else "text-amber-400" if mdd >= -20
+                        else "text-red-400"
+                    )
+                    ui.label(f"{prefix}{mdd:.1f}%").classes(
+                        f"{color} font-bold text-sm"
+                    )
+
+                # 5. 승률
+                with ui.column().classes("p-2 gap-0 items-end"):
+                    color = (
+                        "text-emerald-400" if win_rate >= 55
+                        else "text-gray-300" if win_rate >= 45
+                        else "text-amber-400"
+                    )
+                    ui.label(f"{win_rate:.1f}%").classes(
+                        f"{color} text-sm"
+                    )
+
+                # 6. Sharpe
+                with ui.column().classes("p-2 gap-0 items-end"):
+                    if sharpe is None:
+                        ui.label("—").classes("text-gray-500 text-sm")
+                    elif sharpe > _SM:
+                        ui.label(f"{_SM}+ 비정상").classes(
+                            "text-amber-400 text-xs"
+                        )
+                    else:
+                        prefix = "⚡ " if key == best_sharpe else ""
+                        color = (
+                            "text-emerald-400" if sharpe >= 1.0
+                            else "text-gray-300"
+                        )
+                        ui.label(f"{prefix}{sharpe:.2f}").classes(
+                            f"{color} text-sm"
+                        )
+
+                # 7. alpha
+                with ui.column().classes("p-2 gap-0 items-end"):
+                    if alpha is None:
+                        ui.label("⚪ —").classes(
+                            "text-gray-500 text-xs"
+                        )
+                    else:
+                        prefix = (
+                            "📈 " if key == best_alpha and alpha > 0 else ""
+                        )
+                        color = (
+                            "text-emerald-400" if alpha > 0
+                            else "text-red-400"
+                        )
+                        mode_mark = "" if alpha_mode == "real" else "*"
+                        ui.label(
+                            f"{prefix}{alpha:+.2f}{mode_mark}"
+                        ).classes(f"{color} font-bold text-sm")
+
+                # 8. TP 포화
+                with ui.column().classes("p-2 gap-0 items-end"):
+                    warn = tp_sat >= tp_th
+                    prefix = "⚠️ " if warn else ""
+                    color = "text-amber-400" if warn else "text-gray-300"
+                    ui.label(f"{prefix}{tp_sat:.0f}%").classes(
+                        f"{color} text-sm"
+                    )
+                    ui.label(f"임계 {tp_th}").classes(
+                        "text-[9px] text-gray-500"
+                    )
+
+                # 9. 판정 — [v3.9.16b] SSOT 함수 사용 (verdict_card와 동일)
+                vd = _derive_strategy_verdict(r, cfg)
+                with ui.column().classes("p-2 gap-0"):
+                    ui.label(f"{vd['icon']} {vd['title']}").classes(
+                        f"{vd['color_class']} text-xs font-bold"
+                    )
+                    # 짧은 사유 — anomaly나 misses 첫 2개
+                    if vd.get("reasons"):
+                        ui.label(" · ".join(vd["reasons"][:2])).classes(
+                            "text-[10px] text-amber-200"
+                            if vd["is_anomaly"]
+                            else "text-[10px] text-gray-400"
+                        )
+
+    # ─── 표 아래 범례 ───
+    ui.label(
+        "💡 * 표시 = 간이 알파 (KOSPI 단일 시점). 표시 없음 = 정확 알파 "
+        "(거래일별)."
+    ).classes("text-[10px] text-gray-500 mt-2 italic")
+    ui.label(
+        "⚠️ anomaly 행은 amber 배경. 간이 백테스트 구조상 lookahead/자금 "
+        "제약 미반영으로 과대추정 가능성."
+    ).classes("text-[10px] text-gray-500 italic")
+
+
 def _render_disclaimer():
     """[Step AO+AP] 백테스트 한계 + 과적합 경고 (Prime 유료 기능 법적 안전)"""
     
@@ -1083,7 +1471,16 @@ def render_tab_backtest(df, auth):
         run_btn = ui.button(
             "▶  시뮬레이션 실행",
         ).props("color=primary size=lg").classes("flex-1 min-w-[220px]")
-        
+
+        # [v3.9.16] 프리셋 비교 — 4개 동시 실행 + 비교표
+        compare_btn = ui.button(
+            "📊 4프리셋 비교",
+        ).props("color=cyan-7 size=lg").classes("flex-1 min-w-[180px]")
+        compare_btn.tooltip(
+            "보수형/균형형/공격형/단타형 4개를 한 번에 돌려 비교표로 표시. "
+            "현재 슬라이더 값은 무시되고 각 프리셋 기본값이 사용됩니다."
+        )
+
         save_btn = ui.button(
             "💾 현재 설정 저장",
         ).props("flat color=purple size=md")
@@ -1137,6 +1534,53 @@ def render_tab_backtest(df, auth):
             _render_results(result, cfg)
 
     run_btn.on_click(run_simulation)
+
+    # ─── [v3.9.16] 4프리셋 비교 실행 ───
+    async def run_comparison():
+        result_container.clear()
+        with result_container:
+            ui.spinner("dots", size="lg", color="cyan")
+            ui.label(
+                "4개 프리셋 동시 실행 중... (5~15초)"
+            ).classes("text-xs text-gray-400 mt-2")
+
+        from async_helpers import run_sync
+
+        all_recs = await run_sync(_load_recommend_files)
+        if all_recs.empty:
+            result_container.clear()
+            with result_container:
+                ui.label(
+                    "❌ data/ 폴더에 recommend_*.csv 파일이 없습니다"
+                ).classes("text-red-400")
+            return
+
+        # 4프리셋 동시 실행
+        try:
+            results_by_preset = await run_sync(
+                lambda: _run_preset_comparison(all_recs)
+            )
+        except Exception as e:
+            _logger.warning(f"[프리셋 비교] 실행 실패: {e}", exc_info=True)
+            result_container.clear()
+            with result_container:
+                ui.label(f"⚠️ 프리셋 비교 실행 실패: {e}").classes(
+                    "text-red-400 p-3"
+                )
+            return
+
+        result_container.clear()
+        with result_container:
+            _render_preset_comparison_table(results_by_preset)
+
+            # 비교 후 면책 한 줄 (단일 결과와 동일 면책 footer)
+            ui.label(
+                "※ 백테스트 결과는 과거 데이터 기반입니다. "
+                "미래 수익을 보장하지 않습니다. anomaly 표시된 프리셋은 "
+                "OHLCV 기반 정밀 검증 필요."
+            ).classes("text-[10px] text-gray-500 italic mt-3")
+
+    compare_btn.on_click(run_comparison)
     
     # 즐겨찾기 저장 버튼
     def save_current():
@@ -1252,6 +1696,231 @@ def _calc_kospi_alpha(result: dict, cfg: dict):
         return (None, None)
 
 
+def _derive_strategy_verdict(result: dict, cfg: dict) -> dict:
+    """[v3.9.16b] 전략 판정 SSOT — 단일 카드 + 비교표 공유.
+
+    이 함수는 _render_strategy_verdict_card()와 _render_preset_comparison_table()
+    두 곳에서 같이 호출되어 판정 결과를 항상 같게 보장한다.
+
+    추출 배경 (v3.9.16 평가):
+    - v3.9.16 비교표가 단일 verdict보다 느슨한 조건으로 🟢 부여 → 가짜 🟢 위험
+    - alpha is None인데 🟢, 거래 < 100인데 🟢, Sharpe < 0.8인데 🟢 등
+    - v3.9.15c에서 어렵게 막은 "벤치 없음에도 초록" 회귀 가능성
+    → 한 함수가 SSOT 역할, 두 호출처는 결과만 렌더
+
+    판정 4단계 (verdict_card baseline 그대로):
+      🟢 green   : 수익≥5% AND 승률≥55 AND MDD≥-15 AND 거래≥100 AND
+                   alpha is not None AND alpha≥0 AND Sharpe(None or ≥0.8) AND not anomaly
+      🟡 yellow  : 수익+ but 일부 미달 OR alpha None OR anomaly
+      🟠 orange  : 수익+ but MDD<-20 OR 거래<50 OR Sharpe<0.5
+      🔴 red     : 수익- OR MDD<-25 OR alpha<0 (시장 열위)
+
+    Returns:
+        dict {
+            "icon": str,           # 🟢/🟡/🟠/🔴
+            "level": str,          # green/yellow/orange/red
+            "title": str,          # "실전 후보" / "관찰 후보 · 과대추정 가능성" 등
+            "color_class": str,    # Tailwind text-* class
+            "bg_class": str,       # 카드 배경 class (단일 카드용)
+            "body": str,           # 판정 사유 본문 (단일 카드용)
+            "reasons": list[str],  # 짧은 사유 (비교표용)
+            "is_anomaly": bool,
+            "anomaly_flags": list[str],
+            "alpha": float | None,
+            "alpha_mode": str | None,
+            "tp_saturation": float,
+            "tp_threshold": int,
+            "tp_saturation_warn": bool,
+        }
+    """
+    from services.backtest_policy import (
+        detect_anomaly_flags,
+        tp_saturation_threshold,
+    )
+
+    total_ret = float(result.get("total_return", 0) or 0)
+    win_rate = float(result.get("win_rate", 0) or 0)
+    mdd = float(result.get("mdd", 0) or 0)
+    n_trades = int(result.get("total_trades", 0) or 0)
+    sharpe = result.get("sharpe")
+    sharpe_val = (
+        float(sharpe) if sharpe is not None and not pd.isna(sharpe) else None
+    )
+    cagr_raw = result.get("cagr")
+    cagr_val = (
+        float(cagr_raw)
+        if cagr_raw is not None and not pd.isna(cagr_raw)
+        else None
+    )
+    trading_days = int(result.get("trading_days", 0) or 0)
+
+    # alpha — result에 미리 계산되어 있으면 (비교표 경로) 그대로 사용,
+    # 없으면 (단일 카드 경로) _calc_kospi_alpha 호출
+    if "alpha" in result and "alpha_mode" in result:
+        alpha = result["alpha"]
+        alpha_mode = result["alpha_mode"]
+    else:
+        alpha, alpha_mode = _calc_kospi_alpha(result, cfg)
+
+    # anomaly — result에 미리 계산되어 있으면 (비교표 경로) 그대로 사용
+    if "anomaly_flags" in result:
+        anomaly_flags = result["anomaly_flags"]
+    else:
+        anomaly_flags = detect_anomaly_flags(
+            total_ret=total_ret,
+            sharpe_val=sharpe_val,
+            cagr_val=cagr_val,
+            trading_days=trading_days,
+        )
+    is_anomaly = bool(anomaly_flags)
+
+    # TP 포화율
+    if "tp_saturation" in result and "tp_threshold" in result:
+        tp_saturation = float(result["tp_saturation"] or 0)
+        tp_threshold = int(result["tp_threshold"] or 70)
+    else:
+        sd = result.get("status_dist", {}) or {}
+        n_win = int(sd.get("WIN", 0) or 0)
+        n_stop = int(sd.get("STOP", 0) or 0)
+        n_hold = int(sd.get("HOLD_EXIT", 0) or 0)
+        n_total = n_win + n_stop + n_hold
+        tp_saturation = (n_win / n_total * 100) if n_total > 0 else 0.0
+        target_pct = float(cfg.get("target_pct", 5) or 5)
+        tp_threshold = tp_saturation_threshold(target_pct)
+    tp_saturation_warn = tp_saturation >= tp_threshold
+
+    # ─── 판정 4단계 (verdict_card baseline 그대로) ───
+    out = {
+        "is_anomaly": is_anomaly,
+        "anomaly_flags": anomaly_flags,
+        "alpha": alpha,
+        "alpha_mode": alpha_mode,
+        "tp_saturation": tp_saturation,
+        "tp_threshold": tp_threshold,
+        "tp_saturation_warn": tp_saturation_warn,
+    }
+
+    if total_ret < 0 or mdd < -25:
+        out["icon"] = "🔴"
+        out["level"] = "red"
+        out["title"] = "실전 부적합"
+        out["color_class"] = "text-red-400"
+        out["bg_class"] = "bg-red-900/15 border-red-500/40"
+        if total_ret < 0:
+            out["body"] = (
+                f"누적 수익률이 {total_ret:+.2f}%로 손실입니다. "
+                "현재 설정은 실전 적용에 적합하지 않습니다."
+            )
+            out["reasons"] = [f"손실 ({total_ret:+.2f}%)"]
+        else:
+            out["body"] = (
+                f"최대 낙폭이 {mdd:.1f}%로 너무 큽니다. "
+                "실전 적용 시 큰 손실 위험이 있습니다."
+            )
+            out["reasons"] = [f"MDD 과대 ({mdd:.1f}%)"]
+        return out
+
+    if alpha is not None and alpha < 0:
+        out["icon"] = "🔴"
+        out["level"] = "red"
+        out["title"] = "실전 부적합 · 시장 열위"
+        out["color_class"] = "text-red-400"
+        out["bg_class"] = "bg-red-900/15 border-red-500/40"
+        mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
+        out["body"] = (
+            f"전략 거래당 평균이 KOSPI 동일 보유기간보다 {alpha:+.2f}%p 낮습니다 "
+            f"({mode_label} 기준). 수익이 양수여도 시장보다 못하면 "
+            "인덱스 매수가 더 유리합니다."
+        )
+        out["reasons"] = [f"시장 열위 (alpha {alpha:+.2f}%p)"]
+        return out
+
+    if mdd < -20 or n_trades < 50 or (sharpe_val is not None and sharpe_val < 0.5):
+        out["icon"] = "🟠"
+        out["level"] = "orange"
+        out["title"] = "검증 부족"
+        out["color_class"] = "text-orange-400"
+        out["bg_class"] = "bg-orange-900/15 border-orange-500/40"
+        reasons = []
+        if mdd < -20:
+            reasons.append(f"낙폭 큼 (MDD {mdd:.1f}%)")
+        if n_trades < 50:
+            reasons.append(f"거래 표본 부족 ({n_trades}건)")
+        if sharpe_val is not None and sharpe_val < 0.5:
+            reasons.append(f"Sharpe 낮음 ({sharpe_val:.2f})")
+        out["body"] = (
+            f"수익은 양수({total_ret:+.2f}%)지만 {' · '.join(reasons)} — "
+            "주변 조합/기간 분할 검증 후 적용을 권합니다."
+        )
+        out["reasons"] = reasons
+        return out
+
+    # 🟢 실전 후보 조건 — verdict_card baseline 그대로 엄격하게
+    if (
+        total_ret >= 5
+        and win_rate >= 55
+        and mdd >= -15
+        and n_trades >= 100
+        and alpha is not None
+        and alpha >= 0
+        and (sharpe_val is None or sharpe_val >= 0.8)
+        and not is_anomaly
+    ):
+        out["icon"] = "🟢"
+        out["level"] = "green"
+        out["title"] = "실전 후보"
+        out["color_class"] = "text-emerald-400"
+        out["bg_class"] = "bg-emerald-900/15 border-emerald-500/40"
+        mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
+        out["body"] = (
+            f"수익률 {total_ret:+.2f}%, 승률 {win_rate:.1f}%, MDD {mdd:.1f}%, "
+            f"거래 {n_trades}건, {mode_label} {alpha:+.2f}%p — 모든 기준 통과. "
+            "과거 데이터 기반이므로 주변 조합 강건성 검증 후 실전 적용 권장."
+        )
+        out["reasons"] = ["모든 기준 통과"]
+        return out
+
+    # 🟡 관찰 — anomaly 케이스 차별 표시
+    out["icon"] = "🟡"
+    out["level"] = "yellow"
+    out["color_class"] = "text-yellow-400"
+    out["bg_class"] = "bg-yellow-900/15 border-yellow-500/40"
+    if is_anomaly:
+        out["title"] = "관찰 후보 · 과대추정 가능성"
+        out["body"] = (
+            f"기본 지표는 모두 통과({total_ret:+.2f}% / 승률 {win_rate:.1f}% / "
+            f"MDD {mdd:.1f}% / 거래 {n_trades}건)지만 "
+            f"비현실적 수치 발견: {' · '.join(anomaly_flags)}. "
+            "간이 백테스트 구조상 lookahead, 동시 보유 자금 제약 미반영, "
+            "TP/SL 장중 도달 순서 미반영으로 인한 과대평가 가능성이 큽니다. "
+            "실전 적용 전 OHLCV 기반 정밀 백테스트 + Train/Test 분할 검증 필수."
+        )
+        out["reasons"] = anomaly_flags[:2]
+    else:
+        out["title"] = "관찰 후보"
+        misses = []
+        if total_ret < 5:
+            misses.append(f"수익률 작음 ({total_ret:+.2f}%)")
+        if win_rate < 55:
+            misses.append(f"승률 낮음 ({win_rate:.1f}%)")
+        if mdd < -15:
+            misses.append(f"낙폭 큼 ({mdd:.1f}%)")
+        if n_trades < 100:
+            misses.append(f"거래 부족 ({n_trades}건)")
+        if sharpe_val is not None and sharpe_val < 0.8:
+            misses.append(f"Sharpe 보통 ({sharpe_val:.2f})")
+        # alpha None 명시적 표시 (v3.9.16b 보강)
+        if alpha is None:
+            misses.append("벤치 데이터 없음")
+        miss_str = ", ".join(misses) if misses else "일부 지표 미달"
+        out["body"] = (
+            f"수익은 양호({total_ret:+.2f}%)하지만 {miss_str} — "
+            "실전 적용 전 추가 검증이 필요합니다."
+        )
+        out["reasons"] = misses
+    return out
+
+
 def _render_strategy_verdict_card(result: dict, cfg: dict):
     """[v3.9.15] 전략 판정 카드 — 결과 최상단에 등급 표시.
     
@@ -1285,164 +1954,42 @@ def _render_strategy_verdict_card(result: dict, cfg: dict):
       🟠 검증 부족   : 수익+ but MDD<-20 OR 거래<50 OR Sharpe<0.5
       🔴 실전 부적합 : 수익- OR MDD<-25 OR 알파<0 (시장 열위)
     """
+    # ──────────────────────────────────────────────────────────────
+    # [v3.9.16b] 판정 SSOT — _derive_strategy_verdict() 위임
+    # 비교표와 같은 함수 사용 → 갈라질 가능성 0
+    # ──────────────────────────────────────────────────────────────
+    verdict = _derive_strategy_verdict(result, cfg)
+
+    # 호환 변수 풀기 (UI 렌더 코드 baseline 그대로 사용 위해)
+    icon = verdict["icon"]
+    title = verdict["title"]
+    color = verdict["color_class"]
+    bg = verdict["bg_class"]
+    body = verdict["body"]
+    is_anomaly = verdict["is_anomaly"]
+    anomaly_flags = verdict["anomaly_flags"]
+    alpha = verdict["alpha"]
+    alpha_mode = verdict["alpha_mode"]
+    tp_saturation = verdict["tp_saturation"]
+    tp_threshold = verdict["tp_threshold"]
+    tp_saturation_warn = verdict["tp_saturation_warn"]
+
+    # 렌더용 보조 변수
     total_ret = float(result.get("total_return", 0) or 0)
     win_rate = float(result.get("win_rate", 0) or 0)
     mdd = float(result.get("mdd", 0) or 0)
     n_trades = int(result.get("total_trades", 0) or 0)
     sharpe = result.get("sharpe")
-    sharpe_val = float(sharpe) if sharpe is not None and not pd.isna(sharpe) else None
-    cagr_raw = result.get("cagr")
-    cagr_val = float(cagr_raw) if cagr_raw is not None and not pd.isna(cagr_raw) else None
-    # [v3.9.15e + 8 보정 2] trading_days 추가 — 기간 가중 anomaly 임계값
-    trading_days = int(result.get("trading_days", 0) or 0)
-
-    # [v3.9.15b 보정 1 → v3.9.15c 보정 1 → v3.9.15d 보정 1] 알파 계산
-    # 반환: (alpha_pp, mode) — mode는 "real" / "simple" / None
-    alpha, alpha_mode = _calc_kospi_alpha(result, cfg)
-
-    # ──────────────────────────────────────────────────────────────
-    # [v3.9.15e + 7~10] 비현실 수익률 anomaly 검사
-    # ──────────────────────────────────────────────────────────────
-    # [v3.9.15e + 10] services.backtest_policy.detect_anomaly_flags() 위임.
-    # 검출 로직은 SSOT(services)에 두고 UI는 결과만 받아서 렌더.
-    # 이로써 v3.9.16 프리셋 비교 / v3.9.17 강건성 / v3.9.18 Train/Test
-    # 모두 같은 anomaly 정의 공유.
-    #
-    # 검출 룰 (services/backtest_policy.py 참조):
-    # - 절대: total_ret > 300, sharpe > 5, cagr > 300
-    # - 단기 가중: trading_days<120 + total_ret>100, trading_days<252 + cagr>300
-    # 메시지는 raw 수치 노출 안 함 ("300% 초과" 형식).
-    anomaly_flags = _detect_anomaly_flags(
-        total_ret=total_ret,
-        sharpe_val=sharpe_val,
-        cagr_val=cagr_val,
-        trading_days=trading_days,
+    sharpe_val = (
+        float(sharpe) if sharpe is not None and not pd.isna(sharpe) else None
     )
-    is_anomaly = bool(anomaly_flags)
-
-    # ──────────────────────────────────────────────────────────────
-    # [v3.9.15e + 7/9] TP 포화율 계산 + 익절선별 임계
-    # ──────────────────────────────────────────────────────────────
-    # status_dist: {"WIN": N, "HOLD_EXIT": M, "STOP": K}
-    # [v3.9.15e + 9] 익절선(target_pct) tier별 임계값 적용:
-    #   target_pct ≤ 5  (단타/소익절): 80%+ 경고 (작은 익절은 자주 도달, 자연스러움)
-    #   5 < target_pct < 10 (균형):    70%+ 경고
-    #   target_pct ≥ 10 (공격/큰익절): 60%+ 경고 (큰 익절을 70%+ 도달 = 비현실)
-    # ret_NNd_% 사후수익률 기반 시뮬이므로 익절가 도달 추정이 과한 비율이면
-    # 장중 도달 순서 검증 필요.
+    # n_win/n_stop/n_hold — anomaly 경고 박스에서 카운트 표시용
     status_dist = result.get("status_dist", {}) or {}
     n_win = int(status_dist.get("WIN", 0) or 0)
     n_stop = int(status_dist.get("STOP", 0) or 0)
     n_hold = int(status_dist.get("HOLD_EXIT", 0) or 0)
     n_total_status = n_win + n_stop + n_hold
-    tp_saturation = (n_win / n_total_status * 100) if n_total_status > 0 else 0.0
-    # [v3.9.15e + 9] target_pct별 임계
     target_pct = float(cfg.get("target_pct", 5) or 5)
-    tp_threshold = _tp_saturation_threshold(target_pct)
-    tp_saturation_warn = tp_saturation >= tp_threshold
-
-    if total_ret < 0 or mdd < -25:
-        icon = "🔴"
-        title = "실전 부적합"
-        color = "text-red-400"
-        bg = "bg-red-900/15 border-red-500/40"
-        if total_ret < 0:
-            body = (
-                f"누적 수익률이 {total_ret:+.2f}%로 손실입니다. "
-                "현재 설정은 실전 적용에 적합하지 않습니다."
-            )
-        else:
-            body = (
-                f"최대 낙폭이 {mdd:.1f}%로 너무 큽니다. "
-                "실전 적용 시 큰 손실 위험이 있습니다."
-            )
-    elif alpha is not None and alpha < 0:
-        icon = "🔴"
-        title = "실전 부적합 · 시장 열위"
-        color = "text-red-400"
-        bg = "bg-red-900/15 border-red-500/40"
-        mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
-        body = (
-            f"전략 거래당 평균이 KOSPI 동일 보유기간보다 {alpha:+.2f}%p 낮습니다 "
-            f"({mode_label} 기준). 수익이 양수여도 시장보다 못하면 "
-            "인덱스 매수가 더 유리합니다."
-        )
-    elif mdd < -20 or n_trades < 50 or (sharpe_val is not None and sharpe_val < 0.5):
-        icon = "🟠"
-        title = "검증 부족"
-        color = "text-orange-400"
-        bg = "bg-orange-900/15 border-orange-500/40"
-        reasons = []
-        if mdd < -20:
-            reasons.append(f"낙폭 큼 (MDD {mdd:.1f}%)")
-        if n_trades < 50:
-            reasons.append(f"거래 표본 부족 ({n_trades}건)")
-        if sharpe_val is not None and sharpe_val < 0.5:
-            reasons.append(f"Sharpe 낮음 ({sharpe_val:.2f})")
-        body = (
-            f"수익은 양수({total_ret:+.2f}%)지만 {' · '.join(reasons)} — "
-            "주변 조합/기간 분할 검증 후 적용을 권합니다."
-        )
-    elif (
-        total_ret >= 5
-        and win_rate >= 55
-        and mdd >= -15
-        and n_trades >= 100
-        # [v3.9.15c 보정 2] alpha is None 차단 — 벤치 없으면 🟢 안 됨
-        and alpha is not None
-        and alpha >= 0
-        and (sharpe_val is None or sharpe_val >= 0.8)
-        # [v3.9.15e + 7 보정 1] anomaly 검출 시 🟢 차단
-        and not is_anomaly
-    ):
-        icon = "🟢"
-        title = "실전 후보"
-        color = "text-emerald-400"
-        bg = "bg-emerald-900/15 border-emerald-500/40"
-        mode_label = "정확 알파" if alpha_mode == "real" else "간이 알파"
-        body = (
-            f"수익률 {total_ret:+.2f}%, 승률 {win_rate:.1f}%, MDD {mdd:.1f}%, "
-            f"거래 {n_trades}건, {mode_label} {alpha:+.2f}%p — 모든 기준 통과. "
-            "과거 데이터 기반이므로 주변 조합 강건성 검증 후 실전 적용 권장."
-        )
-    else:
-        # [v3.9.15e + 7 보정 1] anomaly 케이스를 🟡 안에서 차별 표시
-        icon = "🟡"
-        if is_anomaly:
-            title = "관찰 후보 · 과대추정 가능성"
-            color = "text-yellow-400"
-            bg = "bg-yellow-900/15 border-yellow-500/40"
-            body = (
-                f"기본 지표는 모두 통과({total_ret:+.2f}% / 승률 {win_rate:.1f}% / "
-                f"MDD {mdd:.1f}% / 거래 {n_trades}건)지만 "
-                f"비현실적 수치 발견: {' · '.join(anomaly_flags)}. "
-                "간이 백테스트 구조상 lookahead, 동시 보유 자금 제약 미반영, "
-                "TP/SL 장중 도달 순서 미반영으로 인한 과대평가 가능성이 큽니다. "
-                "실전 적용 전 OHLCV 기반 정밀 백테스트 + Train/Test 분할 검증 필수."
-            )
-        else:
-            title = "관찰 후보"
-            color = "text-yellow-400"
-            bg = "bg-yellow-900/15 border-yellow-500/40"
-            misses = []
-            if total_ret < 5:
-                misses.append(f"수익률 작음 ({total_ret:+.2f}%)")
-            if win_rate < 55:
-                misses.append(f"승률 낮음 ({win_rate:.1f}%)")
-            if mdd < -15:
-                misses.append(f"낙폭 큼 ({mdd:.1f}%)")
-            if n_trades < 100:
-                misses.append(f"거래 부족 ({n_trades}건)")
-            if sharpe_val is not None and sharpe_val < 0.8:
-                misses.append(f"Sharpe 보통 ({sharpe_val:.2f})")
-            # [v3.9.15c 보정 2] 벤치 없음도 미달 사유에 포함
-            if alpha is None:
-                misses.append("벤치 데이터 없음")
-            miss_str = ", ".join(misses) if misses else "일부 지표 미달"
-            body = (
-                f"수익은 양호({total_ret:+.2f}%)하지만 {miss_str} — "
-                "실전 적용 전 추가 검증이 필요합니다."
-            )
 
     with ui.card().classes(f"w-full p-3 mb-3 {bg} rounded-lg"):
         with ui.row().classes("w-full items-center gap-2 mb-1"):
