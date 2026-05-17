@@ -56,6 +56,7 @@ SWAP_MIN_SCORE_GAP = 10.0              # 신규 - 보유 ≥ 10점 차이 필요
 # 신규추천 anomaly/과열 차단 기준 (교체 추천 금지 조건)
 NEW_DANGER_ENTRY_GAP_PCT = 5.0         # ENTRY_GAP > 5% → 과열
 NEW_DANGER_TOTAL_RET_ABS = 300.0       # 비현실 수익률 → anomaly
+NEW_DANGER_TP_SATURATION = 80.0        # [v3.9.21b] TP 포화 ≥ 80% → 진입 신호 의심
 
 # 정리 우선 ROUTE
 LIQUIDATE_ROUTES = {"WAIT", "EXIT_WARNING", "EXIT"}
@@ -191,6 +192,37 @@ def _row_to_pick_dict(row: pd.Series) -> dict:
                 return default
         return v if not pd.isna(v) else default
 
+    # [v3.9.21b 평가 1] anomaly 정보도 함께 추출
+    # recommend CSV에 IS_ANOMALY / ANOMALY_FLAG / TP_SATURATION 컬럼이 있을 수 있음
+    is_anomaly = False
+    for col in ("IS_ANOMALY", "ANOMALY_FLAG", "anomaly_flags"):
+        v = row.get(col)
+        if v is None or pd.isna(v):
+            continue
+        if isinstance(v, (list, tuple)):
+            if len(v) > 0:
+                is_anomaly = True
+                break
+        elif isinstance(v, str):
+            if v.strip() and v.strip().lower() not in ("0", "false", "none", "[]"):
+                is_anomaly = True
+                break
+        else:
+            try:
+                if bool(v):
+                    is_anomaly = True
+                    break
+            except Exception as e:
+                _logger.debug(f"[swap] anomaly bool 변환 실패: {e}")
+                pass
+
+    tp_saturation = _get("TP_SATURATION")
+    if tp_saturation is None:
+        tp_saturation = _get("TP_포화율")
+
+    # [v3.9.21b 평가 2] EBS 파서 — 다양한 형식 안전 처리
+    ebs_val = _parse_ebs(row)
+
     return {
         "name": str(row.get("종목명", "")),
         "code": str(row.get("종목코드", "")),
@@ -198,25 +230,104 @@ def _row_to_pick_dict(row: pd.Series) -> dict:
         "display_score": _get("DISPLAY_SCORE"),
         "elite_score": _get("ELITE_SCORE"),
         "route": str(row.get("ROUTE", "")) or None,
-        "ebs": int(_get("EBS", 0) or 0),
+        "ebs": ebs_val,
         "rr_now_tp1": _get("RR_NOW_TP1"),
         "entry_gap_pct": _get("ENTRY_GAP_PCT"),
         "close_price": _get("종가"),
         "macro_risk": str(row.get("MACRO_RISK", "")) or None,
+        # [v3.9.21b 평가 1] anomaly 정보
+        "is_anomaly": is_anomaly,
+        "tp_saturation": tp_saturation,
+        # 비현실 수익률도 anomaly로 분류 (있으면)
+        "total_return_abs": _get("TOTAL_RETURN") or _get("total_return"),
     }
 
 
+def _parse_ebs(row) -> int:
+    """[v3.9.21b 평가 2] EBS 다양한 형식 안전 파싱.
+
+    지원 형식:
+    - 숫자: 0, 1, 8 → 그대로
+    - 문자열: "PASS"/"FAIL", "8/8 (PASS)", "8/8" → 변환
+    - bool: True/False → 1/0
+    - EBS_PASS 컬럼: 별도 boolean 컬럼
+
+    Returns:
+        int — EBS 점수 (0=FAIL, ≥1=PASS)
+    """
+    # EBS_PASS boolean 컬럼 먼저 확인
+    if "EBS_PASS" in row:
+        v = row["EBS_PASS"]
+        if v is not None and not pd.isna(v):
+            try:
+                return 1 if bool(v) else 0
+            except Exception as e:
+                _logger.debug(f"[swap] EBS_PASS bool 변환 실패: {e}")
+                pass
+
+    # EBS / EBS_SCORE / EBS_COUNT 순서로 탐색
+    for col in ("EBS", "EBS_SCORE", "EBS_COUNT"):
+        if col not in row:
+            continue
+        v = row.get(col)
+        if v is None or pd.isna(v):
+            continue
+
+        # 숫자형 직접 변환 가능
+        try:
+            num = float(v)
+            return int(num)
+        except (ValueError, TypeError) as e:
+            _logger.debug(f"[swap] EBS 숫자 변환 실패 (문자열로 시도): {e}")
+            pass
+
+        # 문자열 파싱
+        s = str(v).upper().strip()
+        if "PASS" in s:
+            return 1
+        if "FAIL" in s:
+            return 0
+        if "/" in s:
+            # "8/8" 또는 "8/8 (PASS)"
+            head = s.split("/")[0].strip()
+            try:
+                return int(float(head))
+            except (ValueError, TypeError) as e:
+                _logger.debug(f"[swap] EBS fraction 변환 실패: {e}")
+                pass
+
+    return 0
+
+
 def _is_recommend_safe(top_pick: Optional[dict]) -> bool:
-    """신규추천이 anomaly/과열 아닌지 — 교체 추천 가능 여부.
+    """[v3.9.21b 평가 1] 신규추천이 anomaly/과열 아닌지 — 교체 추천 가능 여부.
 
     Returns False if:
     - top_pick이 None
+    - is_anomaly=True (anomaly_flags 존재)
+    - tp_saturation ≥ 80% (TP 포화 과다)
+    - total_return ≥ 300% (비현실 수익률 — 백테스트 anomaly와 동기)
     - ROUTE가 OVERHEAT
-    - ENTRY_GAP > 5% (과열)
     - ROUTE가 NEW_ALLOWED_ROUTES 밖
+    - ENTRY_GAP > 5% (과열)
     """
     if top_pick is None:
         return False
+
+    # [v3.9.21b 평가 1] 진짜 anomaly 차단 — IS_ANOMALY/anomaly_flags 존재
+    if top_pick.get("is_anomaly"):
+        return False
+
+    # TP 포화 과다 — 80% 이상이면 신규 진입 신호 의심
+    tp_sat = top_pick.get("tp_saturation")
+    if tp_sat is not None and tp_sat >= NEW_DANGER_TP_SATURATION:
+        return False
+
+    # 비현실 수익률 차단 (300% 초과 — backtest_policy의 ANOMALY_TOTAL_RET_ABS와 동기)
+    total_ret = top_pick.get("total_return_abs")
+    if total_ret is not None and abs(total_ret) > NEW_DANGER_TOTAL_RET_ABS:
+        return False
+
     route = top_pick.get("route", "")
     if route in DANGER_ROUTES:
         return False
@@ -224,9 +335,11 @@ def _is_recommend_safe(top_pick: Optional[dict]) -> bool:
         # 알 수 없는 ROUTE는 보수적으로 False
         # 단 빈 문자열/None은 허용 (정보 부족이지 위험은 아님)
         return False
+
     entry_gap = top_pick.get("entry_gap_pct")
     if entry_gap is not None and entry_gap > NEW_DANGER_ENTRY_GAP_PCT:
         return False
+
     return True
 
 
@@ -242,8 +355,9 @@ def _analyze_single_holding(
     avg = int(hold["avg"])
     qty = int(hold["qty"])
 
-    # recommend에서 lookup
-    matched = recommend_df[recommend_df["종목명"] == name]
+    # [v3.9.21b 평가 3] 종목코드 우선 매칭, 이름 fallback
+    # 종목명 정확 일치만 사용하면 띄어쓰기/우선주/약칭으로 매칭 실패 위험
+    matched = _match_holding_to_recommend(hold, recommend_df)
     if matched.empty:
         # 보유종목이 오늘 추천 목록에 없음 — 정보 부족
         return _build_holding_item(
@@ -276,6 +390,44 @@ def _analyze_single_holding(
         hold, current_price, total_value, pick, verdict,
         pnl_pct=pnl_pct, weight_pct=weight_pct,
     )
+
+
+def _match_holding_to_recommend(
+    hold: dict,
+    recommend_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """[v3.9.21b 평가 3] 보유종목 → recommend DataFrame row 매칭.
+
+    매칭 우선순위:
+    1. 종목코드 (6자리 zero-padded) — 가장 안전
+    2. 종목명 strip (공백 제거 비교)
+
+    Args:
+        hold: {"name": str, "code": str (optional), "avg": int, "qty": int}
+        recommend_df: 종목코드 / 종목명 컬럼 보유
+
+    Returns:
+        매칭된 row(들) DataFrame (있으면 1개, 없으면 empty)
+    """
+    # 1순위: 종목코드 매칭 (6자리)
+    code = str(hold.get("code", "") or "").strip()
+    if code and "종목코드" in recommend_df.columns:
+        code_padded = code.zfill(6)
+        matched = recommend_df[
+            recommend_df["종목코드"].astype(str).str.strip().str.zfill(6)
+            == code_padded
+        ]
+        if not matched.empty:
+            return matched
+
+    # 2순위: 종목명 strip 비교
+    name = str(hold.get("name", "") or "").strip()
+    if not name or "종목명" not in recommend_df.columns:
+        return recommend_df.iloc[0:0]  # empty
+
+    return recommend_df[
+        recommend_df["종목명"].astype(str).str.strip() == name
+    ]
 
 
 def _build_holding_item(
@@ -450,7 +602,7 @@ def _derive_holding_verdict(
             "swap_candidate": False,
             "body": (
                 f"보유종목 신호 약화 ({', '.join(reasons)}) — 단 신규추천도 "
-                "강하지 않아 즉시 교체보다 감량 후 관찰 권장."
+                "강하지 않아 바로 교체하기보다 감량 후 관찰 권장."
             ),
         }
 

@@ -431,9 +431,11 @@ class TestSafetyPrinciples:
                 top_pick=tp, new_recommend_safe=safe,
             )
             title = v["title"]
+            body = v["body"]
             # 절대 매도/매수 단어 금지 (확정형 표현)
-            assert "매도하세요" not in title
-            assert "매수하세요" not in title
+            assert "매도하세요" not in title and "매도하세요" not in body
+            assert "매수하세요" not in title and "매수하세요" not in body
+            # title에는 "즉시" 없음 (body는 "바로 교체하기보다" 같은 표현 OK)
             assert "즉시" not in title
             # 권장 표현만 사용
             permitted = [
@@ -442,6 +444,178 @@ class TestSafetyPrinciples:
             assert any(p in title for p in permitted), (
                 f"권장 표현 없음: {title}"
             )
+
+    # ────────────────────────────────────────────────────────────────
+    # [v3.9.21b 평가 1] 진짜 anomaly 차단 — 회귀 가드 강화
+    # ────────────────────────────────────────────────────────────────
+    def test_new_anomaly_flag_blocks_swap(self, fake_env, swap_svc):
+        """[v3.9.21b 평가 1] is_anomaly=True → 교체 금지."""
+        pick = self._make_pick(route="ATTACK", entry_gap_pct=1.0)
+        pick["is_anomaly"] = True
+        safe = swap_svc._is_recommend_safe(pick)
+        assert safe is False, (
+            "is_anomaly=True인데 _is_recommend_safe=True 반환됨"
+        )
+
+    def test_new_high_tp_saturation_blocks_swap(self, fake_env, swap_svc):
+        """[v3.9.21b 평가 1] TP 포화 ≥ 80% → 교체 금지."""
+        pick = self._make_pick(route="ATTACK", entry_gap_pct=1.0)
+        pick["tp_saturation"] = 85.0
+        safe = swap_svc._is_recommend_safe(pick)
+        assert safe is False, (
+            "tp_saturation=85%인데 _is_recommend_safe=True 반환됨"
+        )
+
+    def test_new_low_tp_saturation_is_safe(self, fake_env, swap_svc):
+        """TP 포화 < 80%면 정상."""
+        pick = self._make_pick(route="ATTACK", entry_gap_pct=1.0)
+        pick["tp_saturation"] = 55.0
+        safe = swap_svc._is_recommend_safe(pick)
+        assert safe is True
+
+    def test_new_unrealistic_return_blocks_swap(self, fake_env, swap_svc):
+        """[v3.9.21b 평가 1] 비현실 수익률 (>300%) → 교체 금지."""
+        pick = self._make_pick(route="ATTACK", entry_gap_pct=1.0)
+        pick["total_return_abs"] = 450.0  # 450% 수익률 — anomaly
+        safe = swap_svc._is_recommend_safe(pick)
+        assert safe is False
+
+    def test_orange_blocked_when_new_pick_anomaly(self, fake_env, swap_svc):
+        """[v3.9.21b 평가 1 통합] 신규 anomaly → 🟠 교체 후보 차단."""
+        hold_pick = self._make_pick(final_score=55, ebs=0, route="NEUTRAL")
+        # 신규 점수 높지만 is_anomaly=True
+        top_pick = self._make_pick(
+            name="신규Top", final_score=85, ebs=1, rr_now_tp1=3.0
+        )
+        # 시뮬레이션: 외부에서 _is_recommend_safe로 검증한 결과 False
+        v = swap_svc.derive_holding_verdict(
+            pick=hold_pick, pnl_pct=-3.0, weight_pct=15,
+            top_pick=top_pick, new_recommend_safe=False,  # ★ anomaly 검출됨
+        )
+        # 🟠 안 됨 (신규 unsafe)
+        assert v["icon"] != "🟠"
+
+
+# ════════════════════════════════════════════════════════════════
+# C2. v3.9.21b 추가 가드 — EBS 파서 + 매칭
+# ════════════════════════════════════════════════════════════════
+class TestParseEbs:
+    """[v3.9.21b 평가 2] EBS 다양한 형식 파싱."""
+
+    def test_parse_ebs_from_int(self, fake_env, swap_svc):
+        row = pd.Series({"EBS": 8})
+        assert swap_svc._parse_ebs(row) == 8
+
+    def test_parse_ebs_from_zero(self, fake_env, swap_svc):
+        row = pd.Series({"EBS": 0})
+        assert swap_svc._parse_ebs(row) == 0
+
+    def test_parse_ebs_from_pass_string(self, fake_env, swap_svc):
+        """'PASS' 문자열 → 1."""
+        row = pd.Series({"EBS": "PASS"})
+        assert swap_svc._parse_ebs(row) == 1
+
+    def test_parse_ebs_from_fail_string(self, fake_env, swap_svc):
+        """'FAIL' 문자열 → 0."""
+        row = pd.Series({"EBS": "FAIL"})
+        assert swap_svc._parse_ebs(row) == 0
+
+    def test_parse_ebs_from_fraction(self, fake_env, swap_svc):
+        """'8/8' → 8."""
+        row = pd.Series({"EBS": "8/8"})
+        assert swap_svc._parse_ebs(row) == 8
+
+    def test_parse_ebs_from_fraction_with_label(self, fake_env, swap_svc):
+        """'8/8 (PASS)' → 8 (먼저 PASS 매칭)."""
+        row = pd.Series({"EBS": "8/8 (PASS)"})
+        # PASS가 먼저 매칭 — 1 반환 (또는 8 — 둘 다 ≥ 1이라 PASS 의미)
+        result = swap_svc._parse_ebs(row)
+        assert result >= 1
+
+    def test_parse_ebs_pass_column_true(self, fake_env, swap_svc):
+        """EBS_PASS=True → 1."""
+        row = pd.Series({"EBS_PASS": True})
+        assert swap_svc._parse_ebs(row) == 1
+
+    def test_parse_ebs_pass_column_false(self, fake_env, swap_svc):
+        """EBS_PASS=False → 0."""
+        row = pd.Series({"EBS_PASS": False})
+        assert swap_svc._parse_ebs(row) == 0
+
+    def test_parse_ebs_missing_returns_zero(self, fake_env, swap_svc):
+        """컬럼 없으면 0."""
+        row = pd.Series({"종목명": "A"})
+        assert swap_svc._parse_ebs(row) == 0
+
+
+class TestMatchHoldingByCode:
+    """[v3.9.21b 평가 3] 종목코드 우선 매칭."""
+
+    def test_code_match_when_available(self, fake_env, swap_svc):
+        """종목코드로 매칭 — 이름이 달라도 코드가 같으면 매칭."""
+        recs = pd.DataFrame([{
+            "종목코드": "005930", "종목명": "삼성전자",
+            "DISPLAY_SCORE": 80, "FINAL_SCORE": 80,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 70000,
+        }])
+        # hold에 종목코드 있고 이름은 다름 (약칭)
+        hold = {"name": "삼전", "code": "005930", "avg": 70000, "qty": 10}
+        matched = swap_svc._match_holding_to_recommend(hold, recs)
+        assert not matched.empty
+        assert matched.iloc[0]["종목명"] == "삼성전자"
+
+    def test_code_match_handles_zero_padding(self, fake_env, swap_svc):
+        """종목코드 zero-padding 안전 처리.
+
+        예: hold "5930" / recommend "005930" → 매칭 성공
+        """
+        recs = pd.DataFrame([{
+            "종목코드": "005930", "종목명": "삼성전자",
+            "DISPLAY_SCORE": 80, "FINAL_SCORE": 80,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 70000,
+        }])
+        hold = {"name": "삼성전자", "code": "5930", "avg": 70000, "qty": 10}
+        matched = swap_svc._match_holding_to_recommend(hold, recs)
+        assert not matched.empty
+
+    def test_name_fallback_when_no_code(self, fake_env, swap_svc):
+        """종목코드 없을 때 종목명 strip 비교 fallback."""
+        recs = pd.DataFrame([{
+            "종목코드": "005930", "종목명": "삼성전자",
+            "DISPLAY_SCORE": 80, "FINAL_SCORE": 80,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 70000,
+        }])
+        # code 없음, name으로 매칭
+        hold = {"name": "삼성전자", "avg": 70000, "qty": 10}
+        matched = swap_svc._match_holding_to_recommend(hold, recs)
+        assert not matched.empty
+
+    def test_name_match_handles_whitespace(self, fake_env, swap_svc):
+        """이름 strip — 사용자 입력의 앞뒤 공백 처리."""
+        recs = pd.DataFrame([{
+            "종목코드": "005930", "종목명": "삼성전자",
+            "DISPLAY_SCORE": 80, "FINAL_SCORE": 80,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 70000,
+        }])
+        hold = {"name": " 삼성전자 ", "avg": 70000, "qty": 10}
+        matched = swap_svc._match_holding_to_recommend(hold, recs)
+        assert not matched.empty
+
+    def test_returns_empty_when_no_match(self, fake_env, swap_svc):
+        """매칭 없으면 empty DataFrame."""
+        recs = pd.DataFrame([{
+            "종목코드": "005930", "종목명": "삼성전자",
+            "DISPLAY_SCORE": 80, "FINAL_SCORE": 80,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 70000,
+        }])
+        hold = {"name": "다른회사", "code": "999999", "avg": 1000, "qty": 1}
+        matched = swap_svc._match_holding_to_recommend(hold, recs)
+        assert matched.empty
 
 
 # ════════════════════════════════════════════════════════════════
