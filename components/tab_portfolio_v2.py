@@ -1492,6 +1492,51 @@ def render_tab_portfolio(df, auth):
     # ═══════════════════════════════════════════════════
     _render_portfolio_hero(saved, df)
 
+    # ═══════════════════════════════════════════════════
+    # [v3.9.21c] 🔄 보유종목 vs 신규추천 교체 판단
+    # services/portfolio_swap.py SSOT 로직 + components UI 렌더
+    # 6단계 verdict (🟢 유지 / 🔵 신규금지 / 🟡 감량 / 🟠 교체 / 🔴 정리 / ⚪)
+    # ═══════════════════════════════════════════════════
+    try:
+        items, _cash = _parse_portfolio_text(saved)
+        if items and df is not None and not df.empty:
+            # items에 종목코드 추가 (있으면 매칭 정확도 향상)
+            code_lookup = {}
+            if "종목명" in df.columns and "종목코드" in df.columns:
+                for _, r in df.iterrows():
+                    nm = str(r.get("종목명", "")).strip()
+                    cd = str(r.get("종목코드", "")).strip()
+                    if nm and cd:
+                        code_lookup[nm] = cd
+            holdings = [
+                {
+                    "name": it["name"],
+                    "code": code_lookup.get(it["name"].strip(), ""),
+                    "avg": it["avg"],
+                    "qty": it["qty"],
+                }
+                for it in items
+            ]
+
+            from services.portfolio_swap import analyze_portfolio_swap
+            from components.portfolio_swap import _render_portfolio_swap_card
+
+            try:
+                swap_data = analyze_portfolio_swap(
+                    holdings=holdings,
+                    recommend_df=df,
+                    total_value=0,  # 자동 계산 (2-pass)
+                )
+                _render_portfolio_swap_card(swap_data)
+            except Exception as e:
+                _logger.warning(
+                    f"[v3.9.21c] 교체 판단 렌더 실패: {e}",
+                    exc_info=True,
+                )
+    except Exception as e:
+        _logger.debug(f"[v3.9.21c] 보유종목 파싱 실패: {e}")
+        pass
+
     # [v21.3] 종목 검색 기반 입력 UI
     code_map = _get_code_map(df)
     _ensure_krx_map()

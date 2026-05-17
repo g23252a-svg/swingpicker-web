@@ -166,6 +166,15 @@ def _render_portfolio_swap_card(swap_data: dict) -> None:
         _render_holding_row(item)
 
     # ─── 4. 안내 ───
+    # [v3.9.21c 평가 4] value_basis 안내 — 비중 계산 근거
+    value_basis = swap_data.get("value_basis", "current_price")
+    if value_basis == "mixed_current_avg":
+        ui.label(
+            "⚠️ 일부 보유종목이 오늘 추천에 없어 비중이 매입가 기준으로 "
+            "포함되었습니다 (혼합 기준). 정확한 비중을 보려면 외부에서 "
+            "total_value를 평가금액으로 직접 전달하세요."
+        ).classes("text-[10px] text-amber-400 italic mb-1")
+
     ui.label(
         "💡 이 판단은 SwingPicker 신호 + 보유 비중/손익 기반 권장입니다. "
         "최종 매수/매도는 사용자가 직접 판단하시기 바랍니다. "
