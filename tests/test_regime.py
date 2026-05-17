@@ -329,6 +329,63 @@ class TestRunRegimeSplit:
         assert out["verdict"]["icon"] == "⚪"
         assert "데이터 부족" in out["verdict"]["title"]
 
+    # ──────────────────────────────────────────────────────────────
+    # [v3.9.19b] 평가 2 회귀 가드 — rec_date 정규화
+    # ──────────────────────────────────────────────────────────────
+    def test_rec_date_normalized_from_dashed_format(
+        self, fake_env, regime_svc
+    ):
+        """[v3.9.19b 평가 2] rec_date "2026-01-01" 형식도 "20260101"로 매칭.
+
+        run_health JSON은 YYYYMMDD인데 recommend가 YYYY-MM-DD면
+        이전 v3.9.19는 astype(str)만 해서 매칭 실패.
+        v3.9.19b는 pd.to_datetime 통해 정규화.
+        """
+        _write_run_health(fake_env, "20260101", "NORMAL")
+        # rec_date를 "2026-01-01" 형식으로 만듦
+        recs = _make_synthetic_recs_with_dates(["2026-01-01"], n_per_date=30)
+        out = regime_svc.run_regime_split(recs, "balanced", str(fake_env))
+
+        # 정규화로 NORMAL과 매칭 → 30건
+        assert out["regimes"]["NORMAL"]["n_recs"] == 30, (
+            f"rec_date 정규화 실패: NORMAL={out['regimes']['NORMAL']['n_recs']}"
+        )
+
+    def test_rec_date_normalized_from_datetime(
+        self, fake_env, regime_svc
+    ):
+        """rec_date가 Timestamp 객체일 경우에도 정규화."""
+        _write_run_health(fake_env, "20260101", "NORMAL")
+        recs = _make_synthetic_recs_with_dates(["20260101"], n_per_date=30)
+        # rec_date 컬럼을 Timestamp로 변환
+        recs["rec_date"] = pd.to_datetime(recs["rec_date"], format="%Y%m%d")
+
+        out = regime_svc.run_regime_split(recs, "balanced", str(fake_env))
+        assert out["regimes"]["NORMAL"]["n_recs"] == 30
+
+    def test_rec_date_unparseable_falls_back_to_str(
+        self, fake_env, regime_svc
+    ):
+        """파싱 불가 rec_date는 원본 문자열 fallback (에러 없이 처리).
+
+        예: "INVALID_DATE" 같은 값이 들어와도 silent skip — 정상 날짜만 매칭.
+        """
+        _write_run_health(fake_env, "20260101", "NORMAL")
+        # 일부 row의 rec_date를 정상, 일부를 깨진 값으로
+        recs_normal = _make_synthetic_recs_with_dates(
+            ["20260101"], n_per_date=30
+        )
+        recs_broken = _make_synthetic_recs_with_dates(
+            ["20260102"], n_per_date=10
+        )
+        recs_broken["rec_date"] = "INVALID_DATE"
+        recs = pd.concat([recs_normal, recs_broken], ignore_index=True)
+
+        # 예외 없이 정상 처리
+        out = regime_svc.run_regime_split(recs, "balanced", str(fake_env))
+        # 정상 rec_date는 NORMAL에 매칭 (30건)
+        assert out["regimes"]["NORMAL"]["n_recs"] == 30
+
 
 # ════════════════════════════════════════════════════════════════
 # C. derive_regime_verdict — 판정 로직
@@ -456,6 +513,87 @@ class TestRegimeVerdict:
             f"CRITICAL 큰 손실인데 🔴 아님: {v['icon']} {v['title']}"
         )
         assert "하락장 취약" in v["title"]
+
+    # ──────────────────────────────────────────────────────────────
+    # [v3.9.19b] 평가 1 회귀 가드 — alpha coverage 분기
+    # ──────────────────────────────────────────────────────────────
+    def test_yellow_candidate_when_all_alpha_none(
+        self, fake_env, regime_svc
+    ):
+        """[v3.9.19b 평가 1] 3국면 모두 alpha None → 🟡 전천후 후보 (이전 🟢).
+
+        시나리오: 절대수익/MDD/anomaly 모두 양호 but alpha 산출 0.
+        - 이전 v3.9.19: alpha_ok = (len==0 or all >= 0) → True → 🟢
+        - v3.9.19b: alpha_coverage 0 < 0.67 → 🟡 yellow_candidate
+        """
+        regimes = self._make_regimes(
+            normal=self._make_result(total_return=15.0, alpha=None),
+            caution=self._make_result(total_return=8.0, alpha=None),
+            critical=self._make_result(total_return=5.0, alpha=None),
+        )
+        v = regime_svc.derive_regime_verdict(regimes)
+        # 🟢 아님 — alpha coverage 부족
+        assert v["icon"] != "🟢", (
+            f"alpha 전부 None인데 🟢 부여됨: {v['title']}"
+        )
+        assert v["icon"] == "🟡"
+        assert v["level"] == "yellow_candidate"
+        assert "전천후 후보" in v["title"]
+        assert "alpha 평가 보류" in v["title"]
+
+    def test_yellow_candidate_when_only_one_alpha(
+        self, fake_env, regime_svc
+    ):
+        """[v3.9.19b 평가 1] 3국면 중 1국면만 alpha → coverage 33% < 65% → 🟡.
+
+        REGIME_GREEN_ALPHA_COVERAGE=0.65 — 3국면 중 최소 2국면 alpha 필요.
+        """
+        regimes = self._make_regimes(
+            normal=self._make_result(total_return=15.0, alpha=3.0),
+            caution=self._make_result(total_return=8.0, alpha=None),
+            critical=self._make_result(total_return=5.0, alpha=None),
+        )
+        v = regime_svc.derive_regime_verdict(regimes)
+        assert v["icon"] == "🟡"
+        assert v["level"] == "yellow_candidate"
+
+    def test_green_when_two_alphas_available(
+        self, fake_env, regime_svc
+    ):
+        """[v3.9.19b 평가 1] 3국면 중 2국면 alpha → coverage 67% > 65% → 🟢.
+
+        coverage 67% ≥ 65% 기준 → 🟢. 산출된 alpha 모두 ≥ 0 필수.
+        """
+        regimes = self._make_regimes(
+            normal=self._make_result(total_return=15.0, alpha=3.0),
+            caution=self._make_result(total_return=8.0, alpha=1.5),
+            critical=self._make_result(total_return=5.0, alpha=None),
+        )
+        v = regime_svc.derive_regime_verdict(regimes)
+        assert v["icon"] == "🟢"
+        assert v["level"] == "green"
+        assert "전천후" in v["title"]
+        # 🟢는 제목에 "후보"/"보류" 없음
+        assert "후보" not in v["title"]
+        assert "보류" not in v["title"]
+
+    def test_yellow_when_alpha_coverage_full_but_negative(
+        self, fake_env, regime_svc
+    ):
+        """coverage 100% but alpha 일부 음수 → 🟡 (alpha_all_nonneg 실패).
+
+        v3.9.17c의 alpha 음수 차단과 일관.
+        """
+        regimes = self._make_regimes(
+            normal=self._make_result(total_return=15.0, alpha=3.0),
+            caution=self._make_result(total_return=8.0, alpha=-0.5),
+            critical=self._make_result(total_return=5.0, alpha=1.0),
+        )
+        v = regime_svc.derive_regime_verdict(regimes)
+        # CAUTION alpha 음수 → basic_pass 실패 → 🟡
+        assert v["icon"] == "🟡"
+        # yellow_candidate가 아닌 일반 yellow (basic_pass 자체 실패)
+        assert v["level"] == "yellow"
 
 
 # ════════════════════════════════════════════════════════════════
