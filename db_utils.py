@@ -570,8 +570,11 @@ class LDYDBManager:
             finally:
                 # cursor 누수 방지
                 if cur is not None:
-                    try: cur.close()
-                    except Exception: pass
+                    try:
+                        cur.close()
+                    except Exception as _e:
+                        # cursor close 실패는 무해 (이미 거래 끝남)
+                        _logger.debug(f"[gist→inquiries] cursor close: {_e}")
 
         _logger.info(
             f"[gist→inquiries] 신규 {inserted} / 중복 {skipped} / 빈글차단 {empty}"
@@ -1348,8 +1351,11 @@ class LDYDBManager:
 
     def _close_cursor(self, cur):
         if cur is not None:
-            try: cur.close()
-            except Exception: pass
+            try:
+                cur.close()
+            except Exception as _e:
+                # cursor close 실패는 무해 (이미 거래 끝남)
+                _logger.debug(f"[_close_cursor] cursor close: {_e}")
 
     # ── 조회 ──
     def get_all_inquiries(self, *, limit=None, offset=0):

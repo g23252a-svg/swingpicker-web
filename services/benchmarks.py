@@ -197,8 +197,9 @@ def load_kospi_daily():
             try:
                 mtime = os.path.getmtime(path)
                 break
-            except Exception:
-                pass
+            except OSError as e:
+                # mtime 조회 실패 (권한/fs 이슈) — cache 동작엔 영향 없음 (mtime=0 fallback)
+                _logger.debug(f"[bench cache] {path} mtime 조회 실패: {e}")
     return _load_kospi_daily_cached(mtime)
 
 

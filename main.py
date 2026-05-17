@@ -90,8 +90,11 @@ async def stock_v2_test_page(code: str):
     is_admin = False
     try:
         is_admin = get_auth_status() == "admin"
-    except Exception:
-        pass
+    except Exception as _e:
+        # auth status 조회 실패 시 보안상 비-admin으로 처리 (디폴트 False)
+        # 보안 관련 path라 logger.warning으로 추적
+        import logging
+        logging.getLogger(__name__).warning(f"[stock_v2_test_page] auth_status 조회 실패: {_e}")
 
     # production에서는 환경변수 무시, admin만 허용 (실수 토글 방지)
     if is_prod:
