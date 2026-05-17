@@ -65,6 +65,43 @@ DANGER_ROUTES = {"OVERHEAT"}
 # 회피 ROUTE — 신규추천이 이 ROUTE면 교체 추천 금지
 NEW_ALLOWED_ROUTES = {"ATTACK", "ARMED", "NEUTRAL"}
 
+# [v3.9.21c 평가 3] ROUTE 한글/대소문자 정규화
+# 추천 CSV / UI 표시에서 다양한 표기 가능
+ROUTE_ALIAS = {
+    "ATTACK": "ATTACK", "적극매수": "ATTACK", "공격": "ATTACK",
+    "ARMED": "ARMED", "진입대기": "ARMED", "관심": "ARMED",
+    "NEUTRAL": "NEUTRAL", "중립": "NEUTRAL",
+    "WAIT": "WAIT", "대기": "WAIT",
+    "OVERHEAT": "OVERHEAT", "과열": "OVERHEAT",
+    "EXIT": "EXIT", "EXIT_WARNING": "EXIT_WARNING", "이탈경고": "EXIT_WARNING",
+}
+
+
+def _normalize_route(raw: Optional[str]) -> Optional[str]:
+    """[v3.9.21c 평가 3] ROUTE 정규화 — strip + upper + alias 매핑.
+
+    Args:
+        raw: 원본 ROUTE 문자열 ("attack", " ARMED ", "진입대기" 등)
+
+    Returns:
+        정규화된 ROUTE ("ATTACK"/"ARMED"/"NEUTRAL"/"WAIT"/"OVERHEAT"/"EXIT_WARNING"/"EXIT")
+        또는 None (빈 문자열)
+        매핑되지 않으면 upper만 적용해 반환 (알 수 없는 값은 그대로 유지)
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    # 영문은 upper, 한글은 그대로
+    key = s.upper()
+    if key in ROUTE_ALIAS:
+        return ROUTE_ALIAS[key]
+    # 한글 키 시도 (upper로 바뀌지 않은 원본)
+    if s in ROUTE_ALIAS:
+        return ROUTE_ALIAS[s]
+    return key  # 알 수 없는 ROUTE는 upper만
+
 
 def analyze_portfolio_swap(
     holdings: list,
@@ -125,17 +162,47 @@ def analyze_portfolio_swap(
     top_pick = _select_top_pick(recommend_df)
     new_recommend_safe = _is_recommend_safe(top_pick)
 
-    # ─── 2. 각 보유종목 분석 ───
-    analysis = []
-    # total_value 자동 계산 — 매입가 × 수량 (current_price 없으면 fallback)
+    # ─── 2. 각 보유종목에 현재가 매칭 (1차 — value 산출) ───
+    # [v3.9.21c 평가 4] 비중 2-pass 계산
+    # 1차: 모든 보유종목에 recommend에서 현재가 매칭
+    # 2차: 매칭된 current_price * qty 합계로 total_value 재계산
+    #      (분자/분모 통일 — 분자는 현재가, 분모도 현재가 기준)
+    # 3차: weight_pct 산출 후 verdict
+    matched_picks = []  # [(hold, pick or None, current_price), ...]
+    for hold in holdings:
+        matched_df = _match_holding_to_recommend(hold, recommend_df)
+        if matched_df.empty:
+            pick = None
+            current_price = None
+        else:
+            pick = _row_to_pick_dict(matched_df.iloc[0])
+            current_price = pick.get("close_price")
+            if current_price is None:
+                current_price = hold["avg"]  # fallback
+        matched_picks.append((hold, pick, current_price))
+
+    # 2차: total_value 재계산
+    # - 외부에서 명시적으로 주어진 total_value > 0이면 신뢰
+    # - 아니면 current_price 기반 합계 (매칭 안 된 종목은 avg 사용)
+    value_basis = "current_price"
     if total_value == 0:
-        total_value = sum(h["avg"] * h["qty"] for h in holdings)
+        total_value = sum(
+            (cp if cp is not None else h["avg"]) * h["qty"]
+            for h, _, cp in matched_picks
+        )
         if total_value == 0:
             total_value = 1  # 0 division 방지
+        # 일부 종목이 매칭 안 됐으면 mixed basis
+        unmatched = sum(1 for _, p, _ in matched_picks if p is None)
+        if unmatched > 0:
+            value_basis = "mixed_current_avg"
 
-    for hold in holdings:
-        item = _analyze_single_holding(
-            hold, recommend_df, top_pick, total_value, new_recommend_safe
+    # 3차: weight_pct 산출 + verdict
+    analysis = []
+    for hold, pick, current_price in matched_picks:
+        item = _analyze_with_matched_pick(
+            hold, pick, current_price, total_value,
+            top_pick, new_recommend_safe,
         )
         analysis.append(item)
 
@@ -153,6 +220,8 @@ def analyze_portfolio_swap(
         "new_recommend_safe": new_recommend_safe,
         "holdings_analysis": analysis,
         "total_value": total_value,
+        # [v3.9.21c 평가 4] 비중 계산 근거 — UI에서 사용자에게 표시
+        "value_basis": value_basis,
     }
 
 
@@ -192,18 +261,28 @@ def _row_to_pick_dict(row: pd.Series) -> dict:
                 return default
         return v if not pd.isna(v) else default
 
-    # [v3.9.21b 평가 1] anomaly 정보도 함께 추출
+    # [v3.9.21b] anomaly 정보도 함께 추출
     # recommend CSV에 IS_ANOMALY / ANOMALY_FLAG / TP_SATURATION 컬럼이 있을 수 있음
+    # [v3.9.21c 평가 2] list/tuple 판단을 pd.isna보다 먼저 — array truth ambiguity 방지
     is_anomaly = False
     for col in ("IS_ANOMALY", "ANOMALY_FLAG", "anomaly_flags"):
         v = row.get(col)
-        if v is None or pd.isna(v):
+        if v is None:
             continue
+        # list/tuple는 pd.isna() 호출 전에 처리 (배열 반환 → truth ambiguity)
         if isinstance(v, (list, tuple)):
             if len(v) > 0:
                 is_anomaly = True
                 break
-        elif isinstance(v, str):
+            continue
+        # scalar에서만 pd.isna 호출
+        try:
+            if pd.isna(v):
+                continue
+        except Exception as e:
+            _logger.debug(f"[swap] pd.isna 검사 실패: {e}")
+            pass
+        if isinstance(v, str):
             if v.strip() and v.strip().lower() not in ("0", "false", "none", "[]"):
                 is_anomaly = True
                 break
@@ -229,7 +308,7 @@ def _row_to_pick_dict(row: pd.Series) -> dict:
         "final_score": _get("FINAL_SCORE") or _get("DISPLAY_SCORE"),
         "display_score": _get("DISPLAY_SCORE"),
         "elite_score": _get("ELITE_SCORE"),
-        "route": str(row.get("ROUTE", "")) or None,
+        "route": _normalize_route(row.get("ROUTE")),
         "ebs": ebs_val,
         "rr_now_tp1": _get("RR_NOW_TP1"),
         "entry_gap_pct": _get("ENTRY_GAP_PCT"),
@@ -343,23 +422,25 @@ def _is_recommend_safe(top_pick: Optional[dict]) -> bool:
     return True
 
 
-def _analyze_single_holding(
+def _analyze_with_matched_pick(
     hold: dict,
-    recommend_df: pd.DataFrame,
-    top_pick: Optional[dict],
+    pick: Optional[dict],
+    current_price: Optional[float],
     total_value: float,
+    top_pick: Optional[dict],
     new_recommend_safe: bool,
 ) -> dict:
-    """단일 보유종목 분석."""
-    name = hold["name"]
+    """[v3.9.21c] 이미 매칭된 pick + current_price로 단일 보유종목 분석.
+
+    2-pass 비중 계산을 위해 _analyze_single_holding을 분해:
+    - 매칭 로직은 analyze_portfolio_swap 안에서 1차에 끝남
+    - 이 함수는 매칭 결과 받아서 pnl/weight/verdict만 산출
+    """
     avg = int(hold["avg"])
     qty = int(hold["qty"])
 
-    # [v3.9.21b 평가 3] 종목코드 우선 매칭, 이름 fallback
-    # 종목명 정확 일치만 사용하면 띄어쓰기/우선주/약칭으로 매칭 실패 위험
-    matched = _match_holding_to_recommend(hold, recommend_df)
-    if matched.empty:
-        # 보유종목이 오늘 추천 목록에 없음 — 정보 부족
+    if pick is None or current_price is None:
+        # 보유종목이 오늘 추천 목록에 없음
         return _build_holding_item(
             hold, current_price=None, total_value=total_value,
             pick=None, verdict=_verdict_white(
@@ -367,17 +448,10 @@ def _analyze_single_holding(
             ),
         )
 
-    pick = _row_to_pick_dict(matched.iloc[0])
-    current_price = pick.get("close_price")
-    if current_price is None:
-        current_price = avg  # fallback
-
-    # 보유종목 정보 종합
     value = current_price * qty
     pnl_pct = ((current_price - avg) / avg * 100) if avg > 0 else 0.0
     weight_pct = (value / total_value * 100) if total_value > 0 else 0.0
 
-    # ─── verdict 결정 ───
     verdict = _derive_holding_verdict(
         pick=pick,
         pnl_pct=pnl_pct,
@@ -389,6 +463,32 @@ def _analyze_single_holding(
     return _build_holding_item(
         hold, current_price, total_value, pick, verdict,
         pnl_pct=pnl_pct, weight_pct=weight_pct,
+    )
+
+
+def _analyze_single_holding(
+    hold: dict,
+    recommend_df: pd.DataFrame,
+    top_pick: Optional[dict],
+    total_value: float,
+    new_recommend_safe: bool,
+) -> dict:
+    """단일 보유종목 분석 (단독 호출용 — analyze_portfolio_swap는 2-pass 사용).
+
+    backward compat 유지 — 외부에서 직접 호출하는 경우.
+    """
+    matched = _match_holding_to_recommend(hold, recommend_df)
+    if matched.empty:
+        pick = None
+        current_price = None
+    else:
+        pick = _row_to_pick_dict(matched.iloc[0])
+        current_price = pick.get("close_price")
+        if current_price is None:
+            current_price = hold["avg"]
+    return _analyze_with_matched_pick(
+        hold, pick, current_price, total_value,
+        top_pick, new_recommend_safe,
     )
 
 

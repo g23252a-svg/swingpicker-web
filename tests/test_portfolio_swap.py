@@ -709,3 +709,200 @@ class TestNoRegression:
         )
         assert swap_ui._analyze_portfolio_swap is svc_analyze
         assert swap_ui._derive_holding_verdict is svc_verdict
+
+
+# ════════════════════════════════════════════════════════════════
+# F. [v3.9.21c] 평가 보정 회귀 가드
+# ════════════════════════════════════════════════════════════════
+class TestAnomalyExtractionListSafe:
+    """[v3.9.21c 평가 2] anomaly_flags list 처리 — pd.isna 호출 순서 안전."""
+
+    def test_empty_list_is_not_anomaly(self, fake_env, swap_svc):
+        """[v3.9.21c 평가 2] anomaly_flags=[] → is_anomaly=False (예외 없음).
+
+        이전: pd.isna([])가 빈 array 반환 → "or pd.isna(v)" 평가 시 truth ambiguity
+        v3.9.21c: list/tuple 판단을 pd.isna보다 먼저 → 안전
+        """
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "anomaly_flags": [],
+            "종가": 10000,
+        })
+        # 예외 없이 정상 처리
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["is_anomaly"] is False
+
+    def test_nonempty_list_is_anomaly(self, fake_env, swap_svc):
+        """anomaly_flags=['a', 'b'] → is_anomaly=True (예외 없음)."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "anomaly_flags": ["수익률 비정상", "Sharpe 비정상"],
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["is_anomaly"] is True
+
+    def test_tuple_anomaly_flags(self, fake_env, swap_svc):
+        """tuple도 list와 동일 처리."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1, "ROUTE": "ATTACK",
+            "anomaly_flags": ("a",),
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["is_anomaly"] is True
+
+
+class TestNormalizeRoute:
+    """[v3.9.21c 평가 3] ROUTE 정규화 — strip/upper/alias."""
+
+    def test_normalize_uppercase(self, fake_env, swap_svc):
+        """'attack' → 'ATTACK'."""
+        assert swap_svc._normalize_route("attack") == "ATTACK"
+
+    def test_normalize_with_whitespace(self, fake_env, swap_svc):
+        """' ARMED ' → 'ARMED'."""
+        assert swap_svc._normalize_route(" ARMED ") == "ARMED"
+
+    def test_normalize_mixed_case(self, fake_env, swap_svc):
+        """'Attack' → 'ATTACK'."""
+        assert swap_svc._normalize_route("Attack") == "ATTACK"
+
+    def test_normalize_korean_attack(self, fake_env, swap_svc):
+        """'적극매수' → 'ATTACK'."""
+        assert swap_svc._normalize_route("적극매수") == "ATTACK"
+
+    def test_normalize_korean_armed(self, fake_env, swap_svc):
+        """'진입대기' → 'ARMED'."""
+        assert swap_svc._normalize_route("진입대기") == "ARMED"
+
+    def test_normalize_korean_overheat(self, fake_env, swap_svc):
+        """'과열' → 'OVERHEAT'."""
+        assert swap_svc._normalize_route("과열") == "OVERHEAT"
+
+    def test_normalize_none(self, fake_env, swap_svc):
+        """None → None."""
+        assert swap_svc._normalize_route(None) is None
+
+    def test_normalize_empty_string(self, fake_env, swap_svc):
+        """'' → None."""
+        assert swap_svc._normalize_route("") is None
+        assert swap_svc._normalize_route("   ") is None
+
+    def test_normalize_unknown_returns_upper(self, fake_env, swap_svc):
+        """알 수 없는 값은 upper만 (보수적 유지)."""
+        assert swap_svc._normalize_route("xyz") == "XYZ"
+
+    def test_normalize_via_row_to_pick(self, fake_env, swap_svc):
+        """_row_to_pick_dict가 ROUTE를 자동 정규화."""
+        row = pd.Series({
+            "종목명": "A", "종목코드": "001",
+            "DISPLAY_SCORE": 70, "FINAL_SCORE": 70,
+            "EBS": 1,
+            "ROUTE": "  attack  ",  # 소문자 + 공백
+            "종가": 10000,
+        })
+        pick = swap_svc._row_to_pick_dict(row)
+        assert pick["route"] == "ATTACK"
+
+
+class TestTwoPassWeightCalculation:
+    """[v3.9.21c 평가 4] 비중 2-pass 계산 — 현재가 기반 통일."""
+
+    def test_value_basis_reported_correctly(self, fake_env, swap_svc):
+        """analyze_portfolio_swap 반환에 value_basis 키 포함."""
+        recs = pd.DataFrame([{
+            "종목코드": "001", "종목명": "A",
+            "DISPLAY_SCORE": 75, "FINAL_SCORE": 75,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 15000,
+        }])
+        out = swap_svc.analyze_portfolio_swap(
+            holdings=[{"name": "A", "avg": 10000, "qty": 10}],
+            recommend_df=recs,
+        )
+        assert "value_basis" in out
+        assert out["value_basis"] == "current_price"
+
+    def test_weight_uses_current_price_basis_two_pass(
+        self, fake_env, swap_svc
+    ):
+        """[v3.9.21c 평가 4] total_value 자동 계산 시 현재가 기준 통일.
+
+        시나리오: 보유 1주 (avg 10000) + 가격이 +50% 상승 (current 15000)
+        이전 v3.9.21b:
+          분자: 15000 * qty (현재가)
+          분모: 10000 * qty (매입가)
+          → 비중 150% 왜곡
+        v3.9.21c:
+          2-pass — 분모도 현재가 기준 합계
+          → 단일 종목이면 100%
+        """
+        recs = pd.DataFrame([{
+            "종목코드": "001", "종목명": "A",
+            "DISPLAY_SCORE": 75, "FINAL_SCORE": 75,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 15000,  # +50% 상승
+        }])
+        out = swap_svc.analyze_portfolio_swap(
+            holdings=[{"name": "A", "avg": 10000, "qty": 10}],
+            recommend_df=recs,
+        )
+        item = out["holdings_analysis"][0]
+        # 단일 종목 → 비중 100% (current_price 기준 통일)
+        # 이전 v3.9.21b: 150% (분자 15000 / 분모 10000)
+        assert abs(item["weight_pct"] - 100.0) < 1.0, (
+            f"비중 100% 기대, 실제 {item['weight_pct']:.1f}% — "
+            "2-pass 계산이 적용되지 않은 듯"
+        )
+
+    def test_value_basis_mixed_when_some_unmatched(
+        self, fake_env, swap_svc
+    ):
+        """[v3.9.21c 평가 4] 일부 종목 매칭 안 되면 value_basis=mixed."""
+        recs = pd.DataFrame([{
+            "종목코드": "001", "종목명": "매칭됨",
+            "DISPLAY_SCORE": 75, "FINAL_SCORE": 75,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 10000,
+        }])
+        out = swap_svc.analyze_portfolio_swap(
+            holdings=[
+                {"name": "매칭됨", "avg": 10000, "qty": 10},
+                {"name": "매칭안됨", "avg": 5000, "qty": 20},  # recommend 없음
+            ],
+            recommend_df=recs,
+        )
+        assert out["value_basis"] == "mixed_current_avg"
+
+    def test_external_total_value_is_trusted(self, fake_env, swap_svc):
+        """외부 total_value > 0이면 자동 계산하지 않고 그대로 사용.
+
+        실제 평가금액을 외부에서 주면 가장 정확.
+        """
+        recs = pd.DataFrame([{
+            "종목코드": "001", "종목명": "A",
+            "DISPLAY_SCORE": 75, "FINAL_SCORE": 75,
+            "EBS": 1, "ROUTE": "ATTACK", "RR_NOW_TP1": 2.0,
+            "ENTRY_GAP_PCT": 1.0, "종가": 10000,
+        }])
+        # 외부에서 200,000원 평가금액 전달 (실제 평가금액)
+        out = swap_svc.analyze_portfolio_swap(
+            holdings=[{"name": "A", "avg": 10000, "qty": 10}],
+            recommend_df=recs,
+            total_value=200000,
+        )
+        # 외부 total_value 신뢰 → 100000 / 200000 = 50%
+        item = out["holdings_analysis"][0]
+        assert abs(item["weight_pct"] - 50.0) < 1.0, (
+            f"외부 total_value 사용 시 50% 기대, 실제 {item['weight_pct']:.1f}%"
+        )
+
+
+
