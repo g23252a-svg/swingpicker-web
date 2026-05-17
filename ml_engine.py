@@ -1345,8 +1345,9 @@ def attach_v23_phase1_signals(current_df: pd.DataFrame,
             f"[v23 Phase 1] signal coverage: {coverage:.1%} "
             f"(OK={n_ok}/{n_total}, breakdown={breakdown})"
         )
-    except Exception:
-        pass
+    except Exception as _e:
+        # signal coverage 통계 출력 실패 — 운영엔 영향 없음, 모니터링 신호만 누락
+        logger.debug(f"[v23 Phase 1] coverage log 실패: {_e}")
 
     return current_df
 

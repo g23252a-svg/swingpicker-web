@@ -1,9 +1,9 @@
 {
   "version": 2,
   "doc": "DO NOT edit by hand unless you know what you're doing. Regenerate with: python scripts/check_silent_exceptions.py --regenerate. Matching is by (file, exc_type, body_kind, code) multiset count — robust to line shifts but distinguishes duplicates within same file.",
-  "count": 157,
+  "count": 176,
   "by_severity": {
-    "SILENT": 154,
+    "SILENT": 173,
     "QUASI": 3
   },
   "fingerprint_counts": {
@@ -14,18 +14,23 @@
     "0b13bed4d91f": 2,
     "0d1b5d1262b8": 3,
     "0d3763ceaac3": 1,
+    "15335de984f2": 1,
     "1715ae473d16": 2,
     "1985e4801ad4": 1,
+    "1c59f35c2900": 2,
     "20e25574367c": 1,
-    "262041e63abd": 3,
+    "262041e63abd": 4,
     "28bf2d2c8c21": 1,
     "2e9ddbf955e1": 1,
     "2fecfc3daad2": 1,
+    "3344f7e07761": 2,
     "35bb257d5706": 10,
+    "3d20b88a4c67": 1,
     "428693c26b3a": 3,
     "44500325ff69": 9,
     "462254c612ea": 1,
     "49f471904821": 1,
+    "51a34e567de3": 3,
     "581cbf4c8328": 2,
     "58a011fe7523": 1,
     "590426d6e6ec": 1,
@@ -33,7 +38,7 @@
     "5f54edf7af41": 2,
     "630532677857": 2,
     "63f58e7f1760": 2,
-    "64c5671bf63b": 1,
+    "64c5671bf63b": 5,
     "659a747b6489": 1,
     "6a95b564942b": 2,
     "6b4ae21851d3": 1,
@@ -64,11 +69,13 @@
     "d3415cbcc060": 1,
     "d8a89b7043c5": 2,
     "da95f7500ade": 5,
+    "e1b3f29e054a": 1,
     "e2ec170f10b1": 3,
     "e2f57cf39143": 7,
     "e6dacefda77f": 1,
     "f02e78414cbe": 2,
     "f13c25997b8c": 1,
+    "f7467edbe446": 4,
     "f95b088329dc": 2,
     "fa8aee6f5c87": 4,
     "feaf717ed158": 2,
@@ -126,7 +133,7 @@
     {
       "fingerprint": "20e25574367c",
       "file": "backtest_validation.py",
-      "line": 237,
+      "line": 281,
       "exc_type": "Exception",
       "severity": "QUASI",
       "body_kind": "print_only"
@@ -228,9 +235,41 @@
       "body_kind": "pass"
     },
     {
+      "fingerprint": "f7467edbe446",
+      "file": "components/page_stock.py",
+      "line": 77,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "f7467edbe446",
+      "file": "components/page_stock.py",
+      "line": 87,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "f7467edbe446",
+      "file": "components/page_stock.py",
+      "line": 97,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "f7467edbe446",
+      "file": "components/page_stock.py",
+      "line": 116,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
       "fingerprint": "2fecfc3daad2",
       "file": "components/page_stock.py",
-      "line": 307,
+      "line": 377,
       "exc_type": "AttributeError",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -255,6 +294,30 @@
       "fingerprint": "bb3477bfa82f",
       "file": "components/social_proof.py",
       "line": 210,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "51a34e567de3",
+      "file": "components/stock_detail_v2.py",
+      "line": 70,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "51a34e567de3",
+      "file": "components/stock_detail_v2.py",
+      "line": 82,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "51a34e567de3",
+      "file": "components/stock_detail_v2.py",
+      "line": 2296,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -286,7 +349,7 @@
     {
       "fingerprint": "262041e63abd",
       "file": "components/tab_backtest.py",
-      "line": 277,
+      "line": 301,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -294,7 +357,7 @@
     {
       "fingerprint": "262041e63abd",
       "file": "components/tab_backtest.py",
-      "line": 312,
+      "line": 336,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -302,7 +365,15 @@
     {
       "fingerprint": "262041e63abd",
       "file": "components/tab_backtest.py",
-      "line": 326,
+      "line": 350,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "262041e63abd",
+      "file": "components/tab_backtest.py",
+      "line": 1576,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -310,7 +381,7 @@
     {
       "fingerprint": "58a011fe7523",
       "file": "components/tab_market.py",
-      "line": 246,
+      "line": 249,
       "exc_type": "AttributeError",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -318,7 +389,7 @@
     {
       "fingerprint": "7b729e6de76c",
       "file": "components/tab_market.py",
-      "line": 756,
+      "line": 800,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -326,7 +397,7 @@
     {
       "fingerprint": "7b729e6de76c",
       "file": "components/tab_market.py",
-      "line": 1063,
+      "line": 1165,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -335,6 +406,46 @@
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
       "line": 505,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "15335de984f2",
+      "file": "components/tab_perf.py",
+      "line": 747,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "64c5671bf63b",
+      "file": "components/tab_perf.py",
+      "line": 939,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "64c5671bf63b",
+      "file": "components/tab_perf.py",
+      "line": 995,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "64c5671bf63b",
+      "file": "components/tab_perf.py",
+      "line": 1021,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "64c5671bf63b",
+      "file": "components/tab_perf.py",
+      "line": 1534,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -560,6 +671,22 @@
       "file": "components/tab_stocks.py",
       "line": 743,
       "exc_type": "(ImportError,Exception)",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "1c59f35c2900",
+      "file": "components/tab_stocks.py",
+      "line": 2885,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "1c59f35c2900",
+      "file": "components/tab_stocks.py",
+      "line": 2942,
+      "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
     },
@@ -790,7 +917,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 224,
+      "line": 227,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -798,7 +925,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 240,
+      "line": 243,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -806,7 +933,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 255,
+      "line": 258,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -814,7 +941,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 376,
+      "line": 382,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -822,7 +949,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 475,
+      "line": 481,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -830,7 +957,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 904,
+      "line": 987,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -838,7 +965,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1258,
+      "line": 1848,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -846,7 +973,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1317,
+      "line": 1907,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -854,7 +981,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1397,
+      "line": 1987,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -862,7 +989,7 @@
     {
       "fingerprint": "35bb257d5706",
       "file": "db_utils.py",
-      "line": 1452,
+      "line": 2042,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -934,7 +1061,7 @@
     {
       "fingerprint": "f13c25997b8c",
       "file": "macro_filter.py",
-      "line": 144,
+      "line": 154,
       "exc_type": "(ValueError,TypeError)",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -942,7 +1069,7 @@
     {
       "fingerprint": "fa8aee6f5c87",
       "file": "macro_filter.py",
-      "line": 190,
+      "line": 200,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -950,7 +1077,7 @@
     {
       "fingerprint": "fa8aee6f5c87",
       "file": "macro_filter.py",
-      "line": 220,
+      "line": 230,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -958,7 +1085,7 @@
     {
       "fingerprint": "fa8aee6f5c87",
       "file": "macro_filter.py",
-      "line": 379,
+      "line": 392,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -966,7 +1093,7 @@
     {
       "fingerprint": "fa8aee6f5c87",
       "file": "macro_filter.py",
-      "line": 391,
+      "line": 404,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -974,7 +1101,7 @@
     {
       "fingerprint": "b34fa2337aba",
       "file": "main.py",
-      "line": 283,
+      "line": 410,
       "exc_type": "RuntimeError",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -1158,7 +1285,7 @@
     {
       "fingerprint": "8be99c27497e",
       "file": "scoring_engine.py",
-      "line": 851,
+      "line": 859,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -1200,6 +1327,38 @@
       "file": "test_shadow_analyze.py",
       "line": 151,
       "exc_type": "(ValueError,TypeError)",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "3d20b88a4c67",
+      "file": "tests/test_alpha_real_fallback.py",
+      "line": 65,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "e1b3f29e054a",
+      "file": "tests/test_verdict_anomaly.py",
+      "line": 413,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "3344f7e07761",
+      "file": "tests/test_verdict_anomaly.py",
+      "line": 456,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "3344f7e07761",
+      "file": "tests/test_verdict_anomaly.py",
+      "line": 490,
+      "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
     },
@@ -1302,7 +1461,7 @@
     {
       "fingerprint": "cdb33882f2ed",
       "file": "version_info.py",
-      "line": 271,
+      "line": 370,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
