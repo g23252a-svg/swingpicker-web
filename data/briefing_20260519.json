@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260519",
+  "generated_at": "2026-05-19 23:17:02",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "100790",
+      "name": "미래에셋벤처투자",
+      "route": "ATTACK",
+      "score": 89.1,
+      "close": 60800,
+      "entry": 60800,
+      "stop": 51600,
+      "target1": 70700,
+      "target2": 76800,
+      "est_win_rate": 0.573,
+      "rr": 1.1,
+      "sector": "금융",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/100790"
+    },
+    {
+      "rank": 2,
+      "code": "052900",
+      "name": "KX하이텍",
+      "route": "ARMED",
+      "score": 88.7,
+      "close": 1698,
+      "entry": 1429,
+      "stop": 1214,
+      "target1": 1870,
+      "target2": 2065,
+      "est_win_rate": 0.535,
+      "rr": 2.1,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/052900"
+    },
+    {
+      "rank": 3,
+      "code": "027360",
+      "name": "아주IB투자",
+      "route": "ARMED",
+      "score": 87.8,
+      "close": 17280,
+      "entry": 17280,
+      "stop": 14680,
+      "target1": 19950,
+      "target2": 22000,
+      "est_win_rate": 0.565,
+      "rr": 1.0,
+      "sector": "금융",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/027360"
+    }
+  ]
+}
