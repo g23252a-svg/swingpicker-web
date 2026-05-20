@@ -360,10 +360,14 @@ class TestJsonTypeSafety:
         )
 
         # 명시적으로 default=str 없이 dump — bool/int가 native여야 통과
+        # [v3.9.23-hotfix] Windows cp949 → utf-8 명시 (이모지/한글 안전)
         out = tmp_path / "test.json"
-        out.write_text(json.dumps(promotion, ensure_ascii=False))
+        out.write_text(
+            json.dumps(promotion, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
-        loaded = json.loads(out.read_text())
+        loaded = json.loads(out.read_text(encoding="utf-8"))
 
         # 모든 passed가 진짜 bool로 보존됐는지
         for key, c in loaded["criteria"].items():
