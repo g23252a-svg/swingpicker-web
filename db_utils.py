@@ -469,11 +469,25 @@ class LDYDBManager:
             _logger.warning(f" users INSERT 실패: {e}")
 
     def _upsert_user_row(self, u: dict):
-        """SQLite UPSERT (ON CONFLICT)"""
+        """SQLite UPSERT (ON CONFLICT).
+
+        [v22.3.8] role 다운그레이드 원복 방지:
+        Gist에 role='prime'이 남아있어도, 이미 SQLite가 'free'로 강등된 상태면
+        강등을 유지함. 단방향 다운그레이드 보호.
+        역으로 Gist에 'admin'/'prime'이 들어오고 SQLite가 'free'면 그건 정상
+        업그레이드 → 그대로 반영.
+
+        해결 시나리오:
+        1. 관리자가 강등 버튼 → SQLite role='free' 변경
+        2. Gist는 아직 'prime' (배치 upload 실패 또는 race)
+        3. 앱 재시작 → ensure_gist_loaded → 이 함수 호출
+        4. 이전: ON CONFLICT DO UPDATE → role='prime' 원복 (버그!)
+        5. v22.3.8: 'prime'이 들어와도 SQLite의 'free'를 유지
+        """
         join_dt_str = u.get('created_at', u.get('join_date'))
         expire_val = u.get('prime_expire_date')
-        role = u.get('role', 'free')
-        if not expire_val and role in ['prime', 'pro'] and join_dt_str:
+        gist_role = u.get('role', 'free')
+        if not expire_val and gist_role in ['prime', 'pro'] and join_dt_str:
             try:
                 clean_str = str(join_dt_str)[:19].replace("T", " ")
                 join_dt = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
@@ -481,10 +495,85 @@ class LDYDBManager:
             except Exception:
                 pass
 
+        # [v22.3.8] role 다운그레이드 원복 방지
+        # SQLite에 이미 row 있고 role이 더 낮은(=권한 약한) 상태면 그것을 우선
+        email_id = u.get('login_id', u.get('id'))
+        existing_role = None
+        existing_expire = None
+        if email_id:
+            row = self._exec_sqlite_one(
+                "SELECT role, prime_expire_date FROM users WHERE id = ?",
+                (email_id,),
+            )
+            if row:
+                existing_role = row[0]
+                existing_expire = row[1]
+
+        # 권한 위계 (높음 → 낮음): admin > prime/pro > free > banned
+        # banned는 별도 컬럼이라 role 위계에서 제외
+        role_rank = {"admin": 3, "prime": 2, "pro": 2, "free": 1}
+
+        if existing_role is not None:
+            existing_rank = role_rank.get(
+                str(existing_role).strip().lower(), 1
+            )
+            gist_rank = role_rank.get(
+                str(gist_role).strip().lower(), 1
+            )
+
+            # SQLite 권한이 더 낮음(= 이미 강등됨) AND Gist 만료일이 미래 아님
+            # 이런 경우 강등이 의도된 것이므로 Gist의 prime을 무시
+            if existing_rank < gist_rank:
+                # Gist의 만료일이 이미 지났다면 확실히 강등 의도 → 유지
+                gist_expired = False
+                if expire_val:
+                    try:
+                        exp_clean = str(expire_val).split(" ")[0]
+                        gist_exp_dt = datetime.strptime(exp_clean, "%Y-%m-%d").date()
+                        if gist_exp_dt < datetime.now().date():
+                            gist_expired = True
+                    except Exception as e:
+                        _logger.debug(f"[gist-load] expire 파싱 실패: {e}")
+                        pass
+
+                if gist_expired:
+                    _logger.info(
+                        f" [GIST-LOAD] {email_id}: SQLite={existing_role!r} "
+                        f"유지 (Gist={gist_role!r} 만료일 {expire_val} 이미 지남)"
+                    )
+                    # role과 expire_date는 SQLite 그대로, 나머지만 업데이트
+                    vals = (
+                        email_id,
+                        u.get('password_hash', u.get('password')),
+                        u.get('salt'), u.get('nickname'),
+                        existing_role,  # ← SQLite 값 유지
+                        str(join_dt_str) if join_dt_str else None,
+                        str(u.get('last_login')) if u.get('last_login') else None,
+                        1 if u.get('is_banned') else 0,
+                        u.get('security_q_idx', 0), u.get('security_a_hash'),
+                        u.get('session_token'),
+                        existing_expire,  # ← SQLite 값 유지
+                    )
+                    self._exec_sqlite("""
+                        INSERT INTO users
+                        (id, password, salt, nickname, role, join_date, last_login,
+                         is_banned, security_q_idx, security_a_hash, session_token, prime_expire_date)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            password = excluded.password,
+                            salt = excluded.salt,
+                            nickname = excluded.nickname,
+                            is_banned = excluded.is_banned,
+                            security_q_idx = excluded.security_q_idx,
+                            security_a_hash = excluded.security_a_hash
+                    """, vals)
+                    return
+
+        # 정상 UPSERT — Gist 값 반영
         vals = (
-            u.get('login_id', u.get('id')),
+            email_id,
             u.get('password_hash', u.get('password')),
-            u.get('salt'), u.get('nickname'), role,
+            u.get('salt'), u.get('nickname'), gist_role,
             str(join_dt_str) if join_dt_str else None,
             str(u.get('last_login')) if u.get('last_login') else None,
             1 if u.get('is_banned') else 0,
@@ -1015,8 +1104,35 @@ class LDYDBManager:
             return []
 
     def update_user_role(self, email, new_role):
+        """[v22.3.8] role 변경 + Gist 즉시 동기 push.
+
+        이전 버그: dirty 플래그만 세우고 60초 배치 기다림 → 그 사이 컨테이너
+                  재시작되면 Gist 옛 데이터(prime)가 SQLite를 덮어씀 → 강등 원복
+        v22.3.8: role 변경은 권한 변화라 critical → 즉시 push 시도
+                실패해도 dirty는 남아있어 배치 재시도 가능
+        """
         self._exec_sqlite("UPDATE users SET role = ? WHERE id = ?", (new_role, email))
         self._mark_gist_dirty("users")
+        # [v22.3.8] 즉시 push — 60초 배치 기다리지 않음
+        try:
+            filename = TABLE_TO_GIST_FILE.get("users")
+            if filename:
+                ok = self._do_gist_upload("users", filename)
+                if ok:
+                    _logger.info(
+                        f" [update_user_role] {email} → {new_role} "
+                        f"+ Gist 즉시 push 성공"
+                    )
+                else:
+                    _logger.warning(
+                        f" [update_user_role] {email} → {new_role} "
+                        f"DB 변경 OK / Gist push 실패 (배치 재시도 대기)"
+                    )
+        except Exception as e:
+            _logger.warning(
+                f" [update_user_role] Gist 즉시 push 예외: {e} "
+                f"(DB 변경은 완료, 배치 재시도 대기)"
+            )
         return True
 
     def toggle_user_ban(self, email):
