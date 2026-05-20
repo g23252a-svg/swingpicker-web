@@ -875,6 +875,28 @@ def render_tab_market(df, auth: str = "free"):
                         if avg_label:
                             ui.label(avg_label).classes("text-xs text-gray-500")
 
+                        # [v3.9.22b] BUY_NOW 분포 (3순위 — 관리자/회원 모두 보임)
+                        # TOP_PICK 중 BUY/WATCH/AVOID 카운트
+                        if (_tp_mask is not None and tp_count > 0
+                                and "BUY_NOW_GRADE" in df.columns):
+                            _tp_df = df.loc[_tp_mask]
+                            n_buy = int((_tp_df["BUY_NOW_GRADE"] == "BUY").sum())
+                            n_watch = int((_tp_df["BUY_NOW_GRADE"] == "WATCH").sum())
+                            n_avoid = int((_tp_df["BUY_NOW_GRADE"] == "AVOID").sum())
+                            with ui.row().classes("gap-1 mt-1"):
+                                if n_buy > 0:
+                                    ui.label(f"🟢{n_buy}").classes(
+                                        "text-xs text-emerald-400"
+                                    ).tooltip("매수 적합")
+                                if n_watch > 0:
+                                    ui.label(f"🟡{n_watch}").classes(
+                                        "text-xs text-amber-400"
+                                    ).tooltip("관찰/눌림 대기")
+                                if n_avoid > 0:
+                                    ui.label(f"🔴{n_avoid}").classes(
+                                        "text-xs text-red-400"
+                                    ).tooltip("추격 금지")
+
         # ── [v22 UI Step B + K] 점수 우수 후보 더 보기 — TOP_PICK 제외 ──
         # Hero 카드에 이미 TOP_PICK이 표시되므로, 여기서는 TOP_PICK 제외한 후보만
         try:
