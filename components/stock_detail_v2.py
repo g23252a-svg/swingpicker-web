@@ -117,6 +117,10 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
     top_pick = _as_bool(row.get("TOP_PICK", 0))
     top_pick_type = _safe_str(row.get("TOP_PICK_TYPE", ""), "")
 
+    # [v3.9.22b] BUY_NOW 표시 정보 — 평가 룰 5개 캡슐화
+    from components.buy_now_badge import get_buy_now_display
+    buy_now = get_buy_now_display(row)
+
     # ── EBS (실제 컬럼: EBS + PASS_EBS) ──
     ebs = int(safe_float(row.get("EBS", 0)) or 0)
     pass_ebs = _as_bool(row.get("PASS_EBS", ebs >= 5))
@@ -304,6 +308,8 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         # status 뱃지
         "top_pick": top_pick,
         "top_pick_type": top_pick_type or ("AGGRESSIVE" if top_pick else "—"),
+        # [v3.9.22b] BUY_NOW 표시 정보
+        "buy_now": buy_now,
         "ebs": ebs,
         "ebs_total": 8,
         "pass_ebs": pass_ebs,
@@ -1158,12 +1164,42 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
                 </div>
             ''')
 
-            # 3. TOP_PICK
+            # 3. TOP_PICK + BUY_NOW 배지 [v3.9.22b]
             top_pick_display = top_pick_type if top_pick else "—"
+            # 평가 절대 지킬 룰 #4: TOP_PICK=1이어야 BUY_NOW 표시
+            #                  #5: AVOID도 숨기지 않고 노출
+            _bn = n.get("buy_now", {})
+            _bn_visible = _bn.get("visible", False)
+            _bn_icon = _bn.get("icon", "")
+            _bn_label = _bn.get("label", "")
+            _bn_tone = _bn.get("tone", "none")
+            _bn_score = _bn.get("score", 0)
+            _bn_reason = h_escape(_bn.get("reason", ""))
+            # 툴팁: reason or 기본
+            from components.buy_now_badge import format_buy_now_tooltip
+            _bn_tooltip = h_escape(format_buy_now_tooltip(_bn))
+
+            # BUY_NOW 배지 HTML — TOP_PICK일 때만
+            if _bn_visible and _bn_icon:
+                _buy_now_html = (
+                    f'<div class="buy-now-badge buy-now-{_bn_tone}" '
+                    f'title="{_bn_tooltip}" '
+                    f'style="margin-top:6px;padding:4px 8px;border-radius:6px;'
+                    f'font-size:11px;font-weight:600;'
+                    f'background:rgba(255,255,255,0.05);'
+                    f'border:1px solid {_bn.get("color", "#666")};'
+                    f'color:{_bn.get("color", "#999")};">'
+                    f'{_bn_icon} {_bn_label} · {_bn_score:.0f}점'
+                    f'</div>'
+                )
+            else:
+                _buy_now_html = ""
+
             ui.html(f'''
                 <div class="h-badge {top_pick_class}">
                     <div class="lbl">TOP_PICK</div>
                     <div class="val">{top_pick_display}</div>
+                    {_buy_now_html}
                 </div>
             ''')
 
