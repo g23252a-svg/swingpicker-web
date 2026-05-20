@@ -725,7 +725,8 @@ def main():
         # 마지막 폴백 — str (datetime 등)
         return str(obj)
 
-    with open(out_path, "w") as f:
+    # [v3.9.23-hotfix] Windows cp949 → utf-8 명시 (한글/이모지 안전)
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2,
                   default=_json_default)
     print(f"\n→ 저장: {out_path}")

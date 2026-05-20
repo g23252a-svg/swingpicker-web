@@ -52,3 +52,4 @@ Thumbs.db
 # Local backup files
 *.before_*
 *.bak
+diagnose_expired_users.py
