@@ -1,12 +1,12 @@
 {
-  "asof_ymd": "20260519",
-  "generated_at": "2026-05-19T23:16:01.110322",
+  "asof_ymd": "20260520",
+  "generated_at": "2026-05-20T20:47:20.146849",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
-  "declared_wr_active": 0.5378,
-  "declared_wr_top_pick": 0.569,
+  "declared_wr_active": 0.5402,
+  "declared_wr_top_pick": 0.559,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
@@ -23,7 +23,7 @@
         "score_lo": 50,
         "score_hi": 60.0,
         "n_raw": 99,
-        "p_win": 0.2735,
+        "p_win": 0.2736,
         "p_win_lcb": 0.1947,
         "avg_ret_net_pct": -4.0263,
         "avg_ret_excess_pct": -6.3173
@@ -32,7 +32,7 @@
         "score_lo": 60,
         "score_hi": 70.0,
         "n_raw": 68,
-        "p_win": 0.3557,
+        "p_win": 0.3558,
         "p_win_lcb": 0.25,
         "avg_ret_net_pct": -2.426,
         "avg_ret_excess_pct": -6.0842
@@ -41,7 +41,7 @@
         "score_lo": 70,
         "score_hi": 80.0,
         "n_raw": 37,
-        "p_win": 0.413,
+        "p_win": 0.4131,
         "p_win_lcb": 0.2635,
         "avg_ret_net_pct": -2.9108,
         "avg_ret_excess_pct": -6.3502
@@ -49,11 +49,11 @@
       {
         "score_lo": 80,
         "score_hi": 90.0,
-        "n_raw": 5,
-        "p_win": 0.5714,
-        "p_win_lcb": 0.2307,
-        "avg_ret_net_pct": -0.4244,
-        "avg_ret_excess_pct": -4.0764
+        "n_raw": 6,
+        "p_win": 0.5,
+        "p_win_lcb": 0.1876,
+        "avg_ret_net_pct": -5.4125,
+        "avg_ret_excess_pct": -7.6458
       },
       {
         "score_lo": 90,
@@ -65,36 +65,36 @@
         "avg_ret_excess_pct": null
       }
     ],
-    "monotone_p_win_lcb": true,
+    "monotone_p_win_lcb": false,
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
   "realized_wr": 0.2873,
-  "realized_wr_top_pick": 0.413,
+  "realized_wr_top_pick": 0.4131,
   "realized_wr_top_pick_n": 37,
   "realized_wr_active": 0.2873,
   "realized_wr_active_n": 499,
-  "declared_vs_realized_gap_active": 0.2505,
-  "declared_vs_realized_gap_top_pick": 0.156,
-  "declared_vs_realized_gap": 0.156,
-  "avg_ret_excess_pct": -6.8474,
+  "declared_vs_realized_gap_active": 0.2529,
+  "declared_vs_realized_gap_top_pick": 0.1459,
+  "declared_vs_realized_gap": 0.1459,
+  "avg_ret_excess_pct": -6.8843,
   "top_pick_funnel": {
-    "trade_ymd": "20260519",
-    "total": 565,
+    "trade_ymd": "20260520",
+    "total": 551,
     "aggressive_funnel": {
-      "total": 565,
-      "route_active": 35,
-      "hard_gate": 16,
-      "elite_75": 2,
-      "struct_80": 2,
-      "timing_70": 2,
-      "tp1_15": 2,
-      "final": 2
+      "total": 551,
+      "route_active": 19,
+      "hard_gate": 8,
+      "elite_75": 1,
+      "struct_80": 1,
+      "timing_70": 1,
+      "tp1_15": 1,
+      "final": 1
     },
     "stable_funnel": {
-      "total": 565,
-      "route_active": 35,
-      "hard_gate": 16,
+      "total": 551,
+      "route_active": 19,
+      "hard_gate": 8,
       "elite_70": 2,
       "tp1_7_15": 0,
       "balance_70": 0,
@@ -102,8 +102,8 @@
       "mature": 0,
       "final": 0
     },
-    "top_pick_count": 2,
-    "aggressive_count": 2,
+    "top_pick_count": 1,
+    "aggressive_count": 1,
     "stable_count": 0
   },
   "top_pick_stable_7day_avg": 0.29,
@@ -119,28 +119,29 @@
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "min_rr=1.03"
+      "detail": "min_rr=1.72"
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
-      "status": "FAIL",
-      "detail": "gap_top_pick=15.6% > 15%p (n=37)"
+      "status": "PASS",
+      "detail": "gap_top_pick=14.6% (n=37)"
     }
   ],
   "ci_soft": [
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "WARN",
-      "detail": "gap_active=25.1% (n=499) — fallback 보정 또는 calibration drift 모니터링"
+      "detail": "gap_active=25.3% (n=499) — fallback 보정 또는 calibration drift 모니터링"
     },
     {
       "gate": "wilson_monotonicity",
-      "status": "OK"
+      "status": "WARN",
+      "detail": "ELITE_SCORE bin별 p_win LCB 단조성 깨짐"
     },
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-6.85%"
+      "detail": "avg_ret_excess=-6.88%"
     },
     {
       "gate": "market_map_coverage_95",
@@ -152,9 +153,9 @@
       "detail": "평균 0.29개"
     }
   ],
-  "ci_hard_all_pass": false,
+  "ci_hard_all_pass": true,
   "ci_soft_any_warn": true,
-  "top_pick_count": 2,
+  "top_pick_count": 1,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": 1.03
+  "top_pick_min_rr": 1.72
 }

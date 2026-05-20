@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "v20.8",
-    "as_of_ymd": "20260519",
+    "as_of_ymd": "20260520",
     "horizon_bdays": 5,
     "entry_rule": "next_open",
     "exit_rule": "horizon_close",
@@ -17,7 +17,7 @@
     "feature_n_cols": 16,
     "entry_universe_rule": "top_pick_or_active_route",
     "entry_rule_used_counts": {
-      "route_active": 714
+      "route_active_legacy_only": 714
     },
     "entry_rule_all_ratio": 0.0,
     "entry_rule_trustworthy": true,
