@@ -1051,6 +1051,125 @@ def compute_elite_score(df: pd.DataFrame,
         (~_bn_hard_block) & (_buy_now_score < 70.0) & (_buy_now_score >= 30.0)
     ).fillna(False).astype(int)
 
+    # ═══════════════════════════════════════════════════════════════════
+    # [v3.9.23a SHADOW] Anti-STRUCT Reversal — 측정 전용
+    # ═══════════════════════════════════════════════════════════════════
+    # 평가 명시: production 추천에 영향 없는 shadow 컬럼.
+    # 22,646건 백테스트에서 발견된 "바닥 반등형" 알파 패턴 기록.
+    #
+    # ★ 절대 지킬 룰:
+    #   1) TOP_PICK / BUY_NOW_ELIGIBLE / ROUTE / LDY_RANK 영향 없음
+    #   2) 화면에 매수 신호로 표시 X (관리자 디버깅 라벨만)
+    #   3) 4월 편향 가능성 / 데이터마이닝 위험 / 4월 시장국면 효과
+    #      → 1~2주 shadow 측정 후 production 승격 결정
+    #
+    # 후보 기본 조건 (n=523, win=52.4%, ret +1.91%, Δalpha +11.3p):
+    #   TIMING_SCORE >= 70 AND STRUCT_SCORE < 50
+    #
+    # 강화 조건 (n=61, win=59.0%, ret +4.83%, 단 4월 편향):
+    #   + TIMING_SCORE >= 90
+    #   + RR_NOW_TP1 < 0.5
+    #
+    # 주의 조건 (HARD EXCLUDE — 챔피언이라도 안 됨):
+    #   - 이격도 > 15 (추격위험)
+    #   - MFI14 > 82 (과열)
+    #   - ret_1d > 10 (이미 점프)
+    # ═══════════════════════════════════════════════════════════════════
+
+    # FLAG: 기본 후보 조건만 (가장 안전한 기준)
+    _struct_low = pd.to_numeric(
+        x.get("STRUCT_SCORE", pd.Series(0, index=x.index)),
+        errors="coerce",
+    ).fillna(50)
+    _timing_high = pd.to_numeric(
+        x.get("TIMING_SCORE", pd.Series(0, index=x.index)),
+        errors="coerce",
+    ).fillna(0)
+
+    # 주의 조건 — 챔피언이어도 빼야 할 종목 (이격도/MFI/단기점프)
+    _anti_exclude = (
+        (_disparity > 15.0)
+        | (_mfi > 82.0)
+        | (_r1 > 10.0)
+    ).fillna(False)
+
+    # FLAG: 기본 조건 통과 + 주의 조건 미해당
+    x["ANTI_STRUCT_REVERSAL_FLAG"] = (
+        (_timing_high >= 70.0)
+        & (_struct_low < 50.0)
+        & (~_anti_exclude)
+    ).fillna(False).astype(int)
+
+    # TYPE: 강도 분류
+    # - BASIC: T≥70 AND S<50 (검증 1순위 — n=523 안정)
+    # - STRONG: T≥85 AND S<50 (n=230)
+    # - CHAMPION: T≥90 AND S<60 AND RR<0.5 (n=492 but 4월 편향)
+    _type_basic = (_timing_high >= 70.0) & (_struct_low < 50.0) & ~_anti_exclude
+    _type_strong = _type_basic & (_timing_high >= 85.0)
+    _type_champion = (
+        (_timing_high >= 90.0)
+        & (_struct_low < 60.0)
+        & (_rr_now < 0.5)
+        & ~_anti_exclude
+    )
+
+    def _classify_type(idx):
+        if not _type_basic.iloc[idx] and not _type_champion.iloc[idx]:
+            return ""
+        if _type_champion.iloc[idx]:
+            return "CHAMPION"
+        if _type_strong.iloc[idx]:
+            return "STRONG"
+        return "BASIC"
+
+    x["ANTI_STRUCT_REVERSAL_TYPE"] = [
+        _classify_type(i) for i in range(len(x))
+    ]
+
+    # SCORE: 0~100 추가 강도
+    # BASIC=60, STRONG=75, CHAMPION=90, exclude=0
+    _asr_score = pd.Series(0.0, index=x.index)
+    _asr_score = _asr_score.mask(_type_basic, 60.0)
+    _asr_score = _asr_score.mask(_type_strong, 75.0)
+    _asr_score = _asr_score.mask(_type_champion, 90.0)
+    x["ANTI_STRUCT_REVERSAL_SCORE"] = _asr_score
+
+    # REASON: 디버깅/검증용 텍스트
+    def _asr_reason(idx):
+        if x["ANTI_STRUCT_REVERSAL_FLAG"].iloc[idx] == 0:
+            # 왜 제외됐는지
+            reasons = []
+            if not (_timing_high.iloc[idx] >= 70.0):
+                reasons.append(f"T={_timing_high.iloc[idx]:.0f}<70")
+            if not (_struct_low.iloc[idx] < 50.0):
+                reasons.append(f"S={_struct_low.iloc[idx]:.0f}≥50")
+            if _anti_exclude.iloc[idx]:
+                disp_v = _disparity.iloc[idx]
+                mfi_v = _mfi.iloc[idx]
+                r1_v = _r1.iloc[idx]
+                if pd.notna(disp_v) and disp_v > 15.0:
+                    reasons.append(f"이격도{disp_v:.0f}>15")
+                elif pd.notna(mfi_v) and mfi_v > 82.0:
+                    reasons.append(f"MFI{mfi_v:.0f}>82")
+                elif pd.notna(r1_v) and r1_v > 10.0:
+                    reasons.append(f"전일+{r1_v:.0f}%")
+            return " · ".join(reasons[:2])
+        # FLAG=1일 때 — 어떤 강화 조건 충족했나
+        reasons = []
+        t = _timing_high.iloc[idx]
+        s = _struct_low.iloc[idx]
+        rr = _rr_now.iloc[idx]
+        reasons.append(f"T={t:.0f}·S={s:.0f}")
+        if pd.notna(rr) and rr < 0.5:
+            reasons.append(f"RR={rr:.2f}<0.5")
+        elif pd.notna(rr) and rr < 1.0:
+            reasons.append(f"RR={rr:.2f}<1.0")
+        return " · ".join(reasons)
+
+    x["ANTI_STRUCT_REVERSAL_REASON"] = [
+        _asr_reason(i) for i in range(len(x))
+    ]
+
     # funnel 메타 (단계별 통과 수 — 디버깅/튜닝용)
     def _funnel(masks_dict):
         return {k: int(v.sum()) for k, v in masks_dict.items()}

@@ -1,0 +1,239 @@
+{
+  "generated_at": "2026-05-20T22:59:41",
+  "version": "v3.9.23c-slices",
+  "horizon_bdays": 5,
+  "round_trip_cost_pct": 0.71,
+  "n_total": 18529,
+  "n_asr": 0,
+  "baseline": {
+    "win_rate": 46.0,
+    "avg_ret": 0.819
+  },
+  "by_month_all": {
+    "202602": {
+      "label": "202602",
+      "n": 526,
+      "win_rate": 40.87,
+      "avg_ret": 0.461,
+      "avg_win_ret": 8.984,
+      "avg_loss_ret": -5.432,
+      "b_ratio": 1.654,
+      "fast_loss_rate": 23.0,
+      "worst_loss": -27.341,
+      "insufficient": false,
+      "win_alpha": -5.12,
+      "ret_alpha": -0.359
+    },
+    "202603": {
+      "label": "202603",
+      "n": 6540,
+      "win_rate": 33.33,
+      "avg_ret": -2.663,
+      "avg_win_ret": 8.818,
+      "avg_loss_ret": -8.404,
+      "b_ratio": 1.049,
+      "fast_loss_rate": 42.43,
+      "worst_loss": -71.656,
+      "insufficient": false,
+      "win_alpha": -12.66,
+      "ret_alpha": -3.483
+    },
+    "202604": {
+      "label": "202604",
+      "n": 10910,
+      "win_rate": 54.56,
+      "avg_ret": 3.041,
+      "avg_win_ret": 10.615,
+      "avg_loss_ret": -6.051,
+      "b_ratio": 1.754,
+      "fast_loss_rate": 22.29,
+      "worst_loss": -78.282,
+      "insufficient": false,
+      "win_alpha": 8.56,
+      "ret_alpha": 2.222
+    },
+    "202605": {
+      "label": "202605",
+      "n": 553,
+      "win_rate": 31.83,
+      "avg_ret": -1.484,
+      "avg_win_ret": 9.767,
+      "avg_loss_ret": -6.737,
+      "b_ratio": 1.45,
+      "fast_loss_rate": 40.14,
+      "worst_loss": -27.582,
+      "insufficient": false,
+      "win_alpha": -14.17,
+      "ret_alpha": -2.304
+    }
+  },
+  "by_macro_risk_all": {
+    "CAUTION": {
+      "label": "CAUTION",
+      "n": 9895,
+      "win_rate": 41.21,
+      "avg_ret": -0.032,
+      "avg_win_ret": 10.304,
+      "avg_loss_ret": -7.278,
+      "b_ratio": 1.416,
+      "fast_loss_rate": 34.02,
+      "worst_loss": -71.656,
+      "insufficient": false,
+      "win_alpha": -4.79,
+      "ret_alpha": -0.852
+    },
+    "CRITICAL": {
+      "label": "CRITICAL",
+      "n": 6547,
+      "win_rate": 53.14,
+      "avg_ret": 1.713,
+      "avg_win_ret": 9.528,
+      "avg_loss_ret": -7.15,
+      "b_ratio": 1.333,
+      "fast_loss_rate": 25.39,
+      "worst_loss": -78.282,
+      "insufficient": false,
+      "win_alpha": 7.14,
+      "ret_alpha": 0.893
+    },
+    "NORMAL": {
+      "label": "NORMAL",
+      "n": 1561,
+      "win_rate": 48.11,
+      "avg_ret": 2.593,
+      "avg_win_ret": 11.923,
+      "avg_loss_ret": -6.058,
+      "b_ratio": 1.968,
+      "fast_loss_rate": 25.69,
+      "worst_loss": -40.858,
+      "insufficient": false,
+      "win_alpha": 2.11,
+      "ret_alpha": 1.774
+    },
+    "UNKNOWN": {
+      "label": "UNKNOWN",
+      "n": 526,
+      "win_rate": 40.87,
+      "avg_ret": 0.461,
+      "avg_win_ret": 8.984,
+      "avg_loss_ret": -5.432,
+      "b_ratio": 1.654,
+      "fast_loss_rate": 23.0,
+      "worst_loss": -27.341,
+      "insufficient": false,
+      "win_alpha": -5.12,
+      "ret_alpha": -0.359
+    }
+  },
+  "by_month_asr": {},
+  "by_macro_risk_asr": {},
+  "by_group": {
+    "baseline_all": {
+      "label": "baseline_all",
+      "n": 18529,
+      "win_rate": 46.0,
+      "avg_ret": 0.819,
+      "avg_win_ret": 10.096,
+      "avg_loss_ret": -7.083,
+      "b_ratio": 1.426,
+      "fast_loss_rate": 29.95,
+      "worst_loss": -78.282,
+      "insufficient": false,
+      "win_alpha": 0.0,
+      "ret_alpha": 0.0
+    },
+    "TOP_PICK_1": {
+      "label": "TOP_PICK_1",
+      "n": 47,
+      "win_rate": 57.45,
+      "avg_ret": 3.169,
+      "avg_win_ret": 9.997,
+      "avg_loss_ret": -6.048,
+      "b_ratio": 1.653,
+      "fast_loss_rate": 19.15,
+      "worst_loss": -16.251,
+      "insufficient": false,
+      "win_alpha": 11.45,
+      "ret_alpha": 2.35
+    },
+    "BUY_NOW_ELIGIBLE_1": {
+      "label": "BUY_NOW_ELIGIBLE_1",
+      "n": 0,
+      "insufficient": true
+    },
+    "ANTI_STRUCT_REVERSAL_FLAG_1": {
+      "label": "ANTI_STRUCT_REVERSAL_FLAG_1",
+      "n": 0,
+      "insufficient": true
+    },
+    "ANTI_STRUCT_REVERSAL_BASIC": {
+      "label": "ANTI_STRUCT_REVERSAL_BASIC",
+      "n": 0,
+      "insufficient": true
+    },
+    "ANTI_STRUCT_REVERSAL_STRONG": {
+      "label": "ANTI_STRUCT_REVERSAL_STRONG",
+      "n": 0,
+      "insufficient": true
+    },
+    "ANTI_STRUCT_REVERSAL_CHAMPION": {
+      "label": "ANTI_STRUCT_REVERSAL_CHAMPION",
+      "n": 0,
+      "insufficient": true
+    },
+    "ASR_AND_BUY_NOW": {
+      "label": "ASR_AND_BUY_NOW",
+      "n": 0,
+      "insufficient": true
+    },
+    "ASR_AND_TOP_PICK": {
+      "label": "ASR_AND_TOP_PICK",
+      "n": 0,
+      "insufficient": true
+    }
+  },
+  "promotion_check": {
+    "criteria": {
+      "monthly_ev_positive": {
+        "value": "0/0",
+        "passed": false,
+        "note": "ASR 월별 3개월 중 2개월 이상 EV+ (표본 ≥30/월)"
+      },
+      "macro_normal_caution_ev": {
+        "value": "ASR 표본 부족",
+        "passed": false,
+        "note": "ASR NORMAL/CAUTION에서 모두 EV+ 필요 (각 표본 ≥30)"
+      },
+      "sample_size": {
+        "value": "n=0",
+        "passed": false,
+        "note": "ANTI_STRUCT_REVERSAL_FLAG=1 표본 ≥ 300"
+      },
+      "fast_loss_rate": {
+        "value": "ASR=100.0% vs baseline=29.9%",
+        "passed": false,
+        "note": "빠른 손절률(-5% 이내) baseline 이하"
+      },
+      "worst_loss": {
+        "value": "ASR=-100.0% vs baseline=-78.3%",
+        "passed": false,
+        "note": "최악 손실 baseline보다 덜함"
+      },
+      "return_alpha": {
+        "value": "+-99.00%p",
+        "passed": false,
+        "note": "ASR 평균수익 알파 ≥ +1.0%p (n-가중 평균)"
+      },
+      "return_alpha_unbiased": {
+        "value": "ASR 월별 표본 부족",
+        "passed": false,
+        "valid_months": 0,
+        "required_valid_months": 3,
+        "unbiased_alpha_status": "INSUFFICIENT_DATA",
+        "note": "월별 ret_alpha 산술 평균 ≥ +1.0%p (유효 월 ≥ 3개 필요)"
+      }
+    },
+    "n_passed": 0,
+    "n_total": 7,
+    "all_passed": false,
+    "recommendation": 
