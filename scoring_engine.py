@@ -925,6 +925,56 @@ def compute_elite_score(df: pd.DataFrame,
 
     x["BUY_NOW_REASON"] = [_build_reason(i) for i in range(len(x))]
 
+    # ═══════════════════════════════════════════════════
+    # [v3.9.22a 미니패치 2] 결측 critical 컬럼 보호
+    # ═══════════════════════════════════════════════════
+    # 평가 명시: VWAP_GAP/POC_GAP/MFI14/Range_Pos 중 일부 결측 시 위험 신호를
+    # 못 잡고 BUY가 나올 수 있음. critical 컬럼 7개 중 2+ 결측이면 WATCH로 강등.
+    _critical_cols_for_buy_now = [
+        "ENTRY_GAP_PCT", "RR_NOW_TP1", "ret_5d_%",
+        "VWAP_GAP", "POC_GAP", "MFI14", "Range_Pos",
+    ]
+    _missing_count = pd.Series(0, index=x.index)
+    for _col in _critical_cols_for_buy_now:
+        if _col not in x.columns:
+            _missing_count = _missing_count + 1
+        else:
+            _missing_count = _missing_count + pd.to_numeric(
+                x[_col], errors="coerce"
+            ).isna().astype(int)
+
+    _data_insufficient = _missing_count >= 2
+
+    if _data_insufficient.any():
+        # WATCH로 강등 (HARD BLOCK이 이미 AVOID로 만든 행은 그대로 둠)
+        _was_avoid = x["BUY_NOW_GRADE"] == "AVOID"
+        _to_downgrade = _data_insufficient & ~_was_avoid
+
+        # SCORE는 max 60으로 캡
+        x.loc[_to_downgrade, "BUY_NOW_SCORE"] = np.minimum(
+            x.loc[_to_downgrade, "BUY_NOW_SCORE"].astype(float), 60.0
+        )
+        x.loc[_to_downgrade, "BUY_NOW_GRADE"] = "WATCH"
+        x.loc[_to_downgrade, "BUY_NOW_PASS"] = 0
+        # REASON 앞에 "데이터 부족" 추가
+        for _idx in x.index[_to_downgrade]:
+            _existing = str(x.at[_idx, "BUY_NOW_REASON"] or "")
+            _new = "데이터 부족"
+            if _existing:
+                _new = f"{_new} · {_existing}"
+            x.at[_idx, "BUY_NOW_REASON"] = _new
+
+    # ═══════════════════════════════════════════════════
+    # [v3.9.22a 미니패치 1] BUY_NOW_ELIGIBLE — TOP_PICK AND BUY_NOW_PASS
+    # ═══════════════════════════════════════════════════
+    # 평가 명시: BUY_NOW_PASS는 전체 종목에 찍혀서 TOP_PICK=0이지만 BUY_NOW_PASS=1
+    # 인 종목이 CSV에 생김. PRIME 회원이 CSV 보면 오해 가능.
+    # UI/CSV 소비처에서는 반드시 ELIGIBLE을 사용해야 함.
+    x["BUY_NOW_ELIGIBLE"] = (
+        (x["TOP_PICK"].astype(int) == 1)
+        & (x["BUY_NOW_PASS"].astype(int) == 1)
+    ).astype(int)
+
     # ─── 추가 액션 플래그 ───
     # NO_CHASE_FLAG: 추격 매수 금지 (VWAP/POC/5일 과열)
     x["NO_CHASE_FLAG"] = (
