@@ -344,6 +344,7 @@ def premium_guard(action_name="이 기능"):
 def downgrade_expired_users():
     """
     [v21.3] 만료된 PRIME/PRO → FREE 자동 강등.
+    [v22.3.8] case-insensitive 비교 + 강제 즉시 Gist push (update_user_role 내부).
     매일 실행 또는 관리자 수동 실행.
 
     Returns: (downgraded_count, details_list)
@@ -355,27 +356,42 @@ def downgrade_expired_users():
     now = datetime.now()
     users = db.get_all_users()
     downgraded = []
+    skipped_no_expire = 0
+    skipped_not_paid = 0
 
     for u in users:
-        role = u.get("role", "free")
-        if role not in ("prime", "pro"):
-            continue
+        # [v22.3.8] case-insensitive — DB에 'PRIME'/'Prime'/'prime' 어떤 case든 잡음
+        role_raw = u.get("role", "free")
+        role = str(role_raw).strip().lower()
+
         if role == "admin":
+            continue
+        if role not in ("prime", "pro"):
+            skipped_not_paid += 1
             continue
 
         expire = u.get("prime_expire_date")
         if not expire:
+            skipped_no_expire += 1
             continue
 
         try:
             exp_dt = datetime.strptime(str(expire).split(" ")[0], "%Y-%m-%d")
             if exp_dt.date() < now.date():
                 email = u.get("login_id") or u.get("id", "")
+                # update_user_role이 즉시 Gist push 시도 (v22.3.8)
                 db.update_user_role(email, "free")
-                detail = f"⏰ {email}: {role}→free (만료 {expire})"
+                detail = f"⏰ {email}: {role_raw}→free (만료 {expire})"
                 downgraded.append(detail)
                 _logger.info(detail)
         except Exception as e:
-            _logger.warning(f"만료 체크 실패 ({u.get('login_id', '?')}): {e}")
+            _logger.warning(
+                f"만료 체크 실패 ({u.get('login_id', '?')}): {e}"
+            )
 
+    _logger.info(
+        f"[downgrade_expired] 강등 {len(downgraded)}명 / "
+        f"PRIME·PRO 아닌 회원 {skipped_not_paid}명 / "
+        f"만료일 없음 {skipped_no_expire}명"
+    )
     return len(downgraded), downgraded
