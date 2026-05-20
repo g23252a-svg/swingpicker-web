@@ -318,14 +318,27 @@ def compute_realized_returns(
                     _entry_rule = "top_pick_only"
                     _matched = True
             
-            # TOP_PICK 0건이면 ROUTE active로 fallback
+            # [v3.9.22a] TOP_PICK 컬럼이 있는데 0건이면 그날은 "매수 후보 없음"으로 처리.
+            # ROUTE active fallback이 백테스트와 실전 추천을 오염시켰다.
+            # 근거: backtest_top3_trades_20260519 기준 전체 116건 평균 -2.12%,
+            #       1~2일 손절 23건. ROUTE active fallback 구간이 평균 손익을
+            #       끌어내리는 주범으로 분석됨.
+            # 단 backward compat: TOP_PICK 컬럼 자체가 없는 legacy CSV는
+            # ROUTE fallback 허용 (옛날 데이터 학습 보존).
+            if not _matched and "TOP_PICK" in rec_df.columns:
+                logger.debug(
+                    f"{rec_ymd}: TOP_PICK 0건 → route fallback 금지, skip"
+                )
+                continue
+
+            # TOP_PICK 컬럼이 아예 없는 legacy CSV에서만 ROUTE active fallback 허용
             if not _matched and "ROUTE" in rec_df.columns:
                 _route_filter = rec_df["ROUTE"].astype(str).str.strip().str.upper().isin(
                     ["ATTACK", "ARMED"]
                 )
                 if _route_filter.any():
                     rec_df = rec_df[_route_filter]
-                    _entry_rule = "route_active_fallback" if "TOP_PICK" in rec_df.columns else "route_active"
+                    _entry_rule = "route_active_legacy_only"
                     _matched = True
             
             if not _matched:
