@@ -841,15 +841,37 @@ def compute_elite_score(df: pd.DataFrame,
     _res_near = _num_col("RES_RATIO_NEAR")
     _mfi = _num_col("MFI14")
     _range_pos = _num_col("Range_Pos")
+    # [v3.9.22c] 추가 입력 컬럼
+    _ebs_num = pd.to_numeric(
+        x.get("EBS", pd.Series(8, index=x.index)),
+        errors="coerce",
+    ).fillna(8)
+    _disparity = pd.to_numeric(
+        x.get("이격도", pd.Series(0, index=x.index)),
+        errors="coerce",
+    ).fillna(0)
+    _entry_risk_level = (
+        x.get("ENTRY_RISK_LEVEL", pd.Series("", index=x.index))
+        .astype(str).str.strip().str.upper()
+    )
 
     # ─── HARD BLOCK — 걸리면 절대 즉시매수 금지 ───
     # 기존 _hard_gate(_route_active, EBS, turnover, entry_gap≤5, RR≥1.0)는
     # 이미 TOP_PICK이 통과한 조건이라 중복 검사 안 함.
     # BUY_NOW 전용 HARD BLOCK은 진입 타이밍 위험만 다룸.
+    #
+    # [v3.9.22c-2/3] 추가 HARD BLOCK:
+    #   - ENTRY_RISK_LEVEL=RED → 무조건 AVOID (B_red shadow RWF 5/5 통과)
+    #   - 현대해상형 reversal-risk (단기 급등 + 음봉 + 과열)
     _bn_hard_block = (
-        (entry_gap > 3.0)            # 추천가에서 3% 이상 떠있음 (이미 5% 넘으면 TOP_PICK 자체 거부됨)
-        | (_rr_now < 1.10)           # RR 턱걸이 차단 (1.0~1.10 위험구간)
+        (entry_gap > 3.0)            # 추천가에서 3% 이상 떠있음
+        | (_rr_now < 1.10)           # RR 턱걸이 차단
         | (_r5 > 25.0)               # 5일 +25% 이상 과열 추격 차단
+        # [v3.9.22c-2] ENTRY_RISK_LEVEL=RED → AVOID
+        | (_entry_risk_level == "RED")
+        # [v3.9.22c-3] 현대해상형 reversal-risk (단기 급등 + 음봉)
+        | ((_r5 > 20.0) & (_r1 < -5.0))
+        | ((_disparity > 15.0) & (_r1 < -3.0))
     ).fillna(False)
 
     # ─── SOFT RISK SCORE — 감점 누적 ───
@@ -878,6 +900,24 @@ def compute_elite_score(df: pd.DataFrame,
     ).fillna(False).astype(float) * 10.0
     # 저항 여지 부족
     _risk_calc = _risk_calc + (_res_near < 0.03).fillna(False).astype(float) * 10.0
+
+    # [v3.9.22c-2] ENTRY_RISK_LEVEL=ORANGE — soft penalty
+    # 평가 명시: ORANGE 단독은 -10~-15 감점, 추가 위험 조합 시 AVOID는 HARD BLOCK
+    _risk_calc = _risk_calc + (_entry_risk_level == "ORANGE").astype(float) * 15.0
+
+    # [v3.9.22c-3] 현대해상형 reversal-risk (HARD 못 미치는 약한 신호)
+    # 이격도 > 10 (HMA20 대비 10% 이상 떠있음)
+    _risk_calc = _risk_calc + (
+        (_disparity > 10.0) & (_disparity <= 15.0)
+    ).fillna(False).astype(float) * 15.0
+    # ret_5d 단기 급등 + 전일 음봉 (조정 시작)
+    _risk_calc = _risk_calc + (
+        (_r5 > 15.0) & (_r1 < -3.0) & ~((_r5 > 20.0) & (_r1 < -5.0))
+    ).fillna(False).astype(float) * 15.0
+    # MFI 과열 + 단기 급등
+    _risk_calc = _risk_calc + (
+        (_mfi > 75.0) & (_r5 > 15.0) & (_r1 < 0)
+    ).fillna(False).astype(float) * 10.0
 
     _risk_calc = _risk_calc.clip(0, 100)
 
@@ -911,6 +951,17 @@ def compute_elite_score(df: pd.DataFrame,
             r5v = _r5.iloc[row_idx]
             if pd.notna(r5v) and r5v > 25.0:
                 reasons.append(f"5일 +{r5v:.0f}%")
+            # [v3.9.22c-2/3] 신규 HARD BLOCK 사유
+            erl = _entry_risk_level.iloc[row_idx]
+            if erl == "RED":
+                reasons.append("진입위험 RED")
+            r1v = _r1.iloc[row_idx]
+            if (pd.notna(r5v) and pd.notna(r1v)
+                    and r5v > 20.0 and r1v < -5.0):
+                reasons.append(f"급등후 음봉 ({r5v:.0f}%/{r1v:.0f}%)")
+            disp_v = _disparity.iloc[row_idx]
+            if pd.notna(disp_v) and disp_v > 15.0 and pd.notna(r1v) and r1v < -3.0:
+                reasons.append(f"이격도 {disp_v:.0f}↑ + 음봉")
         # SOFT 신호도 핵심만 표시
         r1v = _r1.iloc[row_idx]
         if pd.notna(r1v) and r1v < -5.0:
@@ -921,6 +972,10 @@ def compute_elite_score(df: pd.DataFrame,
         pocv = _poc_gap.iloc[row_idx]
         if pd.notna(pocv) and pocv > 40.0:
             reasons.append(f"POC {pocv:.0f}↑")
+        # [v3.9.22c-2] ORANGE 소프트 사유
+        erl = _entry_risk_level.iloc[row_idx]
+        if erl == "ORANGE":
+            reasons.append("진입위험 ORANGE")
         return " · ".join(reasons[:3])  # 최대 3개
 
     x["BUY_NOW_REASON"] = [_build_reason(i) for i in range(len(x))]
@@ -974,6 +1029,16 @@ def compute_elite_score(df: pd.DataFrame,
         (x["TOP_PICK"].astype(int) == 1)
         & (x["BUY_NOW_PASS"].astype(int) == 1)
     ).astype(int)
+
+    # ═══════════════════════════════════════════════════
+    # [v3.9.22c-3] EBS < 6 AND TOP_PICK != 1 → ELIGIBLE 강제 0
+    # ═══════════════════════════════════════════════════
+    # 평가 명시: 현대해상 같은 EBS 4/8 + TOP_PICK 미달 종목이
+    # 다른 경로 (ELITE_LABEL 즉시진입 fallback)로 회원 화면에 노출되는 것을
+    # ELIGIBLE 단에서도 한 번 더 차단.
+    # 단 TOP_PICK=1은 이미 EBS≥5 게이트 통과한 종목이므로 영향 없음.
+    _ebs_block = (_ebs_num < 6) & (x["TOP_PICK"].astype(int) != 1)
+    x.loc[_ebs_block, "BUY_NOW_ELIGIBLE"] = 0
 
     # ─── 추가 액션 플래그 ───
     # NO_CHASE_FLAG: 추격 매수 금지 (VWAP/POC/5일 과열)

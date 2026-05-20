@@ -942,10 +942,21 @@ def _code6_top1(x):
 
 
 def _load_top1_trades() -> pd.DataFrame:
-    """[v3.9.14d] backtest_top1_trades 최근 15일치 로딩 + 정규화.
-    
+    """[v3.9.14d + v3.9.22c-1] backtest_top1_trades 최근 15일치 로딩 + 정규화.
+
+    [v3.9.22c-1 DATA_AUDIT] exit_price=0 결손 데이터 필터링.
+    근거: RF머트리얼즈 20260428 케이스
+      04/30: exit_price=0, -100.22% LOSS (데이터 누락)
+      05/04: exit_price=108600, +21.67% OPEN (가격 복구)
+      05/07: exit_price=116900, +30.98% WIN (실제 결과)
+    → exit_price=0 + LOSS 행은 백테스트 처리 버그로 -100% 산출.
+      실제 손실이 아니라 거래정지/상폐/가격 스냅샷 누락 가능성.
+    → 통계/표시에서 제외 + DATA_QUALITY_FLAG 컬럼으로 별도 태깅.
+
     Returns: 정규화된 trades DataFrame 또는 빈 DataFrame.
-    컬럼 추가: fill_date(datetime), net_pct_num(float), outcome_norm(upper str)
+    컬럼 추가:
+      - fill_date(datetime), net_pct_num(float), outcome_norm(upper str)
+      - DATA_QUALITY_FLAG(str): "OK" / "EXIT_ZERO" / ""
     """
     import glob as _g
     try:
@@ -969,6 +980,32 @@ def _load_top1_trades() -> pd.DataFrame:
         trades["net_pct_num"] = pd.to_numeric(trades["net_pct"], errors="coerce")
         # [v3.9.14b 보정 3] outcome 대소문자/공백 정규화
         trades["outcome_norm"] = trades["outcome"].astype(str).str.strip().str.upper()
+
+        # ─── [v3.9.22c-1 DATA_AUDIT] 데이터 결손 태깅 + 필터 ───
+        exit_price_num = pd.to_numeric(
+            trades.get("exit_price", 0), errors="coerce"
+        ).fillna(0)
+        # exit_price=0 인데 outcome=LOSS이고 net_pct가 -90 이하 = 데이터 결손
+        _suspect = (
+            (exit_price_num <= 0)
+            & (trades["outcome_norm"] == "LOSS")
+            & (trades["net_pct_num"] <= -90)
+        )
+        trades["DATA_QUALITY_FLAG"] = "OK"
+        trades.loc[_suspect, "DATA_QUALITY_FLAG"] = "EXIT_ZERO"
+
+        if _suspect.any():
+            n = int(_suspect.sum())
+            _logger = logging.getLogger(__name__)
+            _logger.info(
+                f"[v3.9.22c-1 DATA_AUDIT] exit_price=0 의심 행 {n}건 태깅 "
+                f"(통계 제외 대상)"
+            )
+
+        # 의심 행은 통계에서 제외 — net_pct_num을 NaN으로 (dropna(subset)에서 자동 제외)
+        # outcome_norm은 유지해서 별도 진단 가능
+        trades.loc[_suspect, "net_pct_num"] = pd.NA
+
         return trades
     except Exception:
         return pd.DataFrame()
