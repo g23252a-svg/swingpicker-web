@@ -809,6 +809,133 @@ def compute_elite_score(df: pd.DataFrame,
         np.where(_stable, "STABLE", "")
     )
 
+    # ═══════════════════════════════════════════════════
+    # [v3.9.22a] BUY_NOW_* shadow 컬럼 — TOP_PICK은 건드리지 않음
+    # ═══════════════════════════════════════════════════
+    # 목적: "TOP_PICK 후보 중 즉시 매수 적합 여부" 분리 신호.
+    #
+    # 설계 원칙 (평가 명시):
+    # 1. TOP_PICK 의미 무변경 — 기존 모든 소비처(market/portfolio/briefing/
+    #    backtest/swap) baseline 보존
+    # 2. HARD BLOCK + SOFT RISK SCORE 2단 구조 —
+    #    AND 게이트 일괄 적용 시 0건화 위험 (검증: 패치 원본 10일/15건 → 1건)
+    # 3. CSV/JSON에만 기록 — UI 노출은 v3.9.22b에서 별도 진행
+    # 4. ROUTE fallback 차단은 auto_backtest.py에서 별도 채택
+    #
+    # 근거 데이터 (backtest_top3_trades_20260519):
+    #   - 전체 116건: 평균 -2.12%, 51 LOSS, 1~2일 손절 23건
+    #   - TOP_PICK이 점수만 높고 진입 타이밍 필터가 약함
+    # ═══════════════════════════════════════════════════
+
+    # 측정용 컬럼 (없으면 NaN, fillna로 보수적 처리)
+    def _num_col(name: str, default=np.nan):
+        return pd.to_numeric(
+            x.get(name, pd.Series(default, index=x.index)),
+            errors="coerce",
+        )
+
+    _r1 = _num_col("ret_1d_%")
+    _r5 = _num_col("ret_5d_%")
+    _vwap_gap = _num_col("VWAP_GAP")
+    _poc_gap = _num_col("POC_GAP")
+    _res_near = _num_col("RES_RATIO_NEAR")
+    _mfi = _num_col("MFI14")
+    _range_pos = _num_col("Range_Pos")
+
+    # ─── HARD BLOCK — 걸리면 절대 즉시매수 금지 ───
+    # 기존 _hard_gate(_route_active, EBS, turnover, entry_gap≤5, RR≥1.0)는
+    # 이미 TOP_PICK이 통과한 조건이라 중복 검사 안 함.
+    # BUY_NOW 전용 HARD BLOCK은 진입 타이밍 위험만 다룸.
+    _bn_hard_block = (
+        (entry_gap > 3.0)            # 추천가에서 3% 이상 떠있음 (이미 5% 넘으면 TOP_PICK 자체 거부됨)
+        | (_rr_now < 1.10)           # RR 턱걸이 차단 (1.0~1.10 위험구간)
+        | (_r5 > 25.0)               # 5일 +25% 이상 과열 추격 차단
+    ).fillna(False)
+
+    # ─── SOFT RISK SCORE — 감점 누적 ───
+    # 각 위험 신호별 감점 (0~100 점수 차감)
+    _risk_calc = pd.Series(0.0, index=x.index)
+
+    # 칼날잡기 위험: 전일 -5% 이상 음봉
+    _risk_calc = _risk_calc + (_r1 < -5.0).fillna(False).astype(float) * 20.0
+    # 추격 위험: VWAP에서 너무 떠있음
+    _risk_calc = _risk_calc + (_vwap_gap > 35.0).fillna(False).astype(float) * 25.0
+    _risk_calc = _risk_calc + (
+        (_vwap_gap > 20.0) & (_vwap_gap <= 35.0)
+    ).fillna(False).astype(float) * 10.0
+    # 매물대 이탈/과열: POC에서 너무 떠있음
+    _risk_calc = _risk_calc + (_poc_gap > 80.0).fillna(False).astype(float) * 25.0
+    _risk_calc = _risk_calc + (
+        (_poc_gap > 40.0) & (_poc_gap <= 80.0)
+    ).fillna(False).astype(float) * 10.0
+    # 자금 과열: MFI 과매수
+    _risk_calc = _risk_calc + (_mfi > 82.0).fillna(False).astype(float) * 15.0
+    # 박스 하단/무기력
+    _risk_calc = _risk_calc + (_range_pos < 0.40).fillna(False).astype(float) * 10.0
+    # 손익비 약함 (1.10~1.20 경고 구간)
+    _risk_calc = _risk_calc + (
+        (_rr_now >= 1.10) & (_rr_now < 1.20)
+    ).fillna(False).astype(float) * 10.0
+    # 저항 여지 부족
+    _risk_calc = _risk_calc + (_res_near < 0.03).fillna(False).astype(float) * 10.0
+
+    _risk_calc = _risk_calc.clip(0, 100)
+
+    # ─── BUY_NOW_SCORE = 100 - risk ───
+    # HARD BLOCK 걸리면 무조건 0점
+    _buy_now_score = (100.0 - _risk_calc).where(~_bn_hard_block, 0.0)
+
+    x["BUY_NOW_SCORE"] = _buy_now_score.round(1)
+
+    # ─── BUY_NOW_GRADE — 3단계 분류 ───
+    # 🟢 매수 적합 ≥ 70
+    # 🟡 관찰/눌림 대기 50~69
+    # 🔴 추격 금지 < 50
+    _grade = np.where(
+        _buy_now_score >= 70.0, "BUY",
+        np.where(_buy_now_score >= 50.0, "WATCH", "AVOID")
+    )
+    x["BUY_NOW_GRADE"] = _grade
+
+    # ─── BUY_NOW_PASS — boolean (BUY 등급만) ───
+    x["BUY_NOW_PASS"] = (x["BUY_NOW_GRADE"] == "BUY").astype(int)
+
+    # ─── BUY_NOW_REASON — 어느 위험이 잡혔는지 (디버깅/UI 툴팁용) ───
+    def _build_reason(row_idx):
+        reasons = []
+        if _bn_hard_block.iloc[row_idx]:
+            if entry_gap.iloc[row_idx] > 3.0:
+                reasons.append(f"진입괴리 {entry_gap.iloc[row_idx]:.1f}%")
+            if _rr_now.iloc[row_idx] < 1.10:
+                reasons.append(f"RR {_rr_now.iloc[row_idx]:.2f}")
+            r5v = _r5.iloc[row_idx]
+            if pd.notna(r5v) and r5v > 25.0:
+                reasons.append(f"5일 +{r5v:.0f}%")
+        # SOFT 신호도 핵심만 표시
+        r1v = _r1.iloc[row_idx]
+        if pd.notna(r1v) and r1v < -5.0:
+            reasons.append(f"전일 {r1v:.1f}%")
+        vwapv = _vwap_gap.iloc[row_idx]
+        if pd.notna(vwapv) and vwapv > 20.0:
+            reasons.append(f"VWAP {vwapv:.0f}↑")
+        pocv = _poc_gap.iloc[row_idx]
+        if pd.notna(pocv) and pocv > 40.0:
+            reasons.append(f"POC {pocv:.0f}↑")
+        return " · ".join(reasons[:3])  # 최대 3개
+
+    x["BUY_NOW_REASON"] = [_build_reason(i) for i in range(len(x))]
+
+    # ─── 추가 액션 플래그 ───
+    # NO_CHASE_FLAG: 추격 매수 금지 (VWAP/POC/5일 과열)
+    x["NO_CHASE_FLAG"] = (
+        ((_vwap_gap > 35.0) | (_poc_gap > 80.0) | (_r5 > 25.0))
+        .fillna(False).astype(int)
+    )
+    # PULLBACK_WAIT_FLAG: 눌림 대기 권장 (HARD BLOCK 아니지만 SOFT 위험 있음)
+    x["PULLBACK_WAIT_FLAG"] = (
+        (~_bn_hard_block) & (_buy_now_score < 70.0) & (_buy_now_score >= 30.0)
+    ).fillna(False).astype(int)
+
     # funnel 메타 (단계별 통과 수 — 디버깅/튜닝용)
     def _funnel(masks_dict):
         return {k: int(v.sum()) for k, v in masks_dict.items()}
