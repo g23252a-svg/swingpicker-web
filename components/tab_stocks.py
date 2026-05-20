@@ -1242,35 +1242,51 @@ def compute_elite_labels(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def pick_top1(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
-    """[v3.7.25] 🛡️ 콤보만 사용. 🏆 최강은 관찰 모드 (매매 제외).
+    """[v3.7.25 + v3.9.22b-hotfix] 🛡️ 콤보만 사용 + BUY_NOW_ELIGIBLE 필터.
 
     선별 규칙:
-      · 🛡️ 콤보 중 RANK_SCORE 1위 1종목만
-      · 콤보 없으면 빈 리스트 → "오늘 매매 없음"
+      · 🛡️ 콤보 중 RANK_SCORE 1위 + BUY_NOW_ELIGIBLE=1만
+      · 콤보 없으면 ✅ 즉시진입 fallback (단 BUY_NOW_ELIGIBLE=1 필수)
+      · 둘 다 없으면 빈 리스트 → "오늘 매매 없음"
+
+    [v3.9.22b-hotfix] 사유: 현대해상(20260520) 케이스
+      - TOP_PICK=0, ELITE 62.7, EBS 4/8, 이격도 14.77, MFI 76.5
+      - 그런데 ELITE_LABEL='✅ 즉시진입' fallback에 잡혀 Top1로 노출
+      - 회원이 "시스템이 사라고 한 종목"으로 오해
+      → BUY_NOW_ELIGIBLE=1 강제 필터로 차단
+
+    [BUY_NOW_ELIGIBLE 컬럼 없는 legacy CSV 호환]
+      v3.9.22a 이전 CSV는 컬럼 자체가 없음. 그때는 종전 동작 유지 (backward compat).
+      v3.9.22a 이후 CSV는 BUY_NOW_ELIGIBLE 필수 필터.
 
     [v3.7.25 방안1 — 관찰 모드]
       🏆 최강 라벨은 UI/통계에서는 표시하되 매매 풀에서 완전 배제.
-      사유:
-        - 표본 n=6로 통계적 신뢰 매우 낮음
-        - 실성능 EV +6.79% (콤보 +25.77% 대비 열위)
-        - 2~3개월 실집행 표본 축적 후 재평가 예정
-      사용자 결정: "최강은 표본도 부족하고 실질 검증도 안되니까 매매에서 제외"
-
-    복구 방법 (표본 축적 후):
-      아래 주석 처리된 fallback 블록을 활성화하면 됨.
     """
     if df is None or df.empty or "ELITE_RANK_SCORE" not in df.columns:
         return []
+
+    # [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE 필터 헬퍼 — 컬럼 없으면 무조건 통과 (legacy)
+    def _eligible_mask(_df: pd.DataFrame) -> pd.Series:
+        if "BUY_NOW_ELIGIBLE" not in _df.columns:
+            # legacy CSV (v3.9.22a 이전) — 종전 동작 유지
+            return pd.Series(True, index=_df.index)
+        return (
+            _df["BUY_NOW_ELIGIBLE"]
+            .astype(str).str.strip().str.upper()
+            .isin(["1", "1.0", "TRUE", "Y", "YES"])
+        )
 
     # [Step AC P0-3] 1순위 콤보 → 2순위 즉시진입(엄격) 폴백
     # 외부 리뷰: "콤보 0개일 때 차선 후보 표시" — 빈 상태 빈도 감소
     combo_pool = df[df["ELITE_LABEL"] == "🛡️ 콤보"].copy()
     combo_pool = combo_pool[combo_pool["ELITE_RANK_SCORE"].fillna(0) >= min_rank_score]
+    # [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE=1 강제 필터
+    combo_pool = combo_pool[_eligible_mask(combo_pool)]
     if not combo_pool.empty:
         combo_pool = combo_pool.sort_values("ELITE_RANK_SCORE", ascending=False)
         return [str(combo_pool.iloc[0].get("종목코드", "")).zfill(6)]
 
-    # 2순위: ✅ 즉시진입 + 엄격 필터 (RR≥1.0, 갭≤3%, ATTACK/ARMED)
+    # 2순위: ✅ 즉시진입 + 엄격 필터 (RR≥1.0, 갭≤3%, ATTACK/ARMED) + BUY_NOW_ELIGIBLE=1
     instant = df[df["ELITE_LABEL"] == "✅ 즉시진입"].copy()
     if not instant.empty:
         rr_col = instant.get("RR_NOW_TP1", pd.Series(0, index=instant.index)).fillna(0)
@@ -1281,7 +1297,13 @@ def pick_top1(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
             active = route_col.str.contains("ATTACK|ARMED", regex=True, na=False)
         else:
             active = pd.Series(True, index=instant.index)
-        mask = (rr_col >= 1.0) & (gap_col <= 3.0) & active & (rank_col >= min_rank_score)
+        # [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE=1 강제 추가
+        eligible = _eligible_mask(instant)
+        mask = (
+            (rr_col >= 1.0) & (gap_col <= 3.0)
+            & active & (rank_col >= min_rank_score)
+            & eligible
+        )
         filtered = instant[mask]
         if not filtered.empty:
             filtered = filtered.sort_values("ELITE_RANK_SCORE", ascending=False)
@@ -1303,18 +1325,29 @@ def pick_top3(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
     """오늘의 유니크한 Top 3 종목코드 반환.
 
     [v3.7.25] 🛡️ 콤보 전용. 🏆 최강 관찰 모드 (매매 제외).
+    [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE=1 강제 필터 추가.
 
     선별 규칙:
       1) 라벨 풀: 🛡️ 콤보만 (🏆 최강은 배제)
       2) ELITE_RANK_SCORE ≥ min_rank_score 컷오프
-      3) 섹터 중복 제거
-      4) ELITE_RANK_SCORE 내림차순 Top 3
+      3) BUY_NOW_ELIGIBLE=1 (v3.9.22a 이후)
+      4) 섹터 중복 제거
+      5) ELITE_RANK_SCORE 내림차순 Top 3
 
     콤보 없으면 빈 리스트 → 현금 보유.
-    (🏆 최강 복구 시 방법은 pick_top1() docstring 참조)
     """
     if df is None or df.empty or "ELITE_RANK_SCORE" not in df.columns:
         return []
+
+    # [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE 필터 헬퍼 (legacy CSV 호환)
+    def _eligible_mask(_df: pd.DataFrame) -> pd.Series:
+        if "BUY_NOW_ELIGIBLE" not in _df.columns:
+            return pd.Series(True, index=_df.index)
+        return (
+            _df["BUY_NOW_ELIGIBLE"]
+            .astype(str).str.strip().str.upper()
+            .isin(["1", "1.0", "TRUE", "Y", "YES"])
+        )
 
     # [Step AC P0-3] 콤보 우선 → 즉시진입(엄격) 폴백 (최대 3개, 섹터 중복 제거)
     sector_col = "업종" if "업종" in df.columns else None
@@ -1334,15 +1367,18 @@ def pick_top3(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
         if sector:
             seen_sectors.add(sector)
 
-    # 1순위: 🛡️ 콤보
+    # 1순위: 🛡️ 콤보 + BUY_NOW_ELIGIBLE=1
     combo = df[
         (df["ELITE_LABEL"] == "🛡️ 콤보") &
         (df["ELITE_RANK_SCORE"].fillna(0) >= min_rank_score)
-    ].sort_values("ELITE_RANK_SCORE", ascending=False)
+    ].copy()
+    # [v3.9.22b-hotfix]
+    combo = combo[_eligible_mask(combo)]
+    combo = combo.sort_values("ELITE_RANK_SCORE", ascending=False)
     for _, r in combo.iterrows():
         _add(r)
 
-    # 2순위: ✅ 즉시진입 + 엄격 필터 (RR≥1.0, 갭≤3%, ATTACK/ARMED)
+    # 2순위: ✅ 즉시진입 + 엄격 필터 (RR≥1.0, 갭≤3%, ATTACK/ARMED) + BUY_NOW_ELIGIBLE=1
     if len(picked) < 3:
         instant = df[df["ELITE_LABEL"] == "✅ 즉시진입"].copy()
         if not instant.empty:
@@ -1354,7 +1390,13 @@ def pick_top3(df: pd.DataFrame, min_rank_score: float = 40.0) -> list:
                 active = route_col.str.contains("ATTACK|ARMED", regex=True, na=False)
             else:
                 active = pd.Series(True, index=instant.index)
-            mask = (rr_col >= 1.0) & (gap_col <= 3.0) & active & (rank_col >= min_rank_score)
+            # [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE=1 추가
+            eligible = _eligible_mask(instant)
+            mask = (
+                (rr_col >= 1.0) & (gap_col <= 3.0)
+                & active & (rank_col >= min_rank_score)
+                & eligible
+            )
             for _, r in instant[mask].sort_values("ELITE_RANK_SCORE", ascending=False).iterrows():
                 _add(r)
 
@@ -1973,10 +2015,28 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 ).classes(f"text-[10px] {fresh_cls} mb-2 italic")
 
         if not top3_codes:
-            # [Step AC P0-3] 빈 상태 강화 — 콤보/즉시진입(엄격) 모두 없을 때 차선/관찰 후보 표시
-            ui.label(
-                "🟣 핵심매수 0개 · 🟢 진입가능(엄격필터) 0개 → 오늘은 매매 보류"
-            ).classes("text-sm text-yellow-400 font-semibold mb-1")
+            # [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE=1 종목 0건 우선 표시
+            # 평가 명시: "TOP_PICK 후보는 있으나 BUY_NOW 기준상 관찰/추격금지"
+            _has_eligible_col = "BUY_NOW_ELIGIBLE" in df.columns
+            _has_top_pick = (
+                ("TOP_PICK" in df.columns)
+                and (df["TOP_PICK"].astype(str).str.upper()
+                     .isin(["1", "1.0", "TRUE", "Y", "YES"]).any())
+            )
+            if _has_eligible_col and _has_top_pick:
+                # TOP_PICK은 있는데 ELIGIBLE 0건 → "오늘 매수 적합 없음" 강조
+                ui.label(
+                    "🟡 오늘 즉시 매수 적합 종목 없음"
+                ).classes("text-base text-amber-400 font-bold mb-1")
+                ui.label(
+                    "TOP_PICK 후보는 있으나 BUY_NOW 기준상 관찰/추격금지입니다. "
+                    "무리한 신규 매수보다 관망 권장."
+                ).classes("text-xs text-gray-400 mb-2")
+            else:
+                # [Step AC P0-3] 기존 빈 상태 메시지 (TOP_PICK도 없거나 legacy CSV)
+                ui.label(
+                    "🟣 핵심매수 0개 · 🟢 진입가능(엄격필터) 0개 → 오늘은 매매 보류"
+                ).classes("text-sm text-yellow-400 font-semibold mb-1")
 
             # [Step AE] 차선 후보 / 관찰 후보 카운트 — 한글 표시 (raw 비교 유지)
             if "ELITE_LABEL" in df.columns:
