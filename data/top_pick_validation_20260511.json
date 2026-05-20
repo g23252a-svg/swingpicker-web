@@ -1,0 +1,36 @@
+{
+  "trade_ymd": "20260511",
+  "top_pick_count": 1,
+  "top_pick_by_type": {
+    "AGGRESSIVE": 1
+  },
+  "avg_elite": 82.9,
+  "avg_rr": 1.34,
+  "min_rr": 1.34,
+  "rr_lt_1_count": 0,
+  "avg_balance": 73.5,
+  "avg_win_rate": 0.534,
+  "est_win_rate_method": "ELITE_SCORE",
+  "est_win_rate_mode": "MATURE",
+  "est_win_rate_n": 5619,
+  "routes": {
+    "ARMED": 1
+  },
+  "picks": [
+    {
+      "종목코드": "011690",
+      "종목명": "와이투솔루션",
+      "TOP_PICK_TYPE": "AGGRESSIVE",
+      "ELITE_SCORE": 82.9,
+      "RR_NOW_TP1": 1.34,
+      "BALANCE_SCORE": 73.5,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 20.1,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.534,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 5619
+    }
+  ]
+}

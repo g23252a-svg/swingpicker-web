@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20260518",
+  "macro_risk": "CRITICAL",
+  "macro_msg": "환율 1493원 [05/14] (CRITICAL) | 나스닥 -1.5% [05/15] (주의)",
+  "market_breadth": 30.9,
+  "pass_ebs": 6,
+  "rec_limit": 3,
+  "n_stocks": 609,
+  "run_status": "OK",
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK",
+  "scoring_axes": "STRUCT+TIMING+AI+SECTOR",
+  "w_struct": 0.55,
+  "w_timing": 0.25,
+  "w_ai": 0.2
+}

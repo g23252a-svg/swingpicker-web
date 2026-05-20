@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260512",
+  "generated_at": "2026-05-12 22:50:34",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "101170",
+      "name": "우림피티에스",
+      "route": "ATTACK",
+      "score": 91.3,
+      "close": 16780,
+      "entry": 15070,
+      "stop": 12810,
+      "target1": 18520,
+      "target2": 20350,
+      "est_win_rate": 0.537,
+      "rr": 1.5,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/101170"
+    },
+    {
+      "rank": 2,
+      "code": "018880",
+      "name": "한온시스템",
+      "route": "ATTACK",
+      "score": 88.8,
+      "close": 5160,
+      "entry": 4685,
+      "stop": 3980,
+      "target1": 5860,
+      "target2": 6240,
+      "est_win_rate": 0.537,
+      "rr": 1.7,
+      "sector": "조선·기계·설비",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/018880"
+    },
+    {
+      "rank": 3,
+      "code": "078160",
+      "name": "메디포스트",
+      "route": "ARMED",
+      "score": 86.7,
+      "close": 26050,
+      "entry": 25250,
+      "stop": 21450,
+      "target1": 29100,
+      "target2": 33750,
+      "est_win_rate": 0.537,
+      "rr": 1.0,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/078160"
+    }
+  ]
+}

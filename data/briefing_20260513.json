@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260513",
+  "generated_at": "2026-05-13 22:39:18",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "028670",
+      "name": "팬오션",
+      "route": "ARMED",
+      "score": 89.9,
+      "close": 6120,
+      "entry": 6030,
+      "stop": 5440,
+      "target1": 6290,
+      "target2": 7080,
+      "est_win_rate": 0.537,
+      "rr": 0.4,
+      "sector": "기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/028670"
+    },
+    {
+      "rank": 2,
+      "code": "418420",
+      "name": "라온텍",
+      "route": "ATTACK",
+      "score": 88.4,
+      "close": 8780,
+      "entry": 7840,
+      "stop": 6660,
+      "target1": 10180,
+      "target2": 10950,
+      "est_win_rate": 0.537,
+      "rr": 2.0,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/418420"
+    },
+    {
+      "rank": 3,
+      "code": "019210",
+      "name": "와이지-원",
+      "route": "ARMED",
+      "score": 87.7,
+      "close": 15980,
+      "entry": 15160,
+      "stop": 12880,
+      "target1": 17500,
+      "target2": 19790,
+      "est_win_rate": 0.537,
+      "rr": 1.0,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/019210"
+    }
+  ]
+}

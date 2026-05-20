@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260514",
+  "generated_at": "2026-05-14 22:53:46",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "008770",
+      "name": "호텔신라",
+      "route": "ARMED",
+      "score": 91.5,
+      "close": 66000,
+      "entry": 63600,
+      "stop": 56600,
+      "target1": 70300,
+      "target2": 72700,
+      "est_win_rate": 0.537,
+      "rr": 1.0,
+      "sector": "유통·소비재",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/008770"
+    },
+    {
+      "rank": 2,
+      "code": "028670",
+      "name": "팬오션",
+      "route": "ARMED",
+      "score": 88.4,
+      "close": 6120,
+      "entry": 6120,
+      "stop": 5520,
+      "target1": 7200,
+      "target2": 8220,
+      "est_win_rate": 0.518,
+      "rr": 1.8,
+      "sector": "기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/028670"
+    },
+    {
+      "rank": 3,
+      "code": "010690",
+      "name": "화신",
+      "route": "ARMED",
+      "score": 86.9,
+      "close": 14700,
+      "entry": 13390,
+      "stop": 11520,
+      "target1": 16380,
+      "target2": 17000,
+      "est_win_rate": 0.537,
+      "rr": 1.6,
+      "sector": "자동차·모빌리티",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/010690"
+    }
+  ]
+}
