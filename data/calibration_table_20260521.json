@@ -55,9 +55,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.7125,
-    "n_effective":395.4,
-    "n_raw":539
+    "p_calibrated":0.7131,
+    "n_effective":396.3,
+    "n_raw":540
   },
   {
     "method":"DISPLAY_SCORE",
@@ -75,9 +75,9 @@
     "score_lo":80,
     "score_hi":90.0,
     "score_center":85.0,
-    "p_calibrated":0.687,
-    "n_effective":481.0,
-    "n_raw":635
+    "p_calibrated":0.6876,
+    "n_effective":482.0,
+    "n_raw":636
   },
   {
     "method":"FINAL_SCORE",
