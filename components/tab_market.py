@@ -875,23 +875,40 @@ def render_tab_market(df, auth: str = "free"):
                         if avg_label:
                             ui.label(avg_label).classes("text-xs text-gray-500")
 
-                        # [v3.9.22b] BUY_NOW 분포 (3순위 — 관리자/회원 모두 보임)
-                        # TOP_PICK 중 BUY/WATCH/AVOID 카운트
+                        # [v3.9.22b → v22.3.8 safety] BUY_NOW 분포 (3순위)
+                        # TOP_PICK 중 ELIGIBLE/관찰/AVOID 카운트
+                        # [v22.3.8] BUY 카운트는 ELIGIBLE=1 기준 (회원 오해 방지).
+                        # BUY_NOW_GRADE=BUY인데 ELIGIBLE=0이면 "관찰 후보"로 분류.
                         if (_tp_mask is not None and tp_count > 0
                                 and "BUY_NOW_GRADE" in df.columns):
                             _tp_df = df.loc[_tp_mask]
-                            n_buy = int((_tp_df["BUY_NOW_GRADE"] == "BUY").sum())
-                            n_watch = int((_tp_df["BUY_NOW_GRADE"] == "WATCH").sum())
-                            n_avoid = int((_tp_df["BUY_NOW_GRADE"] == "AVOID").sum())
+                            # ELIGIBLE 컬럼 안전 처리 (legacy CSV 호환)
+                            if "BUY_NOW_ELIGIBLE" in _tp_df.columns:
+                                _eligible = (
+                                    _tp_df["BUY_NOW_ELIGIBLE"]
+                                    .fillna(0).astype(int) == 1
+                                )
+                            else:
+                                _eligible = _tp_df["BUY_NOW_GRADE"] == "BUY"
+                            _is_buy = _tp_df["BUY_NOW_GRADE"] == "BUY"
+                            _is_avoid = _tp_df["BUY_NOW_GRADE"] == "AVOID"
+                            # ★ ELIGIBLE=1 AND BUY → 공식 매수
+                            n_buy = int((_is_buy & _eligible).sum())
+                            # BUY이지만 ELIGIBLE=0이면 관찰로 강등
+                            n_watch = int(
+                                (_tp_df["BUY_NOW_GRADE"] == "WATCH").sum()
+                                + (_is_buy & ~_eligible).sum()
+                            )
+                            n_avoid = int(_is_avoid.sum())
                             with ui.row().classes("gap-1 mt-1"):
                                 if n_buy > 0:
                                     ui.label(f"🟢{n_buy}").classes(
                                         "text-xs text-emerald-400"
-                                    ).tooltip("매수 적합")
+                                    ).tooltip("공식 매수 가능 (ELIGIBLE)")
                                 if n_watch > 0:
                                     ui.label(f"🟡{n_watch}").classes(
                                         "text-xs text-amber-400"
-                                    ).tooltip("관찰/눌림 대기")
+                                    ).tooltip("관찰 후보 (BUY이나 ELIGIBLE=0 포함)")
                                 if n_avoid > 0:
                                     ui.label(f"🔴{n_avoid}").classes(
                                         "text-xs text-red-400"
