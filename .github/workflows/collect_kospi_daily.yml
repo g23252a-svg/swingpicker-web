@@ -100,7 +100,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/kospi_daily.csv
+          git add -f data/kospi_daily.csv
           if git diff --staged --quiet; then
             echo "변경 없음 — 커밋 스킵"
           else
