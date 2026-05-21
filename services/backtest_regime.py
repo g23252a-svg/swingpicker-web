@@ -133,8 +133,8 @@ def run_regime_split(
         }
     """
     # lazy import — services는 components 모듈 top 의존 0
-    from components.tab_backtest import PRESETS, _run_backtest
-    from components.backtest_verdict import _calc_kospi_alpha
+    from components.tab_backtest import PRESETS, _run_backtest  # ci-allow: layer-violation  # lazy import (top 의존 0)
+    from components.backtest_verdict import _calc_kospi_alpha  # ci-allow: layer-violation  # lazy import (top 의존 0)
     from services.backtest_policy import (
         detect_anomaly_flags,
         tp_saturation_threshold,

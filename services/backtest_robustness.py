@@ -79,8 +79,8 @@ def run_robustness_test(
     """
     # lazy import — services는 components를 직접 의존하지 않도록.
     # components.tab_backtest의 _run_backtest와 PRESETS는 함수 내부에서만 사용.
-    from components.tab_backtest import PRESETS, _run_backtest
-    from components.backtest_verdict import _calc_kospi_alpha
+    from components.tab_backtest import PRESETS, _run_backtest  # ci-allow: layer-violation  # lazy import (top 의존 0)
+    from components.backtest_verdict import _calc_kospi_alpha  # ci-allow: layer-violation  # lazy import (top 의존 0)
     from services.backtest_policy import (
         detect_anomaly_flags,
         tp_saturation_threshold,
