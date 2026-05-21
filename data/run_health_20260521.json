@@ -1,0 +1,29 @@
+{
+  "trade_ymd": "20260521",
+  "status": "OK",
+  "reasons": [],
+  "warnings": [],
+  "data_freshness_ok": true,
+  "checks": {
+    "MCAP": true,
+    "BENCH": true,
+    "FLOW": true,
+    "NEWS": true,
+    "SECTOR": true,
+    "TP_MONOTONIC": true
+  },
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK",
+  "macro_risk": "CRITICAL",
+  "market_breadth": 85.5,
+  "axis_status": {
+    "MCAP": "OK",
+    "BENCH": "OK",
+    "FLOW": "OK",
+    "NEWS": "OK",
+    "SECTOR": "OK",
+    "ML": "OK",
+    "TRIGGER": "OK"
+  },
+  "fallback_count": 0
+}
