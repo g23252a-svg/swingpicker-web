@@ -1164,15 +1164,19 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
                 </div>
             ''')
 
-            # 3. TOP_PICK + BUY_NOW 배지 [v3.9.22b]
+            # 3. TOP_PICK + BUY_NOW 배지 [v3.9.22b → v22.3.8 safety]
             top_pick_display = top_pick_type if top_pick else "—"
             # 평가 절대 지킬 룰 #4: TOP_PICK=1이어야 BUY_NOW 표시
             #                  #5: AVOID도 숨기지 않고 노출
+            # [v22.3.8] BUY_NOW_ELIGIBLE=0이면 BUY여도 "관찰 후보"로 강등.
+            # 회원 오해 방지 — buy_now_badge가 이미 display_* 안전 필드 제공.
             _bn = n.get("buy_now", {})
             _bn_visible = _bn.get("visible", False)
-            _bn_icon = _bn.get("icon", "")
-            _bn_label = _bn.get("label", "")
-            _bn_tone = _bn.get("tone", "none")
+            # ★ v22.3.8: display_* 우선 (ELIGIBLE 반영). 없으면 raw fallback.
+            _bn_icon = _bn.get("display_icon", _bn.get("icon", ""))
+            _bn_label = _bn.get("display_label", _bn.get("label", ""))
+            _bn_tone = _bn.get("display_tone", _bn.get("tone", "none"))
+            _bn_color = _bn.get("display_color", _bn.get("color", "#666"))
             _bn_score = _bn.get("score", 0)
             _bn_reason = h_escape(_bn.get("reason", ""))
             # 툴팁: reason or 기본
@@ -1187,8 +1191,8 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
                     f'style="margin-top:6px;padding:4px 8px;border-radius:6px;'
                     f'font-size:11px;font-weight:600;'
                     f'background:rgba(255,255,255,0.05);'
-                    f'border:1px solid {_bn.get("color", "#666")};'
-                    f'color:{_bn.get("color", "#999")};">'
+                    f'border:1px solid {_bn_color};'
+                    f'color:{_bn_color};">'
                     f'{_bn_icon} {_bn_label} · {_bn_score:.0f}점'
                     f'</div>'
                 )

@@ -131,7 +131,10 @@ class TestGradeLabels:
     def test_buy_label(self, badge_module):
         labels = badge_module.BUY_NOW_BADGE_LABELS["BUY"]
         assert labels["icon"] == "🟢"
-        assert "적합" in labels["label"]
+        # [v22.3.8] "매수 적합" → "공식 매수 가능"
+        assert "매수" in labels["label"] and (
+            "가능" in labels["label"] or "적합" in labels["label"]
+        )
 
     def test_watch_label(self, badge_module):
         labels = badge_module.BUY_NOW_BADGE_LABELS["WATCH"]
@@ -156,8 +159,14 @@ class TestGradeLabels:
 class TestFormatters:
 
     def test_subtitle_for_buy(self, badge_module):
-        """🟢 BUY_NOW 80점 — 즉시 진입 가능."""
-        row = {"TOP_PICK": 1, "BUY_NOW_GRADE": "BUY", "BUY_NOW_SCORE": 80}
+        """🟢 BUY_NOW 80점 — 즉시 진입 가능.
+
+        [v22.3.8] ELIGIBLE=1 명시 필요. ELIGIBLE 없으면 🟡 관찰로 강등.
+        """
+        row = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_SCORE": 80, "BUY_NOW_ELIGIBLE": 1,  # ★ v22.3.8: 명시 필요
+        }
         disp = badge_module.get_buy_now_display(row)
         sub = badge_module.format_buy_now_subtitle(disp)
         assert "🟢" in sub
@@ -273,3 +282,142 @@ class TestRobustness:
         # nan은 비교 어려우니 isnan 체크
         score = disp["score"]
         assert isinstance(score, float)
+
+
+# ════════════════════════════════════════════════════════════════
+# ★ [v22.3.8] BUY_NOW_GRADE UI 안전 패치 회귀 가드
+#
+# 평가 명시 위험: 5/21 CSV에 BUY_NOW_GRADE=BUY 349건 vs ELIGIBLE=0 579건.
+# TOP_PICK=1 + BUY + ELIGIBLE=0 케이스에서 회원이 "매수 적합"으로 오해 가능.
+# 패치: display_* 필드에서 ELIGIBLE=0 시 🟡 관찰로 강등 + official_buy 신규.
+# ════════════════════════════════════════════════════════════════
+class TestV2238UiSafety:
+    """BUY인데 ELIGIBLE=0이면 화면에 '매수 적합'으로 나오면 안 됨."""
+
+    def test_buy_but_not_eligible_downgrades_display(self, badge_module):
+        """TOP_PICK=1 + BUY + ELIGIBLE=0 → display는 🟡 관찰로 강등.
+
+        ★ 핵심 회귀: 회원이 'BUY' 글자만 보고 매수하는 사고 방지.
+        """
+        row = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 0, "BUY_NOW_SCORE": 70,
+        }
+        disp = badge_module.get_buy_now_display(row)
+
+        # raw grade는 BUY 그대로 (기존 호환)
+        assert disp["grade"] == "BUY"
+        assert disp["eligible"] is False
+
+        # ★ official_buy는 False여야 함 (공식 매수 아님)
+        assert disp["official_buy"] is False
+
+        # ★ display_* 는 WATCH로 강등돼야 함
+        assert disp["display_icon"] == "🟡", (
+            f"BUY+ELIGIBLE=0인데 display_icon={disp['display_icon']!r} — "
+            f"🟡로 강등 안 됨 (회원 오해 위험)"
+        )
+        assert "관찰" in disp["display_label"] or "대기" in disp["display_label"]
+        # display_short는 "즉시 진입 가능"이면 절대 안 됨
+        assert "즉시" not in disp["display_short"]
+        assert "진입 가능" not in disp["display_short"]
+
+    def test_buy_and_eligible_keeps_display(self, badge_module):
+        """TOP_PICK=1 + BUY + ELIGIBLE=1 → display 그대로 🟢 공식 매수 가능."""
+        row = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1, "BUY_NOW_SCORE": 80,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        assert disp["official_buy"] is True
+        assert disp["display_icon"] == "🟢"
+        # [v22.3.8] "매수 적합" 또는 "공식 매수 가능" 모두 허용
+        assert "매수" in disp["display_label"] and (
+            "가능" in disp["display_label"] or "적합" in disp["display_label"]
+        )
+        assert (
+            "진입" in disp["display_short"]
+            or "즉시" in disp["display_short"]
+            or "신규" in disp["display_short"]
+        )
+
+    def test_official_buy_requires_all_three(self, badge_module):
+        """official_buy = TOP_PICK AND ELIGIBLE AND grade=BUY 모두 필요."""
+        # 케이스: TOP_PICK=0 + BUY + ELIGIBLE=1
+        # 실제 백엔드 산식은 ELIGIBLE = TOP_PICK AND PASS라 이 케이스는 안 생기지만
+        # 방어 로직 검증
+        row1 = {
+            "TOP_PICK": 0, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1,
+        }
+        assert badge_module.get_buy_now_display(row1)["official_buy"] is False
+
+        # 케이스: TOP_PICK=1 + AVOID + ELIGIBLE=0
+        row2 = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "AVOID",
+            "BUY_NOW_ELIGIBLE": 0,
+        }
+        assert badge_module.get_buy_now_display(row2)["official_buy"] is False
+
+        # 케이스: TOP_PICK=1 + BUY + ELIGIBLE=0 (★ 5/21 시나리오)
+        row3 = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 0,
+        }
+        assert badge_module.get_buy_now_display(row3)["official_buy"] is False
+
+        # 케이스: TOP_PICK=1 + BUY + ELIGIBLE=1 (유일하게 True)
+        row4 = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1,
+        }
+        assert badge_module.get_buy_now_display(row4)["official_buy"] is True
+
+    def test_subtitle_buy_but_not_eligible(self, badge_module):
+        """subtitle도 ELIGIBLE=0이면 🟡로 표시."""
+        row = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_SCORE": 75, "BUY_NOW_ELIGIBLE": 0,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        sub = badge_module.format_buy_now_subtitle(disp)
+        # 🟢 절대 안 됨
+        assert "🟢" not in sub, (
+            f"BUY+ELIGIBLE=0 subtitle에 🟢이 보임: {sub!r}"
+        )
+        # 🟡이어야 함
+        assert "🟡" in sub
+        # "즉시 진입 가능" 절대 안 됨
+        assert "즉시" not in sub
+        assert "진입 가능" not in sub
+
+    def test_tooltip_buy_but_not_eligible_warns(self, badge_module):
+        """tooltip이 BUY+ELIGIBLE=0 시 '공식 매수 대상 아님' 안내."""
+        row = {
+            "TOP_PICK": 1, "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 0, "BUY_NOW_SCORE": 70,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        tip = badge_module.format_buy_now_tooltip(disp)
+        # 핵심 안내 포함
+        assert "ELIGIBLE=0" in tip or "공식 매수" in tip, (
+            f"tooltip에 ELIGIBLE=0 안내 누락: {tip!r}"
+        )
+
+    def test_official_buy_field_exists_in_response(self, badge_module):
+        """모든 케이스에서 official_buy 필드 존재."""
+        cases = [
+            {"TOP_PICK": 0},
+            {"TOP_PICK": 1, "BUY_NOW_GRADE": "BUY", "BUY_NOW_ELIGIBLE": 1},
+            {"TOP_PICK": 1, "BUY_NOW_GRADE": "BUY", "BUY_NOW_ELIGIBLE": 0},
+            {"TOP_PICK": 1, "BUY_NOW_GRADE": "AVOID", "BUY_NOW_ELIGIBLE": 0},
+            {"TOP_PICK": 1, "BUY_NOW_GRADE": "WATCH", "BUY_NOW_ELIGIBLE": 0},
+        ]
+        for row in cases:
+            disp = badge_module.get_buy_now_display(row)
+            assert "official_buy" in disp, f"official_buy 필드 누락: {row}"
+            assert isinstance(disp["official_buy"], bool)
+            # display_* 필드도 모두 존재
+            for k in ["display_icon", "display_label", "display_short",
+                      "display_tone", "display_color"]:
+                assert k in disp, f"{k} 필드 누락: {row}"
