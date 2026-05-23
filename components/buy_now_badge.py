@@ -89,12 +89,18 @@ def get_buy_now_display(row: Dict[str, Any]) -> Dict[str, Any]:
         새 동작: display_*에서는 🟡 관찰 후보로 강등 (회원 오해 방지)
         단, "grade" 필드는 그대로 BUY 유지 (기존 22 e2e 호환)
 
+    [v22.3.8-D1] STALE_CARRY 보유종목 가드:
+        IS_STALE_CARRY=True AND DISPLAY_SCORE<30 이면 visible=False로 숨김.
+        오래 끌고 온 약한 보유종목은 신규매수 후보가 아니므로 BUY_NOW 배지가
+        보이면 회원 오해가 큼. raw BUY_NOW_GRADE / ELIGIBLE은 변경 없음.
+        DISPLAY_SCORE 없으면 FINAL_SCORE로 fallback.
+
     Args:
         row: dict-like (recommend CSV row 또는 _normalize 결과)
 
     Returns:
         {
-            "visible": bool,            # TOP_PICK이면 True
+            "visible": bool,            # TOP_PICK이면 True (D1 가드 시 False)
             "grade": str,               # BUY/WATCH/AVOID/NONE (raw — 기존 호환)
             "eligible": bool,           # ELIGIBLE 컬럼 — 매수 가능 신호
             "official_buy": bool,       # ★ v22.3.8 신규 — 공식 매수 가능 여부
@@ -110,6 +116,7 @@ def get_buy_now_display(row: Dict[str, Any]) -> Dict[str, Any]:
             "display_color": str,       # ★ v22.3.8 — ELIGIBLE 반영 color
             "score": float,             # BUY_NOW_SCORE
             "reason": str,              # BUY_NOW_REASON (툴팁용)
+            "stale_carry_guard": bool,  # ★ v22.3.8-D1 — STALE_CARRY 가드 발동 여부
         }
     """
     # TOP_PICK 우선 체크 (절대 지킬 룰 #4)
@@ -123,12 +130,30 @@ def get_buy_now_display(row: Dict[str, Any]) -> Dict[str, Any]:
     score = _safe_float(row.get("BUY_NOW_SCORE"), 0.0)
     reason = _safe_str(row.get("BUY_NOW_REASON"), "")
 
+    # ★ v22.3.8-D1: STALE_CARRY 표시 가드
+    # IS_STALE_CARRY=True + DISPLAY_SCORE<30 이면 BUY_NOW 배지 숨김.
+    # raw 데이터(grade/eligible/score/reason)는 변경하지 않음 — 표시만 막음.
+    is_stale_carry = bool(row.get("IS_STALE_CARRY", False))
+    # DISPLAY_SCORE 우선, 없으면 FINAL_SCORE fallback
+    _display_raw = row.get("DISPLAY_SCORE")
+    if _display_raw is None or (isinstance(_display_raw, float) and _display_raw != _display_raw):
+        _display_raw = row.get("FINAL_SCORE")
+    display_score = _safe_float(_display_raw, default=None) if _display_raw is not None else None
+    stale_carry_guard = bool(
+        is_stale_carry
+        and display_score is not None
+        and display_score < 30
+    )
+
     badge = BUY_NOW_BADGE_LABELS.get(grade, BUY_NOW_BADGE_LABELS["NONE"])
 
     # ★ v22.3.8: 공식 매수 가능 여부
     # 회원에게 "매수 가능"으로 보이려면 visible AND eligible AND grade=BUY 모두 필요.
     # 어느 하나라도 빠지면 절대 🟢 매수 적합으로 표시되면 안 됨.
-    official_buy = bool(is_top_pick and eligible and grade == "BUY")
+    # ★ v22.3.8-D1: STALE_CARRY 가드 발동 시에도 공식 매수 아님
+    official_buy = bool(
+        is_top_pick and eligible and grade == "BUY" and not stale_carry_guard
+    )
 
     # ★ v22.3.8: display_* 필드 — ELIGIBLE을 반영한 안전한 표시값
     # BUY이지만 ELIGIBLE=0이면 화면에는 "관찰 후보"로 강등하여 표시.
@@ -137,9 +162,14 @@ def get_buy_now_display(row: Dict[str, Any]) -> Dict[str, Any]:
     else:
         display_badge = badge
 
+    # ★ v22.3.8-D1: visible 최종 결정 — STALE_CARRY 가드 적용
+    # TOP_PICK이라도 STALE_CARRY 가드 발동 시 화면 숨김.
+    visible = bool(is_top_pick and not stale_carry_guard)
+
     return {
         # 절대 지킬 룰 #4: TOP_PICK=0이면 숨김
-        "visible": is_top_pick,
+        # [v22.3.8-D1] STALE_CARRY 가드 시에도 숨김
+        "visible": visible,
         "grade": grade,
         # 절대 지킬 룰 #2: ELIGIBLE만 매수 가능 신호 (PASS 사용 금지)
         "eligible": eligible,
@@ -159,6 +189,8 @@ def get_buy_now_display(row: Dict[str, Any]) -> Dict[str, Any]:
         "display_color": display_badge["color"],
         "score": score,
         "reason": reason,
+        # ★ v22.3.8-D1 신규: STALE_CARRY 가드 발동 여부 (디버깅/툴팁용)
+        "stale_carry_guard": stale_carry_guard,
     }
 
 
