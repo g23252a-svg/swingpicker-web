@@ -323,7 +323,26 @@ def _render_metrics_grid(
     """
     if cdf.empty:
         return
-    
+
+    # [v22.3.8 C-3] N=0 방어 — 표본 없으면 KPI 숫자 카드 숨김
+    # 현재 데이터엔 TOTAL_N=0 행이 없지만, 미래 데이터 깨짐 대비.
+    # 계산 로직은 안 건드리고 UI만 안전한 안내 카드로 대체.
+    _total_n_guard = (
+        cdf['TOTAL_N'].sum() if 'TOTAL_N' in cdf.columns else 0
+    )
+    if _total_n_guard <= 0:
+        with ui.card().classes(
+            "w-full p-4 bg-[#1a1a2e] border border-gray-700/40 rounded-lg mt-3"
+        ):
+            ui.label("📊 표본 부족 — 평가 보류").classes(
+                "text-sm font-bold text-amber-300 mb-1"
+            )
+            ui.label(
+                "현재 선택한 기준에 해당하는 백테스트 표본이 없어 "
+                "승률/수익률 평가는 표시하지 않습니다."
+            ).classes("text-xs text-gray-400 leading-relaxed")
+        return
+
     # 안전한 평균 계산
     def safe_mean(col):
         if col not in cdf.columns:
@@ -354,9 +373,54 @@ def _render_metrics_grid(
         if kospi_ret is not None and avg_ret is not None:
             alpha = avg_ret - kospi_ret
     
-    ui.label("📊 핵심 지표 (선택 조건 기준)").classes(
-        "text-sm font-bold text-cyan-300 mt-3 mb-2"
+    # [v22.3.8 C-1] 현재 선택된 백테스트 차원(METHOD/TOPK/H/N)을 SSOT로 명시
+    # 회원이 보는 KPI가 어떤 기준의 시뮬레이션인지 항상 헤더에서 확인 가능.
+    # cdf는 위에서 cdf.empty / TOTAL_N=0 가드 통과한 상태이므로 iloc[0] 안전.
+    _method_val = (
+        cdf['METHOD'].iloc[0] if 'METHOD' in cdf.columns else None
     )
+    _topk_val = (
+        cdf['TOPK'].iloc[0] if 'TOPK' in cdf.columns else None
+    )
+    _hold_val = (
+        cdf['H(영업일)'].iloc[0] if 'H(영업일)' in cdf.columns else None
+    )
+    _method_lbl = (
+        METHOD_LABELS.get(_method_val, str(_method_val))
+        if _method_val is not None else "—"
+    )
+    _criteria_parts = [_method_lbl]
+    if _topk_val is not None:
+        try:
+            _criteria_parts.append(f"상위 {int(_topk_val)}")
+        except (TypeError, ValueError):
+            pass
+    if _hold_val is not None:
+        try:
+            _criteria_parts.append(f"{int(_hold_val)}영업일")
+        except (TypeError, ValueError):
+            pass
+    _criteria_parts.append(f"N={int(total_n):,}")
+
+    ui.label("📊 현재 성과 기준: " + " · ".join(_criteria_parts)).classes(
+        "text-base font-bold text-cyan-300 mt-3 mb-1"
+    )
+    ui.label(
+        "선택한 백테스트 시뮬레이션 기준의 평균 지표입니다."
+    ).classes("text-[11px] text-gray-500 italic mb-2")
+
+    # [v22.3.8 C-2] 공식 신규매수 기준은 별도 데이터 누적 후 분리 표시 예정
+    # 현재 데이터엔 TOP_PICK+BUY_NOW_ELIGIBLE METHOD 행이 없음.
+    # "공식 신규매수 기준"이라고 라벨만 박으면 표시-데이터 불일치 → 회피.
+    with ui.card().classes(
+        "w-full p-2 bg-[#1a1a2e]/60 border border-amber-700/30 "
+        "rounded-lg mb-3"
+    ):
+        ui.label(
+            "ℹ️ 위 성과는 선택한 스코어(METHOD) 기준 시뮬레이션입니다. "
+            "공식 신규매수 기준(TOP_PICK + BUY_NOW_ELIGIBLE) 성과는 "
+            "별도 데이터 누적 후 분리 표시 예정입니다."
+        ).classes("text-[11px] text-amber-200 leading-relaxed")
     
     # [Step AL+AM] 메트릭 카드 — 모바일 2열, 데스크톱 3열 반응형
     with ui.grid().classes(
@@ -403,7 +467,7 @@ def _render_metrics_grid(
         # 5. 평균 최대 낙폭 (위험 강조)
         _render_metric_card(
             icon="⚠️", label="평균 낙폭",
-            value=f"{avg_mdd:+.2f}%" if avg_mdd is not None else "—",
+            value=f"-{abs(avg_mdd):.2f}%" if avg_mdd is not None else "—",
             color="orange",
             tooltip="MDD: 보유 중 진입가 대비 최저점까지의 평균 낙폭",
         )
@@ -411,7 +475,7 @@ def _render_metrics_grid(
         # 6. 최악 낙폭 (위험 강조)
         _render_metric_card(
             icon="🔴", label="최악 낙폭",
-            value=f"{worst_mdd:+.2f}%" if worst_mdd is not None else "—",
+            value=f"-{abs(worst_mdd):.2f}%" if worst_mdd is not None else "—",
             color="red",
             tooltip="기간 중 가장 컸던 단일 포지션 낙폭 (최악의 케이스)",
         )
