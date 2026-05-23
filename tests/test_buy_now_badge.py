@@ -421,3 +421,139 @@ class TestV2238UiSafety:
             for k in ["display_icon", "display_label", "display_short",
                       "display_tone", "display_color"]:
                 assert k in disp, f"{k} 필드 누락: {row}"
+
+
+# ★ [v22.3.8-D1] STALE_CARRY 표시 가드 회귀 보호
+# IS_STALE_CARRY=True + DISPLAY_SCORE<30 시 BUY_NOW 배지 전체 숨김.
+# 오래 끌고 온 약한 보유종목이 신규매수 후보로 오해되는 것 차단.
+# raw BUY_NOW_GRADE / ELIGIBLE 변경 없음 — 표시(visible)만 막음.
+class TestV2238D1StaleCarryGuard:
+    """v22.3.8-D1: STALE_CARRY + 낮은 DISPLAY_SCORE 표시 가드."""
+
+    def test_stale_carry_with_low_display_score_hides_badge(self, badge_module):
+        """IS_STALE_CARRY=True + DISPLAY_SCORE=29 + BUY → visible=False, 가드 발동."""
+        row = {
+            "TOP_PICK": 1,
+            "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1,
+            "BUY_NOW_SCORE": 80,
+            "IS_STALE_CARRY": True,
+            "DISPLAY_SCORE": 29,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        # 표시는 숨김
+        assert disp["visible"] is False, (
+            f"STALE_CARRY+DISPLAY<30인데 visible=True: {disp}"
+        )
+        # 가드 발동 플래그
+        assert disp["stale_carry_guard"] is True
+        # 공식 매수 아님
+        assert disp["official_buy"] is False
+        # raw 데이터는 변경 없음
+        assert disp["grade"] == "BUY"
+        assert disp["eligible"] is True
+        assert disp["score"] == 80
+
+    def test_stale_carry_with_high_display_score_keeps_badge(self, badge_module):
+        """IS_STALE_CARRY=True + DISPLAY_SCORE=35(>=30) → 가드 미발동, 기존 동작."""
+        row = {
+            "TOP_PICK": 1,
+            "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1,
+            "BUY_NOW_SCORE": 75,
+            "IS_STALE_CARRY": True,
+            "DISPLAY_SCORE": 35,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        # 가드 미발동
+        assert disp["stale_carry_guard"] is False
+        # 정상 표시
+        assert disp["visible"] is True
+        # 공식 매수 유지
+        assert disp["official_buy"] is True
+
+    def test_no_stale_carry_with_low_display_score_keeps_badge(self, badge_module):
+        """IS_STALE_CARRY=False + DISPLAY_SCORE=29 → 가드 미발동.
+
+        DISPLAY_SCORE만 낮은 건 STALE_CARRY 가드 발동 사유 아님.
+        오래 보유한 약세 종목만 막는 것이 D1의 명시 목적.
+        """
+        row = {
+            "TOP_PICK": 1,
+            "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1,
+            "BUY_NOW_SCORE": 70,
+            "IS_STALE_CARRY": False,
+            "DISPLAY_SCORE": 29,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        assert disp["stale_carry_guard"] is False
+        assert disp["visible"] is True
+        assert disp["official_buy"] is True
+
+    def test_stale_carry_with_buy_eligible0_still_hides(self, badge_module):
+        """STALE_CARRY 가드는 ELIGIBLE 강등 룰보다 강함 — 완전 숨김 우선.
+
+        BUY+ELIGIBLE=0 케이스는 보통 🟡 관찰 후보로 강등되지만,
+        STALE_CARRY+DISPLAY<30 가드 발동 시에는 visible=False로 완전 숨김.
+        """
+        row = {
+            "TOP_PICK": 1,
+            "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 0,
+            "BUY_NOW_SCORE": 70,
+            "IS_STALE_CARRY": True,
+            "DISPLAY_SCORE": 20,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        assert disp["visible"] is False
+        assert disp["stale_carry_guard"] is True
+        assert disp["official_buy"] is False
+
+    def test_stale_carry_fallback_to_final_score(self, badge_module):
+        """DISPLAY_SCORE 없으면 FINAL_SCORE로 fallback."""
+        row = {
+            "TOP_PICK": 1,
+            "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1,
+            "BUY_NOW_SCORE": 65,
+            "IS_STALE_CARRY": True,
+            # DISPLAY_SCORE 없음
+            "FINAL_SCORE": 25,
+        }
+        disp = badge_module.get_buy_now_display(row)
+        assert disp["stale_carry_guard"] is True
+        assert disp["visible"] is False
+
+    def test_stale_carry_no_score_no_guard(self, badge_module):
+        """IS_STALE_CARRY=True지만 DISPLAY/FINAL 둘 다 없으면 가드 미발동.
+
+        점수 미상이면 안전하게 기존 동작 유지 (보수적 fallback).
+        """
+        row = {
+            "TOP_PICK": 1,
+            "BUY_NOW_GRADE": "BUY",
+            "BUY_NOW_ELIGIBLE": 1,
+            "BUY_NOW_SCORE": 60,
+            "IS_STALE_CARRY": True,
+            # DISPLAY/FINAL 모두 없음
+        }
+        disp = badge_module.get_buy_now_display(row)
+        # 가드 발동 안 함 (점수 정보 부재)
+        assert disp["stale_carry_guard"] is False
+        # 기존 visible 동작 (TOP_PICK=1이라 True)
+        assert disp["visible"] is True
+
+    def test_stale_carry_field_exists_in_all_cases(self, badge_module):
+        """모든 케이스에서 stale_carry_guard 필드 존재 (회귀 가드)."""
+        cases = [
+            {"TOP_PICK": 0},
+            {"TOP_PICK": 1, "BUY_NOW_GRADE": "BUY", "BUY_NOW_ELIGIBLE": 1},
+            {"TOP_PICK": 1, "IS_STALE_CARRY": True, "DISPLAY_SCORE": 50},
+            {"TOP_PICK": 1, "IS_STALE_CARRY": True, "DISPLAY_SCORE": 10,
+             "BUY_NOW_GRADE": "WATCH"},
+        ]
+        for row in cases:
+            disp = badge_module.get_buy_now_display(row)
+            assert "stale_carry_guard" in disp, f"stale_carry_guard 필드 누락: {row}"
+            assert isinstance(disp["stale_carry_guard"], bool)
