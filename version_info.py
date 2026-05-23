@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.3.8",
+        "date": "2026-05-21",
+        "type": "patch",
+        "title": "v22.3.8 — BUY_NOW UI Safety: 공식 신규매수 표현 안전화",
+        "items": [
+            "🛡️ **BUY_NOW_GRADE 단독 매수 오해 방지:** 그동안 종목 카드/시장 카운트에서 `BUY_NOW_GRADE=BUY`만 보이면 마치 지금 매수해도 되는 종목처럼 읽힐 여지가 있었습니다. 실제 공식 신규매수 기준은 `TOP_PICK=1` AND `BUY_NOW_ELIGIBLE=1` 두 조건이 동시에 충족되어야 하며, BUY 등급이라도 ELIGIBLE=0이면 관찰 후보에 해당합니다. 이번 패치로 회원 화면 전 영역에서 이 두 조건 기반 표시를 일관 적용해 'BUY=즉시 매수' 오해를 차단합니다.",
+            "🟡 **'진입가능' 문구를 '관찰 후보 / 공식 신규 매수 아님'으로 강등:** 종목분석 탭의 라벨/범례/카운트/실전 팁/가중치 설명 등 7군데에 남아 있던 `🟢 진입가능` 표현을 `🟡 관찰 후보`로 통일하고, 모든 위치에 '공식 신규 매수 아님' 단서를 명시했습니다. 공용 라벨 매핑(`ui_terms.py`)도 함께 정리해 다른 화면에서 같은 문구가 다시 살아나지 않도록 막았습니다.",
+            "🏷️ **TOP_PICK 안전 표시 일관화:** `buy_now_badge.get_buy_now_display()`가 `display_icon / display_label / display_tone / display_color` 안전 필드를 제공하고, `stock_detail_v2.py`가 이를 우선 사용(raw fallback)하도록 정리됐습니다. TOP_PICK=1 AND BUY_NOW_GRADE=BUY AND ELIGIBLE=0 케이스는 카드에서 🟡 관찰 후보로 자동 강등 표시됩니다.",
+            "⚠️ **평균/최악 낙폭 표시 부호 보정:** 성과탭의 '평균 낙폭 +16.09%'처럼 손실 지표인데 양수 부호가 표시되던 문제를 UI 레벨에서 `-abs(값)%`로 강제했습니다. 데이터 소스 부호 오염은 별도 추적 이슈로 분리하고, 회원 화면 리스크는 이번 패치로 닫았습니다.",
+            "📍 **추천 로직/점수 산정 변화 없음:** 이번 패치는 표시(UI) 안전성 정리이며 `scoring_engine.py` / `pipeline_finalize.py` / `collector.py` / BUY_NOW_ELIGIBLE 산식 / ASR shadow / CI 워크플로 모두 미접촉입니다. 추천 종목 선정·점수·추천매수가/매도가/손절가 산정은 v22.3.7과 동일합니다.",
+            "🧪 **자동 회귀 가드:** BUY_NOW 핵심 회귀 묶음 + 전체 tests/ 458건이 매번 실행되어 라벨 변경/표시 안전성 회귀를 차단합니다. 변경 파일: `components/tab_stocks.py` · `components/ui_terms.py` · `components/tab_perf.py` (3개).",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.3.7",
         "date": "2026-05-17",
         "type": "minor",
@@ -395,6 +410,29 @@ def _parse_version(v_str: str) -> Tuple[int, ...]:
 # [📍 핵심 보급품] 앱 버전
 APP_VERSION = CHANGELOG[0]["version"] if CHANGELOG else "18.0.0"
 VERSION_TUPLE = _parse_version(APP_VERSION)
+
+# ─────────────────────────────────────────────────────
+# [v22.3.8 A2] 레이어 버전 분리 표시 (UI / 추천 엔진 / 검증 엔진)
+#
+# 화면에 단일 버전만 노출하면 회원이 "UI 패치"·"추천 엔진"·"검증 엔진"
+# 차이를 인지하기 어렵다. UI safety의 마무리 단계로 3개 레이어를 분리.
+#
+# 주의: ASR validation JSON의 "v3.9.23c-slices"는 슬라이스/리포트
+# 식별자에 가까워 추천 시스템 메인 상수로 그대로 쓰지 않는다.
+# 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
+# ─────────────────────────────────────────────────────
+UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
+RECOMMENDATION_ENGINE_VERSION = "3.9.23"  # 추천 시스템 (collector / scoring / pipeline)
+VALIDATION_ENGINE_VERSION = "3.9.2"       # 검증 엔진 (backtest / rank_validation)
+
+
+def get_version_layer_label() -> str:
+    """3-레이어 분리 표시 라벨 — 'UI vX · 추천 시스템 vY · 검증 엔진 vZ'."""
+    return (
+        f"UI v{UI_VERSION} · "
+        f"추천 시스템 v{RECOMMENDATION_ENGINE_VERSION} · "
+        f"검증 엔진 v{VALIDATION_ENGINE_VERSION}"
+    )
 
 # [📍 핵심 보급품] 텔레그램 조인 URL
 PRIME_TG_JOIN_URL = _get_conf("LDY_PRIME_JOIN_URL", "https://t.me/+DovDEluWnEJhOTY1")

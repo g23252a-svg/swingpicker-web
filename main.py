@@ -63,9 +63,11 @@ except ImportError:
     JOURNAL_OK = False
 
 try:
-    from version_info import APP_VERSION
+    from version_info import APP_VERSION, get_version_layer_label
 except Exception:
     APP_VERSION = "12.3.0"
+    def get_version_layer_label():  # [v22.3.8 A2] fallback — import 실패 시 단일 표시
+        return f"v{APP_VERSION}"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ldy-nicegui")
@@ -274,7 +276,8 @@ async def index():
                 "text-2xl font-bold text-transparent bg-clip-text "
                 "bg-gradient-to-r from-blue-400 to-purple-400"
             ).style("font-family:Outfit,sans-serif")
-            ui.label(f"v{APP_VERSION}").classes("text-xs text-gray-400")
+            # [v22.3.8 A2] UI / 추천 / 검증 레이어 버전 분리 표시
+            ui.label(get_version_layer_label()).classes("text-xs text-gray-400")
         with ui.row().classes("gap-2 items-center"):
             if user:
                 ui.label(f"👋 {user.get('nickname', '')}").classes("text-white text-sm")
