@@ -776,7 +776,13 @@ def make_rank_validation_report(
                         # ✅ mdd safe-divide (inf 방지)
                         mdd = np.full_like(fut_close, np.nan, dtype=float)
                         ok_mdd = np.isfinite(min_close) & np.isfinite(epx) & (epx > 0)
-                        mdd[ok_mdd] = (min_close[ok_mdd] / epx[ok_mdd] - 1.0) * 100.0
+                        # [v22.3.8-B2] AVG_MDD_% 부호 오염 방지 — TP hit 시 exit_price가
+                        # min_close에 반영되어 MDD가 양수화되는 케이스 방지. MDD는 정의상
+                        # 0 이하이므로 0으로 clip. 추천 로직 / BUY_NOW_ELIGIBLE / ASR 영향 없음.
+                        # (정확한 intrabar dip 복원은 v22.4-mdd-tracker-redesign에서 처리)
+                        mdd[ok_mdd] = np.minimum(
+                            (min_close[ok_mdd] / epx[ok_mdd] - 1.0) * 100.0, 0.0
+                        )
 
                         # [v10.3] 극단 이벤트 분리: -30% 이하를 NaN으로 덮지 않고 별도 카운트
                         extreme_mask = mdd < -30.0
