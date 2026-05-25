@@ -153,6 +153,72 @@ def add_entry_risk_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+# ═══════════════════════════════════════════════════════════
+# [v22.3.10] ENTRY_EDGE_SCORE shadow production display
+# ═══════════════════════════════════════════════════════════
+# PRE_ENTRY_RISK shadow에서 가장 유망했던 B_red 룰을 하드 차단이 아니라
+# 표시/감점 전용 컬럼으로 노출한다. BUY_NOW_ELIGIBLE / TOP_PICK은 절대 변경하지 않는다.
+ENTRY_EDGE_BASE_SCORE = 100.0
+ENTRY_EDGE_B_RED_PENALTY = 15.0
+
+
+def add_entry_edge_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """ENTRY_EDGE shadow 컬럼을 recommend CSV에 부여한다.
+
+    목적:
+      - PRE_ENTRY_RISK B_red(STRUCT 70~85 AND VWAP_GAP>8)를
+        ENTRY_EDGE_SCORE 감점/주의 표시로만 반영한다.
+      - BUY_NOW_ELIGIBLE, BUY_NOW_GRADE, TOP_PICK 등 공식 추천 계약은 변경하지 않는다.
+
+    추가 컬럼:
+      ENTRY_EDGE_SCORE       : 100 기준 shadow 점수. B_red면 85.
+      ENTRY_EDGE_LEVEL       : GREEN / CAUTION. 현재 하드 RED 차단 없음.
+      ENTRY_EDGE_RULE        : B_RED_SHADOW 또는 빈값.
+      ENTRY_EDGE_REASON      : UI 표시용 한글 사유.
+      ENTRY_EDGE_SHADOW_FLAG : 감점 발생 여부(0/1).
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    out = df.copy()
+
+    # ENTRY_RISK_LEVEL/RULE이 이미 있으면 SSOT로 사용하고,
+    # legacy/단위 테스트용 입력처럼 없으면 원 지표로 B_red를 재계산한다.
+    risk_level = out.get("ENTRY_RISK_LEVEL", pd.Series("", index=out.index))
+    risk_rule = out.get("ENTRY_RISK_RULE", pd.Series("", index=out.index))
+    risk_level = risk_level.astype(str).str.strip().str.upper()
+    risk_rule = risk_rule.astype(str).str.strip().str.upper()
+
+    struct = pd.to_numeric(out.get("STRUCT_SCORE", 0), errors="coerce").fillna(0)
+    vwap = pd.to_numeric(out.get("VWAP_GAP", 0), errors="coerce").fillna(0)
+    b_red_from_metrics = (
+        (struct >= PRE_RISK_STRUCT_LO_CSV)
+        & (struct <= PRE_RISK_STRUCT_HI_CSV)
+        & (vwap > PRE_RISK_VWAP_RED_CSV)
+    )
+    b_red = (risk_rule == "B_RED") | (risk_level == "RED") | b_red_from_metrics
+
+    score = pd.Series(ENTRY_EDGE_BASE_SCORE, index=out.index, dtype="float64")
+    score.loc[b_red] = (ENTRY_EDGE_BASE_SCORE - ENTRY_EDGE_B_RED_PENALTY)
+
+    # 이 패치는 production hard block이 아니므로 RED 레벨을 만들지 않는다.
+    # 공식 신규매수 차단 여부는 기존 BUY_NOW_ELIGIBLE 계약만 따른다.
+    level = np.where(b_red, "CAUTION", "GREEN")
+    rule = np.where(b_red, "B_RED_SHADOW", "")
+    reason = np.where(
+        b_red,
+        "B_red shadow 감점 -15: STRUCT 70~85 + VWAP_GAP>8 위험 조합 · 공식 매수 차단 아님",
+        "",
+    )
+
+    out["ENTRY_EDGE_SCORE"] = score.round(1)
+    out["ENTRY_EDGE_LEVEL"] = level
+    out["ENTRY_EDGE_RULE"] = rule
+    out["ENTRY_EDGE_REASON"] = reason
+    out["ENTRY_EDGE_SHADOW_FLAG"] = b_red.astype(int)
+    return out
+
 def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
     """IS_NOW_ENTRY — shared_utils.compute_is_now_entry 벡터 적용.
     
@@ -370,6 +436,19 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"🚨 [v3.9.6] ENTRY_RISK 컬럼 부여 완료 — RED {n_red} · ORANGE {n_orange}")
     except Exception as e:
         logger.warning(f"⚠️ add_entry_risk_columns 실패 (무해): {e}")
+
+    # [v22.3.10] ENTRY_EDGE shadow 컬럼 부여 — 표시/감점 전용, 공식 매수식 무수정
+    try:
+        _eligible_before = df_out.get("BUY_NOW_ELIGIBLE", pd.Series([], dtype=object)).copy()
+        df_out = add_entry_edge_columns(df_out)
+        if "BUY_NOW_ELIGIBLE" in df_out.columns and len(_eligible_before) == len(df_out):
+            if not df_out["BUY_NOW_ELIGIBLE"].equals(_eligible_before):
+                logger.error("ENTRY_EDGE 적용 중 BUY_NOW_ELIGIBLE 변경 감지 — 원복")
+                df_out["BUY_NOW_ELIGIBLE"] = _eligible_before
+        n_edge = int((df_out["ENTRY_EDGE_SHADOW_FLAG"] == 1).sum())
+        log(f"🧪 [v22.3.10] ENTRY_EDGE shadow 컬럼 부여 완료 — B_red 감점 {n_edge}건")
+    except Exception as e:
+        logger.warning(f"⚠️ add_entry_edge_columns 실패 (무해): {e}")
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)

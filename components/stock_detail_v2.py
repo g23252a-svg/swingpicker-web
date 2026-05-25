@@ -245,6 +245,13 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
     ttm_squeeze = int(safe_float(row.get("TTM_SQUEEZE_CNT", row.get("TTM_SQUEEZE", 0))) or 0)
     poc_gap = safe_float(row.get("POC_GAP", 0)) or 0
 
+    # ── [v22.3.10] ENTRY_EDGE shadow display fields ──
+    entry_edge_score = safe_float(row.get("ENTRY_EDGE_SCORE", 100)) or 100
+    entry_edge_level = _safe_str(row.get("ENTRY_EDGE_LEVEL", "GREEN"), "GREEN").upper()
+    entry_edge_reason = _safe_str(row.get("ENTRY_EDGE_REASON", ""), "")
+    entry_edge_rule = _safe_str(row.get("ENTRY_EDGE_RULE", ""), "")
+    entry_edge_shadow_flag = int(safe_float(row.get("ENTRY_EDGE_SHADOW_FLAG", 0)) or 0)
+
     # ── [Step 2E] 레이더 5축 (TRIGGER 포함) ──
     trigger_score = safe_float(row.get("TRIGGER_SCORE", row.get("RAW_TRIGGER_SCORE", 0))) or 0
 
@@ -416,6 +423,12 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "ttm_squeeze": ttm_squeeze,
         "poc_gap": poc_gap,
         "trigger_score": trigger_score,
+        # [v22.3.10] ENTRY_EDGE shadow — 공식 매수식 미반영 표시용
+        "entry_edge_score": entry_edge_score,
+        "entry_edge_level": entry_edge_level,
+        "entry_edge_reason": entry_edge_reason,
+        "entry_edge_rule": entry_edge_rule,
+        "entry_edge_shadow_flag": entry_edge_shadow_flag,
 
         # [Step 2F] 리스크 / 뉴스 / 시나리오 / 최종판정
         "news_score": news_score,
@@ -1251,6 +1264,10 @@ def render_v2_scores(n: dict):
     axis_mean = n["axis_mean"]
     axis_gap = n["axis_gap"]
     score_reason = n["score_reason"]
+    entry_edge_score = n.get("entry_edge_score", 100)
+    entry_edge_level = str(n.get("entry_edge_level", "GREEN") or "GREEN").upper()
+    entry_edge_reason = n.get("entry_edge_reason", "") or ""
+    entry_edge_shadow_flag = int(n.get("entry_edge_shadow_flag", 0) or 0)
 
     # 강점 표기: 가장 높은 축이 85+ 일 때만 "강점 ★"
     scores_dict = {"STRUCT": struct_s, "TIMING": timing_s, "AI": ai_s}
@@ -1336,6 +1353,24 @@ def render_v2_scores(n: dict):
                 <div class="val">{h_escape(score_reason)}</div>
             </div>
         ''')
+
+        if entry_edge_shadow_flag or entry_edge_level == "CAUTION":
+            ui.html(f'''
+                <div style="margin-top: 8px; padding: 9px 11px; border-radius: 8px;
+                            background: rgba(245,158,11,0.08);
+                            border: 1px solid rgba(245,158,11,0.28);
+                            color: var(--text-white);">
+                    <div style="font-size: 11px; font-weight: 800; color: var(--orange);">
+                        🧪 ENTRY_EDGE shadow · {entry_edge_score:.0f}점 · {h_escape(entry_edge_level)}
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-gray); margin-top: 3px;">
+                        {h_escape(entry_edge_reason or "B_red shadow 감점 관찰 · 공식 매수식 미반영")}
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-dim); margin-top: 3px;">
+                        표시/감점 전용입니다. BUY_NOW_ELIGIBLE 공식 신규매수 기준은 변경하지 않습니다.
+                    </div>
+                </div>
+            ''')
 
 
 # ═══════════════════════════════════════════════════
