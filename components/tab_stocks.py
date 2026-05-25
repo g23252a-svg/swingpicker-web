@@ -2113,6 +2113,14 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                                 "text-[10px] text-orange-300 font-semibold "
                                 "px-1.5 py-0.5 bg-orange-900/40 rounded"
                             ).tooltip(_risk_reason or "VWAP 강한 과열")
+                        _edge_lvl_card = str(r.get("ENTRY_EDGE_LEVEL", "") or "").strip().upper()
+                        _edge_reason_card = str(r.get("ENTRY_EDGE_REASON", "") or "").strip()
+                        _edge_score_card = _nz(r.get("ENTRY_EDGE_SCORE", 100))
+                        if _edge_lvl_card == "CAUTION":
+                            ui.label(f"🧪 Edge {_edge_score_card:.0f}").classes(
+                                "text-[10px] text-amber-300 font-semibold "
+                                "px-1.5 py-0.5 bg-amber-900/30 rounded"
+                            ).tooltip(_edge_reason_card or "ENTRY_EDGE shadow 감점 · 공식 매수식 미반영")
                         elif _is_low_confidence_today():
                             # [v3.9.5] 종목 자체는 위험 없지만 시장 전체 신뢰도 낮음
                             ui.label("⚠️ 오늘 보수 접근").classes(
@@ -2297,6 +2305,33 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 ).classes("text-[11px] text-gray-400")
             ui.label(
                 "※ 위험 표시는 자동 제외가 아니라 진입 전 확인 신호입니다."
+            ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
+
+    # [v22.3.10] ENTRY_EDGE shadow 표시 기준 — 공식 매수식 변경 없음
+    if "ENTRY_EDGE_LEVEL" in df.columns:
+        _edge_norm = df["ENTRY_EDGE_LEVEL"].astype(str).str.strip().str.upper()
+        n_edge_caution = int((_edge_norm == "CAUTION").sum())
+        n_edge_green = int((_edge_norm == "GREEN").sum())
+        with ui.card().classes(
+            "w-full p-2 mb-3 bg-[rgba(245,158,11,0.04)] "
+            "border border-[rgba(245,158,11,0.2)] rounded"
+        ):
+            with ui.row().classes("w-full items-start gap-2 mb-1"):
+                ui.label("🧪").classes("text-sm")
+                ui.label("ENTRY_EDGE shadow 표시").classes(
+                    "text-xs text-amber-300 font-bold"
+                )
+            with ui.column().classes("gap-0.5 pl-5"):
+                ui.label(
+                    f"🟠 감점 관찰 ({n_edge_caution}): B_red shadow — "
+                    "STRUCT 70~85 + VWAP_GAP>8 조합에 ENTRY_EDGE_SCORE -15"
+                ).classes("text-[11px] text-amber-300")
+                ui.label(
+                    f"🟢 정상 ({n_edge_green}): 현재 ENTRY_EDGE 감점 없음"
+                ).classes("text-[11px] text-gray-400")
+            ui.label(
+                "※ ENTRY_EDGE는 표시/감점 전용 shadow 컬럼입니다. "
+                "BUY_NOW_ELIGIBLE 공식 신규매수 기준은 변경하지 않습니다."
             ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
 
     # [v3.7.26] 스코어 용어집 (접이식) — 사용자 지적: "스코어 너무 많음" 해결
@@ -2654,6 +2689,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             {"name": "route", "label": "상태", "field": "route", "align": "center"},
             # [v3.9.7] 진입 위험 — 라벨 옆에 항상 표시 (회원 안전)
             {"name": "risk", "label": "위험", "field": "risk", "align": "center"},
+            # [v22.3.10] ENTRY_EDGE shadow 점수 — 공식 매수식 미반영
+            {"name": "edge", "label": "Edge", "field": "edge", "align": "center", "sortable": True},
             {"name": "name", "label": "종목명", "field": "name", "align": "left"},
             # 점수 = DISPLAY_SCORE (파이프라인 최종, 화면 메인 숫자)
             {"name": "score", "label": "점수", "field": "score",
@@ -2712,11 +2749,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             # [v3.9.11 hotfix] strip().upper() — 소문자/공백 데이터 silent miss 방지
             _r_risk_lvl = str(r.get("ENTRY_RISK_LEVEL", "") or "").strip().upper()
             _r_risk_emoji = {"RED": "🔴", "ORANGE": "🟠"}.get(_r_risk_lvl, "—")
+            _edge_score = _nz(r.get("ENTRY_EDGE_SCORE", 100))
+            _edge_lvl = str(r.get("ENTRY_EDGE_LEVEL", "") or "").strip().upper()
+            _edge_emoji = "🟠" if _edge_lvl == "CAUTION" else "🟢" if _edge_lvl == "GREEN" else "—"
             rows.append({
                 "code": str(r.get("종목코드", "")).zfill(6),
                 "label": _ae_label_disp(_r_label, short=True) if _r_label else "—",
                 "route": _ae_route_disp(_r_route) if _r_route else "—",
                 "risk": _r_risk_emoji,
+                "edge": f"{_edge_emoji}{_edge_score:.0f}" if _edge_emoji != "—" else "—",
                 "name": str(r.get("종목명", "—")),
                 "score": f'{_nz(r.get("DISPLAY_SCORE", 0)):.0f}',
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
@@ -2852,6 +2893,14 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                                 "text-[9px] text-orange-300 font-semibold "
                                 "px-1 py-0.5 bg-orange-900/40 rounded"
                             ).tooltip(_risk_reason_kb or "VWAP 강한 과열")
+                        _edge_lvl_kb = str(r.get("ENTRY_EDGE_LEVEL", "") or "").strip().upper()
+                        _edge_reason_kb = str(r.get("ENTRY_EDGE_REASON", "") or "").strip()
+                        _edge_score_kb = _nz(r.get("ENTRY_EDGE_SCORE", 100))
+                        if _edge_lvl_kb == "CAUTION":
+                            ui.label(f"🧪 Edge {_edge_score_kb:.0f}").classes(
+                                "text-[9px] text-amber-300 font-semibold "
+                                "px-1 py-0.5 bg-amber-900/30 rounded"
+                            ).tooltip(_edge_reason_kb or "ENTRY_EDGE shadow 감점 · 공식 매수식 미반영")
 
                     with ui.row().classes("justify-between items-center"):
                         ui.label(str(r.get("종목명", ""))).classes(
