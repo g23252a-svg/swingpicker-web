@@ -820,8 +820,8 @@ def _clip_est_win_rate_to_realized_bins(
         try:
             if n_raw is not None and float(n_raw) < 30:
                 continue
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as e:
+            _logger.debug(f"ENTRY win-rate cap n_raw parse skipped: {e}")
 
         mask = (scores_arr >= lo) & (scores_arr < hi)
         if not mask.any():
