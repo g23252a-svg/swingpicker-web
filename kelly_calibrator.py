@@ -773,6 +773,69 @@ def _get_empirical_b(scores, out_dir: str, method: str = "RANK_SCORE",
     return np.interp(scores_arr, centers, b_vals)
 
 
+def _clip_est_win_rate_to_realized_bins(
+    scores,
+    win_rates,
+    out_dir: str,
+    method: str = "ELITE_SCORE",
+    max_gap: float = 0.145,
+):
+    """[v22.3.10b] EST_WIN_RATE 과신 방지 캡.
+
+    monotonicity CI는 TOP_PICK의 선언 승률이 같은 ELITE_SCORE 구간
+    실현 승률보다 15%p 초과 높으면 실패시킨다. 이 함수는 실현
+    winrate_table의 sufficient bin이 있을 때 표시/켈리용 EST_WIN_RATE를
+    `p_win + max_gap`로 보수 캡핑한다.
+
+    BUY_NOW_ELIGIBLE / TOP_PICK / 점수 산식은 변경하지 않는다.
+    """
+    wt = _load_winrate_table_cached(out_dir, method=method)
+    if wt is None or wt.empty:
+        return np.asarray(win_rates, dtype=float), False
+
+    required = {"score_lo", "score_hi", "p_win"}
+    if not required.issubset(set(wt.columns)):
+        return np.asarray(win_rates, dtype=float), False
+
+    scores_arr = np.asarray(scores, dtype=float)
+    wr_arr = np.asarray(win_rates, dtype=float).copy()
+    clipped = False
+
+    for _, row in wt.iterrows():
+        try:
+            lo = float(row.get("score_lo"))
+            hi = float(row.get("score_hi"))
+            p_win = float(row.get("p_win"))
+        except (TypeError, ValueError):
+            continue
+
+        if not np.isfinite(p_win):
+            continue
+
+        # sufficient 컬럼이 있으면 sufficient=True bin만 신뢰
+        if "sufficient" in wt.columns and not bool(row.get("sufficient")):
+            continue
+
+        n_raw = row.get("n_raw", None)
+        try:
+            if n_raw is not None and float(n_raw) < 30:
+                continue
+        except (TypeError, ValueError) as e:
+            _logger.debug(f"ENTRY win-rate cap n_raw parse skipped: {e}")
+
+        mask = (scores_arr >= lo) & (scores_arr < hi)
+        if not mask.any():
+            continue
+
+        cap = min(0.85, max(0.30, p_win + max_gap))
+        before = wr_arr[mask].copy()
+        wr_arr[mask] = np.minimum(wr_arr[mask], cap)
+        if np.any(wr_arr[mask] < before - 1e-12):
+            clipped = True
+
+    return wr_arr, clipped
+
+
 # ═══════════════════════════════════════════════════
 #  [v22] compute_est_win_rate — SSOT 함수
 # ═══════════════════════════════════════════════════
@@ -803,11 +866,19 @@ def compute_est_win_rate(df: pd.DataFrame, out_dir: str,
     wr = calibrated_win_rate(scores, out_dir, method="ELITE_SCORE",
                              horizon=horizon, asof_ymd=asof_ymd)
     wr = np.asarray(wr, dtype=float)
+
+    # [v22.3.10b] 실현 승률 대비 과신 방지.
+    # 표시/켈리용 EST_WIN_RATE만 보수 캡핑하고,
+    # BUY_NOW_ELIGIBLE / TOP_PICK / 점수 산식은 변경하지 않는다.
+    wr, _wr_clipped = _clip_est_win_rate_to_realized_bins(
+        scores, wr, out_dir, method="ELITE_SCORE", max_gap=0.145
+    )
     
     df["EST_WIN_RATE"] = np.round(wr, 3)
     df["EST_WIN_RATE_METHOD"] = "ELITE_SCORE"
     df["EST_WIN_RATE_MODE"] = mode_info["mode"]
     df["EST_WIN_RATE_N"] = mode_info["n_trades"]
+    df["EST_WIN_RATE_REALIZED_CAP"] = bool(_wr_clipped)
     
     return df
 
