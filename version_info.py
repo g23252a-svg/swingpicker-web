@@ -15,6 +15,23 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.3.10",
+        "date": "2026-05-25",
+        "type": "patch",
+        "title": "v22.3.10 — ENTRY_EDGE_SCORE Shadow 표시: 실전 수익률 위험 신호를 production 화면까지 연결",
+        "items": [
+            "🧭 **실전 수익률 예측력 개선 1단계:** 추천 당시에는 좋아 보였던 종목이 실제로 수익을 냈는지 검증하기 위해 `realized edge audit` 분석기를 추가했습니다. 추천 CSV와 Top1/Top3 실전 검증 결과를 결합해 VWAP_GAP, POC_GAP, AXIS_GAP, RR_NOW_TP1, RSI/MFI, 저항 여유 등 조건별 실제 수익률·승률·손절률을 자동 집계합니다.",
+            "📊 **실전 Edge 리포트 자동 생성:** `scripts/analyze_realized_edge.py` 실행 시 `realized_edge_dataset_latest.csv`, `realized_edge_slices_latest.csv`, `realized_edge_report_latest.json`이 생성됩니다. 초기 진단 기준 표본 266건에서 평균 수익률 -2.93%, 승률 27.07%, slice 164개가 산출되어, 단순 점수보다 실제 수익 조건을 따로 검증해야 한다는 점을 수치로 확인했습니다.",
+            "🛡️ **B_red 위험 신호를 ENTRY_EDGE_SCORE로 연결:** PRE_ENTRY_RISK shadow에서 가장 유망했던 `B_red = STRUCT 70~85 AND VWAP_GAP > 8` 조건을 공식 차단이 아닌 shadow 감점 표시로 연결했습니다. 해당 조건이 감지되면 `ENTRY_EDGE_SCORE`, `ENTRY_EDGE_LEVEL`, `ENTRY_EDGE_RULE`, `ENTRY_EDGE_REASON`, `ENTRY_EDGE_SHADOW_FLAG` 컬럼이 CSV에 추가됩니다.",
+            "⚠️ **production 화면 표시 시작:** 종목 리스트와 종목 상세 화면에서 ENTRY_EDGE 위험 신호를 확인할 수 있도록 UI 표시를 추가했습니다. 회원 화면에서는 '공식 매수 차단'이 아니라 '실전 위험 감점 신호'로만 안내되며, 추천 판단 시 VWAP 과열/구조 애매 구간을 더 명확히 확인할 수 있습니다.",
+            "🔒 **BUY_NOW_ELIGIBLE 공식은 변경 없음:** 이번 패치는 실전 위험 신호를 production CSV/UI에 표시하는 단계이며, 공식 신규매수 기준인 `TOP_PICK + BUY_NOW_ELIGIBLE` 산식은 절대 변경하지 않았습니다. `BUY_NOW_GRADE`, `TOP_PICK`, `scoring_engine.py`도 미변경입니다.",
+            "🧪 **회귀 가드 강화:** `tests/test_analyze_realized_edge.py`와 `tests/test_entry_edge_shadow.py`를 추가해 실전 Edge 분석기와 ENTRY_EDGE shadow 표시를 보호합니다. 특히 B_red가 감지되어도 `BUY_NOW_ELIGIBLE`이 바뀌지 않는 것을 테스트로 고정했습니다.",
+            "✅ **검증 결과:** 핵심 테스트 232건 통과, silent exception 신규 0건, deps/cycle 신규 위반 0건. pykrx deprecation warning 1건은 기존 외부 패키지 경고로 이번 패치와 무관합니다.",
+            "📌 **다음 단계:** ENTRY_EDGE_SCORE와 실제 결과를 1~2주 누적한 뒤, 효과가 안정적으로 유지될 경우에만 BUY_NOW_ELIGIBLE 보조 조건 승격을 검토합니다. 현재는 hard block이 아닌 shadow production display 단계입니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.3.8",
         "date": "2026-05-21",
         "type": "patch",
