@@ -600,6 +600,19 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
         if total_n > 0:
             realized_wr = round(w_sum / total_n, 4)
         report["realized_wr"] = realized_wr
+
+        # [v22.3.10b] 레거시/테스트 CSV 호환:
+        # recommend_latest.csv에 ELITE_SCORE가 없으면 같은 점수구간 매칭이 불가능하다.
+        # 이 경우 기존 호환 방식인 전체 sufficient bin 가중 realized_wr로 fallback한다.
+        # 실데이터에 ELITE_SCORE가 있으면 기존 matched-population 로직이 그대로 우선된다.
+        if realized_wr_top_pick is None and declared_wr_top_pick is not None and realized_wr is not None:
+            realized_wr_top_pick = realized_wr
+            realized_wr_top_pick_n = total_n
+            report["realized_wr_top_pick_fallback"] = "overall_no_elite_score"
+        if realized_wr_active is None and declared_wr_active is not None and realized_wr is not None:
+            realized_wr_active = realized_wr
+            realized_wr_active_n = total_n
+            report["realized_wr_active_fallback"] = "overall_no_elite_score"
         
         # [v22.3.2] 모집단 일치 realized 신규 키
         report["realized_wr_top_pick"] = realized_wr_top_pick
