@@ -9,10 +9,10 @@
   "min_rr": 1.52,
   "rr_lt_1_count": 0,
   "avg_balance": 69.8,
-  "avg_win_rate": 0.535,
+  "avg_win_rate": 0.508,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 7087,
+  "est_win_rate_n": 7244,
   "routes": {
     "ARMED": 1
   },
@@ -27,10 +27,10 @@
       "ENTRY_GAP_PCT": 1.5,
       "TP1_PCT": 24.8,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.535,
+      "EST_WIN_RATE": 0.508,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 7087
+      "EST_WIN_RATE_N": 7244
     }
   ]
 }

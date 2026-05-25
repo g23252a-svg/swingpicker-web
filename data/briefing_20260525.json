@@ -1,6 +1,6 @@
 {
   "trade_date": "20260525",
-  "generated_at": "2026-05-25 22:13:44",
+  "generated_at": "2026-05-25 23:30:43",
   "count": 3,
   "stocks": [
     {
@@ -31,7 +31,7 @@
       "stop": 19920,
       "target1": 29700,
       "target2": 35000,
-      "est_win_rate": 0.535,
+      "est_win_rate": 0.508,
       "rr": 1.8,
       "sector": "조선·기계·설비",
       "market": "KOSDAQ",
