@@ -1,7 +1,7 @@
 {
-  "trade_ymd": "20260522",
+  "trade_ymd": "20260525",
   "macro_risk": "CRITICAL",
-  "macro_msg": "환율 1500원 [05/20] (CRITICAL)",
+  "macro_msg": "환율 1504원 [05/21] (CRITICAL)",
   "market_breadth": 85.2,
   "pass_ebs": 6,
   "rec_limit": 3,

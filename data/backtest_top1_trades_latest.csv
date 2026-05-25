@@ -47,3 +47,4 @@ date,code,name,sector,label,rank_score,entry,tp1,stop,outcome,exit_price,days_he
 20260518,033240,자화전자,전자부품 제조업,🏆 최강,69.47,51500.0,60000.0,43750.0,LOSS,43750.0,2,ohlc_low_touch,2026-05-19,-15.05,-15.27,66700.0,68400.0,False,0,False,0,False,0,True,2,False,False,False,0.0,-16.31,-3.69
 20260519,066575,LG전자우,기타,🏆 최강,71.55,72100.0,94100.0,61400.0,OPEN,83300.0,3,ohlc_horizon_close,2026-05-20,15.53,15.31,106900.0,123200.0,False,0,False,0,False,0,False,0,False,False,False,21.5,-7.21,19.28
 20260520,066570,LG전자,통신 및 방송 장비 제조업,🏆 최강,74.72,181000.0,266500.0,153800.0,NOT_FILLED,0.0,0,not_filled_gap_up,,0.0,0.0,311000.0,367500.0,False,0,False,0,False,0,False,0,False,False,False,0.0,0.0,0.0
+20260522,064400,LG씨엔에스,"컴퓨터 프로그래밍, 시스템 통합 및 관리업",🏆 최강,71.89,82000.0,99400.0,70400.0,OPEN,83200.0,10,close_fallback,,1.46,1.24,107600.0,111400.0,False,0,False,0,False,0,False,0,False,False,False,0.0,0.0,1.46

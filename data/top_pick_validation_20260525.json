@@ -1,0 +1,36 @@
+{
+  "trade_ymd": "20260525",
+  "top_pick_count": 1,
+  "top_pick_by_type": {
+    "AGGRESSIVE": 1
+  },
+  "avg_elite": 77.7,
+  "avg_rr": 1.52,
+  "min_rr": 1.52,
+  "rr_lt_1_count": 0,
+  "avg_balance": 69.8,
+  "avg_win_rate": 0.535,
+  "est_win_rate_method": "ELITE_SCORE",
+  "est_win_rate_mode": "MATURE",
+  "est_win_rate_n": 7087,
+  "routes": {
+    "ARMED": 1
+  },
+  "picks": [
+    {
+      "종목코드": "187870",
+      "종목명": "디바이스",
+      "TOP_PICK_TYPE": "AGGRESSIVE",
+      "ELITE_SCORE": 77.7,
+      "RR_NOW_TP1": 1.52,
+      "BALANCE_SCORE": 69.8,
+      "ENTRY_GAP_PCT": 1.5,
+      "TP1_PCT": 24.8,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.535,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 7087
+    }
+  ]
+}
