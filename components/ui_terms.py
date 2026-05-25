@@ -95,7 +95,8 @@ def pick_type_info(pick_type: str) -> tuple:
 ELITE_LABEL_DISPLAY = {
     "🛡️ 콤보":   "🟣 핵심매수",
     "🏆 최강":   "🔵 관심관찰",
-    "✅ 즉시진입": "🟢 진입가능",
+    # v22.3.8 UI safety: 내부값은 유지하되 화면에서는 매수 가능처럼 보이지 않게 표시
+    "✅ 즉시진입": "🟡 관찰 후보",
     "⚠️ 추격":   "🟠 추격주의",
 }
 
@@ -106,7 +107,8 @@ ELITE_LABEL_INTERNAL = {v: k for k, v in ELITE_LABEL_DISPLAY.items()}
 ELITE_LABEL_DISPLAY_SHORT = {
     "🛡️ 콤보":   "🟣 핵심매수",
     "🏆 최강":   "🔵 관심관찰",
-    "✅ 즉시진입": "🟢 진입가능",
+    # 짧은 라벨도 '진입가능' 금지 — 공식 신규매수는 TOP_PICK+BUY_NOW_ELIGIBLE만
+    "✅ 즉시진입": "🟡 관찰 후보",
     "⚠️ 추격":   "🟠 추격주의",
 }
 

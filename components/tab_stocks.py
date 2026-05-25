@@ -1150,12 +1150,12 @@ def _elite_label(stats: dict) -> tuple:
             f"👁️ 관찰중 · 매매 제외 · 표본 n=6 (신뢰 LOW) · 통계 축적 대기",
         )
 
-    # ── ✅ 즉시 진입 가능 (실제 주력 · 최다 표본) ──
+    # ── ✅ 내부 즉시진입 라벨 (화면 표시는 관찰 후보 — 공식 신규매수 아님) ──
     if amn >= 50 and bal >= 70 and gap <= 5.0:
         return (
             "✅ 즉시진입",
             "#10B981",  # 초록
-            f"최다 검증 (N=57) · TP1 47% · EV +3.0% (갭 {gap:.1f}%)",
+            f"관찰 후보 · 공식 신규매수는 TOP_PICK+BUY_NOW_ELIGIBLE 충족 시에만 가능 (갭 {gap:.1f}%)",
         )
 
     # ── ⚠️ 추격 필요 ──
@@ -2026,16 +2026,16 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
             if _has_eligible_col and _has_top_pick:
                 # TOP_PICK은 있는데 ELIGIBLE 0건 → "오늘 매수 적합 없음" 강조
                 ui.label(
-                    "🟡 오늘 즉시 매수 적합 종목 없음"
+                    "🟡 오늘 공식 신규 매수 가능 종목 없음"
                 ).classes("text-base text-amber-400 font-bold mb-1")
                 ui.label(
-                    "TOP_PICK 후보는 있으나 BUY_NOW 기준상 관찰/추격금지입니다. "
-                    "무리한 신규 매수보다 관망 권장."
+                    "TOP_PICK 후보는 있으나 TOP_PICK+BUY_NOW_ELIGIBLE 기준상 "
+                    "공식 신규매수 대상이 아닙니다. 관찰/관망 권장."
                 ).classes("text-xs text-gray-400 mb-2")
             else:
                 # [Step AC P0-3] 기존 빈 상태 메시지 (TOP_PICK도 없거나 legacy CSV)
                 ui.label(
-                    "🟣 핵심매수 0개 · 🟢 진입가능(엄격필터) 0개 → 오늘은 매매 보류"
+                    "🟡 공식 신규매수 0개 · 관찰 후보만 있음 → 오늘은 매매 보류"
                 ).classes("text-sm text-yellow-400 font-semibold mb-1")
 
             # [Step AE] 차선 후보 / 관찰 후보 카운트 — 한글 표시 (raw 비교 유지)
@@ -2044,7 +2044,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 instant_n = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
                 parts = []
                 if instant_n > 0:
-                    parts.append(f"🟢 진입가능 {instant_n}개 (엄격필터 미통과)")
+                    parts.append(f"🟡 관찰 후보 {instant_n}개 (공식 신규 매수 아님)")
                 if strong_n > 0:
                     parts.append(f"🔵 관심관찰 {strong_n}개 (👁️ 관찰 · 매매 제외)")
                 if parts:
@@ -2064,7 +2064,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
 
             ui.label(
                 "🟣 핵심매수: S≥90·T≥80·AI≥60·매수검토/진입대기  ·  "
-                "🟢 진입가능: 최소≥50·균형≥70·갭≤5%"
+                "🟡 관찰 후보: 최소≥50·균형≥70·갭≤5% · 공식 신규매수 아님"
             ).classes("text-xs text-gray-500 mt-1")
             return
 
@@ -2197,7 +2197,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "전체": "전체",
                 "🛡️ 콤보":   "🟣 핵심매수",
                 "🏆 최강":   "🔵 관심관찰",
-                "✅ 즉시진입": "🟢 진입가능",
+                "✅ 즉시진입": "🟡 관찰 후보",
                 "⚠️ 추격":   "🟠 추격주의",
             },
             value="전체", label="라벨",
@@ -2258,7 +2258,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 f"[n=6 · 👁️ 관찰중 · 매매 제외]"
             ).classes("text-xs text-gray-500 line-through opacity-60")
             ui.label(
-                f"🟢 진입가능 ({n_instant}): 최소≥50 · 균형≥70 · 갭≤5%"
+                f"🟡 관찰 후보 ({n_instant}): 최소≥50 · 균형≥70 · 갭≤5% · 공식 신규매수 아님"
             ).classes("text-xs text-green-400")
             ui.label(
                 f"🟠 추격주의 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
@@ -2370,7 +2370,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ui.label(
                 # [Step AE] 라벨 가중치 설명 한글화
                 "  · 🟣 핵심매수 ×1.50 (실성능 1위)  "
-                "· 🟢 진입가능 ×1.30  "
+                "· 🟡 관찰 후보 ×1.30 (공식 신규매수 아님)  "
                 "· 🔵 관심관찰 ×0.50 (관찰 모드)  "
                 "· 🟠 추격주의 ×0.70"
             ).classes("text-[11px] text-gray-400")
@@ -2381,9 +2381,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             )
             # [Step AF-2] 실전 팁 — 한글 라벨 + 친절한 표현
             ui.label(
-                "  ① 라벨 (🟣 핵심매수·🟢 진입가능 우선, 🟠 추격주의 신중)  "
-                "→ ② 종합점수 70+  →  ③ 손익비(RR) 1.0+  "
-                "→ ④ 진입갭 ±5% 이내  →  ⑤ S/T/AI 세부 확인"
+                "  ① 공식 신규매수 기준(TOP_PICK+BUY_NOW_ELIGIBLE) 우선 확인  "
+                "→ ② 관찰 후보는 매매 제외  →  ③ 종합점수 70+  →  ④ 손익비(RR) 1.0+  "
+                "→ ⑤ 진입갭 ±5% 이내  →  ⑥ S/T/AI 세부 확인"
             ).classes("text-[11px] text-gray-300")
 
     # [v3.7.22] CSV 다운로드 권한 제어 — prime/admin만 허용

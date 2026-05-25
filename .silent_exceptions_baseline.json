@@ -1,10 +1,10 @@
 {
   "version": 2,
   "doc": "DO NOT edit by hand unless you know what you're doing. Regenerate with: python scripts/check_silent_exceptions.py --regenerate. Matching is by (file, exc_type, body_kind, code) multiset count — robust to line shifts but distinguishes duplicates within same file.",
-  "count": 178,
+  "count": 176,
   "by_severity": {
-    "SILENT": 174,
-    "QUASI": 4
+    "SILENT": 173,
+    "QUASI": 3
   },
   "fingerprint_counts": {
     "01f4bfa08cb1": 1,
@@ -31,7 +31,6 @@
     "462254c612ea": 1,
     "49f471904821": 1,
     "51a34e567de3": 3,
-    "54c9f00a7664": 1,
     "581cbf4c8328": 2,
     "58a011fe7523": 1,
     "590426d6e6ec": 1,
@@ -48,7 +47,6 @@
     "7988c2bb6d8d": 17,
     "7b729e6de76c": 2,
     "7bb9e996cc10": 2,
-    "7c703aed7028": 1,
     "7ea95abefc4e": 1,
     "80485ef4614c": 7,
     "81b605aa5cbb": 1,
@@ -175,7 +173,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1117,
+      "line": 1123,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -183,7 +181,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1132,
+      "line": 1138,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -191,7 +189,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1165,
+      "line": 1171,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -199,7 +197,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1588,
+      "line": 1594,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -207,15 +205,7 @@
     {
       "fingerprint": "08896929936d",
       "file": "collector.py",
-      "line": 1725,
-      "exc_type": "Exception",
-      "severity": "SILENT",
-      "body_kind": "pass"
-    },
-    {
-      "fingerprint": "80485ef4614c",
-      "file": "collector.py",
-      "line": 1738,
+      "line": 1731,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -231,7 +221,15 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1758,
+      "line": 1750,
+      "exc_type": "Exception",
+      "severity": "SILENT",
+      "body_kind": "pass"
+    },
+    {
+      "fingerprint": "80485ef4614c",
+      "file": "collector.py",
+      "line": 1764,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -319,7 +317,7 @@
     {
       "fingerprint": "51a34e567de3",
       "file": "components/stock_detail_v2.py",
-      "line": 2332,
+      "line": 2336,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -399,7 +397,7 @@
     {
       "fingerprint": "7b729e6de76c",
       "file": "components/tab_market.py",
-      "line": 1187,
+      "line": 1204,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -407,7 +405,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 505,
+      "line": 569,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -415,7 +413,7 @@
     {
       "fingerprint": "15335de984f2",
       "file": "components/tab_perf.py",
-      "line": 747,
+      "line": 811,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -423,7 +421,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 939,
+      "line": 1003,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -431,7 +429,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1032,
+      "line": 1096,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -439,7 +437,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1058,
+      "line": 1122,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -447,7 +445,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1571,
+      "line": 1635,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -997,22 +995,6 @@
       "body_kind": "pass"
     },
     {
-      "fingerprint": "54c9f00a7664",
-      "file": "diagnose_expired_users.py",
-      "line": 39,
-      "exc_type": "Exception",
-      "severity": "QUASI",
-      "body_kind": "print_only"
-    },
-    {
-      "fingerprint": "7c703aed7028",
-      "file": "diagnose_expired_users.py",
-      "line": 60,
-      "exc_type": "Exception",
-      "severity": "SILENT",
-      "body_kind": "pass"
-    },
-    {
       "fingerprint": "903f5a1e1086",
       "file": "fix_stock_names.py",
       "line": 29,
@@ -1119,7 +1101,7 @@
     {
       "fingerprint": "b34fa2337aba",
       "file": "main.py",
-      "line": 410,
+      "line": 413,
       "exc_type": "RuntimeError",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -1479,7 +1461,7 @@
     {
       "fingerprint": "cdb33882f2ed",
       "file": "version_info.py",
-      "line": 388,
+      "line": 403,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
