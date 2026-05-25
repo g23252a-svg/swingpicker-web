@@ -393,13 +393,13 @@ def _render_metrics_grid(
     if _topk_val is not None:
         try:
             _criteria_parts.append(f"상위 {int(_topk_val)}")
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            _logger.debug("[tab_perf] TOPK 표시값 변환 실패: %r (%s)", _topk_val, exc)
     if _hold_val is not None:
         try:
             _criteria_parts.append(f"{int(_hold_val)}영업일")
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            _logger.debug("[tab_perf] 보유기간 표시값 변환 실패: %r (%s)", _hold_val, exc)
     _criteria_parts.append(f"N={int(total_n):,}")
 
     ui.label("📊 현재 성과 기준: " + " · ".join(_criteria_parts)).classes(
