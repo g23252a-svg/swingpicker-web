@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260526",
+  "generated_at": "2026-05-26 23:28:02",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "142210",
+      "name": "유니트론텍",
+      "route": "ATTACK",
+      "score": 92.9,
+      "close": 8720,
+      "entry": 7240,
+      "stop": 6150,
+      "target1": 9000,
+      "target2": 10210,
+      "est_win_rate": 0.458,
+      "rr": 1.6,
+      "sector": "자동차·모빌리티",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/142210"
+    },
+    {
+      "rank": 2,
+      "code": "187790",
+      "name": "나노",
+      "route": "ATTACK",
+      "score": 86.0,
+      "close": 6850,
+      "entry": 6850,
+      "stop": 5820,
+      "target1": 7560,
+      "target2": 8420,
+      "est_win_rate": 0.458,
+      "rr": 0.7,
+      "sector": "화학·소재",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/187790"
+    },
+    {
+      "rank": 3,
+      "code": "054450",
+      "name": "텔레칩스",
+      "route": "ATTACK",
+      "score": 85.9,
+      "close": 18450,
+      "entry": 16810,
+      "stop": 14330,
+      "target1": 19530,
+      "target2": 22300,
+      "est_win_rate": 0.458,
+      "rr": 1.1,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/054450"
+    }
+  ]
+}
