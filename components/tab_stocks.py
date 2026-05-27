@@ -90,7 +90,7 @@ tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
   복구: view_table_mode 기본값 변경 또는 hoverlabel 제거로 즉시 가능.
 [v3.7.25] (2026-04-19) — 🛡️ 콤보 정식 승격 + 🏆 최강 관찰 모드 전환
   사용자 결정 2가지:
-    · "콤보를 제1 매수종목으로 가자"
+    · "콤보를 고점수 관찰종목으로 가자"
     · "최강은 표본도 부족하고 실질 검증도 안되니까 매매에서 제외"
   배경:
     · combo_optimizer: S≥90 T≥80 AI≥60 ATTACK/ARMED → n=112, EV +25.77%, 승률 83.9%
@@ -125,7 +125,7 @@ tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
   #4 "검증"이라는 혼동 용어 제거 (walk-forward와 무관한 점수)
 [v3.7.23] (2026-04-18) — 헤더 카드 읽기 순서 최적화 + 제목 정확화
   사용자 리뷰어 지적 3가지 전부 반영:
-  #1 제목: "🏆 오늘의 검증 Top 3" → "🏆 오늘의 실전 Top Pick"
+  #1 제목: "🏆 오늘의 검증 Top 3" → "🏆 오늘의 실전 후보"
      - 실제 모드는 top1_first_then_top3_fallback (Top1 우선)
      - "Top 3"는 예전 철학 흔적 → "Top Pick"이 정확
      - 뱃지: "1/3" → "🎯 Top1" (1개 성공) / "Top3 폴백 N/3" (fallback)
@@ -1131,7 +1131,7 @@ def _elite_label(stats: dict) -> tuple:
     ai  = stats.get("ai_raw", 0)
     rt  = stats.get("route",  "")
 
-    # ── 🛡️ 콤보 (v3.7.25: 실성능 최고 · 제1 매수 종목) ──
+    # ── 🛡️ 콤보 (v3.7.25: 실성능 최고 · 고점수 관찰 종목) ──
     # combo_optimizer.py 그리드 서치 결과 반영
     # 즉석 walk-forward: IS 64% → OOS 92% (오버피팅 아님)
     if s >= 90 and t >= 80 and ai >= 60 and rt in ("ATTACK", "ARMED"):
@@ -1180,8 +1180,8 @@ def _rank_score(stats: dict, label: str = "") -> float:
       RR < 0.5  → ×0.3
 
     라벨 보정 (v3.7.25 관찰 모드):
-      🛡️ 콤보     → ×1.50  (실성능 최고 · EV +25.77% · n=112 · 제1 매수)
-      ✅ 즉시진입  → ×1.30  (OHLC 검증 EV +9.40% · 실전 주력)
+      🛡️ 콤보     → ×1.50  (실성능 최고 · EV +25.77% · n=112 · 고점수 관찰)
+      ✅ 즉시진입  → ×1.30  (OHLC 검증 EV +9.40% · 관찰 후보)
       🏆 최강     → ×0.50  (👁️ 관찰중 · 매매 제외 · 표본부족 n=6)
       ⚠️ 추격     → ×0.70  (경고)
       기타        → ×0.50
@@ -1615,7 +1615,7 @@ def _member_stat_box(label: str, value: str,
 def _render_candidate_context_notice() -> None:
     """[v3.9.4] Top Pick 카드와 종목 리스트 사이 컨텍스트 안내.
 
-    회원 요약 카드가 "⚠️ 신규 매수 주의"인데 바로 아래 종목이 "🟣 핵심매수"로
+    회원 요약 카드가 "⚠️ 신규 매수 주의"인데 바로 아래 종목이 "🟣 핵심 관찰"로
     떠서 충돌. 상태에 따라 적절한 안내문 표시.
     """
     bt = _load_backtest_stats()
@@ -1997,7 +1997,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 # [v3.7.23] 제목 — "Top 3" → "Top Pick" (실제 모드는 Top1 우선)
                 # 실제 selection_mode가 top1_first_then_top3_fallback이므로
                 # "오늘의 실전 1순위"가 정확한 표현. Top3는 fallback일 뿐.
-                ui.label("🏆 오늘의 실전 Top Pick").classes(
+                ui.label("🏆 오늘의 실전 후보").classes(
                     "text-lg font-bold text-white"
                 )
                 # [v3.7.1→v3.7.23] 뱃지 의미 명확화
@@ -2336,7 +2336,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 ).classes("text-[11px] text-gray-500 mb-1 italic")
 
             ui.label(
-                "🟣 핵심매수: S≥90·T≥80·AI≥60·매수검토/진입대기  ·  "
+                "🟣 핵심 관찰: S≥90·T≥80·AI≥60·고점수 관찰 · 공식 신규매수 아님  ·  "
                 "🟡 관찰 후보: 최소≥50·균형≥70·갭≤5% · 공식 신규매수 아님"
             ).classes("text-xs text-gray-500 mt-1")
             return
@@ -2453,8 +2453,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     _render_top3_card(df, top3_codes, on_card_click=_on_top_pick_click, auth=auth)
 
     # ── [v3.9.4] 종목 리스트 직전 — Top Pick 컨텍스트 안내 ──
-    # "신규 매수 주의" 상태일 때 바로 아래에 종목 카드가 "🟣 핵심매수"로 떠서
-    # "방금은 주의라며 왜 핵심매수?" 충돌이 생김. 명확한 안내로 해소.
+    # "신규 매수 주의" 상태일 때 바로 아래에 종목 카드가 "🟣 핵심 관찰"로 떠서
+    # "방금은 주의라며 왜 핵심 관찰?" 충돌이 생김. 명확한 안내로 해소.
     _render_candidate_context_notice()
 
     # ── 뷰모드 + 필터 ──
@@ -2474,12 +2474,12 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             value="전체", label="상태",
         ).classes("min-w-[130px]")
         # [v3.7.18] 라벨 필터 추가 - 즉시진입 너무 많을 때 최강만 보기 등
-        # [v3.7.25] 🛡️ 콤보 필터 추가 (제1 매수 종목)
+        # [v3.7.25] 🛡️ 콤보 필터 추가 (고점수 관찰 종목)
         # [Step AE] dict 옵션: key=internal(비교용), value=display(화면)
         label_filter = ui.select(
             {
                 "전체": "전체",
-                "🛡️ 콤보":   "🟣 핵심매수",
+                "🛡️ 콤보":   "🟣 핵심 관찰",
                 "🏆 최강":   "🔵 관심관찰",
                 "✅ 즉시진입": "🟡 관찰 후보",
                 "⚠️ 추격":   "🟠 추격주의",
@@ -2532,9 +2532,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         with ui.row().classes("w-full gap-6 items-center flex-wrap"):
             ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
             # [Step AE] 라벨명을 외부 리뷰안 한글로 표시 (내부값은 그대로 유지)
-            # [v3.7.25] 핵심매수 최우선 표시 (제1 매수 · 실성능 1위)
+            # [v3.7.25] 핵심 관찰 최우선 표시 (고점수 관찰 · 실성능 1위)
             ui.label(
-                f"🟣 핵심매수 ({n_combo}): S≥90 · T≥80 · AI≥60 · 매수검토/진입대기 "
+                f"🟣 핵심 관찰 ({n_combo}): S≥90 · T≥80 · AI≥60 · 고점수 관찰 "
                 f"[n=112 EV +25.77% 승률 83.9%]"
             ).classes("text-xs text-purple-400 font-bold")
             ui.label(
@@ -2680,7 +2680,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             )
             ui.label(
                 # [Step AE] 라벨 가중치 설명 한글화
-                "  · 🟣 핵심매수 ×1.50 (실성능 1위)  "
+                "  · 🟣 핵심 관찰 ×1.50 (고점수 관찰)  "
                 "· 🟡 관찰 후보 ×1.30 (공식 신규매수 아님)  "
                 "· 🔵 관심관찰 ×0.50 (관찰 모드)  "
                 "· 🟠 추격주의 ×0.70"

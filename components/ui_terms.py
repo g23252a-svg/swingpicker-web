@@ -90,10 +90,10 @@ def pick_type_info(pick_type: str) -> tuple:
 # ELITE_LABEL — v3.7 라벨 체계 (내부값 유지, 화면만 한국어)
 # ═══════════════════════════════════════════════════
 
-# [Step AE] 외부 리뷰안 — 행동 중심 + 컬러 통일 🟣🟢🔵🟠
+# [Step AE] 외부 리뷰안 — 관찰/공식매수 분리 + 컬러 통일 🟣🟢🔵🟠
 # 내부 ELITE_LABEL → 화면 표시
 ELITE_LABEL_DISPLAY = {
-    "🛡️ 콤보":   "🟣 핵심매수",
+    "🛡️ 콤보":   "🟣 핵심 관찰",
     "🏆 최강":   "🔵 관심관찰",
     # v22.3.8 UI safety: 내부값은 유지하되 화면에서는 매수 가능처럼 보이지 않게 표시
     "✅ 즉시진입": "🟡 관찰 후보",
@@ -105,7 +105,7 @@ ELITE_LABEL_INTERNAL = {v: k for k, v in ELITE_LABEL_DISPLAY.items()}
 
 # [Step AE] 테이블/칸반용 — 길지 않으니 동일하게
 ELITE_LABEL_DISPLAY_SHORT = {
-    "🛡️ 콤보":   "🟣 핵심매수",
+    "🛡️ 콤보":   "🟣 핵심 관찰",
     "🏆 최강":   "🔵 관심관찰",
     # 짧은 라벨도 '진입가능' 금지 — 공식 신규매수는 TOP_PICK+BUY_NOW_ELIGIBLE만
     "✅ 즉시진입": "🟡 관찰 후보",
