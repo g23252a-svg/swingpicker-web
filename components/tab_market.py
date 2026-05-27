@@ -6,6 +6,7 @@ tab_market.py — 📊 시장 현황 (NiceGUI Dark Theme)
 """
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timedelta
 
@@ -149,6 +150,65 @@ def _metric_card(title, value, delta="", positive=True):
             ui.label(str(delta)).classes(f"text-sm {color} mt-0.5")
 
 
+def _safe_number_or_none(value):
+    """UI 표시용 숫자 변환. NaN/inf/None은 화면에 노출하지 않는다."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(num) or pd.isna(num):
+        return None
+    return num
+
+
+def _format_macro_delta(last, prev):
+    """글로벌 매크로 카드의 전일 대비 표기 안전화.
+
+    FDR/캐시 데이터가 비어 있거나 NaN이면 `+nan%`를 표시하지 않고
+    사용자에게 의미 있는 fallback 문구를 반환한다.
+    """
+    last_num = _safe_number_or_none(last)
+    prev_num = _safe_number_or_none(prev)
+    if last_num is None or prev_num is None or prev_num == 0:
+        return "전일 대비 —", "text-xs text-gray-500", None
+    chg = (last_num - prev_num) / prev_num * 100
+    if not math.isfinite(chg) or pd.isna(chg):
+        return "전일 대비 —", "text-xs text-gray-500", None
+    css = "text-xs text-green-400" if chg >= 0 else "text-xs text-red-400"
+    return f"{chg:+.2f}%", css, chg
+
+
+def _is_market_no_buy_mode(macro_risk=None, max_route=None) -> bool:
+    """시장/엔진 상태 때문에 신규매수를 표시상 금지해야 하는지 판정."""
+    risk = str(macro_risk or "").strip().upper()
+    return risk in {"WARNING", "CRITICAL"} or is_route_blocked(max_route)
+
+
+def _combo_section_title(is_no_buy_mode: bool) -> str:
+    if is_no_buy_mode:
+        return "🎯 과거 유사패턴 참고용 조합 (오늘 매수 신호 아님)"
+    return "🎯 데이터 기반 최적 조합 (자동 탐색)"
+
+
+def _match_section_title(is_no_buy_mode: bool, n: int, combo_label: str, win_rate) -> str:
+    prefix = "👀 관찰 매칭 종목 · 공식 신규매수 아님" if is_no_buy_mode else "🎯 매칭 종목"
+    return f"{prefix} ({int(n)}개) — {combo_label} (승률 {win_rate}%)"
+
+
+def _blocking_priority_text(macro_risk=None, max_route=None, shortfall_msg="") -> list[str]:
+    """가장 가까운 후보 카드에 보여줄 차단 사유 우선순위."""
+    lines: list[str] = []
+    risk = str(macro_risk or "").strip().upper()
+    if risk in {"WARNING", "CRITICAL"}:
+        lines.append(f"1순위 차단: 매크로 위험 {risk}")
+    elif is_route_blocked(max_route):
+        lines.append(f"1순위 차단: 엔진 제한 {route_display(max_route)}")
+    if shortfall_msg:
+        prefix = "2순위 미달" if lines else "미달 사유"
+        lines.append(f"{prefix}: {shortfall_msg}")
+    return lines or ["조건 일부 미달"]
+
+
 def _plotly_dark(fig, height=300):
     if fig:
         fig.update_layout(
@@ -201,9 +261,14 @@ def _spark_card(label: str, ticker: str, color: str):
                 if d is None or d.empty:
                     val_label.set_text("N/A")
                     return
-                last = float(d["Close"].iloc[-1])
-                prev = float(d["Close"].iloc[-2]) if len(d) > 1 else last
-                chg = (last - prev) / prev * 100 if prev else 0
+                last = _safe_number_or_none(d["Close"].iloc[-1])
+                prev = _safe_number_or_none(d["Close"].iloc[-2]) if len(d) > 1 else last
+                if last is None:
+                    val_label.set_text(f"{label}: —")
+                    chg_label.set_text("전일 대비 —")
+                    chg_label.classes(replace="text-xs text-gray-500")
+                    return
+                delta_text, delta_css, _chg_value = _format_macro_delta(last, prev)
 
                 if ticker in ("USD/KRW",):
                     fmt = f"{last:,.1f}"
@@ -213,8 +278,8 @@ def _spark_card(label: str, ticker: str, color: str):
                     fmt = f"{last:,.2f}"
 
                 val_label.set_text(f"{label}: {fmt}")
-                chg_label.set_text(f"{chg:+.2f}%")
-                chg_label.classes(replace="text-xs text-green-400" if chg >= 0 else "text-xs text-red-400")
+                chg_label.set_text(delta_text)
+                chg_label.classes(replace=delta_css)
 
                 if PLOTLY_OK:
                     fig = go.Figure()
@@ -741,9 +806,10 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                         "text-xs text-amber-400 mb-1"
                     )
                 
-                ui.label(f"└ {shortfall_msg}").classes(
-                    "text-sm text-amber-300 mt-1"
-                )
+                for _line in _blocking_priority_text(macro_risk, max_route, shortfall_msg):
+                    ui.label(f"└ {_line}").classes(
+                        "text-sm text-amber-300 mt-1"
+                    )
                 
                 if cand_buy > 0 and cand_target > 0:
                     ui.label(
@@ -826,6 +892,9 @@ def render_tab_market(df, auth: str = "free"):
 
         risk_color = {"NORMAL": "#10B981", "CAUTION": "#F59E0B", "WARNING": "#EF4444", "CRITICAL": "#DC2626"}.get(macro_risk, "#6B7280")
         risk_kr = {"NORMAL": "정상", "CAUTION": "주의", "WARNING": "경고", "CRITICAL": "위험"}.get(macro_risk, macro_risk)
+        is_macro_dangerous = str(macro_risk or "").strip().upper() in {"WARNING", "CRITICAL"}
+        route_blocked = is_route_blocked(max_route)
+        is_no_buy_mode = _is_market_no_buy_mode(macro_risk, max_route)
 
         with ui.card().classes("w-full p-4 bg-[#0d0d1a] border border-gray-700/50 rounded-xl mb-4"):
             ui.label("🛡️ 엔진 상태").classes("text-xs text-gray-400 mb-2")
@@ -965,7 +1034,9 @@ def render_tab_market(df, auth: str = "free"):
 
                                 # [v3.9.11] 개별 제외 사유 — 우선순위 순서로 첫 매칭 표시
                                 _reason = ""
-                                if risk_lvl == "RED":
+                                if is_macro_dangerous:
+                                    _reason = "🚫 시장 위험 구간 — 오늘 매매 제외"
+                                elif risk_lvl == "RED":
                                     _reason = "🔴 RED 위험 — 진입 위험 패턴"
                                 elif risk_lvl == "ORANGE":
                                     _reason = "🟠 ORANGE — 과열 주의"
@@ -977,8 +1048,6 @@ def render_tab_market(df, auth: str = "free"):
                                     _reason = "👀 진입 시점 아님 — 관망 구간"
                                 elif is_macro_caution:
                                     _reason = "⚠️ 시장 CAUTION — 보수 접근 구간"
-                                elif is_macro_dangerous:
-                                    _reason = "🚫 시장 위험 구간"
 
                                 with ui.card().classes("flex-1 min-w-[200px] p-3 bg-[#1a1a2e] border border-gray-700 rounded-lg"):
                                     with ui.row().classes("items-center gap-2"):
@@ -1050,7 +1119,11 @@ def render_tab_market(df, auth: str = "free"):
                     meta = opt.get("meta", {})
                     if best:
                         with ui.card().classes("w-full p-4 bg-[#0a1628] border border-yellow-600/50 rounded-xl mb-4"):
-                            ui.label("🎯 데이터 기반 최적 조합 (자동 탐색)").classes("text-sm font-bold text-yellow-400 mb-2")
+                            ui.label(_combo_section_title(is_no_buy_mode)).classes("text-sm font-bold text-yellow-400 mb-2")
+                            if is_no_buy_mode:
+                                ui.label(
+                                    "※ 현재 시장/엔진 상태상 이 조합은 과거 통계 참고용입니다. 오늘 공식 신규매수 신호가 아닙니다."
+                                ).classes("text-[10px] text-red-300 italic mb-2")
 
                             # 승률 최적
                             with ui.row().classes("w-full gap-4 flex-wrap items-center"):
@@ -1162,9 +1235,10 @@ def render_tab_market(df, auth: str = "free"):
 
                             _uc = used_combo
                             _combo_label = f"S≥{_uc['S_min']} T≥{_uc['T_min']} AI≥{_uc['AI_min']} + {'+'.join(_uc['routes'])}"
-                            _match_title = "🎯 관찰 매칭 종목" if (is_macro_dangerous or route_blocked) else "🎯 매칭 종목"
-                            ui.label(f"{_match_title} ({len(matched)}개) — {_combo_label} (승률 {_uc['win_rate']}%)").classes("text-sm font-bold text-yellow-400 mb-2")
-                            if is_macro_dangerous or route_blocked:
+                            ui.label(
+                                _match_section_title(is_no_buy_mode, len(matched), _combo_label, _uc['win_rate'])
+                            ).classes("text-sm font-bold text-yellow-400 mb-2")
+                            if is_no_buy_mode:
                                 ui.label(
                                     "※ 현재 시장/엔진 상태상 아래 매칭 종목은 관찰 전용이며 공식 신규매수가 아닙니다."
                                 ).classes("text-[10px] text-red-300 italic mb-2")
