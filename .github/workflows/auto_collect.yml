@@ -87,10 +87,20 @@ jobs:
           }
           echo ">>> Backtest validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
+      - name: Run Official Buy Validation
+        run: |
+          echo ">>> Official buy validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+          python scripts/official_buy_validation.py --data-dir data --out-dir data || {
+            echo "⚠️ official_buy_validation 실패 — 기존 JSON 유지하고 계속 진행"
+            exit 0
+          }
+          echo ">>> Official buy validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+
       - name: Show outputs
         run: |
           ls -alh data || true
           head -n 5 data/recommend_latest.csv || true
+          test -f data/official_buy_validation_latest.json && head -n 30 data/official_buy_validation_latest.json || true
 
       - name: Commit & Push CSV
         run: |
