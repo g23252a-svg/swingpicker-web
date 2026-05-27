@@ -34,6 +34,7 @@ tab_perf.py — 📈 시스템 성과 추세 (NiceGUI Dark Theme)
 - 거래별 비용 차감 후 평균 (현재는 평균에서 일괄 차감)
 """
 import glob
+import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -842,6 +843,124 @@ def _load_backtest_validation() -> dict:
                 _logger.warning(f"backtest_validation_latest.json 로드 실패: {e}")
                 return {}
     return {}
+
+
+
+def _load_official_buy_validation() -> dict:
+    """[v22.3.12] 공식 신규매수 검증 JSON 로드.
+
+    공식 신규매수는 TOP_PICK + BUY_NOW_ELIGIBLE 기준이며,
+    별도 script가 생성한 official_buy_validation_latest.json만 읽는다.
+    추천/점수/BUY_NOW 산식은 여기서 절대 변경하지 않는다.
+    """
+    dirs_to_try = [DATA_DIR, os.path.join(os.getcwd(), "data"), "data"]
+    for d in dirs_to_try:
+        path = os.path.join(d, "official_buy_validation_latest.json")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:
+            _logger.warning("official_buy_validation_latest.json 로드 실패: %s", exc)
+            return {}
+    return {}
+
+
+def _pct_or_dash(value, digits: int = 2, signed: bool = False) -> str:
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+    except (TypeError, ValueError) as exc:
+        _logger.debug("pct 표시값 변환 실패: %r (%s)", value, exc)
+        return "—"
+    sign = "+" if signed else ""
+    return f"{v:{sign}.{digits}f}%"
+
+
+def _render_official_buy_validation_card() -> None:
+    """[v22.3.12] 공식 신규매수 성과 누적 카드.
+
+    측정 대상:
+    - TOP_PICK + BUY_NOW_ELIGIBLE 실제 결과
+    - BUY_NOW_ELIGIBLE=0으로 보류한 TOP_PICK의 이후 결과
+    - 보류/현금 유지가 손실을 피했는지, 기회비용을 냈는지
+    """
+    j = _load_official_buy_validation()
+
+    with ui.card().classes(
+        "w-full p-3 bg-[#1a1a2e] border border-emerald-700/30 rounded-lg mb-3"
+    ):
+        with ui.row().classes("w-full items-center gap-2 mb-1"):
+            ui.label("📌").classes("text-2xl")
+            with ui.column().classes("gap-0 flex-1"):
+                ui.label("공식 신규매수 성과 검증").classes(
+                    "text-lg font-bold text-emerald-300"
+                )
+                ui.label(
+                    "TOP_PICK + BUY_NOW_ELIGIBLE 기준의 실제 성과와, "
+                    "ELIGIBLE=0으로 보류한 TOP_PICK의 현금 유지 효과를 별도로 측정합니다."
+                ).classes("text-xs text-gray-400 leading-relaxed")
+
+        if not j:
+            ui.label(
+                "아직 official_buy_validation_latest.json 데이터가 없습니다. "
+                "`python scripts/official_buy_validation.py --data-dir data --out-dir data` 실행 후 표시됩니다."
+            ).classes("text-xs text-amber-200 leading-relaxed mt-1")
+            return
+
+        s = j.get("summary", {}) or {}
+        asof = j.get("asof", "")
+
+        with ui.row().classes("w-full flex-wrap gap-x-6 gap-y-1 mt-2"):
+            _shadow_stat("검증일", f"{int(s.get('signal_days', 0)):,}일")
+            _shadow_stat("공식 신호", f"{int(s.get('official_buy_signals', 0)):,}건")
+            _shadow_stat("공식 결과", f"{int(s.get('official_buy_results', 0)):,}건")
+            _shadow_stat(
+                "공식 승률",
+                _pct_or_dash(s.get("official_buy_win_rate"), digits=1),
+                good=(s.get("official_buy_win_rate") or 0) >= 50,
+            )
+            _shadow_stat(
+                "공식 평균",
+                _pct_or_dash(s.get("official_buy_avg_net_pct"), digits=2, signed=True),
+                good=(s.get("official_buy_avg_net_pct") or 0) > 0,
+                bad=(s.get("official_buy_avg_net_pct") or 0) < 0,
+            )
+
+        with ui.row().classes("w-full flex-wrap gap-x-6 gap-y-1 mt-2"):
+            _shadow_stat("공식매수 없음", f"{int(s.get('no_official_buy_days', 0)):,}일")
+            _shadow_stat("보류 TOP_PICK", f"{int(s.get('top_pick_holdout_results', 0)):,}건")
+            _shadow_stat(
+                "보류 종목 승률",
+                _pct_or_dash(s.get("holdout_top_pick_win_rate"), digits=1),
+                bad=(s.get("holdout_top_pick_win_rate") or 0) >= 50,
+            )
+            _shadow_stat(
+                "보류 종목 평균",
+                _pct_or_dash(s.get("holdout_top_pick_avg_net_pct"), digits=2, signed=True),
+                good=(s.get("holdout_top_pick_avg_net_pct") or 0) < 0,
+                bad=(s.get("holdout_top_pick_avg_net_pct") or 0) > 0,
+            )
+            _shadow_stat(
+                "현금 효과",
+                _pct_or_dash(s.get("cash_vs_top_pick_avg_pct"), digits=2, signed=True),
+                good=(s.get("cash_vs_top_pick_avg_pct") or 0) > 0,
+                bad=(s.get("cash_vs_top_pick_avg_pct") or 0) < 0,
+            )
+
+        avoided = int(s.get("cash_avoided_loss_days", 0) or 0)
+        opp = int(s.get("cash_opportunity_cost_days", 0) or 0)
+        ui.label(
+            f"현금 유지 판정: 손실 회피 {avoided}건 · 기회비용 {opp}건 · "
+            f"데이터 기준 {asof or '—'}"
+        ).classes("text-xs text-emerald-100 mt-2 leading-relaxed")
+        ui.label(
+            "※ 이 카드는 측정 전용입니다. BUY_NOW_ELIGIBLE / TOP_PICK / 점수 산식은 변경하지 않습니다. "
+            "공식 결과 표본이 충분히 쌓이기 전까지는 승률을 과신하지 마세요."
+        ).classes("text-[10px] text-gray-500 italic mt-1 leading-relaxed")
 
 
 def _render_shadow_lab_card():
@@ -2124,6 +2243,13 @@ def render_tab_perf(auth: str = "free"):
         if w:
             w.on("update:model-value", lambda _: _build_chart())
     _build_chart()
+
+    # [v22.3.12] 공식 신규매수 성과 누적 — TOP_PICK + BUY_NOW_ELIGIBLE 별도 검증
+    try:
+        ui.separator().classes("my-6")
+        _render_official_buy_validation_card()
+    except Exception as e:
+        _logger.warning(f"official buy validation 카드 렌더 실패 (페이지 영향 없음): {e}")
 
     # [v3.9.1] Shadow 실험실 — ENTRY_MODE / STRUCT risk shadow 측정 결과
     try:

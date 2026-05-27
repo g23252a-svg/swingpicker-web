@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.3.12",
+        "date": "2026-05-27",
+        "type": "patch",
+        "title": "v22.3.12 — 공식 신규매수 성과 누적: TOP_PICK + BUY_NOW_ELIGIBLE 실제 검증 시작",
+        "items": [
+            "📌 **공식 신규매수 성과 검증 신설:** `TOP_PICK + BUY_NOW_ELIGIBLE` 조합만 공식 신규매수로 분리해 실제 결과를 누적합니다. 기존 ELITE Top5/Top1 백테스트와 혼동하지 않도록 별도 데이터셋과 성과탭 카드를 추가했습니다.",
+            "💵 **현금 유지 판단도 검증:** `BUY_NOW_ELIGIBLE=0`으로 보류한 날을 단순 공백으로 두지 않고, TOP_PICK 보류 종목이 이후 상승했는지 하락했는지를 추적합니다. 보류 종목이 하락하면 현금 유지 성공, 상승하면 기회비용으로 기록됩니다.",
+            "📊 **새 산출물 추가:** `scripts/official_buy_validation.py` 실행 시 `official_buy_validation_latest.csv/json`과 날짜별 파일이 생성됩니다. 공식매수 신호 수, 결과 표본, 승률, 평균수익률, 보류 TOP_PICK 평균, 현금 효과를 자동 요약합니다.",
+            "🧭 **성과탭 표시 추가:** 성과탭에 '공식 신규매수 성과 검증' 카드를 추가해 공식 신호와 보류 판단을 ELITE/Shadow 지표와 분리 표시합니다. 데이터가 없으면 실행 명령과 준비 상태를 안내합니다.",
+            "🔒 **추천 로직 무변경:** 이번 패치는 measurement-only 검증 추가입니다. `BUY_NOW_ELIGIBLE`, `TOP_PICK`, `BUY_NOW_GRADE`, 점수 산식, `scoring_engine.py`는 변경하지 않습니다.",
+            "🧪 **회귀 테스트 추가:** 공식매수 1건과 보류 TOP_PICK 1건을 날짜+종목코드로 조인하고, 현금 효과(`cash_vs_top_pick_pct`)를 올바르게 계산하는 테스트를 추가했습니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.3.10",
         "date": "2026-05-25",
         "type": "patch",
