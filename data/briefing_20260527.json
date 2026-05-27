@@ -1,6 +1,6 @@
 {
   "trade_date": "20260527",
-  "generated_at": "2026-05-27 23:23:48",
+  "generated_at": "2026-05-27 23:42:30",
   "count": 3,
   "stocks": [
     {
@@ -48,7 +48,7 @@
       "stop": 3240,
       "target1": 5610,
       "target2": 6140,
-      "est_win_rate": 0.496,
+      "est_win_rate": 0.473,
       "rr": 3.1,
       "sector": "반도체",
       "market": "KOSDAQ",
