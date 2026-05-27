@@ -212,7 +212,8 @@ def format_buy_now_subtitle(disp: Dict[str, Any]) -> str:
     icon = disp.get("display_icon", disp.get("icon", ""))
     score = disp.get("score", 0)
     short = disp.get("display_short", disp.get("short", ""))
-    return f"{icon} BUY_NOW {score:.0f}점 — {short}"
+    prefix = "공식 신규매수" if disp.get("official_buy") else "진입조건"
+    return f"{icon} {prefix} {score:.0f}점 — {short}"
 
 
 def format_buy_now_tooltip(disp: Dict[str, Any]) -> str:
@@ -228,7 +229,7 @@ def format_buy_now_tooltip(disp: Dict[str, Any]) -> str:
     # ★ v22.3.8: BUY인데 ELIGIBLE=0이면 회원 오해 방지 안내
     grade = disp.get("grade", "NONE")
     if grade == "BUY" and not disp.get("official_buy"):
-        ineligible_note = "BUY_NOW_ELIGIBLE=0 · 공식 매수 대상 아님"
+        ineligible_note = "진입조건은 양호하나 BUY_NOW_ELIGIBLE=0 · 공식 매수 대상 아님"
         if reason:
             return f"사유: {reason} · {ineligible_note}"
         return f"사유: {ineligible_note}"
