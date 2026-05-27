@@ -27,10 +27,13 @@ tab_perf.py — 📈 시스템 성과 추세 (NiceGUI Dark Theme)
 추가 개선 (Step AN):
 15. ✅ _safe_float() helper — sel_cost.value 안전 변환
 16. ✅ 차트 모드별 해설 (CHART_MODE_EXPLANATIONS)
-17. ✅ KOSPI 근사치 명시 (행별 정확한 알파는 향후 백테스트 단계 작업)
+17. ✅ KOSPI 근사치 명시 → v22.3.14에서 행별 KOSPI_RET_%/ALPHA_% 우선 사용
 
-향후 작업 (백엔드 단계 — 99점 → 100점):
-- rank_validation_summary CSV에 KOSPI_RET_%/ALPHA_% 컬럼 추가
+v22.3.14 추가:
+- rank_validation_summary CSV의 KOSPI_RET_%/ALPHA_% 행별 정확 알파 우선 표시
+- Shadow Promotion Gate로 B_red 등 룰 승격 심사표 표시
+
+향후 작업:
 - 거래별 비용 차감 후 평균 (현재는 평균에서 일괄 차감)
 """
 import glob
@@ -38,7 +41,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 from nicegui import ui
@@ -259,6 +262,143 @@ def _worst_drawdown_value(df: pd.DataFrame, col: str = "WORST_MDD_%") -> Optiona
     return -float(values.abs().max())
 
 
+
+
+def _resolve_alpha_metrics(
+    df: pd.DataFrame,
+    bench_data: dict = None,
+    hold_days: int = None,
+) -> Tuple[Optional[float], Optional[float], str]:
+    """[v22.3.14] 행별 KOSPI/알파 우선 사용.
+
+    rank_validation_summary에 KOSPI_RET_% / ALPHA_%가 있으면 추천일별
+    실제 KOSPI forward return을 집계한 정확 알파로 표시한다. 없을 때만
+    기존 bench_cache_latest 보유기간 평균 기반 근사치로 fallback한다.
+
+    Returns:
+        (kospi_ret_pct, alpha_pctp, source)
+        source: row_exact | bench_avg | none
+    """
+    row_kospi = _weighted_mean(df, "KOSPI_RET_%")
+    row_alpha = _weighted_mean(df, "ALPHA_%")
+    if row_kospi is not None and row_alpha is not None:
+        return row_kospi, row_alpha, "row_exact"
+
+    if bench_data and hold_days is not None:
+        kospi_ret = _get_kospi_return(bench_data, hold_days)
+        avg_ret = _weighted_mean(df, "AVG_RET_%")
+        if kospi_ret is not None and avg_ret is not None:
+            return float(kospi_ret), float(avg_ret - float(kospi_ret)), "bench_avg"
+
+    return None, None, "none"
+
+
+def _safe_shadow_float(value, default: Optional[float] = None) -> Optional[float]:
+    """Shadow promotion gate용 숫자 변환."""
+    try:
+        if value is None:
+            return default
+        v = float(value)
+        if pd.isna(v):
+            return default
+        return v
+    except (TypeError, ValueError):
+        return default
+
+
+def _shadow_changed_pct(rule: dict) -> Optional[float]:
+    """changed_pick_rate가 0~1 비율/0~100 퍼센트 어느 형식이든 %로 정규화."""
+    raw = _safe_shadow_float(rule.get("changed_pick_rate"), None)
+    if raw is None:
+        raw = _safe_shadow_float(rule.get("changed_pick_pct"), None)
+    if raw is None:
+        return None
+    return raw * 100.0 if abs(raw) <= 1.0 else raw
+
+
+def _shadow_sample_n(rule: dict) -> Optional[int]:
+    """Shadow rule 표본 수 후보 키를 보수적으로 탐색."""
+    for key in ("n", "N", "sample_n", "n_raw", "total_n", "trades", "candidate_n"):
+        if key in rule:
+            v = _safe_shadow_float(rule.get(key), None)
+            if v is not None:
+                return int(v)
+    return None
+
+
+def _score_shadow_promotion_rule(
+    rule_key: str,
+    rule: dict,
+    rwf_pass: bool = False,
+) -> Dict[str, Any]:
+    """[v22.3.14] Shadow Rule 승격 심사표.
+
+    추천 로직을 자동 변경하지 않고, 룰을 다음 단계로 올릴 수 있는지
+    표시/감점/hard-block 검토 후보로만 판정한다. hard block은 언제나
+    사람이 별도 PR로 승격해야 한다.
+    """
+    d_ev = _safe_shadow_float(rule.get("delta_ev"), 0.0) or 0.0
+    d_non_win = _safe_shadow_float(rule.get("delta_non_win_avg_ret"), 0.0) or 0.0
+    changed_pct = _shadow_changed_pct(rule)
+    sample_n = _shadow_sample_n(rule)
+    single_ok = bool(rule.get("single_backtest_ok", False))
+    rwf_ok = bool(
+        rule.get("rwf_ok", False)
+        or rule.get("rwf_pass", False)
+        or rule.get("rwf_passed", False)
+        or rwf_pass
+    )
+
+    checks = {
+        "delta_ev": d_ev >= 0.8,
+        "non_win": d_non_win >= 0.0,
+        "changed": (changed_pct is not None and changed_pct <= 35.0),
+        "single": single_ok,
+        "rwf": rwf_ok,
+        "sample": (sample_n is not None and sample_n >= 30),
+    }
+
+    if d_ev < 0 or ("single_backtest_ok" in rule and not single_ok):
+        verdict = "폐기 후보"
+        tone = "red"
+        action = "운영 반영 금지"
+    elif not checks["sample"]:
+        verdict = "표본 부족 · 표시 유지"
+        tone = "yellow"
+        action = "2~4주 추가 누적"
+    elif checks["delta_ev"] and checks["changed"] and checks["single"] and checks["rwf"]:
+        if d_ev >= 1.0 and changed_pct is not None and changed_pct <= 30.0 and sample_n >= 60:
+            verdict = "hard block 검토 후보"
+            tone = "amber"
+            action = "별도 PR에서 승격 심사"
+        else:
+            verdict = "감점/표시 승격 후보"
+            tone = "green"
+            action = "ENTRY_EDGE 감점 강화 검토"
+    elif checks["delta_ev"] and checks["single"]:
+        verdict = "관찰 유지"
+        tone = "yellow"
+        action = "구성변경률/RWF/표본 보강"
+    else:
+        verdict = "측정 유지"
+        tone = "gray"
+        action = "현 상태 유지"
+
+    return {
+        "rule_key": rule_key,
+        "description": rule.get("description", ""),
+        "delta_ev": d_ev,
+        "delta_non_win_avg_ret": d_non_win,
+        "changed_pct": changed_pct,
+        "sample_n": sample_n,
+        "single_ok": single_ok,
+        "rwf_ok": rwf_ok,
+        "checks": checks,
+        "verdict": verdict,
+        "tone": tone,
+        "action": action,
+    }
+
 def _select_perf_default_slice(
     history: pd.DataFrame,
     method: str = "ELITE_SCORE",
@@ -441,13 +581,10 @@ def _render_metrics_grid(
     if avg_ret is not None:
         avg_ret_after_cost = avg_ret - cost_pct
     
-    # [Step AM] KOSPI 알파 계산
-    kospi_ret = None
-    alpha = None
-    if bench_data and hold_days is not None:
-        kospi_ret = _get_kospi_return(bench_data, hold_days)
-        if kospi_ret is not None and avg_ret is not None:
-            alpha = avg_ret - kospi_ret
+    # [v22.3.14] KOSPI 알파 계산 — 행별 정확 알파 우선, 없으면 기존 평균 benchmark fallback
+    kospi_ret, alpha, alpha_source = _resolve_alpha_metrics(
+        cdf, bench_data=bench_data, hold_days=hold_days
+    )
     
     # [v22.3.8 C-1] 현재 선택된 백테스트 차원(METHOD/TOPK/H/N)을 SSOT로 명시
     # 회원이 보는 KPI가 어떤 기준의 시뮬레이션인지 항상 헤더에서 확인 가능.
@@ -607,14 +744,21 @@ def _render_metrics_grid(
             f"{'text-emerald-300' if alpha > 0 else 'text-red-300'}"
         )
         
-        # [Step AN] 근사치 안내 — 행별 정확한 알파 미지원
-        ui.label(
-            "ℹ️ 현재 KOSPI 알파는 동일 보유기간 평균값 기반 근사치입니다. "
-            "행별(검증일별) 정확한 알파는 백테스트 데이터에 "
-            "KOSPI_RET_% / ALPHA_% 컬럼 추가 시 제공됩니다."
-        ).classes(
-            "text-[11px] text-gray-500 italic mt-2 text-center leading-relaxed"
-        )
+        # [v22.3.14] 알파 산출 방식 안내
+        if alpha_source == "row_exact":
+            alpha_note = (
+                "ℹ️ KOSPI 알파는 검증일별 KOSPI_RET_% / ALPHA_% 컬럼을 "
+                "TOTAL_N 기준으로 집계한 정확 알파입니다."
+            )
+            alpha_note_cls = "text-[11px] text-emerald-300 italic mt-2 text-center leading-relaxed"
+        else:
+            alpha_note = (
+                "ℹ️ 현재 KOSPI 알파는 기존 bench_cache_latest 보유기간 평균값 기반 "
+                "근사치입니다. rank_validation에 KOSPI_RET_% / ALPHA_%가 생성되면 "
+                "검증일별 정확 알파로 자동 전환됩니다."
+            )
+            alpha_note_cls = "text-[11px] text-gray-500 italic mt-2 text-center leading-relaxed"
+        ui.label(alpha_note).classes(alpha_note_cls)
     
     # [Step AL+AM] 비용 안내 + 시장 비교 안내
     with ui.column().classes("w-full gap-1 mt-3"):
@@ -1004,7 +1148,13 @@ def _render_shadow_lab_card():
     try:
         _render_shadow_summary_card(j)
     except Exception as _e:
-        pass  # 안전 폴백
+        _logger.debug("shadow summary card render skipped: %s", _e)
+
+    # [v22.3.14] Shadow Promotion Gate — 룰 승격 심사표
+    try:
+        _render_shadow_promotion_gate_card(j)
+    except Exception as _e:
+        _logger.debug("shadow promotion gate render skipped: %s", _e)
 
     # ─── ENTRY_MODE shadow ───
     if em.get("enabled"):
@@ -1787,12 +1937,13 @@ def _render_perf_judgment_card(history: pd.DataFrame, bench_data: dict) -> None:
     except Exception:
         return
 
-    # [v3.9.12b] alpha — 기존 _get_kospi_return() 헬퍼 사용 (dict 구조 호환)
+    # [v22.3.14] alpha — 행별 정확 ALPHA_% 우선, 없으면 bench 평균 fallback
     alpha = None
+    alpha_source = "none"
     try:
-        kospi_ret = _get_kospi_return(bench_data, 5)
-        if kospi_ret is not None:
-            alpha = avg_ret - float(kospi_ret)
+        _kospi_ret, alpha, alpha_source = _resolve_alpha_metrics(
+            h, bench_data=bench_data, hold_days=5
+        )
     except Exception as e:
         _logger.debug("KOSPI alpha 계산 실패: %s", e)
 
@@ -1847,7 +1998,8 @@ def _render_perf_judgment_card(history: pd.DataFrame, bench_data: dict) -> None:
         # 한 줄 지표 요약
         summary_parts = [f"표본가중 승률 {win:.1f}%", f"표본가중 수익률 {avg_ret:+.2f}%"]
         if alpha is not None:
-            summary_parts.append(f"KOSPI 알파 {alpha:+.2f}%p")
+            alpha_label = "행별 KOSPI 알파" if alpha_source == "row_exact" else "KOSPI 알파"
+            summary_parts.append(f"{alpha_label} {alpha:+.2f}%p")
         else:
             summary_parts.append("KOSPI 알파 데이터 없음")
         ui.label("기준: " + " · ".join(summary_parts)).classes(

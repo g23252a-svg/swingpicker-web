@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.3.14",
+        "date": "2026-05-27",
+        "type": "patch",
+        "title": "v22.3.14 — 행별 KOSPI 알파 + Shadow Promotion Gate: 검증 정밀도와 룰 승격 심사표 강화",
+        "items": [
+            "📈 **행별 KOSPI 알파 정확화:** rank validation에 `KOSPI_RET_%`, `ALPHA_%`, `ALPHA_WIN_RATE_%` 컬럼을 추가합니다. 기존 보유기간 평균 KOSPI 근사치가 아니라 추천일별 KOSPI forward return을 기준으로 시장 초과성과를 계산합니다.",
+            "📊 **성과탭 알파 표시 자동 전환:** 성과탭은 `ALPHA_%` 컬럼이 있으면 행별 정확 알파를 우선 표시하고, 없을 때만 기존 `bench_cache_latest.json` 평균값으로 fallback합니다. 상단 성과 판정 카드도 같은 기준을 사용합니다.",
+            "🧭 **Shadow Promotion Gate 추가:** B_red 등 PRE_ENTRY_RISK shadow 룰을 `표시 유지 / 감점 후보 / hard block 검토 후보 / 폐기 후보`로 자동 판정하는 심사표를 성과탭에 추가합니다.",
+            "🔒 **운영 추천 산식 무변경:** 이번 패치는 검증·표시 레이어 전용입니다. `BUY_NOW_ELIGIBLE`, `TOP_PICK`, `ENTRY_EDGE_SCORE`, `scoring_engine.py`는 변경하지 않습니다. hard block은 자동 적용하지 않고 별도 PR 심사 대상으로만 표시합니다.",
+            "🧪 **회귀 테스트 추가:** 행별 알파 우선 사용, bench 평균 fallback, Shadow Promotion Gate의 표본 부족/승격 후보/폐기 후보 판정을 테스트로 고정했습니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.3.13",
         "date": "2026-05-27",
         "type": "patch",

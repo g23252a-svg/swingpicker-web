@@ -1,9 +1,9 @@
 {
   "version": 2,
   "doc": "DO NOT edit by hand unless you know what you're doing. Regenerate with: python scripts/check_silent_exceptions.py --regenerate. Matching is by (file, exc_type, body_kind, code) multiset count — robust to line shifts but distinguishes duplicates within same file.",
-  "count": 175,
+  "count": 174,
   "by_severity": {
-    "SILENT": 172,
+    "SILENT": 171,
     "QUASI": 3
   },
   "fingerprint_counts": {
@@ -14,7 +14,6 @@
     "0b13bed4d91f": 2,
     "0d1b5d1262b8": 3,
     "0d3763ceaac3": 1,
-    "15335de984f2": 1,
     "1715ae473d16": 2,
     "1985e4801ad4": 1,
     "1c59f35c2900": 2,
@@ -173,7 +172,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1123,
+      "line": 1189,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -181,7 +180,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1138,
+      "line": 1204,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -189,7 +188,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1171,
+      "line": 1237,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -197,7 +196,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1594,
+      "line": 1660,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -205,7 +204,7 @@
     {
       "fingerprint": "08896929936d",
       "file": "collector.py",
-      "line": 1731,
+      "line": 1797,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -213,7 +212,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1744,
+      "line": 1810,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -221,7 +220,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1750,
+      "line": 1816,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -229,7 +228,7 @@
     {
       "fingerprint": "80485ef4614c",
       "file": "collector.py",
-      "line": 1764,
+      "line": 1830,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -405,15 +404,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 645,
-      "exc_type": "Exception",
-      "severity": "SILENT",
-      "body_kind": "pass"
-    },
-    {
-      "fingerprint": "15335de984f2",
-      "file": "components/tab_perf.py",
-      "line": 887,
+      "line": 790,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -421,7 +412,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1079,
+      "line": 1348,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -429,7 +420,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1172,
+      "line": 1441,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -437,7 +428,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1198,
+      "line": 1467,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -669,7 +660,7 @@
     {
       "fingerprint": "1c59f35c2900",
       "file": "components/tab_stocks.py",
-      "line": 2994,
+      "line": 3270,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -677,7 +668,7 @@
     {
       "fingerprint": "1c59f35c2900",
       "file": "components/tab_stocks.py",
-      "line": 3051,
+      "line": 3327,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -1453,7 +1444,7 @@
     {
       "fingerprint": "cdb33882f2ed",
       "file": "version_info.py",
-      "line": 420,
+      "line": 463,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"

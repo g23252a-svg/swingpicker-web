@@ -582,6 +582,55 @@ def _next_trade_day(trade_days: List[str], ymd: str, offset: int) -> Optional[st
 
 # [v14 REMOVED → _pick_recommend_file_per_day moved to module] (15 lines deleted)
 
+
+
+# [v22.3.14] rank validation 행별 KOSPI forward return / alpha helper
+_KOSPI_FORWARD_RET_CACHE: Dict[Tuple[str, int], Dict[str, float]] = {}
+
+
+def _load_kospi_forward_return_map(out_dir: str, horizon: int) -> Dict[str, float]:
+    """data/kospi_daily.csv에서 rec_date별 KOSPI forward return을 로드.
+
+    scripts/collect_kospi_daily.py가 생성하는 ret_{h}d_% 컬럼을 사용한다.
+    없으면 빈 dict를 반환해 기존 rank validation 동작을 유지한다.
+    """
+    key = (str(out_dir), int(horizon))
+    if key in _KOSPI_FORWARD_RET_CACHE:
+        return _KOSPI_FORWARD_RET_CACHE[key]
+
+    path = os.path.join(out_dir, "kospi_daily.csv")
+    col = f"ret_{int(horizon)}d_%"
+    result: Dict[str, float] = {}
+    if not os.path.exists(path):
+        _KOSPI_FORWARD_RET_CACHE[key] = result
+        return result
+
+    try:
+        kdf = pd.read_csv(path, dtype={"date": str})
+        if "date" not in kdf.columns or col not in kdf.columns:
+            _KOSPI_FORWARD_RET_CACHE[key] = result
+            return result
+        kdf["date"] = kdf["date"].astype(str).str.replace(r"\D", "", regex=True).str[:8]
+        vals = pd.to_numeric(kdf[col], errors="coerce")
+        for d, v in zip(kdf["date"], vals):
+            if d and len(d) == 8 and np.isfinite(v):
+                result[d] = float(v)
+    except Exception as e:
+        logger.debug(f"KOSPI forward return 로드 실패 ({path}, {col}): {e}")
+        result = {}
+
+    _KOSPI_FORWARD_RET_CACHE[key] = result
+    return result
+
+
+def _lookup_kospi_forward_return(out_dir: str, rec_ymd: str, horizon: int) -> float:
+    """rec_ymd 기준 horizon 영업일 KOSPI 수익률(%). 없으면 NaN."""
+    mp = _load_kospi_forward_return_map(out_dir, horizon)
+    try:
+        return float(mp.get(str(rec_ymd), np.nan))
+    except (TypeError, ValueError):
+        return float("nan")
+
 def make_rank_validation_report(
     out_dir: str,
     asof_ymd: str,
@@ -798,6 +847,17 @@ def make_rank_validation_report(
                         r = ret[valid]
                         md = mdd[valid]
 
+                        # [v22.3.14] 행별 KOSPI forward return / ALPHA_%.
+                        # rec_ymd 기준 ret_{h}d_%를 사용해 검증일별 정확 알파를 계산한다.
+                        kospi_ret = _lookup_kospi_forward_return(out_dir, rec_ymd, h)
+                        if np.isfinite(kospi_ret):
+                            alpha_arr = r - float(kospi_ret)
+                            alpha_avg = float(np.nanmean(alpha_arr)) if len(alpha_arr) else np.nan
+                            alpha_win_rate = float((alpha_arr > 0).mean() * 100) if len(alpha_arr) else np.nan
+                        else:
+                            alpha_avg = np.nan
+                            alpha_win_rate = np.nan
+
                         # [v10.5] hit rate는 ret 유효 기준 (mdd NaN이어도 체결은 된 경우 포함)
                         n_ret = int(valid_ret.sum())
                         stop_hit_rate = float(stop_hit[valid_ret].mean() * 100) if n_ret > 0 else 0.0
@@ -838,6 +898,9 @@ def make_rank_validation_report(
                             "N": n,
                             "WIN_RATE_%": round(float((r > 0).mean() * 100), 1),
                             "AVG_RET_%": round(float(np.nanmean(r)), 2),
+                            "KOSPI_RET_%": round(float(kospi_ret), 2) if np.isfinite(kospi_ret) else np.nan,
+                            "ALPHA_%": round(float(alpha_avg), 2) if np.isfinite(alpha_avg) else np.nan,
+                            "ALPHA_WIN_RATE_%": round(float(alpha_win_rate), 1) if np.isfinite(alpha_win_rate) else np.nan,
                             "MED_RET_%": round(float(np.nanmedian(r)), 2),
                             "HIT_2%_%": round(float((r >= 2).mean() * 100), 1),
                             "HIT_5%_%": round(float((r >= 5).mean() * 100), 1),
@@ -870,6 +933,9 @@ def make_rank_validation_report(
             "TOTAL_N": int(g["N"].sum()),
             "WIN_RATE_%": round(_wavg(g, "WIN_RATE_%"), 1),
             "AVG_RET_%": round(_wavg(g, "AVG_RET_%"), 2),
+            "KOSPI_RET_%": round(_wavg(g, "KOSPI_RET_%"), 2) if "KOSPI_RET_%" in g.columns and g["KOSPI_RET_%"].notna().any() else np.nan,
+            "ALPHA_%": round(_wavg(g, "ALPHA_%"), 2) if "ALPHA_%" in g.columns and g["ALPHA_%"].notna().any() else np.nan,
+            "ALPHA_WIN_RATE_%": round(_wavg(g, "ALPHA_WIN_RATE_%"), 1) if "ALPHA_WIN_RATE_%" in g.columns and g["ALPHA_WIN_RATE_%"].notna().any() else np.nan,
             "MED_RET_%": round(float(np.nanmedian(g["MED_RET_%"].values)), 2),
             "HIT_2%_%": round(_wavg(g, "HIT_2%_%"), 1),
             "HIT_5%_%": round(_wavg(g, "HIT_5%_%"), 1),
