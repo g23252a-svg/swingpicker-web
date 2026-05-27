@@ -984,6 +984,79 @@ def render_tab_market(df, auth: str = "free"):
                                         "text-xs text-red-400"
                                     ).tooltip("추격 금지")
 
+        # ── [v22.3.17-b] FX Regime & No-Buy Gate Audit render ──
+        # helper 함수만 있고 화면에 표시되지 않던 v22.3.17 진단 카드를 실제 UI에 연결한다.
+        # 표시/진단 전용이며 TOP_PICK/BUY_NOW_ELIGIBLE/추천 산식은 변경하지 않는다.
+        try:
+            if is_no_buy_mode:
+                _ref_date = (
+                    meta.get("data_date")
+                    or meta.get("run_date")
+                    or meta.get("generated_at")
+                    or meta.get("asof_date")
+                )
+                _fx_diag = _fx_regime_diagnosis(
+                    macro_msg=macro_msg,
+                    macro_risk=macro_risk,
+                    breadth=breadth,
+                    max_route=max_route,
+                    reference_date=_ref_date,
+                )
+                _gate = _build_no_buy_gate_audit(df, meta)
+                _cnt = _gate.get("counts", {})
+                _tone_css = {
+                    "red": "border-red-700/50 bg-red-950/20 text-red-200",
+                    "orange": "border-orange-700/50 bg-orange-950/20 text-orange-200",
+                    "amber": "border-amber-700/50 bg-amber-950/20 text-amber-200",
+                    "gray": "border-gray-700/50 bg-gray-900/30 text-gray-200",
+                }.get(_fx_diag.get("tone"), "border-gray-700/50 bg-gray-900/30 text-gray-200")
+
+                with ui.card().classes(f"w-full p-4 rounded-xl border mb-4 {_tone_css}"):
+                    ui.label("🧭 공식 신규매수 0개 원인 분석 — FX Regime & Gate Audit").classes(
+                        "text-sm font-bold mb-2"
+                    )
+                    ui.label(_fx_diag.get("verdict", "진단 정보 부족")).classes(
+                        "text-xs font-bold mb-2"
+                    )
+                    with ui.row().classes("w-full gap-2 flex-wrap mb-2"):
+                        ui.badge(f"전체 {_cnt.get('total', 0)}", color="#6B7280")
+                        ui.badge(f"ARMED/ATTACK {_cnt.get('armed_attack', 0)}", color="#3B82F6")
+                        ui.badge(f"TOP_PICK {_cnt.get('top_pick', 0)}", color="#F59E0B")
+                        ui.badge(f"공식매수 {_cnt.get('official_buy', 0)}", color="#10B981")
+                        if _cnt.get("macro_blocked", 0):
+                            ui.badge(f"매크로/엔진 차단 {_cnt.get('macro_blocked', 0)}", color="#DC2626")
+
+                    with ui.row().classes("w-full gap-3 flex-wrap"):
+                        with ui.column().classes("flex-1 min-w-[240px] gap-1"):
+                            ui.label("매크로 차단 상세").classes("text-[10px] text-gray-400 uppercase")
+                            for _line in _fx_diag.get("lines", []):
+                                ui.label(f"• {_line}").classes("text-xs")
+                        with ui.column().classes("flex-1 min-w-[240px] gap-1"):
+                            ui.label("게이트별 탈락 집계 — 중복 집계 가능").classes("text-[10px] text-gray-400 uppercase")
+                            ui.label(f"• FINAL/ELITE 75 미달: {_cnt.get('final_under_75', 0)}개").classes("text-xs")
+                            ui.label(f"• BUY_NOW_PASS=0: {_cnt.get('buy_now_pass_0', 0)}개").classes("text-xs")
+                            ui.label(f"• BUY_NOW_ELIGIBLE=0: {_cnt.get('buy_now_eligible_0', 0)}개").classes("text-xs")
+                            ui.label(f"• VWAP/POC 과열: {_cnt.get('vwap_poc_overheat', 0)}개").classes("text-xs")
+                            ui.label(f"• RR 1.2 미만: {_cnt.get('rr_under_1_2', 0)}개").classes("text-xs")
+                            ui.label(f"• EBS 미통과/불명: {_cnt.get('ebs_fail', 0)}개").classes("text-xs")
+
+                    _closest = _gate.get("closest", [])
+                    if _closest:
+                        ui.label("가장 가까운 관찰 후보").classes("text-[10px] text-gray-400 uppercase mt-2")
+                        for _c in _closest:
+                            ui.label(
+                                f"• {_c.get('name')} · {_c.get('route')} · E{_c.get('score', 0):.1f} "
+                                f"· RR {_c.get('rr', 0):.1f} · VWAP {_c.get('vwap_gap', 0):+.1f}% "
+                                f"· POC {_c.get('poc_gap', 0):+.1f}%"
+                            ).classes("text-xs text-amber-100")
+
+                    ui.label(
+                        "※ 이 카드는 원인 분석 전용입니다. TOP_PICK/BUY_NOW_ELIGIBLE/gate 산식은 변경하지 않습니다. "
+                        "고환율이 장기 레짐으로 고착된 경우, 환율 절대값 hard block보다 신선도·변화율·Breadth를 함께 점검해야 합니다."
+                    ).classes("text-[10px] text-gray-500 italic mt-2")
+        except Exception as _audit_err:
+            _logger.warning(f"No-Buy Gate Audit 렌더 실패: {_audit_err}")
+
         # ── [v22 UI Step B + K] 점수 우수 후보 더 보기 — TOP_PICK 제외 ──
         # Hero 카드에 이미 TOP_PICK이 표시되므로, 여기서는 TOP_PICK 제외한 후보만
         try:

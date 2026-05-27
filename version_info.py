@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.3.17",
+        "date": "2026-05-27",
+        "type": "patch",
+        "title": "v22.3.17 — FX Regime & No-Buy Gate Audit: 고환율 장기화와 공식매수 0개 원인 분해",
+        "items": [
+            "🧭 **공식 신규매수 0개 원인 분석 카드:** 시장탭에 `FX Regime & Gate Audit` 카드를 연결해 전체 종목 수, ARMED/ATTACK 수, TOP_PICK 수, 공식매수 수, 매크로/엔진 차단 수를 한눈에 보여줍니다.",
+            "💱 **고환율 레짐 진단:** `환율 1515원 [05/25] (CRITICAL)` 같은 매크로 메시지에서 환율 레벨과 기준일을 추출해, 고환율이 새 충격인지 장기 레짐인지 표시합니다.",
+            "🕒 **매크로 데이터 신선도 경고:** 환율 기준일이 오래되었는데 Breadth가 양호한 경우, 고환율 장기/안정 레짐 가능성과 전면 매수금지 지속 여부 점검 필요성을 안내합니다.",
+            "🚦 **게이트별 탈락 집계:** FINAL/ELITE 75 미달, BUY_NOW_PASS=0, BUY_NOW_ELIGIBLE=0, VWAP/POC 과열, RR 1.2 미만, EBS 미통과/불명을 분해해 공식매수 0개의 원인을 숫자로 보여줍니다.",
+            "🔎 **가장 가까운 관찰 후보 표시:** 공식 신규매수 0개인 날에도 ARMED/ATTACK 후보 중 점수와 RR이 가까운 종목 3개를 관찰 후보로 보여주어, 기준이 과도한지 확인할 수 있게 했습니다.",
+            "🔒 **추천 로직 변경 없음:** 이번 업데이트는 원인 분석/표시 전용입니다. `TOP_PICK`, `BUY_NOW_ELIGIBLE`, `scoring_engine.py`, 추천가·손절가·TP 계산, hard block 여부는 변경하지 않았습니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.3.16",
         "date": "2026-05-27",
         "type": "patch",
