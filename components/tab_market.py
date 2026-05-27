@@ -7,6 +7,7 @@ tab_market.py — 📊 시장 현황 (NiceGUI Dark Theme)
 import asyncio
 import logging
 import math
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -1345,3 +1346,219 @@ def render_tab_market(df, auth: str = "free"):
                         rows=ax_rows, row_key="name",
                     ).classes("w-full").props("dense dark flat bordered")
                     ui.label("💡 차이가 클수록 해당 지표의 승률 예측력이 강함").classes("text-xs text-gray-500 mt-1")
+
+
+def _safe_float_or_default(value, default=0.0):
+    num = _safe_number_or_none(value)
+    return default if num is None else num
+
+
+def _parse_reference_date(value=None):
+    """메타/문자열/날짜 객체를 date로 안전 변환한다."""
+    if value is None:
+        return datetime.now().date()
+    if hasattr(value, "date"):
+        try:
+            return value.date()
+        except TypeError:
+            pass
+    text = str(value or "").strip()
+    for pat in (r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", r"(\d{4})(\d{2})(\d{2})"):
+        m = re.search(pat, text)
+        if m:
+            y, mo, d = map(int, m.groups())
+            try:
+                return datetime(y, mo, d).date()
+            except ValueError:
+                return datetime.now().date()
+    return datetime.now().date()
+
+
+def _extract_macro_msg_date(macro_msg: str, reference_date=None):
+    """`환율 1513원 [05/24]` 같은 macro_msg에서 기준일을 추출한다."""
+    msg = str(macro_msg or "")
+    ref = _parse_reference_date(reference_date)
+    m = re.search(r"\[(\d{1,2})/(\d{1,2})\]", msg)
+    if not m:
+        return None
+    month, day = map(int, m.groups())
+    year = ref.year
+    try:
+        dt = datetime(year, month, day).date()
+    except ValueError:
+        return None
+    if dt > ref + timedelta(days=31):
+        try:
+            dt = datetime(year - 1, month, day).date()
+        except ValueError:
+            return None
+    return dt
+
+
+def _extract_fx_level(macro_msg: str):
+    """macro_msg에서 원/달러 환율 숫자를 추출한다."""
+    msg = str(macro_msg or "")
+    patterns = [
+        r"환율\s*([0-9,]+(?:\.\d+)?)\s*원",
+        r"USD\s*/?\s*KRW\s*[:=]?\s*([0-9,]+(?:\.\d+)?)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, msg, flags=re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1).replace(",", ""))
+            except ValueError:
+                return None
+    return None
+
+
+def _fx_regime_diagnosis(macro_msg="", macro_risk="", breadth=0, max_route="", reference_date=None):
+    """환율 CRITICAL이 새 충격인지 장기 고환율 레짐인지 표시용으로 분해한다."""
+    ref_date = _parse_reference_date(reference_date)
+    msg_date = _extract_macro_msg_date(macro_msg, ref_date)
+    fx_level = _extract_fx_level(macro_msg)
+    risk = str(macro_risk or "").strip().upper()
+    breadth_num = _safe_float_or_default(breadth, 0)
+
+    stale_days = None
+    if msg_date is not None:
+        stale_days = max((ref_date - msg_date).days, 0)
+
+    is_stale = stale_days is not None and stale_days >= 2
+    is_high_fx = fx_level is not None and fx_level >= 1500
+    breadth_ok = breadth_num >= 45
+    route_limited = is_route_blocked(max_route)
+
+    lines = []
+    if fx_level is not None:
+        if is_high_fx:
+            lines.append(f"환율 {fx_level:,.0f}원 — 고환율 레짐")
+        else:
+            lines.append(f"환율 {fx_level:,.0f}원 — 절대 레벨은 CRITICAL 단독 근거로 약함")
+    elif macro_msg:
+        lines.append(f"매크로 메시지: {macro_msg}")
+    else:
+        lines.append("매크로 상세 메시지 없음")
+
+    if msg_date is not None:
+        freshness = f"데이터 기준 {msg_date.strftime('%m/%d')}"
+        if is_stale:
+            freshness += f" — {stale_days}일 경과, 최신성 확인 필요"
+        else:
+            freshness += " — 최신성 양호"
+        lines.append(freshness)
+    else:
+        lines.append("환율 기준일 파싱 불가 — 최신성 확인 필요")
+
+    lines.append(f"Breadth {breadth_num:.1f}% — {'시장 내부는 중립 이상' if breadth_ok else '시장 내부도 약함'}")
+
+    if risk in {"WARNING", "CRITICAL"} and is_high_fx and is_stale and breadth_ok:
+        verdict = "고환율 장기/안정 레짐 가능 — 전면 매수금지 지속 여부 점검 필요"
+        tone = "amber"
+    elif risk in {"WARNING", "CRITICAL"} and not is_stale:
+        verdict = "최근 매크로 충격 가능 — 보수 모드 유지"
+        tone = "red"
+    elif route_limited:
+        verdict = "엔진 ROUTE 제한이 우선 — 매크로보다 엔진 상태 확인"
+        tone = "orange"
+    else:
+        verdict = "매크로 hard block 단독 원인은 약함 — 종목/진입 게이트 확인"
+        tone = "gray"
+
+    return {
+        "fx_level": fx_level,
+        "macro_msg_date": msg_date,
+        "stale_days": stale_days,
+        "is_stale": is_stale,
+        "is_high_fx": is_high_fx,
+        "breadth_ok": breadth_ok,
+        "verdict": verdict,
+        "tone": tone,
+        "lines": lines,
+    }
+
+
+def _truthy_series(df, col: str):
+    if col not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df[col].apply(is_truthy_flag)
+
+
+def _numeric_series(df, cols, default=0.0):
+    for col in cols:
+        if col in df.columns:
+            return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    return pd.Series(default, index=df.index)
+
+
+def _route_active_mask(df):
+    if "ROUTE" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df["ROUTE"].astype(str).str.upper().str.contains("ARMED|ATTACK", na=False)
+
+
+def _ebs_fail_mask(df):
+    for col in ("EBS_STATUS", "EBS", "EBS_PASS"):
+        if col in df.columns:
+            s = df[col].astype(str).str.upper()
+            return s.str.contains("FAIL|FALSE|미통과|0/", na=False) | s.isin({"0", "0.0", "N", "NO"})
+    return pd.Series(False, index=df.index)
+
+
+def _build_no_buy_gate_audit(df, meta=None) -> dict:
+    """공식 신규매수 0개 원인을 gate별로 분해한다. 표시/진단 전용."""
+    meta = meta or {}
+    if df is None:
+        df = pd.DataFrame()
+
+    total = int(len(df))
+    active_mask = _route_active_mask(df)
+    top_mask = _truthy_series(df, "TOP_PICK")
+    eligible_mask = _truthy_series(df, "BUY_NOW_ELIGIBLE")
+    pass_mask = _truthy_series(df, "BUY_NOW_PASS")
+    official_mask = top_mask & eligible_mask
+
+    active = df[active_mask].copy()
+    score = _numeric_series(active, ["ELITE_SCORE", "DISPLAY_SCORE", "FINAL_SCORE"], 0)
+    rr = _numeric_series(active, ["RR_NOW_TP1", "RR_MULT"], 0)
+    vwap = _numeric_series(active, ["VWAP_GAP", "VWAP_GAP_PCT"], 0)
+    poc = _numeric_series(active, ["POC_GAP", "POC_GAP_PCT"], 0)
+
+    macro_risk = str(meta.get("macro_risk", "")).strip().upper()
+    max_route = meta.get("max_allowed_route", "")
+    macro_block = macro_risk in {"WARNING", "CRITICAL"} or is_route_blocked(max_route)
+
+    counts = {
+        "total": total,
+        "armed_attack": int(active_mask.sum()),
+        "top_pick": int(top_mask.sum()),
+        "official_buy": int(official_mask.sum()),
+        "macro_blocked": int(active_mask.sum()) if macro_block else 0,
+        "final_under_75": int((score < 75).sum()) if not active.empty else 0,
+        "buy_now_pass_0": int((~pass_mask[active_mask]).sum()) if "BUY_NOW_PASS" in df.columns else 0,
+        "buy_now_eligible_0": int((~eligible_mask[active_mask]).sum()) if "BUY_NOW_ELIGIBLE" in df.columns else 0,
+        "vwap_poc_overheat": int(((vwap > 10) | (poc > 30)).sum()) if not active.empty else 0,
+        "rr_under_1_2": int((rr < 1.2).sum()) if not active.empty else 0,
+        "ebs_fail": int(_ebs_fail_mask(active).sum()) if not active.empty else 0,
+    }
+
+    closest = []
+    if not active.empty:
+        active["_score"] = score
+        active["_rr"] = rr
+        active["_vwap"] = vwap
+        active["_poc"] = poc
+        for _, row in active.sort_values(["_score", "_rr"], ascending=[False, False]).head(3).iterrows():
+            closest.append({
+                "name": str(row.get("종목명", row.get("name", ""))),
+                "route": str(row.get("ROUTE", "")),
+                "score": _safe_float_or_default(row.get("ELITE_SCORE", row.get("DISPLAY_SCORE", row.get("FINAL_SCORE", 0))), 0),
+                "rr": _safe_float_or_default(row.get("RR_NOW_TP1", row.get("RR_MULT", 0)), 0),
+                "vwap_gap": _safe_float_or_default(row.get("VWAP_GAP", row.get("VWAP_GAP_PCT", 0)), 0),
+                "poc_gap": _safe_float_or_default(row.get("POC_GAP", row.get("POC_GAP_PCT", 0)), 0),
+                "top_pick": is_truthy_flag(row.get("TOP_PICK", 0)),
+                "eligible": is_truthy_flag(row.get("BUY_NOW_ELIGIBLE", 0)),
+            })
+
+    return {"counts": counts, "closest": closest, "macro_block": macro_block}
+
