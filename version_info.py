@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "22.3.13",
+        "date": "2026-05-27",
+        "type": "patch",
+        "title": "v22.3.13 — 오늘 신규진입 판정 카드: 공식 매수/현금 유지/보류 사유 자동 설명",
+        "items": [
+            "📌 **오늘 신규진입 판정 카드 추가:** 종목탭 상단에서 `TOP_PICK + BUY_NOW_ELIGIBLE` 기준 공식 신규매수 개수와 최종 판단을 먼저 보여줍니다. 공식 후보가 없으면 `현금 유지`로 명확히 표시합니다.",
+            "🟡 **TOP_PICK 보류 사유 자동 설명:** TOP_PICK은 있지만 BUY_NOW_ELIGIBLE=0인 경우, VWAP_GAP/POC_GAP/NO_CHASE/PULLBACK_WAIT/FINAL/AXIS_GAP/RR 등 실제 차단 사유를 한 줄씩 자동 정리합니다.",
+            "🧭 **진입 가능 전환 조건 안내:** 보류 종목이 어떤 조건을 만족하면 공식 신규매수로 전환될 수 있는지 `VWAP_GAP 10% 이하`, `POC_GAP 30% 이하`, `BUY_NOW_PASS=1`, `BUY_NOW_ELIGIBLE=1` 같은 체크리스트로 표시합니다.",
+            "🔒 **추천 로직 무변경:** 이번 패치는 UI 설명 전용입니다. `TOP_PICK`, `BUY_NOW_ELIGIBLE`, `BUY_NOW_PASS`, 점수 산식, `scoring_engine.py`는 변경하지 않습니다.",
+            "🧪 **회귀 테스트 추가:** 공식매수 가능/보류 TOP_PICK/NO_TOP_PICK 3가지 케이스에서 판정 카드 요약이 올바르게 생성되는지 테스트합니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.3.12",
         "date": "2026-05-27",
         "type": "patch",

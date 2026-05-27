@@ -385,7 +385,7 @@ tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 import asyncio
 import os
 import logging
-from typing import Optional
+from typing import Optional, Any, Dict, List
 
 import pandas as pd
 from nicegui import ui, run, app
@@ -1666,6 +1666,279 @@ def _render_candidate_context_notice() -> None:
             )
 
 
+
+
+def _bool_like(value: Any) -> bool:
+    """CSV boolean-like 값을 안전하게 bool로 변환한다."""
+    if value is None:
+        return False
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value) != 0.0
+    return str(value).strip().upper() in {"1", "1.0", "TRUE", "Y", "YES", "PASS", "OK"}
+
+
+def _num_like(value: Any, default: float | None = None) -> float | None:
+    """CSV 숫자-like 값을 안전하게 float로 변환한다."""
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return default
+
+
+def _series_truthy(series: pd.Series) -> pd.Series:
+    """DataFrame boolean-like 컬럼을 mask로 변환한다."""
+    return series.map(_bool_like).fillna(False).astype(bool)
+
+
+def _get_first_existing(row: pd.Series, keys: list[str], default: Any = None) -> Any:
+    for key in keys:
+        if key in row.index:
+            value = row.get(key)
+            try:
+                if pd.isna(value):
+                    continue
+            except (TypeError, ValueError) as exc:
+                _logger.debug("daily decision card value null check skipped for %s: %s", key, exc)
+            return value
+    return default
+
+
+def _pick_display_name(row: pd.Series) -> str:
+    return str(_get_first_existing(row, ["종목명", "NAME", "name", "StockName"], "-")).strip() or "-"
+
+
+def _pick_code(row: pd.Series) -> str:
+    raw = _get_first_existing(row, ["종목코드", "code", "CODE"], "")
+    return str(raw).strip().zfill(6) if str(raw).strip() else ""
+
+
+def _ebs_pass_like(row: pd.Series) -> bool | None:
+    for key in ["EBS_PASS", "PASS_EBS", "EBS_OK"]:
+        if key in row.index:
+            return _bool_like(row.get(key))
+    raw = str(row.get("EBS", "")).upper()
+    if not raw:
+        return None
+    if "PASS" in raw:
+        return True
+    if "FAIL" in raw:
+        return False
+    return None
+
+
+def _build_daily_official_decision(df: pd.DataFrame) -> Dict[str, Any]:
+    """[v22.3.13] 오늘 공식 신규진입 판정 요약.
+
+    공식 신규매수는 `TOP_PICK + BUY_NOW_ELIGIBLE`만 사용한다. 이 함수는
+    UI 설명용 요약만 만들며 TOP_PICK/BUY_NOW_ELIGIBLE/점수 산식은 변경하지 않는다.
+    """
+    if df is None or df.empty:
+        return {
+            "status": "NO_DATA",
+            "official_count": 0,
+            "top_pick_count": 0,
+            "title": "데이터 없음",
+            "summary": "추천 CSV가 아직 로드되지 않았습니다.",
+            "top_pick": None,
+            "blockers": [],
+            "conversion_conditions": [],
+        }
+
+    top_mask = _series_truthy(df["TOP_PICK"]) if "TOP_PICK" in df.columns else pd.Series(False, index=df.index)
+    elig_mask = _series_truthy(df["BUY_NOW_ELIGIBLE"]) if "BUY_NOW_ELIGIBLE" in df.columns else pd.Series(False, index=df.index)
+    official_mask = top_mask & elig_mask
+    official_count = int(official_mask.sum())
+    top_pick_count = int(top_mask.sum())
+
+    if official_count > 0:
+        pick_row = df.loc[official_mask].iloc[0]
+        return {
+            "status": "OFFICIAL_BUY_AVAILABLE",
+            "official_count": official_count,
+            "top_pick_count": top_pick_count,
+            "title": f"공식 신규매수 {official_count}개",
+            "summary": "TOP_PICK + BUY_NOW_ELIGIBLE 기준을 충족한 공식 신규매수 후보가 있습니다.",
+            "top_pick": {
+                "name": _pick_display_name(pick_row),
+                "code": _pick_code(pick_row),
+                "final": _num_like(_get_first_existing(pick_row, ["FINAL_SCORE", "DISPLAY_SCORE"])),
+                "route": str(pick_row.get("ROUTE", "")),
+                "grade": str(pick_row.get("BUY_NOW_GRADE", "")),
+            },
+            "blockers": [],
+            "conversion_conditions": [],
+        }
+
+    if top_pick_count <= 0:
+        return {
+            "status": "CASH_HOLD_NO_TOP_PICK",
+            "official_count": 0,
+            "top_pick_count": 0,
+            "title": "공식 신규매수 0개 · TOP_PICK 없음",
+            "summary": "오늘은 공식 신규진입 후보가 없어 현금 유지가 기본 판단입니다.",
+            "top_pick": None,
+            "blockers": ["TOP_PICK=1 후보 없음"],
+            "conversion_conditions": ["다음 CSV에서 TOP_PICK=1 후보 발생", "BUY_NOW_ELIGIBLE=1 동시 충족"],
+        }
+
+    top_df = df.loc[top_mask].copy()
+    if "LDY_RANK" in top_df.columns:
+        top_df["_sort_rank"] = pd.to_numeric(top_df["LDY_RANK"], errors="coerce").fillna(999999)
+        top_df = top_df.sort_values("_sort_rank", ascending=True)
+    elif "ELITE_SCORE" in top_df.columns:
+        top_df["_sort_elite"] = pd.to_numeric(top_df["ELITE_SCORE"], errors="coerce").fillna(-999)
+        top_df = top_df.sort_values("_sort_elite", ascending=False)
+    row = top_df.iloc[0]
+
+    name = _pick_display_name(row)
+    code = _pick_code(row)
+    final = _num_like(_get_first_existing(row, ["FINAL_SCORE", "DISPLAY_SCORE"]))
+    elite = _num_like(row.get("ELITE_SCORE"))
+    axis_gap = _num_like(row.get("AXIS_GAP"))
+    rr = _num_like(row.get("RR_NOW_TP1"))
+    gap = _num_like(_get_first_existing(row, ["GAP_PCT", "ENTRY_GAP_PCT", "ENTRY_GAP_TO_BUY"]))
+    vwap_gap = _num_like(row.get("VWAP_GAP"))
+    poc_gap = _num_like(row.get("POC_GAP"))
+    buy_pass = _bool_like(row.get("BUY_NOW_PASS")) if "BUY_NOW_PASS" in row.index else None
+    grade = str(row.get("BUY_NOW_GRADE", "")).upper()
+    route = str(row.get("ROUTE", ""))
+    ebs_pass = _ebs_pass_like(row)
+    no_chase = _bool_like(row.get("NO_CHASE_FLAG")) if "NO_CHASE_FLAG" in row.index else False
+    pullback_wait = _bool_like(row.get("PULLBACK_WAIT_FLAG")) if "PULLBACK_WAIT_FLAG" in row.index else False
+
+    blockers: List[str] = ["BUY_NOW_ELIGIBLE=0 · 공식 신규매수 아님"]
+    conversion: List[str] = ["BUY_NOW_ELIGIBLE=1 전환"]
+
+    if final is not None and final < 70:
+        blockers.append(f"FINAL {final:.1f} < 70")
+        conversion.append("FINAL_SCORE 70 이상 회복")
+    if axis_gap is not None and axis_gap > 35:
+        blockers.append(f"AXIS_GAP {axis_gap:.1f} > 35 · 3축 불균형")
+        conversion.append("AXIS_GAP 35 이하로 축소")
+    if rr is not None and rr < 1.5:
+        blockers.append(f"RR_NOW_TP1 {rr:.2f} < 1.5")
+        conversion.append("RR_NOW_TP1 1.5 이상")
+    if gap is not None and abs(gap) > 2:
+        blockers.append(f"추천가 괴리 {gap:+.1f}% · 허용범위 초과")
+        conversion.append("추천가 괴리 ±2% 이내")
+    if vwap_gap is not None and vwap_gap > 10:
+        blockers.append(f"VWAP_GAP {vwap_gap:+.1f}% > 10% · 추격 위험")
+        conversion.append("VWAP_GAP 10% 이하로 축소")
+    if poc_gap is not None and poc_gap > 30:
+        blockers.append(f"POC_GAP {poc_gap:+.1f}% > 30% · 기준가격 이격 과다")
+        conversion.append("POC_GAP 30% 이하로 축소")
+    if buy_pass is False:
+        blockers.append("BUY_NOW_PASS=0 · 진입조건 미통과")
+        conversion.append("BUY_NOW_PASS=1 전환")
+    if grade and grade not in {"BUY", ""}:
+        blockers.append(f"BUY_NOW_GRADE={grade} · 진입조건 보류")
+    if no_chase:
+        blockers.append("NO_CHASE_FLAG=1 · 추격 금지")
+        conversion.append("NO_CHASE_FLAG 해제")
+    if pullback_wait:
+        blockers.append("PULLBACK_WAIT_FLAG=1 · 눌림 대기")
+        conversion.append("PULLBACK_WAIT_FLAG 해제")
+    if ebs_pass is False:
+        blockers.append("EBS 미통과")
+        conversion.append("EBS PASS 전환")
+
+    # 중복 제거, 표시 과밀 방지
+    blockers = list(dict.fromkeys(blockers))[:7]
+    conversion = list(dict.fromkeys(conversion))[:6]
+
+    return {
+        "status": "CASH_HOLD_TOP_PICK_DEFERRED",
+        "official_count": 0,
+        "top_pick_count": top_pick_count,
+        "title": "공식 신규매수 0개 · 현금 유지",
+        "summary": f"TOP_PICK {name}({code})은 있으나 TOP_PICK + BUY_NOW_ELIGIBLE 기준상 보류입니다.",
+        "top_pick": {
+            "name": name,
+            "code": code,
+            "final": final,
+            "elite": elite,
+            "route": route,
+            "grade": grade,
+            "rr": rr,
+            "gap": gap,
+            "vwap_gap": vwap_gap,
+            "poc_gap": poc_gap,
+        },
+        "blockers": blockers,
+        "conversion_conditions": conversion,
+    }
+
+
+def _render_daily_official_decision_card(df: pd.DataFrame) -> None:
+    """[v22.3.13] 종목탭 상단 공식 신규진입 판정 카드."""
+    d = _build_daily_official_decision(df)
+    status = d.get("status")
+    if status == "OFFICIAL_BUY_AVAILABLE":
+        border = "border-emerald-500/40 bg-emerald-500/8"
+        icon = "🟢"
+        title_cls = "text-emerald-300"
+    elif status == "CASH_HOLD_TOP_PICK_DEFERRED":
+        border = "border-amber-500/40 bg-amber-500/8"
+        icon = "🟡"
+        title_cls = "text-amber-300"
+    else:
+        border = "border-slate-500/30 bg-slate-500/8"
+        icon = "⚪"
+        title_cls = "text-slate-300"
+
+    with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
+        with ui.row().classes("w-full items-center justify-between gap-2"):
+            ui.label(f"{icon} 오늘 신규진입 판정 — {d.get('title', '')}").classes(
+                f"text-base font-bold {title_cls}"
+            )
+            ui.badge(
+                f"공식 {int(d.get('official_count', 0))} · TOP_PICK {int(d.get('top_pick_count', 0))}",
+                color="#F59E0B" if status == "CASH_HOLD_TOP_PICK_DEFERRED" else "#10B981",
+            ).classes("text-xs")
+        ui.label(d.get("summary", "")).classes("text-xs text-gray-300 mt-1")
+
+        pick = d.get("top_pick") or {}
+        if pick:
+            metric_bits = []
+            if pick.get("final") is not None:
+                metric_bits.append(f"FINAL {pick['final']:.1f}")
+            if pick.get("elite") is not None:
+                metric_bits.append(f"ELITE {pick['elite']:.1f}")
+            if pick.get("rr") is not None:
+                metric_bits.append(f"RR {pick['rr']:.2f}")
+            if pick.get("vwap_gap") is not None:
+                metric_bits.append(f"VWAP {pick['vwap_gap']:+.1f}%")
+            ui.label(
+                f"TOP_PICK: {pick.get('name', '-')} {pick.get('code', '')}"
+                + (" · " + " · ".join(metric_bits) if metric_bits else "")
+            ).classes("text-xs text-white mt-2 font-semibold")
+
+        blockers = d.get("blockers") or []
+        if blockers:
+            ui.label("보류/차단 사유").classes("text-[11px] text-amber-200 font-bold mt-2")
+            for reason in blockers[:6]:
+                ui.label(f"• {reason}").classes("text-[11px] text-gray-300 leading-snug")
+
+        conditions = d.get("conversion_conditions") or []
+        if conditions:
+            ui.label("진입 가능 전환 조건").classes("text-[11px] text-blue-200 font-bold mt-2")
+            ui.label(" · ".join(conditions[:5])).classes("text-[11px] text-gray-400 leading-snug")
+
+        ui.label(
+            "※ 이 카드는 표시/설명 전용입니다. 공식 신규매수 산식은 TOP_PICK + BUY_NOW_ELIGIBLE 그대로 유지합니다."
+        ).classes("text-[10px] text-gray-500 mt-2")
+
 def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                        auth: str = "free"):
     """Tab 2 상단 헤더 카드 — 오늘의 검증 Top 3 표시."""
@@ -2162,6 +2435,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     ui.label("🎯 AI & Quant 추천 종목").classes(
         "text-xl font-bold text-white mb-4"
     )
+
+    # [v22.3.13] 오늘 공식 신규진입 판정 — 매수/보류 이유를 Top Pick 카드보다 먼저 표시
+    _render_daily_official_decision_card(df)
 
     # [Step AC P0-4] Top Pick 카드 클릭 → 상세 패널 렌더 (closure: detail_area는 아래에서 정의됨)
     def _on_top_pick_click(code: str):
