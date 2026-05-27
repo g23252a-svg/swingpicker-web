@@ -376,7 +376,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                     "BLOCK_MARKET", "🔴 오늘 매수 금지 (시장 위험)"
                 ).replace("🔴 ", "")  # 헤더에서 emoji는 별도 표시
                 verdict_subtitle = (
-                    f"오늘의 추천 {n_top}개  ·  하지만 시장 위험 "
+                    f"공식 추천 {n_top}개  ·  하지만 시장 위험 "
                     f"({macro_risk}) — 지켜보기만 권장"
                 )
                 gradient_from = "#3d0a0a"
@@ -392,7 +392,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                     "BLOCK_ENGINE", "🟠 신규 매수 자제 (엔진 제한)"
                 ).replace("🟠 ", "")
                 verdict_subtitle = (
-                    f"오늘의 추천 {n_top}개  ·  엔진 상태={route_display(max_route)} "
+                    f"공식 추천 {n_top}개  ·  엔진 상태={route_display(max_route)} "
                     f"— 지켜보기만 권장"
                 )
                 gradient_from = "#3d2a0a"
@@ -408,7 +408,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                     "HALF", "🟠 절반만 매수 권장"
                 ).replace("🟠 ", "")
                 verdict_subtitle = (
-                    f"오늘의 추천 {n_top}개  ·  시장 주의 "
+                    f"공식 추천 {n_top}개  ·  시장 주의 "
                     f"({macro_risk}) — 비중 절반으로 축소"
                 )
                 gradient_from = "#3d2a0a"
@@ -426,8 +426,8 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                 type_summary = []
                 if n_agg > 0: type_summary.append(f"🔥 공격형 {n_agg}")
                 if n_stb > 0: type_summary.append(f"💎 안정형 {n_stb}")
-                if not type_summary: type_summary.append(f"⭐ 추천 {n_top}")
-                verdict_subtitle = f"오늘의 추천 {n_top}개  ·  " + " / ".join(type_summary)
+                if not type_summary: type_summary.append(f"⭐ Top Pick {n_top}")
+                verdict_subtitle = f"공식 추천 {n_top}개  ·  " + " / ".join(type_summary)
                 gradient_from = "#0a3d2a"
                 gradient_via = "#0d5440"
                 border_color = "border-emerald-500/50"
@@ -672,7 +672,7 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                 _hdr_emoji = "⏸️"
                 _hdr_text = "오늘은 지켜보세요"
                 _suffix = f" · 시장 주의({macro_risk})" if is_macro_caution else ""
-                _hdr_subtitle = f"오늘의 추천 0개  ·  관찰 후보 {len(active)}종목{_suffix}"
+                _hdr_subtitle = f"공식 추천 0개  ·  관찰 후보 {len(active)}종목{_suffix}"
                 _hdr_g_from = "#3d2a0a"; _hdr_g_via = "#544013"
                 _hdr_border = "border-amber-500/50"
                 _hdr_text_main = "text-amber-300"
@@ -851,7 +851,7 @@ def render_tab_market(df, auth: str = "free"):
                     ui.label(f"최대허용: {_max_route_disp}").classes("text-xs text-gray-500")
 
                 # ELITE/TOP_PICK 요약
-                # [v3.9.10] 회원이 "오늘의 추천 종목 / 평균 점수 32" 보고
+                # [v3.9.10] 회원이 "공식 Top Pick 현황 / 평균 점수 32" 보고
                 # "넥스트칩 E87인데 왜 평균이 32?" 혼란 → TOP_PICK 평균만 계산
                 # [v3.9.10 hotfix] TOP_PICK 값이 "1"/1.0/True 등 다양해서
                 # is_truthy_flag로 통일 (다른 코드와 일관성)
@@ -870,7 +870,7 @@ def render_tab_market(df, auth: str = "free"):
                         # TOP_PICK 없으면 표시 안 함 (혼란 방지)
                         avg_label = ""
                     with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
-                        ui.label("오늘의 추천 종목").classes("text-xs text-gray-400")
+                        ui.label("공식 Top Pick 현황").classes("text-xs text-gray-400")
                         ui.label(f"🏆 {tp_count}종목").classes("text-lg font-bold text-yellow-400")
                         if avg_label:
                             ui.label(avg_label).classes("text-xs text-gray-500")
@@ -929,7 +929,7 @@ def render_tab_market(df, auth: str = "free"):
                     _label_text = "👀 관찰 후보 — 오늘 매매 제외"
                 else:
                     _candidates = _top_df.copy()
-                    _label_text = "🏆 오늘의 점수 우수 종목 Top"
+                    _label_text = "👀 점수 우수 관찰 종목 Top"
                 
                 # 활성 ROUTE 우선 정렬 (관찰 가치 있는 종목)
                 _picks = _candidates.nlargest(3, "ELITE_SCORE") if not _candidates.empty else _candidates
@@ -1162,7 +1162,12 @@ def render_tab_market(df, auth: str = "free"):
 
                             _uc = used_combo
                             _combo_label = f"S≥{_uc['S_min']} T≥{_uc['T_min']} AI≥{_uc['AI_min']} + {'+'.join(_uc['routes'])}"
-                            ui.label(f"🎯 매칭 종목 ({len(matched)}개) — {_combo_label} (승률 {_uc['win_rate']}%)").classes("text-sm font-bold text-yellow-400 mb-2")
+                            _match_title = "🎯 관찰 매칭 종목" if (is_macro_dangerous or route_blocked) else "🎯 매칭 종목"
+                            ui.label(f"{_match_title} ({len(matched)}개) — {_combo_label} (승률 {_uc['win_rate']}%)").classes("text-sm font-bold text-yellow-400 mb-2")
+                            if is_macro_dangerous or route_blocked:
+                                ui.label(
+                                    "※ 현재 시장/엔진 상태상 아래 매칭 종목은 관찰 전용이며 공식 신규매수가 아닙니다."
+                                ).classes("text-[10px] text-red-300 italic mb-2")
 
                             match_rows = []
                             for _, s in matched.iterrows():
