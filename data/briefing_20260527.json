@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260527",
+  "generated_at": "2026-05-27 23:23:48",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "052900",
+      "name": "KX하이텍",
+      "route": "ATTACK",
+      "score": 88.1,
+      "close": 1978,
+      "entry": 1623,
+      "stop": 1379,
+      "target1": 2430,
+      "target2": 2515,
+      "est_win_rate": 0.457,
+      "rr": 3.3,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/052900"
+    },
+    {
+      "rank": 2,
+      "code": "006110",
+      "name": "삼아알미늄",
+      "route": "ARMED",
+      "score": 86.4,
+      "close": 81900,
+      "entry": 81900,
+      "stop": 73600,
+      "target1": 104600,
+      "target2": 124600,
+      "est_win_rate": 0.493,
+      "rr": 2.7,
+      "sector": "철강·금속",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/006110"
+    },
+    {
+      "rank": 3,
+      "code": "321260",
+      "name": "프로이천",
+      "route": "ATTACK",
+      "score": 85.3,
+      "close": 4440,
+      "entry": 3815,
+      "stop": 3240,
+      "target1": 5610,
+      "target2": 6140,
+      "est_win_rate": 0.496,
+      "rr": 3.1,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/321260"
+    }
+  ]
+}
