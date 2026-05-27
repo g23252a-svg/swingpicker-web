@@ -1,9 +1,9 @@
 {
   "version": 2,
   "doc": "DO NOT edit by hand unless you know what you're doing. Regenerate with: python scripts/check_silent_exceptions.py --regenerate. Matching is by (file, exc_type, body_kind, code) multiset count — robust to line shifts but distinguishes duplicates within same file.",
-  "count": 176,
+  "count": 175,
   "by_severity": {
-    "SILENT": 173,
+    "SILENT": 172,
     "QUASI": 3
   },
   "fingerprint_counts": {
@@ -38,7 +38,7 @@
     "5f54edf7af41": 2,
     "630532677857": 2,
     "63f58e7f1760": 2,
-    "64c5671bf63b": 5,
+    "64c5671bf63b": 4,
     "659a747b6489": 1,
     "6a95b564942b": 2,
     "6b4ae21851d3": 1,
@@ -317,7 +317,7 @@
     {
       "fingerprint": "51a34e567de3",
       "file": "components/stock_detail_v2.py",
-      "line": 2336,
+      "line": 2371,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -405,7 +405,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 569,
+      "line": 645,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -413,7 +413,7 @@
     {
       "fingerprint": "15335de984f2",
       "file": "components/tab_perf.py",
-      "line": 811,
+      "line": 887,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -421,7 +421,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1003,
+      "line": 1079,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -429,7 +429,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1096,
+      "line": 1172,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -437,15 +437,7 @@
     {
       "fingerprint": "64c5671bf63b",
       "file": "components/tab_perf.py",
-      "line": 1122,
-      "exc_type": "Exception",
-      "severity": "SILENT",
-      "body_kind": "pass"
-    },
-    {
-      "fingerprint": "64c5671bf63b",
-      "file": "components/tab_perf.py",
-      "line": 1635,
+      "line": 1198,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -677,7 +669,7 @@
     {
       "fingerprint": "1c59f35c2900",
       "file": "components/tab_stocks.py",
-      "line": 2945,
+      "line": 2994,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -685,7 +677,7 @@
     {
       "fingerprint": "1c59f35c2900",
       "file": "components/tab_stocks.py",
-      "line": 3002,
+      "line": 3051,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"
@@ -1461,7 +1453,7 @@
     {
       "fingerprint": "cdb33882f2ed",
       "file": "version_info.py",
-      "line": 403,
+      "line": 420,
       "exc_type": "Exception",
       "severity": "SILENT",
       "body_kind": "pass"

@@ -37,6 +37,7 @@ import glob
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import pandas as pd
 from nicegui import ui
@@ -205,6 +206,87 @@ def _get_kospi_return(bench_data: dict, hold_days: int) -> float:
     return bench_data["KOSPI"].get(int(hold_days))
 
 
+
+def _metric_weights(df: pd.DataFrame, weight_col: str = "TOTAL_N") -> pd.Series:
+    """[v22.3.11] KPI 표본가중 평균용 weight.
+
+    rank_validation_summary는 일별/조건별 요약행이므로 단순 mean을 쓰면
+    표본 5건인 날과 표본 200건인 날이 동일 가중 처리된다. 성과탭 KPI는
+    TOTAL_N 기준 가중 평균을 기본으로 사용한다. TOTAL_N이 없거나 전부 0이면
+    row 단위 동일가중으로 안전 fallback한다.
+    """
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+    if weight_col not in df.columns:
+        return pd.Series(1.0, index=df.index, dtype=float)
+    w = pd.to_numeric(df[weight_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+    if float(w.sum()) <= 0:
+        return pd.Series(1.0, index=df.index, dtype=float)
+    return w.astype(float)
+
+
+def _weighted_mean(df: pd.DataFrame, col: str, weight_col: str = "TOTAL_N") -> Optional[float]:
+    """[v22.3.11] TOTAL_N 표본가중 평균.
+
+    Returns None when the metric column has no valid numeric values.
+    """
+    if df is None or df.empty or col not in df.columns:
+        return None
+    values = pd.to_numeric(df[col], errors="coerce")
+    mask = values.notna()
+    if not mask.any():
+        return None
+    weights = _metric_weights(df, weight_col=weight_col).reindex(df.index).fillna(0.0)
+    weights = weights[mask]
+    values = values[mask]
+    if float(weights.sum()) <= 0:
+        return float(values.mean())
+    return float((values * weights).sum() / weights.sum())
+
+
+def _worst_drawdown_value(df: pd.DataFrame, col: str = "WORST_MDD_%") -> Optional[float]:
+    """[v22.3.11] 기간 중 최악 낙폭.
+
+    과거 데이터에 MDD 부호 오염이 섞여도 회원 화면에는 위험값을 보수적으로
+    표시하기 위해 절댓값 최대치를 음수로 반환한다.
+    """
+    if df is None or df.empty or col not in df.columns:
+        return None
+    values = pd.to_numeric(df[col], errors="coerce").dropna()
+    if values.empty:
+        return None
+    return -float(values.abs().max())
+
+
+def _select_perf_default_slice(
+    history: pd.DataFrame,
+    method: str = "ELITE_SCORE",
+    topk: int = 5,
+    hold_days: int = 5,
+) -> pd.DataFrame:
+    """[v22.3.11] 성과탭 상단 카드 공통 기준 slice.
+
+    성과 판정 카드/최근 7거래일 카드가 동일 기준을 중복 구현하던 것을
+    helper로 통일한다. 가능한 경우 ELITE_SCORE / Top5 / 5영업일 기준을 사용하고,
+    해당 slice가 없으면 기존 데이터 범위 안에서 안전하게 fallback한다.
+    """
+    if history is None or history.empty:
+        return pd.DataFrame()
+    h = history.copy()
+    if "METHOD" in h.columns and (h["METHOD"] == method).any():
+        h = h[h["METHOD"] == method]
+    if "TOPK" in h.columns:
+        topk_num = pd.to_numeric(h["TOPK"], errors="coerce")
+        h_topk = h[topk_num == int(topk)]
+        if not h_topk.empty:
+            h = h_topk
+    if "H(영업일)" in h.columns:
+        hold_num = pd.to_numeric(h["H(영업일)"], errors="coerce")
+        h_hold = h[hold_num == int(hold_days)]
+        if not h_hold.empty:
+            h = h_hold
+    return h
+
 def _now_kst():
     return datetime.now(KST)
 
@@ -343,22 +425,15 @@ def _render_metrics_grid(
             ).classes("text-xs text-gray-400 leading-relaxed")
         return
 
-    # 안전한 평균 계산
-    def safe_mean(col):
-        if col not in cdf.columns:
-            return None
-        try:
-            v = cdf[col].mean()
-            return None if pd.isna(v) else v
-        except Exception:
-            return None
-    
-    win_rate = safe_mean('WIN_RATE_%')
-    avg_ret = safe_mean('AVG_RET_%')
-    hit_5 = safe_mean('HIT_5%_%')
-    avg_mdd = safe_mean('AVG_MDD_%')
-    worst_mdd = safe_mean('WORST_MDD_%')
-    total_n = cdf['TOTAL_N'].sum() if 'TOTAL_N' in cdf.columns else 0
+    # [v22.3.11] 성과 KPI는 TOTAL_N 표본가중 평균으로 계산.
+    # 일별 summary 행 단순 mean은 표본 작은 날을 과대반영할 수 있어 낙관 편향이 생김.
+    win_rate = _weighted_mean(cdf, 'WIN_RATE_%')
+    avg_ret = _weighted_mean(cdf, 'AVG_RET_%')
+    hit_5 = _weighted_mean(cdf, 'HIT_5%_%')
+    avg_mdd = _weighted_mean(cdf, 'AVG_MDD_%')
+    # 최악 낙폭은 평균이 아니라 선택 구간의 최대 위험값으로 표시.
+    worst_mdd = _worst_drawdown_value(cdf, 'WORST_MDD_%')
+    total_n = cdf['TOTAL_N'].sum() if 'TOTAL_N' in cdf.columns else len(cdf)
     
     # [Step AL+AM] 비용 차감 후 추정 수익률 (사용자 선택 비용률)
     avg_ret_after_cost = None
@@ -406,7 +481,7 @@ def _render_metrics_grid(
         "text-base font-bold text-cyan-300 mt-3 mb-1"
     )
     ui.label(
-        "선택한 백테스트 시뮬레이션 기준의 평균 지표입니다."
+        "선택한 백테스트 시뮬레이션 기준의 표본가중 지표입니다."
     ).classes("text-[11px] text-gray-500 italic mb-2")
 
     # [v22.3.8 C-2] 공식 신규매수 기준은 별도 데이터 누적 후 분리 표시 예정
@@ -418,6 +493,7 @@ def _render_metrics_grid(
     ):
         ui.label(
             "ℹ️ 위 성과는 선택한 스코어(METHOD) 기준 시뮬레이션입니다. "
+            "승률/수익률은 TOTAL_N 기준 표본가중 평균이며, "
             "공식 신규매수 기준(TOP_PICK + BUY_NOW_ELIGIBLE) 성과는 "
             "별도 데이터 누적 후 분리 표시 예정입니다."
         ).classes("text-[11px] text-amber-200 leading-relaxed")
@@ -428,18 +504,18 @@ def _render_metrics_grid(
     ):
         # 1. 평균 승률
         _render_metric_card(
-            icon="📊", label="평균 승률",
+            icon="📊", label="표본가중 승률",
             value=f"{win_rate:.1f}%" if win_rate is not None else "—",
             color="amber",
-            tooltip="보유 기간 종료 시 진입가 대비 +1% 이상 종목 비율",
+            tooltip="TOTAL_N 기준 표본가중 승률. 보유 기간 종료 시 진입가 대비 +1% 이상 종목 비율",
         )
         
         # 2. 평균 수익률 (총 수익률 — 비용 미반영)
         _render_metric_card(
-            icon="💰", label="평균 수익률 (총)",
+            icon="💰", label="표본가중 수익률 (총)",
             value=f"{avg_ret:+.2f}%" if avg_ret is not None else "—",
             color="blue",
-            tooltip="모든 포지션의 산술 평균 수익률 (수수료/세금 미반영)",
+            tooltip="TOTAL_N 기준 표본가중 평균 수익률 (수수료/세금 미반영)",
         )
         
         # 3. [Step AL+AM] 비용 반영 추정 — 사용자 선택 비용률
@@ -477,7 +553,7 @@ def _render_metrics_grid(
             icon="🔴", label="최악 낙폭",
             value=f"-{abs(worst_mdd):.2f}%" if worst_mdd is not None else "—",
             color="red",
-            tooltip="기간 중 가장 컸던 단일 포지션 낙폭 (최악의 케이스)",
+            tooltip="선택 기간 중 가장 컸던 낙폭. 평균이 아니라 최대 위험값",
         )
     
     # [Step AM] KOSPI 알파 카드 (있을 때만 별도 표시 — 강조)
@@ -502,7 +578,7 @@ def _render_metrics_grid(
                 icon="💰", label="전략 수익률",
                 value=f"{avg_ret:+.2f}%" if avg_ret is not None else "—",
                 color="blue",
-                tooltip="동일 조건 백테스트 전략 평균 수익률 (총)",
+                tooltip="동일 조건 백테스트 전략 표본가중 평균 수익률 (총)",
             )
             
             # 알파 (전략 - KOSPI)
@@ -1457,20 +1533,7 @@ def _render_recent_trend_card(history: pd.DataFrame) -> None:
         return
 
     try:
-        h = history.copy()
-        # 동일 기준
-        if "METHOD" in h.columns and (h["METHOD"] == "ELITE_SCORE").any():
-            h = h[h["METHOD"] == "ELITE_SCORE"]
-        if "TOPK" in h.columns:
-            topk_num = pd.to_numeric(h["TOPK"], errors="coerce")
-            h_topk = h[topk_num == 5]
-            if not h_topk.empty:
-                h = h_topk
-        if "H(영업일)" in h.columns:
-            hold_num = pd.to_numeric(h["H(영업일)"], errors="coerce")
-            h_hold = h[hold_num == 5]
-            if not h_hold.empty:
-                h = h_hold
+        h = _select_perf_default_slice(history)
         if h.empty or "Date" not in h.columns:
             return
 
@@ -1483,23 +1546,15 @@ def _render_recent_trend_card(history: pd.DataFrame) -> None:
         if len(prev) < 3:
             return  # 직전 표본 부족
 
-        # 3개 지표 비교
-        def _safe_mean(s):
-            # [v3.9.13b] NaN 안전성 — 전부 NaN인 구간이면 None 반환
-            try:
-                v = pd.to_numeric(s, errors="coerce").mean()
-                return None if pd.isna(v) else float(v)
-            except Exception:
-                return None
-
-        recent_win = _safe_mean(recent["WIN_RATE_%"])
-        prev_win = _safe_mean(prev["WIN_RATE_%"])
-        recent_ret = _safe_mean(recent["AVG_RET_%"])
-        prev_ret = _safe_mean(prev["AVG_RET_%"])
+        # [v22.3.11] 3개 지표 모두 TOTAL_N 표본가중 평균으로 비교
+        recent_win = _weighted_mean(recent, "WIN_RATE_%")
+        prev_win = _weighted_mean(prev, "WIN_RATE_%")
+        recent_ret = _weighted_mean(recent, "AVG_RET_%")
+        prev_ret = _weighted_mean(prev, "AVG_RET_%")
 
         # MDD는 음수일수록 나쁨 (절댓값 클수록 나쁨)
-        recent_mdd = _safe_mean(recent.get("AVG_MDD_%", pd.Series()))
-        prev_mdd = _safe_mean(prev.get("AVG_MDD_%", pd.Series()))
+        recent_mdd = _weighted_mean(recent, "AVG_MDD_%")
+        prev_mdd = _weighted_mean(prev, "AVG_MDD_%")
 
         if any(x is None for x in [recent_win, prev_win, recent_ret, prev_ret]):
             return
@@ -1558,12 +1613,12 @@ def _render_recent_trend_card(history: pd.DataFrame) -> None:
             with ui.column().classes("gap-0.5 pl-5 mt-1"):
                 a_w, c_w = _arrow(d_win)
                 ui.label(
-                    f"승률: {prev_win:.1f}% → {recent_win:.1f}% "
+                    f"표본가중 승률: {prev_win:.1f}% → {recent_win:.1f}% "
                     f"({d_win:+.1f}%p {a_w})"
                 ).classes(f"text-xs {c_w}")
                 a_r, c_r = _arrow(d_ret)
                 ui.label(
-                    f"평균 수익률: {prev_ret:+.2f}% → {recent_ret:+.2f}% "
+                    f"표본가중 수익률: {prev_ret:+.2f}% → {recent_ret:+.2f}% "
                     f"({d_ret:+.2f}%p {a_r})"
                 ).classes(f"text-xs {c_r}")
                 if d_mdd is not None:
@@ -1603,26 +1658,13 @@ def _render_perf_judgment_card(history: pd.DataFrame, bench_data: dict) -> None:
 
     # 디폴트 view (METHOD=ELITE_SCORE 가능하면 / Top5 / 5영업일) 기준 평균
     try:
-        h = history.copy()
-        # [v3.9.12b] METHOD 정합성 — 가능하면 ELITE_SCORE만
-        if "METHOD" in h.columns and (h["METHOD"] == "ELITE_SCORE").any():
-            h = h[h["METHOD"] == "ELITE_SCORE"]
-        # [v3.9.12b] TOPK 타입 안전성 — "5" 문자열도 처리
-        if "TOPK" in h.columns:
-            topk_num = pd.to_numeric(h["TOPK"], errors="coerce")
-            h_topk = h[topk_num == 5]
-            if not h_topk.empty:
-                h = h_topk
-        # [v3.9.12b] H(영업일) 타입 안전성
-        if "H(영업일)" in h.columns:
-            hold_num = pd.to_numeric(h["H(영업일)"], errors="coerce")
-            h_hold = h[hold_num == 5]
-            if not h_hold.empty:
-                h = h_hold
+        h = _select_perf_default_slice(history)
         if h.empty:
             return
-        win = float(h["WIN_RATE_%"].mean())
-        avg_ret = float(h["AVG_RET_%"].mean())
+        win = _weighted_mean(h, "WIN_RATE_%")
+        avg_ret = _weighted_mean(h, "AVG_RET_%")
+        if win is None or avg_ret is None:
+            return
     except Exception:
         return
 
@@ -1632,8 +1674,8 @@ def _render_perf_judgment_card(history: pd.DataFrame, bench_data: dict) -> None:
         kospi_ret = _get_kospi_return(bench_data, 5)
         if kospi_ret is not None:
             alpha = avg_ret - float(kospi_ret)
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug("KOSPI alpha 계산 실패: %s", e)
 
     # [v3.9.12b] 상태 판정 — alpha None일 때 잘못 양호 판정 차단
     # alpha 없으면 양호 단정 금지, "시장 비교 데이터 부족" 상태로
@@ -1684,7 +1726,7 @@ def _render_perf_judgment_card(history: pd.DataFrame, bench_data: dict) -> None:
             ui.label(icon).classes("text-2xl")
             ui.label(title).classes(f"text-lg font-bold {color}")
         # 한 줄 지표 요약
-        summary_parts = [f"평균 승률 {win:.1f}%", f"평균 수익률 {avg_ret:+.2f}%"]
+        summary_parts = [f"표본가중 승률 {win:.1f}%", f"표본가중 수익률 {avg_ret:+.2f}%"]
         if alpha is not None:
             summary_parts.append(f"KOSPI 알파 {alpha:+.2f}%p")
         else:
@@ -1724,9 +1766,13 @@ def _render_validation_basis_card() -> None:
             ui.label(
                 "• Shadow 실험실 — 추천 로직을 바꾸지 않고 \"바꿨다면 어땠을지\"를 측정한 실험 결과"
             ).classes("text-xs text-gray-300")
+            ui.label(
+                "• 공식 신규매수 — TOP_PICK + BUY_NOW_ELIGIBLE 기준. 현재는 별도 누적 전이라 데이터 준비 중"
+            ).classes("text-xs text-amber-200")
         ui.label(
             "※ 각 영역의 숫자가 다른 이유는 \"검증 기준\"이 다르기 때문이며, "
-            "성과탭 +X%인데 종목탭은 매수 주의인 경우 충돌이 아닙니다."
+            "성과탭 +X%인데 종목탭은 매수 주의인 경우 충돌이 아닙니다. "
+            "공식 매수 판단은 반드시 TOP_PICK + BUY_NOW_ELIGIBLE 기준으로 분리해 보세요."
         ).classes("text-[10px] text-gray-500 italic mt-2 pl-5")
 
 
