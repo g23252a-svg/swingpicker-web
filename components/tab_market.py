@@ -1434,7 +1434,7 @@ def _parse_reference_date(value=None):
         try:
             return value.date()
         except TypeError:
-            pass
+            value = str(value)
     text = str(value or "").strip()
     for pat in (r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", r"(\d{4})(\d{2})(\d{2})"):
         m = re.search(pat, text)
