@@ -1438,10 +1438,112 @@ def _is_low_confidence_today() -> bool:
     return ev < 0 and cap_ret < 0
 
 
+
+def _official_decision_allows_entry(official_decision: dict | None) -> bool:
+    """[v22.3.18] 공식 신규매수 판정이 진입 가능인지 여부.
+
+    UI 문구의 최상위 SSOT는 `TOP_PICK + BUY_NOW_ELIGIBLE`이다.
+    최근 검증 EV가 양수여도 공식 후보 0개면 '진입' 문구를 표시하지 않는다.
+    """
+    if not official_decision:
+        return True
+    try:
+        return int(official_decision.get("official_count", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _resolve_member_summary_action(
+    ev: float,
+    tp1_rate: float,
+    cap_ret: float,
+    b_red_delta_ev: float = 0.0,
+    struct_delta_ev: float = 0.0,
+    extra_risk_signals: list[str] | None = None,
+    official_decision: dict | None = None,
+) -> dict:
+    """[v22.3.18] 회원 요약 카드의 최종 행동 문구를 결정한다.
+
+    공식 신규매수 0개인 날에는 백테스트 성과가 보통/양호해도
+    '선택적 진입', '소액 분할 진입' 같은 문구를 내보내지 않는다.
+    """
+    extra_risk_signals = extra_risk_signals or []
+
+    if official_decision and not _official_decision_allows_entry(official_decision):
+        status = str(official_decision.get("status", ""))
+        if status == "CASH_HOLD_TOP_PICK_DEFERRED":
+            action_txt = (
+                "TOP_PICK 후보는 있으나 공식 신규매수 기준(TOP_PICK + BUY_NOW_ELIGIBLE)을 "
+                "충족하지 못했습니다. 오늘은 관찰 전용이며, 성과 지표는 참고용입니다."
+            )
+        else:
+            action_txt = (
+                "공식 신규매수 후보가 없으므로 오늘은 관찰 전용입니다. "
+                "최근 성과 지표는 참고용이며 신규 진입 신호가 아닙니다."
+            )
+        return {
+            "status_icon": "⚪",
+            "status_txt": "매매 보류",
+            "status_color": "text-slate-300",
+            "action_txt": action_txt,
+            "bg_class": "bg-slate-900/25 border-slate-500/40",
+        }
+
+    primary_bad = ev < 0 and cap_ret < 0
+    shadow_warning = b_red_delta_ev > 1.0 or struct_delta_ev > 1.0
+
+    if primary_bad or (ev < 0 and b_red_delta_ev > 1.0):
+        action_txt = (
+            "최근 추천 성과가 약합니다. 무리한 신규 매수보다 관망 또는 소액 진입을 "
+            "권장합니다. 진입하더라도 손절 기준을 엄격히 지키는 것이 좋습니다."
+        )
+        if extra_risk_signals:
+            action_txt += " · 위험 신호: " + ", ".join(extra_risk_signals)
+        return {
+            "status_icon": "⚠️",
+            "status_txt": "신규 매수 주의",
+            "status_color": "text-amber-400",
+            "action_txt": action_txt,
+            "bg_class": "bg-amber-900/20 border-amber-500/40",
+        }
+
+    if ev > 0 and tp1_rate >= 0.35 and not shadow_warning:
+        return {
+            "status_icon": "✅",
+            "status_txt": "추천 신뢰 양호",
+            "status_color": "text-emerald-400",
+            "action_txt": (
+                "최근 추천이 양호한 성과를 보이고 있습니다. 조건이 맞는 종목에 분할 진입을 "
+                "검토해볼 수 있습니다. 다만 시장 변동성에 따라 결과는 달라질 수 있습니다."
+            ),
+            "bg_class": "bg-emerald-900/20 border-emerald-500/40",
+        }
+
+    if shadow_warning:
+        action_txt = (
+            "추천 성과는 보통 구간이지만, 시장에 위험 패턴 종목이 누적돼 있습니다. "
+            "강한 종목만 골라 소액으로 분할 진입하고 손절 기준을 엄격히 지키세요."
+        )
+        if extra_risk_signals:
+            action_txt += " · 위험 신호: " + ", ".join(extra_risk_signals)
+    else:
+        action_txt = (
+            "추천 성과가 강하지도 약하지도 않은 구간입니다. 강한 종목만 골라 "
+            "소액으로 분할 진입하는 것이 안전합니다."
+        )
+    return {
+        "status_icon": "🟡",
+        "status_txt": "선택적 진입",
+        "status_color": "text-yellow-400",
+        "action_txt": action_txt,
+        "bg_class": "bg-yellow-900/10 border-yellow-500/30",
+    }
+
 def _render_member_summary(capital_top1: dict, signal_top1: dict,
                             daily_top1: dict, confidence: dict,
                             pre_entry_risk: dict = None,
-                            struct_risk: dict = None) -> None:
+                            struct_risk: dict = None,
+                            official_decision: dict | None = None) -> None:
     """[v3.9.3/v3.9.5] 회원용 요약 카드 — 결론 우선, 한글 용어.
 
     상태 판정 (v3.9.5 — shadow 신호 추가 반영):
@@ -1493,49 +1595,21 @@ def _render_member_summary(capital_top1: dict, signal_top1: dict,
         if struct_delta_ev > 1.0:
             extra_risk_signals.append("STRUCT 70~85 위험 구간 다수")
 
-    # ── 상태 판정 (v3.9.5 — shadow 신호 반영) ──
-    primary_bad = ev < 0 and cap_ret < 0
-    shadow_warning = b_red_delta_ev > 1.0 or struct_delta_ev > 1.0
-
-    if primary_bad or (ev < 0 and b_red_delta_ev > 1.0):
-        status_icon = "⚠️"
-        status_txt = "신규 매수 주의"
-        status_color = "text-amber-400"
-        base_action = (
-            "최근 추천 성과가 약합니다. 무리한 신규 매수보다 관망 또는 소액 진입을 "
-            "권장합니다. 진입하더라도 손절 기준을 엄격히 지키는 것이 좋습니다."
-        )
-        if extra_risk_signals:
-            base_action += " · 위험 신호: " + ", ".join(extra_risk_signals)
-        action_txt = base_action
-        bg_class = "bg-amber-900/20 border-amber-500/40"
-    elif ev > 0 and tp1_rate >= 0.35 and not shadow_warning:
-        status_icon = "✅"
-        status_txt = "추천 신뢰 양호"
-        status_color = "text-emerald-400"
-        action_txt = (
-            "최근 추천이 양호한 성과를 보이고 있습니다. 조건이 맞는 종목에 분할 진입을 "
-            "검토해볼 수 있습니다. 다만 시장 변동성에 따라 결과는 달라질 수 있습니다."
-        )
-        bg_class = "bg-emerald-900/20 border-emerald-500/40"
-    else:
-        # [v3.9.5] 선택적 진입에도 shadow warning 있으면 명시
-        status_icon = "🟡"
-        status_txt = "선택적 진입"
-        status_color = "text-yellow-400"
-        if shadow_warning:
-            base_action = (
-                "추천 성과는 보통 구간이지만, 시장에 위험 패턴 종목이 누적돼 있습니다. "
-                "강한 종목만 골라 소액으로 분할 진입하고 손절 기준을 엄격히 지키세요."
-            )
-            base_action += " · 위험 신호: " + ", ".join(extra_risk_signals)
-            action_txt = base_action
-        else:
-            action_txt = (
-                "추천 성과가 강하지도 약하지도 않은 구간입니다. 강한 종목만 골라 "
-                "소액으로 분할 진입하는 것이 안전합니다."
-            )
-        bg_class = "bg-yellow-900/10 border-yellow-500/30"
+    # ── 상태 판정 (v22.3.18 — 공식 판정 SSOT 우선) ──
+    _summary_action = _resolve_member_summary_action(
+        ev=ev,
+        tp1_rate=tp1_rate,
+        cap_ret=cap_ret,
+        b_red_delta_ev=b_red_delta_ev,
+        struct_delta_ev=struct_delta_ev,
+        extra_risk_signals=extra_risk_signals,
+        official_decision=official_decision,
+    )
+    status_icon = _summary_action["status_icon"]
+    status_txt = _summary_action["status_txt"]
+    status_color = _summary_action["status_color"]
+    action_txt = _summary_action["action_txt"]
+    bg_class = _summary_action["bg_class"]
 
     # ── 검증 신뢰도 한글 ──
     conf_kor = {"HIGH": "높음", "MEDIUM": "보통", "LOW": "낮음"}.get(conf_level, "낮음")
@@ -1612,7 +1686,7 @@ def _member_stat_box(label: str, value: str,
             ui.label(sub).classes("text-[9px] text-gray-500")
 
 
-def _render_candidate_context_notice() -> None:
+def _render_candidate_context_notice(official_decision: dict | None = None) -> None:
     """[v3.9.4] Top Pick 카드와 종목 리스트 사이 컨텍스트 안내.
 
     회원 요약 카드가 "⚠️ 신규 매수 주의"인데 바로 아래 종목이 "🟣 핵심 관찰"로
@@ -1632,8 +1706,16 @@ def _render_candidate_context_notice() -> None:
         tp1_rate = daily_top1.get("tp1_rate", 0)
     cap_ret = capital_top1.get("total_return_pct", 0) if capital_top1 else 0
 
-    # 상태별 안내문
-    if ev < 0 and cap_ret < 0:
+    # 상태별 안내문 — v22.3.18: 공식 신규매수 0개면 관찰 전용 문구 우선
+    if official_decision and not _official_decision_allows_entry(official_decision):
+        icon = "📌"
+        msg = (
+            "오늘의 후보 — 공식 신규매수 후보가 없어 아래 종목은 관찰 전용입니다. "
+            "진입위치 관찰/고점수 관찰/보유관리 후보를 구분해서 확인하세요."
+        )
+        bg_class = "bg-slate-900/20 border-slate-500/30"
+        text_class = "text-slate-200"
+    elif ev < 0 and cap_ret < 0:
         icon = "📌"
         msg = (
             "오늘의 후보 — 전체 추천 신뢰도는 낮은 구간입니다. 아래 종목은 "
@@ -1880,7 +1962,143 @@ def _build_daily_official_decision(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _render_daily_official_decision_card(df: pd.DataFrame) -> None:
+
+def _candidate_row_payload(row: pd.Series) -> dict:
+    """[v22.3.18] 후보 유형 카드/테스트 공용 요약 payload."""
+    return {
+        "name": _pick_display_name(row),
+        "code": _pick_code(row),
+        "route": str(row.get("ROUTE", row.get("상태", ""))),
+        "score": _num_like(_get_first_existing(row, ["ELITE_SCORE", "DISPLAY_SCORE", "FINAL_SCORE"]), 0) or 0,
+        "final": _num_like(_get_first_existing(row, ["FINAL_SCORE", "DISPLAY_SCORE"]), 0) or 0,
+        "ai": _num_like(_get_first_existing(row, ["AI_SCORE", "AI", "ML_SCORE"]), 0) or 0,
+        "rr": _num_like(_get_first_existing(row, ["RR_NOW_TP1", "RR_MULT"]), 0) or 0,
+        "gap": _num_like(_get_first_existing(row, ["GAP_PCT", "ENTRY_GAP_PCT", "gap_pct"]), 0) or 0,
+        "vwap_gap": _num_like(_get_first_existing(row, ["VWAP_GAP", "VWAP_GAP_PCT"]), 0) or 0,
+        "poc_gap": _num_like(_get_first_existing(row, ["POC_GAP", "POC_GAP_PCT"]), 0) or 0,
+        "buy_now_score": _num_like(row.get("BUY_NOW_SCORE"), 0) or 0,
+        "buy_now_grade": str(row.get("BUY_NOW_GRADE", "")),
+        "eligible": _bool_like(row.get("BUY_NOW_ELIGIBLE", 0)),
+        "top_pick": _bool_like(row.get("TOP_PICK", 0)),
+    }
+
+
+def _build_candidate_triage(df: pd.DataFrame, max_each: int = 3) -> dict:
+    """[v22.3.18] 공식/진입위치/고점수/보유관리 후보를 분리한다.
+
+    - 공식 신규매수: TOP_PICK=1 AND BUY_NOW_ELIGIBLE=1
+    - 진입위치 관찰: BUY_NOW_PASS 또는 BUY 등급 + GAP/VWAP/POC/RR 양호
+    - 고점수 관찰: 점수는 높지만 공식 신규매수는 아닌 후보
+    - 보유관리: 신규매수가 아니라 기존 보유/관리 관점에서 봐야 하는 후보
+    """
+    if df is None or df.empty:
+        return {"official_buy": [], "entry_watch": [], "high_score_watch": [], "holding_manage": []}
+
+    work = df.copy()
+    top = _series_truthy(work["TOP_PICK"]) if "TOP_PICK" in work.columns else pd.Series(False, index=work.index)
+    elig = _series_truthy(work["BUY_NOW_ELIGIBLE"]) if "BUY_NOW_ELIGIBLE" in work.columns else pd.Series(False, index=work.index)
+    buy_pass = _series_truthy(work["BUY_NOW_PASS"]) if "BUY_NOW_PASS" in work.columns else pd.Series(False, index=work.index)
+    official = top & elig
+
+    score = pd.to_numeric(
+        work.get("ELITE_SCORE", work.get("DISPLAY_SCORE", work.get("FINAL_SCORE", 0))),
+        errors="coerce",
+    ).fillna(0)
+    final = pd.to_numeric(work.get("FINAL_SCORE", work.get("DISPLAY_SCORE", 0)), errors="coerce").fillna(0)
+    ai = pd.to_numeric(work.get("AI_SCORE", work.get("AI", 0)), errors="coerce").fillna(0)
+    rr = pd.to_numeric(work.get("RR_NOW_TP1", work.get("RR_MULT", 0)), errors="coerce").fillna(0)
+    gap = pd.to_numeric(work.get("GAP_PCT", work.get("ENTRY_GAP_PCT", 999)), errors="coerce").fillna(999)
+    vwap_gap = pd.to_numeric(work.get("VWAP_GAP", work.get("VWAP_GAP_PCT", 0)), errors="coerce").fillna(0)
+    poc_gap = pd.to_numeric(work.get("POC_GAP", work.get("POC_GAP_PCT", 0)), errors="coerce").fillna(0)
+    buy_score = pd.to_numeric(work.get("BUY_NOW_SCORE", 0), errors="coerce").fillna(0)
+    grade_buy = work.get("BUY_NOW_GRADE", pd.Series("", index=work.index)).astype(str).str.upper().eq("BUY")
+
+    route_txt = work.get("ROUTE", pd.Series("", index=work.index)).astype(str).str.upper()
+    active_route = route_txt.str.contains("ATTACK|ARMED", regex=True, na=False)
+
+    clean_entry = (
+        (~official)
+        & active_route
+        & (buy_pass | grade_buy)
+        & (gap.abs() <= 2.0)
+        & (vwap_gap <= 10.0)
+        & (poc_gap <= 30.0)
+        & (rr >= 1.2)
+    )
+    high_score = (~official) & (score >= 80.0)
+
+    status_text = pd.Series("", index=work.index)
+    for col in ("상태", "상태표시", "ACTION_LABEL", "ROUTE"):
+        if col in work.columns:
+            status_text = status_text.str.cat(work[col].astype(str), sep=" ")
+    holding = (~official) & status_text.str.contains("보유|CARRY", case=False, na=False)
+
+    def _top(mask, sort_cols):
+        if not bool(mask.any()):
+            return []
+        tmp = work.loc[mask].copy()
+        tmp["_score"] = score.loc[mask]
+        tmp["_final"] = final.loc[mask]
+        tmp["_ai"] = ai.loc[mask]
+        tmp["_rr"] = rr.loc[mask]
+        tmp["_gap_abs"] = gap.loc[mask].abs()
+        tmp["_buy"] = buy_score.loc[mask]
+        return [
+            _candidate_row_payload(row)
+            for _, row in tmp.sort_values(sort_cols[0], ascending=sort_cols[1]).head(max_each).iterrows()
+        ]
+
+    return {
+        "official_buy": _top(official, (["_score", "_rr"], [False, False])),
+        "entry_watch": _top(clean_entry, (["_buy", "_ai", "_rr", "_gap_abs"], [False, False, False, True])),
+        "high_score_watch": _top(high_score, (["_score", "_final", "_rr"], [False, False, False])),
+        "holding_manage": _top(holding, (["_score", "_rr"], [False, False])),
+    }
+
+
+def _triage_line(items: list[dict], empty_text: str = "해당 없음") -> str:
+    if not items:
+        return empty_text
+    parts = []
+    for item in items[:3]:
+        parts.append(
+            f"{item.get('name', '-')} "
+            f"(E{item.get('score', 0):.1f} · RR {item.get('rr', 0):.2f} · GAP {item.get('gap', 0):+.1f}%)"
+        )
+    return " / ".join(parts)
+
+
+def _render_candidate_triage_card(df: pd.DataFrame, official_decision: dict | None = None) -> None:
+    """[v22.3.18] 공식/비공식/보유관리 후보 유형 분리 카드."""
+    if official_decision and _official_decision_allows_entry(official_decision):
+        return
+
+    triage = _build_candidate_triage(df)
+
+    with ui.card().classes("w-full p-3 mb-3 bg-slate-900/20 border border-slate-500/30 rounded-lg"):
+        ui.label("🧭 오늘의 후보 유형 분리 — 공식 판정 SSOT").classes(
+            "text-sm font-bold text-slate-200 mb-1"
+        )
+        ui.label(
+            "공식 매수 추천은 TOP_PICK + BUY_NOW_ELIGIBLE만 인정합니다. "
+            "아래 후보는 성격별 관찰 분류이며 공식 신규매수가 아닐 수 있습니다."
+        ).classes("text-[11px] text-gray-400 mb-2")
+        ui.label("공식 매수 추천: 없음").classes("text-[11px] text-slate-300 font-semibold")
+        ui.label("진입위치 관찰: " + _triage_line(triage.get("entry_watch", []))).classes(
+            "text-[11px] text-emerald-200 leading-snug"
+        )
+        ui.label("고점수 관찰: " + _triage_line(triage.get("high_score_watch", []))).classes(
+            "text-[11px] text-blue-200 leading-snug"
+        )
+        if triage.get("holding_manage"):
+            ui.label("보유관리: " + _triage_line(triage.get("holding_manage", []))).classes(
+                "text-[11px] text-amber-200 leading-snug"
+            )
+        ui.label(
+            "※ 진입위치 관찰은 센서뷰처럼 가격 위치가 깨끗한 후보, 고점수 관찰은 해성디에스처럼 점수는 높지만 진입조건이 별도인 후보를 뜻합니다."
+        ).classes("text-[10px] text-gray-500 mt-1")
+
+def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
     """[v22.3.13] 종목탭 상단 공식 신규진입 판정 카드."""
     d = _build_daily_official_decision(df)
     status = d.get("status")
@@ -1938,9 +2156,10 @@ def _render_daily_official_decision_card(df: pd.DataFrame) -> None:
         ui.label(
             "※ 이 카드는 표시/설명 전용입니다. 공식 신규매수 산식은 TOP_PICK + BUY_NOW_ELIGIBLE 그대로 유지합니다."
         ).classes("text-[10px] text-gray-500 mt-2")
+    return d
 
 def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
-                       auth: str = "free"):
+                       auth: str = "free", official_decision: dict | None = None):
     """Tab 2 상단 헤더 카드 — 오늘의 검증 Top 3 표시."""
     # [v3.7.8] 확장 JSON 스키마
     #   daily_top3_backtest   — 체결 검증 포함 Top3 성능
@@ -2035,6 +2254,8 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
             # [v3.9.5] shadow 신호 반영 — 시장 위험 패턴 누적 시 판정 강화
             pre_entry_risk=bt.get("pre_entry_risk_shadow") or {},
             struct_risk=bt.get("struct_risk_shadow") or {},
+            # [v22.3.18] 공식 신규매수 0개면 성과 카드도 '진입' 문구 금지
+            official_decision=official_decision,
         )
 
         # ───────────────────────────────────────────
@@ -2437,7 +2658,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     )
 
     # [v22.3.13] 오늘 공식 신규진입 판정 — 매수/보류 이유를 Top Pick 카드보다 먼저 표시
-    _render_daily_official_decision_card(df)
+    official_decision = _render_daily_official_decision_card(df)
+
+    # [v22.3.18] 공식/진입위치/고점수/보유관리 후보 유형 분리
+    _render_candidate_triage_card(df, official_decision=official_decision)
 
     # [Step AC P0-4] Top Pick 카드 클릭 → 상세 패널 렌더 (closure: detail_area는 아래에서 정의됨)
     def _on_top_pick_click(code: str):
@@ -2450,12 +2674,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # ── [v3.7] Top 3 헤더 카드 (백테스트 검증 기반) ──
     # [v3.9.5] auth 전달 — 관리자는 상세 검증 expansion 기본 열림
-    _render_top3_card(df, top3_codes, on_card_click=_on_top_pick_click, auth=auth)
+    _render_top3_card(
+        df, top3_codes, on_card_click=_on_top_pick_click, auth=auth,
+        official_decision=official_decision,
+    )
 
     # ── [v3.9.4] 종목 리스트 직전 — Top Pick 컨텍스트 안내 ──
     # "신규 매수 주의" 상태일 때 바로 아래에 종목 카드가 "🟣 핵심 관찰"로 떠서
     # "방금은 주의라며 왜 핵심 관찰?" 충돌이 생김. 명확한 안내로 해소.
-    _render_candidate_context_notice()
+    _render_candidate_context_notice(official_decision=official_decision)
 
     # ── 뷰모드 + 필터 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-2"):
