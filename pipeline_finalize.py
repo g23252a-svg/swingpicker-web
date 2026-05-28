@@ -409,6 +409,391 @@ def add_official_buy_funnel_columns(
 
     return out
 
+
+# ═══════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════
+# [v3.9.27] Abnormal History & Market Warning Guard
+# ═══════════════════════════════════════════════════════════
+# 목적:
+#   - 아이로보틱스처럼 단기 진입 위치는 좋아 보이지만,
+#     장기 이상이력/시장경보/초급등 후 붕괴 위험이 큰 종목을
+#     공식매수뿐 아니라 관찰 후보에서도 제외한다.
+#   - production guard다. Shadow가 아니며, BUY_NOW_PASS/ELIGIBLE을 실제 차단한다.
+#   - 외부 실시간 조회가 없어도 CSV 내 시장경보 컬럼과 수익률 이력으로 작동한다.
+ABNORMAL_HISTORY_RET120_SPIKE = 150.0
+ABNORMAL_HISTORY_RET60_SPIKE = 100.0
+ABNORMAL_HISTORY_RET20_SPIKE = 40.0
+ABNORMAL_HISTORY_DROP_5D = -10.0
+ABNORMAL_HISTORY_DROP_1D = -3.0
+ABNORMAL_HISTORY_LONG_RATIO_BLOCK = 50.0
+ABNORMAL_HISTORY_LONG_DD_BLOCK = -95.0
+_ABNORMAL_HISTORY_HARD_WARNING_KEYWORDS = (
+    "투자경고", "투자위험", "관리종목", "환기", "거래정지",
+    "상장폐지", "상장적격성", "실질심사", "불성실공시",
+)
+_ABNORMAL_HISTORY_CAUTION_KEYWORDS = (
+    "투자주의", "단기과열",
+)
+_ABNORMAL_HISTORY_WARNING_COLS = (
+    "MARKET_WARNING", "MARKET_WARNING_TEXT", "WARNING_TYPE", "ISSUE_TYPE",
+    "시장경보", "투자경고", "투자주의", "투자위험", "관리종목", "환기종목",
+    "거래정지", "종목상태", "거래상태", "주의사항", "상장리스크",
+)
+
+
+def _ah_num(df: pd.DataFrame, col: str, default: float = 0.0) -> pd.Series:
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    return pd.Series(default, index=df.index, dtype="float64")
+
+
+def _ah_text_join(df: pd.DataFrame, cols: tuple) -> pd.Series:
+    existing = [c for c in cols if c in df.columns]
+    if not existing:
+        return pd.Series("", index=df.index, dtype="object")
+    out = pd.Series("", index=df.index, dtype="object")
+    for c in existing:
+        out = (out.astype(str) + " " + df[c].fillna("").astype(str)).str.strip()
+    return out.fillna("").astype(str)
+
+
+def add_abnormal_history_guard_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """v3.9.27 장기 이상이력/시장경보 production guard.
+
+    차단 조건:
+      1) CSV 내 시장경보/관리/거래정지 계열 hard keyword 존재
+      2) 장기 고점 대비 현재가 비율 컬럼이 있으면 50배 이상 또는 -95% 이상 훼손
+      3) 최근 120/60/20일 초급등 후 5일 급락 또는 당일 급락 조합
+
+    차단 시:
+      TOP_PICK=0, BUY_NOW_ELIGIBLE=0, BUY_NOW_PASS=0, BUY_NOW_GRADE=AVOID,
+      CANDIDATE_TRIAGE_TYPE=EXCLUDED_ABNORMAL_HISTORY 로 고정한다.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    out = df.copy()
+    idx = out.index
+
+    warning_text = _ah_text_join(out, _ABNORMAL_HISTORY_WARNING_COLS)
+    hard_warning = warning_text.str.contains("|".join(_ABNORMAL_HISTORY_HARD_WARNING_KEYWORDS), regex=True, na=False)
+    caution_warning = warning_text.str.contains("|".join(_ABNORMAL_HISTORY_CAUTION_KEYWORDS), regex=True, na=False)
+
+    ratio_cols = [
+        "LONG_HIGH_TO_CLOSE_RATIO", "MAX_PRICE_TO_CLOSE_RATIO", "ALL_TIME_HIGH_TO_CLOSE_RATIO",
+        "LONG_MAX_TO_CLOSE_RATIO", "HISTORICAL_HIGH_TO_CLOSE_RATIO",
+    ]
+    long_ratio = pd.Series(0.0, index=idx, dtype="float64")
+    for c in ratio_cols:
+        if c in out.columns:
+            long_ratio = pd.concat([long_ratio, _ah_num(out, c, 0.0)], axis=1).max(axis=1)
+
+    dd_cols = ["LONG_DRAWDOWN_PCT", "ALL_TIME_DRAWDOWN_PCT", "MAX_DRAWDOWN_FROM_HIGH_PCT"]
+    long_dd = pd.Series(0.0, index=idx, dtype="float64")
+    for c in dd_cols:
+        if c in out.columns:
+            long_dd = pd.concat([long_dd, _ah_num(out, c, 0.0)], axis=1).min(axis=1)
+
+    long_history_collapse = (long_ratio >= ABNORMAL_HISTORY_LONG_RATIO_BLOCK) | (long_dd <= ABNORMAL_HISTORY_LONG_DD_BLOCK)
+
+    ret_120d = _ah_num(out, "ret_120d_%", 0.0)
+    ret_60d = _ah_num(out, "ret_60d_%", 0.0)
+    ret_20d = _ah_num(out, "ret_20d_%", 0.0)
+    ret_5d = _ah_num(out, "ret_5d_%", 0.0)
+    ret_1d = _ah_num(out, "ret_1d_%", 0.0)
+
+    spike_reversal = (
+        (((ret_120d >= ABNORMAL_HISTORY_RET120_SPIKE) | (ret_60d >= ABNORMAL_HISTORY_RET60_SPIKE)) & (ret_5d <= ABNORMAL_HISTORY_DROP_5D))
+        | ((ret_20d >= ABNORMAL_HISTORY_RET20_SPIKE) & (ret_5d <= ABNORMAL_HISTORY_DROP_5D) & (ret_1d <= ABNORMAL_HISTORY_DROP_1D))
+    )
+
+    block = hard_warning | long_history_collapse | spike_reversal
+    warn_only = (~block) & caution_warning
+
+    reason = pd.Series("", index=idx, dtype="object")
+    guard_type = pd.Series("", index=idx, dtype="object")
+    reason.loc[hard_warning] = "시장경보/관리/거래정지 계열 리스크"
+    guard_type.loc[hard_warning] = "MARKET_WARNING"
+    reason.loc[long_history_collapse] = "장기 고점 대비 과도한 훼손/비정상 수정주가 이력"
+    guard_type.loc[long_history_collapse] = "LONG_HISTORY_COLLAPSE"
+    reason.loc[spike_reversal] = "초급등 후 단기 급락 — 눌림 착시/테마 붕괴 위험"
+    guard_type.loc[spike_reversal] = "SPIKE_REVERSAL"
+    reason.loc[warn_only] = "투자주의/단기과열 계열 주의 신호"
+    guard_type.loc[warn_only] = "MARKET_CAUTION"
+
+    out["ABNORMAL_HISTORY_GUARD_FLAG"] = block.astype(int)
+    out["ABNORMAL_HISTORY_GUARD_LEVEL"] = np.where(block, "BLOCK", np.where(warn_only, "WARN", "CLEAR"))
+    out["ABNORMAL_HISTORY_GUARD_TYPE"] = guard_type
+    out["ABNORMAL_HISTORY_GUARD_REASON"] = reason
+    out["MARKET_WARNING_GUARD_FLAG"] = hard_warning.astype(int)
+    out["MARKET_CAUTION_GUARD_FLAG"] = caution_warning.astype(int)
+    out["LONG_HISTORY_COLLAPSE_FLAG"] = long_history_collapse.astype(int)
+    out["SPIKE_REVERSAL_GUARD_FLAG"] = spike_reversal.astype(int)
+    out["LONG_HIGH_TO_CLOSE_RATIO_USED"] = long_ratio.round(2)
+
+    if block.any():
+        if "ORIGINAL_CANDIDATE_TRIAGE_TYPE" not in out.columns:
+            out["ORIGINAL_CANDIDATE_TRIAGE_TYPE"] = out.get("CANDIDATE_TRIAGE_TYPE", pd.Series("", index=idx)).astype(str)
+        if "ORIGINAL_BUY_NOW_PASS" not in out.columns:
+            out["ORIGINAL_BUY_NOW_PASS"] = out.get("BUY_NOW_PASS", pd.Series(0, index=idx))
+        if "ORIGINAL_BUY_NOW_GRADE" not in out.columns:
+            out["ORIGINAL_BUY_NOW_GRADE"] = out.get("BUY_NOW_GRADE", pd.Series("", index=idx)).astype(str)
+
+        out.loc[block, "TOP_PICK"] = 0
+        if "TOP_PICK_TYPE" in out.columns:
+            out.loc[block, "TOP_PICK_TYPE"] = ""
+        out.loc[block, "BUY_NOW_ELIGIBLE"] = 0
+        out.loc[block, "BUY_NOW_PASS"] = 0
+        out.loc[block, "BUY_NOW_GRADE"] = "AVOID"
+        if "BUY_NOW_SCORE" in out.columns:
+            out.loc[block, "BUY_NOW_SCORE"] = 0
+        out.loc[block, "CANDIDATE_TRIAGE_TYPE"] = "EXCLUDED_ABNORMAL_HISTORY"
+        out.loc[block, "OFFICIAL_FUNNEL_STAGE"] = "EXCLUDED_ABNORMAL_HISTORY"
+        out.loc[block, "OFFICIAL_BLOCK_REASON_1"] = "ABNORMAL_HISTORY_GUARD"
+        out.loc[block, "OFFICIAL_BLOCK_REASON_2"] = reason.loc[block]
+        if "NO_BUY_BREAKER_DECISION" in out.columns:
+            out.loc[block, "NO_BUY_BREAKER_DECISION"] = "REJECT_ABNORMAL_HISTORY_GUARD"
+        if "ENTRY_EDGE_LEVEL" in out.columns:
+            out.loc[block, "ENTRY_EDGE_LEVEL"] = "BLOCK"
+        if "ENTRY_EDGE_REASON" in out.columns:
+            out.loc[block, "ENTRY_EDGE_REASON"] = reason.loc[block]
+
+    return out
+
+# [v3.9.26] Evidence-Gated No-Buy Breaker
+# ═══════════════════════════════════════════════════════════
+# 목적:
+#   - 공식 TOP_PICK + BUY_NOW_ELIGIBLE 0개 고착을 완화하되,
+#     검증 N=0 가설 룰을 production으로 승격하지 않는다.
+#   - scripts/no_buy_breaker_backtest_v3926.py가 만든 검증 리포트에서
+#     PASS 룰이 있을 때만 최대 1개를 공식 후보로 승격한다.
+#   - 검증 리포트가 없거나 PASS 룰이 없으면 기존 공식매수 0개를 유지한다.
+NO_BUY_BREAKER_MIN_N = 20
+NO_BUY_BREAKER_MAX_PICKS = 1
+NO_BUY_BREAKER_OUTPUT_COLS = [
+    "NO_BUY_BREAKER_RULE_ID",
+    "NO_BUY_BREAKER_VALIDATED",
+    "NO_BUY_BREAKER_N",
+    "NO_BUY_BREAKER_WIN_RATE_5D",
+    "NO_BUY_BREAKER_AVG_RET_5D",
+    "NO_BUY_BREAKER_ALPHA_5D",
+    "NO_BUY_BREAKER_DECISION",
+]
+
+
+def _nbb_to_num(df: pd.DataFrame, col: str, default: float = 0.0) -> pd.Series:
+    """No-Buy Breaker용 안전 numeric Series."""
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    return pd.Series(default, index=df.index, dtype="float64")
+
+
+def _nbb_to_str(df: pd.DataFrame, col: str, default: str = "") -> pd.Series:
+    """No-Buy Breaker용 안전 string Series."""
+    if col in df.columns:
+        return df[col].fillna(default).astype(str)
+    return pd.Series(default, index=df.index, dtype="object")
+
+
+def get_no_buy_breaker_rule_mask(df: pd.DataFrame, rule_id: str) -> pd.Series:
+    """v3.9.26 검증/production 공통 후보 룰.
+
+    이 함수는 룰 후보만 판정한다. production 승격 여부는 반드시
+    검증 리포트의 PASS/REJECT 결과를 별도로 확인해야 한다.
+    """
+    if df is None or len(df) == 0:
+        return pd.Series(False, index=getattr(df, "index", None), dtype=bool)
+
+    route = _nbb_to_str(df, "ROUTE").str.upper().str.strip()
+    risk = _nbb_to_str(df, "ENTRY_RISK_LEVEL", "GREEN").str.upper().str.strip()
+    buy_pass = _nbb_to_num(df, "BUY_NOW_PASS", 0)
+    pass_ebs = _nbb_to_num(df, "PASS_EBS", 0)
+    volume = _nbb_to_num(df, "거래대금(억원)", 0)
+    final = _nbb_to_num(df, "FINAL_SCORE", 0)
+    struct = _nbb_to_num(df, "STRUCT_SCORE", 0)
+    timing = _nbb_to_num(df, "TIMING_SCORE", 0)
+    ai = _nbb_to_num(df, "AI_SCORE", 0)
+    rr = _nbb_to_num(df, "RR_NOW_TP1", 0)
+    gap = _nbb_to_num(df, "ENTRY_GAP_PCT", 99)
+    if "ENTRY_GAP_PCT" not in df.columns and "GAP_PCT" in df.columns:
+        gap = _nbb_to_num(df, "GAP_PCT", 99)
+    vwap = _nbb_to_num(df, "VWAP_GAP", 0)
+    poc = _nbb_to_num(df, "POC_GAP", 0)
+    mfi = _nbb_to_num(df, "MFI14", 50)
+    ret_1d = _nbb_to_num(df, "ret_1d_%", 0)
+    ret_5d = _nbb_to_num(df, "ret_5d_%", 0)
+
+    base_clean = (
+        route.isin(["ARMED", "ATTACK"])
+        & (buy_pass == 1)
+        & (pass_ebs == 1)
+        & (volume >= 50)
+        & (gap <= 3)
+        & (rr >= 1.10)
+        & (~risk.isin(["RED", "ORANGE"]))
+    )
+
+    rule_id = str(rule_id or "").upper().strip()
+    if rule_id == "RULE_A_STRUCT90_TIMING60":
+        return base_clean & (struct >= 90) & (timing >= 60) & (final >= 75)
+    if rule_id == "RULE_B_FINAL80_ENTRY_CLEAN":
+        return base_clean & (final >= 80) & (vwap <= 12) & (poc <= 40)
+    if rule_id == "RULE_C_HIGH_STRUCT_LOW_TIMING_RECOVERY":
+        return base_clean & (struct >= 95) & (timing >= 55) & (ai >= 70) & (vwap <= 12)
+    if rule_id == "RULE_D_ROUTE_ARMED_CLEAN_ENTRY":
+        return base_clean & (vwap <= 12) & (poc <= 40) & (mfi <= 80) & (ret_5d <= 20) & (ret_1d > -5)
+    return pd.Series(False, index=df.index, dtype=bool)
+
+
+def _load_validated_no_buy_breaker_rules(out_dir: str = None) -> list:
+    """검증 리포트에서 production PASS 룰을 읽는다.
+
+    scripts/no_buy_breaker_backtest_v3926.py가 생성하는
+    no_buy_breaker_rules_latest.csv/json 중 하나라도 존재하면 사용한다.
+    리포트가 없거나 PASS 룰이 없으면 빈 리스트를 반환한다.
+    """
+    import json
+    from pathlib import Path
+
+    base = Path(out_dir or OUT_DIR)
+    csv_path = base / "no_buy_breaker_rules_latest.csv"
+    json_path = base / "no_buy_breaker_backtest_latest.json"
+    rules = []
+
+    try:
+        if csv_path.exists():
+            rdf = pd.read_csv(csv_path)
+            if len(rdf) > 0:
+                decision = rdf.get("DECISION", pd.Series("", index=rdf.index)).astype(str).str.upper()
+                passed = rdf[decision == "PASS_PRODUCTION_GATE"].copy()
+                for _, row in passed.iterrows():
+                    n = int(pd.to_numeric(row.get("N", 0), errors="coerce") or 0)
+                    if n < NO_BUY_BREAKER_MIN_N:
+                        continue
+                    rules.append({
+                        "rule_id": str(row.get("RULE_ID", "")),
+                        "n": n,
+                        "win_rate_5d": float(pd.to_numeric(row.get("WIN_RATE_5D", 0), errors="coerce") or 0.0),
+                        "avg_ret_5d": float(pd.to_numeric(row.get("AVG_RET_5D", 0), errors="coerce") or 0.0),
+                        "avg_alpha_5d": float(pd.to_numeric(row.get("AVG_ALPHA_5D", 0), errors="coerce") or 0.0),
+                    })
+        elif json_path.exists():
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            for row in payload.get("rules", []):
+                if str(row.get("DECISION", "")).upper() != "PASS_PRODUCTION_GATE":
+                    continue
+                n = int(row.get("N", 0) or 0)
+                if n < NO_BUY_BREAKER_MIN_N:
+                    continue
+                rules.append({
+                    "rule_id": str(row.get("RULE_ID", "")),
+                    "n": n,
+                    "win_rate_5d": float(row.get("WIN_RATE_5D", 0.0) or 0.0),
+                    "avg_ret_5d": float(row.get("AVG_RET_5D", 0.0) or 0.0),
+                    "avg_alpha_5d": float(row.get("AVG_ALPHA_5D", 0.0) or 0.0),
+                })
+    except Exception as e:
+        logger.warning(f"⚠️ No-Buy Breaker 검증 리포트 로드 실패 (fallback 비활성): {e}")
+        return []
+
+    # 성과가 좋은 룰 우선. 평균수익률/승률/N 순으로 정렬.
+    rules = [r for r in rules if r.get("rule_id")]
+    rules.sort(key=lambda r: (r.get("avg_ret_5d", 0), r.get("win_rate_5d", 0), r.get("n", 0)), reverse=True)
+    return rules
+
+
+def apply_evidence_gated_no_buy_breaker(df: pd.DataFrame, rules: list = None, out_dir: str = None) -> pd.DataFrame:
+    """v3.9.26 검증 통과형 No-Buy Breaker production gate.
+
+    동작 원칙:
+      1. 기존 공식 신규매수(TOP_PICK=1 AND BUY_NOW_ELIGIBLE=1)가 있으면 개입하지 않는다.
+      2. 검증 리포트에서 PASS_PRODUCTION_GATE를 받은 룰이 없으면 개입하지 않는다.
+      3. PASS 룰 후보가 현재 CSV에도 있으면 점수 우선순위로 최대 1개만 TOP_PICK/ELIGIBLE 승격한다.
+      4. 모든 행에 NO_BUY_BREAKER_* 진단 컬럼을 남겨 UI/CSV에서 이유를 확인할 수 있게 한다.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    out = df.copy()
+    for col in NO_BUY_BREAKER_OUTPUT_COLS:
+        if col not in out.columns:
+            if col in {"NO_BUY_BREAKER_RULE_ID", "NO_BUY_BREAKER_DECISION"}:
+                out[col] = ""
+            elif col in {"NO_BUY_BREAKER_WIN_RATE_5D", "NO_BUY_BREAKER_AVG_RET_5D", "NO_BUY_BREAKER_ALPHA_5D"}:
+                out[col] = 0.0
+            else:
+                out[col] = 0
+
+    top_pick = _nbb_to_num(out, "TOP_PICK", 0).astype(int)
+    eligible = _nbb_to_num(out, "BUY_NOW_ELIGIBLE", 0).astype(int)
+    official_existing = int(((top_pick == 1) & (eligible == 1)).sum())
+    if official_existing > 0:
+        out["NO_BUY_BREAKER_DECISION"] = "SKIP_EXISTING_OFFICIAL_BUY"
+        return out
+
+    if rules is None:
+        rules = _load_validated_no_buy_breaker_rules(out_dir or OUT_DIR)
+
+    rules = [r for r in rules if int(r.get("n", 0) or 0) >= NO_BUY_BREAKER_MIN_N and str(r.get("rule_id", "")).strip()]
+    if not rules:
+        out["NO_BUY_BREAKER_DECISION"] = "REJECT_NO_VALIDATED_RULE"
+        return out
+
+    candidates = []
+    for rule in rules:
+        rid = str(rule.get("rule_id", ""))
+        mask = get_no_buy_breaker_rule_mask(out, rid)
+        if not mask.any():
+            continue
+        tmp = out.loc[mask].copy()
+        tmp["_NBB_RULE_ID"] = rid
+        tmp["_NBB_N"] = int(rule.get("n", 0) or 0)
+        tmp["_NBB_WIN_RATE_5D"] = float(rule.get("win_rate_5d", 0.0) or 0.0)
+        tmp["_NBB_AVG_RET_5D"] = float(rule.get("avg_ret_5d", 0.0) or 0.0)
+        tmp["_NBB_ALPHA_5D"] = float(rule.get("avg_alpha_5d", 0.0) or 0.0)
+        candidates.append(tmp)
+
+    if not candidates:
+        out["NO_BUY_BREAKER_DECISION"] = "REJECT_NO_CURRENT_CANDIDATE"
+        return out
+
+    cand = pd.concat(candidates, axis=0)
+    # 동일 종목이 여러 PASS 룰에 걸리면 검증 성과가 좋은 룰 우선.
+    cand["_SORT_RULE_RET"] = pd.to_numeric(cand.get("_NBB_AVG_RET_5D", 0), errors="coerce").fillna(0)
+    cand["_SORT_FINAL"] = _nbb_to_num(cand, "FINAL_SCORE", 0)
+    cand["_SORT_ELITE"] = _nbb_to_num(cand, "ELITE_SCORE", 0)
+    cand["_SORT_RR"] = _nbb_to_num(cand, "RR_NOW_TP1", 0)
+    cand["_SORT_GAP"] = _nbb_to_num(cand, "ENTRY_GAP_PCT", 99)
+    cand = cand.sort_values(
+        ["_SORT_RULE_RET", "_NBB_WIN_RATE_5D", "_NBB_N", "_SORT_FINAL", "_SORT_ELITE", "_SORT_RR", "_SORT_GAP"],
+        ascending=[False, False, False, False, False, False, True],
+    )
+    selected_idx = cand.index[:NO_BUY_BREAKER_MAX_PICKS]
+
+    out.loc[selected_idx, "TOP_PICK"] = 1
+    if "TOP_PICK_TYPE" not in out.columns:
+        out["TOP_PICK_TYPE"] = ""
+    out.loc[selected_idx, "TOP_PICK_TYPE"] = "NO_BUY_BREAKER_VALIDATED"
+    out.loc[selected_idx, "BUY_NOW_ELIGIBLE"] = 1
+    if "BUY_NOW_PASS" in out.columns:
+        out.loc[selected_idx, "BUY_NOW_PASS"] = 1
+
+    for idx in selected_idx:
+        row = cand.loc[idx]
+        out.loc[idx, "NO_BUY_BREAKER_RULE_ID"] = row.get("_NBB_RULE_ID", "")
+        out.loc[idx, "NO_BUY_BREAKER_VALIDATED"] = 1
+        out.loc[idx, "NO_BUY_BREAKER_N"] = int(row.get("_NBB_N", 0) or 0)
+        out.loc[idx, "NO_BUY_BREAKER_WIN_RATE_5D"] = round(float(row.get("_NBB_WIN_RATE_5D", 0.0) or 0.0), 2)
+        out.loc[idx, "NO_BUY_BREAKER_AVG_RET_5D"] = round(float(row.get("_NBB_AVG_RET_5D", 0.0) or 0.0), 2)
+        out.loc[idx, "NO_BUY_BREAKER_ALPHA_5D"] = round(float(row.get("_NBB_ALPHA_5D", 0.0) or 0.0), 2)
+        out.loc[idx, "NO_BUY_BREAKER_DECISION"] = "ALLOW_MAX_ONE_OFFICIAL_PICK"
+
+    not_selected = ~out.index.isin(selected_idx)
+    out.loc[not_selected & (out["NO_BUY_BREAKER_DECISION"].astype(str) == ""), "NO_BUY_BREAKER_DECISION"] = "NOT_SELECTED"
+    return out
+
 def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
     """IS_NOW_ENTRY — shared_utils.compute_is_now_entry 벡터 적용.
     
@@ -659,6 +1044,35 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"🧭 [v3.9.24] Official Buy Funnel 컬럼 부여 완료 — {_triage_counts}")
     except Exception as e:
         logger.warning(f"⚠️ add_official_buy_funnel_columns 실패 (무해): {e}")
+
+
+    # [v3.9.27] Abnormal History & Market Warning Guard — production hard block
+    try:
+        df_out = add_abnormal_history_guard_columns(df_out)
+        _ah_block = int(pd.to_numeric(df_out.get("ABNORMAL_HISTORY_GUARD_FLAG", 0), errors="coerce").fillna(0).astype(int).sum())
+        _ah_warn = int((df_out.get("ABNORMAL_HISTORY_GUARD_LEVEL", pd.Series("", index=df_out.index)).astype(str) == "WARN").sum())
+        if _ah_block > 0 or _ah_warn > 0:
+            _ah_types = df_out.get("ABNORMAL_HISTORY_GUARD_TYPE", pd.Series("", index=df_out.index)).astype(str).value_counts().to_dict()
+            log(f"🧯 [v3.9.27] Abnormal History Guard 적용 — BLOCK {_ah_block} · WARN {_ah_warn} · {_ah_types}")
+        else:
+            log("🧯 [v3.9.27] Abnormal History Guard 적용 — BLOCK 0")
+    except Exception as e:
+        logger.warning(f"⚠️ add_abnormal_history_guard_columns 실패 (기존 추천 유지): {e}")
+
+    # [v3.9.26] Evidence-Gated No-Buy Breaker — 검증 통과 룰이 있을 때만 최대 1개 공식 승격
+    try:
+        _official_before = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                                & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        df_out = apply_evidence_gated_no_buy_breaker(df_out, out_dir=OUT_DIR)
+        _official_after = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                               & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        if _official_after > _official_before:
+            log(f"🧬 [v3.9.26] Evidence-Gated No-Buy Breaker 공식 후보 승격: {_official_after - _official_before}건")
+        else:
+            _dec = df_out.get("NO_BUY_BREAKER_DECISION", pd.Series("", index=df_out.index)).astype(str).value_counts().to_dict()
+            log(f"🧬 [v3.9.26] No-Buy Breaker 비활성/보류 — {_dec}")
+    except Exception as e:
+        logger.warning(f"⚠️ apply_evidence_gated_no_buy_breaker 실패 (기존 공식추천 유지): {e}")
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
