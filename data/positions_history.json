@@ -3177,5 +3177,32 @@
     "alerted_events": [
       "396270_20260515_WARN_DRAWDOWN_20260518"
     ]
+  },
+  {
+    "code": "482630",
+    "name": "삼양엔씨켐",
+    "entry_ymd": "20260513",
+    "entry_px": 20700.0,
+    "qty": 0,
+    "stop_px": 18050.0,
+    "stop_px_initial": 18050.0,
+    "take_px1": 23700.0,
+    "take_px2": 25000.0,
+    "trailing_high": 23150.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260528",
+    "last_close_px": 17030.0,
+    "unrealized_pnl_pct": -17.73,
+    "realized_pnl_pct": -17.73,
+    "close_ymd": "20260528",
+    "close_px": 17030.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "482630_20260513_WARN_DRAWDOWN_20260515",
+      "482630_20260513_WARN_DRAWDOWN_20260518",
+      "482630_20260513_WARN_DRAWDOWN_20260520",
+      "482630_20260513_WARN_DRAWDOWN_20260527",
+      "482630_20260513_STOP_HIT_20260528"
+    ]
   }
 ]
