@@ -219,6 +219,196 @@ def add_entry_edge_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["ENTRY_EDGE_SHADOW_FLAG"] = b_red.astype(int)
     return out
 
+
+
+# ═══════════════════════════════════════════════════════════
+# [v3.9.24] Official Buy Funnel & Macro Regime Shadow
+# ═══════════════════════════════════════════════════════════
+# 공식 추천식을 완화하지 않고, recommend CSV에 "왜 공식 신규매수 0개인지"를
+# 설명하는 퍼널/후보 유형/shadow 시뮬레이션 컬럼만 추가한다.
+# 절대 계약:
+#   - TOP_PICK / BUY_NOW_ELIGIBLE / BUY_NOW_GRADE / BUY_NOW_PASS 변경 금지
+#   - scoring_engine.py 점수 산식 변경 금지
+#   - MACRO shadow는 production hard block 완화가 아니라 진단 전용
+
+def _v3924_truthy(value) -> bool:
+    text = str(value).strip().upper()
+    return text in {"1", "1.0", "TRUE", "T", "Y", "YES", "BUY", "PASS"}
+
+
+def _v3924_num_series(df: pd.DataFrame, names, default: float = 0.0) -> pd.Series:
+    for name in names:
+        if name in df.columns:
+            return pd.to_numeric(df[name], errors="coerce").fillna(default)
+    return pd.Series(default, index=df.index, dtype="float64")
+
+
+def _v3924_text_series(df: pd.DataFrame, name: str, default: str = "") -> pd.Series:
+    if name in df.columns:
+        return df[name].fillna(default).astype(str)
+    return pd.Series(default, index=df.index, dtype="object")
+
+
+def _v3924_flag_series(df: pd.DataFrame, name: str) -> pd.Series:
+    if name not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df[name].map(_v3924_truthy).fillna(False).astype(bool)
+
+
+def _v3924_extract_fx_level(macro_msg: str):
+    """`환율 1515원 [05/25]` / `USD/KRW: 1495.5`에서 환율 레벨을 추출한다."""
+    import re
+
+    msg = str(macro_msg or "")
+    patterns = [
+        r"환율\s*([0-9,]+(?:\.\d+)?)\s*원",
+        r"USD\s*/?\s*KRW\s*[:=]?\s*([0-9,]+(?:\.\d+)?)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, msg, flags=re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1).replace(",", ""))
+            except ValueError as e:
+                logger.debug("v3.9.24 FX level parse skip: %s", e)
+    return None
+
+
+def _v3924_ebs_pass_mask(df: pd.DataFrame) -> pd.Series:
+    if "PASS_EBS" in df.columns:
+        return _v3924_flag_series(df, "PASS_EBS")
+    if "EBS_STATUS" in df.columns:
+        s = _v3924_text_series(df, "EBS_STATUS").str.upper()
+        return s.str.contains("PASS|통과", na=False)
+    if "EBS" in df.columns:
+        s = _v3924_text_series(df, "EBS").str.upper()
+        return s.str.contains("PASS|통과", na=False) | s.str.match(r"^[6-9]/|^10/", na=False)
+    return pd.Series(False, index=df.index)
+
+
+def add_official_buy_funnel_columns(
+    df: pd.DataFrame,
+    macro_risk: str = "",
+    market_breadth=None,
+    macro_msg: str = "",
+) -> pd.DataFrame:
+    """[v3.9.24] 공식매수 퍼널/후보 유형/macro shadow 컬럼을 추가한다.
+
+    이 함수는 measurement/display 전용이다. TOP_PICK, BUY_NOW_ELIGIBLE,
+    BUY_NOW_PASS, BUY_NOW_GRADE 값은 절대 수정하지 않는다.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    out = df.copy()
+
+    top_pick = _v3924_flag_series(out, "TOP_PICK")
+    eligible = _v3924_flag_series(out, "BUY_NOW_ELIGIBLE")
+    buy_pass = _v3924_flag_series(out, "BUY_NOW_PASS")
+    route = _v3924_text_series(out, "ROUTE").str.upper()
+    state = _v3924_text_series(out, "상태").str.upper()
+    active = route.isin(["ATTACK", "ARMED"]) | state.isin(["ATTACK", "ARMED", "매수검토", "진입대기"])
+
+    score = _v3924_num_series(out, ["ELITE_SCORE", "DISPLAY_SCORE", "FINAL_SCORE"], 0.0)
+    final_score = _v3924_num_series(out, ["FINAL_SCORE", "DISPLAY_SCORE", "ELITE_SCORE"], 0.0)
+    rr = _v3924_num_series(out, ["RR_NOW_TP1", "RR_MULT"], 0.0)
+    gap = _v3924_num_series(out, ["ENTRY_GAP_PCT", "GAP_PCT", "gap_pct"], 99.0).abs()
+    vwap = _v3924_num_series(out, ["VWAP_GAP", "VWAP_GAP_PCT"], 0.0)
+    poc = _v3924_num_series(out, ["POC_GAP", "POC_GAP_PCT"], 0.0)
+    no_chase = _v3924_flag_series(out, "NO_CHASE_FLAG")
+    pullback_wait = _v3924_flag_series(out, "PULLBACK_WAIT_FLAG")
+    ebs_pass = _v3924_ebs_pass_mask(out)
+
+    strict = top_pick & eligible
+    entry_clean = buy_pass & (gap <= 3.0) & (vwap <= 10.0) & (poc <= 30.0) & (rr >= 1.2) & (~no_chase) & (~pullback_wait)
+    chase_risk = active & ((gap > 8.0) | (rr < 1.1) | no_chase | (vwap > 35.0) | (poc > 80.0))
+    high_score = score >= 80.0
+    holding_manage = route.eq("CARRY") | state.str.contains("보유", na=False)
+
+    stage = pd.Series("BELOW_OFFICIAL_BAR", index=out.index, dtype="object")
+    stage.loc[holding_manage] = "HOLDING_MANAGE"
+    stage.loc[active & chase_risk] = "ROUTE_ACTIVE_BUT_CHASE_RISK"
+    stage.loc[high_score & (~strict) & (~chase_risk)] = "HIGH_SCORE_BUT_ENTRY_BLOCKED"
+    stage.loc[entry_clean & (~top_pick)] = "ENTRY_READY_BUT_NOT_TOP_PICK"
+    stage.loc[top_pick & (~eligible)] = "TOP_PICK_ENTRY_BLOCKED"
+    stage.loc[strict] = "OFFICIAL_BUY"
+
+    triage = pd.Series("IGNORE", index=out.index, dtype="object")
+    triage.loc[holding_manage] = "HOLDING_MANAGE"
+    triage.loc[chase_risk] = "CHASE_RISK"
+    triage.loc[high_score & (~strict) & (~chase_risk)] = "HIGH_SCORE_OBSERVE"
+    triage.loc[entry_clean & (~strict)] = "ENTRY_CLEAN_OBSERVE"
+    triage.loc[strict] = "OFFICIAL_BUY"
+
+    reason1 = pd.Series("공식 기준 미달", index=out.index, dtype="object")
+    reason2 = pd.Series("", index=out.index, dtype="object")
+    reason1.loc[~top_pick] = "TOP_PICK=0"
+    reason2.loc[(~top_pick) & entry_clean] = "진입조건은 양호하나 공식 Top Pick 아님"
+    reason2.loc[(~top_pick) & high_score & (~entry_clean)] = "고점수이나 공식 Top Pick 아님"
+    reason1.loc[top_pick & (~eligible)] = "BUY_NOW_ELIGIBLE=0"
+    reason2.loc[top_pick & (~eligible) & (~buy_pass)] = "BUY_NOW_PASS=0"
+    reason2.loc[chase_risk & (gap > 8.0)] = "추천가 괴리 과다"
+    reason2.loc[chase_risk & (rr < 1.1)] = "RR_NOW_TP1 부족"
+    reason2.loc[(vwap > 35.0) | (poc > 80.0)] = "VWAP/POC 과열"
+    reason2.loc[~ebs_pass] = reason2.loc[~ebs_pass].mask(reason2.loc[~ebs_pass].eq(""), "EBS 미통과/불명")
+    reason1.loc[strict] = "공식 신규매수"
+    reason2.loc[strict] = "TOP_PICK + BUY_NOW_ELIGIBLE"
+
+    # 0~100 근접도 점수: 공식식이 아니라 설명용 near-miss score.
+    near = pd.Series(0.0, index=out.index, dtype="float64")
+    near += np.where(active, 15, 0)
+    near += np.where(top_pick, 20, 0)
+    near += np.where(buy_pass, 20, 0)
+    near += np.where(entry_clean, 15, 0)
+    near += np.where(rr >= 1.2, 10, np.where(rr >= 1.0, 5, 0))
+    near += np.where(final_score >= 75, 15, np.where(final_score >= 65, 8, 0))
+    near += np.where(ebs_pass, 5, 0)
+    near.loc[strict] = 100.0
+
+    try:
+        breadth_val = float(market_breadth)
+    except (TypeError, ValueError) as e:
+        logger.debug("v3.9.24 market breadth parse skip: %s", e)
+        breadth_val = np.nan
+    macro_risk_u = str(macro_risk or "").strip().upper()
+    fx_level = _v3924_extract_fx_level(macro_msg)
+    fx_high = fx_level is not None and fx_level >= 1500.0
+    internal_weak = (not np.isnan(breadth_val)) and breadth_val < 35.0
+    macro_hard = macro_risk_u in {"WARNING", "CRITICAL"}
+    macro_relaxed_market_ok = fx_high and macro_hard and (not internal_weak)
+
+    macro_mode = "NORMAL"
+    if fx_high and internal_weak:
+        macro_mode = "FX_HIGH_AND_INTERNAL_WEAK"
+    elif fx_high:
+        macro_mode = "FX_HIGH_REGIME"
+    elif macro_hard:
+        macro_mode = f"MACRO_{macro_risk_u}"
+
+    out["STRICT_OFFICIAL_BUY_ELIGIBLE"] = strict.astype(int)
+    out["OFFICIAL_FUNNEL_STAGE"] = stage
+    out["OFFICIAL_BLOCK_REASON_1"] = reason1
+    out["OFFICIAL_BLOCK_REASON_2"] = reason2
+    out["OFFICIAL_NEAR_MISS_SCORE"] = near.clip(0, 100).round(1)
+    out["OFFICIAL_NEAR_MISS_TYPE"] = triage
+    out["CANDIDATE_TRIAGE_TYPE"] = triage
+
+    out["MACRO_REGIME_MODE"] = macro_mode
+    out["FX_HIGH_REGIME_FLAG"] = int(fx_high)
+    out["FX_STALE_FLAG"] = 0  # 날짜 stale 판정은 UI v22.3.17 카드에서 run_meta 기준으로 처리
+    out["MARKET_INTERNAL_WEAK_FLAG"] = int(internal_weak)
+    out["MACRO_HARD_BLOCK_SHADOW"] = int(macro_hard)
+
+    shadow_macro = active & buy_pass & (final_score >= 65) & (rr >= 1.0) & (gap <= 5.0) & bool(macro_relaxed_market_ok)
+    shadow_entry = active & (final_score >= 75) & (rr >= 1.0) & (gap <= 10.0) & (~strict)
+    shadow_score = active & buy_pass & (final_score >= 65) & (rr >= 1.0) & (~strict)
+    out["MACRO_RELAXED_SHADOW_PASS"] = shadow_macro.astype(int)
+    out["SHADOW_MACRO_RELAXED_ELIGIBLE"] = shadow_macro.astype(int)
+    out["SHADOW_ENTRY_RELAXED_ELIGIBLE"] = shadow_entry.astype(int)
+    out["SHADOW_SCORE_RELAXED_ELIGIBLE"] = shadow_score.astype(int)
+
+    return out
+
 def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
     """IS_NOW_ENTRY — shared_utils.compute_is_now_entry 벡터 적용.
     
@@ -449,6 +639,26 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"🧪 [v22.3.10] ENTRY_EDGE shadow 컬럼 부여 완료 — B_red 감점 {n_edge}건")
     except Exception as e:
         logger.warning(f"⚠️ add_entry_edge_columns 실패 (무해): {e}")
+
+
+    # [v3.9.24] Official Buy Funnel & Macro Regime Shadow — 표시/진단 전용, 공식식 무수정
+    try:
+        _contract_cols = [c for c in ["TOP_PICK", "BUY_NOW_ELIGIBLE", "BUY_NOW_PASS", "BUY_NOW_GRADE"] if c in df_out.columns]
+        _contract_before = df_out[_contract_cols].copy() if _contract_cols else pd.DataFrame(index=df_out.index)
+        df_out = add_official_buy_funnel_columns(
+            df_out,
+            macro_risk=ctx.macro_risk,
+            market_breadth=ctx.breadth.get("ALL", np.nan),
+            macro_msg=getattr(ctx, "macro_msg", ""),
+        )
+        for _c in _contract_cols:
+            if not df_out[_c].equals(_contract_before[_c]):
+                logger.error("v3.9.24 funnel 적용 중 %s 변경 감지 — 원복", _c)
+                df_out[_c] = _contract_before[_c]
+        _triage_counts = df_out["CANDIDATE_TRIAGE_TYPE"].value_counts().to_dict()
+        log(f"🧭 [v3.9.24] Official Buy Funnel 컬럼 부여 완료 — {_triage_counts}")
+    except Exception as e:
+        logger.warning(f"⚠️ add_official_buy_funnel_columns 실패 (무해): {e}")
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
