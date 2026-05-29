@@ -1,0 +1,41 @@
+{
+  "trade_date": "20260529",
+  "generated_at": "2026-05-29 23:25:20",
+  "count": 2,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "036570",
+      "name": "NC",
+      "route": "ARMED",
+      "score": 82.9,
+      "close": 289500,
+      "entry": 289500,
+      "stop": 256000,
+      "target1": 352500,
+      "target2": 407000,
+      "est_win_rate": 0.495,
+      "rr": 1.9,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/036570"
+    },
+    {
+      "rank": 2,
+      "code": "080220",
+      "name": "제주반도체",
+      "route": "ARMED",
+      "score": 80.6,
+      "close": 97800,
+      "entry": 84500,
+      "stop": 71800,
+      "target1": 137100,
+      "target2": 164900,
+      "est_win_rate": 0.505,
+      "rr": 4.1,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/080220"
+    }
+  ]
+}

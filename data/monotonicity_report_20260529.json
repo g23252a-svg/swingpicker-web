@@ -1,0 +1,161 @@
+{
+  "asof_ymd": "20260529",
+  "generated_at": "2026-05-29T23:24:17.169861",
+  "market_map_coverage": 1.0,
+  "market_unknown_count": 0,
+  "market_unknown_samples": [],
+  "benchmark_mapping_warning": null,
+  "declared_wr_active": 0.5,
+  "declared_wr_top_pick": null,
+  "elite_monotonicity": {
+    "valid": true,
+    "bins": [
+      {
+        "score_lo": 0,
+        "score_hi": 50.0,
+        "n_raw": 0,
+        "p_win": null,
+        "p_win_lcb": null,
+        "avg_ret_net_pct": null,
+        "avg_ret_excess_pct": null
+      },
+      {
+        "score_lo": 50,
+        "score_hi": 60.0,
+        "n_raw": 0,
+        "p_win": null,
+        "p_win_lcb": null,
+        "avg_ret_net_pct": null,
+        "avg_ret_excess_pct": null
+      },
+      {
+        "score_lo": 60,
+        "score_hi": 70.0,
+        "n_raw": 16,
+        "p_win": 0.7778,
+        "p_win_lcb": 0.505,
+        "avg_ret_net_pct": 5.0449,
+        "avg_ret_excess_pct": -0.0688
+      },
+      {
+        "score_lo": 70,
+        "score_hi": 80.0,
+        "n_raw": 35,
+        "p_win": 0.3497,
+        "p_win_lcb": 0.2083,
+        "avg_ret_net_pct": -4.1649,
+        "avg_ret_excess_pct": -7.692
+      },
+      {
+        "score_lo": 80,
+        "score_hi": 90.0,
+        "n_raw": 9,
+        "p_win": 0.3636,
+        "p_win_lcb": 0.1206,
+        "avg_ret_net_pct": -6.2069,
+        "avg_ret_excess_pct": -7.388
+      },
+      {
+        "score_lo": 90,
+        "score_hi": 100.01,
+        "n_raw": 0,
+        "p_win": null,
+        "p_win_lcb": null,
+        "avg_ret_net_pct": null,
+        "avg_ret_excess_pct": null
+      }
+    ],
+    "monotone_p_win_lcb": false,
+    "monotone_avg_ret": false,
+    "monotone_avg_ret_excess": false
+  },
+  "realized_wr": 0.3497,
+  "realized_wr_top_pick": null,
+  "realized_wr_top_pick_n": 0,
+  "realized_wr_active": 0.3497,
+  "realized_wr_active_n": 35,
+  "declared_vs_realized_gap_active": 0.1503,
+  "declared_vs_realized_gap_top_pick": null,
+  "declared_vs_realized_gap": 0.1503,
+  "avg_ret_excess_pct": -5.6135,
+  "top_pick_funnel": {
+    "trade_ymd": "20260529",
+    "total": 579,
+    "aggressive_funnel": {
+      "total": 579,
+      "route_active": 2,
+      "hard_gate": 1,
+      "elite_75": 0,
+      "struct_80": 0,
+      "timing_70": 0,
+      "tp1_15": 0,
+      "final": 0
+    },
+    "stable_funnel": {
+      "total": 579,
+      "route_active": 2,
+      "hard_gate": 1,
+      "elite_70": 1,
+      "tp1_7_15": 0,
+      "balance_70": 0,
+      "wr_55": 0,
+      "mature": 0,
+      "final": 0
+    },
+    "top_pick_count": 0,
+    "aggressive_count": 0,
+    "stable_count": 0
+  },
+  "top_pick_stable_7day_avg": 0.0,
+  "ci_hard": [
+    {
+      "gate": "top_pick_route_positive",
+      "status": "PASS"
+    },
+    {
+      "gate": "top_pick_tp1_positive",
+      "status": "PASS"
+    },
+    {
+      "gate": "top_pick_rr_now_tp1_1",
+      "status": "PASS",
+      "detail": "TOP_PICK 0건"
+    },
+    {
+      "gate": "declared_vs_realized_gap_15pp",
+      "status": "SKIP",
+      "detail": "TOP_PICK 매칭 sufficient bin 없음"
+    }
+  ],
+  "ci_soft": [
+    {
+      "gate": "declared_vs_realized_gap_active",
+      "status": "WARN",
+      "detail": "gap_active=15.0% (n=35) — fallback 보정 또는 calibration drift 모니터링"
+    },
+    {
+      "gate": "wilson_monotonicity",
+      "status": "WARN",
+      "detail": "ELITE_SCORE bin별 p_win LCB 단조성 깨짐"
+    },
+    {
+      "gate": "avg_ret_excess_positive",
+      "status": "WARN",
+      "detail": "avg_ret_excess=-5.61%"
+    },
+    {
+      "gate": "market_map_coverage_95",
+      "status": "OK"
+    },
+    {
+      "gate": "stable_7day_avg_1",
+      "status": "WARN",
+      "detail": "평균 0.0개"
+    }
+  ],
+  "ci_hard_all_pass": true,
+  "ci_soft_any_warn": true,
+  "top_pick_count": 0,
+  "top_pick_rr_lt1_count": 0,
+  "top_pick_min_rr": null
+}

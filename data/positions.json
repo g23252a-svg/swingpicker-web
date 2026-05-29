@@ -11,9 +11,9 @@
     "take_px2": 421000.0,
     "trailing_high": 375500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 288000.0,
-    "unrealized_pnl_pct": 4.54,
+    "last_check_ymd": "20260529",
+    "last_close_px": 287000.0,
+    "unrealized_pnl_pct": 4.17,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -37,9 +37,9 @@
     "take_px2": 75400.0,
     "trailing_high": 70700.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 49600.0,
-    "unrealized_pnl_pct": -1.59,
+    "last_check_ymd": "20260529",
+    "last_close_px": 49950.0,
+    "unrealized_pnl_pct": -0.89,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -61,47 +61,15 @@
     "take_px2": 5140.0,
     "trailing_high": 4530.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 3370.0,
-    "unrealized_pnl_pct": 11.59,
+    "last_check_ymd": "20260529",
+    "last_close_px": 3115.0,
+    "unrealized_pnl_pct": 3.15,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
       "321370_20260318_WARN_DRAWDOWN_20260407"
-    ]
-  },
-  {
-    "code": "003070",
-    "name": "코오롱글로벌",
-    "entry_ymd": "20260320",
-    "entry_px": 10680.0,
-    "qty": 0,
-    "stop_px": 9360.0,
-    "stop_px_initial": 9360.0,
-    "take_px1": 12300.0,
-    "take_px2": 13120.0,
-    "trailing_high": 13570.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 9530.0,
-    "unrealized_pnl_pct": -10.77,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": [
-      "003070_20260320_TP1_HIT_20260415",
-      "003070_20260320_WARN_DRAWDOWN_20260512",
-      "003070_20260320_WARN_DRAWDOWN_20260513",
-      "003070_20260320_WARN_DRAWDOWN_20260518",
-      "003070_20260320_WARN_DRAWDOWN_20260519",
-      "003070_20260320_WARN_DRAWDOWN_20260520",
-      "003070_20260320_WARN_DRAWDOWN_20260521",
-      "003070_20260320_WARN_DRAWDOWN_20260526",
-      "003070_20260320_WARN_DRAWDOWN_20260527",
-      "003070_20260320_WARN_DRAWDOWN_20260528"
     ]
   },
   {
@@ -116,9 +84,9 @@
     "take_px2": 5900.0,
     "trailing_high": 6050.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 3880.0,
-    "unrealized_pnl_pct": -10.6,
+    "last_check_ymd": "20260529",
+    "last_close_px": 3860.0,
+    "unrealized_pnl_pct": -11.06,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -132,7 +100,8 @@
       "039560_20260323_TP1_HIT_20260421",
       "039560_20260323_WARN_DRAWDOWN_20260520",
       "039560_20260323_WARN_DRAWDOWN_20260527",
-      "039560_20260323_WARN_DRAWDOWN_20260528"
+      "039560_20260323_WARN_DRAWDOWN_20260528",
+      "039560_20260323_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -147,9 +116,9 @@
     "take_px2": 9570.0,
     "trailing_high": 9300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 5920.0,
-    "unrealized_pnl_pct": -9.06,
+    "last_check_ymd": "20260529",
+    "last_close_px": 5730.0,
+    "unrealized_pnl_pct": -11.98,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -162,7 +131,8 @@
       "214390_20260325_WARN_DRAWDOWN_20260521",
       "214390_20260325_WARN_DRAWDOWN_20260526",
       "214390_20260325_WARN_DRAWDOWN_20260527",
-      "214390_20260325_WARN_DRAWDOWN_20260528"
+      "214390_20260325_WARN_DRAWDOWN_20260528",
+      "214390_20260325_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -177,9 +147,9 @@
     "take_px2": 26350.0,
     "trailing_high": 25550.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 18150.0,
-    "unrealized_pnl_pct": -9.25,
+    "last_check_ymd": "20260529",
+    "last_close_px": 17440.0,
+    "unrealized_pnl_pct": -12.8,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -218,7 +188,8 @@
       "451760_20260326_WARN_DRAWDOWN_20260522",
       "451760_20260326_WARN_DRAWDOWN_20260525",
       "451760_20260326_WARN_DRAWDOWN_20260527",
-      "451760_20260326_WARN_DRAWDOWN_20260528"
+      "451760_20260326_WARN_DRAWDOWN_20260528",
+      "451760_20260326_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -233,9 +204,9 @@
     "take_px2": 35800.0,
     "trailing_high": 34750.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 21150.0,
-    "unrealized_pnl_pct": -13.14,
+    "last_check_ymd": "20260529",
+    "last_close_px": 20750.0,
+    "unrealized_pnl_pct": -14.78,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -251,7 +222,8 @@
       "053690_20260401_WARN_DRAWDOWN_20260521",
       "053690_20260401_WARN_DRAWDOWN_20260526",
       "053690_20260401_WARN_DRAWDOWN_20260527",
-      "053690_20260401_WARN_DRAWDOWN_20260528"
+      "053690_20260401_WARN_DRAWDOWN_20260528",
+      "053690_20260401_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -266,9 +238,9 @@
     "take_px2": 28300.0,
     "trailing_high": 29950.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 18400.0,
-    "unrealized_pnl_pct": -7.49,
+    "last_check_ymd": "20260529",
+    "last_close_px": 17310.0,
+    "unrealized_pnl_pct": -12.97,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -279,7 +251,8 @@
       "368770_20260403_TP1_HIT_20260421",
       "368770_20260403_WARN_DRAWDOWN_20260520",
       "368770_20260403_WARN_DRAWDOWN_20260527",
-      "368770_20260403_WARN_DRAWDOWN_20260528"
+      "368770_20260403_WARN_DRAWDOWN_20260528",
+      "368770_20260403_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -294,9 +267,9 @@
     "take_px2": 18910.0,
     "trailing_high": 20900.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 15870.0,
-    "unrealized_pnl_pct": 5.03,
+    "last_check_ymd": "20260529",
+    "last_close_px": 16000.0,
+    "unrealized_pnl_pct": 5.89,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -319,9 +292,9 @@
     "take_px2": 50400.0,
     "trailing_high": 48350.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 37450.0,
-    "unrealized_pnl_pct": 22.99,
+    "last_check_ymd": "20260529",
+    "last_close_px": 39750.0,
+    "unrealized_pnl_pct": 30.54,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -346,7 +319,8 @@
       "319400_20260414_TP1_HIT_20260525",
       "319400_20260414_TP1_HIT_20260526",
       "319400_20260414_TP1_HIT_20260527",
-      "319400_20260414_TP1_HIT_20260528"
+      "319400_20260414_TP1_HIT_20260528",
+      "319400_20260414_TP1_HIT_20260529"
     ]
   },
   {
@@ -361,9 +335,9 @@
     "take_px2": 24050.0,
     "trailing_high": 24200.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 19010.0,
-    "unrealized_pnl_pct": 3.15,
+    "last_check_ymd": "20260529",
+    "last_close_px": 17870.0,
+    "unrealized_pnl_pct": -3.04,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -384,40 +358,14 @@
     "take_px2": 137200.0,
     "trailing_high": 138800.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 100400.0,
-    "unrealized_pnl_pct": 7.61,
+    "last_check_ymd": "20260529",
+    "last_close_px": 106500.0,
+    "unrealized_pnl_pct": 14.15,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": []
-  },
-  {
-    "code": "005380",
-    "name": "현대차",
-    "entry_ymd": "20260417",
-    "entry_px": 538000.0,
-    "qty": 0,
-    "stop_px": 486000.0,
-    "stop_px_initial": 486000.0,
-    "take_px1": 687000.0,
-    "take_px2": 720000.0,
-    "trailing_high": 774500.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 677000.0,
-    "unrealized_pnl_pct": 25.84,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": [
-      "005380_20260417_TP1_HIT_20260513",
-      "005380_20260417_TP1_HIT_20260514",
-      "005380_20260417_TP1_HIT_20260515",
-      "005380_20260417_TP1_HIT_20260526"
-    ]
   },
   {
     "code": "005850",
@@ -431,50 +379,15 @@
     "take_px2": 84900.0,
     "trailing_high": 79500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 75600.0,
-    "unrealized_pnl_pct": 18.31,
+    "last_check_ymd": "20260529",
+    "last_close_px": 75100.0,
+    "unrealized_pnl_pct": 17.53,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
       "005850_20260421_WARN_DRAWDOWN_20260520"
-    ]
-  },
-  {
-    "code": "079550",
-    "name": "LIG디펜스앤에어로스페이스",
-    "entry_ymd": "20260427",
-    "entry_px": 950000.0,
-    "qty": 0,
-    "stop_px": 807000.0,
-    "stop_px_initial": 807000.0,
-    "take_px1": 1118000.0,
-    "take_px2": 1180000.0,
-    "trailing_high": 1002000.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 856000.0,
-    "unrealized_pnl_pct": -9.89,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": [
-      "079550_20260427_WARN_DRAWDOWN_20260507",
-      "079550_20260427_WARN_DRAWDOWN_20260508",
-      "079550_20260427_WARN_DRAWDOWN_20260511",
-      "079550_20260427_WARN_DRAWDOWN_20260512",
-      "079550_20260427_WARN_DRAWDOWN_20260513",
-      "079550_20260427_WARN_DRAWDOWN_20260514",
-      "079550_20260427_WARN_DRAWDOWN_20260515",
-      "079550_20260427_WARN_DRAWDOWN_20260518",
-      "079550_20260427_WARN_DRAWDOWN_20260519",
-      "079550_20260427_WARN_DRAWDOWN_20260520",
-      "079550_20260427_WARN_DRAWDOWN_20260521",
-      "079550_20260427_WARN_DRAWDOWN_20260527",
-      "079550_20260427_WARN_DRAWDOWN_20260528"
     ]
   },
   {
@@ -489,7 +402,7 @@
     "take_px2": 144300.0,
     "trailing_high": 121300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
+    "last_check_ymd": "20260529",
     "last_close_px": 120000.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -497,35 +410,6 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": []
-  },
-  {
-    "code": "012800",
-    "name": "대창",
-    "entry_ymd": "20260430",
-    "entry_px": 1650.0,
-    "qty": 0,
-    "stop_px": 1489.0,
-    "stop_px_initial": 1489.0,
-    "take_px1": 1790.0,
-    "take_px2": 1930.0,
-    "trailing_high": 2095.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 1510.0,
-    "unrealized_pnl_pct": -8.48,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": [
-      "012800_20260430_TP1_HIT_20260513",
-      "012800_20260430_TP1_HIT_20260514",
-      "012800_20260430_WARN_DRAWDOWN_20260518",
-      "012800_20260430_WARN_DRAWDOWN_20260519",
-      "012800_20260430_WARN_DRAWDOWN_20260520",
-      "012800_20260430_WARN_DRAWDOWN_20260521",
-      "012800_20260430_WARN_DRAWDOWN_20260528"
-    ]
   },
   {
     "code": "018880",
@@ -539,16 +423,17 @@
     "take_px2": 6060.0,
     "trailing_high": 5940.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 5100.0,
-    "unrealized_pnl_pct": 4.08,
+    "last_check_ymd": "20260529",
+    "last_close_px": 5630.0,
+    "unrealized_pnl_pct": 14.9,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
       "018880_20260507_TP1_HIT_20260511",
-      "018880_20260507_WARN_DRAWDOWN_20260520"
+      "018880_20260507_WARN_DRAWDOWN_20260520",
+      "018880_20260507_TP1_HIT_20260529"
     ]
   },
   {
@@ -563,9 +448,9 @@
     "take_px2": 52300.0,
     "trailing_high": 46300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 36900.0,
-    "unrealized_pnl_pct": -10.11,
+    "last_check_ymd": "20260529",
+    "last_close_px": 35700.0,
+    "unrealized_pnl_pct": -13.03,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -576,7 +461,8 @@
       "089010_20260508_WARN_DRAWDOWN_20260520",
       "089010_20260508_WARN_DRAWDOWN_20260521",
       "089010_20260508_WARN_DRAWDOWN_20260527",
-      "089010_20260508_WARN_DRAWDOWN_20260528"
+      "089010_20260508_WARN_DRAWDOWN_20260528",
+      "089010_20260508_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -591,15 +477,16 @@
     "take_px2": 6820.0,
     "trailing_high": 6360.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 5480.0,
-    "unrealized_pnl_pct": -5.84,
+    "last_check_ymd": "20260529",
+    "last_close_px": 5490.0,
+    "unrealized_pnl_pct": -5.67,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "028670_20260511_WARN_DRAWDOWN_20260528"
+      "028670_20260511_WARN_DRAWDOWN_20260528",
+      "028670_20260511_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -614,9 +501,9 @@
     "take_px2": 80300.0,
     "trailing_high": 64600.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 52800.0,
-    "unrealized_pnl_pct": -12.44,
+    "last_check_ymd": "20260529",
+    "last_close_px": 52600.0,
+    "unrealized_pnl_pct": -12.77,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -629,7 +516,8 @@
       "082920_20260514_WARN_DRAWDOWN_20260522",
       "082920_20260514_WARN_DRAWDOWN_20260525",
       "082920_20260514_WARN_DRAWDOWN_20260527",
-      "082920_20260514_WARN_DRAWDOWN_20260528"
+      "082920_20260514_WARN_DRAWDOWN_20260528",
+      "082920_20260514_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -644,9 +532,9 @@
     "take_px2": 23400.0,
     "trailing_high": 22650.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 20300.0,
-    "unrealized_pnl_pct": -2.64,
+    "last_check_ymd": "20260529",
+    "last_close_px": 19950.0,
+    "unrealized_pnl_pct": -4.32,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -665,9 +553,9 @@
     "take_px2": 22600.0,
     "trailing_high": 19900.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 16370.0,
-    "unrealized_pnl_pct": -7.15,
+    "last_check_ymd": "20260529",
+    "last_close_px": 15930.0,
+    "unrealized_pnl_pct": -9.64,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -678,7 +566,8 @@
       "019210_20260515_TP1_HIT_20260520",
       "019210_20260515_TP1_HIT_20260522",
       "019210_20260515_TP1_HIT_20260525",
-      "019210_20260515_WARN_DRAWDOWN_20260528"
+      "019210_20260515_WARN_DRAWDOWN_20260528",
+      "019210_20260515_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -693,9 +582,9 @@
     "take_px2": 2100.0,
     "trailing_high": 2430.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 1866.0,
-    "unrealized_pnl_pct": 23.09,
+    "last_check_ymd": "20260529",
+    "last_close_px": 1738.0,
+    "unrealized_pnl_pct": 14.64,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -720,9 +609,9 @@
     "take_px2": 34600.0,
     "trailing_high": 27400.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 24950.0,
-    "unrealized_pnl_pct": 5.72,
+    "last_check_ymd": "20260529",
+    "last_close_px": 25950.0,
+    "unrealized_pnl_pct": 9.96,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -741,15 +630,16 @@
     "take_px2": 44250.0,
     "trailing_high": 39550.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 34700.0,
-    "unrealized_pnl_pct": -5.45,
+    "last_check_ymd": "20260529",
+    "last_close_px": 34550.0,
+    "unrealized_pnl_pct": -5.86,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "001450_20260520_WARN_DRAWDOWN_20260528"
+      "001450_20260520_WARN_DRAWDOWN_20260528",
+      "001450_20260520_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -762,11 +652,11 @@
     "stop_px_initial": 3425.0,
     "take_px1": 4440.0,
     "take_px2": 6160.0,
-    "trailing_high": 5830.0,
+    "trailing_high": 6140.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 5370.0,
-    "unrealized_pnl_pct": 33.09,
+    "last_check_ymd": "20260529",
+    "last_close_px": 5080.0,
+    "unrealized_pnl_pct": 25.9,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -777,7 +667,8 @@
       "357880_20260520_TP1_HIT_20260525",
       "357880_20260520_TP1_HIT_20260526",
       "357880_20260520_TP1_HIT_20260527",
-      "357880_20260520_TP1_HIT_20260528"
+      "357880_20260520_TP1_HIT_20260528",
+      "357880_20260520_TP1_HIT_20260529"
     ]
   },
   {
@@ -792,16 +683,17 @@
     "take_px2": 8290.0,
     "trailing_high": 7560.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 6730.0,
-    "unrealized_pnl_pct": -0.3,
+    "last_check_ymd": "20260529",
+    "last_close_px": 6410.0,
+    "unrealized_pnl_pct": -5.04,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
       "187790_20260521_TP1_HIT_20260522",
-      "187790_20260521_TP1_HIT_20260525"
+      "187790_20260521_TP1_HIT_20260525",
+      "187790_20260521_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -816,37 +708,15 @@
     "take_px2": 12790.0,
     "trailing_high": 10980.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 9460.0,
-    "unrealized_pnl_pct": -0.63,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": []
-  },
-  {
-    "code": "003690",
-    "name": "코리안리",
-    "entry_ymd": "20260522",
-    "entry_px": 14520.0,
-    "qty": 0,
-    "stop_px": 13350.0,
-    "stop_px_initial": 13350.0,
-    "take_px1": 17000.0,
-    "take_px2": 18620.0,
-    "trailing_high": 14750.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 13660.0,
-    "unrealized_pnl_pct": -5.92,
+    "last_check_ymd": "20260529",
+    "last_close_px": 8400.0,
+    "unrealized_pnl_pct": -11.76,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "003690_20260522_WARN_DRAWDOWN_20260527",
-      "003690_20260522_WARN_DRAWDOWN_20260528"
+      "144960_20260521_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -861,16 +731,17 @@
     "take_px2": 7810.0,
     "trailing_high": 6300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 5030.0,
-    "unrealized_pnl_pct": -11.6,
+    "last_check_ymd": "20260529",
+    "last_close_px": 4965.0,
+    "unrealized_pnl_pct": -12.74,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
       "012610_20260526_WARN_DRAWDOWN_20260527",
-      "012610_20260526_WARN_DRAWDOWN_20260528"
+      "012610_20260526_WARN_DRAWDOWN_20260528",
+      "012610_20260526_WARN_DRAWDOWN_20260529"
     ]
   },
   {
@@ -885,9 +756,9 @@
     "take_px2": 45800.0,
     "trailing_high": 35500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260528",
-    "last_close_px": 29400.0,
-    "unrealized_pnl_pct": -10.64,
+    "last_check_ymd": "20260529",
+    "last_close_px": 31850.0,
+    "unrealized_pnl_pct": -3.19,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -895,5 +766,47 @@
     "alerted_events": [
       "230240_20260527_WARN_DRAWDOWN_20260528"
     ]
+  },
+  {
+    "code": "036570",
+    "name": "NC",
+    "entry_ymd": "20260529",
+    "entry_px": 289500.0,
+    "qty": 0,
+    "stop_px": 256000.0,
+    "stop_px_initial": 256000.0,
+    "take_px1": 352500.0,
+    "take_px2": 407000.0,
+    "trailing_high": 293000.0,
+    "status": "OPEN",
+    "last_check_ymd": "20260529",
+    "last_close_px": 289500.0,
+    "unrealized_pnl_pct": 0.0,
+    "realized_pnl_pct": 0.0,
+    "close_ymd": "",
+    "close_px": 0.0,
+    "close_reason": "",
+    "alerted_events": []
+  },
+  {
+    "code": "095610",
+    "name": "테스",
+    "entry_ymd": "20260529",
+    "entry_px": 119100.0,
+    "qty": 0,
+    "stop_px": 101200.0,
+    "stop_px_initial": 101200.0,
+    "take_px1": 141700.0,
+    "take_px2": 150900.0,
+    "trailing_high": 123400.0,
+    "status": "OPEN",
+    "last_check_ymd": "20260529",
+    "last_close_px": 119100.0,
+    "unrealized_pnl_pct": 0.0,
+    "realized_pnl_pct": 0.0,
+    "close_ymd": "",
+    "close_px": 0.0,
+    "close_reason": "",
+    "alerted_events": []
   }
 ]
