@@ -2068,6 +2068,53 @@ def _triage_line(items: list[dict], empty_text: str = "해당 없음") -> str:
     return " / ".join(parts)
 
 
+def _candidate_watch_reason(item: dict, max_reasons: int = 2) -> str:
+    """[v22.3.19] 관찰 후보가 '왜 공식 신규매수가 아닌지' 1줄 사유.
+
+    우선순위(임계값은 v22.3.18 `_build_candidate_triage` 분류 기준과 동일):
+      VWAP 과열(>10%) → POC 과열(>30%) → RR 부족(<1.2)
+      → TOP_PICK 미선정 → BUY_NOW 미충족
+    최대 `max_reasons`개를 뽑아 ' · '로 잇는다. 표시 전용이며 산식은 건드리지 않는다.
+    """
+    reasons: list[str] = []
+
+    vwap_gap = item.get("vwap_gap")
+    if vwap_gap is not None and vwap_gap > 10.0:
+        reasons.append(f"VWAP 과열 +{vwap_gap:.0f}%")
+
+    poc_gap = item.get("poc_gap")
+    if poc_gap is not None and poc_gap > 30.0:
+        reasons.append(f"POC 과열 +{poc_gap:.0f}%")
+
+    rr = item.get("rr")
+    if rr is not None and rr < 1.2:
+        reasons.append(f"RR 부족 {rr:.2f}")
+
+    if not item.get("top_pick", False):
+        reasons.append("TOP_PICK 미선정")
+
+    if not item.get("eligible", False):
+        reasons.append("BUY_NOW 미충족")
+
+    if not reasons:
+        return "공식 신규매수 조건 미충족"
+    return " · ".join(reasons[:max_reasons])
+
+
+def _triage_line_with_reason(items: list[dict], empty_text: str = "해당 없음") -> str:
+    """[v22.3.19] `_triage_line`에 후보별 비매수 사유를 덧붙인 표시 문자열."""
+    if not items:
+        return empty_text
+    parts = []
+    for item in items[:3]:
+        parts.append(
+            f"{item.get('name', '-')} "
+            f"(E{item.get('score', 0):.1f} · RR {item.get('rr', 0):.2f} · GAP {item.get('gap', 0):+.1f}%"
+            f" · 사유: {_candidate_watch_reason(item)})"
+        )
+    return " / ".join(parts)
+
+
 def _render_candidate_triage_card(df: pd.DataFrame, official_decision: dict | None = None) -> None:
     """[v22.3.18] 공식/비공식/보유관리 후보 유형 분리 카드."""
     if official_decision and _official_decision_allows_entry(official_decision):
@@ -2084,18 +2131,19 @@ def _render_candidate_triage_card(df: pd.DataFrame, official_decision: dict | No
             "아래 후보는 성격별 관찰 분류이며 공식 신규매수가 아닐 수 있습니다."
         ).classes("text-[11px] text-gray-400 mb-2")
         ui.label("공식 매수 추천: 없음").classes("text-[11px] text-slate-300 font-semibold")
-        ui.label("진입위치 관찰: " + _triage_line(triage.get("entry_watch", []))).classes(
+        ui.label("진입위치 관찰: " + _triage_line_with_reason(triage.get("entry_watch", []))).classes(
             "text-[11px] text-emerald-200 leading-snug"
         )
-        ui.label("고점수 관찰: " + _triage_line(triage.get("high_score_watch", []))).classes(
+        ui.label("고점수 관찰: " + _triage_line_with_reason(triage.get("high_score_watch", []))).classes(
             "text-[11px] text-blue-200 leading-snug"
         )
         if triage.get("holding_manage"):
-            ui.label("보유관리: " + _triage_line(triage.get("holding_manage", []))).classes(
+            ui.label("보유관리: " + _triage_line_with_reason(triage.get("holding_manage", []))).classes(
                 "text-[11px] text-amber-200 leading-snug"
             )
         ui.label(
-            "※ 진입위치 관찰은 센서뷰처럼 가격 위치가 깨끗한 후보, 고점수 관찰은 해성디에스처럼 점수는 높지만 진입조건이 별도인 후보를 뜻합니다."
+            "※ 진입위치 관찰은 센서뷰처럼 가격 위치가 깨끗한 후보, 고점수 관찰은 해성디에스처럼 점수는 높지만 진입조건이 별도인 후보를 뜻합니다. "
+            "각 줄의 `사유:`는 해당 후보가 왜 공식 신규매수가 아닌지를 나타냅니다."
         ).classes("text-[10px] text-gray-500 mt-1")
 
 def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
