@@ -3534,3 +3534,138 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
 
     # [Step 2F] 최종 판정 띠 (페이지 최하단)
     render_v2_final_verdict(n, rank=rank, total=total)
+
+# ═══════════════════════════════════════════════════════════════════
+# [v22.3.21] No-Buy / 관망 카드 렌더 (NiceGUI) — FOMO-safety
+#   buy_now_badge.build_no_buy_card_model() 결과만 소비한다.
+#   official_buy=False면 목표가/매수가를 hero로 절대 띄우지 않는다(회색 각주만).
+#   관리자 raw 엔진값은 ui.expansion으로 분리(구독자 화면 비노출).
+# ═══════════════════════════════════════════════════════════════════
+
+_NB_GREEN = "#10b981"
+_NB_AMBER = "#f59e0b"
+_NB_DANGER_BG = "#fef2f2"
+_NB_DANGER_TX = "#b91c1c"
+_NB_DANGER_IC = "#ef4444"
+_NB_TX = "#111827"
+_NB_TX2 = "#6b7280"
+_NB_TX3 = "#9ca3af"
+_NB_SURF = "#f9fafb"
+_NB_BORDER = "#e5e7eb"
+
+
+def _nb_bar_html(a: Dict[str, Any]) -> str:
+    color = _NB_GREEN if a["pass"] else _NB_AMBER
+    icon = "✓" if a["pass"] else "✗"
+    name = h_escape(str(a["name"]))
+    val = float(a["value"]); thr = float(a["threshold"])
+    fillw = max(0.0, min(100.0, val))
+    markl = max(0.0, min(100.0, thr))
+    return (
+        '<div style="margin-bottom:10px;">'
+        '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;">'
+        f'<span style="color:{_NB_TX2};">{name}</span>'
+        f'<span style="color:{color};font-weight:600;">{icon} {val:.0f} '
+        f'<span style="color:{_NB_TX3};font-weight:400;">· 통과선 {thr:.0f}</span></span>'
+        '</div>'
+        f'<div style="position:relative;height:7px;background:#f1f5f9;border-radius:4px;">'
+        f'<div style="width:{fillw:.0f}%;height:100%;background:{color};border-radius:4px;"></div>'
+        f'<div style="position:absolute;left:{markl:.0f}%;top:-2px;width:2px;height:11px;background:{_NB_TX3};"></div>'
+        '</div></div>'
+    )
+
+
+def _nb_card_html(m: Dict[str, Any], pass_count=None, watch_count=None) -> str:
+    """카드 모델 → HTML 문자열. official_buy=False면 가격은 각주로만 강등된다."""
+    market_blocked = any(b["kind"] == "market" for b in m["blockers"])
+    banner_sub = "시장 전체 위험 높음 · CRITICAL" if market_blocked else "공식 신규매수 기준 미충족"
+
+    # 상단 배너 (rest 톤)
+    html = (
+        f'<div style="max-width:420px;background:#fff;border:0.5px solid {_NB_BORDER};'
+        'border-radius:12px;padding:14px 16px;font-family:inherit;">'
+        f'<div style="display:flex;align-items:center;gap:10px;background:{_NB_DANGER_BG};'
+        'border-radius:8px;padding:11px 12px;">'
+        f'<span style="font-size:20px;color:{_NB_DANGER_IC};">🛡️</span>'
+        '<div>'
+        f'<div style="font-weight:600;font-size:15px;color:{_NB_DANGER_TX};">{h_escape(m["headline"])}</div>'
+        f'<div style="font-size:12px;color:{_NB_DANGER_TX};">{h_escape(banner_sub)}</div>'
+        '</div></div>'
+        f'<p style="font-size:13px;color:{_NB_TX2};line-height:1.7;margin:12px 2px;">{h_escape(m["subtext"])}</p>'
+    )
+
+    # (선택) 오늘 통과/관찰 카운트
+    if pass_count is not None or watch_count is not None:
+        pc = 0 if pass_count is None else int(pass_count)
+        wc = 0 if watch_count is None else int(watch_count)
+        html += (
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
+            f'<div style="background:{_NB_SURF};border-radius:8px;padding:10px 12px;">'
+            f'<div style="font-size:12px;color:{_NB_TX2};">오늘 매수 통과</div>'
+            f'<div style="font-size:22px;font-weight:600;color:{_NB_TX};">{pc}<span style="font-size:13px;font-weight:400;color:{_NB_TX2};"> 종목</span></div></div>'
+            f'<div style="background:{_NB_SURF};border-radius:8px;padding:10px 12px;">'
+            f'<div style="font-size:12px;color:{_NB_TX2};">관찰 후보</div>'
+            f'<div style="font-size:22px;font-weight:600;color:{_NB_TX};">{wc}<span style="font-size:13px;font-weight:400;color:{_NB_TX2};"> 종목</span></div></div>'
+            '</div>'
+        )
+
+    # 가장 가까운 종목 분석
+    html += f'<div style="border-top:0.5px solid {_NB_BORDER};margin-top:14px;padding-top:14px;">'
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">'
+    html += (
+        '<div style="display:flex;align-items:center;gap:7px;">'
+        f'<span style="font-size:16px;color:{_NB_TX2};">👀</span>'
+        f'<span style="font-weight:600;font-size:15px;color:{_NB_TX};">{h_escape(m["name"])}</span>'
+        f'<span style="font-size:11px;color:{_NB_TX2};">가장 가까웠던 종목</span></div>'
+    )
+    if m["watch_label"]:
+        html += (f'<span style="background:#f1f5f9;color:{_NB_TX2};font-size:11px;font-weight:600;'
+                 f'padding:3px 9px;border-radius:8px;">{h_escape(m["watch_label"])}</span>')
+    html += '</div>'
+    if m["closest_note"]:
+        html += f'<p style="font-size:13px;color:{_NB_TX2};margin:6px 2px 14px;">{h_escape(m["closest_note"])}</p>'
+
+    for a in m["axes"]:
+        html += _nb_bar_html(a)
+
+    # 차단 사유 (1순위/2순위)
+    html += f'<div style="background:{_NB_SURF};border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.7;">'
+    html += f'<div style="color:{_NB_TX};font-weight:600;margin-bottom:3px;">통과 못한 이유</div>'
+    for b in m["blockers"]:
+        rc = _NB_DANGER_IC if b["kind"] == "market" else _NB_AMBER
+        html += (f'<div style="color:{_NB_TX2};"><span style="color:{rc};font-weight:600;">'
+                 f'{b["rank"]}순위 ·</span> {h_escape(b["text"])}</div>')
+    html += '</div>'
+
+    # 가격 — official_buy=False면 각주로만 (FOMO-safety)
+    if m["price_treatment"] == "footnote" and m["target_footnote"]:
+        html += (f'<p style="font-size:11px;color:{_NB_TX3};line-height:1.6;margin:10px 2px 0;">'
+                 f'ⓘ {h_escape(m["target_footnote"])}</p>')
+
+    html += '</div>'  # close 분석 section
+    html += (f'<div style="border-top:0.5px solid {_NB_BORDER};margin-top:14px;padding-top:10px;'
+             f'font-size:11px;color:{_NB_TX3};">데이터 기준 오늘 · {h_escape(m["disclaimer"])}</div>')
+    html += '</div>'  # close card
+    return html
+
+
+def render_no_buy_card(row: Dict[str, Any], is_admin: bool = False,
+                       pass_count=None, watch_count=None) -> Dict[str, Any]:
+    """[v22.3.21] 관망/No-Buy 카드 렌더(NiceGUI). 반환: 사용된 카드 모델(테스트/디버깅용).
+
+    official_buy=False면 build_no_buy_card_model 규칙에 따라 목표가/매수가를 hero로
+    띄우지 않고 회색 각주로만 표시한다. 관리자 raw 엔진값은 expander로 분리한다.
+    """
+    from components.buy_now_badge import build_no_buy_card_model
+    m = build_no_buy_card_model(row, is_admin=is_admin)
+    ui.html(_nb_card_html(m, pass_count=pass_count, watch_count=watch_count))
+
+    if is_admin and m.get("admin_raw"):
+        with ui.expansion("관리자 · 엔진 원시값", icon="settings").classes("w-full").style("max-width:420px"):
+            rows_html = "".join(
+                f'<tr><td style="color:{_NB_TX2};padding:3px 8px 3px 0;font-size:12px;">{h_escape(str(k))}</td>'
+                f'<td style="text-align:right;padding:3px 0;font-size:12px;color:{_NB_TX};">{h_escape(str(v))}</td></tr>'
+                for k, v in m["admin_raw"].items()
+            )
+            ui.html(f'<table style="width:100%;border-collapse:collapse;">{rows_html}</table>')
+    return m

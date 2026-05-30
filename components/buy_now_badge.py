@@ -244,3 +244,139 @@ def format_buy_now_tooltip(disp: Dict[str, Any]) -> str:
         }
         return defaults.get(grade, "")
     return f"사유: {reason}"
+
+# ═══════════════════════════════════════════════════════════════════
+# [v22.3.21] No-Buy / 관망 카드 모델 — FOMO-safety
+#   목적: official_buy=False인 날, 프론트가 목표가/매수가를 매수 CTA처럼
+#         노출해 백엔드 안전신호(TOP_PICK + BUY_NOW_ELIGIBLE)를 훼손하지 않게 한다.
+#   이 함수는 '무엇을/어떻게 보여줄지'만 정하는 순수 로직(렌더 없음).
+#   → UX 규칙을 테스트로 강제할 수 있다. TOP_PICK/BUY_NOW_ELIGIBLE 계약은 건드리지 않는다.
+# ═══════════════════════════════════════════════════════════════════
+
+# 공식 신규매수 ELITE 통과선(AGGRESSIVE 기준). 표시 전용 — 게이트 계약 변경 아님.
+NO_BUY_ELITE_PASS = 75.0
+NO_BUY_AXIS_THRESHOLDS = {"struct": 80.0, "timing": 70.0, "ai": 60.0, "balance": 50.0}
+
+
+def build_no_buy_card_model(row: Dict[str, Any], is_admin: bool = False) -> Dict[str, Any]:
+    """관망/No-Buy 카드의 표시 모델(dict)을 만든다. 렌더러(NiceGUI 등)는 이 결과만 소비한다.
+
+    FOMO-safety 핵심 규칙 — official_buy=False 일 때:
+      - promote_target = False        (목표 수익률을 hero로 띄우지 않음)
+      - price_treatment = "footnote"  (매수가/목표가는 회색 각주로 강등 · CTA 아님)
+      - headline_tone = "rest"        ('매수 금지'가 아니라 '오늘은 쉬어갑니다')
+      - cta = None                    (매수 CTA 없음)
+      - blockers 는 1순위/2순위로 분리
+
+    official_buy=True 일 때만 promote_target=True / price_treatment="hero" / 매수 CTA 허용.
+    """
+    disp = get_buy_now_display(row)
+    official_buy = bool(disp.get("official_buy"))
+    name = _safe_str(row.get("종목명"), "이 종목")
+
+    th = NO_BUY_AXIS_THRESHOLDS
+    axes = [
+        {"key": "struct",  "name": "구조",      "value": _safe_float(row.get("STRUCT_SCORE")), "threshold": th["struct"]},
+        {"key": "timing",  "name": "타이밍",    "value": _safe_float(row.get("TIMING_SCORE")), "threshold": th["timing"]},
+        {"key": "ai",      "name": "AI 신뢰도", "value": _safe_float(row.get("AI_SCORE")),     "threshold": th["ai"]},
+        {"key": "balance", "name": "3축 균형",  "value": _safe_float(row.get("BALANCE_SCORE")), "threshold": th["balance"]},
+    ]
+    for a in axes:
+        a["pass"] = a["value"] >= a["threshold"]
+
+    elite = _safe_float(row.get("ELITE_SCORE"), _safe_float(row.get("EBS"), 0.0))
+    score_gap = max(0.0, NO_BUY_ELITE_PASS - elite)
+
+    macro_risk = _safe_str(row.get("MACRO_RISK")).upper()
+    market_blocked = (macro_risk == "CRITICAL") or (_safe_int(row.get("MACRO_HARD_BLOCK_SHADOW")) == 1)
+
+    blockers = []
+    rank = 1
+    if market_blocked:
+        blockers.append({"rank": rank, "kind": "market", "text": "시장 위험 (오늘 전체 매수 차단)"})
+        rank += 1
+    if score_gap > 0:
+        blockers.append({"rank": rank, "kind": "score",
+                         "text": f"종합점수 {elite:.1f} / {NO_BUY_ELITE_PASS:.0f} ({score_gap:.1f} 부족)"})
+        rank += 1
+    if not blockers:
+        blockers.append({"rank": 1, "kind": "other", "text": "공식 신규매수 기준 미충족"})
+
+    entry = _safe_float(row.get("추천매수가"))
+    target = _safe_float(row.get("추천매도가1"))
+    tp1_pct = _safe_float(row.get("TP1_PCT"))
+    rr = _safe_float(row.get("RR_NOW_TP1"))
+    has_prices = entry > 0 and target > 0
+
+    promote_target = official_buy
+    if official_buy:
+        price_treatment = "hero"
+    elif has_prices:
+        price_treatment = "footnote"
+    else:
+        price_treatment = "hidden"
+
+    target_footnote = ""
+    if (not official_buy) and has_prices:
+        target_footnote = (
+            f"참고용 — 조건 충족 시 잠재 목표 +{tp1_pct:.1f}% "
+            f"({entry:,.0f} → {target:,.0f}), 수익:손실 {rr:.1f}:1. 오늘은 매수 대상이 아닙니다."
+        )
+
+    if official_buy:
+        mode, headline_tone, cta = "official_buy", "buy", "매수 검토"
+        headline = f"{name} · 신규 매수 가능"
+        subtext = "공식 신규진입 기준을 통과했어요. 분할 진입과 손절 기준을 함께 확인하세요."
+        watch_label = ""
+        closest_note = ""
+    else:
+        mode = "watch_only" if disp.get("visible") else "no_buy"
+        headline_tone, cta = "rest", None
+        headline = "오늘은 신규 매수 쉬어갑니다"
+        if market_blocked:
+            subtext = ("시장 환경 위험이 높아 모든 신규 진입을 멈췄어요. 종목이 좋아 보여도 "
+                       "이런 날은 무리한 매수보다 기다리는 편이 유리합니다.")
+        else:
+            subtext = ("오늘은 공식 신규진입 기준을 통과한 종목이 없어요. 무리한 진입보다 "
+                       "다음 기회를 기다리는 것도 전략입니다.")
+        watch_label = "관찰만 · 매수 아님"
+        closest_note = "조건은 거의 갖췄지만, 아래 사유가 막았어요."
+
+    model = {
+        "mode": mode,
+        "name": name,
+        "official_buy": official_buy,
+        "headline": headline,
+        "headline_tone": headline_tone,      # "rest" | "buy"
+        "subtext": subtext,
+        "watch_label": watch_label,
+        "closest_note": closest_note,
+        "axes": axes,
+        "blockers": blockers,
+        "promote_target": promote_target,
+        "price_treatment": price_treatment,  # "hero" | "footnote" | "hidden"
+        "target_footnote": target_footnote,
+        "cta": cta,
+        "disclaimer": "투자 판단과 책임은 본인에게 있습니다",
+        "admin_raw": {},
+    }
+    if is_admin:
+        model["admin_raw"] = {
+            "TOP_PICK": _safe_int(row.get("TOP_PICK")),
+            "BUY_NOW_ELIGIBLE": int(bool(disp.get("eligible"))),
+            "BUY_NOW_GRADE": disp.get("grade", ""),
+            "ELITE_SCORE": elite,
+            "STRUCT_SCORE": axes[0]["value"],
+            "TIMING_SCORE": axes[1]["value"],
+            "AI_SCORE": axes[2]["value"],
+            "BALANCE_SCORE": axes[3]["value"],
+            "ROUTE": _safe_str(row.get("ROUTE")),
+            "MACRO_RISK": macro_risk,
+            "ENTRY_RISK_LEVEL": _safe_str(row.get("ENTRY_RISK_LEVEL")),
+            "TP1_PCT": tp1_pct,
+            "RR_NOW_TP1": rr,
+            "추천매수가": entry,
+            "추천매도가1": target,
+            "MACRO_HARD_BLOCK_SHADOW": _safe_int(row.get("MACRO_HARD_BLOCK_SHADOW")),
+        }
+    return model
