@@ -138,6 +138,7 @@ def build_segmented_table(
     ret_col: str = "ret_pct",
     horizon_col: str = "horizon",
     benchmark_returns=None,
+    lookup_col: Optional[str] = None,
 ) -> Dict:
     """과거 체결 로그 → (ELITE 버킷 × segment_cols) 세그먼트 승률 테이블.
 
@@ -150,18 +151,25 @@ def build_segmented_table(
       - "excess": ret_col − 시장(또는 당일 평균) 초과 여부로 재정의. 시장 베타 제거 →
         prior가 ~0.5로 정직해지고 종목 간 분리력↑. (구독자 화면 과대표기 방지)
 
+    lookup_col: 추론(score_segment) 시 recommend row에서 버킷을 읽을 컬럼명.
+        미지정 시 score_col. per-trade 로그는 'score'(method별)지만 recommend row는
+        'DISPLAY_SCORE'를 쓰므로, 라이브 테이블은 lookup_col='DISPLAY_SCORE'로 둔다.
+
     trades 에 segment_cols 가 없으면 자동으로 'ALL'로 폴백한다(스키마 안전).
     """
     seg_cols = list(segment_cols) if segment_cols is not None else list(DEFAULT_SEGMENT_COLS)
+    n_raw_total = int(len(trades)) if trades is not None else 0
     meta = {
         "version": "v4.0-phase1",
         "method": "SEGMENTED_EB",
         "win_basis": win_basis,
+        "score_col": score_col,
+        "lookup_col": lookup_col or score_col,
         "prior_k": prior_k,
         "min_effective_n": min_effective_n,
         "half_life_days": half_life_days,
         "segment_cols": seg_cols,
-        "n_raw_total": int(len(trades)),
+        "n_raw_total": n_raw_total,
     }
 
     _has_win = win_col in (trades.columns if trades is not None else [])
@@ -233,11 +241,26 @@ def _build_lookup(table: Dict) -> Tuple[Dict[str, Dict], List[str], float]:
     return lut, seg_cols, p0
 
 
+def _lookup_col_from_table(table: Dict) -> str:
+    meta = table.get("meta", {})
+    return str(meta.get("lookup_col") or meta.get("score_col") or "ELITE_SCORE")
+
+
 def score_segment(row: pd.Series, table: Dict) -> Tuple[float, float, str, bool]:
-    """(p_win_v4, n_effective, segment_key, sufficient) 반환. 셀 없으면 prior로 폴백."""
+    """(p_win_v4, n_effective, segment_key, sufficient) 반환. 셀 없으면 prior로 폴백.
+
+    버킷 축은 테이블이 만들어진 기준(meta.lookup_col → score_col)을 따른다.
+    recommend row에 그 컬럼이 없으면 DISPLAY_SCORE → ELITE_SCORE 순으로 폴백한다.
+    (과거 버그: 무조건 ELITE_SCORE로 버킷팅 → 테이블 생성 기준과 어긋남)
+    """
     lut, seg_cols, p0 = _build_lookup(table)
-    bucket = _elite_bucket(pd.to_numeric(pd.Series([row.get("ELITE_SCORE", 0)]),
-                                         errors="coerce").fillna(0.0).iloc[0])
+    score_col = _lookup_col_from_table(table)
+    score_value = row.get(score_col, None)
+    if score_value is None or (isinstance(score_value, float) and pd.isna(score_value)):
+        score_value = row.get("DISPLAY_SCORE", row.get("ELITE_SCORE", 0))
+    bucket = _elite_bucket(
+        pd.to_numeric(pd.Series([score_value]), errors="coerce").fillna(0.0).iloc[0]
+    )
     parts = [bucket] + [_norm_segment_value(row.get(c, "ALL")) for c in seg_cols]
     key = "|".join(parts)
     hit = lut.get(key)
