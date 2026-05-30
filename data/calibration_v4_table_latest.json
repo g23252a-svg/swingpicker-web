@@ -1,0 +1,547 @@
+{
+ "meta": {
+  "version": "v4.0-phase1",
+  "method": "SEGMENTED_EB",
+  "prior_k": 30.0,
+  "min_effective_n": 8.0,
+  "half_life_days": 90,
+  "segment_cols": [
+   "method",
+   "horizon"
+  ],
+  "n_raw_total": 11467,
+  "global_prior": 0.6501,
+  "segment_cols_used": [
+   "method",
+   "horizon"
+  ],
+  "is_sufficient": true,
+  "n_segments": 40,
+  "score_col": "score",
+  "win_col": "win",
+  "built_at": "2026-05-30T22:32:41",
+  "WARN_no_regime_tier_in_log": true
+ },
+ "table": [
+  {
+   "segment_key": "0-50|POSITION_TRACK|0",
+   "bucket": "0-50",
+   "segment": {
+    "method": "POSITION_TRACK",
+    "horizon": "0"
+   },
+   "p_win": 0.4547,
+   "p_win_raw": 0.3847,
+   "n_raw": 123,
+   "n_effective": 83.8,
+   "sufficient": true
+  },
+  {
+   "segment_key": "50-60|ELITE_SCORE|1",
+   "bucket": "50-60",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.6583,
+   "p_win_raw": 1.0,
+   "n_raw": 1,
+   "n_effective": 0.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "50-60|ELITE_SCORE|3",
+   "bucket": "50-60",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.6583,
+   "p_win_raw": 1.0,
+   "n_raw": 1,
+   "n_effective": 0.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "50-60|ELITE_SCORE|5",
+   "bucket": "50-60",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.6351,
+   "p_win_raw": 0.0,
+   "n_raw": 1,
+   "n_effective": 0.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "60-70|ELITE_SCORE|1",
+   "bucket": "60-70",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.5396,
+   "p_win_raw": 0.4685,
+   "n_raw": 55,
+   "n_effective": 46.7,
+   "sufficient": true
+  },
+  {
+   "segment_key": "60-70|ELITE_SCORE|3",
+   "bucket": "60-70",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.5038,
+   "p_win_raw": 0.4098,
+   "n_raw": 55,
+   "n_effective": 46.7,
+   "sufficient": true
+  },
+  {
+   "segment_key": "60-70|ELITE_SCORE|5",
+   "bucket": "60-70",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.4971,
+   "p_win_raw": 0.3759,
+   "n_raw": 46,
+   "n_effective": 37.9,
+   "sufficient": true
+  },
+  {
+   "segment_key": "70-80|AI_SCORE|1",
+   "bucket": "70-80",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.6805,
+   "p_win_raw": 0.8333,
+   "n_raw": 12,
+   "n_effective": 6.0,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|AI_SCORE|3",
+   "bucket": "70-80",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.6667,
+   "p_win_raw": 0.75,
+   "n_raw": 12,
+   "n_effective": 6.0,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|AI_SCORE|5",
+   "bucket": "70-80",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.6529,
+   "p_win_raw": 0.6667,
+   "n_raw": 12,
+   "n_effective": 6.0,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|DISPLAY_SCORE|1",
+   "bucket": "70-80",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.669,
+   "p_win_raw": 1.0,
+   "n_raw": 3,
+   "n_effective": 1.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|DISPLAY_SCORE|3",
+   "bucket": "70-80",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.651,
+   "p_win_raw": 0.6667,
+   "n_raw": 3,
+   "n_effective": 1.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|DISPLAY_SCORE|5",
+   "bucket": "70-80",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.651,
+   "p_win_raw": 0.6667,
+   "n_raw": 3,
+   "n_effective": 1.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|ELITE_SCORE|1",
+   "bucket": "70-80",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.5913,
+   "p_win_raw": 0.5858,
+   "n_raw": 388,
+   "n_effective": 322.7,
+   "sufficient": true
+  },
+  {
+   "segment_key": "70-80|ELITE_SCORE|3",
+   "bucket": "70-80",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.628,
+   "p_win_raw": 0.6258,
+   "n_raw": 374,
+   "n_effective": 308.7,
+   "sufficient": true
+  },
+  {
+   "segment_key": "70-80|ELITE_SCORE|5",
+   "bucket": "70-80",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.6324,
+   "p_win_raw": 0.6305,
+   "n_raw": 356,
+   "n_effective": 291.0,
+   "sufficient": true
+  },
+  {
+   "segment_key": "70-80|FINAL_SCORE|1",
+   "bucket": "70-80",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.669,
+   "p_win_raw": 1.0,
+   "n_raw": 3,
+   "n_effective": 1.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|FINAL_SCORE|3",
+   "bucket": "70-80",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.651,
+   "p_win_raw": 0.6667,
+   "n_raw": 3,
+   "n_effective": 1.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "70-80|FINAL_SCORE|5",
+   "bucket": "70-80",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.651,
+   "p_win_raw": 0.6667,
+   "n_raw": 3,
+   "n_effective": 1.7,
+   "sufficient": false
+  },
+  {
+   "segment_key": "80-90|AI_SCORE|1",
+   "bucket": "80-90",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.6607,
+   "p_win_raw": 0.6623,
+   "n_raw": 284,
+   "n_effective": 199.2,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|AI_SCORE|3",
+   "bucket": "80-90",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.6224,
+   "p_win_raw": 0.6182,
+   "n_raw": 284,
+   "n_effective": 199.2,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|AI_SCORE|5",
+   "bucket": "80-90",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.5978,
+   "p_win_raw": 0.5895,
+   "n_raw": 274,
+   "n_effective": 189.4,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|DISPLAY_SCORE|1",
+   "bucket": "80-90",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.6962,
+   "p_win_raw": 0.6989,
+   "n_raw": 694,
+   "n_effective": 522.3,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|DISPLAY_SCORE|3",
+   "bucket": "80-90",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.7148,
+   "p_win_raw": 0.7187,
+   "n_raw": 665,
+   "n_effective": 493.4,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|DISPLAY_SCORE|5",
+   "bucket": "80-90",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.7171,
+   "p_win_raw": 0.7214,
+   "n_raw": 636,
+   "n_effective": 465.0,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|ELITE_SCORE|1",
+   "bucket": "80-90",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.4497,
+   "p_win_raw": 0.418,
+   "n_raw": 222,
+   "n_effective": 189.4,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|ELITE_SCORE|3",
+   "bucket": "80-90",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.4363,
+   "p_win_raw": 0.3975,
+   "n_raw": 198,
+   "n_effective": 165.5,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|ELITE_SCORE|5",
+   "bucket": "80-90",
+   "segment": {
+    "method": "ELITE_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.4717,
+   "p_win_raw": 0.437,
+   "n_raw": 187,
+   "n_effective": 154.7,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|FINAL_SCORE|1",
+   "bucket": "80-90",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.7037,
+   "p_win_raw": 0.7066,
+   "n_raw": 747,
+   "n_effective": 564.5,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|FINAL_SCORE|3",
+   "bucket": "80-90",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.7274,
+   "p_win_raw": 0.7318,
+   "n_raw": 712,
+   "n_effective": 529.6,
+   "sufficient": true
+  },
+  {
+   "segment_key": "80-90|FINAL_SCORE|5",
+   "bucket": "80-90",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.7164,
+   "p_win_raw": 0.7203,
+   "n_raw": 685,
+   "n_effective": 503.1,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|AI_SCORE|1",
+   "bucket": "90-101",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.5541,
+   "p_win_raw": 0.5494,
+   "n_raw": 788,
+   "n_effective": 610.6,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|AI_SCORE|3",
+   "bucket": "90-101",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.5133,
+   "p_win_raw": 0.5061,
+   "n_raw": 750,
+   "n_effective": 572.7,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|AI_SCORE|5",
+   "bucket": "90-101",
+   "segment": {
+    "method": "AI_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.4982,
+   "p_win_raw": 0.4898,
+   "n_raw": 722,
+   "n_effective": 545.3,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|DISPLAY_SCORE|1",
+   "bucket": "90-101",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.7838,
+   "p_win_raw": 0.7971,
+   "n_raw": 398,
+   "n_effective": 300.1,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|DISPLAY_SCORE|3",
+   "bucket": "90-101",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.8041,
+   "p_win_raw": 0.8201,
+   "n_raw": 387,
+   "n_effective": 289.1,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|DISPLAY_SCORE|5",
+   "bucket": "90-101",
+   "segment": {
+    "method": "DISPLAY_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.7767,
+   "p_win_raw": 0.7903,
+   "n_raw": 376,
+   "n_effective": 278.3,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|FINAL_SCORE|1",
+   "bucket": "90-101",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "1"
+   },
+   "p_win": 0.7737,
+   "p_win_raw": 0.7883,
+   "n_raw": 341,
+   "n_effective": 254.6,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|FINAL_SCORE|3",
+   "bucket": "90-101",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "3"
+   },
+   "p_win": 0.8034,
+   "p_win_raw": 0.8217,
+   "n_raw": 337,
+   "n_effective": 250.7,
+   "sufficient": true
+  },
+  {
+   "segment_key": "90-101|FINAL_SCORE|5",
+   "bucket": "90-101",
+   "segment": {
+    "method": "FINAL_SCORE",
+    "horizon": "5"
+   },
+   "p_win": 0.7818,
+   "p_win_raw": 0.7982,
+   "n_raw": 326,
+   "n_effective": 239.9,
+   "sufficient": true
+  }
+ ]
+}
