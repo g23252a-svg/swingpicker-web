@@ -43,9 +43,15 @@ def _f(v, default=0.0) -> float:
         return default
 
 
-def _winrate_phrase(p: float) -> str:
-    """0.0~1.0 승률 → '10번 중 약 N번' (과거 빈도, 보장 아님)."""
+def _winrate_phrase(p: float, basis: str = "excess") -> str:
+    """0.0~1.0 승률 → 평이 문구 (과거 빈도, 보장 아님).
+
+    basis="excess"(v4 기본): 시장 평균 대비 초과 빈도 — 정직하고 과대표기 아님.
+    basis="absolute": 절대 상승 빈도(상승장 인플레 위험) — 권장하지 않음.
+    """
     n = max(0, min(10, round(p * 10)))
+    if basis == "excess":
+        return f"과거 비슷한 상황에서 시장 평균보다 나은 결과가 10번 중 약 {n}번이었어요"
     return f"과거 비슷한 상황에서 10번 중 약 {n}번 수익으로 끝났어요"
 
 
@@ -122,7 +128,9 @@ def build_member_view(row: Optional[Dict[str, Any]], market_ctx: Dict[str, Any])
     if score >= 75:
         why.append(_strength_phrase(score))
     if wr > 0:
-        why.append(_winrate_phrase(wr))
+        # v4 excess 컬럼이 있으면 시장 대비 문구, 아니면 절대 문구
+        _basis = "excess" if ("EST_WIN_RATE_V4" in row and row.get("EST_WIN_RATE_V4") not in (None, "")) else "absolute"
+        why.append(_winrate_phrase(wr, basis=_basis))
     if rr > 0:
         why.append(_rr_phrase(rr))
 

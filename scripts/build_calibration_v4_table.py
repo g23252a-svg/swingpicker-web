@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--segment-cols", nargs="*", default=None,
                     help="미지정 시 로그에 존재하는 [ACTION_TIER, MACRO_REGIME_MODE, method] 중 사용")
     ap.add_argument("--asof", default=None, help="기준일 YYYYMMDD (미지정 시 최신 rec_date)")
+    ap.add_argument("--win-basis", default="excess", choices=["absolute", "excess"],
+                    help="excess(기본): 당일 시장 대비 초과승률 → 인플레 제거 / absolute: ret>0")
     args = ap.parse_args()
 
     trades = _load_trades(args.data_dir)
@@ -85,6 +87,7 @@ def main():
     table = build_segmented_table(
         trades, score_col=score_col, win_col=win_col,
         segment_cols=seg_cols, asof_ymd=asof,
+        win_basis=args.win_basis,
     )
     table["meta"]["score_col"] = score_col
     table["meta"]["win_col"] = win_col
@@ -104,8 +107,11 @@ def main():
     m = table["meta"]
     n_break = sum(1 for r in table["table"] if r["sufficient"] and r["p_win"] > 0.55)
     print(f"✅ 저장: {latest}")
-    print(f"   score_col={score_col} · seg_cols={m.get('segment_cols_used')} · prior={m.get('global_prior')}")
+    print(f"   win_basis={m.get('win_basis')} · benchmark={m.get('benchmark_source')} · prior={m.get('global_prior')}")
+    print(f"   score_col={score_col} · seg_cols={m.get('segment_cols_used')}")
     print(f"   세그먼트 {m.get('n_segments')}개 · 0.55 돌파(충분) {n_break}개")
+    if m.get("win_basis") == "excess":
+        print("   ℹ️ excess 기준: prior가 ~0.5 근처면 정상(시장 베타 제거). 0.5 초과 세그먼트가 진짜 엣지.")
     if m["WARN_no_regime_tier_in_log"]:
         print("   ⚠️ 로그에 레짐/티어 없음 — 로거 보강 후 재빌드 시 다축 세그먼트 활성화")
 

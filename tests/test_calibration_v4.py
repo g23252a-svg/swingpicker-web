@@ -128,3 +128,51 @@ def test_shadow_revives_stable_candidate():
     out = add_v4_shadow_columns(df, t)
     assert out["TOP_PICK"].iloc[0] == 0            # 본선은 여전히 탈락
     assert out["TOP_PICK_V4_SHADOW"].iloc[0] == 1  # V4 shadow에서는 부활
+
+
+# ── excess(벤치 대비) 기준 회귀 ──────────────────────────────────────────────
+def _ret_trades():
+    """ret_pct 기반 합성 로그: 상승장(모두 양수)이지만 분리력 있는 두 세그먼트."""
+    rng = np.random.default_rng(7)
+    rows = []
+    for _ in range(120):  # A: 시장 평균 위 (좋은 엣지)
+        rows.append(dict(ELITE_SCORE=85, ACTION_TIER="NOW_BUY", MACRO_REGIME_MODE="NORMAL",
+                         ret_pct=8 + rng.normal(0, 2), horizon=5, rec_date="20260520"))
+    for _ in range(120):  # B: 같은 날 시장 평균 아래 (엣지 없음)
+        rows.append(dict(ELITE_SCORE=85, ACTION_TIER="PASS", MACRO_REGIME_MODE="NORMAL",
+                         ret_pct=2 + rng.normal(0, 2), horizon=5, rec_date="20260520"))
+    df = pd.DataFrame(rows)
+    df["win"] = (df["ret_pct"] > 0).astype(int)  # 절대 기준이면 거의 전부 win
+    return df
+
+
+def test_absolute_inflated_but_excess_realistic():
+    """핵심: 상승장에서 absolute prior는 부풀고(>0.9), excess prior는 ~0.5로 정직."""
+    tr = _ret_trades()
+    abs_t = build_segmented_table(tr, score_col="ELITE_SCORE", win_col="win",
+                                  segment_cols=["ACTION_TIER"], win_basis="absolute", asof_ymd="20260529")
+    exc_t = build_segmented_table(tr, score_col="ELITE_SCORE", win_col="win", ret_col="ret_pct",
+                                  segment_cols=["ACTION_TIER"], win_basis="excess", asof_ymd="20260529")
+    assert abs_t["meta"]["global_prior"] > 0.9          # 절대 기준: 거의 다 win (인플레)
+    assert 0.35 < exc_t["meta"]["global_prior"] < 0.65  # 초과 기준: 정직한 ~0.5
+    assert exc_t["meta"]["benchmark_source"] == "day_relative_mean"
+
+
+def test_excess_separates_good_from_market_following():
+    """excess 기준: 시장 위 세그먼트 > 0.5, 시장 추종 세그먼트 < 0.5 로 분리."""
+    tr = _ret_trades()
+    exc_t = build_segmented_table(tr, score_col="ELITE_SCORE", win_col="win", ret_col="ret_pct",
+                                  segment_cols=["ACTION_TIER"], win_basis="excess", asof_ymd="20260529")
+    good = score_segment(pd.Series(dict(ELITE_SCORE=85, ACTION_TIER="NOW_BUY", MACRO_REGIME_MODE="NORMAL")), exc_t)[0]
+    weak = score_segment(pd.Series(dict(ELITE_SCORE=85, ACTION_TIER="PASS", MACRO_REGIME_MODE="NORMAL")), exc_t)[0]
+    assert good > weak
+    assert good > 0.5 and weak < 0.5
+
+
+def test_external_benchmark_hook():
+    """benchmark_returns 콜백을 주면 지수 대비 초과로 계산되고 source가 바뀐다."""
+    tr = _ret_trades()
+    exc_t = build_segmented_table(tr, score_col="ELITE_SCORE", win_col="win", ret_col="ret_pct",
+                                  segment_cols=["ACTION_TIER"], win_basis="excess",
+                                  benchmark_returns=lambda d, h: 5.0, asof_ymd="20260529")
+    assert exc_t["meta"]["benchmark_source"] == "external_benchmark"
