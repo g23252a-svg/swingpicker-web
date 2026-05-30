@@ -557,6 +557,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                     ai_sc = safe_float(row.get('AI_SCORE', row.get('ML_SCORE', 0)))
                     balance = safe_float(row.get('BALANCE_SCORE', 0))
                     is_now_entry = is_truthy_flag(row.get('IS_NOW_ENTRY', '0'))
+                    # [v22.3.21] 공식 신규매수 게이트 — 초록 CTA는 TOP_PICK & ELIGIBLE일 때만
+                    from components.buy_now_badge import is_official_new_buy
+                    official_buy = is_official_new_buy(row)
                     
                     # [v22 UI Step E4 + F3] Kelly engine + error 요약
                     kelly_engine = str(row.get('KELLY_ENGINE', '')).strip()
@@ -604,10 +607,15 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                                 ui.label(
                                     "시장 주의 구간 — 평소 비중의 50% 이하로 제한"
                                 ).classes("text-[10px] text-orange-300/80 mb-1")
-                            else:
-                                # 🟢 NORMAL → 기존 그대로
-                                ui.label("✅ 지금 매수 OK").classes(
+                            elif official_buy:
+                                # 🟢 NORMAL + 공식(TOP_PICK & ELIGIBLE) → 매수 가능
+                                ui.label("✅ 오늘 신규 매수 가능").classes(
                                     "text-xs text-emerald-400 font-bold mb-1"
+                                )
+                            else:
+                                # [v22.3.21] TOP_PICK이나 BUY_NOW_ELIGIBLE=0 → 초록 CTA 금지(중립)
+                                ui.label("⏳ 가격 도달 — 공식 매수 대상 아님").classes(
+                                    "text-xs text-gray-400 mb-1"
                                 )
                         else:
                             ui.label("⏳ 추천가 도달 대기").classes(
@@ -697,6 +705,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
             cand_rr = safe_float(top_cand.get('RR_NOW_TP1', 0))
             cand_gap = safe_float(top_cand.get('ENTRY_GAP_PCT', 0))
             cand_is_now = is_truthy_flag(top_cand.get('IS_NOW_ENTRY', '0'))
+            # [v22.3.21] 공식 신규매수 게이트 — 초록 CTA는 TOP_PICK & ELIGIBLE일 때만
+            from components.buy_now_badge import is_official_new_buy
+            cand_official_buy = is_official_new_buy(top_cand)
             
             # 부족한 점수 진단 (변수 재사용 — 위에서 추출했으므로 그대로)
             shortfall_msg = ""
@@ -798,9 +809,14 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                         ui.label("🟠 조건부 소액 매수 (시장 주의 — 비중 50% 이하)").classes(
                             "text-xs text-orange-400 font-bold mb-1"
                         )
-                    else:
-                        ui.label("✅ 지금 매수 OK (조건 미달이지만 가격은 OK)").classes(
+                    elif cand_official_buy:
+                        ui.label("✅ 오늘 신규 매수 가능").classes(
                             "text-xs text-emerald-400 mb-1"
+                        )
+                    else:
+                        # [v22.3.21] 공식 매수 미통과(TOP_PICK&ELIGIBLE 아님) → 초록 CTA 금지(중립)
+                        ui.label("⏳ 가격 도달 — 공식 매수 대상 아님").classes(
+                            "text-xs text-gray-400 mb-1"
                         )
                 else:
                     ui.label("⏳ 추천가 도달 대기").classes(
@@ -812,10 +828,13 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                         "text-sm text-amber-300 mt-1"
                     )
                 
+                # [v22.3.21 FOMO-safety] 매수보류 카드에서 목표가/매수가는 매수 CTA처럼
+                # 띄우지 않고 회색 '참고용' 각주로 강등한다 (백엔드 안전신호 보호).
                 if cand_buy > 0 and cand_target > 0:
                     ui.label(
-                        f"매수 {int(cand_buy):,} → 목표 {int(cand_target):,}  (+{cand_tp1:.1f}%)"
-                    ).classes("text-sm text-cyan-400 mt-1")
+                        f"참고용 — 조건 충족 시 목표 +{cand_tp1:.1f}% "
+                        f"({int(cand_buy):,} → {int(cand_target):,}) · 오늘은 매수 대상이 아닙니다"
+                    ).classes("text-xs text-gray-500 mt-1")
                 
                 ui.label(
                     "시스템이 신중하게 골라서 오늘은 통과한 종목이 없어요. "
@@ -1055,7 +1074,9 @@ def render_tab_market(df, auth: str = "free"):
                                         ui.label(f"{_route_icon} {tp_flag}{s.get('종목명', '')}").classes("text-white font-bold text-sm")
                                         ui.badge(f"E{elite:.0f}", color="#10B981" if elite >= 80 else "#3B82F6").classes("text-xs")
                                     ui.label(f"구조 {safe_float(s.get('STRUCT_SCORE', 0)):.0f} · 타이밍 {safe_float(s.get('TIMING_SCORE', 0)):.0f} · AI {safe_float(s.get('AI_SCORE', 0)):.0f} | 3축 균형 {bal:.0f}").classes("text-xs text-gray-400 mt-1")
-                                    ui.label(f"{close:,.0f} → {tp1:,.0f} ({tp1_pct:+.1f}%) | 수익:손실 {rr:.1f}:1 | 개별 모델 승률 {wr * 100:.0f}%").classes("text-xs text-cyan-400")
+                                    # [v22.3.21 FOMO-safety] 제외 종목의 목표가/매수가는
+                                    # 회색 '참고용' 각주로 강등 (매수 신호 오해 방지).
+                                    ui.label(f"참고용 — 조건 충족 시 목표 +{tp1_pct:.1f}% ({close:,.0f} → {tp1:,.0f}) · 수익:손실 {rr:.1f}:1 · 승률 {wr * 100:.0f}% · 오늘은 매수 대상 아님").classes("text-[10px] text-gray-500")
                                     # [v3.9.11] 종목별 개별 제외 사유 — 하단에 한 줄
                                     if _reason:
                                         ui.label(f"└ 제외 사유: {_reason}").classes(

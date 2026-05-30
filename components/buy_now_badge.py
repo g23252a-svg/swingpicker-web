@@ -380,3 +380,13 @@ def build_no_buy_card_model(row: Dict[str, Any], is_admin: bool = False) -> Dict
             "MACRO_HARD_BLOCK_SHADOW": _safe_int(row.get("MACRO_HARD_BLOCK_SHADOW")),
         }
     return model
+
+
+def is_official_new_buy(row: Dict[str, Any]) -> bool:
+    """[v22.3.21] 공식 신규매수 가능 = TOP_PICK==1 AND BUY_NOW_ELIGIBLE==1.
+
+    초록 매수 CTA 라벨('오늘 신규 매수 가능' 등)은 이 함수가 True일 때만 허용한다.
+    이 조건이 아니면(관찰 후보/공식 매수 미통과) 초록 CTA 대신 회색/중립 톤을 써야 한다.
+    TOP_PICK/BUY_NOW_ELIGIBLE 계약 자체는 변경하지 않는다(읽기 전용 판정).
+    """
+    return _safe_int(row.get("TOP_PICK")) == 1 and _safe_int(row.get("BUY_NOW_ELIGIBLE")) == 1
