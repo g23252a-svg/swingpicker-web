@@ -317,36 +317,52 @@ def _match_holding_row(name, df, code_map=None):
 _AJ_BLOCKED_ROUTES = {"BLOCKED", "EXIT_WARNING", "OVERHEAT"}
 _AJ_SAFE_ROUTES = {"ATTACK", "ARMED", "CARRY", "NEUTRAL"}
 
-def _classify_holding(score, route, has_dart_warning=False):
-    """점수/ROUTE/DART 기반 분류. 4가지 그룹 + 액션 텍스트.
+def _classify_holding(score, route, has_dart_warning=False,
+                      carry_exit_signal=0, carry_stale_stage="", carry_stale_reason=""):
+    """점수/ROUTE/DART/보유경과 기반 분류. 4가지 그룹 + 액션 텍스트.
 
     Args:
         score: DISPLAY_SCORE
         route: ROUTE 문자열
         has_dart_warning: DART 위험 신호 있으면 즉시 액션으로 가중
+        carry_exit_signal: [v22.3.20] CARRY_EXIT_SIGNAL(=1이면 DEAD 청산 검토 신호)
+        carry_stale_stage: [v22.3.20] CARRY_STALE_STAGE (FRESH/WATCH/STALE/DEAD)
+        carry_stale_reason: [v22.3.20] CARRY_STALE_REASON 표시 문구
     Returns:
-        dict {group, action, action_color, border}
+        dict {group, action, action_color, border, carry_stale_reason}
+
+    표현 안전: 시스템이 '매도'를 확정하지 않는다. '청산 검토'(보유관리 경고)만 표시.
     """
     route_u = str(route or "").strip().upper()
     sc = float(score) if score else 0
+    try:
+        _exit = float(carry_exit_signal) >= 1
+    except (TypeError, ValueError):
+        _exit = bool(carry_exit_signal)
 
-    # DART 위험은 즉시 액션 가중
+    # DART 위험은 즉시 액션 가중 (최우선)
     if has_dart_warning:
-        return {"group": "caution", "action": "🚨 공시 주의 + 검토",
-                "action_color": "text-red-400", "border": "border-red-500/40"}
-
-    if route_u in _AJ_BLOCKED_ROUTES or (sc > 0 and sc <= 40):
-        return {"group": "caution", "action": "🚨 교체 검토",
-                "action_color": "text-red-400", "border": "border-red-500/40"}
-    if route_u == "WAIT" or (sc > 0 and sc < 60):
-        return {"group": "observe", "action": "⚠️ 지켜보기",
-                "action_color": "text-amber-400", "border": "border-amber-500/40"}
-    if sc >= 60 and route_u in _AJ_SAFE_ROUTES:
-        return {"group": "hold", "action": "✅ 보유 유지",
-                "action_color": "text-emerald-400", "border": "border-emerald-500/40"}
-    # 정보 부족 — 모니터링으로 분류 (Hero와 카드 일관)
-    return {"group": "observe", "action": "👁️ 정보 부족",
-            "action_color": "text-gray-400", "border": "border-gray-600"}
+        res = {"group": "caution", "action": "🚨 공시 주의 + 검토",
+               "action_color": "text-red-400", "border": "border-red-500/40"}
+    # [v22.3.20] 보유경과 청산 검토 신호 (DEAD/CARRY_EXIT_SIGNAL=1) — 자동매도 아님
+    elif _exit:
+        res = {"group": "caution", "action": "🔴 청산 검토",
+               "action_color": "text-red-400", "border": "border-red-500/50"}
+    elif route_u in _AJ_BLOCKED_ROUTES or (sc > 0 and sc <= 40):
+        res = {"group": "caution", "action": "🚨 교체 검토",
+               "action_color": "text-red-400", "border": "border-red-500/40"}
+    elif route_u == "WAIT" or (sc > 0 and sc < 60):
+        res = {"group": "observe", "action": "⚠️ 지켜보기",
+               "action_color": "text-amber-400", "border": "border-amber-500/40"}
+    elif sc >= 60 and route_u in _AJ_SAFE_ROUTES:
+        res = {"group": "hold", "action": "✅ 보유 유지",
+               "action_color": "text-emerald-400", "border": "border-emerald-500/40"}
+    else:
+        # 정보 부족 — 모니터링으로 분류 (Hero와 카드 일관)
+        res = {"group": "observe", "action": "👁️ 정보 부족",
+               "action_color": "text-gray-400", "border": "border-gray-600"}
+    res["carry_stale_reason"] = str(carry_stale_reason or "")
+    return res
 
 
 def _fetch_current_price(code, name):
@@ -965,7 +981,13 @@ def _render_portfolio_hero(saved_text: str, df: pd.DataFrame):
                         today_picks_in_holdings.append(it["name"])
 
                     # [Step AJ-3] 공용 분류 함수 사용 (카드와 동일 기준)
-                    cls = _classify_holding(score, route)
+                    # [v22.3.20] 보유경과 청산 검토 신호 반영
+                    cls = _classify_holding(
+                        score, route,
+                        carry_exit_signal=row.get("CARRY_EXIT_SIGNAL", 0),
+                        carry_stale_stage=row.get("CARRY_STALE_STAGE", ""),
+                        carry_stale_reason=row.get("CARRY_STALE_REASON", ""),
+                    )
                     grp = cls["group"]
                     if grp == "caution":
                         n_caution += 1; caution_names.append(it["name"])
@@ -1799,15 +1821,23 @@ def render_tab_portfolio(df, auth):
                         _label_disp = _ah_label_disp(_label_raw, short=True) if _label_raw else "—"
                         _route_disp = _ah_route_disp(_route_raw) if _route_raw else "—"
                         # [Step AJ-3] 공용 분류 함수 사용
-                        _cls = _classify_holding(_score, _route_raw)
+                        # [v22.3.20] 보유경과 청산 검토 신호 반영
+                        _cls = _classify_holding(
+                            _score, _route_raw,
+                            carry_exit_signal=_row.get("CARRY_EXIT_SIGNAL", 0),
+                            carry_stale_stage=_row.get("CARRY_STALE_STAGE", ""),
+                            carry_stale_reason=_row.get("CARRY_STALE_REASON", ""),
+                        )
                         _action = _cls["action"]
                         _action_color = _cls["action_color"]
                         _border = _cls["border"]
+                        _carry_reason = _cls.get("carry_stale_reason", "")
                     else:
                         _score = 0
                         _label_disp = "⚪ 분석 외"
                         _route_disp = "—"
                         _action = "ℹ️ 시스템 추천 외"; _action_color = "text-gray-500"; _border = "border-gray-700"
+                        _carry_reason = ""
 
                     # 시세 + 평가금 + 수익률 (있으면)
                     _cur_price = _price_cache.get(item["name"], 0)
@@ -1851,6 +1881,12 @@ def render_tab_portfolio(df, auth):
                         ui.label(_action).classes(
                             f"text-xs {_action_color} font-bold mb-1"
                         )
+
+                        # [v22.3.20] 보유경과 청산 검토 사유 (DEAD/손실 stale일 때만)
+                        if _carry_reason:
+                            ui.label(_carry_reason).classes(
+                                "text-[10px] text-red-300 leading-snug mb-1"
+                            )
 
                         # 3행: 평단/현재가/수익률 (시세 있으면)
                         if _cur_price > 0:
