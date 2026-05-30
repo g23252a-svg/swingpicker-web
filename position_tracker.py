@@ -318,6 +318,11 @@ def record_closed_to_tradelog(out_dir: str, closed: List[Position]) -> int:
             "win": 1 if ret > 0 else 0,
             "exit_type": p.close_reason,
             "b_ratio": round(b_ratio, 4),
+            # [v4.0] 세그먼트 축 — Position에 진입시점 값이 있으면 기록, 없으면 ""
+            "MACRO_REGIME_MODE": getattr(p, "entry_regime", "") or "",
+            "ACTION_TIER": getattr(p, "entry_action_tier", "") or "",
+            "ROUTE": getattr(p, "entry_route", "") or "",
+            "TOP_PICK_TYPE": getattr(p, "entry_top_pick_type", "") or "",
         })
 
     if not records:

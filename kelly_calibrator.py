@@ -29,6 +29,9 @@ PER_TRADE_COLS = [
     "rec_date", "code", "method", "topk", "horizon",
     "score", "entry_price", "exit_price", "stop_price", "target_price",
     "ret_pct", "win", "exit_type", "b_ratio",
+    # [v4.0] 세그먼트 캘리브레이션용 축 — recommend 컬럼명과 동일하게 둬서
+    # build(로그)·lookup(recommend) 양쪽에서 같은 키로 매칭된다. (append-only)
+    "MACRO_REGIME_MODE", "ACTION_TIER", "ROUTE", "TOP_PICK_TYPE",
 ]
 
 
@@ -151,6 +154,10 @@ def save_per_trade_log(
     try:
         if lock:
             lock.acquire(timeout=10)
+        # [v4.0] 기존 파일 헤더가 신규 스키마와 다르면 1회 재작성(구행 NaN 백필) →
+        # 새 컬럼 append 시 정렬 어긋남 방지. 마이그레이션 후 헤더 재판정.
+        _ensure_per_trade_schema(path)
+        write_header = not os.path.exists(path)
         df_new.to_csv(path, mode="a", header=write_header, index=False, encoding="utf-8-sig")
     except Exception as e:
         _logger.error(f"트레이드 로그 저장 실패: {e}")
@@ -171,6 +178,29 @@ def _acquire_filelock(path: str):
         return FileLock(path + ".lock", timeout=10)
     except ImportError:
         return None
+
+
+def _ensure_per_trade_schema(path: str) -> None:
+    """[v4.0] 기존 per_trade_log.csv 헤더를 현재 PER_TRADE_COLS로 1회 마이그레이션.
+
+    구버전 파일은 신규 축 컬럼(MACRO_REGIME_MODE 등)이 없어 그대로 append하면
+    컬럼 정렬이 어긋난다. 헤더가 다르면 전체를 reindex(신규컬럼 NaN)해서 재작성한다.
+    멱등: 헤더가 이미 일치하면 아무것도 안 함.
+    """
+    if not os.path.exists(path):
+        return
+    try:
+        old = pd.read_csv(path, dtype={"code": str})
+    except (pd.errors.EmptyDataError, OSError):
+        return
+    if list(old.columns) == list(PER_TRADE_COLS):
+        return
+    try:
+        old.reindex(columns=PER_TRADE_COLS).to_csv(path, index=False, encoding="utf-8-sig")
+        _logger.info("per_trade_log 스키마 마이그레이션 완료: %d→%d 컬럼",
+                     len(old.columns), len(PER_TRADE_COLS))
+    except OSError as e:
+        _logger.warning("per_trade_log 스키마 마이그레이션 실패: %s", e)
 
 
 # ── Dedup-on-load: 파일 읽을 때 중복 제거 ──
