@@ -1,0 +1,130 @@
+# -*- coding: utf-8 -*-
+"""v4.0 Phase 1 세그먼트 캘리브레이션 회귀 테스트.
+
+pytest tests/test_calibration_v4.py -v
+
+대상: calibration_v4 (순수 함수)
+- 천장 제거: 표본 충분 + 고승률 셀은 0.55를 넘을 수 있어야 한다 (STABLE 부활)
+- 경험적 베이즈: 표본 적은 셀은 글로벌 prior로 수축
+- 상대 게이트: 절대 0.55 미사용, 당일 분위 + prior 마진
+- SHADOW 안전: 본선 TOP_PICK / EST_WIN_RATE 컬럼 무변경
+"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import numpy as np
+import pandas as pd
+
+from calibration_v4 import (
+    build_segmented_table,
+    score_segment,
+    relative_stable_gate,
+    add_v4_shadow_columns,
+)
+
+
+def _trades(n_high=80, n_low=4):
+    """고승률 세그먼트(표본 충분) + 저표본 세그먼트 합성 체결 로그."""
+    rng = np.random.default_rng(42)
+    rows = []
+    # 세그먼트 A: ELITE 80-90 / NOW_BUY / NORMAL — 표본 충분, 실제 승률 ~0.75
+    for _ in range(n_high):
+        rows.append(dict(ELITE_SCORE=85, ACTION_TIER="NOW_BUY", MACRO_REGIME_MODE="NORMAL",
+                         is_win=int(rng.random() < 0.75), rec_date="20260520"))
+    # 세그먼트 B: ELITE 80-90 / ACCUMULATION_READY / NORMAL — 표본 희박
+    for _ in range(n_low):
+        rows.append(dict(ELITE_SCORE=85, ACTION_TIER="ACCUMULATION_READY", MACRO_REGIME_MODE="NORMAL",
+                         is_win=1, rec_date="20260520"))
+    # 글로벌 prior 낮추는 잡음 표본
+    for _ in range(120):
+        rows.append(dict(ELITE_SCORE=55, ACTION_TIER="PASS", MACRO_REGIME_MODE="NORMAL",
+                         is_win=int(rng.random() < 0.40), rec_date="20260520"))
+    return pd.DataFrame(rows)
+
+
+def test_table_builds_and_has_global_prior():
+    t = build_segmented_table(_trades())
+    assert t["meta"]["method"] == "SEGMENTED_EB"
+    assert 0.3 < t["meta"]["global_prior"] < 0.7
+    assert t["meta"]["n_segments"] >= 2
+
+
+def test_ceiling_removed_high_segment_exceeds_055():
+    """핵심: 표본 충분 + 고승률 셀은 0.55를 넘는다 (기존 단일축 천장 ~0.51 제거)."""
+    t = build_segmented_table(_trades(n_high=120), asof_ymd="20260529")
+    row = pd.Series(dict(ELITE_SCORE=85, ACTION_TIER="NOW_BUY", MACRO_REGIME_MODE="NORMAL"))
+    p, n, key, suff = score_segment(row, t)
+    assert suff is True
+    assert p > 0.55, f"고승률 셀이 0.55를 못 넘음: {p}"
+
+
+def test_eb_shrinks_sparse_segment_toward_prior():
+    """표본 4개짜리 셀은 prior 쪽으로 수축되어 1.0이 되면 안 된다."""
+    t = build_segmented_table(_trades(n_low=4))
+    p0 = t["meta"]["global_prior"]
+    row = pd.Series(dict(ELITE_SCORE=85, ACTION_TIER="ACCUMULATION_READY", MACRO_REGIME_MODE="NORMAL"))
+    p, n, key, suff = score_segment(row, t)
+    assert p < 1.0
+    assert abs(p - p0) < abs(1.0 - p0), "수축이 prior 방향으로 작동하지 않음"
+    assert suff is False
+
+
+def test_missing_segment_falls_back_to_prior():
+    """존재하지 않는 세그먼트 → prior 폴백, 예외 없음."""
+    t = build_segmented_table(_trades())
+    row = pd.Series(dict(ELITE_SCORE=85, ACTION_TIER="UNKNOWN_TIER", MACRO_REGIME_MODE="MARS"))
+    p, n, key, suff = score_segment(row, t)
+    assert n == 0.0 and suff is False
+    assert abs(p - t["meta"]["global_prior"]) < 1e-6
+
+
+def test_relative_gate_uses_quantile_not_absolute():
+    p_win = pd.Series([0.40, 0.52, 0.58, 0.63, 0.70])
+    n_eff = pd.Series([50, 50, 50, 50, 50])
+    gate = relative_stable_gate(p_win, n_eff, prior=0.50)
+    # 절대 0.55였다면 0.52는 탈락이지만, 분위 게이트는 상위만 통과
+    assert gate.iloc[0] == False  # 0.40
+    assert gate.iloc[-1] == True  # 0.70 상위
+    assert gate.sum() >= 1
+
+
+def test_low_sample_pool_disables_quantile_gate():
+    """게이트 풀 표본<4면 분위 비활성, prior+margin만 적용."""
+    p_win = pd.Series([0.60, 0.30])
+    n_eff = pd.Series([50, 5])  # 두 번째는 min_n 미달
+    gate = relative_stable_gate(p_win, n_eff, prior=0.50, min_n=20)
+    assert gate.iloc[0] == True   # 0.60 >= 0.53
+    assert gate.iloc[1] == False  # 표본 미달
+
+
+def test_shadow_columns_do_not_touch_baseline():
+    """SHADOW 안전: 기존 TOP_PICK / EST_WIN_RATE 값이 변하지 않는다."""
+    t = build_segmented_table(_trades())
+    df = pd.DataFrame([
+        dict(종목명="가", ELITE_SCORE=85, TP1_PCT=10.0, BALANCE_SCORE=80,
+             CALIBRATION_MODE="MATURE", ACTION_TIER="NOW_BUY", MACRO_REGIME_MODE="NORMAL",
+             TOP_PICK=0, EST_WIN_RATE=0.417),
+        dict(종목명="나", ELITE_SCORE=55, TP1_PCT=20.0, BALANCE_SCORE=40,
+             CALIBRATION_MODE="MATURE", ACTION_TIER="PASS", MACRO_REGIME_MODE="NORMAL",
+             TOP_PICK=0, EST_WIN_RATE=0.417),
+    ])
+    before_tp = df["TOP_PICK"].tolist()
+    before_wr = df["EST_WIN_RATE"].tolist()
+    out = add_v4_shadow_columns(df, t)
+    assert out["TOP_PICK"].tolist() == before_tp
+    assert out["EST_WIN_RATE"].tolist() == before_wr
+    for c in ["EST_WIN_RATE_V4", "STABLE_GATE_V4_PASS", "TOP_PICK_V4_SHADOW"]:
+        assert c in out.columns
+
+
+def test_shadow_revives_stable_candidate():
+    """천장 제거 효과: 구조는 STABLE이지만 단일축 WR로는 죽던 종목이 V4에서 부활."""
+    t = build_segmented_table(_trades(n_high=120), asof_ymd="20260529")
+    df = pd.DataFrame([dict(
+        종목명="부활", ELITE_SCORE=85, TP1_PCT=10.0, BALANCE_SCORE=80,
+        CALIBRATION_MODE="MATURE", ACTION_TIER="NOW_BUY", MACRO_REGIME_MODE="NORMAL",
+        TOP_PICK=0, EST_WIN_RATE=0.495,
+    )])
+    out = add_v4_shadow_columns(df, t)
+    assert out["TOP_PICK"].iloc[0] == 0            # 본선은 여전히 탈락
+    assert out["TOP_PICK_V4_SHADOW"].iloc[0] == 1  # V4 shadow에서는 부활
