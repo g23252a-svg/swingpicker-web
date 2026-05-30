@@ -887,6 +887,14 @@ def make_rank_validation_report(
                                 "win": 1 if ret[j] > 0 else 0,
                                 "exit_type": _exit_type,
                                 "b_ratio": round(_b_j, 2),
+                                # [v4.0] 세그먼트 축 — pick(recommend slice)에 있으면 기록, 없으면 ""
+                                "MACRO_REGIME_MODE": (pick["MACRO_REGIME_MODE"].iloc[j]
+                                                      if "MACRO_REGIME_MODE" in pick.columns else ""),
+                                "ACTION_TIER": (pick["ACTION_TIER"].iloc[j]
+                                                if "ACTION_TIER" in pick.columns else ""),
+                                "ROUTE": (pick["ROUTE"].iloc[j] if "ROUTE" in pick.columns else ""),
+                                "TOP_PICK_TYPE": (pick["TOP_PICK_TYPE"].iloc[j]
+                                                  if "TOP_PICK_TYPE" in pick.columns else ""),
                             })
 
                         rows.append({

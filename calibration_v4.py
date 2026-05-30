@@ -73,6 +73,41 @@ def _time_weight(rec_dates: pd.Series, half_life_days: int = HALF_LIFE_DAYS,
     return np.exp(-lam * age)
 
 
+def _excess_win(
+    df: pd.DataFrame, ret_col: str, date_col: str, horizon_col: str,
+    benchmark_returns=None,
+) -> Tuple[pd.Series, str]:
+    """초과(벤치 대비) 승리 지표 {0,1} 계산.
+
+    raw win( ret>0 )은 상승장에서 ~0.65로 부풀려져 '엣지'가 아니다.
+    여기서는 같은 (날짜[,horizon]) 시장 대비 초과 여부를 본다.
+
+    benchmark_returns:
+      - None(기본): 당일 횡단면 평균수익을 시장 프록시로 사용(day-relative).
+        같은 날 평균보다 나았으면 excess-win. 시장 베타 인플레이션 제거.
+      - callable(date, horizon)->float 또는 dict[(date,horizon)]->float:
+        진짜 지수(코스피/코스닥) 전방수익을 주면 지수 대비 초과로 계산.
+    """
+    ret = pd.to_numeric(df[ret_col], errors="coerce")
+    if benchmark_returns is not None:
+        def _bench_of(r):
+            key_d = str(r.get(date_col, ""))
+            key_h = r.get(horizon_col, None)
+            if callable(benchmark_returns):
+                return benchmark_returns(key_d, key_h)
+            return (benchmark_returns.get((key_d, key_h))
+                    if isinstance(benchmark_returns, dict) else None)
+        bench = df.apply(_bench_of, axis=1)
+        bench = pd.to_numeric(bench, errors="coerce")
+        src = "external_benchmark"
+    else:
+        grp = [date_col] + ([horizon_col] if horizon_col in df.columns else [])
+        bench = df.groupby(grp)[ret_col].transform("mean")
+        src = "day_relative_mean"
+    excess = ret - bench
+    return (excess > 0).astype(float), src
+
+
 def _elite_bucket(score: float) -> str:
     for lo, hi in ELITE_BUCKETS:
         if lo <= score < hi:
@@ -99,6 +134,11 @@ def build_segmented_table(
     min_effective_n: float = MIN_EFFECTIVE_N,
     half_life_days: int = HALF_LIFE_DAYS,
     asof_ymd: Optional[str] = None,
+    win_basis: str = "absolute",
+    ret_col: str = "ret_pct",
+    horizon_col: str = "horizon",
+    benchmark_returns=None,
+    lookup_col: Optional[str] = None,
 ) -> Dict:
     """과거 체결 로그 → (ELITE 버킷 × segment_cols) 세그먼트 승률 테이블.
 
@@ -106,20 +146,36 @@ def build_segmented_table(
       - p0 = 전체 시간감쇠 승률 (글로벌 prior)
       - 표본 적은 셀은 p0로 수렴(과적합 방지), 표본 많은 셀만 신호 발현.
 
+    win_basis:
+      - "absolute"(기본): win_col(ret>0)을 그대로 사용. 상승장에서 ~0.65로 부풀려짐.
+      - "excess": ret_col − 시장(또는 당일 평균) 초과 여부로 재정의. 시장 베타 제거 →
+        prior가 ~0.5로 정직해지고 종목 간 분리력↑. (구독자 화면 과대표기 방지)
+
+    lookup_col: 추론(score_segment) 시 recommend row에서 버킷을 읽을 컬럼명.
+        미지정 시 score_col. per-trade 로그는 'score'(method별)지만 recommend row는
+        'DISPLAY_SCORE'를 쓰므로, 라이브 테이블은 lookup_col='DISPLAY_SCORE'로 둔다.
+
     trades 에 segment_cols 가 없으면 자동으로 'ALL'로 폴백한다(스키마 안전).
     """
     seg_cols = list(segment_cols) if segment_cols is not None else list(DEFAULT_SEGMENT_COLS)
+    n_raw_total = int(len(trades)) if trades is not None else 0
     meta = {
         "version": "v4.0-phase1",
         "method": "SEGMENTED_EB",
+        "win_basis": win_basis,
+        "score_col": score_col,
+        "lookup_col": lookup_col or score_col,
         "prior_k": prior_k,
         "min_effective_n": min_effective_n,
         "half_life_days": half_life_days,
         "segment_cols": seg_cols,
-        "n_raw_total": int(len(trades)),
+        "n_raw_total": n_raw_total,
     }
 
-    if trades is None or len(trades) == 0 or score_col not in trades.columns or win_col not in trades.columns:
+    _has_win = win_col in (trades.columns if trades is not None else [])
+    _has_ret = ret_col in (trades.columns if trades is not None else [])
+    _usable = (win_basis == "excess" and _has_ret) or (win_basis != "excess" and _has_win)
+    if trades is None or len(trades) == 0 or score_col not in trades.columns or not _usable:
         meta["global_prior"] = GLOBAL_PRIOR_FALLBACK
         meta["is_sufficient"] = False
         return {"meta": meta, "table": []}
@@ -128,7 +184,12 @@ def build_segmented_table(
     df["_w"] = _time_weight(df.get(date_col, pd.Series(index=df.index)),
                             half_life_days=half_life_days, asof_date=asof_ymd)
     df["_w"] = pd.to_numeric(df["_w"], errors="coerce").fillna(0.0).clip(lower=0.0)
-    df["_win"] = pd.to_numeric(df[win_col], errors="coerce").fillna(0.0).clip(0, 1)
+    if win_basis == "excess":
+        df["_win"], _bench_src = _excess_win(df, ret_col, date_col, horizon_col, benchmark_returns)
+        meta["benchmark_source"] = _bench_src
+    else:
+        df["_win"] = pd.to_numeric(df[win_col], errors="coerce").fillna(0.0).clip(0, 1)
+        meta["benchmark_source"] = "none_absolute"
     df["_bucket"] = pd.to_numeric(df[score_col], errors="coerce").fillna(0.0).map(_elite_bucket)
 
     # 글로벌 prior (시간감쇠)
@@ -180,11 +241,26 @@ def _build_lookup(table: Dict) -> Tuple[Dict[str, Dict], List[str], float]:
     return lut, seg_cols, p0
 
 
+def _lookup_col_from_table(table: Dict) -> str:
+    meta = table.get("meta", {})
+    return str(meta.get("lookup_col") or meta.get("score_col") or "ELITE_SCORE")
+
+
 def score_segment(row: pd.Series, table: Dict) -> Tuple[float, float, str, bool]:
-    """(p_win_v4, n_effective, segment_key, sufficient) 반환. 셀 없으면 prior로 폴백."""
+    """(p_win_v4, n_effective, segment_key, sufficient) 반환. 셀 없으면 prior로 폴백.
+
+    버킷 축은 테이블이 만들어진 기준(meta.lookup_col → score_col)을 따른다.
+    recommend row에 그 컬럼이 없으면 DISPLAY_SCORE → ELITE_SCORE 순으로 폴백한다.
+    (과거 버그: 무조건 ELITE_SCORE로 버킷팅 → 테이블 생성 기준과 어긋남)
+    """
     lut, seg_cols, p0 = _build_lookup(table)
-    bucket = _elite_bucket(pd.to_numeric(pd.Series([row.get("ELITE_SCORE", 0)]),
-                                         errors="coerce").fillna(0.0).iloc[0])
+    score_col = _lookup_col_from_table(table)
+    score_value = row.get(score_col, None)
+    if score_value is None or (isinstance(score_value, float) and pd.isna(score_value)):
+        score_value = row.get("DISPLAY_SCORE", row.get("ELITE_SCORE", 0))
+    bucket = _elite_bucket(
+        pd.to_numeric(pd.Series([score_value]), errors="coerce").fillna(0.0).iloc[0]
+    )
     parts = [bucket] + [_norm_segment_value(row.get(c, "ALL")) for c in seg_cols]
     key = "|".join(parts)
     hit = lut.get(key)

@@ -11,6 +11,10 @@
 EST_WIN_RATE를 막고 있던 **캘리브레이션 천장(~0.51)**을 제거한다. 단일축 ELITE_SCORE 룩업 →
 (ELITE 버킷 × 세그먼트) 경험적 베이즈 수축 테이블로. 본선은 건드리지 않고 `*_V4` 그림자 컬럼으로 먼저 검증.
 
+> **[보강 2026-05-30] 승률 기준을 absolute → excess(시장 대비)로 교정.**
+> 검증 중 발견: raw win(ret>0)은 상승장에서 prior 0.65로 부풀려져 DISPLAY 전환 시 전 종목 0.71(게이트 무력화 + 구독자 화면 과대표기). day-relative excess로 바꾸니 prior 0.41, 진짜 엣지 세그먼트만 0.5↑로 분리. `build_segmented_table(win_basis="excess")`가 기본. explainer는 "시장 평균보다 나은 결과가 10번 중 약 N번"으로 정직 표기.
+
+
 ---
 
 ## 1. 왜 (진단, 실측 근거)
