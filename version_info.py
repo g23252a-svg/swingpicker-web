@@ -555,7 +555,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.9.27"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.9.28"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.3"       # 검증 엔진 (backtest / rank_validation)
 
 

@@ -220,8 +220,150 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
     # 그래도 없으면 오늘 날짜
     carry_df["CARRY_FROM_DATE"] = carry_df["CARRY_FROM_DATE"].fillna(ctx.trade_ymd)
 
+    # [v3.9.28] 보유 손익(진입 시점 종가 대비) — carry-stale 가드용. 실패 시 NaN(손실조건 미발동).
+    try:
+        _from_close = []
+        for _, _r in carry_df.iterrows():
+            _code = str(_r.get("종목코드", "")).zfill(6)
+            _fdt = pd.to_datetime(_r.get("CARRY_FROM_DATE"), format="%Y%m%d", errors="coerce")
+            _o = carry_ohlcv.get(_code)
+            _fc = np.nan
+            if _o is not None and not _o.empty and "종가" in _o.columns and pd.notna(_fdt):
+                try:
+                    _idx = pd.to_datetime(_o.index, errors="coerce")
+                    _sub = _o[_idx <= _fdt]
+                    if not _sub.empty:
+                        _fc = float(pd.to_numeric(_sub["종가"], errors="coerce").dropna().iloc[-1])
+                except Exception:
+                    _fc = np.nan
+            _from_close.append(_fc)
+        carry_df["CARRY_FROM_CLOSE"] = _from_close
+        _cur = pd.to_numeric(carry_df.get("종가"), errors="coerce")
+        _fcs = pd.to_numeric(carry_df["CARRY_FROM_CLOSE"], errors="coerce")
+        carry_df["CARRY_RET_PCT"] = ((_cur - _fcs) / _fcs * 100.0).where(_fcs > 0)
+    except Exception as _e:
+        logger.debug(f"CARRY_RET_PCT 계산 실패(무시): {_e}")
+        if "CARRY_FROM_CLOSE" not in carry_df.columns:
+            carry_df["CARRY_FROM_CLOSE"] = np.nan
+        if "CARRY_RET_PCT" not in carry_df.columns:
+            carry_df["CARRY_RET_PCT"] = np.nan
+
     carry_df["기준일"] = ctx.trade_ymd
     return carry_df
+
+
+# ─────────────────────────────────────────────────────────────
+#  [v3.9.28] 단계형 보유경과 청산 가드 (Staged Carry-Stale Exit Guard)
+#  - GUARD #3/#8 production 승격: 신세계I&C(10일·-9%)류 방치 포지션 경고.
+#  - 자동매도 아님. 보유관리 카드에서 '청산 검토 신호'로 강하게 경고하는 표시/감점 레이어.
+#  - 신규 진입 산식(TOP_PICK / BUY_NOW_ELIGIBLE / scoring_engine)은 변경하지 않는다.
+# ─────────────────────────────────────────────────────────────
+def add_carry_stale_guard_columns(df: pd.DataFrame, today_ymd: str = None) -> pd.DataFrame:
+    """v3.9.28 보유경과 단계 / 청산검토 신호 / 감점을 부여한다.
+
+    단계:  0~3 FRESH · 4~6 WATCH · 7~9 STALE · 10+ DEAD
+    신호:  WATCH=표시만 · STALE=손실이면 경고 · DEAD=청산 검토(CARRY_EXIT_SIGNAL=1)
+           DEAD + 손실≤-5% + 회복신호 없음 + 구조/타이밍 악화 → '강한 청산 검토'
+    감점:  WATCH 0 · STALE 10/14/18(day7/8/9) · DEAD 22~35(escalation) · stale&손실 +5
+    표현 안전: '자동매도 / 팔아라' 금지 — '청산 검토 / 보유관리 주의 / 관찰'만 사용.
+    """
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    idx = out.index
+    n = len(out)
+
+    # 1) 보유 경과일 (없으면 CARRY_FROM_DATE로 계산)
+    if "CARRY_AGE_DAYS" in out.columns:
+        age = pd.to_numeric(out["CARRY_AGE_DAYS"], errors="coerce")
+    else:
+        age = pd.Series(np.nan, index=idx)
+    if age.isna().all() and "CARRY_FROM_DATE" in out.columns and today_ymd:
+        try:
+            _fd = pd.to_datetime(out["CARRY_FROM_DATE"], format="%Y%m%d", errors="coerce")
+            age = (pd.Timestamp(str(today_ymd)) - _fd).dt.days
+        except Exception:
+            age = pd.Series(np.nan, index=idx)
+    age = age.fillna(0).clip(0, 365).astype(int)
+    out["CARRY_AGE_DAYS"] = age
+
+    # 2) 보유 손익 (없으면 NaN — 손실 조건은 NaN이면 미발동)
+    if "CARRY_RET_PCT" in out.columns:
+        ret = pd.to_numeric(out["CARRY_RET_PCT"], errors="coerce")
+    else:
+        ret = pd.Series(np.nan, index=idx)
+
+    # 3) 구조/타이밍 (회복신호 없음 / 악화 판정용; 없으면 양호값으로 봐 미발동)
+    struct = (pd.to_numeric(out["STRUCT_SCORE"], errors="coerce").fillna(100.0)
+              if "STRUCT_SCORE" in out.columns else pd.Series(100.0, index=idx))
+    timing = (pd.to_numeric(out["TIMING_SCORE"], errors="coerce").fillna(100.0)
+              if "TIMING_SCORE" in out.columns else pd.Series(100.0, index=idx))
+
+    # 4) 단계 산정 (0~3 FRESH · 4~6 WATCH · 7~9 STALE · 10+ DEAD)
+    stage = pd.Series("FRESH", index=idx, dtype="object")
+    stage[age >= 4] = "WATCH"
+    stage[age >= 7] = "STALE"
+    stage[age >= 10] = "DEAD"
+    out["CARRY_STALE_STAGE"] = stage
+
+    is_stale = stage.eq("STALE")
+    is_dead = stage.eq("DEAD")
+
+    # 5) 청산 검토 신호 (DEAD에서만 1) — 자동매도 아님, 보유관리 경고용
+    out["CARRY_EXIT_SIGNAL"] = is_dead.astype(int)
+
+    # 6) 기존 호환 — IS_STALE_CARRY = 7일+ (STALE 또는 DEAD)
+    out["IS_STALE_CARRY"] = (is_stale | is_dead)
+
+    # 7) 감점 커브
+    base = pd.Series(0.0, index=idx)
+    base[is_stale] = 10.0 + (age[is_stale] - 7).clip(lower=0) * 4.0          # 10/14/18
+    base[is_dead] = (22.0 + (age[is_dead] - 10).clip(lower=0) * 2.0).clip(upper=35.0)  # 22~35
+    losing = ret.le(-5.0).fillna(False)                                       # 손실 -5% 이하
+    base = base + 5.0 * ((is_stale | is_dead) & losing).astype(float)         # stale&손실 +5
+    penalty = base.clip(0, 35)
+    out["STALE_PENALTY"] = penalty
+
+    # 8) DISPLAY_SCORE 차감 (표시 점수만 — 진입 산식 무관)
+    if "DISPLAY_SCORE" in out.columns:
+        out["DISPLAY_SCORE"] = (
+            pd.to_numeric(out["DISPLAY_SCORE"], errors="coerce").fillna(0) - penalty
+        ).clip(0, 100)
+
+    # 9) '강한 청산 검토' 게이트 (4조건 모두): DEAD & 손실≤-5 & 회복신호 없음 & 구조/타이밍 악화
+    no_recovery = timing.lt(40.0)                       # 회복 신호 없음 (타이밍 약화)
+    deteriorating = struct.lt(50.0) & timing.lt(40.0)   # 구조/타이밍 동반 악화
+    strong_review = is_dead & losing & no_recovery & deteriorating
+
+    # 10) 사유 문자열 (표현 안전)
+    ret_list = ret.tolist()
+    age_list = age.tolist()
+    stage_list = stage.tolist()
+    losing_list = losing.tolist()
+    strong_list = strong_review.tolist()
+
+    def _ret_txt(i: int) -> str:
+        v = ret_list[i] if i < len(ret_list) else np.nan
+        return f"{v:+.1f}%" if pd.notna(v) else "—"
+
+    reasons = []
+    for i in range(n):
+        a = age_list[i]
+        st = stage_list[i]
+        if st == "FRESH":
+            reasons.append("")
+        elif st == "WATCH":
+            reasons.append(f"보유 {a}일차 · 손익 {_ret_txt(i)} · 관찰")
+        elif st == "STALE":
+            tail = " · 손실 지속" if losing_list[i] else ""
+            reasons.append(f"보유 {a}일차 · 손익 {_ret_txt(i)} · 보유관리 주의{tail}")
+        else:  # DEAD
+            head = "강한 청산 검토" if strong_list[i] else "청산 검토"
+            reasons.append(f"보유 {a}일차 · 손익 {_ret_txt(i)} · {head}")
+    out["CARRY_STALE_REASON"] = reasons
+
+    return out
 
 
 # ─────────────────────────────────────────────────────────────
@@ -313,24 +455,14 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
                 _cd = _refresh_carry_rows(ctx, _pd, carry_codes)
 
                 if not _cd.empty:
-                    # Stale carry 패널티 적용
-                    try:
-                        _fd = pd.to_datetime(_cd["CARRY_FROM_DATE"], format="%Y%m%d", errors="coerce")
-                        _cd["CARRY_AGE_DAYS"] = (pd.Timestamp(ctx.trade_ymd) - _fd).dt.days.fillna(0).astype(int)
-                    except Exception:
-                        _cd["CARRY_AGE_DAYS"] = 0
-                    _cd["IS_STALE_CARRY"] = _cd["CARRY_AGE_DAYS"] >= 7
-                    _sp = _cd["CARRY_AGE_DAYS"].clip(0,30).apply(
-                        lambda d: min(20.0, max(0, (d-5)*5.0)) if d > 5 else 0.0
-                    )
-                    _cd["STALE_PENALTY"] = _sp
-                    if "DISPLAY_SCORE" in _cd.columns:
-                        _cd["DISPLAY_SCORE"] = (
-                            pd.to_numeric(_cd["DISPLAY_SCORE"], errors="coerce").fillna(0) - _sp
-                        ).clip(0, 100)
-                    _sc2 = _cd["IS_STALE_CARRY"].sum()
-                    if _sc2 > 0:
-                        log(f"   ⏳ stale carry {_sc2}건 (7일+ 경과)")
+                    # [v3.9.28] 단계형 보유경과 청산 가드 (표시/감점/청산검토 신호)
+                    #   - 자동매도 아님. DEAD(10일+)·손실 stale에 '청산 검토 신호'를 부여.
+                    _cd = add_carry_stale_guard_columns(_cd, today_ymd=ctx.trade_ymd)
+                    _sc2 = int(_cd["IS_STALE_CARRY"].sum()) if "IS_STALE_CARRY" in _cd.columns else 0
+                    _dead2 = int((_cd.get("CARRY_STALE_STAGE", pd.Series("", index=_cd.index)) == "DEAD").sum())
+                    _exit2 = int(pd.to_numeric(_cd.get("CARRY_EXIT_SIGNAL", 0), errors="coerce").fillna(0).sum())
+                    if _sc2 > 0 or _dead2 > 0:
+                        log(f"   ⏳ carry-stale: STALE+ {_sc2}건 · DEAD {_dead2}건 · 청산검토신호 {_exit2}건")
 
                     # [v22] 캘리브레이션 적용 (CARRY 재분석분) — LEGACY 기록만
                     # 이 시점엔 ELITE_SCORE가 없으므로 RANK_SCORE 기반으로 seed 값만 기록.
