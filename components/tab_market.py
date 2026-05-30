@@ -557,6 +557,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                     ai_sc = safe_float(row.get('AI_SCORE', row.get('ML_SCORE', 0)))
                     balance = safe_float(row.get('BALANCE_SCORE', 0))
                     is_now_entry = is_truthy_flag(row.get('IS_NOW_ENTRY', '0'))
+                    # [v22.3.21] 공식 신규매수 게이트 — 초록 CTA는 TOP_PICK & ELIGIBLE일 때만
+                    from components.buy_now_badge import is_official_new_buy
+                    official_buy = is_official_new_buy(row)
                     
                     # [v22 UI Step E4 + F3] Kelly engine + error 요약
                     kelly_engine = str(row.get('KELLY_ENGINE', '')).strip()
@@ -604,10 +607,15 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                                 ui.label(
                                     "시장 주의 구간 — 평소 비중의 50% 이하로 제한"
                                 ).classes("text-[10px] text-orange-300/80 mb-1")
-                            else:
-                                # 🟢 NORMAL → 기존 그대로
-                                ui.label("✅ 지금 매수 OK").classes(
+                            elif official_buy:
+                                # 🟢 NORMAL + 공식(TOP_PICK & ELIGIBLE) → 매수 가능
+                                ui.label("✅ 오늘 신규 매수 가능").classes(
                                     "text-xs text-emerald-400 font-bold mb-1"
+                                )
+                            else:
+                                # [v22.3.21] TOP_PICK이나 BUY_NOW_ELIGIBLE=0 → 초록 CTA 금지(중립)
+                                ui.label("⏳ 가격 도달 — 공식 매수 대상 아님").classes(
+                                    "text-xs text-gray-400 mb-1"
                                 )
                         else:
                             ui.label("⏳ 추천가 도달 대기").classes(
@@ -697,6 +705,9 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
             cand_rr = safe_float(top_cand.get('RR_NOW_TP1', 0))
             cand_gap = safe_float(top_cand.get('ENTRY_GAP_PCT', 0))
             cand_is_now = is_truthy_flag(top_cand.get('IS_NOW_ENTRY', '0'))
+            # [v22.3.21] 공식 신규매수 게이트 — 초록 CTA는 TOP_PICK & ELIGIBLE일 때만
+            from components.buy_now_badge import is_official_new_buy
+            cand_official_buy = is_official_new_buy(top_cand)
             
             # 부족한 점수 진단 (변수 재사용 — 위에서 추출했으므로 그대로)
             shortfall_msg = ""
@@ -798,9 +809,14 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
                         ui.label("🟠 조건부 소액 매수 (시장 주의 — 비중 50% 이하)").classes(
                             "text-xs text-orange-400 font-bold mb-1"
                         )
-                    else:
-                        ui.label("✅ 지금 매수 OK (조건 미달이지만 가격은 OK)").classes(
+                    elif cand_official_buy:
+                        ui.label("✅ 오늘 신규 매수 가능").classes(
                             "text-xs text-emerald-400 mb-1"
+                        )
+                    else:
+                        # [v22.3.21] 공식 매수 미통과(TOP_PICK&ELIGIBLE 아님) → 초록 CTA 금지(중립)
+                        ui.label("⏳ 가격 도달 — 공식 매수 대상 아님").classes(
+                            "text-xs text-gray-400 mb-1"
                         )
                 else:
                     ui.label("⏳ 추천가 도달 대기").classes(
