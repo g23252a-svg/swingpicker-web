@@ -571,7 +571,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
 RECOMMENDATION_ENGINE_VERSION = "3.9.28"  # 추천 시스템 (collector / scoring / pipeline)
-VALIDATION_ENGINE_VERSION = "3.9.3"       # 검증 엔진 (backtest / rank_validation)
+VALIDATION_ENGINE_VERSION = "3.9.4"       # 검증 엔진 (backtest / rank_validation)
 
 
 def get_version_layer_label() -> str:
