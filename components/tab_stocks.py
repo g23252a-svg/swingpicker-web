@@ -764,6 +764,22 @@ def _nz(val, default=0):
         return default
 
 
+
+def _nb_score_cell(r) -> str:
+    """[v22.3.21] 테이블 '점수' 셀 — CARRY 과차감 모순 방지.
+
+    CARRY 보유종목은 STALE/legacy penalty 누적으로 DISPLAY_SCORE가 0~한자리까지
+    떨어져 'S 98인데 점수 0' 모순이 생긴다(엔진 과차감 버그, 별도 수정 예정).
+    DISPLAY가 FINAL보다 비정상적으로 낮으면(괴리>15) '보유'로 표시해 혼란을 막는다.
+    비-CARRY 또는 정상 차감 범위면 기존대로 DISPLAY_SCORE를 그대로 보여준다.
+    """
+    route = str(r.get("ROUTE", "")).strip().upper()
+    disp = _nz(r.get("DISPLAY_SCORE", 0))
+    final = _nz(r.get("FINAL_SCORE", disp))
+    if route == "CARRY" and (final - disp) > 15.0:
+        return "보유"
+    return f"{disp:.0f}"
+
 def _plotly_dark(fig, height=300):
     """Plotly 차트 다크 테마 + 툴팁 가독성
 
@@ -3310,7 +3326,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "risk": _r_risk_emoji,
                 "edge": f"{_edge_emoji}{_edge_score:.0f}" if _edge_emoji != "—" else "—",
                 "name": str(r.get("종목명", "—")),
-                "score": f'{_nz(r.get("DISPLAY_SCORE", 0)):.0f}',
+                # [v22.3.21] CARRY 보유종목은 DISPLAY_SCORE 과차감(STALE/legacy 누적)으로
+                # 0~한자리가 나와 'S 98인데 점수 0' 모순이 생김 → '보유'로 표시(혼란 방지).
+                # 비-CARRY는 기존대로 DISPLAY_SCORE 그대로.
+                "score": _nb_score_cell(r),
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
                 "t":     f'{_nz(r.get("TIMING_SCORE",  0)):.0f}',
                 "ai":    f'{_nz(r.get("AI_SCORE",      0)):.0f}',
