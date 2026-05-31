@@ -924,6 +924,9 @@ def render_tab_market(df, auth: str = "free"):
                     ui.label(f"{'🟢' if macro_risk == 'NORMAL' else '🟡' if macro_risk == 'CAUTION' else '🔴'} {risk_kr}").classes("text-lg font-bold").style(f"color:{risk_color}")
                     if macro_msg:
                         ui.label(macro_msg).classes("text-xs text-gray-500")
+                    # [v22.3.21] 매수금지 구간이면 행동 지침 한 줄 (가격/CTA 톤과 일관)
+                    if is_no_buy_mode:
+                        ui.label("→ 오늘은 신규매수 보류 구간").classes("text-xs text-red-300/80 mt-1")
 
                 with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
                     ui.label("시장 Breadth").classes("text-xs text-gray-400")
@@ -936,8 +939,13 @@ def render_tab_market(df, auth: str = "free"):
                     cc = "#10B981" if confidence >= 80 else "#F59E0B" if confidence >= 50 else "#EF4444"
                     ui.label(f"{confidence:.0f}/100").classes("text-lg font-bold").style(f"color:{cc}")
                     # [Step J] 최대 허용 ROUTE도 한국어로 표시
-                    _max_route_disp = route_display(max_route) if max_route else "-"
-                    ui.label(f"최대허용: {_max_route_disp}").classes("text-xs text-gray-500")
+                    # [v22.3.21] 매수금지 구간이면 매수성 ROUTE 단어 대신 '신규매수 보류'로 표시
+                    #   (시장이 막은 날 '최대허용: 적극 매수' 등이 매수 가능으로 오해되는 것 방지)
+                    if is_no_buy_mode:
+                        ui.label("최대허용: 신규매수 보류").classes("text-xs text-gray-500")
+                    else:
+                        _max_route_disp = route_display(max_route) if max_route else "-"
+                        ui.label(f"최대허용: {_max_route_disp}").classes("text-xs text-gray-500")
 
                 # ELITE/TOP_PICK 요약
                 # [v3.9.10] 회원이 "공식 Top Pick 현황 / 평균 점수 32" 보고
