@@ -1390,7 +1390,9 @@ def _parse_reference_date(value=None):
         try:
             return value.date()
         except TypeError:
-            pass
+            # 일부 객체는 date 속성은 있으나 호출 시 TypeError가 날 수 있다.
+            # 아래 문자열 파싱 fallback으로 넘긴다.
+            text = str(value or "").strip()
     text = str(value or "").strip()
     for pat in (r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", r"(\d{4})(\d{2})(\d{2})"):
         m = re.search(pat, text)
