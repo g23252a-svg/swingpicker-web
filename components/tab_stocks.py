@@ -2229,6 +2229,162 @@ def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
         ).classes("text-[10px] text-gray-500 mt-2")
     return d
 
+
+def _render_historical_alpha_pick_card(df: pd.DataFrame) -> None:
+    # [v22.3.22] OOS 검증형 RR 알파 후보 카드.
+    # Tier A: OOS 조건 통과 + RR>=1.2 → RR 알파 후보
+    # Tier B: OOS 조건 통과 + RR<1.2 → 근접 관찰 후보, 매수 아님
+    try:
+        import os as _os
+        import sys as _sys
+        import json as _json
+
+        _root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        _scripts = _os.path.join(_root, "scripts")
+        if _scripts not in _sys.path:
+            _sys.path.insert(0, _scripts)
+
+        from find_best_historical_alpha_combo_v22322 import (
+            select_alpha_tiers,
+            FALLBACK_RULE,
+            RR_FLOOR,
+        )
+    except Exception:
+        return
+
+    rule = None
+    summary = {}
+    try:
+        summary_path = _os.path.join(_root, "data", "historical_alpha_pick_summary_latest.json")
+        if _os.path.exists(summary_path):
+            with open(summary_path, encoding="utf-8") as f:
+                summary = _json.load(f)
+            rule = summary.get("selected_rule")
+    except Exception:
+        summary = {}
+        rule = None
+
+    if not isinstance(rule, dict) or not rule:
+        rule = {
+            **FALLBACK_RULE,
+            "struct_min": None,
+            "breadth_max": None,
+            "win_rate": None,
+            "win_train": None,
+            "win_test": None,
+            "baseline_test": summary.get("baseline_test"),
+            "oos_pass": False,
+        }
+
+    try:
+        tiers = select_alpha_tiers(df, rule, 3)
+    except Exception:
+        return
+
+    tier_a = tiers.get("tier_a")
+    tier_b = tiers.get("tier_b")
+    rule_pass_n = int(tiers.get("rule_pass_n", 0) or 0)
+
+    if rule_pass_n == 0:
+        return
+
+    def _fmt_num(v, digits=1, suffix=""):
+        try:
+            if pd.isna(v):
+                return "—"
+            return f"{float(v):.{digits}f}{suffix}"
+        except Exception:
+            return "—"
+
+    def _val(row, key, default=None):
+        try:
+            v = row.get(key, default)
+            if pd.isna(v):
+                return default
+            return v
+        except Exception:
+            return default
+
+    win = rule.get("win_test", rule.get("win_rate"))
+    base = rule.get("baseline_test", summary.get("baseline_test", 33.0))
+    win_txt = _fmt_num(win, 0, "%") if win is not None else "—"
+    base_txt = _fmt_num(base, 0, "%") if base is not None else "33%"
+    oos_txt = "OOS 검증 통과" if rule.get("oos_pass") else "fallback"
+
+    with ui.card().classes("w-full p-4 mb-4 rounded-xl border border-purple-500/40 bg-purple-500/8"):
+        with ui.row().classes("w-full items-center justify-between gap-2"):
+            ui.label("⚡ RR 알파 후보 (OOS 검증형)").classes("text-base font-bold text-purple-300")
+            ui.badge(
+                f"RR 알파 {len(tier_a) if tier_a is not None else 0} · 승률 {win_txt}",
+                color="#A855F7",
+            ).classes("text-xs")
+
+        ui.label(
+            "승률로 먹는 후보가 아니라 RR(손익비)로 기대값을 만드는 후보입니다. "
+            f"과거 전반부에서 찾고 후반부(OOS)에서 재현된 조건 기준 — {oos_txt}."
+        ).classes("text-xs text-gray-300 mt-1")
+
+        ui.label(
+            f"선정 근거: {rule.get('desc', '-')} · RR≥{RR_FLOOR:.1f}"
+        ).classes("text-[11px] text-purple-200 mt-1 font-semibold")
+
+        ui.label(
+            f"과거 유사조건: 승률 {win_txt} (baseline {base_txt}) · "
+            f"train승 {_fmt_num(rule.get('win_train'), 0, '%')} / test승 {_fmt_num(rule.get('win_test'), 0, '%')}"
+        ).classes("text-[11px] text-gray-400 leading-snug")
+
+        def _bits(row):
+            bits = []
+            rr = _val(row, "RR_NOW_TP1")
+            if rr is not None:
+                bits.append(f"RR {_fmt_num(rr, 2)}")
+            timing = _val(row, "TIMING_SCORE")
+            if timing is not None:
+                bits.append(f"TIMING {_fmt_num(timing, 0)}")
+            frg = _val(row, "외인순매수")
+            if frg is not None:
+                bits.append(f"외인 {float(frg):+,.0f}")
+            poc = _val(row, "POC_GAP")
+            if poc is not None:
+                bits.append(f"POC {_fmt_num(poc, 0, '%')}")
+            vwap = _val(row, "VWAP_GAP")
+            if vwap is not None:
+                bits.append(f"VWAP {_fmt_num(vwap, 1, '%')}")
+            risk = str(_val(row, "ENTRY_RISK_LEVEL", "") or "")
+            if risk in ("RED", "ORANGE"):
+                bits.append(f"⚠️{risk}")
+            return " · ".join(bits)
+
+        if tier_a is not None and len(tier_a) > 0:
+            ui.label("RR 알파 픽 (실전 후보)").classes("text-[11px] text-emerald-300 font-bold mt-2")
+            for i, (_, row) in enumerate(tier_a.iterrows(), 1):
+                nm = row.get("종목명", "-")
+                cd = str(row.get("종목코드", "")).zfill(6)
+                score = _fmt_num(row.get("HISTORICAL_ALPHA_SCORE"), 0)
+                ui.label(
+                    f"{i}위 {nm} {cd} · ALPHA {score} · {_bits(row)}"
+                ).classes("text-xs text-white mt-1 font-semibold")
+        else:
+            ui.label(
+                f"RR 알파 픽: 0개 — OOS 통과 {rule_pass_n}개 있으나 RR {RR_FLOOR:.1f} 미만은 실전 후보에서 제외"
+            ).classes("text-[11px] text-amber-200 font-bold mt-2")
+
+        if tier_b is not None and len(tier_b) > 0:
+            ui.label("근접 관찰 후보 (매수 아님)").classes("text-[11px] text-slate-300 font-bold mt-2")
+            for _, row in tier_b.iterrows():
+                nm = row.get("종목명", "-")
+                cd = str(row.get("종목코드", "")).zfill(6)
+                ui.label(
+                    f"• {nm} {cd} · {_bits(row)}"
+                ).classes("text-[11px] text-gray-400 leading-snug")
+
+        ui.label(
+            "※ 공식 신규매수(TOP_PICK+BUY_NOW_ELIGIBLE)와 별개입니다. "
+            "RR 알파 픽만 실전 후보이며, 근접 후보는 관찰용입니다. "
+            "진입·청산·손절은 본인 판단입니다."
+        ).classes("text-[10px] text-gray-500 mt-2")
+
+
 def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                        auth: str = "free", official_decision: dict | None = None):
     """Tab 2 상단 헤더 카드 — 오늘의 검증 Top 3 표시."""
@@ -2733,6 +2889,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # [v22.3.18] 공식/진입위치/고점수/보유관리 후보 유형 분리
     _render_candidate_triage_card(df, official_decision=official_decision)
+
+    # [v22.3.22] RR 알파 후보 — 공식과 별도인 OOS 검증형 실전 후보 레인
+    _render_historical_alpha_pick_card(df)
 
     # [Step AC P0-4] Top Pick 카드 클릭 → 상세 패널 렌더 (closure: detail_area는 아래에서 정의됨)
     def _on_top_pick_click(code: str):
