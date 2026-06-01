@@ -1835,6 +1835,125 @@ def _ebs_pass_like(row: pd.Series) -> bool | None:
     return None
 
 
+def _num_series(df: pd.DataFrame, col: str, default: float = 0.0) -> pd.Series:
+    """UI 요약용 숫자 컬럼 안전 파서. 산식/추천 계약에는 영향을 주지 않는다."""
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    return pd.Series(default, index=df.index, dtype="float64")
+
+
+def _build_market_no_buy_context(df: pd.DataFrame) -> str:
+    """TOP_PICK=0일 때 '고장'이 아니라 시장/게이트 판단임을 설명하는 짧은 문장."""
+    if df is None or df.empty:
+        return ""
+
+    parts: list[str] = []
+    if "Above_MA20" in df.columns:
+        above_ratio = float((_num_series(df, "Above_MA20", 0) > 0).mean() * 100.0)
+        below_ratio = max(0.0, 100.0 - above_ratio)
+        parts.append(f"시장 {below_ratio:.0f}%가 20일선 아래")
+
+    route = df.get("ROUTE", pd.Series("", index=df.index)).astype(str).str.upper().str.strip()
+    active_n = int(route.isin(["ATTACK", "ARMED"]).sum())
+    if active_n > 0:
+        parts.append(f"ROUTE active {active_n}개")
+    else:
+        parts.append("ROUTE active 0개")
+
+    if "BUY_NOW_PASS" in df.columns:
+        pass_n = int(_series_truthy(df["BUY_NOW_PASS"]).sum())
+        parts.append(f"BUY_NOW_PASS {pass_n}개")
+
+    if "NO_BUY_BREAKER_DECISION" in df.columns:
+        nbb_top = (
+            df["NO_BUY_BREAKER_DECISION"].fillna("").astype(str)
+            .replace("", "UNKNOWN")
+            .value_counts()
+        )
+        if len(nbb_top) > 0:
+            parts.append(f"breaker {nbb_top.index[0]}")
+
+    return " · ".join(parts)
+
+
+def _nearest_official_candidate(df: pd.DataFrame) -> dict | None:
+    """공식 0개일 때 가장 가까운 후보 1개를 표시용으로만 산출한다.
+
+    TOP_PICK / BUY_NOW_ELIGIBLE / BUY_NOW_PASS 값은 절대 수정하지 않는다.
+    """
+    if df is None or df.empty:
+        return None
+
+    work = df.copy()
+    route = work.get("ROUTE", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
+    # 신규진입 맥락의 '가장 가까운 후보'이므로 보유관리/청산/과열 행은 우선 제외한다.
+    new_candidate_mask = ~route.isin(["CARRY", "EXIT", "EXIT_WARNING", "OVERHEAT"])
+    if bool(new_candidate_mask.any()):
+        work = work.loc[new_candidate_mask].copy()
+        route = route.loc[new_candidate_mask]
+    active = route.isin(["ATTACK", "ARMED"])
+    final = _num_series(work, "FINAL_SCORE", 0)
+    score = _num_series(work, "ELITE_SCORE", 0) if "ELITE_SCORE" in work.columns else final.copy()
+    score = score.where(score.notna(), final)
+    rr = _num_series(work, "RR_NOW_TP1", 0)
+    gap = _num_series(work, "ENTRY_GAP_PCT", 999).abs()
+    vwap = _num_series(work, "VWAP_GAP", 0)
+    poc = _num_series(work, "POC_GAP", 0)
+    buy_pass = _series_truthy(work["BUY_NOW_PASS"]) if "BUY_NOW_PASS" in work.columns else pd.Series(False, index=work.index)
+    ebs_ok = _series_truthy(work["PASS_EBS"]) if "PASS_EBS" in work.columns else pd.Series(True, index=work.index)
+
+    # 표시용 near score: 공식산식이 아니라 '왜 0개인지' 설명하기 위한 근접도.
+    work["_near_score"] = 0.0
+    work.loc[active, "_near_score"] += 18
+    work.loc[buy_pass, "_near_score"] += 18
+    work.loc[ebs_ok, "_near_score"] += 8
+    work.loc[rr >= 1.2, "_near_score"] += 14
+    work.loc[(rr >= 1.0) & (rr < 1.2), "_near_score"] += 7
+    work.loc[gap <= 3.0, "_near_score"] += 12
+    work.loc[vwap <= 10.0, "_near_score"] += 10
+    work.loc[poc <= 30.0, "_near_score"] += 8
+    work.loc[final >= 75.0, "_near_score"] += 12
+
+    work["_score"] = score
+    work["_final"] = final
+    work["_rr"] = rr
+    work["_gap_abs"] = gap
+    row = work.sort_values(
+        ["_near_score", "_score", "_final", "_rr", "_gap_abs"],
+        ascending=[False, False, False, False, True],
+    ).iloc[0]
+
+    reasons: list[str] = []
+    if not active.loc[row.name]:
+        reasons.append(f"ROUTE {str(row.get('ROUTE', '-'))}")
+    if not bool(buy_pass.loc[row.name]):
+        reasons.append("BUY_NOW_PASS=0")
+    if rr.loc[row.name] < 1.2:
+        reasons.append(f"RR {rr.loc[row.name]:.2f}")
+    if gap.loc[row.name] > 3.0:
+        reasons.append(f"추천가 괴리 {gap.loc[row.name]:.1f}%")
+    if vwap.loc[row.name] > 10.0:
+        reasons.append(f"VWAP {vwap.loc[row.name]:+.1f}%")
+    if poc.loc[row.name] > 30.0:
+        reasons.append(f"POC {poc.loc[row.name]:+.1f}%")
+    if not bool(ebs_ok.loc[row.name]):
+        reasons.append("EBS 미통과")
+
+    return {
+        "name": _pick_display_name(row),
+        "code": _pick_code(row),
+        "route": str(row.get("ROUTE", "")),
+        "near_score": float(row.get("_near_score", 0.0)),
+        "final": _num_like(row.get("FINAL_SCORE"), 0) or 0,
+        "elite": _num_like(row.get("ELITE_SCORE"), 0) or 0,
+        "rr": float(rr.loc[row.name]),
+        "gap": float(gap.loc[row.name]),
+        "vwap_gap": float(vwap.loc[row.name]),
+        "poc_gap": float(poc.loc[row.name]),
+        "reasons": reasons[:4] if reasons else ["TOP_PICK 공식 기준 미충족"],
+    }
+
+
 def _build_daily_official_decision(df: pd.DataFrame) -> Dict[str, Any]:
     """[v22.3.13] 오늘 공식 신규진입 판정 요약.
 
@@ -1879,14 +1998,23 @@ def _build_daily_official_decision(df: pd.DataFrame) -> Dict[str, Any]:
         }
 
     if top_pick_count <= 0:
+        market_context = _build_market_no_buy_context(df)
+        nearest = _nearest_official_candidate(df)
+        summary = "오늘은 공식 신규진입 후보가 없어 현금 유지가 기본 판단입니다."
+        if market_context:
+            summary += f" ({market_context})"
+        if nearest:
+            summary += f" 가장 가까운 관찰 후보는 {nearest['name']}({nearest['code']})입니다."
         return {
             "status": "CASH_HOLD_NO_TOP_PICK",
             "official_count": 0,
             "top_pick_count": 0,
             "title": "공식 신규매수 0개 · TOP_PICK 없음",
-            "summary": "오늘은 공식 신규진입 후보가 없어 현금 유지가 기본 판단입니다.",
+            "summary": summary,
             "top_pick": None,
-            "blockers": ["TOP_PICK=1 후보 없음"],
+            "nearest_candidate": nearest,
+            "market_context": market_context,
+            "blockers": ["TOP_PICK=1 후보 없음"] + ([market_context] if market_context else []),
             "conversion_conditions": ["다음 CSV에서 TOP_PICK=1 후보 발생", "BUY_NOW_ELIGIBLE=1 동시 충족"],
         }
 
@@ -2205,6 +2333,24 @@ def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
                 f"TOP_PICK: {pick.get('name', '-')} {pick.get('code', '')}"
                 + (" · " + " · ".join(metric_bits) if metric_bits else "")
             ).classes("text-xs text-white mt-2 font-semibold")
+
+        nearest = d.get("nearest_candidate") or {}
+        if nearest:
+            metric_bits = []
+            if nearest.get("final") is not None:
+                metric_bits.append(f"FINAL {nearest['final']:.1f}")
+            if nearest.get("elite") is not None:
+                metric_bits.append(f"ELITE {nearest['elite']:.1f}")
+            if nearest.get("rr") is not None:
+                metric_bits.append(f"RR {nearest['rr']:.2f}")
+            if nearest.get("gap") is not None:
+                metric_bits.append(f"GAP {nearest['gap']:.1f}%")
+            reason_txt = " · ".join(nearest.get("reasons") or [])
+            ui.label(
+                f"가장 가까운 관찰 후보: {nearest.get('name', '-')} {nearest.get('code', '')}"
+                + (" · " + " · ".join(metric_bits) if metric_bits else "")
+                + (f" · 미달 사유: {reason_txt}" if reason_txt else "")
+            ).classes("text-xs text-blue-200 mt-2 font-semibold")
 
         blockers = d.get("blockers") or []
         if blockers:

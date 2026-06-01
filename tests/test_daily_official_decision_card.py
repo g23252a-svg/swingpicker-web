@@ -96,3 +96,50 @@ def test_daily_decision_no_top_pick_is_cash_hold():
     assert d["official_count"] == 0
     assert d["top_pick_count"] == 0
     assert "현금 유지" in d["summary"]
+
+
+def test_daily_decision_no_top_pick_shows_market_context_and_nearest_candidate():
+    df = pd.DataFrame([
+        {
+            "종목코드": "036570",
+            "종목명": "NC",
+            "ROUTE": "WAIT",
+            "TOP_PICK": 0,
+            "BUY_NOW_ELIGIBLE": 0,
+            "BUY_NOW_PASS": 1,
+            "PASS_EBS": 1,
+            "Above_MA20": 0,
+            "FINAL_SCORE": 85.1,
+            "ELITE_SCORE": 70.5,
+            "RR_NOW_TP1": 1.98,
+            "ENTRY_GAP_PCT": 0.0,
+            "VWAP_GAP": 17.87,
+            "POC_GAP": 37.64,
+            "NO_BUY_BREAKER_DECISION": "REJECT_NO_VALIDATED_RULE",
+        },
+        {
+            "종목코드": "000001",
+            "종목명": "일반종목",
+            "ROUTE": "NEUTRAL",
+            "TOP_PICK": 0,
+            "BUY_NOW_ELIGIBLE": 0,
+            "BUY_NOW_PASS": 0,
+            "PASS_EBS": 1,
+            "Above_MA20": 1,
+            "FINAL_SCORE": 30.0,
+            "ELITE_SCORE": 20.0,
+            "RR_NOW_TP1": 0.8,
+            "ENTRY_GAP_PCT": 10.0,
+            "VWAP_GAP": 0.0,
+            "POC_GAP": 0.0,
+            "NO_BUY_BREAKER_DECISION": "REJECT_NO_VALIDATED_RULE",
+        },
+    ])
+
+    d = _build_daily_official_decision(df)
+
+    assert d["status"] == "CASH_HOLD_NO_TOP_PICK"
+    assert "시장 50%가 20일선 아래" in d["summary"]
+    assert "breaker REJECT_NO_VALIDATED_RULE" in d["summary"]
+    assert d["nearest_candidate"]["name"] == "NC"
+    assert "VWAP" in " ".join(d["nearest_candidate"]["reasons"])
