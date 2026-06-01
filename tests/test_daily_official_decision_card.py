@@ -22,7 +22,7 @@ if "nicegui" not in sys.modules:
     nicegui_stub.app = _DummyNiceGuiObject()
     sys.modules["nicegui"] = nicegui_stub
 
-from components.tab_stocks import _build_daily_official_decision
+from components.tab_stocks import _build_candidate_triage, _build_daily_official_decision
 
 
 def test_daily_decision_detects_official_buy_available():
@@ -96,3 +96,45 @@ def test_daily_decision_no_top_pick_is_cash_hold():
     assert d["official_count"] == 0
     assert d["top_pick_count"] == 0
     assert "현금 유지" in d["summary"]
+
+
+def test_candidate_triage_high_score_prefers_active_route_over_wait():
+    df = pd.DataFrame([
+        {
+            "종목코드": "001001",
+            "종목명": "WAIT고득점",
+            "ROUTE": "WAIT",
+            "TOP_PICK": 0,
+            "BUY_NOW_ELIGIBLE": 0,
+            "BUY_NOW_PASS": 1,
+            "PASS_EBS": 1,
+            "FINAL_SCORE": 95.0,
+            "ELITE_SCORE": 95.0,
+            "AI_SCORE": 95.0,
+            "RR_NOW_TP1": 2.50,
+            "GAP_PCT": 0.0,
+            "VWAP_GAP": 0.0,
+            "POC_GAP": 0.0,
+        },
+        {
+            "종목코드": "002002",
+            "종목명": "ARMED후보",
+            "ROUTE": "ARMED",
+            "TOP_PICK": 0,
+            "BUY_NOW_ELIGIBLE": 0,
+            "BUY_NOW_PASS": 0,
+            "PASS_EBS": 1,
+            "FINAL_SCORE": 86.0,
+            "ELITE_SCORE": 86.0,
+            "AI_SCORE": 70.0,
+            "RR_NOW_TP1": 1.30,
+            "GAP_PCT": 3.0,
+            "VWAP_GAP": 12.0,
+            "POC_GAP": 35.0,
+        },
+    ])
+
+    triage = _build_candidate_triage(df, max_each=1)
+
+    assert triage["high_score_watch"][0]["name"] == "ARMED후보"
+    assert triage["high_score_watch"][0]["route"] == "ARMED"
