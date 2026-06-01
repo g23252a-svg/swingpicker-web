@@ -2016,17 +2016,21 @@ def _build_candidate_triage(df: pd.DataFrame, max_each: int = 3) -> dict:
     buy_pass = _series_truthy(work["BUY_NOW_PASS"]) if "BUY_NOW_PASS" in work.columns else pd.Series(False, index=work.index)
     official = top & elig
 
-    score = pd.to_numeric(
-        work.get("ELITE_SCORE", work.get("DISPLAY_SCORE", work.get("FINAL_SCORE", 0))),
-        errors="coerce",
-    ).fillna(0)
-    final = pd.to_numeric(work.get("FINAL_SCORE", work.get("DISPLAY_SCORE", 0)), errors="coerce").fillna(0)
-    ai = pd.to_numeric(work.get("AI_SCORE", work.get("AI", 0)), errors="coerce").fillna(0)
-    rr = pd.to_numeric(work.get("RR_NOW_TP1", work.get("RR_MULT", 0)), errors="coerce").fillna(0)
-    gap = pd.to_numeric(work.get("GAP_PCT", work.get("ENTRY_GAP_PCT", 999)), errors="coerce").fillna(999)
-    vwap_gap = pd.to_numeric(work.get("VWAP_GAP", work.get("VWAP_GAP_PCT", 0)), errors="coerce").fillna(0)
-    poc_gap = pd.to_numeric(work.get("POC_GAP", work.get("POC_GAP_PCT", 0)), errors="coerce").fillna(0)
-    buy_score = pd.to_numeric(work.get("BUY_NOW_SCORE", 0), errors="coerce").fillna(0)
+    def _num_col(keys, default=0):
+        """선택 컬럼이 없어도 index 정렬된 numeric Series를 반환한다."""
+        for key in keys:
+            if key in work.columns:
+                return pd.to_numeric(work[key], errors="coerce").fillna(default)
+        return pd.Series(default, index=work.index, dtype="float64")
+
+    score = _num_col(["ELITE_SCORE", "DISPLAY_SCORE", "FINAL_SCORE"], 0)
+    final = _num_col(["FINAL_SCORE", "DISPLAY_SCORE"], 0)
+    ai = _num_col(["AI_SCORE", "AI", "ML_SCORE"], 0)
+    rr = _num_col(["RR_NOW_TP1", "RR_MULT"], 0)
+    gap = _num_col(["GAP_PCT", "ENTRY_GAP_PCT", "gap_pct"], 999)
+    vwap_gap = _num_col(["VWAP_GAP", "VWAP_GAP_PCT"], 0)
+    poc_gap = _num_col(["POC_GAP", "POC_GAP_PCT"], 0)
+    buy_score = _num_col(["BUY_NOW_SCORE"], 0)
     grade_buy = work.get("BUY_NOW_GRADE", pd.Series("", index=work.index)).astype(str).str.upper().eq("BUY")
 
     route_txt = work.get("ROUTE", pd.Series("", index=work.index)).astype(str).str.upper()
