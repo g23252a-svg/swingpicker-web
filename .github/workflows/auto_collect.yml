@@ -96,11 +96,21 @@ jobs:
           }
           echo ">>> Official buy validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
+      - name: Run No-Buy Breaker Backtest
+        run: |
+          echo ">>> No-buy breaker backtest 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+          python scripts/no_buy_breaker_backtest_v3926.py --data-dir data --out-dir data || {
+            echo "⚠️ no_buy_breaker_backtest 실패 — 기존 breaker 리포트 유지하고 계속 진행"
+            exit 0
+          }
+          echo ">>> No-buy breaker backtest 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+
       - name: Show outputs
         run: |
           ls -alh data || true
           head -n 5 data/recommend_latest.csv || true
           test -f data/official_buy_validation_latest.json && head -n 30 data/official_buy_validation_latest.json || true
+          test -f data/no_buy_breaker_rules_latest.csv && head -n 10 data/no_buy_breaker_rules_latest.csv || true
 
       - name: Commit & Push CSV
         run: |
