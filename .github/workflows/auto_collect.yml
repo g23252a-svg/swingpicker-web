@@ -105,11 +105,22 @@ jobs:
           }
           echo ">>> No-buy breaker backtest 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
+      - name: Run Historical RR Alpha Pick
+        run: |
+          echo ">>> Historical RR Alpha Pick 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+          python scripts/find_best_historical_alpha_combo_v22322.py --data-dir data --out-dir data || {
+            echo "⚠️ historical alpha pick 실패 — 기존 리포트 유지하고 계속 진행"
+            exit 0
+          }
+          echo ">>> Historical RR Alpha Pick 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+
       - name: Show outputs
         run: |
           ls -alh data || true
           head -n 5 data/recommend_latest.csv || true
           test -f data/official_buy_validation_latest.json && head -n 30 data/official_buy_validation_latest.json || true
+          test -f data/historical_alpha_pick_summary_latest.json && head -n 60 data/historical_alpha_pick_summary_latest.json || true
+          test -f data/historical_alpha_pick_latest.csv && head -n 10 data/historical_alpha_pick_latest.csv || true
           test -f data/no_buy_breaker_rules_latest.csv && head -n 10 data/no_buy_breaker_rules_latest.csv || true
 
       - name: Commit & Push CSV
