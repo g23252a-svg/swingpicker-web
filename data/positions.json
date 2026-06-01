@@ -571,7 +571,9 @@
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "095610_20260529_WARN_DRAWDOWN_20260601"
+    ]
   },
   {
     "code": "356860",
