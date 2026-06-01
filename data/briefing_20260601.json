@@ -1,0 +1,24 @@
+{
+  "trade_date": "20260601",
+  "generated_at": "2026-06-01 20:36:02",
+  "count": 1,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "080220",
+      "name": "제주반도체",
+      "route": "ARMED",
+      "score": 80.8,
+      "close": 98500,
+      "entry": 86900,
+      "stop": 73800,
+      "target1": 137100,
+      "target2": 140800,
+      "est_win_rate": 0.497,
+      "rr": 3.8,
+      "sector": "반도체",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/080220"
+    }
+  ]
+}
