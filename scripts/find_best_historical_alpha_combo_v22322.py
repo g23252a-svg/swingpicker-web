@@ -333,7 +333,9 @@ def build(data_dir: str = OUT_DIR, out_dir: str = OUT_DIR) -> dict:
         "rr_floor": RR_FLOOR,
         "rule_source": rule_source,
         "selected_rule": {**{k: best.get(k) for k in
-                          ["rule_id", "desc", "win_rate", "avg_ret", "n",
+                          ["rule_id", "desc",
+                           "timing_min", "frg_pos", "poc_max", "struct_min", "breadth_max",
+                           "win_rate", "avg_ret", "n",
                            "win_train", "win_test", "ret_test", "oos_pass"]},
                           "baseline_test": disc.get("base_test")},
         "baseline_train": disc.get("base_train"),
