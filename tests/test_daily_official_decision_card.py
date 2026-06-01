@@ -96,3 +96,47 @@ def test_daily_decision_no_top_pick_is_cash_hold():
     assert d["official_count"] == 0
     assert d["top_pick_count"] == 0
     assert "현금 유지" in d["summary"]
+
+def test_daily_decision_nearest_candidate_prefers_route_active_over_wait():
+    df = pd.DataFrame([
+        {
+            "종목코드": "001001",
+            "종목명": "WAIT고득점",
+            "ROUTE": "WAIT",
+            "TOP_PICK": 0,
+            "BUY_NOW_ELIGIBLE": 0,
+            "BUY_NOW_PASS": 1,
+            "PASS_EBS": 1,
+            "Above_MA20": 1,
+            "FINAL_SCORE": 95.0,
+            "ELITE_SCORE": 95.0,
+            "RR_NOW_TP1": 2.50,
+            "ENTRY_GAP_PCT": 0.0,
+            "VWAP_GAP": 0.0,
+            "POC_GAP": 0.0,
+            "NO_BUY_BREAKER_DECISION": "REJECT_NO_VALIDATED_RULE",
+        },
+        {
+            "종목코드": "002002",
+            "종목명": "ARMED후보",
+            "ROUTE": "ARMED",
+            "TOP_PICK": 0,
+            "BUY_NOW_ELIGIBLE": 0,
+            "BUY_NOW_PASS": 0,
+            "PASS_EBS": 1,
+            "Above_MA20": 0,
+            "FINAL_SCORE": 70.0,
+            "ELITE_SCORE": 60.0,
+            "RR_NOW_TP1": 1.10,
+            "ENTRY_GAP_PCT": 4.0,
+            "VWAP_GAP": 12.0,
+            "POC_GAP": 35.0,
+            "NO_BUY_BREAKER_DECISION": "REJECT_NO_VALIDATED_RULE",
+        },
+    ])
+
+    d = _build_daily_official_decision(df)
+
+    assert d["status"] == "CASH_HOLD_NO_TOP_PICK"
+    assert d["nearest_candidate"]["name"] == "ARMED후보"
+    assert d["nearest_candidate"]["route"] == "ARMED"
