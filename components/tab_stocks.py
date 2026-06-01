@@ -2059,6 +2059,7 @@ def _build_candidate_triage(df: pd.DataFrame, max_each: int = 3) -> dict:
         tmp["_rr"] = rr.loc[mask]
         tmp["_gap_abs"] = gap.loc[mask].abs()
         tmp["_buy"] = buy_score.loc[mask]
+        tmp["_active_route"] = active_route.loc[mask].astype(int)
         return [
             _candidate_row_payload(row)
             for _, row in tmp.sort_values(sort_cols[0], ascending=sort_cols[1]).head(max_each).iterrows()
@@ -2067,7 +2068,9 @@ def _build_candidate_triage(df: pd.DataFrame, max_each: int = 3) -> dict:
     return {
         "official_buy": _top(official, (["_score", "_rr"], [False, False])),
         "entry_watch": _top(clean_entry, (["_buy", "_ai", "_rr", "_gap_abs"], [False, False, False, True])),
-        "high_score_watch": _top(high_score, (["_score", "_final", "_rr"], [False, False, False])),
+        # 고점수 관찰은 점수순이 기본이지만, ARMED/ATTACK 후보가 있으면 WAIT보다 먼저 보여준다.
+        # 표시 정렬만 바꾸며 공식 매수 산식(TOP_PICK + BUY_NOW_ELIGIBLE)은 변경하지 않는다.
+        "high_score_watch": _top(high_score, (["_active_route", "_score", "_final", "_rr"], [False, False, False, False])),
         "holding_manage": _top(holding, (["_score", "_rr"], [False, False])),
     }
 
