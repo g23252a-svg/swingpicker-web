@@ -1,11 +1,11 @@
 {
-  "asof_ymd": "20260601",
-  "generated_at": "2026-06-02T17:00:45.490647",
+  "asof_ymd": "20260602",
+  "generated_at": "2026-06-03T02:30:58.151228",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
-  "declared_wr_active": 0.499,
+  "declared_wr_active": null,
   "declared_wr_top_pick": null,
   "elite_monotonicity": {
     "valid": true,
@@ -41,10 +41,10 @@
         "score_lo": 70,
         "score_hi": 80.0,
         "n_raw": 36,
-        "p_win": 0.3702,
-        "p_win_lcb": 0.2248,
-        "avg_ret_net_pct": -3.9885,
-        "avg_ret_excess_pct": -7.1518
+        "p_win": 0.3389,
+        "p_win_lcb": 0.2021,
+        "avg_ret_net_pct": -4.1184,
+        "avg_ret_excess_pct": -7.2818
       },
       {
         "score_lo": 80,
@@ -69,22 +69,21 @@
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
-  "realized_wr": 0.3702,
-  "realized_wr_active_fallback": "overall_no_elite_score",
+  "realized_wr": 0.3389,
   "realized_wr_top_pick": null,
   "realized_wr_top_pick_n": 0,
-  "realized_wr_active": 0.3702,
-  "realized_wr_active_n": 36,
-  "declared_vs_realized_gap_active": 0.1288,
+  "realized_wr_active": null,
+  "realized_wr_active_n": 0,
+  "declared_vs_realized_gap_active": null,
   "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": 0.1288,
-  "avg_ret_excess_pct": -5.3288,
+  "declared_vs_realized_gap": null,
+  "avg_ret_excess_pct": -5.4055,
   "top_pick_funnel": {
-    "trade_ymd": "20260601",
-    "total": 528,
+    "trade_ymd": "20260602",
+    "total": 507,
     "aggressive_funnel": {
-      "total": 528,
-      "route_active": 1,
+      "total": 507,
+      "route_active": 0,
       "hard_gate": 0,
       "elite_75": 0,
       "struct_80": 0,
@@ -93,8 +92,8 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 528,
-      "route_active": 1,
+      "total": 507,
+      "route_active": 0,
       "hard_gate": 0,
       "elite_70": 0,
       "tp1_7_15": 0,
@@ -132,7 +131,7 @@
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "OK",
-      "detail": "gap_active=12.9% (n=36)"
+      "detail": "active 매칭 sufficient bin 없음"
     },
     {
       "gate": "wilson_monotonicity",
@@ -142,7 +141,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-5.33%"
+      "detail": "avg_ret_excess=-5.41%"
     },
     {
       "gate": "market_map_coverage_95",

@@ -26,9 +26,9 @@
     7.0
   ],
   "stop_loss_pct": -5.0,
-  "pos_ratio": 0.4909,
-  "best_kpi": 0.7536,
-  "trained_at": "2026-02-28T00:17:28.946922",
+  "pos_ratio": 0.4844,
+  "best_kpi": 0.7391,
+  "trained_at": "2026-06-03T02:14:55.054290",
   "fixes": [
     "first_touch_labeling",
     "vectorized_inference",
