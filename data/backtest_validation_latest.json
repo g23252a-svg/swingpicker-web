@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-06-02T02:00:40",
+  "generated_at": "2026-06-02T17:01:31",
   "version": "v3.9.2",
   "engine_version": "v3.9.2",
   "horizon_bdays": 10,
   "trade_cost_pct": 0.22,
   "days_covered": 68,
-  "ohlc_coverage_note": "OHLC parquet 종목수: 1588 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
+  "ohlc_coverage_note": "OHLC parquet 종목수: 1589 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
   "methodology": {
     "horizon_days": 10,
     "fill_window_days": 3,

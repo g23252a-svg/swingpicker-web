@@ -1,8 +1,8 @@
 {
   "trade_ymd": "20260601",
-  "total": 557,
+  "total": 528,
   "aggressive_funnel": {
-    "total": 557,
+    "total": 528,
     "route_active": 1,
     "hard_gate": 0,
     "elite_75": 0,
@@ -12,7 +12,7 @@
     "final": 0
   },
   "stable_funnel": {
-    "total": 557,
+    "total": 528,
     "route_active": 1,
     "hard_gate": 0,
     "elite_70": 0,

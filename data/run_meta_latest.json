@@ -5,7 +5,7 @@
   "market_breadth": 34.8,
   "pass_ebs": 6,
   "rec_limit": 3,
-  "n_stocks": 557,
+  "n_stocks": 528,
   "run_status": "OK",
   "confidence_score": 100.0,
   "max_allowed_route": "ATTACK",

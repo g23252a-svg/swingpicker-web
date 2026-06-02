@@ -1,5 +1,5 @@
 ﻿rule_id,desc,timing_min,frg_pos,poc_max,struct_min,breadth_max,n_train,win_train,ret_train,n_test,win_test,ret_test,win_rate,avg_ret,n,rr_test,oos_pass,edge_score
-T60_FRG_P90_SNA_BNA,TIMING>=60 + 외인순매수>0 + POC<=90 + 위험가드,60,True,90.0,,,169,37.3,0.19,306,37.3,0.09,37.3,0.12,475,1.75,True,4.9
-T60_FRG_PNA_SNA_BNA,TIMING>=60 + 외인순매수>0 + 위험가드,60,True,,,,194,37.6,0.27,375,36.0,-0.01,36.6,0.08,569,1.77,False,-46.0
-T55_FRG_P90_SNA_BNA,TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드,55,True,90.0,,,198,37.9,0.23,343,35.9,-0.04,36.6,0.06,541,1.76,False,-46.1
-T55_FRG_PNA_SNA_BNA,TIMING>=55 + 외인순매수>0 + 위험가드,55,True,,,,228,37.7,0.25,423,35.2,-0.08,36.1,0.04,651,1.78,False,-46.7
+T60_FRG_P90_SNA_BNA,TIMING>=60 + 외인순매수>0 + POC<=90 + 위험가드,60,True,90.0,,,169,37.3,0.19,306,37.3,0.09,37.3,0.12,475,1.75,True,5.1
+T60_FRG_PNA_SNA_BNA,TIMING>=60 + 외인순매수>0 + 위험가드,60,True,,,,194,37.6,0.27,375,36.0,-0.01,36.6,0.08,569,1.77,False,-45.8
+T55_FRG_P90_SNA_BNA,TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드,55,True,90.0,,,198,37.9,0.23,343,35.9,-0.04,36.6,0.06,541,1.76,False,-45.9
+T55_FRG_PNA_SNA_BNA,TIMING>=55 + 외인순매수>0 + 위험가드,55,True,,,,228,37.7,0.25,423,35.2,-0.08,36.1,0.04,651,1.78,False,-46.5

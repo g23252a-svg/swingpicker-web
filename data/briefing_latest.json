@@ -1,6 +1,6 @@
 {
   "trade_date": "20260601",
-  "generated_at": "2026-06-02 02:00:34",
+  "generated_at": "2026-06-02 17:01:25",
   "count": 1,
   "stocks": [
     {
@@ -8,13 +8,13 @@
       "code": "080220",
       "name": "제주반도체",
       "route": "ARMED",
-      "score": 80.8,
+      "score": 80.9,
       "close": 98500,
       "entry": 86900,
       "stop": 73800,
       "target1": 137100,
       "target2": 140800,
-      "est_win_rate": 0.497,
+      "est_win_rate": 0.499,
       "rr": 3.8,
       "sector": "반도체",
       "market": "KOSDAQ",
