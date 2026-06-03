@@ -1,5 +1,5 @@
 {
-  "trade_ymd": "20260602",
+  "trade_ymd": "20260603",
   "top_pick_count": 0,
   "top_pick_by_type": {},
   "avg_elite": null,
@@ -10,7 +10,7 @@
   "avg_win_rate": null,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 8052,
+  "est_win_rate_n": 8195,
   "routes": {},
   "picks": []
 }

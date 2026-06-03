@@ -54,3 +54,4 @@ date,code,name,sector,label,rank_score,entry,tp1,stop,outcome,exit_price,days_he
 20260528,417840,저스템,특수 목적용 기계 제조업,🏆 최강,78.37,17900.0,22250.0,15210.0,LOSS,15210.0,2,ohlc_low_touch,2026-06-01,-15.03,-15.25,26200.0,26900.0,False,0,False,0,False,0,True,2,False,False,False,-2.23,-20.5,-9.89
 20260529,440110,파두,반도체 제조업,🏆 최강,73.87,112100.0,129400.0,95200.0,OPEN,107100.0,1,ohlc_horizon_close,2026-06-02,-4.46,-4.68,151100.0,181200.0,False,0,False,0,False,0,False,0,False,False,False,0.71,-6.78,-4.46
 20260601,440110,파두,반도체 제조업,🏆 최강,80.68,111100.0,129400.0,94400.0,OPEN,107100.0,1,ohlc_horizon_close,2026-06-02,-3.6,-3.82,151300.0,181200.0,False,0,False,0,False,0,False,0,False,False,False,1.62,-5.94,-3.6
+20260602,420770,기가비스,특수 목적용 기계 제조업,🏆 최강,77.33,125400.0,158000.0,106500.0,OPEN,125400.0,10,close_fallback,,0.0,-0.22,184100.0,217500.0,False,0,False,0,False,0,False,0,False,False,False,0.0,0.0,0.0
