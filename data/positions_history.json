@@ -3761,5 +3761,40 @@
       "019210_20260515_WARN_DRAWDOWN_20260601",
       "019210_20260515_STOP_HIT_20260601"
     ]
+  },
+  {
+    "code": "082920",
+    "name": "비츠로셀",
+    "entry_ymd": "20260514",
+    "entry_px": 60300.0,
+    "qty": 0,
+    "stop_px": 51200.0,
+    "stop_px_initial": 51200.0,
+    "take_px1": 67800.0,
+    "take_px2": 80300.0,
+    "trailing_high": 64600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260604",
+    "last_close_px": 50400.0,
+    "unrealized_pnl_pct": -16.42,
+    "realized_pnl_pct": -16.42,
+    "close_ymd": "20260604",
+    "close_px": 50400.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "082920_20260514_WARN_DRAWDOWN_20260515",
+      "082920_20260514_WARN_DRAWDOWN_20260518",
+      "082920_20260514_WARN_DRAWDOWN_20260520",
+      "082920_20260514_WARN_DRAWDOWN_20260521",
+      "082920_20260514_WARN_DRAWDOWN_20260522",
+      "082920_20260514_WARN_DRAWDOWN_20260525",
+      "082920_20260514_WARN_DRAWDOWN_20260527",
+      "082920_20260514_WARN_DRAWDOWN_20260528",
+      "082920_20260514_WARN_DRAWDOWN_20260529",
+      "082920_20260514_WARN_DRAWDOWN_20260601",
+      "082920_20260514_WARN_DRAWDOWN_20260602",
+      "082920_20260514_WARN_DRAWDOWN_20260603",
+      "082920_20260514_STOP_HIT_20260604"
+    ]
   }
 ]
