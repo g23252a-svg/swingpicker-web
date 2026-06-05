@@ -1,0 +1,31 @@
+{
+  "trade_ymd": "20260605",
+  "status": "DEGRADED",
+  "reasons": [
+    "FLOW_ZERO"
+  ],
+  "warnings": [],
+  "data_freshness_ok": true,
+  "checks": {
+    "MCAP": true,
+    "BENCH": true,
+    "FLOW_ZERO": false,
+    "NEWS": true,
+    "SECTOR": true,
+    "TP_MONOTONIC": true
+  },
+  "confidence_score": 85.0,
+  "max_allowed_route": "ARMED",
+  "macro_risk": "CRITICAL",
+  "market_breadth": 20.0,
+  "axis_status": {
+    "MCAP": "OK",
+    "BENCH": "OK",
+    "FLOW": "FAILED_ZERO_FILLED",
+    "NEWS": "OK",
+    "SECTOR": "OK",
+    "ML": "OK",
+    "TRIGGER": "OK"
+  },
+  "fallback_count": 1
+}

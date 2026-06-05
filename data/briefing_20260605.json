@@ -1,0 +1,58 @@
+{
+  "trade_date": "20260605",
+  "generated_at": "2026-06-05 23:08:16",
+  "count": 3,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "170920",
+      "name": "엘티씨",
+      "route": "ARMED",
+      "score": 85.3,
+      "close": 46500,
+      "entry": 46500,
+      "stop": 39500,
+      "target1": 52100,
+      "target2": 58400,
+      "est_win_rate": 0.474,
+      "rr": 0.8,
+      "sector": "화학·소재",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/170920"
+    },
+    {
+      "rank": 2,
+      "code": "028260",
+      "name": "삼성물산",
+      "route": "ARMED",
+      "score": 79.9,
+      "close": 460500,
+      "entry": 460500,
+      "stop": 391000,
+      "target1": 565000,
+      "target2": 626000,
+      "est_win_rate": 0.472,
+      "rr": 1.5,
+      "sector": "기타",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/028260"
+    },
+    {
+      "rank": 3,
+      "code": "181710",
+      "name": "NHN",
+      "route": "ARMED",
+      "score": 76.2,
+      "close": 49050,
+      "entry": 43950,
+      "stop": 37350,
+      "target1": 64900,
+      "target2": 73100,
+      "est_win_rate": 0.474,
+      "rr": 3.2,
+      "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/181710"
+    }
+  ]
+}

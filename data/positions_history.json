@@ -3796,5 +3796,33 @@
       "082920_20260514_WARN_DRAWDOWN_20260603",
       "082920_20260514_STOP_HIT_20260604"
     ]
+  },
+  {
+    "code": "405100",
+    "name": "큐알티",
+    "entry_ymd": "20260415",
+    "entry_px": 18430.0,
+    "qty": 0,
+    "stop_px": 15660.0,
+    "stop_px_initial": 15660.0,
+    "take_px1": 23500.0,
+    "take_px2": 24050.0,
+    "trailing_high": 24200.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260605",
+    "last_close_px": 15470.0,
+    "unrealized_pnl_pct": -16.06,
+    "realized_pnl_pct": -16.06,
+    "close_ymd": "20260605",
+    "close_px": 15470.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "405100_20260415_WARN_DRAWDOWN_20260520",
+      "405100_20260415_WARN_DRAWDOWN_20260601",
+      "405100_20260415_WARN_DRAWDOWN_20260602",
+      "405100_20260415_WARN_DRAWDOWN_20260603",
+      "405100_20260415_WARN_DRAWDOWN_20260604",
+      "405100_20260415_STOP_HIT_20260605"
+    ]
   }
 ]
