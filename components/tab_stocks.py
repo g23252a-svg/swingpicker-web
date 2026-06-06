@@ -3534,6 +3534,51 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                     )
 
 
+
+def _normalize_stock_search_text(value) -> str:
+    # [v22.3.28] 종목 검색어 정규화. 숫자 코드는 6자리 보정 검색도 지원.
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    txt = str(value).strip()
+    if not txt:
+        return ""
+    return txt.lower()
+
+
+def _apply_stock_search_filter(df: pd.DataFrame, query: str) -> pd.DataFrame:
+    # [v22.3.28] 종목명/종목코드/업종 간편 검색. UI 필터 전용.
+    if df is None or df.empty:
+        return df
+    q = _normalize_stock_search_text(query)
+    if not q:
+        return df
+
+    mask = pd.Series(False, index=df.index)
+
+    if "종목명" in df.columns:
+        mask = mask | df["종목명"].astype(str).str.lower().str.contains(q, na=False, regex=False)
+
+    if "종목코드" in df.columns:
+        code = df["종목코드"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+        q_code = q
+        try:
+            if q.replace(".", "", 1).isdigit():
+                q_code = str(int(float(q))).zfill(6)
+        except Exception:
+            q_code = q
+        mask = mask | code.str.contains(q_code, na=False, regex=False) | code.str.contains(q, na=False, regex=False)
+
+    if "업종" in df.columns:
+        mask = mask | df["업종"].astype(str).str.lower().str.contains(q, na=False, regex=False)
+
+    return df.loc[mask].copy()
+
+
 def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     """Tab 2: AI & Quant 추천 종목
 
@@ -3601,6 +3646,22 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         view_mode = ui.toggle(
             ["📋 테이블", "🃏 칸반"], value="📋 테이블"
         )
+        # [v22.3.28] 종목명/종목코드 빠른 검색
+        stock_search = ui.input(
+            "종목 검색",
+            placeholder="예: 삼성전자 / 005930 / 반도체",
+        ).props("dense clearable").classes("min-w-[220px]")
+        ui.button(
+            "검색",
+            icon="search",
+            on_click=lambda: _build_view(),
+        ).props("size=sm flat color=primary").classes("text-xs")
+        ui.button(
+            "초기화",
+            icon="restart_alt",
+            on_click=lambda: (stock_search.set_value(""), _build_view()),
+        ).props("size=sm flat color=grey").classes("text-xs")
+        stock_search.on("keydown.enter", lambda e: _build_view())
         # [Step AE] dict 옵션: key=internal(비교용), value=display(화면)
         route_filter = ui.select(
             {
@@ -4014,8 +4075,17 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     table_area = ui.column().classes("w-full")
     detail_area = ui.column().classes("w-full mt-4")
 
+    # [v22.3.28] 필터 변경 시 즉시 테이블/칸반 재렌더
+    for _ctrl in (route_filter, label_filter, risk_filter, sort_mode, view_table_mode, view_mode):
+        try:
+            _ctrl.on_value_change(lambda e: _build_view())
+        except Exception:
+            pass
+
     def _filtered():
         fdf = df.copy()
+        # [v22.3.28] 검색어 우선 적용 — 종목명/종목코드/업종
+        fdf = _apply_stock_search_filter(fdf, stock_search.value)
         if route_filter.value != "전체" and "ROUTE" in fdf.columns:
             fdf = fdf[fdf["ROUTE"].astype(str).str.contains(
                 route_filter.value, na=False
