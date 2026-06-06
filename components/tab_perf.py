@@ -1107,6 +1107,218 @@ def _render_official_buy_validation_card() -> None:
         ).classes("text-[10px] text-gray-500 italic mt-1 leading-relaxed")
 
 
+
+def _shadow_reliability_eval(
+    n: int = 0,
+    delta_ev: float | None = None,
+    changed_rate: float | None = None,
+    single_ok: bool | None = None,
+    rwf_ok: bool | None = None,
+) -> dict:
+    # [v22.3.25] Shadow 실험 신뢰도/승격 가능성 평가. 표시 전용.
+    # production 추천식에는 절대 반영하지 않는다.
+    try:
+        n = int(n or 0)
+    except Exception:
+        n = 0
+    try:
+        ev = None if delta_ev is None else float(delta_ev)
+    except Exception:
+        ev = None
+    try:
+        chg = None if changed_rate is None else float(changed_rate)
+    except Exception:
+        chg = None
+
+    blockers: list[str] = []
+    if n < 10:
+        grade = "🔴 표본 부족"
+        blockers.append("N<10")
+    elif n < 30:
+        grade = "🟡 관찰"
+        blockers.append("N<30")
+    elif n < 60:
+        grade = "🟢 후보"
+    else:
+        grade = "🔵 승격 검토"
+
+    if ev is not None and ev <= 0:
+        blockers.append("EV 개선 없음")
+    if single_ok is False:
+        blockers.append("단일 백테스트 미통과")
+    if rwf_ok is False:
+        blockers.append("RWF 미통과")
+    if chg is not None and chg > 0.40:
+        blockers.append("구성변경률>40%")
+
+    promotion_ready = (
+        n >= 30
+        and (ev is None or ev > 0.50)
+        and single_ok is not False
+        and rwf_ok is not False
+        and (chg is None or chg <= 0.35)
+    )
+    verdict = "승격 검토 가능" if promotion_ready else (
+        "승격 불가 — " + (" · ".join(blockers) if blockers else "추가 검증 필요")
+    )
+
+    return {
+        "n": n,
+        "grade": grade,
+        "verdict": verdict,
+        "promotion_ready": promotion_ready,
+        "blockers": blockers,
+    }
+
+
+def _render_shadow_reliability_badge(title: str, eval_result: dict) -> None:
+    grade = eval_result.get("grade", "—")
+    verdict = eval_result.get("verdict", "추가 검증 필요")
+    ready = bool(eval_result.get("promotion_ready"))
+    color_cls = "text-emerald-300" if ready else "text-amber-200"
+    ui.label(f"{title}: {grade} · {verdict}").classes(
+        f"text-[11px] {color_cls} leading-snug mt-1"
+    )
+
+
+def _render_shadow_reliability_card(j: dict) -> None:
+    # [v22.3.25] Shadow 실험실 신뢰도/승격 게이트 요약 카드.
+    em = j.get("entry_mode_shadow", {}) or {}
+    sr = j.get("struct_risk_shadow", {}) or {}
+    pe = j.get("pre_entry_risk_shadow", {}) or {}
+    rows = []
+
+    if em.get("enabled"):
+        n = int(em.get("extra_fills", 0) or 0)
+        ev = None
+        if n > 0:
+            try:
+                ev = float(em.get("extra_sum_ret", 0) or 0) / n
+            except Exception:
+                ev = None
+        note = f"N={n} · 평균추가수익 {ev:+.2f}%" if ev is not None else f"N={n}"
+        rows.append(("ENTRY_MODE chase", _shadow_reliability_eval(n=n, delta_ev=ev), note))
+
+    if sr.get("enabled"):
+        n = int(sr.get("n", sr.get("sample_n", sr.get("total_n", 0)) or 0))
+        ev = sr.get("delta_ev")
+        chg = sr.get("changed_pick_rate")
+        single = bool(sr.get("single_backtest_ok")) if "single_backtest_ok" in sr else None
+        note = f"ΔEV {float(ev or 0):+.2f} · 구성변경 {float(chg or 0)*100:.1f}%"
+        rows.append(("STRUCT risk", _shadow_reliability_eval(n=n, delta_ev=ev, changed_rate=chg, single_ok=single), note))
+
+    if pe.get("enabled") and isinstance(pe.get("rules"), dict):
+        rules = pe.get("rules", {}) or {}
+        key = pe.get("best_by_efficiency") or pe.get("best_by_delta_ev") or "B_red"
+        best = rules.get(key, {}) or {}
+        n = int(best.get("n", best.get("sample_n", best.get("total_n", 0)) or 0))
+        ev = best.get("delta_ev")
+        chg = best.get("changed_pick_rate")
+        single = bool(best.get("single_backtest_ok")) if "single_backtest_ok" in best else None
+        note = f"ΔEV {float(ev or 0):+.2f} · 구성변경 {float(chg or 0)*100:.1f}%"
+        rows.append((f"PRE_ENTRY_RISK {key}", _shadow_reliability_eval(n=n, delta_ev=ev, changed_rate=chg, single_ok=single, rwf_ok=True if pe.get("rwf_required") else None), note))
+
+    if not rows:
+        return
+
+    with ui.card().classes("w-full p-3 bg-[#141428] border border-purple-600/30 rounded-lg mb-2"):
+        ui.label("🧪 Shadow 신뢰도/승격 게이트").classes(
+            "text-sm font-bold text-purple-200 mb-1"
+        )
+        ui.label(
+            "좋아 보이는 Shadow라도 N, 구성변경률, 단일 백테스트, RWF를 통과하지 못하면 운영 반영 금지입니다."
+        ).classes("text-[11px] text-gray-400 leading-relaxed mb-1")
+
+        for title, evl, note in rows:
+            with ui.row().classes("w-full items-start justify-between gap-2"):
+                ui.label(f"• {title}").classes("text-[11px] text-gray-200 font-semibold")
+                ui.label(note).classes("text-[10px] text-gray-500")
+            _render_shadow_reliability_badge("판정", evl)
+
+        ui.label(
+            "승격 기준: N≥30 · ΔEV +0.5 이상 · 구성변경률≤35% · 단일/RWF 통과. 하나라도 미달이면 measurement-only 유지."
+        ).classes("text-[10px] text-gray-500 mt-2 leading-snug")
+
+
+def _safe_col(df: pd.DataFrame, *names) -> pd.Series:
+    for name in names:
+        if name in df.columns:
+            return df[name]
+    return pd.Series([pd.NA] * len(df), index=df.index)
+
+
+def _render_green_early_stop_shadow_card() -> None:
+    # [v22.3.25] GREEN인데 1~2일 내 손절난 케이스 진단 카드.
+    trades = _load_top1_trades()
+    if trades is None or trades.empty:
+        return
+
+    t = trades.copy()
+    if "net_pct_num" not in t.columns:
+        t["net_pct_num"] = pd.to_numeric(_safe_col(t, "net_pct", "NET_PCT"), errors="coerce")
+
+    t = t.dropna(subset=["net_pct_num"]).tail(80).copy()
+    if t.empty:
+        return
+
+    risk = _safe_col(t, "ENTRY_RISK_LEVEL", "entry_risk_level", "risk_level").astype(str).str.upper()
+    if risk.eq("<NA>").all() or risk.eq("NAN").all():
+        vwap = pd.to_numeric(_safe_col(t, "VWAP_GAP", "vwap_gap"), errors="coerce")
+        risk = pd.Series("UNKNOWN", index=t.index)
+        risk.loc[vwap.notna() & (vwap <= 10)] = "GREEN_PROXY"
+
+    out = _safe_col(t, "outcome_norm", "outcome").astype(str).str.upper()
+    is_loss = out.eq("LOSS") | (t["net_pct_num"] < 0)
+    is_green = risk.isin(["GREEN", "GREEN_PROXY"])
+
+    fill_dt = pd.to_datetime(_safe_col(t, "fill_date", "entry_date"), errors="coerce")
+    exit_dt = pd.to_datetime(_safe_col(t, "exit_date", "sell_date"), errors="coerce")
+    hold_days = pd.to_numeric(_safe_col(t, "holding_days", "hold_days"), errors="coerce")
+    calc_days = (exit_dt - fill_dt).dt.days
+    hold_days = hold_days.fillna(calc_days)
+    early = hold_days.fillna(999) <= 2
+
+    green_losses = t[is_green & is_loss].copy()
+    early_green_losses = t[is_green & is_loss & early].copy()
+
+    if len(green_losses) == 0:
+        return
+
+    n_green_loss = int(len(green_losses))
+    n_early = int(len(early_green_losses))
+    early_rate = n_early / max(n_green_loss, 1) * 100.0
+    avg_loss = float(green_losses["net_pct_num"].mean())
+
+    with ui.card().classes("w-full p-3 bg-[#1a1a2e] border border-rose-700/30 rounded-lg mb-2"):
+        ui.label("🧯 GREEN 조기손절 shadow — 놓친 위험 원인 분석").classes(
+            "text-sm font-bold text-rose-200 mb-1"
+        )
+        ui.label(
+            "ENTRY_RISK가 GREEN이었거나 GREEN에 가까웠는데 빠르게 손절난 케이스를 추적합니다. 추천식에는 반영하지 않는 진단 전용입니다."
+        ).classes("text-[11px] text-gray-400 leading-relaxed mb-1")
+
+        with ui.row().classes("w-full flex-wrap gap-x-6 gap-y-1"):
+            _shadow_stat("GREEN 손실", f"{n_green_loss}건")
+            _shadow_stat("2일내 손절", f"{n_early}건", bad=n_early > 0)
+            _shadow_stat("조기손절률", f"{early_rate:.1f}%", bad=early_rate >= 50)
+            _shadow_stat("평균손익", f"{avg_loss:+.2f}%", bad=avg_loss < 0)
+
+        if n_early:
+            ui.label("최근 조기손절 예시").classes("text-[10px] text-rose-100 mt-2")
+            for _, row in early_green_losses.tail(3).iterrows():
+                name = row.get("name", row.get("종목명", row.get("stock_name", "-")))
+                code = row.get("code", row.get("종목코드", ""))
+                net = pd.to_numeric(row.get("net_pct_num"), errors="coerce")
+                fd = row.get("fill_date", row.get("entry_date", ""))
+                code_txt = str(code).zfill(6) if str(code).strip() else ""
+                ui.label(f"• {fd} {name} {code_txt} · {float(net):+.2f}%").classes(
+                    "text-[10px] text-gray-500 leading-tight"
+                )
+
+        ui.label(
+            "다음 연구 후보: 전일 급등·VWAP 급확대·거래대금 폭증 후 식음·시장 급락·수급 역전. 현재는 원인 표시 단계이며 hard block 금지."
+        ).classes("text-[10px] text-gray-500 mt-2 leading-snug")
+
 def _render_shadow_lab_card():
     """[v3.9.1 / v3.9.2] Shadow 실험실 — 3개 shadow 측정 결과 표시.
 
@@ -1155,6 +1367,18 @@ def _render_shadow_lab_card():
         _render_shadow_promotion_gate_card(j)
     except Exception as _e:
         _logger.debug("shadow promotion gate render skipped: %s", _e)
+
+    # [v22.3.25] Shadow 신뢰도/승격 게이트 — measurement-only
+    try:
+        _render_shadow_reliability_card(j)
+    except Exception as _e:
+        _logger.debug("shadow reliability card render skipped: %s", _e)
+
+    # [v22.3.25] GREEN 조기손절 shadow — 놓친 위험 원인 분석
+    try:
+        _render_green_early_stop_shadow_card()
+    except Exception as _e:
+        _logger.debug("green early stop shadow render skipped: %s", _e)
 
     # ─── ENTRY_MODE shadow ───
     if em.get("enabled"):
