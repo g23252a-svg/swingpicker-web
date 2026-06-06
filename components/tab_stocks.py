@@ -2374,6 +2374,291 @@ def _triage_line_with_reason(items: list[dict], empty_text: str = "해당 없음
     return " / ".join(parts)
 
 
+
+def _load_rank_validation_summary_df(data_dir: str | None = None) -> pd.DataFrame:
+    # [v22.3.27] 성과탭 검증 요약(rank_validation_summary_latest.csv) 로드.
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dirs = []
+    if data_dir:
+        dirs.append(data_dir)
+    dirs.extend([
+        os.path.join(root, "data"),
+        os.path.join(os.getcwd(), "data"),
+        "data",
+    ])
+    for d in dirs:
+        path = os.path.join(d, "rank_validation_summary_latest.csv")
+        if not os.path.exists(path):
+            continue
+        try:
+            dfv = pd.read_csv(path, encoding="utf-8-sig")
+            dfv.columns = [str(c).lstrip("\ufeff") for c in dfv.columns]
+            return dfv
+        except Exception as exc:
+            _logger.warning("rank_validation_summary_latest.csv 로드 실패: %s", exc)
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+def _select_winrate_action_profile(summary_df: pd.DataFrame | None = None) -> dict:
+    # [v22.3.27] 실제 검증 성과가 좋은 지표를 선택한다.
+    # 우선순위: FINAL/DISPLAY, H=5, Top1/3/5, 표본 충분, 승률/수익률/알파 양수.
+    if summary_df is None:
+        summary_df = _load_rank_validation_summary_df()
+    if summary_df is None or summary_df.empty:
+        return {"ok": False, "reason": "rank_validation_summary 없음"}
+
+    work = summary_df.copy()
+    method_col = "METHOD"
+    topk_col = "TOPK"
+    h_col = "H(영업일)"
+    if method_col not in work.columns or topk_col not in work.columns or h_col not in work.columns:
+        return {"ok": False, "reason": "검증 요약 컬럼 부족"}
+
+    for c in ["TOTAL_N", "WIN_RATE_%", "AVG_RET_%", "ALPHA_%", "HIT_5%_%"]:
+        if c in work.columns:
+            work[c] = pd.to_numeric(work[c], errors="coerce")
+
+    work["_METHOD"] = work[method_col].astype(str).str.upper()
+    work["_TOPK"] = pd.to_numeric(work[topk_col], errors="coerce")
+    work["_H"] = pd.to_numeric(work[h_col], errors="coerce")
+
+    cand = work[
+        work["_METHOD"].isin(["FINAL_SCORE", "DISPLAY_SCORE"])
+        & work["_TOPK"].isin([1, 3, 5])
+        & (work["_H"] == 5)
+        & (work.get("TOTAL_N", 0) >= 50)
+        & (work.get("WIN_RATE_%", 0) >= 65)
+        & (work.get("AVG_RET_%", 0) > 0)
+        & (work.get("ALPHA_%", 0) > 0)
+    ].copy()
+
+    if cand.empty:
+        cand = work[
+            work["_METHOD"].isin(["FINAL_SCORE", "DISPLAY_SCORE"])
+            & work["_TOPK"].isin([1, 3, 5])
+            & (work["_H"] == 5)
+            & (work.get("TOTAL_N", 0) >= 30)
+            & (work.get("AVG_RET_%", 0) > 0)
+            & (work.get("ALPHA_%", 0) > 0)
+        ].copy()
+
+    if cand.empty:
+        return {"ok": False, "reason": "검증승률 profile 미충족"}
+
+    cand["_PROFILE_SCORE"] = (
+        pd.to_numeric(cand.get("WIN_RATE_%", 0), errors="coerce").fillna(0) * 1.0
+        + pd.to_numeric(cand.get("AVG_RET_%", 0), errors="coerce").fillna(0) * 0.6
+        + pd.to_numeric(cand.get("ALPHA_%", 0), errors="coerce").fillna(0) * 0.5
+        - pd.to_numeric(cand.get("_TOPK", 5), errors="coerce").fillna(5) * 0.8
+    )
+    row = cand.sort_values("_PROFILE_SCORE", ascending=False).iloc[0]
+    return {
+        "ok": True,
+        "method": str(row.get("METHOD", "FINAL_SCORE")),
+        "topk": int(float(row.get("TOPK", 3))),
+        "horizon": int(float(row.get("H(영업일)", 5))),
+        "total_n": int(float(row.get("TOTAL_N", 0) or 0)),
+        "win_rate": float(row.get("WIN_RATE_%", 0) or 0),
+        "avg_ret": float(row.get("AVG_RET_%", 0) or 0),
+        "alpha": float(row.get("ALPHA_%", 0) or 0),
+        "hit5": float(row.get("HIT_5%_%", 0) or 0) if "HIT_5%_%" in row.index else None,
+        "reason": (
+            f"{row.get('METHOD', 'FINAL_SCORE')} Top{int(float(row.get('TOPK', 3)))} · "
+            f"{int(float(row.get('H(영업일)', 5)))}영업일 검증"
+        ),
+    }
+
+
+def _build_winrate_action_candidates(
+    df: pd.DataFrame,
+    max_n: int = 3,
+    summary_df: pd.DataFrame | None = None,
+) -> dict:
+    # [v22.3.27] 검증승률 기반 추천 후보 산출. 공식 매수 산식과 분리.
+    profile = _select_winrate_action_profile(summary_df)
+    if df is None or df.empty:
+        return {"profile": profile, "candidates": pd.DataFrame(), "mode": "empty"}
+
+    if not profile.get("ok"):
+        return {"profile": profile, "candidates": pd.DataFrame(), "mode": "no_profile"}
+
+    method = str(profile.get("method", "FINAL_SCORE"))
+    work = df.copy()
+    if method not in work.columns:
+        method = "FINAL_SCORE" if "FINAL_SCORE" in work.columns else "DISPLAY_SCORE"
+        if method not in work.columns:
+            return {"profile": profile, "candidates": pd.DataFrame(), "mode": "no_method"}
+        profile = dict(profile)
+        profile["method"] = method
+        profile["reason"] = profile.get("reason", "") + " · 화면 fallback"
+
+    def _num_series(keys, default=0.0):
+        for key in keys:
+            if key in work.columns:
+                return pd.to_numeric(work[key], errors="coerce").fillna(default)
+        return pd.Series(default, index=work.index, dtype="float64")
+
+    val = _num_series([method], 0)
+    final = _num_series(["FINAL_SCORE", "DISPLAY_SCORE"], 0)
+    elite = _num_series(["ELITE_SCORE", "FINAL_SCORE", "DISPLAY_SCORE"], 0)
+    timing = _num_series(["TIMING_SCORE"], 0)
+    struct = _num_series(["STRUCT_SCORE"], 0)
+    ai = _num_series(["AI_SCORE", "AI", "ML_SCORE"], 0)
+    rr = _num_series(["RR_NOW_TP1", "RR_MULT"], 0)
+    gap = _num_series(["GAP_PCT", "ENTRY_GAP_PCT", "gap_pct"], 999)
+    vwap = _num_series(["VWAP_GAP", "VWAP_GAP_PCT"], 0)
+    poc = _num_series(["POC_GAP", "POC_GAP_PCT"], 0)
+
+    top = _series_truthy(work["TOP_PICK"]) if "TOP_PICK" in work.columns else pd.Series(False, index=work.index)
+    elig = _series_truthy(work["BUY_NOW_ELIGIBLE"]) if "BUY_NOW_ELIGIBLE" in work.columns else pd.Series(False, index=work.index)
+    official = top & elig
+
+    risk = work.get("ENTRY_RISK_LEVEL", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
+    edge = work.get("ENTRY_EDGE_LEVEL", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
+    route = work.get("ROUTE", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
+
+    try:
+        real_holding = _actual_holding_mask(work)
+    except Exception:
+        real_holding = pd.Series(False, index=work.index)
+
+    base = (~real_holding) & (~official) & (risk != "RED")
+    strict = (
+        base
+        & (val >= 70)
+        & (final >= 65)
+        & (rr >= 1.0)
+        & (gap.abs() <= 5.0)
+        & (vwap <= 20.0)
+        & (poc <= 80.0)
+    )
+
+    relaxed = (
+        base
+        & (val >= 60)
+        & (final >= 55)
+        & (rr >= 0.8)
+        & (gap.abs() <= 8.0)
+        & (vwap <= 30.0)
+    )
+
+    mode = "strict" if bool(strict.any()) else "relaxed"
+    mask = strict if bool(strict.any()) else relaxed
+
+    if not bool(mask.any()):
+        return {"profile": profile, "candidates": pd.DataFrame(), "mode": "no_candidates"}
+
+    tmp = work.loc[mask].copy()
+    tmp["VALIDATED_METHOD"] = method
+    tmp["VALIDATED_SCORE"] = val.loc[mask]
+    tmp["VALIDATED_FINAL"] = final.loc[mask]
+    tmp["VALIDATED_ELITE"] = elite.loc[mask]
+    tmp["VALIDATED_RR"] = rr.loc[mask]
+    tmp["VALIDATED_GAP"] = gap.loc[mask]
+    tmp["VALIDATED_ROUTE"] = route.loc[mask]
+    tmp["VALIDATED_WIN_RATE_%"] = float(profile.get("win_rate", 0) or 0)
+    tmp["VALIDATED_AVG_RET_%"] = float(profile.get("avg_ret", 0) or 0)
+    tmp["VALIDATED_ALPHA_%"] = float(profile.get("alpha", 0) or 0)
+    tmp["VALIDATED_REASON"] = profile.get("reason", "")
+
+    active_bonus = route.loc[mask].str.contains("ATTACK|ARMED", regex=True, na=False).astype(float) * 8.0
+    wait_bonus = route.loc[mask].str.contains("WAIT|NEUTRAL", regex=True, na=False).astype(float) * 2.0
+    edge_pen = edge.loc[mask].eq("CAUTION").astype(float) * 6.0
+    orange_pen = risk.loc[mask].eq("ORANGE").astype(float) * 4.0
+
+    tmp["VALIDATED_ACTION_SCORE"] = (
+        tmp["VALIDATED_SCORE"].astype(float) * 1.0
+        + final.loc[mask].astype(float) * 0.20
+        + timing.loc[mask].astype(float) * 0.08
+        + struct.loc[mask].astype(float) * 0.05
+        + ai.loc[mask].astype(float) * 0.04
+        + rr.loc[mask].clip(lower=0, upper=3).astype(float) * 5.0
+        + active_bonus
+        + wait_bonus
+        - gap.loc[mask].abs().astype(float) * 1.2
+        - vwap.loc[mask].clip(lower=0).astype(float) * 0.12
+        - poc.loc[mask].clip(lower=0).astype(float) * 0.05
+        - edge_pen
+        - orange_pen
+    )
+
+    def _tier(row):
+        r = str(row.get("VALIDATED_ROUTE", "")).upper()
+        if "ATTACK" in r or "ARMED" in r:
+            return "진입검토"
+        return "조건부"
+
+    tmp["VALIDATED_ACTION_TIER"] = tmp.apply(_tier, axis=1)
+    tmp = tmp.sort_values("VALIDATED_ACTION_SCORE", ascending=False).head(max_n)
+    return {"profile": profile, "candidates": tmp, "mode": mode}
+
+
+def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None = None) -> None:
+    # [v22.3.27] 공식 0개일 때도 승률 좋은 검증 지표 기반 후보를 상단에 올린다.
+    result = _build_winrate_action_candidates(df, max_n=3)
+    profile = result.get("profile", {}) or {}
+    candidates = result.get("candidates", pd.DataFrame())
+    mode = result.get("mode", "")
+
+    if not profile.get("ok"):
+        return
+
+    win = float(profile.get("win_rate", 0) or 0)
+    avg = float(profile.get("avg_ret", 0) or 0)
+    alpha = float(profile.get("alpha", 0) or 0)
+    n = int(profile.get("total_n", 0) or 0)
+    method = str(profile.get("method", "FINAL_SCORE"))
+    topk = int(profile.get("topk", 3) or 3)
+    h = int(profile.get("horizon", 5) or 5)
+
+    border = "border-emerald-500/40 bg-emerald-500/8" if len(candidates) else "border-slate-500/30 bg-slate-500/8"
+    with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
+        with ui.row().classes("w-full items-center justify-between gap-2"):
+            ui.label("📊 검증승률 기반 추천 후보").classes(
+                "text-base font-bold text-emerald-300" if len(candidates) else "text-base font-bold text-slate-300"
+            )
+            ui.badge(
+                f"{method} Top{topk} · 승률 {win:.1f}% · N={n}",
+                color="#10B981" if len(candidates) else "#64748B",
+            ).classes("text-xs")
+
+        ui.label(
+            f"성과탭 검증에서 {method} Top{topk}/{h}영업일 조합이 "
+            f"승률 {win:.1f}% · 평균 {avg:+.2f}% · 알파 {alpha:+.2f}%p로 확인된 지표입니다. "
+            "오늘 CSV에서 이 지표가 높은 종목을 안전필터로 재정렬합니다."
+        ).classes("text-xs text-gray-300 mt-1 leading-relaxed")
+
+        if candidates is None or len(candidates) == 0:
+            ui.label(
+                "검증승률 profile은 좋지만 오늘은 RED/과열/갭/RR 필터까지 통과하는 후보가 없습니다."
+            ).classes("text-[11px] text-amber-200 font-bold mt-2")
+        else:
+            ui.label(
+                "오늘 추천 우선순위 — 공식 신규매수와 별개, 소액/조건부 판단용"
+                if mode == "strict"
+                else "오늘 조건부 우선순위 — strict 후보가 없어 완화 필터로 표시"
+            ).classes("text-[11px] text-emerald-200 font-bold mt-2")
+            for i, (_, row) in enumerate(candidates.iterrows(), 1):
+                name = _pick_display_name(row)
+                code = _pick_code(row)
+                tier = str(row.get("VALIDATED_ACTION_TIER", "조건부"))
+                ui.label(
+                    f"{i}. {name} {code} · {tier} · {method} {float(row.get('VALIDATED_SCORE', 0)):.1f} "
+                    f"· FINAL {float(row.get('VALIDATED_FINAL', 0)):.1f} "
+                    f"· RR {float(row.get('VALIDATED_RR', 0)):.2f} "
+                    f"· GAP {float(row.get('VALIDATED_GAP', 0)):+.1f}%"
+                ).classes("text-xs text-white mt-1 font-semibold")
+                ui.label(
+                    f"   └ 근거: 검증승률 {win:.1f}% · 평균수익 {avg:+.2f}% · 알파 {alpha:+.2f}%p · "
+                    f"ROUTE {row.get('ROUTE', '—')} · 공식매수 아님"
+                ).classes("text-[10px] text-gray-400 leading-snug")
+
+        ui.label(
+            "※ 이 레인은 '맨날 0개' 문제를 줄이기 위한 검증승률 기반 보조 추천입니다. "
+            "공식 신규매수 산식(TOP_PICK + BUY_NOW_ELIGIBLE)은 변경하지 않습니다."
+        ).classes("text-[10px] text-gray-500 mt-2")
+
 def _render_candidate_triage_card(df: pd.DataFrame, official_decision: dict | None = None) -> None:
     """[v22.3.18] 공식/비공식/보유관리 후보 유형 분리 카드."""
     if official_decision and _official_decision_allows_entry(official_decision):
@@ -3277,6 +3562,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # [v22.3.13] 오늘 공식 신규진입 판정 — 매수/보류 이유를 Top Pick 카드보다 먼저 표시
     official_decision = _render_daily_official_decision_card(df)
+
+    # [v22.3.27] 검증승률 기반 추천 후보 — 공식 0개인 날에도 승률 좋은 지표 후보를 상단 표시
+    _render_winrate_action_lane(df, official_decision=official_decision)
 
     # [v22.3.18] 공식/진입위치/고점수/보유관리 후보 유형 분리
     _render_candidate_triage_card(df, official_decision=official_decision)
