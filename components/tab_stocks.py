@@ -3716,6 +3716,153 @@ def _apply_stock_search_filter(df: pd.DataFrame, query: str) -> pd.DataFrame:
     return df.loc[mask].copy()
 
 
+
+def _build_today_action_summary(df: pd.DataFrame, max_n: int = 3) -> dict:
+    # [v22.3.31] 상단 행동 요약용 순수 계산 함수.
+    # 공식 매수 산식은 TOP_PICK + BUY_NOW_ELIGIBLE 그대로 읽기만 한다.
+    if df is None or df.empty:
+        return {
+            "official_count": 0,
+            "conditional_count": 0,
+            "market_risk": "UNKNOWN",
+            "headline": "데이터 없음",
+            "action": "데이터 로드 후 확인",
+            "first_name": "",
+            "first_code": "",
+            "first_tier": "",
+            "first_rr": None,
+        }
+
+    work = df.copy()
+    top = _series_truthy(work["TOP_PICK"]) if "TOP_PICK" in work.columns else pd.Series(False, index=work.index)
+    elig = _series_truthy(work["BUY_NOW_ELIGIBLE"]) if "BUY_NOW_ELIGIBLE" in work.columns else pd.Series(False, index=work.index)
+    official_count = int((top & elig).sum())
+
+    market_risk = "NORMAL"
+    if "MACRO_RISK" in work.columns:
+        mr = work["MACRO_RISK"].astype(str).str.upper().str.strip()
+        if bool(mr.eq("CRITICAL").any()):
+            market_risk = "CRITICAL"
+        elif bool(mr.isin(["WARNING", "CAUTION"]).any()):
+            market_risk = "WARNING"
+
+    cond_df = pd.DataFrame()
+    try:
+        lane = _build_winrate_action_candidates(work, max_n=max_n)
+        cond_df = lane.get("candidates", pd.DataFrame())
+    except Exception as exc:
+        _logger.warning("today action summary candidate build failed: %s", exc)
+        cond_df = pd.DataFrame()
+
+    conditional_count = int(len(cond_df)) if cond_df is not None else 0
+
+    first_name = first_code = first_tier = ""
+    first_rr = None
+    if conditional_count > 0:
+        row = cond_df.iloc[0]
+        first_name = _pick_display_name(row)
+        first_code = _pick_code(row)
+        first_tier = str(row.get("VALIDATED_ACTION_TIER", "조건부") or "조건부")
+        try:
+            first_rr = float(row.get("VALIDATED_RR", row.get("RR_NOW_TP1", 0)) or 0)
+        except Exception:
+            first_rr = None
+
+    if official_count > 0:
+        headline = f"공식 신규매수 {official_count}개"
+        action = "공식 후보만 우선 확인"
+        tone = "official"
+    elif conditional_count > 0:
+        headline = f"정식 신규매수 없음 · 조건부 관찰 {conditional_count}개"
+        if market_risk == "CRITICAL":
+            action = f"신규매수 보류 · {first_name}만 조건부 관찰"
+        else:
+            action = f"{first_name} 조건부 관찰"
+        tone = "conditional"
+    else:
+        headline = "오늘 신규매수 없음"
+        action = "현금 유지 · 신규 진입 보류"
+        tone = "no_buy"
+
+    return {
+        "official_count": official_count,
+        "conditional_count": conditional_count,
+        "market_risk": market_risk,
+        "headline": headline,
+        "action": action,
+        "tone": tone,
+        "first_name": first_name,
+        "first_code": first_code,
+        "first_tier": first_tier,
+        "first_rr": first_rr,
+    }
+
+
+def _render_today_action_summary_card(df: pd.DataFrame, official_decision: dict | None = None) -> dict:
+    # [v22.3.31] 사용자가 화면을 열자마자 "그래서 오늘 뭘 해야 하는지" 알 수 있게 하는 카드.
+    summary = _build_today_action_summary(df)
+    tone = summary.get("tone", "no_buy")
+    if tone == "official":
+        border = "border-emerald-500/50 bg-emerald-500/10"
+        title_cls = "text-emerald-200"
+        badge_color = "#10B981"
+    elif tone == "conditional":
+        border = "border-amber-500/50 bg-amber-500/10"
+        title_cls = "text-amber-200"
+        badge_color = "#F59E0B"
+    else:
+        border = "border-slate-500/40 bg-slate-500/8"
+        title_cls = "text-slate-200"
+        badge_color = "#64748B"
+
+    with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
+        with ui.row().classes("w-full items-center justify-between gap-2 flex-wrap"):
+            ui.label("🧭 오늘 행동 요약").classes(f"text-lg font-bold {title_cls}")
+            ui.badge(summary["headline"], color=badge_color).classes("text-xs")
+
+        ui.label(f"결론: {summary['action']}").classes("text-base text-white font-bold mt-1")
+
+        with ui.row().classes("w-full gap-2 flex-wrap mt-2"):
+            ui.badge(f"공식매수 {summary['official_count']}개", color="#10B981" if summary["official_count"] else "#475569")
+            ui.badge(f"조건부 {summary['conditional_count']}개", color="#F59E0B" if summary["conditional_count"] else "#475569")
+            ui.badge(f"시장 {summary['market_risk']}", color="#EF4444" if summary["market_risk"] == "CRITICAL" else "#64748B")
+
+        if summary.get("conditional_count", 0) > 0:
+            rr_txt = ""
+            if summary.get("first_rr") is not None:
+                rr_txt = f" · RR {summary['first_rr']:.2f}"
+            ui.label(
+                f"조건부 1순위: {summary['first_name']} {summary['first_code']} · "
+                f"{summary['first_tier']}{rr_txt} · 공식매수 아님"
+            ).classes("text-xs text-amber-100 mt-2 font-semibold")
+
+        ui.label(
+            "판단 순서: 공식 신규매수(TOP_PICK+BUY_NOW_ELIGIBLE) → 조건부 후보 → 전체 후보 사전. "
+            "공식 0개인 날에는 조건부 후보도 매수 지시가 아니라 관찰/검토 대상입니다."
+        ).classes("text-[10px] text-gray-400 mt-2 leading-relaxed")
+
+    return summary
+
+
+def _table_score_display(row: pd.Series):
+    # [v22.3.31] DISPLAY_SCORE 0/음수인 비보유 종목은 테이블에서 숫자 0 대신 검증제외로 표시.
+    # _nb_score_cell의 CARRY 보유 표시 가드는 유지한다.
+    try:
+        display = float(pd.to_numeric(row.get("DISPLAY_SCORE", 0), errors="coerce"))
+    except Exception:
+        display = 0.0
+    is_real_holding = False
+    try:
+        is_real_holding = bool(row.get("IS_REAL_HOLDING", False))
+    except Exception:
+        is_real_holding = False
+
+    route = str(row.get("ROUTE", "") or "").upper()
+    if display <= 0 and not is_real_holding and "CARRY" not in route:
+        return "검증제외"
+    return _nb_score_cell(row)
+
+
 def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     """Tab 2: AI & Quant 추천 종목
 
@@ -3744,6 +3891,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # [v22.3.13] 오늘 공식 신규진입 판정 — 매수/보류 이유를 Top Pick 카드보다 먼저 표시
     official_decision = _render_daily_official_decision_card(df)
+
+    # [v22.3.31] 최종 행동 요약 — 사용자가 "그래서 오늘 뭘 해야 하는지" 먼저 확인
+    _render_today_action_summary_card(df, official_decision=official_decision)
 
     # [v22.3.27] 검증승률 기반 추천 후보 — 공식 0개인 날에도 승률 좋은 지표 후보를 상단 표시
     _render_winrate_action_lane(df, official_decision=official_decision)
@@ -3789,15 +3939,15 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             placeholder="예: 삼성전자 / 005930 / 반도체",
         ).props("dense clearable").classes("min-w-[220px]")
         ui.button(
-            "검색",
+            "🔍 검색 적용",
             icon="search",
             on_click=lambda: _build_view(),
-        ).props("size=sm flat color=primary").classes("text-xs")
+        ).props("size=sm unelevated color=primary").classes("text-xs min-w-[96px] font-bold")
         ui.button(
-            "초기화",
+            "↺ 검색 초기화",
             icon="restart_alt",
             on_click=lambda: (stock_search.set_value(""), _build_view()),
-        ).props("size=sm flat color=grey").classes("text-xs")
+        ).props("size=sm outline color=grey").classes("text-xs min-w-[112px]")
         stock_search.on("keydown.enter", lambda e: _build_view())
         # [Step AE] dict 옵션: key=internal(비교용), value=display(화면)
         route_filter = ui.select(
@@ -3886,6 +4036,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ).classes("text-xs text-orange-400")
             if n_none > 0:
                 ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
+            ui.label(
+                "※ 점수 '검증제외' 표시는 DISPLAY_SCORE 0/음수 또는 legacy/stale 표시 후보입니다."
+            ).classes("text-[10px] text-gray-600")
 
     # [v3.9.8] 진입 위험 표시 기준 (ENTRY_RISK 범례)
     # 회원이 종목 카드/테이블의 🔴/🟠 뱃지를 보고 "이게 뭐지?" 못 알게 만들기 위한 범례
@@ -4384,7 +4537,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 # [v22.3.21] CARRY 보유종목은 DISPLAY_SCORE 과차감(STALE/legacy 누적)으로
                 # 0~한자리가 나와 'S 98인데 점수 0' 모순이 생김 → '보유'로 표시(혼란 방지).
                 # 비-CARRY는 기존대로 DISPLAY_SCORE 그대로.
-                "score": _nb_score_cell(r),
+                "score": _table_score_display(r),
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
                 "t":     f'{_nz(r.get("TIMING_SCORE",  0)):.0f}',
                 "ai":    f'{_nz(r.get("AI_SCORE",      0)):.0f}',
