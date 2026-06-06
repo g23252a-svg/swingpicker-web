@@ -2470,6 +2470,61 @@ def _select_winrate_action_profile(summary_df: pd.DataFrame | None = None) -> di
     }
 
 
+
+def _validated_action_veto_reasons(row: pd.Series) -> list[str]:
+    # [v22.3.29] 검증승률 후보 개별 품질 veto 사유.
+    # 공식 매수 산식에는 반영하지 않고 보조 후보 레인 표시 전 필터에만 사용한다.
+    reasons: list[str] = []
+
+    def _n(keys, default=0.0):
+        for key in keys:
+            if key in row.index:
+                try:
+                    return float(pd.to_numeric(row.get(key), errors="coerce"))
+                except Exception:
+                    return default
+        return default
+
+    display = _n(["DISPLAY_SCORE"], 0.0)
+    timing = _n(["TIMING_SCORE"], 0.0)
+    balance = _n(["BALANCE_SCORE", "BALANCE_CALC"], 100.0)
+    axis_gap = _n(["AXIS_GAP"], 0.0)
+    ret10 = _n(["ret_10d_%", "ret_10d", "RET_10D_%"], 0.0)
+    ret20 = _n(["ret_20d_%", "ret_20d", "RET_20D_%"], 0.0)
+
+    kelly_qty = None
+    for key in ["KELLY_수량", "KELLY_QTY", "KELLY_SHARES", "추천수량", "RECOMMENDED_QTY"]:
+        if key in row.index:
+            try:
+                kelly_qty = float(pd.to_numeric(row.get(key), errors="coerce"))
+            except Exception:
+                kelly_qty = None
+            break
+
+    route_reason = " ".join(
+        str(row.get(c, "") or "")
+        for c in ["ROUTE_REASON", "BUY_NOW_REASON", "REASON", "STATUS_REASON"]
+        if c in row.index
+    ).lower()
+
+    if display <= 0:
+        reasons.append("DISPLAY_SCORE<=0")
+    if kelly_qty is not None and kelly_qty <= 0:
+        reasons.append("KELLY 수량 0")
+    if timing < 50:
+        reasons.append("TIMING<50")
+    if axis_gap > 45:
+        reasons.append("AXIS_GAP>45")
+    if balance < 35:
+        reasons.append("BALANCE<35")
+    if "캐리 재계산 실패" in route_reason or "legacy snapshot" in route_reason or "carry recalc" in route_reason:
+        reasons.append("legacy/carry 재계산 실패")
+    if ret10 < 0 and ret20 > 30 and timing < 60:
+        reasons.append("급등 후 식는 패턴")
+
+    return reasons
+
+
 def _build_winrate_action_candidates(
     df: pd.DataFrame,
     max_n: int = 3,
@@ -2510,6 +2565,19 @@ def _build_winrate_action_candidates(
     vwap = _num_series(["VWAP_GAP", "VWAP_GAP_PCT"], 0)
     poc = _num_series(["POC_GAP", "POC_GAP_PCT"], 0)
 
+    # [v22.3.29] 개별 종목 품질 veto용 지표
+    display = _num_series(["DISPLAY_SCORE"], 0)
+    balance = _num_series(["BALANCE_SCORE", "BALANCE_CALC"], 100)
+    axis_gap = _num_series(["AXIS_GAP"], 0)
+    ret10 = _num_series(["ret_10d_%", "ret_10d", "RET_10D_%"], 0)
+    ret20 = _num_series(["ret_20d_%", "ret_20d", "RET_20D_%"], 0)
+
+    kelly_zero = pd.Series(False, index=work.index)
+    for _kcol in ["KELLY_수량", "KELLY_QTY", "KELLY_SHARES", "추천수량", "RECOMMENDED_QTY"]:
+        if _kcol in work.columns:
+            kelly_zero = pd.to_numeric(work[_kcol], errors="coerce").fillna(1) <= 0
+            break
+
     top = _series_truthy(work["TOP_PICK"]) if "TOP_PICK" in work.columns else pd.Series(False, index=work.index)
     elig = _series_truthy(work["BUY_NOW_ELIGIBLE"]) if "BUY_NOW_ELIGIBLE" in work.columns else pd.Series(False, index=work.index)
     official = top & elig
@@ -2517,13 +2585,46 @@ def _build_winrate_action_candidates(
     risk = work.get("ENTRY_RISK_LEVEL", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
     edge = work.get("ENTRY_EDGE_LEVEL", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
     route = work.get("ROUTE", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
+    route_reason = pd.Series("", index=work.index)
+    for _rcol in ["ROUTE_REASON", "BUY_NOW_REASON", "REASON", "STATUS_REASON"]:
+        if _rcol in work.columns:
+            route_reason = route_reason.str.cat(work[_rcol].astype(str), sep=" ")
+    route_reason_l = route_reason.astype(str).str.lower()
+    legacy_fail = route_reason_l.str.contains("캐리 재계산 실패|legacy snapshot|carry recalc", regex=True, na=False)
+    macro = work.get("MACRO_RISK", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
+    macro_critical = macro.eq("CRITICAL")
+    fading_after_spike = (ret10 < 0) & (ret20 > 30) & (timing < 60)
 
     try:
         real_holding = _actual_holding_mask(work)
     except Exception:
         real_holding = pd.Series(False, index=work.index)
 
-    base = (~real_holding) & (~official) & (risk != "RED")
+    raw_base = (~real_holding) & (~official) & (risk != "RED")
+
+    # [v22.3.29] 검증승률 후보 개별 품질 veto.
+    # 프로이천 케이스: FINAL은 높아도 DISPLAY=0, TIMING<50, AXIS_GAP>45, BALANCE<35,
+    # legacy snapshot이면 후보에서 제외한다.
+    quality_ok = (
+        (display > 0)
+        & (timing >= 50)
+        & (axis_gap <= 45)
+        & (balance >= 35)
+        & (~legacy_fail)
+        & (~fading_after_spike)
+        & (~kelly_zero)
+    )
+
+    rejected = work.loc[raw_base & ~quality_ok].copy()
+    if not rejected.empty:
+        rejected["VALIDATED_VETO_REASON"] = rejected.apply(
+            lambda r: " · ".join(_validated_action_veto_reasons(r)) or "개별 품질 미달",
+            axis=1,
+        )
+        rejected["_VETO_SORT"] = val.loc[rejected.index]
+        rejected = rejected.sort_values("_VETO_SORT", ascending=False).head(5)
+
+    base = raw_base & quality_ok
     strict = (
         base
         & (val >= 70)
@@ -2547,7 +2648,12 @@ def _build_winrate_action_candidates(
     mask = strict if bool(strict.any()) else relaxed
 
     if not bool(mask.any()):
-        return {"profile": profile, "candidates": pd.DataFrame(), "mode": "no_candidates"}
+        return {
+            "profile": profile,
+            "candidates": pd.DataFrame(),
+            "mode": "no_quality_candidates" if not rejected.empty else "no_candidates",
+            "rejected": rejected,
+        }
 
     tmp = work.loc[mask].copy()
     tmp["VALIDATED_METHOD"] = method
@@ -2561,11 +2667,14 @@ def _build_winrate_action_candidates(
     tmp["VALIDATED_AVG_RET_%"] = float(profile.get("avg_ret", 0) or 0)
     tmp["VALIDATED_ALPHA_%"] = float(profile.get("alpha", 0) or 0)
     tmp["VALIDATED_REASON"] = profile.get("reason", "")
+    tmp["VALIDATED_MARKET_RISK"] = macro.loc[mask]
+    tmp["VALIDATED_MACRO_CRITICAL"] = macro_critical.loc[mask].astype(int)
 
     active_bonus = route.loc[mask].str.contains("ATTACK|ARMED", regex=True, na=False).astype(float) * 8.0
     wait_bonus = route.loc[mask].str.contains("WAIT|NEUTRAL", regex=True, na=False).astype(float) * 2.0
     edge_pen = edge.loc[mask].eq("CAUTION").astype(float) * 6.0
     orange_pen = risk.loc[mask].eq("ORANGE").astype(float) * 4.0
+    macro_pen = macro_critical.loc[mask].astype(float) * 8.0
 
     tmp["VALIDATED_ACTION_SCORE"] = (
         tmp["VALIDATED_SCORE"].astype(float) * 1.0
@@ -2581,9 +2690,12 @@ def _build_winrate_action_candidates(
         - poc.loc[mask].clip(lower=0).astype(float) * 0.05
         - edge_pen
         - orange_pen
+        - macro_pen
     )
 
     def _tier(row):
+        if int(row.get("VALIDATED_MACRO_CRITICAL", 0) or 0) == 1:
+            return "위험시장 조건부"
         r = str(row.get("VALIDATED_ROUTE", "")).upper()
         if "ATTACK" in r or "ARMED" in r:
             return "진입검토"
@@ -2591,7 +2703,7 @@ def _build_winrate_action_candidates(
 
     tmp["VALIDATED_ACTION_TIER"] = tmp.apply(_tier, axis=1)
     tmp = tmp.sort_values("VALIDATED_ACTION_SCORE", ascending=False).head(max_n)
-    return {"profile": profile, "candidates": tmp, "mode": mode}
+    return {"profile": profile, "candidates": tmp, "mode": mode, "rejected": rejected}
 
 
 def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None = None) -> None:
@@ -2599,6 +2711,7 @@ def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None
     result = _build_winrate_action_candidates(df, max_n=3)
     profile = result.get("profile", {}) or {}
     candidates = result.get("candidates", pd.DataFrame())
+    rejected = result.get("rejected", pd.DataFrame())
     mode = result.get("mode", "")
 
     if not profile.get("ok"):
@@ -2615,7 +2728,7 @@ def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None
     border = "border-emerald-500/40 bg-emerald-500/8" if len(candidates) else "border-slate-500/30 bg-slate-500/8"
     with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
         with ui.row().classes("w-full items-center justify-between gap-2"):
-            ui.label("📊 검증승률 기반 추천 후보").classes(
+            ui.label("📊 검증지표 우수 조건부 후보").classes(
                 "text-base font-bold text-emerald-300" if len(candidates) else "text-base font-bold text-slate-300"
             )
             ui.badge(
@@ -2631,8 +2744,17 @@ def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None
 
         if candidates is None or len(candidates) == 0:
             ui.label(
-                "검증승률 profile은 좋지만 오늘은 RED/과열/갭/RR 필터까지 통과하는 후보가 없습니다."
+                "검증승률 profile은 좋지만 오늘은 개별 품질 veto까지 통과하는 후보가 없습니다."
             ).classes("text-[11px] text-amber-200 font-bold mt-2")
+            if rejected is not None and len(rejected) > 0:
+                ui.label("품질 veto 제외 예시").classes("text-[10px] text-rose-200 font-bold mt-2")
+                for _, row in rejected.head(3).iterrows():
+                    nm = _pick_display_name(row)
+                    cd = _pick_code(row)
+                    reason = str(row.get("VALIDATED_VETO_REASON", "개별 품질 미달") or "개별 품질 미달")
+                    ui.label(f"• {nm} {cd} 제외 — {reason}").classes(
+                        "text-[10px] text-gray-500 leading-snug"
+                    )
         else:
             ui.label(
                 "오늘 추천 우선순위 — 공식 신규매수와 별개, 소액/조건부 판단용"
@@ -2655,7 +2777,7 @@ def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None
                 ).classes("text-[10px] text-gray-400 leading-snug")
 
         ui.label(
-            "※ 이 레인은 '맨날 0개' 문제를 줄이기 위한 검증승률 기반 보조 추천입니다. "
+            "※ 이 레인은 '맨날 0개' 문제를 줄이되, 개별 품질 veto를 통과한 조건부 후보만 표시합니다. "
             "공식 신규매수 산식(TOP_PICK + BUY_NOW_ELIGIBLE)은 변경하지 않습니다."
         ).classes("text-[10px] text-gray-500 mt-2")
 
