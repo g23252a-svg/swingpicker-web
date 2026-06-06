@@ -2107,6 +2107,115 @@ def _build_daily_official_decision(df: pd.DataFrame) -> Dict[str, Any]:
 
 
 
+
+def _code6_ssot(value) -> str:
+    # [v22.3.26] 종목코드 6자리 정규화 - 보유 SSOT 매칭용.
+    try:
+        if value is None or pd.isna(value):
+            return ""
+    except Exception:
+        if value is None:
+            return ""
+    s = str(value).strip()
+    try:
+        if s.endswith(".0") or "." in s:
+            s = str(int(float(s)))
+    except Exception:
+        pass
+    return s.zfill(6) if s else ""
+
+
+def _load_actual_holding_codes(data_dir: str | None = None) -> set[str]:
+    # [v22.3.26] positions.json의 OPEN 포지션만 실제 보유로 인정.
+    import json as _json
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dirs = []
+    if data_dir:
+        dirs.append(data_dir)
+    dirs.extend([
+        os.path.join(root, "data"),
+        os.path.join(os.getcwd(), "data"),
+        "data",
+    ])
+
+    for d in dirs:
+        path = os.path.join(d, "positions.json")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                raw = _json.load(f)
+        except Exception:
+            return set()
+
+        if isinstance(raw, dict):
+            if isinstance(raw.get("positions"), list):
+                items = raw.get("positions") or []
+            else:
+                items = list(raw.values())
+        elif isinstance(raw, list):
+            items = raw
+        else:
+            items = []
+
+        codes: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get("status", item.get("상태", "OPEN")) or "OPEN").upper()
+            if status and not status.startswith("OPEN"):
+                continue
+            try:
+                qty = float(item.get("qty", item.get("quantity", item.get("수량", 1))) or 0)
+            except Exception:
+                qty = 1
+            if qty <= 0:
+                continue
+            code = _code6_ssot(item.get("code", item.get("종목코드", item.get("ticker", ""))))
+            if code:
+                codes.add(code)
+        return codes
+    return set()
+
+
+def _actual_holding_mask(work: pd.DataFrame, holding_codes: set[str] | None = None) -> pd.Series:
+    # [v22.3.26] 실제 보유종목 mask. positions.json OPEN 포지션만 True.
+    if work is None or work.empty:
+        return pd.Series(dtype=bool)
+    if holding_codes is None:
+        holding_codes = _load_actual_holding_codes()
+    if not holding_codes or "종목코드" not in work.columns:
+        return pd.Series(False, index=work.index)
+    codes = work["종목코드"].apply(_code6_ssot)
+    return codes.isin(holding_codes)
+
+
+def _apply_holding_ssot_display_guard(df: pd.DataFrame) -> pd.DataFrame:
+    # [v22.3.26] stale CARRY/보유관리 표시 방지.
+    # 실제 positions.json OPEN 보유가 아니면 종목탭 UI에서만 관망/WAIT로 정정한다.
+    if df is None or df.empty:
+        return df
+    work = df.copy()
+    holding_codes = _load_actual_holding_codes()
+    real_holding = _actual_holding_mask(work, holding_codes)
+    work["IS_REAL_HOLDING"] = real_holding.astype(int)
+
+    stale = ~real_holding
+    for col in ("ROUTE", "상태", "상태표시", "ACTION_LABEL"):
+        if col not in work.columns:
+            continue
+        txt = work[col].astype(str)
+        stale_carry = stale & txt.str.contains("CARRY|보유", case=False, na=False)
+        if not bool(stale_carry.any()):
+            continue
+        if col == "ROUTE":
+            work.loc[stale_carry, col] = "WAIT"
+        else:
+            work.loc[stale_carry, col] = "관망"
+    return work
+
+
 def _candidate_row_payload(row: pd.Series) -> dict:
     """[v22.3.18] 후보 유형 카드/테스트 공용 요약 payload."""
     return {
@@ -2124,6 +2233,7 @@ def _candidate_row_payload(row: pd.Series) -> dict:
         "buy_now_grade": str(row.get("BUY_NOW_GRADE", "")),
         "eligible": _bool_like(row.get("BUY_NOW_ELIGIBLE", 0)),
         "top_pick": _bool_like(row.get("TOP_PICK", 0)),
+        "real_holding": _bool_like(row.get("IS_REAL_HOLDING", 0)),
     }
 
 
@@ -2175,11 +2285,9 @@ def _build_candidate_triage(df: pd.DataFrame, max_each: int = 3) -> dict:
     )
     high_score = (~official) & (score >= 80.0)
 
-    status_text = pd.Series("", index=work.index)
-    for col in ("상태", "상태표시", "ACTION_LABEL", "ROUTE"):
-        if col in work.columns:
-            status_text = status_text.str.cat(work[col].astype(str), sep=" ")
-    holding = (~official) & status_text.str.contains("보유|CARRY", case=False, na=False)
+    # [v22.3.26] 보유관리 후보는 CSV의 보유/CARRY 문자열이 아니라
+    # positions.json OPEN 포지션만 SSOT로 인정한다. stale carry 표시 방지.
+    holding = (~official) & _actual_holding_mask(work)
 
     def _top(mask, sort_cols):
         if not bool(mask.any()):
@@ -3149,6 +3257,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         auth: 사용자 권한 ("admin" / "premium" / "free" / ...)
         store: services.data_store.store 인스턴스 (현재 미사용, 장래 확장용)
     """
+
+    # [v22.3.26] stale CARRY/보유관리 표시 방지 — 실제 positions.json OPEN 보유만 보유관리로 인정.
+    # UI 표시/분류 전용이며 원본 CSV/추천 산식은 변경하지 않는다.
+    df = _apply_holding_ssot_display_guard(df)
 
     # ── [v3.7.11] 라벨링 + Top1 우선 선별 (pick_top3은 fallback) ──
     # Top1이 "진짜 수익 나는" 기본 모드. 🏆 최강이 없으면 pick_top3으로 폴백.
