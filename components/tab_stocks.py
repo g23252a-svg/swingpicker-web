@@ -2531,6 +2531,139 @@ def _render_historical_alpha_pick_card(df: pd.DataFrame) -> None:
         ).classes("text-[10px] text-gray-500 mt-2")
 
 
+
+def _render_swing_alpha_oos_card(df: pd.DataFrame) -> None:
+    # [v22.3.24] 백데이터 기반 스윙 알파 후보 카드.
+    # 공식 신규매수 산식과 분리된 보조 레인이다.
+    try:
+        import os as _os
+        import sys as _sys
+
+        _root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        _scripts = _os.path.join(_root, "scripts")
+        if _scripts not in _sys.path:
+            _sys.path.insert(0, _scripts)
+
+        from swing_alpha_oos_v22324 import build_swing_alpha
+    except Exception:
+        return
+
+    try:
+        result = build_swing_alpha(df, data_dir=_os.path.join(_root, "data"), topk=3)
+    except Exception:
+        return
+
+    profile = result.get("profile") or {}
+    picks = result.get("picks")
+    near = result.get("near")
+    profile_pass_n = int(result.get("profile_pass_n", 0) or 0)
+
+    def _fmt(v, digits=1, suffix=""):
+        try:
+            if pd.isna(v):
+                return "—"
+            return f"{float(v):.{digits}f}{suffix}"
+        except Exception:
+            return "—"
+
+    def _val(row, key, default=None):
+        try:
+            v = row.get(key, default)
+            if pd.isna(v):
+                return default
+            return v
+        except Exception:
+            return default
+
+    def _bits(row):
+        bits = []
+        score = _val(row, "SWING_ALPHA_SCORE")
+        if score is not None:
+            bits.append(f"SWING {_fmt(score, 0)}")
+        for key, label, digits in [
+            ("RR_NOW_TP1", "RR1", 2),
+            ("RR_NOW_TP2_SWING", "RR2", 2),
+            ("TIMING_SCORE", "T", 0),
+            ("FINAL_SCORE", "F", 0),
+            ("STRUCT_SCORE", "S", 0),
+        ]:
+            v = _val(row, key)
+            if v is not None:
+                bits.append(f"{label} {_fmt(v, digits)}")
+        flow = str(_val(row, "SWING_FLOW_QUALITY", "") or "")
+        if flow:
+            bits.append(f"수급 {flow}")
+        frg = _val(row, "외인순매수")
+        if frg is not None:
+            bits.append(f"외인 {float(frg):+,.0f}")
+        return " · ".join(bits)
+
+    oos = bool(profile.get("oos_pass"))
+    win = profile.get("win_test")
+    base = profile.get("baseline_test")
+    ret = profile.get("ret_test")
+    badge_txt = f"스윙 알파 {len(picks) if picks is not None else 0} · OOS승 {_fmt(win, 0, '%')}"
+    border = "border-cyan-500/40 bg-cyan-500/8" if oos else "border-slate-500/30 bg-slate-500/8"
+
+    with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
+        with ui.row().classes("w-full items-center justify-between gap-2"):
+            ui.label("🚀 스윙 알파 후보 (백데이터 OOS)").classes(
+                "text-base font-bold text-cyan-300" if oos else "text-base font-bold text-slate-300"
+            )
+            ui.badge(badge_txt, color="#06B6D4" if oos else "#64748B").classes("text-xs")
+
+        ui.label(
+            "과거 recommend/OHLC 백데이터를 train/test로 나눠, 상승확률·EV·손익비가 함께 살아남은 "
+            "스윙형 profile을 오늘 CSV에 적용합니다."
+        ).classes("text-xs text-gray-300 mt-1")
+
+        ui.label(
+            f"선정 profile: {profile.get('desc', '-')}"
+        ).classes("text-[11px] text-cyan-200 mt-1 font-semibold")
+
+        ui.label(
+            f"OOS 결과: test승 {_fmt(win, 0, '%')} (baseline {_fmt(base, 0, '%')}) · "
+            f"test EV {_fmt(ret, 2, '%')} · 표본 train {int(profile.get('n_train', 0) or 0)} / "
+            f"test {int(profile.get('n_test', 0) or 0)} · 오늘 profile 통과 {profile_pass_n}개"
+        ).classes("text-[11px] text-gray-400 leading-snug")
+
+        if not oos:
+            ui.label(
+                "스윙 알파 profile OOS 검증이 충분하지 않아 실전 후보를 표시하지 않습니다."
+            ).classes("text-[11px] text-amber-200 font-bold mt-2")
+        elif picks is not None and len(picks) > 0:
+            ui.label("스윙 알파 픽 (비공식 후보)").classes("text-[11px] text-emerald-300 font-bold mt-2")
+            for i, (_, row) in enumerate(picks.iterrows(), 1):
+                nm = row.get("종목명", "-")
+                cd = str(row.get("종목코드", "")).zfill(6)
+                ui.label(
+                    f"{i}위 {nm} {cd} · {_bits(row)}"
+                ).classes("text-xs text-white mt-1 font-semibold")
+                reason = str(row.get("SWING_ALPHA_REASON", "") or "")
+                if reason:
+                    ui.label(f"   └ {reason}").classes("text-[10px] text-gray-400 leading-snug")
+        else:
+            ui.label(
+                "스윙 알파 픽: 0개 — OOS profile은 있으나 오늘은 수익폭/위험/수급 조건이 동시에 맞는 종목이 없습니다."
+            ).classes("text-[11px] text-amber-200 font-bold mt-2")
+
+        if near is not None and len(near) > 0:
+            ui.label("근접 후보 — 조건 일부 미달, 매수 아님").classes(
+                "text-[11px] text-slate-300 font-bold mt-2"
+            )
+            for _, row in near.head(3).iterrows():
+                nm = row.get("종목명", "-")
+                cd = str(row.get("종목코드", "")).zfill(6)
+                ui.label(f"• {nm} {cd} · {_bits(row)}").classes(
+                    "text-[11px] text-gray-400 leading-snug"
+                )
+
+        ui.label(
+            "※ 공식 신규매수(TOP_PICK+BUY_NOW_ELIGIBLE)와 별개입니다. "
+            "스윙 알파는 백데이터 기반 보조 레인이며, 자동매수 신호가 아닙니다."
+        ).classes("text-[10px] text-gray-500 mt-2")
+
+
 def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                        auth: str = "free", official_decision: dict | None = None):
     """Tab 2 상단 헤더 카드 — 오늘의 검증 Top 3 표시."""
@@ -3038,6 +3171,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # [v22.3.22] RR 알파 후보 — 공식과 별도인 OOS 검증형 실전 후보 레인
     _render_historical_alpha_pick_card(df)
+
+    # [v22.3.24] 백데이터 기반 스윙 알파 후보 — 공식 산식과 별도인 보조 레인
+    _render_swing_alpha_oos_card(df)
 
     # [Step AC P0-4] Top Pick 카드 클릭 → 상세 패널 렌더 (closure: detail_area는 아래에서 정의됨)
     def _on_top_pick_click(code: str):
