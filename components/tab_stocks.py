@@ -2491,6 +2491,10 @@ def _validated_action_veto_reasons(row: pd.Series) -> list[str]:
     axis_gap = _n(["AXIS_GAP"], 0.0)
     ret10 = _n(["ret_10d_%", "ret_10d", "RET_10D_%"], 0.0)
     ret20 = _n(["ret_20d_%", "ret_20d", "RET_20D_%"], 0.0)
+    rr = _n(["RR_NOW_TP1", "RR_MULT"], 0.0)
+    route_txt = str(row.get("ROUTE", "") or "").upper()
+    macro_txt = str(row.get("MACRO_RISK", "") or "").upper()
+    route_active = ("ATTACK" in route_txt) or ("ARMED" in route_txt)
 
     kelly_qty = None
     for key in ["KELLY_수량", "KELLY_QTY", "KELLY_SHARES", "추천수량", "RECOMMENDED_QTY"]:
@@ -2521,6 +2525,10 @@ def _validated_action_veto_reasons(row: pd.Series) -> list[str]:
         reasons.append("legacy/carry 재계산 실패")
     if ret10 < 0 and ret20 > 30 and timing < 60:
         reasons.append("급등 후 식는 패턴")
+    if macro_txt == "CRITICAL" and not route_active:
+        reasons.append("CRITICAL 시장에서 ROUTE 비활성")
+    if macro_txt == "CRITICAL" and rr < 1.2:
+        reasons.append("CRITICAL 시장 RR<1.2")
 
     return reasons
 
@@ -2593,6 +2601,7 @@ def _build_winrate_action_candidates(
     legacy_fail = route_reason_l.str.contains("캐리 재계산 실패|legacy snapshot|carry recalc", regex=True, na=False)
     macro = work.get("MACRO_RISK", pd.Series("", index=work.index)).astype(str).str.upper().str.strip()
     macro_critical = macro.eq("CRITICAL")
+    route_active_for_macro = route.str.contains("ATTACK|ARMED", regex=True, na=False)
     fading_after_spike = (ret10 < 0) & (ret20 > 30) & (timing < 60)
 
     try:
@@ -2613,6 +2622,8 @@ def _build_winrate_action_candidates(
         & (~legacy_fail)
         & (~fading_after_spike)
         & (~kelly_zero)
+        # [v22.3.30] 위험시장에서는 ROUTE active + RR 1.2 이상만 조건부 후보 허용.
+        & (~macro_critical | (route_active_for_macro & (rr >= 1.2)))
     )
 
     rejected = work.loc[raw_base & ~quality_ok].copy()
@@ -2728,19 +2739,23 @@ def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None
     border = "border-emerald-500/40 bg-emerald-500/8" if len(candidates) else "border-slate-500/30 bg-slate-500/8"
     with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
         with ui.row().classes("w-full items-center justify-between gap-2"):
-            ui.label("📊 검증지표 우수 조건부 후보").classes(
+            ui.label("📊 과거 그룹승률 기반 조건부 후보").classes(
                 "text-base font-bold text-emerald-300" if len(candidates) else "text-base font-bold text-slate-300"
             )
             ui.badge(
-                f"{method} Top{topk} · 승률 {win:.1f}% · N={n}",
+                f"{method} Top{topk} · 과거그룹승률 {win:.1f}% · N={n}",
                 color="#10B981" if len(candidates) else "#64748B",
             ).classes("text-xs")
 
         ui.label(
-            f"성과탭 검증에서 {method} Top{topk}/{h}영업일 조합이 "
-            f"승률 {win:.1f}% · 평균 {avg:+.2f}% · 알파 {alpha:+.2f}%p로 확인된 지표입니다. "
-            "오늘 CSV에서 이 지표가 높은 종목을 안전필터로 재정렬합니다."
+            f"성과탭 검증에서 {method} Top{topk}/{h}영업일 그룹이 "
+            f"과거 그룹승률 {win:.1f}% · 평균 {avg:+.2f}% · 알파 {alpha:+.2f}%p로 확인된 지표입니다. "
+            "오늘 CSV에서 이 지표가 높은 종목을 안전필터로 재정렬합니다. 단, 이 승률은 개별 종목 확률이 아닙니다."
         ).classes("text-xs text-gray-300 mt-1 leading-relaxed")
+        ui.label(
+            "주의: 위 승률은 개별 종목 승률이 아니라 과거 Top 그룹 집계입니다. "
+            "위험시장에서는 ROUTE active + RR 1.2 이상만 조건부 후보로 허용합니다."
+        ).classes("text-[10px] text-amber-300 mt-1 font-semibold")
 
         if candidates is None or len(candidates) == 0:
             ui.label(
@@ -2772,12 +2787,12 @@ def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None
                     f"· GAP {float(row.get('VALIDATED_GAP', 0)):+.1f}%"
                 ).classes("text-xs text-white mt-1 font-semibold")
                 ui.label(
-                    f"   └ 근거: 검증승률 {win:.1f}% · 평균수익 {avg:+.2f}% · 알파 {alpha:+.2f}%p · "
+                    f"   └ 근거: 과거 그룹승률 {win:.1f}% · 평균수익 {avg:+.2f}% · 알파 {alpha:+.2f}%p · 개별승률 아님 · "
                     f"ROUTE {row.get('ROUTE', '—')} · 공식매수 아님"
                 ).classes("text-[10px] text-gray-400 leading-snug")
 
         ui.label(
-            "※ 이 레인은 '맨날 0개' 문제를 줄이되, 개별 품질 veto를 통과한 조건부 후보만 표시합니다. "
+            "※ 이 레인은 과거 그룹승률과 개별 품질 veto를 함께 통과한 조건부 후보만 표시합니다. "
             "공식 신규매수 산식(TOP_PICK + BUY_NOW_ELIGIBLE)은 변경하지 않습니다."
         ).classes("text-[10px] text-gray-500 mt-2")
 
