@@ -425,6 +425,28 @@ class GuardConfig:
     guard_enforce_top_pick: bool = True    # False면 shadow 컬럼만 (combo backtest OFF)
 
 
+
+# ═══════════════════════════════════════════════════
+#  [v23.1] MomentumLaneConfig — ⚡ 모멘텀 후보 레인 SSOT
+# ═══════════════════════════════════════════════════
+@dataclass(frozen=True)
+class MomentumLaneConfig:
+    """momentum_lane.py 파라미터. ROUTE=OVERHEAT × GUARD 통과 종목의 별도 추천 레인.
+
+    [RR 제외 근거] 백테스트상 OVERHEAT 초과수익은 RR이 낮은(이미 오른) 종목에서
+    나온다(모멘텀 역설). 따라서 RR로 거르지 않고 가드 반영 점수 랭크 상위 N개를
+    실전 후보(Tier A)로 둔다.
+    """
+    source_route: str = "OVERHEAT"        # 레인 소스 ROUTE
+    require_guard: bool = True            # GUARD_ALL_PASS 통과 의무
+    max_picks: int = 5                    # 점수 랭크 상위 N = Tier A(실전 후보)
+
+    # 시장국면(비대칭 보험) 임계 — '명백한 하락 전환'에만 레인 OFF
+    regime_ma_window: int = 20            # KOSPI MA 기간
+    regime_ma_slope_lookback: int = 5     # MA 기울기 비교 시점(일)
+    regime_deviation_floor: float = -0.03 # close가 MA20 대비 이 값 이하 이탈 시 risk_off
+
+
 # ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
@@ -446,7 +468,7 @@ class CollectorConfig:
 
     __slots__ = (
         "data", "indicator", "scoring", "macro",
-        "slippage", "time_stop", "secrets", "policy", "guard",
+        "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -462,8 +484,9 @@ class CollectorConfig:
         secrets: SecretsConfig = None,
         policy: PolicyConfig = None,
         guard: 'GuardConfig' = None,
+        momentum_lane: 'MomentumLaneConfig' = None,
         base_dir: str = None,
-        config_version: str = "2.2.0",
+        config_version: str = "2.3.0",
     ):
         self.data = data or DataConfig()
         self.indicator = indicator or IndicatorConfig()
@@ -474,6 +497,7 @@ class CollectorConfig:
         self.secrets = secrets or SecretsConfig()
         self.policy = policy or PolicyConfig()
         self.guard = guard or GuardConfig()
+        self.momentum_lane = momentum_lane or MomentumLaneConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -481,7 +505,7 @@ class CollectorConfig:
         self._sub_configs = (
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
-            self.policy, self.guard, self.secrets,
+            self.policy, self.guard, self.momentum_lane, self.secrets,
         )
 
     def __getattr__(self, name: str):
@@ -516,7 +540,7 @@ class CollectorConfig:
         """전략 파라미터의 재현 가능한 스냅샷 (SecretsConfig, base_dir 배제)."""
         from datetime import datetime
         d = {}
-        for sub_name in ("data", "indicator", "scoring", "macro", "slippage", "time_stop", "policy", "guard"):
+        for sub_name in ("data", "indicator", "scoring", "macro", "slippage", "time_stop", "policy", "guard", "momentum_lane"):
             sub = getattr(self, sub_name)
             sub_dict = dataclasses.asdict(sub)
             d.update(sub_dict)
