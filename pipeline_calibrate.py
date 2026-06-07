@@ -674,5 +674,29 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
     except Exception as e:
         logger.warning(f"⚠️ [v23.1] Momentum Lane 적용 실패 (무해): {e}")
 
+    # ── [v23.2] Stop Override — 공식 신호 손절 -10% (베어 시 OFF + 신규차단) ──
+    try:
+        from stop_override import apply_stop_override, stop_override_summary
+        from momentum_lane import compute_market_risk_off as _cmro2
+        from collector_config import DEFAULT_CONFIG as _SCFG
+        import os as _os2
+
+        _kp2 = _os2.path.join(getattr(_SCFG, "out_dir", "data"), "kospi_daily.csv")
+        _ro2, _ = _cmro2(_kp2)
+        df_out = apply_stop_override(df_out, market_risk_off=_ro2, config=_SCFG)
+
+        _ss = stop_override_summary(df_out)
+        log(
+            "\U0001F6E1\uFE0F [v23.2] Stop Override: \uc801\uc6a9 {a}\uac74 \u00b7 \uc2e0\uaddc\ucc28\ub2e8 {b}\uac74 "
+            "(\uc190\uc808-{p:.0f}%, \uc2dc\uc7a5 {rg})".format(
+                a=_ss.get("active", 0), b=_ss.get("blocked", 0),
+                p=_ss.get("stop_pct", 0.10) * 100,
+                rg=("\uc704\ud5d8\ud68c\ud53c \u2192 override OFF + \uc2e0\uaddc\ucc28\ub2e8" if _ro2
+                    else "\uc815\uc0c1 \u2192 \uc190\uc808 override ON"),
+            )
+        )
+    except Exception as e:
+        logger.warning(f"\u26a0\uFE0F [v23.2] Stop Override \uc801\uc6a9 \uc2e4\ud328 (\ubb34\ud574): {e}")
+
     ctx.df_out = df_out
     return ctx

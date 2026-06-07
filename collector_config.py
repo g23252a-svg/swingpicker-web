@@ -447,6 +447,25 @@ class MomentumLaneConfig:
     regime_deviation_floor: float = -0.03 # close가 MA20 대비 이 값 이하 이탈 시 risk_off
 
 
+
+# ═══════════════════════════════════════════════════
+#  [v23.2] StopOverrideConfig — 손절 -10% override SSOT
+# ═══════════════════════════════════════════════════
+@dataclass(frozen=True)
+class StopOverrideConfig:
+    """stop_override.py 파라미터. 공식 신호(TOP_PICK)의 과타이트 손절 교정.
+
+    [근거] backtest_validation 재현(-14.61%) 위 손절폭 ablation: 추천손절(-5~7%)이
+    -14.6%의 주범, 진입가 -10%로 넓히면 +13.40%/MDD 23.7% (단조: -7% 조이면 -42%).
+    [안전] 강세장 단일구간 검증 → 베어(compute_market_risk_off) 시 override OFF +
+    신규진입 차단. 미검증 베어는 룰로 막는 2단 구조.
+    """
+    enabled: bool = True
+    stop_pct: float = 0.10                    # 진입가 대비 손절 폭 (검증된 값)
+    apply_to_official_only: bool = True       # TOP_PICK/BUY_NOW_ELIGIBLE 에만
+    disable_on_risk_off: bool = True          # 베어 시 override OFF(추천손절 복귀)
+    block_new_entry_on_risk_off: bool = True  # 베어 시 신규진입 차단
+
 # ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
@@ -468,7 +487,7 @@ class CollectorConfig:
 
     __slots__ = (
         "data", "indicator", "scoring", "macro",
-        "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane",
+        "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane", "stop_override",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -485,8 +504,9 @@ class CollectorConfig:
         policy: PolicyConfig = None,
         guard: 'GuardConfig' = None,
         momentum_lane: 'MomentumLaneConfig' = None,
+        stop_override: 'StopOverrideConfig' = None,
         base_dir: str = None,
-        config_version: str = "2.3.0",
+        config_version: str = "2.4.0",
     ):
         self.data = data or DataConfig()
         self.indicator = indicator or IndicatorConfig()
@@ -498,6 +518,7 @@ class CollectorConfig:
         self.policy = policy or PolicyConfig()
         self.guard = guard or GuardConfig()
         self.momentum_lane = momentum_lane or MomentumLaneConfig()
+        self.stop_override = stop_override or StopOverrideConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -505,7 +526,7 @@ class CollectorConfig:
         self._sub_configs = (
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
-            self.policy, self.guard, self.momentum_lane, self.secrets,
+            self.policy, self.guard, self.momentum_lane, self.stop_override, self.secrets,
         )
 
     def __getattr__(self, name: str):

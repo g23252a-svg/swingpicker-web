@@ -496,6 +496,70 @@ def check_momentum_lane_contract():
     return errors
 
 
+def check_stop_override_contract():
+    """[v23.2] stop_override 산출 컬럼 계약 + StopOverrideConfig SSOT + 베어 게이트."""
+    errors = []
+    try:
+        sys.path.insert(0, PROJECT_ROOT)
+        import pandas as pd
+        from stop_override import apply_stop_override, STOP_OVERRIDE_COLS
+        from collector_config import DEFAULT_CONFIG
+    except Exception as e:
+        return [f"stop_override/collector_config import 실패: {e}"]
+
+    # 1) StopOverrideConfig 연동 + 필드
+    if not hasattr(DEFAULT_CONFIG, "stop_override"):
+        errors.append("CollectorConfig에 stop_override 미연동")
+        return errors
+    for fld in ("enabled", "stop_pct", "apply_to_official_only",
+                "disable_on_risk_off", "block_new_entry_on_risk_off"):
+        if not hasattr(DEFAULT_CONFIG.stop_override, fld):
+            errors.append(f"StopOverrideConfig 필드 누락: {fld}")
+
+    # 2) 합성 df: 공식신호 2 + 비공식 1
+    df = pd.DataFrame([
+        dict(종목명="공식A", 추천매수가=10000.0, 손절가=9400.0, TOP_PICK=1, BUY_NOW_ELIGIBLE=1),
+        dict(종목명="공식B", 추천매수가=20000.0, 손절가=18800.0, TOP_PICK=1, BUY_NOW_ELIGIBLE=0),
+        dict(종목명="비공식", 추천매수가=5000.0, 손절가=4700.0, TOP_PICK=0, BUY_NOW_ELIGIBLE=0),
+    ])
+
+    # 3) 산출 컬럼 계약
+    out = apply_stop_override(df, market_risk_off=False, config=DEFAULT_CONFIG)
+    missing = [c for c in STOP_OVERRIDE_COLS if c not in out.columns]
+    if missing:
+        errors.append(f"STOP_OVERRIDE 산출 컬럼 누락: {missing}")
+        return errors
+
+    sp = float(DEFAULT_CONFIG.stop_override.stop_pct)
+    o = out.set_index("종목명")
+    # 4) 강세장: 공식신호 override price = 추천매수가*(1-stop_pct)
+    if not bool(o.loc["공식A", "STOP_OVERRIDE_ACTIVE"]):
+        errors.append("공식 신호에 손절 override 미적용")
+    exp = round(10000.0 * (1 - sp))
+    _pa = float(o.loc["공식A", "STOP_OVERRIDE_PRICE"])
+    if abs(_pa - exp) > 1:
+        errors.append(f"override 손절가 오류: {_pa} != {exp}")
+    # 5) 비공식 신호는 미적용
+    if bool(o.loc["비공식", "STOP_OVERRIDE_ACTIVE"]):
+        errors.append("비공식 신호에 override 누출 (official_only 위반)")
+    # 6) 원본 손절가 보존
+    if abs(float(o.loc["공식A", "손절가"]) - 9400.0) > 1:
+        errors.append("원본 손절가 변형 (보존 위반)")
+
+    # 7) 베어: override OFF + 신규진입 차단
+    off = apply_stop_override(df, market_risk_off=True, config=DEFAULT_CONFIG).set_index("종목명")
+    if int(off["STOP_OVERRIDE_ACTIVE"].sum()) != 0:
+        errors.append("베어인데 override 비활성화 안됨")
+    if not bool(off.loc["공식A", "NEW_ENTRY_BLOCKED"]):
+        errors.append("베어인데 신규진입 차단 미설정")
+
+    # 8) ACTIVE/NEW_ENTRY_BLOCKED 상호배타
+    both = (out["STOP_OVERRIDE_ACTIVE"].astype(bool) & out["NEW_ENTRY_BLOCKED"].astype(bool)).any()
+    if both:
+        errors.append("STOP_OVERRIDE_ACTIVE와 NEW_ENTRY_BLOCKED 동시 True (상호배타 위반)")
+
+    return errors
+
 def main():
     print("🔍 Contract Gate Check")
     print("=" * 50)
@@ -576,6 +640,13 @@ def main():
 
     print("\n11. [MOMENTUM_V23_1] momentum_lane 산출물 계약 + 시장국면 게이트...")
     errs = check_momentum_lane_contract()
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:5]:
+        print(f"      {e}")
+
+    print("\n12. [STOP_OVERRIDE_V23_2] stop_override 산출물 계약 + 베어 게이트...")
+    errs = check_stop_override_contract()
     all_errors.extend(errs)
     print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
     for e in errs[:5]:
