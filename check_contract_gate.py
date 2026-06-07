@@ -434,6 +434,68 @@ def check_guard_v23_contract():
     return errors
 
 
+
+def check_momentum_lane_contract():
+    """[v23.1] momentum_lane 산출 컬럼 계약 + MomentumLaneConfig SSOT + 시장국면 게이트."""
+    errors = []
+    try:
+        sys.path.insert(0, PROJECT_ROOT)
+        import pandas as pd
+        from momentum_lane import apply_momentum_lane, MOMENTUM_LANE_COLS
+        from collector_config import DEFAULT_CONFIG
+    except Exception as e:
+        return [f"momentum_lane/collector_config import 실패: {e}"]
+
+    # 1) MomentumLaneConfig가 CollectorConfig에 합성되어 있는지
+    if not hasattr(DEFAULT_CONFIG, "momentum_lane"):
+        errors.append("CollectorConfig에 momentum_lane(MomentumLaneConfig) 미연동")
+        return errors
+    for fld in ("source_route", "max_picks", "require_guard", "regime_deviation_floor"):
+        if not hasattr(DEFAULT_CONFIG.momentum_lane, fld):
+            errors.append(f"MomentumLaneConfig 필드 누락: {fld}")
+
+    # 2) 산출 컬럼 계약 — 합성 df (OVERHEAT 6 + ATTACK 1)
+    rows = []
+    for i in range(6):
+        rows.append(dict(종목명=f"과열{i}", ROUTE="OVERHEAT",
+                         GUARD_ALL_PASS=True, GUARDED_ELITE_SCORE=90 - i,
+                         RR_NOW_TP1=0.7))   # RR 낮아도 레인 진입해야(모멘텀 역설)
+    rows.append(dict(종목명="공격", ROUTE="ATTACK",
+                     GUARD_ALL_PASS=True, GUARDED_ELITE_SCORE=95, RR_NOW_TP1=1.5))
+    rows.append(dict(종목명="과열_가드탈락", ROUTE="OVERHEAT",
+                     GUARD_ALL_PASS=False, GUARDED_ELITE_SCORE=92, RR_NOW_TP1=1.4))
+    df = pd.DataFrame(rows)
+
+    out = apply_momentum_lane(df, market_risk_off=False, config=DEFAULT_CONFIG)
+    missing = [c for c in MOMENTUM_LANE_COLS if c not in out.columns]
+    if missing:
+        errors.append(f"MOMENTUM 산출 컬럼 누락: {missing}")
+        return errors
+
+    res = dict(zip(out["종목명"], out["MOMENTUM_LANE_TIER"]))
+    lane = dict(zip(out["종목명"], out["MOMENTUM_LANE"]))
+
+    # 3) ATTACK(소스 아님)·가드탈락은 레인 제외
+    if res.get("공격") != "":
+        errors.append(f"ATTACK이 모멘텀 레인에 누출: tier={res.get('공격')!r}")
+    if res.get("과열_가드탈락") != "":
+        errors.append("가드 미통과 과열주가 레인에 누출")
+
+    # 4) 점수 상위 max_picks개가 Tier A, RR 낮아도 진입(모멘텀 역설)
+    n_a = int(out["MOMENTUM_LANE"].sum())
+    if n_a != min(5, DEFAULT_CONFIG.momentum_lane.max_picks):
+        errors.append(f"Tier A 수 비정상: {n_a} (max_picks={DEFAULT_CONFIG.momentum_lane.max_picks})")
+    if lane.get("과열0") != 1:  # 점수 최고 + RR 0.7 → 그래도 Tier A여야
+        errors.append("점수 최상위 과열주가 RR 때문에 Tier A 탈락 (모멘텀 역설 위반)")
+
+    # 5) 시장 위험회피 시 레인 전체 OFF
+    off = apply_momentum_lane(df, market_risk_off=True, config=DEFAULT_CONFIG)
+    if int(off["MOMENTUM_LANE"].sum()) != 0 or int(off["MOMENTUM_WATCH"].sum()) != 0:
+        errors.append("시장 위험회피인데 모멘텀 레인이 비활성화되지 않음")
+
+    return errors
+
+
 def main():
     print("🔍 Contract Gate Check")
     print("=" * 50)
@@ -507,6 +569,13 @@ def main():
 
     print("\n10. [GUARD_V23] guard_system 산출물 계약 + ELITE_LABEL 게이트...")
     errs = check_guard_v23_contract()
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:5]:
+        print(f"      {e}")
+
+    print("\n11. [MOMENTUM_V23_1] momentum_lane 산출물 계약 + 시장국면 게이트...")
+    errs = check_momentum_lane_contract()
     all_errors.extend(errs)
     print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
     for e in errs[:5]:

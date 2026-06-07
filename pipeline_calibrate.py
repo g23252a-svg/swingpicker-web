@@ -652,5 +652,27 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
     except Exception as e:
         logger.warning(f"⚠️ [v23.0] GUARD 적용 실패 (기존 추천 유지): {e}")
 
+    # ── [v23.1] Momentum Lane — OVERHEAT × GUARD 통과 종목의 별도 추천 레인 ──
+    try:
+        from momentum_lane import (
+            apply_momentum_lane, compute_market_risk_off, momentum_summary,
+        )
+        from collector_config import DEFAULT_CONFIG as _MCFG
+        import os as _os
+
+        _kospi_path = _os.path.join(getattr(_MCFG, "out_dir", "data"), "kospi_daily.csv")
+        _risk_off, _regime = compute_market_risk_off(_kospi_path)
+        df_out = apply_momentum_lane(df_out, market_risk_off=_risk_off, config=_MCFG)
+
+        _ms = momentum_summary(df_out)
+        log(
+            "⚡ [v23.1] Momentum Lane: 실전 {a}건 · 관찰 {b}건 (시장 {rg})".format(
+                a=_ms.get("tier_a", 0), b=_ms.get("tier_b", 0),
+                rg=("위험회피 → 레인 OFF" if _risk_off else "정상 → 레인 ON"),
+            )
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ [v23.1] Momentum Lane 적용 실패 (무해): {e}")
+
     ctx.df_out = df_out
     return ctx

@@ -15,6 +15,22 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "23.1.0",
+        "date": "2026-06-07",
+        "type": "minor",
+        "title": "v23.1 — Momentum Lane: 과열·가드통과 종목의 ⚡ 모멘텀 후보 레인 신설",
+        "items": [
+            "⚡ **Momentum Lane 신설 (별도 추천 레인):** ROUTE 분석 결과 '과열(OVERHEAT)'로 공식 매수에서 배제되던 종목군이 실제로는 가장 높은 전방수익률(T+3 +16.6%, 승률 84%)과 가장 통제된 하방(-6.5%)을 보였습니다. 공식 매수 게이트(`TOP_PICK`)는 그대로 두고, `ROUTE=OVERHEAT × GUARD_ALL_PASS` 종목을 ⚡ 모멘텀 후보로 분리 표시하는 `momentum_lane.py`를 추가했습니다.",
+            "🛡️ **GUARD 통과 의무 (v23.0 연계):** 모멘텀 레인은 v23.0 GUARD를 통과한 과열주만 받습니다. 백테스트상 OVERHEAT 중 가드통과군은 +16.8%, 가드탈락군은 +5.3%로 격차가 +11.5%p였습니다 — 가드가 과열주의 나쁜 케이스를 정확히 걸러줍니다.",
+            "🔢 **점수 랭크 상위 N = 실전(Tier A), 나머지 = 관찰(Tier B):** 가드 반영 점수(`GUARDED_ELITE_SCORE`) 상위 5개를 실전 후보로, 그 외 자격자는 관찰로 분리합니다. RR(손익비)은 분류에서 의도적으로 제외했습니다 — OVERHEAT 초과수익은 RR이 낮은(이미 강하게 오른) 종목에서 나오는 모멘텀 역설이 확인됐기 때문입니다(RR≥1.2군 +2.4% vs RR<1.2군 +18.2%). 점수 상위5도 +16.4% 알파를 유지합니다.",
+            "🌊 **시장국면 게이트 (비대칭 보험):** KOSPI가 *명백한 하락 전환*(close < MA20 AND MA20 하락 AND MA20 대비 -3% 이상 이탈)일 때만 레인 전체를 OFF합니다. 강세장에선 거의 항상 ON(분석기간 risk_off 발생 6%)이라 무해하고, 미래 하락장에서만 과열주 레인을 자동 차단합니다. 과열주는 추세 전환 시 가장 먼저 무너지므로 이 보험을 둡니다.",
+            "📊 **산출 컬럼:** `MOMENTUM_LANE`(실전 0/1), `MOMENTUM_WATCH`(관찰 0/1), `MOMENTUM_LANE_TIER`(A/B), `MOMENTUM_LANE_SCORE`, `MOMENTUM_LANE_RANK`, `MOMENTUM_LANE_REASON`. recommend CSV에 기록되어 후보 풀이 일평균 0.9개→실전 2.6개(점수 상위5 기준)로 늘고, 후보 있는 날이 35%→53%로 개선됩니다.",
+            "🧪 **검증·계약:** `momentum_lane_backtest.py`로 레인 ON/OFF·Tier별 전방수익률·시장국면 게이트 발생률을 측정합니다. `check_contract_gate.py`에 Momentum 계약 검사(step 11)를 추가해 산출 컬럼·SSOT 연동·모멘텀 역설(RR 낮아도 점수 상위면 Tier A)·시장국면 OFF를 고정했고, 전용 회귀 테스트를 추가했습니다.",
+            "🔁 **추천 로직 변경 있음 (의도):** 공식 매수 산식(`scoring_engine.py`·`TOP_PICK`·`BUY_NOW_ELIGIBLE`)은 한 글자도 바꾸지 않았습니다. 다만 '과열이라 버리던' 종목을 별도 레인으로 *추가 노출*하는 변경이므로, 화면에 새 후보 유형이 등장합니다. 공식 매수와 모멘텀 후보는 UI에서 분리됩니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "23.0.0",
         "date": "2026-06-07",
         "type": "major",
@@ -606,7 +622,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.10.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.11.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 
