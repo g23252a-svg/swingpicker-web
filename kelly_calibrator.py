@@ -1009,6 +1009,13 @@ def apply_kelly_calibrated(
     valid = (scores >= min_score_threshold) & (buy > 0) & (stop > 0) & (target > 0) & (risk > 0)
     f_safe = np.where(valid, f_safe, 0.0)
 
+    # [v23.0] GUARD 반영 — GUARD_KELLY_MULT(0~1)로 분율·손익비 축소
+    # guard_system이 부여한 컬럼이 있으면 차단(0)·감점(<1)을 Kelly 사이징에 직접 반영.
+    if "GUARD_KELLY_MULT" in df.columns:
+        _gm = pd.to_numeric(df["GUARD_KELLY_MULT"], errors="coerce").fillna(1.0).clip(0.0, 1.0).values
+        f_safe = f_safe * _gm
+        b_ratio = b_ratio * _gm
+
     # [v22] 관측 컬럼
     df["KELLY_PLANNED_B"] = np.round(planned_b, 3)
     df["KELLY_EMPIRICAL_B"] = (

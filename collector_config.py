@@ -375,6 +375,56 @@ class PolicyConfig:
         return hashlib.md5(vals.encode()).hexdigest()[:12]
 
 
+
+# ═══════════════════════════════════════════════════
+#  [v23.0] GuardConfig — 통합 GUARD 엔진 임계값 SSOT
+# ═══════════════════════════════════════════════════
+@dataclass(frozen=True)
+class GuardConfig:
+    """guard_system.py 8개 규칙 임계값. 전부 여기서만 정의(하드코딩 금지)."""
+    # G1 유동성-손절 차단
+    g1_turnover_min_eok: float = 100.0     # 거래대금(억) 미만 + 손절 협소 시 차단
+    g1_stop_pct_max: float = 6.0           # STOP_PCT 이하면 손절 여유 부족으로 간주
+
+    # G2 RR 열화 배수
+    g2_timing_zero_eps: float = 0.0        # TIMING_SCORE 이하를 0으로 간주
+    g2_rr_mult_timing0: float = 0.3        # TIMING=0 → RR 배수
+    g2_axis_min: float = 40.0              # AXIS_MEAN 미만 → 저품질
+    g2_rr_mult_axis_low: float = 0.5       # AXIS<min → RR 배수
+
+    # G3 CARRY STALE 누적 감점(점수)
+    g3_pen_day5: float = 15.0              # 5일차 +15
+    g3_pen_day7: float = 10.0              # 7일차 +10 (누적 25)
+    g3_pen_day10: float = 20.0             # 10일차 +20 (누적 45)
+
+    # G4 저모멘텀 섹터 게이트
+    g4_timing_gate: float = 30.0           # 저모멘텀 섹터 TIMING 게이트
+    g4_low_mom_keywords: tuple = (
+        "지주", "홀딩스", "금융지주", "SI", "시스템통합", "전산",
+    )
+
+    # G5 추세선 붕괴 경보
+    g5_break_min: int = 3                  # 5축 중 붕괴 N개 이상 → 경보
+    g5_penalty: float = 20.0               # 경보 시 점수 감점
+
+    # G6 시장 역행 감점
+    g6_kospi_up_pct: float = 2.0           # 장 +N% 이상
+    g6_stock_down_pct: float = -5.0        # 종목 -N% 이하
+    g6_penalty: float = 25.0
+
+    # G7 윗꼬리 약세 감점
+    g7_shadow_max: float = 0.5             # Upper_Shadow_Ratio 초과
+    g7_vol_intensity_min: float = 0.7      # 거래강도 미만
+    g7_penalty: float = 15.0
+
+    # G8 CARRY 사전경고
+    g8_prewarn_day: int = 4                # 보유 N일차 사전경고(감점 없음)
+
+    # 적용 정책
+    guard_top_pick_min: float = 60.0       # 가드 후 GUARDED_ELITE 이 값 이상이라야 ELITE 라벨
+    guard_enforce_top_pick: bool = True    # False면 shadow 컬럼만 (combo backtest OFF)
+
+
 # ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
@@ -396,7 +446,7 @@ class CollectorConfig:
 
     __slots__ = (
         "data", "indicator", "scoring", "macro",
-        "slippage", "time_stop", "secrets", "policy",
+        "slippage", "time_stop", "secrets", "policy", "guard",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -411,8 +461,9 @@ class CollectorConfig:
         time_stop: TimeStopConfig = None,
         secrets: SecretsConfig = None,
         policy: PolicyConfig = None,
+        guard: 'GuardConfig' = None,
         base_dir: str = None,
-        config_version: str = "2.1.0",
+        config_version: str = "2.2.0",
     ):
         self.data = data or DataConfig()
         self.indicator = indicator or IndicatorConfig()
@@ -422,6 +473,7 @@ class CollectorConfig:
         self.time_stop = time_stop or TimeStopConfig()
         self.secrets = secrets or SecretsConfig()
         self.policy = policy or PolicyConfig()
+        self.guard = guard or GuardConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -429,7 +481,7 @@ class CollectorConfig:
         self._sub_configs = (
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
-            self.policy, self.secrets,
+            self.policy, self.guard, self.secrets,
         )
 
     def __getattr__(self, name: str):
@@ -464,7 +516,7 @@ class CollectorConfig:
         """전략 파라미터의 재현 가능한 스냅샷 (SecretsConfig, base_dir 배제)."""
         from datetime import datetime
         d = {}
-        for sub_name in ("data", "indicator", "scoring", "macro", "slippage", "time_stop", "policy"):
+        for sub_name in ("data", "indicator", "scoring", "macro", "slippage", "time_stop", "policy", "guard"):
             sub = getattr(self, sub_name)
             sub_dict = dataclasses.asdict(sub)
             d.update(sub_dict)
