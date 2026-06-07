@@ -3062,6 +3062,91 @@ def _render_historical_alpha_pick_card(df: pd.DataFrame) -> None:
 
 
 
+def _render_momentum_lane_card(df: pd.DataFrame) -> None:
+    # [v23.1] ⚡ 모멘텀 후보 카드 — ROUTE=OVERHEAT & GUARD 통과 종목 (MOMENTUM_LANE 컬럼 기반).
+    # 공식 매수(TOP_PICK+BUY_NOW_ELIGIBLE)와 별개. 점수/RR 낮아도 강한 모멘텀이면 더 가는 패턴.
+    if df is None or len(df) == 0 or "MOMENTUM_LANE" not in df.columns:
+        return
+
+    def _mfmt(v, digits=0, suffix=""):
+        try:
+            if pd.isna(v):
+                return "—"
+            return f"{float(v):.{digits}f}{suffix}"
+        except Exception:
+            return "—"
+
+    a = df[pd.to_numeric(df["MOMENTUM_LANE"], errors="coerce").fillna(0) == 1].copy()
+    b = df[pd.to_numeric(df.get("MOMENTUM_WATCH", 0), errors="coerce").fillna(0) == 1].copy()
+
+    reasons = df["MOMENTUM_LANE_REASON"].astype(str) if "MOMENTUM_LANE_REASON" in df.columns else None
+    risk_off = bool(reasons is not None and len(a) == 0 and reasons.str.contains("위험회피").any())
+
+    if len(a) == 0 and len(b) == 0 and not risk_off:
+        return  # 표시할 것 없음 — 빈 카드 방지
+
+    if "MOMENTUM_LANE_RANK" in a.columns and len(a) > 0:
+        a = a.sort_values("MOMENTUM_LANE_RANK")
+
+    def _bits(row):
+        bits = []
+        sc = row.get("GUARDED_ELITE_SCORE", row.get("ELITE_SCORE"))
+        if sc is not None and not pd.isna(sc):
+            bits.append(f"가드후 {_mfmt(sc, 0)}")
+        rr = row.get("RR_NOW_TP1")
+        if rr is not None and not pd.isna(rr):
+            bits.append(f"RR {_mfmt(rr, 2)}")
+        vwap = row.get("VWAP_GAP")
+        if vwap is not None and not pd.isna(vwap):
+            bits.append(f"VWAP {_mfmt(vwap, 1, '%')}")
+        return " · ".join(bits)
+
+    with ui.card().classes("w-full p-4 mb-4 rounded-xl border border-amber-500/40 bg-amber-500/8"):
+        with ui.row().classes("w-full items-center justify-between gap-2"):
+            ui.label("⚡ 모멘텀 후보 (과열 돌파)").classes("text-base font-bold text-amber-300")
+            ui.badge(
+                f"모멘텀 {len(a)} · 과거 T+3 +16%",
+                color="#F59E0B",
+            ).classes("text-xs")
+
+        ui.label(
+            "'과열'로 공식 매수에서 빠지지만 GUARD를 통과한 추세 지속 후보입니다. "
+            "점수·RR이 낮아도 강한 모멘텀이면 더 가는 패턴(백테스트 T+3 평균 +16.4% · 승률 78%)."
+        ).classes("text-xs text-gray-300 mt-1")
+
+        if risk_off:
+            ui.label(
+                "🌊 오늘은 시장 위험회피(KOSPI 하락 전환) — 모멘텀 레인 OFF"
+            ).classes("text-xs text-amber-200 font-bold mt-2")
+
+        if len(a) > 0:
+            ui.label("⚡ 모멘텀 픽 (모멘텀 강도순)").classes(
+                "text-[11px] text-emerald-300 font-bold mt-2")
+            for _, row in a.iterrows():
+                rank = int(pd.to_numeric(row.get("MOMENTUM_LANE_RANK", 0), errors="coerce") or 0)
+                nm = row.get("종목명", "-")
+                cd = str(row.get("종목코드", "")).zfill(6)
+                ui.label(
+                    f"{rank}위 {nm} {cd} · {_bits(row)}"
+                ).classes("text-xs text-white mt-1 font-semibold")
+
+        if len(b) > 0:
+            ui.label("모멘텀 관찰 (상위권 밖)").classes(
+                "text-[11px] text-slate-300 font-bold mt-2")
+            for _, row in b.iterrows():
+                nm = row.get("종목명", "-")
+                cd = str(row.get("종목코드", "")).zfill(6)
+                ui.label(
+                    f"• {nm} {cd} · {_bits(row)}"
+                ).classes("text-[11px] text-gray-400 leading-snug")
+
+        ui.label(
+            "※ 공식 신규매수(TOP_PICK+BUY_NOW_ELIGIBLE)와 별개입니다. "
+            "과열·가드통과 추세 후보이며, 진입·청산·손절은 본인 판단입니다."
+        ).classes("text-[10px] text-gray-500 mt-2")
+
+
+
 def _render_swing_alpha_oos_card(df: pd.DataFrame) -> None:
     # [v22.3.24] 백데이터 기반 스윙 알파 후보 카드.
     # 공식 신규매수 산식과 분리된 보조 레인이다.
@@ -3903,6 +3988,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # [v22.3.22] RR 알파 후보 — 공식과 별도인 OOS 검증형 실전 후보 레인
     _render_historical_alpha_pick_card(df)
+
+    # [v23.1] ⚡ 모멘텀 후보 — ROUTE=OVERHEAT & GUARD 통과 종목 (공식과 별도 레인)
+    _render_momentum_lane_card(df)
 
     # [v22.3.24] 백데이터 기반 스윙 알파 후보 — 공식 산식과 별도인 보조 레인
     _render_swing_alpha_oos_card(df)
