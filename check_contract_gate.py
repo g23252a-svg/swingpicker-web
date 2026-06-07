@@ -383,6 +383,57 @@ def check_kospi_daily_csv_schema():
     return errors
 
 
+
+def check_guard_v23_contract():
+    """[v23.0] guard_system 산출 컬럼 계약 + GuardConfig SSOT 연동 + ELITE_LABEL 게이트."""
+    errors = []
+    try:
+        sys.path.insert(0, PROJECT_ROOT)
+        import pandas as pd
+        from guard_system import apply_guard_system, GUARD_CONTRACT_COLS
+        from collector_config import DEFAULT_CONFIG
+    except Exception as e:
+        return [f"guard_system/collector_config import 실패: {e}"]
+
+    # 1) GuardConfig가 CollectorConfig에 합성되어 있는지
+    if not hasattr(DEFAULT_CONFIG, "guard"):
+        errors.append("CollectorConfig에 guard(GuardConfig) 미연동")
+        return errors
+    for fld in ("g1_turnover_min_eok", "g5_break_min", "guard_enforce_top_pick"):
+        if not hasattr(DEFAULT_CONFIG.guard, fld):
+            errors.append(f"GuardConfig 필드 누락: {fld}")
+
+    # 2) 산출 컬럼 계약 — 합성 df에 전 컬럼 부여되는지
+    df = pd.DataFrame([
+        # 정상 TOP_PICK
+        dict(종목명="정상", ELITE_SCORE=88, TIMING_SCORE=75, AXIS_MEAN=80,
+             **{"거래대금(억원)": 800}, STOP_PCT=9, TOP_PICK=1,
+             SUPERTREND_DIR=1, Above_MA20=1),
+        # 유동성 차단 TOP_PICK → ELITE 아님
+        dict(종목명="차단", ELITE_SCORE=85, TIMING_SCORE=70, AXIS_MEAN=75,
+             **{"거래대금(억원)": 50}, STOP_PCT=5, TOP_PICK=1),
+    ])
+    out = apply_guard_system(df, config=DEFAULT_CONFIG, kospi_ret_1d=None)
+    missing = [c for c in GUARD_CONTRACT_COLS if c not in out.columns]
+    if missing:
+        errors.append(f"GUARD 산출 컬럼 누락: {missing}")
+        return errors
+
+    # 3) ELITE_LABEL 게이트 — 차단 종목은 ELITE 금지, 정상은 ELITE
+    lab = dict(zip(out["종목명"], out["ELITE_LABEL"]))
+    if lab.get("정상") != "ELITE":
+        errors.append(f"정상 TOP_PICK이 ELITE 아님: {lab.get('정상')!r}")
+    if lab.get("차단") == "ELITE":
+        errors.append("유동성 차단 종목이 ELITE로 누출")
+
+    # 4) 차단 종목 GUARD_KELLY_MULT==0 (사이징 0)
+    km = dict(zip(out["종목명"], out["GUARD_KELLY_MULT"]))
+    if km.get("차단", 1) != 0:
+        errors.append(f"차단 종목 GUARD_KELLY_MULT≠0: {km.get('차단')}")
+
+    return errors
+
+
 def main():
     print("🔍 Contract Gate Check")
     print("=" * 50)
@@ -449,6 +500,13 @@ def main():
 
     print("\n9. [GUARD_ANOMALY_THRESHOLDS] backtest_policy anomaly 임계값 정합...")
     errs = check_anomaly_thresholds()
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:5]:
+        print(f"      {e}")
+
+    print("\n10. [GUARD_V23] guard_system 산출물 계약 + ELITE_LABEL 게이트...")
+    errs = check_guard_v23_contract()
     all_errors.extend(errs)
     print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
     for e in errs[:5]:

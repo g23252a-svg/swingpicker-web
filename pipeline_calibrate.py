@@ -619,5 +619,38 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
     except Exception as e:
         logger.warning(f"⚠️ ELITE_SCORE 2-pass 실패: {e}")
 
+    # ═══════════════════════════════════════════════════
+    # [v23.0] 통합 GUARD 엔진 — compute_elite_score 직후 · Kelly 직전
+    # ═══════════════════════════════════════════════════
+    # 8개 GUARD(유동성·RR열화·보유경과·저모멘텀·추세붕괴·시장역행·윗꼬리·사전경고)를
+    # 단일 모듈에서 적용. GUARDED_ELITE_SCORE / GUARD_KELLY_MULT / ELITE_LABEL 부여,
+    # enforce 모드면 TOP_PICK을 가드 통과분으로 재게이트(TOP_PICK_RAW 보존).
+    try:
+        from guard_system import apply_guard_system, guard_summary
+        from collector_config import DEFAULT_CONFIG as _GCFG
+
+        # 당일 KOSPI 등락률 — ctx에 있으면 전달 (없으면 컬럼/스킵 fallback)
+        _kospi_ret = None
+        try:
+            _kospi_ret = getattr(ctx, "kospi_ret_1d", None)
+            if _kospi_ret is None and isinstance(getattr(ctx, "breadth", None), dict):
+                _kospi_ret = ctx.breadth.get("KOSPI_RET_1D")
+        except Exception:
+            _kospi_ret = None
+
+        df_out = apply_guard_system(df_out, config=_GCFG, kospi_ret_1d=_kospi_ret)
+
+        _gs = guard_summary(df_out)
+        log(
+            "🛡️ [v23.0] GUARD: 차단 {nb}건 · 강제청산경보 {fe}건 · 사전경고 {pw}건 · "
+            "ELITE {ne}건 (가드탈락 후보 {gb}건)".format(
+                nb=_gs.get("n_block", 0), fe=_gs.get("n_force_exit", 0),
+                pw=_gs.get("n_pre_warning", 0), ne=_gs.get("n_elite", 0),
+                gb=_gs.get("n_guard_blocked_pick", 0),
+            )
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ [v23.0] GUARD 적용 실패 (기존 추천 유지): {e}")
+
     ctx.df_out = df_out
     return ctx

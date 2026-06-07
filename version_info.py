@@ -15,6 +15,27 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "23.0.0",
+        "date": "2026-06-07",
+        "type": "major",
+        "title": "v23.0 — GUARD System: 추천 직후 8대 안전가드로 음의 알파 차단",
+        "items": [
+            "🛡️ **GUARD System 도입 (신규 추천 레이어):** ELITE 점수 산정 직후, 종목별로 8개의 독립 가드를 적용하는 `guard_system.py`를 추가했습니다. 각 가드는 통과여부(`GUARD_PASS_n`)·감점(`GUARD_PENALTY_n`)·사유(`GUARD_REASON`)를 남기고, 종합 결과를 `GUARDED_ELITE_SCORE`·`GUARD_KELLY_MULT`로 환산해 추천/켈리에 반영합니다.",
+            "🚫 **G1 유동성·손절 차단:** 거래대금 100억 미만이면서 손절폭(STOP_PCT) 6% 이하인 종목은 진입을 차단합니다. 얕은 손절 + 저유동성 조합의 슬리피지 리스크를 원천 제거합니다.",
+            "📉 **G2 RR 열화 패널티:** TIMING_SCORE=0이면 RR×0.3, 3축 평균(AXIS_MEAN)<40이면 RR×0.5로 위험-보상을 강등합니다(둘 다 해당 시 더 보수적인 배수 적용).",
+            "🕒 **G3 CARRY STALE 누적감점:** 보유경과 5/7/10일차에 각각 +15/+10/+20점을 누적 감점(최대 −45)합니다. 신세계I&C형 장기 방치 손실 포지션을 추천에서 강등합니다.",
+            "🏦 **G4 저모멘텀 섹터 게이트:** 지주·홀딩스·금융지주·SI·시스템통합·전산 등 저모멘텀 섹터는 TIMING_SCORE 30 미만일 때 진입을 차단합니다.",
+            "📛 **G5 추세선 붕괴 경보:** SUPERTREND·MA20·POC·HMA·MACD 5개 추세 신호 중 3개 이상 붕괴 시 `FORCE_EXIT_ALERT`를 띄우고 20점 감점합니다.",
+            "🌪️ **G6 시장역행 패널티:** KOSPI가 +2% 이상인 날 종목이 −5% 이하로 역행하면 25점 감점합니다(코스피 수익률을 알 수 없는 날은 자동 스킵).",
+            "🪶 **G7 윗꼬리 약세 패널티:** 윗꼬리 비율(Upper_Shadow_Ratio)>0.5이면서 거래강도<0.7이면 15점 감점합니다(분출 후 약세 흡수).",
+            "🔔 **G8 보유 사전경고(차단 아님):** 보유경과 4일차(CARRY_AGE_DAYS=4)에는 `GUARD_PRE_WARNING`만 표시하고 감점/차단은 하지 않습니다. STALE 진입 직전 단계를 미리 알립니다.",
+            "🏷️ **ELITE 라벨 가드 의무화:** TOP_PICK이라도 8대 핵심가드(G1~G7)를 통과하고 `GUARDED_ELITE_SCORE`≥60이어야 `ELITE` 라벨을 부여합니다. 가드에 막힌 TOP_PICK은 `GUARD_BLOCKED`로 표시되고 켈리 비중이 0이 됩니다.",
+            "🧪 **검증 프레임워크:** `guard_backtest_v23.py`로 가드 ON/OFF A/B 백테스트(매칭 6개월)를 돌려 통과군·탈락군 수익률 차이를 측정합니다. h=3 기준 탈락군−통과군 −4.80%p, h=5 기준 −6.48%p로 가드가 음의 알파를 제거함을 확인했습니다. `check_contract_gate.py`에 GUARD 계약 검사(step 10)를 추가했고, 가드 전용 회귀 테스트 34개를 고정했습니다.",
+            "🔁 **추천 로직 변경 있음 (의도):** 본 릴리스는 UI 마감이 아니라 추천 파이프라인에 안전가드 레이어를 추가하는 변경입니다. `GUARDED_ELITE_SCORE`/`GUARD_KELLY_MULT`가 최종 추천 강도와 켈리 비중에 직접 반영됩니다. 산식 자체(scoring_engine.py)는 보존하되, 그 위에 게이트/감점을 덧씌웁니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "22.3.31",
         "date": "2026-06-06",
         "type": "patch",
@@ -585,7 +606,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.9.28"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.10.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 
