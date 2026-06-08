@@ -1,12 +1,12 @@
 {
-  "asof_ymd": "20260605",
-  "generated_at": "2026-06-07T16:27:08.253836",
+  "asof_ymd": "20260608",
+  "generated_at": "2026-06-08T22:39:04.427327",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
-  "declared_wr_active": 0.4733,
-  "declared_wr_top_pick": null,
+  "declared_wr_active": 0.474,
+  "declared_wr_top_pick": 0.474,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
@@ -70,40 +70,40 @@
     "monotone_avg_ret_excess": false
   },
   "realized_wr": 0.3287,
-  "realized_wr_top_pick": null,
-  "realized_wr_top_pick_n": 0,
+  "realized_wr_top_pick": 0.3287,
+  "realized_wr_top_pick_n": 37,
   "realized_wr_active": 0.3287,
   "realized_wr_active_n": 37,
-  "declared_vs_realized_gap_active": 0.1446,
-  "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": 0.1446,
+  "declared_vs_realized_gap_active": 0.1453,
+  "declared_vs_realized_gap_top_pick": 0.1453,
+  "declared_vs_realized_gap": 0.1453,
   "avg_ret_excess_pct": -5.2686,
   "top_pick_funnel": {
-    "trade_ymd": "20260605",
-    "total": 474,
+    "trade_ymd": "20260608",
+    "total": 446,
     "aggressive_funnel": {
-      "total": 474,
+      "total": 446,
       "route_active": 3,
-      "hard_gate": 1,
-      "elite_75": 0,
-      "struct_80": 0,
-      "timing_70": 0,
-      "tp1_15": 0,
-      "final": 0
+      "hard_gate": 2,
+      "elite_75": 2,
+      "struct_80": 2,
+      "timing_70": 2,
+      "tp1_15": 2,
+      "final": 2
     },
     "stable_funnel": {
-      "total": 474,
+      "total": 446,
       "route_active": 3,
-      "hard_gate": 1,
-      "elite_70": 0,
+      "hard_gate": 2,
+      "elite_70": 2,
       "tp1_7_15": 0,
       "balance_70": 0,
       "wr_55": 0,
       "mature": 0,
       "final": 0
     },
-    "top_pick_count": 0,
-    "aggressive_count": 0,
+    "top_pick_count": 2,
+    "aggressive_count": 2,
     "stable_count": 0
   },
   "top_pick_stable_7day_avg": 0.0,
@@ -119,12 +119,12 @@
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "TOP_PICK 0건"
+      "detail": "min_rr=1.15"
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
-      "status": "SKIP",
-      "detail": "TOP_PICK 매칭 sufficient bin 없음"
+      "status": "PASS",
+      "detail": "gap_top_pick=14.5% (n=37)"
     }
   ],
   "ci_soft": [
@@ -155,7 +155,7 @@
   ],
   "ci_hard_all_pass": true,
   "ci_soft_any_warn": true,
-  "top_pick_count": 0,
+  "top_pick_count": 2,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": null
+  "top_pick_min_rr": 1.15
 }

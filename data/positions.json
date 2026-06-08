@@ -11,7 +11,7 @@
     "take_px2": 75400.0,
     "trailing_high": 70700.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 46850.0,
     "unrealized_pnl_pct": -7.04,
     "realized_pnl_pct": 0.0,
@@ -21,7 +21,8 @@
     "alerted_events": [
       "005090_20260316_TP1_HIT_20260423",
       "005090_20260316_WARN_DRAWDOWN_20260520",
-      "005090_20260316_WARN_DRAWDOWN_20260605"
+      "005090_20260316_WARN_DRAWDOWN_20260605",
+      "005090_20260316_WARN_DRAWDOWN_20260608"
     ]
   },
   {
@@ -36,7 +37,7 @@
     "take_px2": 18910.0,
     "trailing_high": 20900.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 13510.0,
     "unrealized_pnl_pct": -10.59,
     "realized_pnl_pct": 0.0,
@@ -47,7 +48,8 @@
       "050890_20260413_TP1_HIT_20260504",
       "050890_20260413_TP1_HIT_20260505",
       "050890_20260413_TP1_HIT_20260507",
-      "050890_20260413_WARN_DRAWDOWN_20260605"
+      "050890_20260413_WARN_DRAWDOWN_20260605",
+      "050890_20260413_WARN_DRAWDOWN_20260608"
     ]
   },
   {
@@ -62,9 +64,9 @@
     "take_px2": 50400.0,
     "trailing_high": 48350.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 33100.0,
-    "unrealized_pnl_pct": 8.7,
+    "last_check_ymd": "20260608",
+    "last_close_px": 35000.0,
+    "unrealized_pnl_pct": 14.94,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -95,7 +97,8 @@
       "319400_20260414_TP1_HIT_20260602",
       "319400_20260414_TP1_HIT_20260603",
       "319400_20260414_TP1_HIT_20260604",
-      "319400_20260414_TP1_HIT_20260605"
+      "319400_20260414_TP1_HIT_20260605",
+      "319400_20260414_TP1_HIT_20260608"
     ]
   },
   {
@@ -110,9 +113,9 @@
     "take_px2": 84900.0,
     "trailing_high": 79500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 69700.0,
-    "unrealized_pnl_pct": 9.08,
+    "last_check_ymd": "20260608",
+    "last_close_px": 64100.0,
+    "unrealized_pnl_pct": 0.31,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -133,7 +136,7 @@
     "take_px2": 144300.0,
     "trailing_high": 156000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 120000.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -154,7 +157,7 @@
     "take_px2": 6060.0,
     "trailing_high": 5940.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 4695.0,
     "unrealized_pnl_pct": -4.18,
     "realized_pnl_pct": 0.0,
@@ -179,7 +182,7 @@
     "take_px2": 23400.0,
     "trailing_high": 22650.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 19980.0,
     "unrealized_pnl_pct": -4.17,
     "realized_pnl_pct": 0.0,
@@ -200,7 +203,7 @@
     "take_px2": 2100.0,
     "trailing_high": 2430.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 1641.0,
     "unrealized_pnl_pct": 8.25,
     "realized_pnl_pct": 0.0,
@@ -227,7 +230,7 @@
     "take_px2": 34600.0,
     "trailing_high": 27400.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 21150.0,
     "unrealized_pnl_pct": -10.38,
     "realized_pnl_pct": 0.0,
@@ -238,7 +241,8 @@
       "187870_20260520_WARN_DRAWDOWN_20260601",
       "187870_20260520_WARN_DRAWDOWN_20260602",
       "187870_20260520_WARN_DRAWDOWN_20260603",
-      "187870_20260520_WARN_DRAWDOWN_20260605"
+      "187870_20260520_WARN_DRAWDOWN_20260605",
+      "187870_20260520_WARN_DRAWDOWN_20260608"
     ]
   },
   {
@@ -253,9 +257,9 @@
     "take_px2": 44250.0,
     "trailing_high": 39550.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 35800.0,
-    "unrealized_pnl_pct": -2.45,
+    "last_check_ymd": "20260608",
+    "last_close_px": 34050.0,
+    "unrealized_pnl_pct": -7.22,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -265,7 +269,8 @@
       "001450_20260520_WARN_DRAWDOWN_20260529",
       "001450_20260520_WARN_DRAWDOWN_20260601",
       "001450_20260520_WARN_DRAWDOWN_20260602",
-      "001450_20260520_WARN_DRAWDOWN_20260603"
+      "001450_20260520_WARN_DRAWDOWN_20260603",
+      "001450_20260520_WARN_DRAWDOWN_20260608"
     ]
   },
   {
@@ -280,7 +285,7 @@
     "take_px2": 6160.0,
     "trailing_high": 6140.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 4650.0,
     "unrealized_pnl_pct": 15.24,
     "realized_pnl_pct": 0.0,
@@ -299,7 +304,8 @@
       "357880_20260520_TP1_HIT_20260602",
       "357880_20260520_TP1_HIT_20260603",
       "357880_20260520_TP1_HIT_20260604",
-      "357880_20260520_TP1_HIT_20260605"
+      "357880_20260520_TP1_HIT_20260605",
+      "357880_20260520_TP1_HIT_20260608"
     ]
   },
   {
@@ -314,7 +320,7 @@
     "take_px2": 12790.0,
     "trailing_high": 10980.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 8470.0,
     "unrealized_pnl_pct": -11.03,
     "realized_pnl_pct": 0.0,
@@ -327,7 +333,8 @@
       "144960_20260521_WARN_DRAWDOWN_20260602",
       "144960_20260521_WARN_DRAWDOWN_20260603",
       "144960_20260521_WARN_DRAWDOWN_20260604",
-      "144960_20260521_WARN_DRAWDOWN_20260605"
+      "144960_20260521_WARN_DRAWDOWN_20260605",
+      "144960_20260521_WARN_DRAWDOWN_20260608"
     ]
   },
   {
@@ -342,7 +349,7 @@
     "take_px2": 45800.0,
     "trailing_high": 35550.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 28950.0,
     "unrealized_pnl_pct": -12.01,
     "realized_pnl_pct": 0.0,
@@ -354,7 +361,8 @@
       "230240_20260527_WARN_DRAWDOWN_20260601",
       "230240_20260527_WARN_DRAWDOWN_20260602",
       "230240_20260527_WARN_DRAWDOWN_20260603",
-      "230240_20260527_WARN_DRAWDOWN_20260605"
+      "230240_20260527_WARN_DRAWDOWN_20260605",
+      "230240_20260527_WARN_DRAWDOWN_20260608"
     ]
   },
   {
@@ -369,14 +377,16 @@
     "take_px2": 407000.0,
     "trailing_high": 343500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 281500.0,
-    "unrealized_pnl_pct": -2.76,
+    "last_check_ymd": "20260608",
+    "last_close_px": 263500.0,
+    "unrealized_pnl_pct": -8.98,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "036570_20260529_WARN_DRAWDOWN_20260608"
+    ]
   },
   {
     "code": "095610",
@@ -390,9 +400,9 @@
     "take_px2": 150900.0,
     "trailing_high": 154300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 139200.0,
-    "unrealized_pnl_pct": 16.88,
+    "last_check_ymd": "20260608",
+    "last_close_px": 136200.0,
+    "unrealized_pnl_pct": 14.36,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
@@ -415,14 +425,16 @@
     "take_px2": 151800.0,
     "trailing_high": 125000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 106700.0,
-    "unrealized_pnl_pct": 0.38,
+    "last_check_ymd": "20260608",
+    "last_close_px": 94900.0,
+    "unrealized_pnl_pct": -10.72,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "356860_20260601_WARN_DRAWDOWN_20260608"
+    ]
   },
   {
     "code": "353200",
@@ -436,7 +448,7 @@
     "take_px2": 225500.0,
     "trailing_high": 173500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 152400.0,
     "unrealized_pnl_pct": -3.24,
     "realized_pnl_pct": 0.0,
@@ -444,29 +456,6 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": []
-  },
-  {
-    "code": "007660",
-    "name": "이수페타시스",
-    "entry_ymd": "20260604",
-    "entry_px": 133700.0,
-    "qty": 0,
-    "stop_px": 113600.0,
-    "stop_px_initial": 113600.0,
-    "take_px1": 154300.0,
-    "take_px2": 164400.0,
-    "trailing_high": 140800.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 120900.0,
-    "unrealized_pnl_pct": -9.57,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": [
-      "007660_20260604_WARN_DRAWDOWN_20260605"
-    ]
   },
   {
     "code": "170920",
@@ -480,7 +469,7 @@
     "take_px2": 58400.0,
     "trailing_high": 48800.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
+    "last_check_ymd": "20260608",
     "last_close_px": 46500.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -501,14 +490,16 @@
     "take_px2": 626000.0,
     "trailing_high": 504000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 460500.0,
-    "unrealized_pnl_pct": 0.0,
+    "last_check_ymd": "20260608",
+    "last_close_px": 408000.0,
+    "unrealized_pnl_pct": -11.4,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "028260_20260605_WARN_DRAWDOWN_20260608"
+    ]
   },
   {
     "code": "005930",
@@ -522,13 +513,15 @@
     "take_px2": 405500.0,
     "trailing_high": 343000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260605",
-    "last_close_px": 329000.0,
-    "unrealized_pnl_pct": 0.0,
+    "last_check_ymd": "20260608",
+    "last_close_px": 303000.0,
+    "unrealized_pnl_pct": -7.9,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
-    "alerted_events": []
+    "alerted_events": [
+      "005930_20260605_WARN_DRAWDOWN_20260608"
+    ]
   }
 ]

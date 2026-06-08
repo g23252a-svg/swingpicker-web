@@ -3824,5 +3824,29 @@
       "405100_20260415_WARN_DRAWDOWN_20260604",
       "405100_20260415_STOP_HIT_20260605"
     ]
+  },
+  {
+    "code": "007660",
+    "name": "이수페타시스",
+    "entry_ymd": "20260604",
+    "entry_px": 133700.0,
+    "qty": 0,
+    "stop_px": 113600.0,
+    "stop_px_initial": 113600.0,
+    "take_px1": 154300.0,
+    "take_px2": 164400.0,
+    "trailing_high": 140800.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260608",
+    "last_close_px": 108100.0,
+    "unrealized_pnl_pct": -19.15,
+    "realized_pnl_pct": -19.15,
+    "close_ymd": "20260608",
+    "close_px": 108100.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "007660_20260604_WARN_DRAWDOWN_20260605",
+      "007660_20260604_STOP_HIT_20260608"
+    ]
   }
 ]
