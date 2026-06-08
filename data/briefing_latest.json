@@ -1,6 +1,6 @@
 {
   "trade_date": "20260608",
-  "generated_at": "2026-06-08 22:40:00",
+  "generated_at": "2026-06-09 00:02:24",
   "count": 3,
   "stocks": [
     {
@@ -8,7 +8,7 @@
       "code": "095610",
       "name": "테스",
       "route": "ARMED",
-      "score": 88.3,
+      "score": 88.4,
       "close": 131500,
       "entry": 131500,
       "stop": 111700,
@@ -25,7 +25,7 @@
       "code": "080220",
       "name": "제주반도체",
       "route": "ARMED",
-      "score": 86.7,
+      "score": 86.8,
       "close": 95500,
       "entry": 95500,
       "stop": 81100,
@@ -42,7 +42,7 @@
       "code": "242040",
       "name": "나무기술",
       "route": "ARMED",
-      "score": 83.0,
+      "score": 83.2,
       "close": 8400,
       "entry": 6190,
       "stop": 5260,
