@@ -698,5 +698,16 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
     except Exception as e:
         logger.warning(f"\u26a0\uFE0F [v23.2] Stop Override \uc801\uc6a9 \uc2e4\ud328 (\ubb34\ud574): {e}")
 
+    # [v24 P0-B] 이상 폭등주 플래그 + 모멘텀 레인 제외 (작전/이벤트성 급등 차단)
+    try:
+        _ABN_RET10 = 300.0
+        _r10 = pd.to_numeric(df_out.get("ret_10d_%", 0.0), errors="coerce").fillna(0.0)
+        _abn_mask = _r10 > _ABN_RET10
+        df_out["ABNORMAL_SURGE_FLAG"] = _abn_mask
+        if "MOMENTUM_LANE" in df_out.columns:
+            df_out.loc[_abn_mask, "MOMENTUM_LANE"] = 0
+    except Exception:
+        df_out["ABNORMAL_SURGE_FLAG"] = False
+
     ctx.df_out = df_out
     return ctx

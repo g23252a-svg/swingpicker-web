@@ -50,6 +50,7 @@ class StopConfig:
     # 손절 관련
     atr_mult: float = 1.5
     max_stop_pct: float = 5.0
+    hard_stop_floor_pct: float = 20.0   # [v24] 손절폭 하드캡: 이 이상으로 손절이 벌어지지 않게
     gap_atr_mult: float = 0.4
     gap_trigger_pct: float = 7.0
 

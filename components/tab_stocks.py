@@ -3105,13 +3105,13 @@ def _render_momentum_lane_card(df: pd.DataFrame) -> None:
         with ui.row().classes("w-full items-center justify-between gap-2"):
             ui.label("⚡ 모멘텀 후보 (과열 돌파)").classes("text-base font-bold text-amber-300")
             ui.badge(
-                f"모멘텀 {len(a)} · 과거 T+3 +16%",
+                f"모멘텀 {len(a)} · 모니터링 전용",
                 color="#F59E0B",
             ).classes("text-xs")
 
         ui.label(
-            "'과열'로 공식 매수에서 빠지지만 GUARD를 통과한 추세 지속 후보입니다. "
-            "점수·RR이 낮아도 강한 모멘텀이면 더 가는 패턴(백테스트 T+3 평균 +16.4% · 승률 78%)."
+            "'과열'로 공식 매수에서 빠진 종목입니다. 백테스트의 T+3 +16%는 추천일 종가 진입 기준이며, "
+            "익일 시가 진입 시에는 손실(-24.6%)이었습니다. 매수 신호가 아닌 모니터링 전용입니다."
         ).classes("text-xs text-gray-300 mt-1")
 
         if risk_off:

@@ -523,6 +523,15 @@ def build_trade_plan(
     if stop_final >= entry_final and entry_final > 0:
         stop_final = float(SL.floor_to_tick(entry_final * 0.99))
 
+    # [v24 P0-A] 손절 하드캡: 손절폭이 hard_stop_floor_pct%를 넘지 않게 (이상 폭등주 -66% 등 차단)
+    _hard_floor_pct = float(getattr(cfg, "hard_stop_floor_pct", 20.0))
+    if entry_final > 0 and _hard_floor_pct > 0:
+        _floor_price = entry_final * (1.0 - _hard_floor_pct / 100.0)
+        if stop_final < _floor_price:
+            stop_final = float(SL.floor_to_tick(_floor_price))
+            if "HARDCAP" not in stop_reason:
+                stop_reason = stop_reason + "+HARDCAP" if (stop_reason and stop_reason != "NORMAL") else "HARDCAP"
+
     # stop_pct 재계산 (tick 라운딩 후)
     actual_stop_pct = (1.0 - stop_final / entry_final) * 100.0 if entry_final > 0 else stop_pct
 
