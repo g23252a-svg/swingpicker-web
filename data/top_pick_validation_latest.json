@@ -1,51 +1,16 @@
 {
-  "trade_ymd": "20260608",
-  "top_pick_count": 2,
-  "top_pick_by_type": {
-    "AGGRESSIVE": 2
-  },
-  "avg_elite": 76.9,
-  "avg_rr": 2.02,
-  "min_rr": 1.15,
+  "trade_ymd": "20260609",
+  "top_pick_count": 0,
+  "top_pick_by_type": {},
+  "avg_elite": null,
+  "avg_rr": null,
+  "min_rr": null,
   "rr_lt_1_count": 0,
-  "avg_balance": 60.0,
-  "avg_win_rate": 0.474,
+  "avg_balance": null,
+  "avg_win_rate": null,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
   "est_win_rate_n": 8645,
-  "routes": {
-    "ARMED": 2
-  },
-  "picks": [
-    {
-      "종목코드": "095610",
-      "종목명": "테스",
-      "TOP_PICK_TYPE": "AGGRESSIVE",
-      "ELITE_SCORE": 78.7,
-      "RR_NOW_TP1": 1.15,
-      "BALANCE_SCORE": 52.5,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 17.3,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.474,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 8645
-    },
-    {
-      "종목코드": "080220",
-      "종목명": "제주반도체",
-      "TOP_PICK_TYPE": "AGGRESSIVE",
-      "ELITE_SCORE": 75.1,
-      "RR_NOW_TP1": 2.89,
-      "BALANCE_SCORE": 67.4,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 43.6,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.474,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 8645
-    }
-  ]
+  "routes": {},
+  "picks": []
 }

@@ -3848,5 +3848,61 @@
       "007660_20260604_WARN_DRAWDOWN_20260605",
       "007660_20260604_STOP_HIT_20260608"
     ]
+  },
+  {
+    "code": "230240",
+    "name": "에치에프알",
+    "entry_ymd": "20260527",
+    "entry_px": 32900.0,
+    "qty": 0,
+    "stop_px": 27950.0,
+    "stop_px_initial": 27950.0,
+    "take_px1": 39700.0,
+    "take_px2": 45800.0,
+    "trailing_high": 35550.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260609",
+    "last_close_px": 25350.0,
+    "unrealized_pnl_pct": -22.95,
+    "realized_pnl_pct": -22.95,
+    "close_ymd": "20260609",
+    "close_px": 25350.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "230240_20260527_WARN_DRAWDOWN_20260528",
+      "230240_20260527_WARN_DRAWDOWN_20260601",
+      "230240_20260527_WARN_DRAWDOWN_20260602",
+      "230240_20260527_WARN_DRAWDOWN_20260603",
+      "230240_20260527_WARN_DRAWDOWN_20260605",
+      "230240_20260527_WARN_DRAWDOWN_20260608",
+      "230240_20260527_STOP_HIT_20260609"
+    ]
+  },
+  {
+    "code": "095610",
+    "name": "테스",
+    "entry_ymd": "20260529",
+    "entry_px": 119100.0,
+    "qty": 0,
+    "stop_px": 101200.0,
+    "stop_px_initial": 101200.0,
+    "take_px1": 141700.0,
+    "take_px2": 150900.0,
+    "trailing_high": 167500.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260609",
+    "last_close_px": 161400.0,
+    "unrealized_pnl_pct": 35.52,
+    "realized_pnl_pct": 35.52,
+    "close_ymd": "20260609",
+    "close_px": 161400.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "095610_20260529_WARN_DRAWDOWN_20260601",
+      "095610_20260529_WARN_DRAWDOWN_20260602",
+      "095610_20260529_WARN_DRAWDOWN_20260603",
+      "095610_20260529_TP1_HIT_20260609",
+      "095610_20260529_TP2_HIT_20260609"
+    ]
   }
 ]
