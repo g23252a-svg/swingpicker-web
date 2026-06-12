@@ -15,6 +15,22 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.1.0",
+        "date": "2026-06-12",
+        "type": "minor",
+        "title": "v24.1 — 데이터 무결성 게이트: OHLC 감사(P0-C) + CI 복구",
+        "items": [
+            "🧪 **OHLC 무결성 게이트 (P0-C):** 추천 행 단위로 최근 20봉의 OHLC 무결성을 감사하는 `data_integrity.py`를 추가했습니다. V1 가격 불변식(고가≥max(시·종), 저가≤min(시·종), 고가≥저가), V2 비양수 가격, V3 종가 점프(|1일 변화율|>45% — KRX ±30% 상하한을 정규 거래로 넘을 수 없으므로 수정주가 단절·병합·데이터 오류 의심)를 검사해 `DATA_INTEGRITY_OK/REASON/NBAD` 컬럼으로 남깁니다. 에이프로젠 -66.7% 손절(ret_10d +1582%) 같은 사건이 재발하면 런타임 디버깅 없이 recommend CSV만으로 원인 추적이 가능합니다. 무결성 실패 종목은 모멘텀 레인에서 제외됩니다.",
+            "🚫 **P0-B SSOT 흡수:** v24의 이상 폭등주 필터(ret_10d>300% → ABNORMAL_SURGE_FLAG + 모멘텀 제외)를 pipeline_calibrate 인라인 하드코딩에서 `DataIntegrityConfig`(collector_config SSOT)로 이전했습니다. 동작은 동일하며, 모듈 실패 시에도 기존 P0-B 로직으로 폴백해 v24 보호를 절대 잃지 않습니다. CARRY 종목 OHLCV도 ctx.ohlcv_map에 병합해 보유 종목까지 감사 범위에 포함합니다.",
+            "🔒 **공식 산식 무변경:** TOP_PICK·BUY_NOW_ELIGIBLE은 기본 설정에서 한 글자도 건드리지 않습니다(계약으로 고정). `demote_official=True`(기본 False)로 켜면 무결성 실패 종목의 BUY_NOW_ELIGIBLE만 0으로 강등하는 스위치를 준비해 뒀습니다 — 백테스트 검증 후 켤 수 있는 운용 옵션입니다.",
+            "🧰 **계약·테스트:** `check_contract_gate.py`에 DATA_INTEGRITY 계약(step 13)을 추가해 산출 컬럼·SSOT 연동·상한가 30% 무오탐·P0-B 보존·공식 산식 보존을 고정했고, 전용 회귀 테스트 23개(tests/test_data_integrity_v241.py)를 추가했습니다.",
+            "🛠️ **CI 복구 (silent exception 4건):** v22.3.28 작업에서 유입된 신규 silent exception 4건(tab_market 1·tab_stocks 3)을 baseline 재생성이 아닌 정식 디버그 로깅으로 해소해 `check_silent_exceptions.py` 게이트를 복구했습니다. 다음 main push가 다시 통과합니다.",
+            "🔧 **테스트 수리:** `test_carry_freshness.py`의 mock OHLCV가 1행이라 60행 미만 CARRY_LEGACY 폴백 규칙에 걸려 영구 실패하던 것을 70행 합성 OHLCV로 수리, CARRY_REFRESHED 경로가 실제로 검증되도록 했습니다. kelly_calibrator의 per_trade_log 로드 DtypeWarning(혼합 타입)도 low_memory=False로 제거했습니다.",
+            "🔁 **추천 로직 변경 없음:** 공식 매수 산식·모멘텀 레인 선정 기준은 그대로입니다. 본 릴리스는 '깨진 데이터가 신호로 둔갑하는 것'을 막는 계측·관측 레이어 추가이며, 기존 v24 P0-B 제외 동작에 무결성 실패 종목 제외가 더해지는 것이 유일한 화면 차이입니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.0.0",
         "date": "2026-06-09",
         "type": "minor",

@@ -467,6 +467,39 @@ class StopOverrideConfig:
     block_new_entry_on_risk_off: bool = True  # 베어 시 신규진입 차단
 
 # ═══════════════════════════════════════════════════
+#  [v24.1] DataIntegrityConfig — OHLC 무결성 게이트 SSOT
+# ═══════════════════════════════════════════════════
+@dataclass(frozen=True)
+class DataIntegrityConfig:
+    """data_integrity.py 파라미터. OHLC 무결성 감사 + 이상 폭등 플래그 (P0-C).
+
+    [근거] 에이프로젠 -66.7% 손절: ret_10d +1582% 폭등주의 OHLC 왜곡이 손절
+    산식을 오염 — v24 P0-A/B는 증상을 막았고, 본 게이트는 원인을 계측한다.
+    [jump_limit 45%] KRX 가격제한폭 ±30%를 정규 거래로 넘을 수 없음 → 초과 시
+    수정주가 단절·병합/감자·데이터 오류 의심 (여유 15%p는 상한가+시간외 등
+    경계 케이스 오탐 방지). 상한가 30% 연속은 절대 플래그되지 않는다.
+    """
+    enabled: bool = True
+    window: int = 20                 # 감사 대상 최근 봉 수
+    jump_limit_pct: float = 45.0     # |1일 종가 변화율| 상한 (KRX ±30% + 여유)
+    max_bad_bars: int = 0            # 허용 위반 봉 수 (0 = 단 1봉도 불허)
+    surge_ret10_pct: float = 300.0   # [P0-B 흡수] ret_10d 이상 폭등 임계
+    demote_official: bool = False    # True면 무결성 실패 시 BUY_NOW_ELIGIBLE=0 (기본: 공식 산식 보존)
+
+    def __post_init__(self):
+        if self.window < 2:
+            raise ValueError(f"window={self.window}: 최소 2봉 필요 (점프 검사)")
+        if self.jump_limit_pct <= 30.0:
+            raise ValueError(
+                f"jump_limit_pct={self.jump_limit_pct}: KRX 상하한 30%보다 커야 함 (정상 상한가 오탐 방지)"
+            )
+        if self.max_bad_bars < 0:
+            raise ValueError(f"max_bad_bars={self.max_bad_bars}: 음수 불가")
+        if self.surge_ret10_pct <= 0:
+            raise ValueError(f"surge_ret10_pct={self.surge_ret10_pct}: 양수 필요")
+
+
+# ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
 
@@ -488,6 +521,7 @@ class CollectorConfig:
     __slots__ = (
         "data", "indicator", "scoring", "macro",
         "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane", "stop_override",
+        "data_integrity",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -505,6 +539,7 @@ class CollectorConfig:
         guard: 'GuardConfig' = None,
         momentum_lane: 'MomentumLaneConfig' = None,
         stop_override: 'StopOverrideConfig' = None,
+        data_integrity: 'DataIntegrityConfig' = None,
         base_dir: str = None,
         config_version: str = "2.4.0",
     ):
@@ -519,6 +554,7 @@ class CollectorConfig:
         self.guard = guard or GuardConfig()
         self.momentum_lane = momentum_lane or MomentumLaneConfig()
         self.stop_override = stop_override or StopOverrideConfig()
+        self.data_integrity = data_integrity or DataIntegrityConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -526,7 +562,8 @@ class CollectorConfig:
         self._sub_configs = (
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
-            self.policy, self.guard, self.momentum_lane, self.stop_override, self.secrets,
+            self.policy, self.guard, self.momentum_lane, self.stop_override,
+            self.data_integrity, self.secrets,
         )
 
     def __getattr__(self, name: str):

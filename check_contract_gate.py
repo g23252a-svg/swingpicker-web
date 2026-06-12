@@ -560,6 +560,90 @@ def check_stop_override_contract():
 
     return errors
 
+def check_data_integrity_contract():
+    """[v24.1] data_integrity 산출 컬럼 계약 + DataIntegrityConfig SSOT + 모멘텀 제외 + 공식 산식 보존."""
+    errors = []
+    try:
+        sys.path.insert(0, PROJECT_ROOT)
+        import numpy as np
+        import pandas as pd
+        from data_integrity import (
+            apply_data_integrity, audit_ohlcv_window, DATA_INTEGRITY_COLS,
+        )
+        from collector_config import DEFAULT_CONFIG
+    except Exception as e:
+        return [f"data_integrity/collector_config import 실패: {e}"]
+
+    # 1) DataIntegrityConfig 연동 + 필드
+    if not hasattr(DEFAULT_CONFIG, "data_integrity"):
+        errors.append("CollectorConfig에 data_integrity 미연동")
+        return errors
+    for fld in ("enabled", "window", "jump_limit_pct", "max_bad_bars",
+                "surge_ret10_pct", "demote_official"):
+        if not hasattr(DEFAULT_CONFIG.data_integrity, fld):
+            errors.append(f"DataIntegrityConfig 필드 누락: {fld}")
+
+    # 2) 합성 OHLCV — 정상 / 불변식 위반 / 종가 점프
+    def _mk_ohlcv(closes):
+        c = pd.Series(closes, dtype="float64")
+        return pd.DataFrame({
+            "시가": c * 0.99, "고가": c * 1.02,
+            "저가": c * 0.97, "종가": c, "거래량": 10000.0,
+        })
+
+    clean = _mk_ohlcv(np.linspace(100.0, 110.0, 30))
+    invariant_bad = _mk_ohlcv(np.linspace(100.0, 110.0, 30))
+    invariant_bad.loc[invariant_bad.index[-1], "고가"] = 50.0  # 고가 < 종가 위반
+    jump_bad = _mk_ohlcv(list(np.linspace(100.0, 110.0, 29)) + [330.0])  # +200% 점프
+
+    ok1, r1, _ = audit_ohlcv_window(clean, window=20, jump_limit_pct=45.0, max_bad_bars=0)
+    if not ok1:
+        errors.append(f"정상 OHLCV가 무결성 위반 오판: {r1}")
+    ok2, _, _ = audit_ohlcv_window(invariant_bad, window=20, jump_limit_pct=45.0, max_bad_bars=0)
+    if ok2:
+        errors.append("OHLC 불변식 위반(고가<종가) 미탐지")
+    ok3, _, _ = audit_ohlcv_window(jump_bad, window=20, jump_limit_pct=45.0, max_bad_bars=0)
+    if ok3:
+        errors.append("종가 점프(+200%) 미탐지")
+
+    # 3) df 적용: 산출 컬럼 + 모멘텀 제외 + P0-B 보존
+    df = pd.DataFrame([
+        {"종목코드": "000001", "종목명": "정상주", "ret_10d_%": 12.0,
+         "MOMENTUM_LANE": 1, "BUY_NOW_ELIGIBLE": 1, "TOP_PICK": 1},
+        {"종목코드": "000002", "종목명": "폭등주", "ret_10d_%": 1582.0,
+         "MOMENTUM_LANE": 1, "BUY_NOW_ELIGIBLE": 1, "TOP_PICK": 1},
+        {"종목코드": "000003", "종목명": "왜곡주", "ret_10d_%": 20.0,
+         "MOMENTUM_LANE": 1, "BUY_NOW_ELIGIBLE": 1, "TOP_PICK": 1},
+    ])
+    omap = {"000001": clean, "000002": clean, "000003": invariant_bad}
+    out = apply_data_integrity(df, ohlcv_map=omap, config=DEFAULT_CONFIG)
+    missing = [c for c in DATA_INTEGRITY_COLS if c not in out.columns]
+    if missing:
+        errors.append(f"DATA_INTEGRITY 산출 컬럼 누락: {missing}")
+        return errors
+
+    o = out.set_index("종목명")
+    if not bool(o.loc["폭등주", "ABNORMAL_SURGE_FLAG"]):
+        errors.append("ret_10d>300% 폭등 플래그 미부여 (P0-B 회귀)")
+    if int(o.loc["폭등주", "MOMENTUM_LANE"]) != 0:
+        errors.append("폭등주 모멘텀 레인 미제외 (P0-B 회귀)")
+    if bool(o.loc["왜곡주", "DATA_INTEGRITY_OK"]):
+        errors.append("OHLC 왜곡주 무결성 OK 오판")
+    if int(o.loc["왜곡주", "MOMENTUM_LANE"]) != 0:
+        errors.append("왜곡주 모멘텀 레인 미제외")
+    if int(o.loc["정상주", "MOMENTUM_LANE"]) != 1:
+        errors.append("정상주 모멘텀 레인 오제외")
+    if not bool(o.loc["정상주", "DATA_INTEGRITY_OK"]):
+        errors.append("정상주 무결성 위반 오판")
+
+    # 4) 공식 산식 보존 — demote_official 기본 False
+    if bool(getattr(DEFAULT_CONFIG.data_integrity, "demote_official", False)):
+        errors.append("demote_official 기본값이 True (공식 산식 보존 원칙 위반)")
+    if int(o.loc["왜곡주", "BUY_NOW_ELIGIBLE"]) != 1 or int(o.loc["왜곡주", "TOP_PICK"]) != 1:
+        errors.append("기본 설정에서 공식 신호(BUY_NOW/TOP_PICK) 변형 (보존 위반)")
+
+    return errors
+
 def main():
     print("🔍 Contract Gate Check")
     print("=" * 50)
@@ -647,6 +731,13 @@ def main():
 
     print("\n12. [STOP_OVERRIDE_V23_2] stop_override 산출물 계약 + 베어 게이트...")
     errs = check_stop_override_contract()
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+    for e in errs[:5]:
+        print(f"      {e}")
+
+    print("\n13. [DATA_INTEGRITY_V24_1] data_integrity 산출물 계약 + OHLC 감사 + 공식 산식 보존...")
+    errs = check_data_integrity_contract()
     all_errors.extend(errs)
     print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
     for e in errs[:5]:

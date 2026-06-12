@@ -55,6 +55,17 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
         logger.warning(f"⚠️ CARRY OHLCV 수집 실패: {e}")
         carry_ohlcv = {}
 
+    # [v24.1 P0-C] carry 종목 OHLCV를 ctx.ohlcv_map에 병합
+    # — 보유 중(carry) 종목이야말로 무결성 감사가 가장 중요하므로,
+    #   pipeline 말미 data_integrity 감사가 carry 행을 SKIP하지 않게 한다.
+    try:
+        if isinstance(getattr(ctx, "ohlcv_map", None), dict):
+            for _ck, _cdf in carry_ohlcv.items():
+                if _cdf is not None and not _cdf.empty:
+                    ctx.ohlcv_map[str(_ck).zfill(6)] = _cdf
+    except Exception as e:
+        logger.debug(f"carry OHLCV → ctx.ohlcv_map 병합 실패 (무해): {e}")
+
     # [v20.3.5] carry 종목이 top_df에 없으면 임시 추가
     # + 이미 있어도 거래대금이 부족하면 보강 (min_turnover 필터 우회)
     _top_codes = set(ctx.top_df["종목코드"].astype(str).str.zfill(6)) if ctx.top_df is not None and not ctx.top_df.empty else set()
@@ -698,16 +709,39 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
     except Exception as e:
         logger.warning(f"\u26a0\uFE0F [v23.2] Stop Override \uc801\uc6a9 \uc2e4\ud328 (\ubb34\ud574): {e}")
 
-    # [v24 P0-B] 이상 폭등주 플래그 + 모멘텀 레인 제외 (작전/이벤트성 급등 차단)
+    # ── [v24.1 P0-C] 데이터 무결성 게이트 — OHLC 감사 + 이상 폭등 플래그 (P0-B 흡수) ──
+    # 임계값은 collector_config.DataIntegrityConfig(SSOT)에서 주입.
+    # 무결성 실패/폭등 종목은 모멘텀 레인에서 제외, 사유는 DATA_INTEGRITY_REASON에 기록.
     try:
-        _ABN_RET10 = 300.0
-        _r10 = pd.to_numeric(df_out.get("ret_10d_%", 0.0), errors="coerce").fillna(0.0)
-        _abn_mask = _r10 > _ABN_RET10
-        df_out["ABNORMAL_SURGE_FLAG"] = _abn_mask
-        if "MOMENTUM_LANE" in df_out.columns:
-            df_out.loc[_abn_mask, "MOMENTUM_LANE"] = 0
-    except Exception:
-        df_out["ABNORMAL_SURGE_FLAG"] = False
+        from data_integrity import apply_data_integrity, data_integrity_summary
+        from collector_config import DEFAULT_CONFIG as _DICFG
+
+        df_out = apply_data_integrity(
+            df_out, ohlcv_map=getattr(ctx, "ohlcv_map", None), config=_DICFG,
+        )
+        _ds = data_integrity_summary(df_out)
+        log(
+            "🧪 [v24.1] Data Integrity: 감사 {n}건 · 무결성위반 {b}건 · "
+            "폭등플래그 {s}건 · 모멘텀제외 {m}건".format(
+                n=_ds.get("n_audited", 0), b=_ds.get("n_integrity_bad", 0),
+                s=_ds.get("n_surge", 0), m=_ds.get("n_momentum_excluded", 0),
+            )
+        )
+    except Exception as e:
+        # 신규 모듈 실패 시에도 v24 P0-B(폭등주 모멘텀 제외)는 절대 잃지 않는다.
+        logger.warning(f"⚠️ [v24.1] Data Integrity 적용 실패 → P0-B 폴백: {e}")
+        try:
+            if "ret_10d_%" in df_out.columns:
+                _r10 = pd.to_numeric(df_out["ret_10d_%"], errors="coerce").fillna(0.0)
+            else:
+                _r10 = pd.Series(0.0, index=df_out.index)
+            _abn_mask = _r10 > 300.0
+            df_out["ABNORMAL_SURGE_FLAG"] = _abn_mask
+            if "MOMENTUM_LANE" in df_out.columns:
+                df_out.loc[_abn_mask, "MOMENTUM_LANE"] = 0
+        except Exception as e2:
+            logger.warning(f"⚠️ [v24.1] P0-B 폴백도 실패 (플래그 False 고정): {e2}")
+            df_out["ABNORMAL_SURGE_FLAG"] = False
 
     ctx.df_out = df_out
     return ctx
