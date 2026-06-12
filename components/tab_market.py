@@ -1389,8 +1389,9 @@ def _parse_reference_date(value=None):
     if hasattr(value, "date"):
         try:
             return value.date()
-        except TypeError:
-            pass
+        except TypeError as e:
+            # date가 호출 불가능한 속성인 객체 — 아래 문자열 파싱으로 폴백
+            _logger.debug("[tab_market] reference date .date() 호출 실패 (문자열 파싱 폴백): %s", e)
     text = str(value or "").strip()
     for pat in (r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", r"(\d{4})(\d{2})(\d{2})"):
         m = re.search(pat, text)

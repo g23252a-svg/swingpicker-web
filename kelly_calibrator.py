@@ -190,7 +190,7 @@ def _ensure_per_trade_schema(path: str) -> None:
     if not os.path.exists(path):
         return
     try:
-        old = pd.read_csv(path, dtype={"code": str})
+        old = pd.read_csv(path, dtype={"code": str}, low_memory=False)
     except (pd.errors.EmptyDataError, OSError):
         return
     if list(old.columns) == list(PER_TRADE_COLS):
@@ -217,7 +217,7 @@ def load_per_trade_log(out_dir: str) -> pd.DataFrame:
         return pd.DataFrame(columns=PER_TRADE_COLS)
 
     try:
-        df = pd.read_csv(path, dtype={"code": str})
+        df = pd.read_csv(path, dtype={"code": str}, low_memory=False)
     except (pd.errors.EmptyDataError, OSError) as e:
         _logger.warning(f"트레이드 로그 읽기 실패: {e}")
         return pd.DataFrame(columns=PER_TRADE_COLS)

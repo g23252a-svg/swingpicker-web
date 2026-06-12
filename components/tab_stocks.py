@@ -4457,8 +4457,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     for _ctrl in (route_filter, label_filter, risk_filter, sort_mode, view_table_mode, view_mode):
         try:
             _ctrl.on_value_change(lambda e: _build_view())
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.debug("[tab_stocks] 필터 on_value_change 바인딩 실패 (무해): %s", e)
 
     def _filtered():
         fdf = df.copy()
@@ -4857,8 +4857,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                         ]
                         if not same_label.empty:
                             _compare = str(same_label.iloc[0].get("종목명", ""))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.debug("[tab_stocks] 동일 라벨 비교종목 조회 실패 (무해): %s", e)
 
                 # rank/total 계산
                 try:
@@ -4914,8 +4914,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                                 f'border-radius: 4px; margin-bottom: 8px;">'
                                 f'⚠️ v2 렌더링 실패 → v1으로 fallback. 사유: {h_escape_safe(str(_e))}</div>'
                             )
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.debug("[tab_stocks] v2 폴백 디버그 배너 렌더 실패 (무해): %s", e)
         else:
             # v2 미활성 사유 표시 (admin인데 v2 안 뜨는 경우 진단)
             if _show_debug and isinstance(_auth, str):

@@ -11,6 +11,22 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 
 
+def _mk_mock_ohlcv(n: int = 70, last_close: float = 4700.0) -> pd.DataFrame:
+    """[v24.1] CARRY 재분석 최소 요건을 충족하는 합성 OHLCV.
+
+    _refresh_carry_rows는 60행 미만 OHLCV를 'ohlcv_short'로 CARRY_LEGACY
+    폴백하므로, CARRY_REFRESHED 경로를 검증하려면 60행 이상이 필요하다.
+    """
+    closes = np.linspace(last_close * 0.9, last_close, n)
+    return pd.DataFrame({
+        "시가": closes * 0.99,
+        "고가": closes * 1.01,
+        "저가": closes * 0.98,
+        "종가": closes,
+        "거래량": np.full(n, 10000.0),
+    })
+
+
 def test_carry_indicators_refreshed():
     """CARRY 종목의 RSI14가 이전 값과 달라져야 한다."""
     prev_row = {
@@ -40,7 +56,7 @@ def test_carry_indicators_refreshed():
     result = _refresh_carry_rows(
         ctx, prev_df, ["054920"],
         analyze_fn=lambda *a, **kw: mock_result,
-        prepare_ohlcv_fn=lambda codes, s, e, d: {"054920": pd.DataFrame({"종가": [4700]})},
+        prepare_ohlcv_fn=lambda codes, s, e, d: {"054920": _mk_mock_ohlcv(70)},
         trigger_fn=lambda df: 45.0,
         ml_apply_fn=lambda df, _: df.assign(ML_SCORE=80.0),
         build_score_fn=lambda df, _: df,
@@ -74,7 +90,7 @@ def test_carry_from_date_preserved():
     result = _refresh_carry_rows(
         ctx, prev_df, ["054920"],
         analyze_fn=lambda *a, **kw: mock_result,
-        prepare_ohlcv_fn=lambda codes, s, e, d: {"054920": pd.DataFrame({"종가": [4700]})},
+        prepare_ohlcv_fn=lambda codes, s, e, d: {"054920": _mk_mock_ohlcv(70)},
         trigger_fn=lambda df: 40.0,
         ml_apply_fn=lambda df, _: df.assign(ML_SCORE=80.0),
         build_score_fn=lambda df, _: df,
