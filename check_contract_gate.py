@@ -27,6 +27,18 @@ STALE_VERSIONS = ['"v20.5"', '"v20.6"', '"v20.7"']  # 현재 v20.8, 이전 버�
 POLICY_FILES = ["validation.py", "stop_logic.py", "trade_plan.py"]
 FEATURE_FILES = ["ml_engine.py"]
 
+# ── [v24.1.1] 서드파티 의존성 미설치 환경(CI quick-checks 등) 구분 ──
+# step 10~13(런타임 행동 계약)은 pandas/numpy가 필요하다. 의존성 없는 환경에서는
+# 스킵하고(CI test job이 전체 검증), '프로젝트 모듈' import 실패는 그대로 위반 처리.
+_THIRD_PARTY_DEPS = {"pandas", "numpy"}
+
+
+def _missing_third_party(e: Exception):
+    """ModuleNotFoundError가 서드파티 의존성 부재라면 모듈명, 아니면 None."""
+    if isinstance(e, ModuleNotFoundError) and getattr(e, "name", None) in _THIRD_PARTY_DEPS:
+        return e.name
+    return None
+
 # 정책 임계치 리터럴 금지 패턴
 # validation.py, stop_logic.py에서 PolicyConfig 참조 없이 직접 숫자를 쓰면 위반
 POLICY_LITERALS = {
@@ -393,6 +405,10 @@ def check_guard_v23_contract():
         from guard_system import apply_guard_system, GUARD_CONTRACT_COLS
         from collector_config import DEFAULT_CONFIG
     except Exception as e:
+        _dep = _missing_third_party(e)
+        if _dep:
+            print(f"   ⚠️ {_dep} 미설치 환경 — 건너뜀 (CI test job에서 전체 검증)")
+            return []
         return [f"guard_system/collector_config import 실패: {e}"]
 
     # 1) GuardConfig가 CollectorConfig에 합성되어 있는지
@@ -444,6 +460,10 @@ def check_momentum_lane_contract():
         from momentum_lane import apply_momentum_lane, MOMENTUM_LANE_COLS
         from collector_config import DEFAULT_CONFIG
     except Exception as e:
+        _dep = _missing_third_party(e)
+        if _dep:
+            print(f"   ⚠️ {_dep} 미설치 환경 — 건너뜀 (CI test job에서 전체 검증)")
+            return []
         return [f"momentum_lane/collector_config import 실패: {e}"]
 
     # 1) MomentumLaneConfig가 CollectorConfig에 합성되어 있는지
@@ -505,6 +525,10 @@ def check_stop_override_contract():
         from stop_override import apply_stop_override, STOP_OVERRIDE_COLS
         from collector_config import DEFAULT_CONFIG
     except Exception as e:
+        _dep = _missing_third_party(e)
+        if _dep:
+            print(f"   ⚠️ {_dep} 미설치 환경 — 건너뜀 (CI test job에서 전체 검증)")
+            return []
         return [f"stop_override/collector_config import 실패: {e}"]
 
     # 1) StopOverrideConfig 연동 + 필드
@@ -572,6 +596,10 @@ def check_data_integrity_contract():
         )
         from collector_config import DEFAULT_CONFIG
     except Exception as e:
+        _dep = _missing_third_party(e)
+        if _dep:
+            print(f"   ⚠️ {_dep} 미설치 환경 — 건너뜀 (CI test job에서 전체 검증)")
+            return []
         return [f"data_integrity/collector_config import 실패: {e}"]
 
     # 1) DataIntegrityConfig 연동 + 필드

@@ -105,6 +105,12 @@ jobs:
           # 버전 spec은 반드시 quote — `>`가 쉘 redirection으로 해석되는 것 방지
           python -m pip install "bcrypt>=4.0.0" pytest
 
+      # ─── [v24.1.1] Contract Gate 전체 검증 (Hard Fail) ───
+      # quick-checks(의존성 없음)에서는 pandas 필요한 step 10~13이 스킵되므로,
+      # 의존성이 설치된 이 job에서 13단계 전체를 강제한다.
+      - name: 📋 Contract Gate (전체 13단계 — 런타임 행동 계약 포함)
+        run: python check_contract_gate.py
+
       # ─── 항상 실행되어야 하는 핵심 테스트 (Hard Fail) ───
       - name: 🧪 Route 계약 테스트
         run: python -m pytest test_route_contract_v22.py -v --tb=short
