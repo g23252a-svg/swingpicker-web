@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.2.0",
+        "date": "2026-06-13",
+        "type": "minor",
+        "title": "v24.2 — DATA_INTEGRITY 소급 백테스트 + combo DQ 변수",
+        "items": [
+            "📊 **소급 백테스트 하네스 (scripts/backtest_data_integrity.py):** v24.1 무결성 게이트를 추천 이력 77일(2/26~6/12, 32,463 거래행)에 소급 적용했습니다. 각 추천일의 ohlcv_cache parquet(그날 파이프라인이 실제로 본 데이터)으로 as-of 감사를 수행해 사후 수정주가 반영에 의한 왜곡을 차단합니다. 임계값은 전부 DataIntegrityConfig SSOT에서 주입.",
+            "🔬 **핵심 발견:** 무결성 위반(DI_BAD) 651건(에피소드 496)의 forward 성과 — h20 중앙값 -14.78%·승률 26.4%·p10 -34.2% (CLEAN: -0.30%·49.1%). 단기(h5)는 차이 없으나 보유할수록 급격히 부패하는 거래정지/데이터결손 종목군 프로파일. TOP_PICK 오염 1건(5/12 빛과전자 ARMED → h20 -43.7%) 확인.",
+            "🎯 **에이프로젠 원인 계측 완료:** 5/15 as-of 감사 결과 직전 20봉 중 14봉 비양수가격 + OHLC 불변식 14봉 위반 + 종가점프 1446% — 3종 위반 전부 적중. -66.7% 손절 사건의 근본 원인(캐시 OHLC 왜곡)이 데이터 레벨에서 확정되었습니다.",
+            "⚙️ **combo_optimizer DQ 변수:** GUARD 검증 패턴 그대로 dq_exclude ON/OFF 차원을 추가했습니다(패널 존재 시 128→256 조합). 실데이터 grid search에서 옵티마이저가 스스로 dq_exclude=1 조합을 최적으로 선택(승률 74.0→75.0%, EV +12.55→+12.85). 패널 없으면 기존 128조합과 비트단위 동일 — 완전 하위호환.",
+            "🧰 **테스트 10개 추가** (tests/test_backtest_data_integrity_v242.py): as-of 컷·forward 관례·flag 파싱·그룹 집계·combo 하위호환/제외 효과 고정. 산출물: data_integrity_asof_panel.csv(combo DQ 입력) + backtest_data_integrity_latest.json.",
+            "🔁 **추천 로직 변경 없음:** demote_official 기본값은 False 유지(계약 고정). 본 릴리스는 승격 판단의 '근거'를 생산하는 분석 레이어이며, 스위치 결정은 리포트(REPORT_v24.2) 참조.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.1.0",
         "date": "2026-06-12",
         "type": "minor",

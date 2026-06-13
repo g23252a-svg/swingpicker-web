@@ -96,10 +96,36 @@ def _load_trade_rows(data_dir: str, horizon: int) -> pd.DataFrame:
                 "ROUTE": str(r.get("ROUTE", "")),
                 "SCORE": float(r.get("DISPLAY_SCORE", 0) or 0),
                 "trade_date": rec_ymd,  # [v3.8.1] IS/OOS 분할용
+                "code": code,           # [v24.2] DQ 패널 merge 키
             })
 
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
     df.attrs["matched_days"] = matched_days
+
+    # ── [v24.2] DATA_INTEGRITY as-of 패널 merge → DQ 컬럼(1=플래그) ──
+    # scripts/backtest_data_integrity.py가 생성한 패널이 있을 때만 부여.
+    # 패널이 없으면 DQ=0 → dq_exclude 조합이 기존과 완전 동일(하위호환).
+    df["DQ"] = 0
+    panel_path = os.path.join(data_dir, "data_integrity_asof_panel.csv")
+    if not df.empty and os.path.exists(panel_path):
+        try:
+            _pn = pd.read_csv(
+                panel_path, dtype={"종목코드": str, "rec_ymd": str},
+                encoding="utf-8-sig",
+                usecols=["rec_ymd", "종목코드", "FLAGGED"],
+            )
+            _flag_keys = set(zip(
+                _pn.loc[_pn["FLAGGED"].astype(bool), "rec_ymd"].astype(str),
+                _pn.loc[_pn["FLAGGED"].astype(bool), "종목코드"].astype(str).str.zfill(6),
+            ))
+            df["DQ"] = [
+                1 if (str(d), str(c)) in _flag_keys else 0
+                for d, c in zip(df["trade_date"], df["code"])
+            ]
+            logger.info("combo_optimizer: DQ 패널 적용 — 플래그 %d/%d행",
+                        int(df["DQ"].sum()), len(df))
+        except Exception as e:
+            logger.warning("combo_optimizer: DQ 패널 적용 실패 (DQ=0 유지): %s", e)
     return df
 
 
@@ -110,14 +136,21 @@ def _evaluate_combo(
     ai_min: int,
     routes: List[str],
     min_samples: int = 10,
+    dq_exclude: int = 0,
 ) -> Optional[dict]:
-    """단일 조합을 데이터에 적용 → 통계 반환. 표본 부족 시 None."""
+    """단일 조합을 데이터에 적용 → 통계 반환. 표본 부족 시 None.
+
+    [v24.2] dq_exclude=1이면 DATA_INTEGRITY 플래그(DQ=1) 행을 제외하고 평가.
+    DQ 컬럼이 없거나 dq_exclude=0이면 기존과 완전 동일.
+    """
     sub = df[
         (df["S"] >= s_min)
         & (df["T"] >= t_min)
         & (df["AI"] >= ai_min)
         & (df["ROUTE"].isin(routes))
     ]
+    if int(dq_exclude) == 1 and "DQ" in sub.columns:
+        sub = sub[sub["DQ"] == 0]
     n = len(sub)
     if n < min_samples:
         return None
@@ -141,13 +174,19 @@ def _evaluate_combo(
     }
 
 
-def _all_combos() -> list:
-    """탐색할 128개 조합 생성 (기존 그리드와 동일)."""
+def _all_combos(include_dq: bool = False) -> list:
+    """탐색 조합 생성 — 항상 5-tuple (s, t, ai, routes, dq_exclude).
+
+    include_dq=False(기본): dq 차원 [0]만 → 기존 128개 조합과 동일.
+    include_dq=True: dq 차원 [0, 1] → 256개 (DATA_INTEGRITY 제외 효과 비교).
+    """
+    dq_dim = [0, 1] if include_dq else [0]
     return list(product(
         [60, 70, 80, 90],                                   # S_min
         [50, 60, 70, 80],                                   # T_min
         [40, 50, 60, 70],                                   # AI_min
         [["ATTACK", "ARMED"], ["ATTACK", "ARMED", "WAIT"]],  # ROUTE
+        dq_dim,                                             # [v24.2] DQ 제외
     ))
 
 
@@ -188,8 +227,10 @@ def run_combo_optimization(
 
     # 2) 조합 그리드 탐색 — _all_combos() + _evaluate_combo() 사용
     results = []
-    for s_min, t_min, ai_min, routes in _all_combos():
-        stat = _evaluate_combo(df, s_min, t_min, ai_min, routes, min_samples)
+    _include_dq = bool(("DQ" in df.columns) and df["DQ"].any())  # [v24.2]
+    for s_min, t_min, ai_min, routes, dq in _all_combos(_include_dq):
+        stat = _evaluate_combo(df, s_min, t_min, ai_min, routes, min_samples,
+                               dq_exclude=dq)
         if stat is None:
             continue
         results.append({
@@ -197,6 +238,7 @@ def run_combo_optimization(
             "T_min": int(t_min),
             "AI_min": int(ai_min),
             "routes": routes,
+            "dq_exclude": int(dq),  # [v24.2] 1=무결성 플래그 제외 조합
             **stat,  # n, win_rate, avg_ret, avg_win, avg_loss, ev
         })
 
@@ -330,12 +372,16 @@ def run_combo_optimization_wf(
         )
 
     # 3) 모든 조합에 대해 IS/OOS 동시 평가
-    combos = _all_combos()
+    _include_dq = bool(("DQ" in df.columns) and df["DQ"].any())  # [v24.2]
+    combos = _all_combos(_include_dq)
     results = []
 
-    for s_min, t_min, ai_min, routes in combos:
-        is_stat = _evaluate_combo(is_df, s_min, t_min, ai_min, routes, min_samples)
-        oos_stat = _evaluate_combo(oos_df, s_min, t_min, ai_min, routes, min_samples=max(3, min_samples // 2))
+    for s_min, t_min, ai_min, routes, dq in combos:
+        is_stat = _evaluate_combo(is_df, s_min, t_min, ai_min, routes, min_samples,
+                                  dq_exclude=dq)
+        oos_stat = _evaluate_combo(oos_df, s_min, t_min, ai_min, routes,
+                                   min_samples=max(3, min_samples // 2),
+                                   dq_exclude=dq)
 
         if is_stat is None or oos_stat is None:
             continue
@@ -385,6 +431,7 @@ def run_combo_optimization_wf(
             "T_min": int(t_min),
             "AI_min": int(ai_min),
             "routes": routes,
+            "dq_exclude": int(dq),  # [v24.2] 1=무결성 플래그 제외 조합
             "is": is_stat,
             "oos": oos_stat,
             "robustness": robustness,
