@@ -6,6 +6,7 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260520,066570,LG전자,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260608,170920,엘티씨,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260611,353200,대덕전자,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
+20260615,353200,대덕전자,🏆 최강,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260227,309710,아이티켐,🏆 최강,EXECUTE,EXECUTED,,2026-03-03,0,
 20260302,309710,아이티켐,🏆 최강,SKIP,SAME_TICKER_ALREADY_HELD,이미 보유 중,2026-03-03,1,309710
 20260313,003310,대주산업,🏆 최강,EXECUTE,EXECUTED,,2026-03-16,0,
