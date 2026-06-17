@@ -3991,5 +3991,30 @@
       "144960_20260521_WARN_DRAWDOWN_20260609",
       "144960_20260521_STOP_HIT_20260610"
     ]
+  },
+  {
+    "code": "000660",
+    "name": "SK하이닉스",
+    "entry_ymd": "20260611",
+    "entry_px": 2101000.0,
+    "qty": 0,
+    "stop_px": 1785000.0,
+    "stop_px_initial": 1785000.0,
+    "take_px1": 2407000.0,
+    "take_px2": 2473000.0,
+    "trailing_high": 2523000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260617",
+    "last_close_px": 2521000.0,
+    "unrealized_pnl_pct": 19.99,
+    "realized_pnl_pct": 19.99,
+    "close_ymd": "20260617",
+    "close_px": 2521000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "000660_20260611_TP1_HIT_20260616",
+      "000660_20260611_TP1_HIT_20260617",
+      "000660_20260611_TP2_HIT_20260617"
+    ]
   }
 ]
