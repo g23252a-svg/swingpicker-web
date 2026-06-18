@@ -1,0 +1,24 @@
+{
+  "trade_date": "20260618",
+  "generated_at": "2026-06-18 23:27:13",
+  "count": 1,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "033160",
+      "name": "엠케이전자",
+      "route": "ATTACK",
+      "score": 84.9,
+      "close": 30000,
+      "entry": 30000,
+      "stop": 25500,
+      "target1": 37000,
+      "target2": 38450,
+      "est_win_rate": 0.452,
+      "rr": 1.6,
+      "sector": "IT/전기전자",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/033160"
+    }
+  ]
+}

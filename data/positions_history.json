@@ -4016,5 +4016,58 @@
       "000660_20260611_TP1_HIT_20260617",
       "000660_20260611_TP2_HIT_20260617"
     ]
+  },
+  {
+    "code": "214320",
+    "name": "이노션",
+    "entry_ymd": "20260515",
+    "entry_px": 20850.0,
+    "qty": 0,
+    "stop_px": 19670.0,
+    "stop_px_initial": 19670.0,
+    "take_px1": 22650.0,
+    "take_px2": 23400.0,
+    "trailing_high": 22650.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260618",
+    "last_close_px": 19560.0,
+    "unrealized_pnl_pct": -6.19,
+    "realized_pnl_pct": -6.19,
+    "close_ymd": "20260618",
+    "close_px": 19560.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "214320_20260515_WARN_DRAWDOWN_20260617",
+      "214320_20260515_STOP_HIT_20260618"
+    ]
+  },
+  {
+    "code": "356860",
+    "name": "티엘비",
+    "entry_ymd": "20260601",
+    "entry_px": 106300.0,
+    "qty": 0,
+    "stop_px": 90300.0,
+    "stop_px_initial": 90300.0,
+    "take_px1": 134500.0,
+    "take_px2": 151800.0,
+    "trailing_high": 125000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260618",
+    "last_close_px": 90100.0,
+    "unrealized_pnl_pct": -15.24,
+    "realized_pnl_pct": -15.24,
+    "close_ymd": "20260618",
+    "close_px": 90100.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "356860_20260601_WARN_DRAWDOWN_20260608",
+      "356860_20260601_WARN_DRAWDOWN_20260609",
+      "356860_20260601_WARN_DRAWDOWN_20260610",
+      "356860_20260601_WARN_DRAWDOWN_20260612",
+      "356860_20260601_WARN_DRAWDOWN_20260616",
+      "356860_20260601_WARN_DRAWDOWN_20260617",
+      "356860_20260601_STOP_HIT_20260618"
+    ]
   }
 ]

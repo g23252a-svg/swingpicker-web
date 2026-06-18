@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20260618",
+  "top_pick_count": 0,
+  "top_pick_by_type": {},
+  "avg_elite": null,
+  "avg_rr": null,
+  "min_rr": null,
+  "rr_lt_1_count": 0,
+  "avg_balance": null,
+  "avg_win_rate": null,
+  "est_win_rate_method": "ELITE_SCORE",
+  "est_win_rate_mode": "MATURE",
+  "est_win_rate_n": 9805,
+  "routes": {},
+  "picks": []
+}

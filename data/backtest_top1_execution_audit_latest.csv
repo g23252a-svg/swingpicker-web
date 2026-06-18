@@ -63,3 +63,4 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260610,009155,삼성전기우,🏆 최강,EXECUTE,EXECUTED,,2026-06-11,0,
 20260615,353200,대덕전자,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-06-17,1,009155
 20260616,353200,대덕전자,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-06-17,1,009155
+20260617,089030,테크윙,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-06-18,1,009155
