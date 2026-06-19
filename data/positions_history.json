@@ -4069,5 +4069,88 @@
       "356860_20260601_WARN_DRAWDOWN_20260617",
       "356860_20260601_STOP_HIT_20260618"
     ]
+  },
+  {
+    "code": "187870",
+    "name": "디바이스",
+    "entry_ymd": "20260520",
+    "entry_px": 23600.0,
+    "qty": 0,
+    "stop_px": 20050.0,
+    "stop_px_initial": 20050.0,
+    "take_px1": 29700.0,
+    "take_px2": 34600.0,
+    "trailing_high": 27400.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260619",
+    "last_close_px": 19930.0,
+    "unrealized_pnl_pct": -15.55,
+    "realized_pnl_pct": -15.55,
+    "close_ymd": "20260619",
+    "close_px": 19930.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "187870_20260520_WARN_DRAWDOWN_20260601",
+      "187870_20260520_WARN_DRAWDOWN_20260602",
+      "187870_20260520_WARN_DRAWDOWN_20260603",
+      "187870_20260520_WARN_DRAWDOWN_20260605",
+      "187870_20260520_WARN_DRAWDOWN_20260608",
+      "187870_20260520_WARN_DRAWDOWN_20260610",
+      "187870_20260520_WARN_DRAWDOWN_20260617",
+      "187870_20260520_WARN_DRAWDOWN_20260618",
+      "187870_20260520_STOP_HIT_20260619"
+    ]
+  },
+  {
+    "code": "323410",
+    "name": "카카오뱅크",
+    "entry_ymd": "20260610",
+    "entry_px": 24750.0,
+    "qty": 0,
+    "stop_px": 22550.0,
+    "stop_px_initial": 22550.0,
+    "take_px1": 28550.0,
+    "take_px2": 29500.0,
+    "trailing_high": 25000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260619",
+    "last_close_px": 22150.0,
+    "unrealized_pnl_pct": -10.51,
+    "realized_pnl_pct": -10.51,
+    "close_ymd": "20260619",
+    "close_px": 22150.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "323410_20260610_WARN_DRAWDOWN_20260611",
+      "323410_20260610_WARN_DRAWDOWN_20260618",
+      "323410_20260610_STOP_HIT_20260619"
+    ]
+  },
+  {
+    "code": "043260",
+    "name": "성호전자",
+    "entry_ymd": "20260612",
+    "entry_px": 46650.0,
+    "qty": 0,
+    "stop_px": 39650.0,
+    "stop_px_initial": 39650.0,
+    "take_px1": 57700.0,
+    "take_px2": 62000.0,
+    "trailing_high": 50500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260619",
+    "last_close_px": 38150.0,
+    "unrealized_pnl_pct": -18.22,
+    "realized_pnl_pct": -18.22,
+    "close_ymd": "20260619",
+    "close_px": 38150.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "043260_20260612_WARN_DRAWDOWN_20260615",
+      "043260_20260612_WARN_DRAWDOWN_20260616",
+      "043260_20260612_WARN_DRAWDOWN_20260617",
+      "043260_20260612_WARN_DRAWDOWN_20260618",
+      "043260_20260612_STOP_HIT_20260619"
+    ]
   }
 ]
