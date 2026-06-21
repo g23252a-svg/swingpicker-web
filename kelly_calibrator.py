@@ -158,7 +158,29 @@ def save_per_trade_log(
         # 새 컬럼 append 시 정렬 어긋남 방지. 마이그레이션 후 헤더 재판정.
         _ensure_per_trade_schema(path)
         write_header = not os.path.exists(path)
-        df_new.to_csv(path, mode="a", header=write_header, index=False, encoding="utf-8-sig")
+        # [v4.0 hotfix] 저장 시점 중복 제거
+        if os.path.exists(path):
+            try:
+                df_old = pd.read_csv(path, dtype={"code": str}, low_memory=False)
+            except (pd.errors.EmptyDataError, OSError):
+                df_old = pd.DataFrame(columns=PER_TRADE_COLS)
+            df_all = pd.concat(
+                [df_old.reindex(columns=PER_TRADE_COLS),
+                 df_new.reindex(columns=PER_TRADE_COLS)],
+                ignore_index=True,
+            )
+            for _col in ["rec_date", "code", "method", "topk"]:
+                if _col in df_all.columns:
+                    df_all[_col] = df_all[_col].astype(str)
+            if "horizon" in df_all.columns:
+                df_all["horizon"] = pd.to_numeric(
+                    df_all["horizon"], errors="coerce").fillna(5).astype(int)
+            _keys = [c for c in _TRADE_KEY_COLS if c in df_all.columns]
+            if _keys:
+                df_all = df_all.drop_duplicates(subset=_keys, keep="last")
+            df_all.to_csv(path, index=False, encoding="utf-8-sig")
+        else:
+            df_new.to_csv(path, mode="w", header=True, index=False, encoding="utf-8-sig")
     except Exception as e:
         _logger.error(f"트레이드 로그 저장 실패: {e}")
     finally:
