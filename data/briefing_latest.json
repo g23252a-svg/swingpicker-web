@@ -1,24 +1,41 @@
 {
-  "trade_date": "20260622",
-  "generated_at": "2026-06-23 01:08:46",
-  "count": 1,
+  "trade_date": "20260623",
+  "generated_at": "2026-06-23 23:01:11",
+  "count": 2,
   "stocks": [
     {
       "rank": 1,
-      "code": "252990",
-      "name": "샘씨엔에스",
-      "route": "ARMED",
-      "score": 84.6,
-      "close": 14600,
-      "entry": 14600,
-      "stop": 12410,
-      "target1": 16960,
-      "target2": 20000,
+      "code": "004710",
+      "name": "한솔테크닉스",
+      "route": "ATTACK",
+      "score": 88.6,
+      "close": 12870,
+      "entry": 12870,
+      "stop": 10930,
+      "target1": 16430,
+      "target2": 17090,
       "est_win_rate": 0.486,
-      "rr": 1.1,
+      "rr": 1.8,
       "sector": "IT/전기전자",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/004710"
+    },
+    {
+      "rank": 2,
+      "code": "019210",
+      "name": "와이지-원",
+      "route": "ATTACK",
+      "score": 84.0,
+      "close": 19330,
+      "entry": 19330,
+      "stop": 16430,
+      "target1": 25300,
+      "target2": 25950,
+      "est_win_rate": 0.486,
+      "rr": 2.1,
+      "sector": "기타",
       "market": "KOSDAQ",
-      "url": "https://ldyprotrader.com/stock/252990"
+      "url": "https://ldyprotrader.com/stock/019210"
     }
   ]
 }

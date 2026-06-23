@@ -201,12 +201,12 @@
         "ARMED"
       ],
       "dq_exclude": 0,
-      "n": 283,
-      "win_rate": 72.4,
-      "avg_ret": 9.95,
+      "n": 284,
+      "win_rate": 72.2,
+      "avg_ret": 9.85,
       "avg_win": 16.8,
-      "avg_loss": 8.07,
-      "ev": 9.95
+      "avg_loss": 8.2,
+      "ev": 9.85
     }
   ],
   "top_combos_ev": [
@@ -372,11 +372,11 @@
     }
   ],
   "meta": {
-    "total_trades": 35981,
-    "total_win_rate": 49.8,
-    "matched_days": 70,
+    "total_trades": 36386,
+    "total_win_rate": 49.3,
+    "matched_days": 71,
     "horizon": 3,
     "min_samples": 10
   },
-  "generated_at": "2026-06-23T01:08:31.946132"
+  "generated_at": "2026-06-23T23:00:51.474453"
 }

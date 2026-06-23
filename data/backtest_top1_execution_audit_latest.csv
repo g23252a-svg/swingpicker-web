@@ -65,3 +65,4 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260616,353200,대덕전자,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-06-17,1,009155
 20260617,089030,테크윙,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-06-18,1,009155
 20260618,011070,LG이노텍,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-06-19,1,009155
+20260622,252990,샘씨엔에스,🏆 최강,EXECUTE,EXECUTED,,2026-06-23,0,
