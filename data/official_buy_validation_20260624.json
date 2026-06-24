@@ -1,0 +1,27 @@
+{
+  "version": "22.3.12",
+  "asof": "20260624",
+  "generated_at": "2026-06-24T22:42:14",
+  "summary": {
+    "signal_days": 28,
+    "top_pick_signals": 70,
+    "official_buy_signals": 0,
+    "official_buy_results": 0,
+    "official_buy_win_rate": null,
+    "official_buy_avg_net_pct": null,
+    "no_official_buy_days": 28,
+    "top_pick_holdout_signals": 70,
+    "top_pick_holdout_results": 15,
+    "holdout_top_pick_win_rate": 26.67,
+    "holdout_top_pick_avg_net_pct": -2.524,
+    "cash_vs_top_pick_avg_pct": 2.524,
+    "cash_avoided_loss_days": 8,
+    "cash_opportunity_cost_days": 4
+  },
+  "notes": [
+    "official_buy_signal = TOP_PICK + BUY_NOW_ELIGIBLE",
+    "top_pick_holdout = TOP_PICK=1 and BUY_NOW_ELIGIBLE=0",
+    "cash_vs_top_pick_pct = 0% cash return - holdout TOP_PICK net_pct",
+    "measurement-only: recommendation formulas are not modified"
+  ]
+}

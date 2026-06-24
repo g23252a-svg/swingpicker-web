@@ -4333,5 +4333,127 @@
       "036010_20260616_WARN_DRAWDOWN_20260622",
       "036010_20260616_STOP_HIT_20260623"
     ]
+  },
+  {
+    "code": "005850",
+    "name": "에스엘",
+    "entry_ymd": "20260421",
+    "entry_px": 63900.0,
+    "qty": 0,
+    "stop_px": 57800.0,
+    "stop_px_initial": 57800.0,
+    "take_px1": 77400.0,
+    "take_px2": 84900.0,
+    "trailing_high": 79500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260624",
+    "last_close_px": 57700.0,
+    "unrealized_pnl_pct": -9.7,
+    "realized_pnl_pct": -9.7,
+    "close_ymd": "20260624",
+    "close_px": 57700.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "005850_20260421_WARN_DRAWDOWN_20260520",
+      "005850_20260421_WARN_DRAWDOWN_20260623",
+      "005850_20260421_STOP_HIT_20260624"
+    ]
+  },
+  {
+    "code": "031330",
+    "name": "에스에이엠티",
+    "entry_ymd": "20260609",
+    "entry_px": 15700.0,
+    "qty": 0,
+    "stop_px": 13340.0,
+    "stop_px_initial": 13340.0,
+    "take_px1": 19950.0,
+    "take_px2": 20800.0,
+    "trailing_high": 17700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260624",
+    "last_close_px": 12880.0,
+    "unrealized_pnl_pct": -17.96,
+    "realized_pnl_pct": -17.96,
+    "close_ymd": "20260624",
+    "close_px": 12880.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "031330_20260609_WARN_DRAWDOWN_20260623",
+      "031330_20260609_STOP_HIT_20260624"
+    ]
+  },
+  {
+    "code": "033780",
+    "name": "KT&G",
+    "entry_ymd": "20260611",
+    "entry_px": 185100.0,
+    "qty": 0,
+    "stop_px": 170800.0,
+    "stop_px_initial": 170800.0,
+    "take_px1": 209000.0,
+    "take_px2": 214500.0,
+    "trailing_high": 192400.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260624",
+    "last_close_px": 168600.0,
+    "unrealized_pnl_pct": -8.91,
+    "realized_pnl_pct": -8.91,
+    "close_ymd": "20260624",
+    "close_px": 168600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "033780_20260611_WARN_DRAWDOWN_20260622",
+      "033780_20260611_WARN_DRAWDOWN_20260623",
+      "033780_20260611_STOP_HIT_20260624"
+    ]
+  },
+  {
+    "code": "252990",
+    "name": "샘씨엔에스",
+    "entry_ymd": "20260622",
+    "entry_px": 14600.0,
+    "qty": 0,
+    "stop_px": 12410.0,
+    "stop_px_initial": 12410.0,
+    "take_px1": 16960.0,
+    "take_px2": 20000.0,
+    "trailing_high": 15290.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260624",
+    "last_close_px": 12320.0,
+    "unrealized_pnl_pct": -15.62,
+    "realized_pnl_pct": -15.62,
+    "close_ymd": "20260624",
+    "close_px": 12320.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "252990_20260622_WARN_DRAWDOWN_20260623",
+      "252990_20260622_STOP_HIT_20260624"
+    ]
+  },
+  {
+    "code": "200470",
+    "name": "에이팩트",
+    "entry_ymd": "20260622",
+    "entry_px": 11040.0,
+    "qty": 0,
+    "stop_px": 9380.0,
+    "stop_px_initial": 9380.0,
+    "take_px1": 13100.0,
+    "take_px2": 13610.0,
+    "trailing_high": 11410.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260624",
+    "last_close_px": 9140.0,
+    "unrealized_pnl_pct": -17.21,
+    "realized_pnl_pct": -17.21,
+    "close_ymd": "20260624",
+    "close_px": 9140.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "200470_20260622_WARN_DRAWDOWN_20260623",
+      "200470_20260622_STOP_HIT_20260624"
+    ]
   }
 ]
