@@ -794,6 +794,217 @@ def apply_evidence_gated_no_buy_breaker(df: pd.DataFrame, rules: list = None, ou
     out.loc[not_selected & (out["NO_BUY_BREAKER_DECISION"].astype(str) == ""), "NO_BUY_BREAKER_DECISION"] = "NOT_SELECTED"
     return out
 
+
+# [v3.9.28] July Profit Defense Gate — 실전 손실 방어 + Top ranking 재정렬 보조
+# ═══════════════════════════════════════════════════════════
+# 데이터 근거(2026-02~06 backtest_top3_trades_latest join):
+#   - 최근 5영업일 상승률(ret_5d_%)이 낮은 구간(≤5)이 과열 구간보다 손실이 작음
+#   - MARKET_BREADTH≥45 + ret_5d≤5 + Vol_Quality≥1.2 + STRUCT≥80 조합은
+#     표본은 작지만 5~6월 손실 국면에서 상대적으로 양호하게 재현됨
+#   - 반대로 ret_5d>20, VWAP/POC 과열, spike/abnormal guard, ENTRY_EDGE BLOCK은
+#     신규 진입에서 손실 리스크가 급격히 커짐
+# 이 레이어는 수익 보장이 아니라 "7월 생존/방어" 목적의 production 안전장치다.
+JULY_PROFILE_BREADTH_MIN = 45.0
+JULY_PROFILE_RET5_MAX = 5.0
+JULY_PROFILE_VOLQ_MIN = 1.2
+JULY_PROFILE_STRUCT_MIN = 80.0
+JULY_PROFILE_FINAL_MIN = 75.0
+JULY_PROFILE_VWAP_MAX = 20.0
+JULY_PROFILE_POC_MAX = 60.0
+JULY_BLOCK_BREADTH_MIN = 35.0
+JULY_BLOCK_RET5_MAX = 20.0
+JULY_BLOCK_VWAP_MAX = 35.0
+JULY_BLOCK_POC_MAX = 80.0
+
+
+def _july_num(df: pd.DataFrame, col: str, default: float = np.nan) -> pd.Series:
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce")
+    return pd.Series(default, index=df.index, dtype="float64")
+
+
+def _july_flag(df: pd.DataFrame, col: str) -> pd.Series:
+    if col not in df.columns:
+        return pd.Series(False, index=df.index, dtype=bool)
+    return pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int).eq(1)
+
+
+def _july_str(df: pd.DataFrame, col: str, default: str = "") -> pd.Series:
+    if col in df.columns:
+        return df[col].fillna(default).astype(str)
+    return pd.Series(default, index=df.index, dtype="object")
+
+
+def add_july_profit_defense_columns(df: pd.DataFrame, enforce: bool = True) -> pd.DataFrame:
+    """v3.9.28 July Profit Defense Gate.
+
+    핵심 역할:
+      1) 모든 행에 JULY_PROFIT_* 진단 컬럼을 부여한다.
+      2) 명백한 손실 위험 조합은 신규 진입 신호에서 제외한다.
+      3) finalize_sort가 JULY_PROFIT_DEFENSE_SCORE를 보조 정렬축으로 사용하게 한다.
+
+    엄격히 과최적화하지 않기 위해 '승격'은 하지 않고, 위험 후보 차단/강등만 한다.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    out = df.copy()
+
+    breadth = _july_num(out, "MARKET_BREADTH", np.nan)
+    ret5 = _july_num(out, "ret_5d_%", np.nan)
+    vwap = _july_num(out, "VWAP_GAP", np.nan)
+    poc = _july_num(out, "POC_GAP", np.nan)
+    volq = _july_num(out, "Vol_Quality", np.nan)
+    struct = _july_num(out, "STRUCT_SCORE", np.nan)
+    final = _july_num(out, "FINAL_SCORE", np.nan)
+    rsi = _july_num(out, "RSI14", np.nan)
+    sector_rs = _july_num(out, "SECTOR_RS", np.nan)
+
+    entry_edge = _july_str(out, "ENTRY_EDGE_LEVEL").str.upper().str.strip()
+    entry_risk = _july_str(out, "ENTRY_RISK_LEVEL").str.upper().str.strip()
+
+    abnormal_guard = _july_flag(out, "ABNORMAL_HISTORY_GUARD_FLAG")
+    spike_guard = _july_flag(out, "SPIKE_REVERSAL_GUARD_FLAG")
+    market_warn_guard = _july_flag(out, "MARKET_WARNING_GUARD_FLAG")
+    collapse_guard = _july_flag(out, "LONG_HISTORY_COLLAPSE_FLAG")
+
+    # 최근 손실국면에서 살아남은 실전 profile. 둘 중 하나의 quality 축(STRUCT 또는 FINAL)을 요구한다.
+    profile_pass = (
+        (breadth.fillna(0) >= JULY_PROFILE_BREADTH_MIN)
+        & (ret5.fillna(99) <= JULY_PROFILE_RET5_MAX)
+        & (volq.fillna(0) >= JULY_PROFILE_VOLQ_MIN)
+        & ((struct.fillna(0) >= JULY_PROFILE_STRUCT_MIN) | (final.fillna(0) >= JULY_PROFILE_FINAL_MIN))
+        & (vwap.fillna(999) <= JULY_PROFILE_VWAP_MAX)
+        & (poc.fillna(999) <= JULY_PROFILE_POC_MAX)
+        & (~abnormal_guard) & (~spike_guard)
+        & (~entry_edge.eq("BLOCK"))
+    )
+
+    hard_block = (
+        abnormal_guard | spike_guard | entry_edge.eq("BLOCK")
+        | (ret5.fillna(0) > JULY_BLOCK_RET5_MAX)
+        | (vwap.fillna(0) > JULY_BLOCK_VWAP_MAX)
+        | (poc.fillna(0) > JULY_BLOCK_POC_MAX)
+        | ((breadth.fillna(50) < JULY_BLOCK_BREADTH_MIN) & (ret5.fillna(0) > JULY_PROFILE_RET5_MAX))
+        | (entry_risk.eq("ORANGE") & (ret5.fillna(0) > 10.0))
+    )
+
+    score = pd.Series(50.0, index=out.index, dtype="float64")
+    score += np.where(breadth >= JULY_PROFILE_BREADTH_MIN, 10.0, 0.0)
+    score -= np.where(breadth < JULY_BLOCK_BREADTH_MIN, 15.0, 0.0)
+    score += np.where(ret5 <= JULY_PROFILE_RET5_MAX, 12.0, 0.0)
+    score -= np.where(ret5 > 10.0, 6.0, 0.0)
+    score -= np.where(ret5 > JULY_BLOCK_RET5_MAX, 12.0, 0.0)
+    score += np.where(volq >= JULY_PROFILE_VOLQ_MIN, 8.0, 0.0)
+    score += np.where(struct >= JULY_PROFILE_STRUCT_MIN, 8.0, 0.0)
+    score += np.where(final >= JULY_PROFILE_FINAL_MIN, 6.0, 0.0)
+    score += np.where(vwap <= 15.0, 6.0, 0.0)
+    score -= np.where(vwap > JULY_PROFILE_VWAP_MAX, 6.0, 0.0)
+    score -= np.where(vwap > JULY_BLOCK_VWAP_MAX, 12.0, 0.0)
+    score += np.where(poc <= 40.0, 6.0, 0.0)
+    score -= np.where(poc > JULY_PROFILE_POC_MAX, 6.0, 0.0)
+    score -= np.where(poc > JULY_BLOCK_POC_MAX, 12.0, 0.0)
+    score += np.where(rsi >= 55.0, 4.0, 0.0)
+    score -= np.where(rsi < 45.0, 4.0, 0.0)
+    score += np.where(sector_rs >= 0.0, 4.0, 0.0)
+    score -= np.where(market_warn_guard | collapse_guard, 6.0, 0.0)
+    score -= np.where(abnormal_guard | spike_guard | entry_edge.eq("BLOCK"), 20.0, 0.0)
+    score = pd.Series(np.clip(score, 0.0, 100.0), index=out.index).round(1)
+
+    level = pd.Series("CAUTION", index=out.index, dtype="object")
+    level.loc[profile_pass & (~hard_block)] = "PASS"
+    level.loc[hard_block] = "BLOCK"
+
+    reasons = []
+    for i in out.index:
+        bits = []
+        if bool(profile_pass.loc[i]) and not bool(hard_block.loc[i]):
+            bits.append("7월 방어 profile 통과")
+        if pd.notna(ret5.loc[i]) and ret5.loc[i] > JULY_BLOCK_RET5_MAX:
+            bits.append(f"5일 과열 {ret5.loc[i]:.1f}%")
+        elif pd.notna(ret5.loc[i]) and ret5.loc[i] > JULY_PROFILE_RET5_MAX:
+            bits.append(f"5일 상승 {ret5.loc[i]:.1f}% > {JULY_PROFILE_RET5_MAX:.0f}%")
+        if pd.notna(breadth.loc[i]) and breadth.loc[i] < JULY_BLOCK_BREADTH_MIN:
+            bits.append(f"시장폭 약함 {breadth.loc[i]:.1f}")
+        if pd.notna(vwap.loc[i]) and vwap.loc[i] > JULY_BLOCK_VWAP_MAX:
+            bits.append(f"VWAP 과열 {vwap.loc[i]:.1f}")
+        elif pd.notna(vwap.loc[i]) and vwap.loc[i] > JULY_PROFILE_VWAP_MAX:
+            bits.append(f"VWAP {vwap.loc[i]:.1f} > {JULY_PROFILE_VWAP_MAX:.0f}")
+        if pd.notna(poc.loc[i]) and poc.loc[i] > JULY_BLOCK_POC_MAX:
+            bits.append(f"POC 과열 {poc.loc[i]:.1f}")
+        elif pd.notna(poc.loc[i]) and poc.loc[i] > JULY_PROFILE_POC_MAX:
+            bits.append(f"POC {poc.loc[i]:.1f} > {JULY_PROFILE_POC_MAX:.0f}")
+        if bool(abnormal_guard.loc[i]):
+            bits.append("비정상 이력 guard")
+        if bool(spike_guard.loc[i]):
+            bits.append("급등반전 guard")
+        if entry_edge.loc[i] == "BLOCK":
+            bits.append("ENTRY_EDGE BLOCK")
+        if entry_risk.loc[i] == "ORANGE" and pd.notna(ret5.loc[i]) and ret5.loc[i] > 10.0:
+            bits.append("ORANGE + 단기과열")
+        if not bits:
+            bits.append("중립/관찰")
+        reasons.append(" · ".join(bits[:4]))
+
+    out["JULY_PROFIT_DEFENSE_SCORE"] = score
+    out["JULY_PROFIT_PROFILE_PASS"] = profile_pass.astype(int)
+    out["JULY_PROFIT_BLOCK_FLAG"] = hard_block.astype(int)
+    out["JULY_PROFIT_DEFENSE_LEVEL"] = level
+    out["JULY_PROFIT_DEFENSE_REASON"] = reasons
+
+    if not enforce:
+        return out
+
+    top_pick = _july_flag(out, "TOP_PICK")
+    buy_eligible = _july_flag(out, "BUY_NOW_ELIGIBLE")
+    buy_pass = _july_flag(out, "BUY_NOW_PASS")
+    is_now = _july_flag(out, "IS_NOW_ENTRY")
+    route = _july_str(out, "ROUTE").str.upper().str.strip()
+    new_entry_like = top_pick | buy_eligible | buy_pass | is_now | route.isin(["ATTACK", "ARMED"])
+    block_new_entry = hard_block & new_entry_like
+
+    if "NEW_ENTRY_BLOCKED" not in out.columns:
+        out["NEW_ENTRY_BLOCKED"] = False
+    out.loc[block_new_entry, "NEW_ENTRY_BLOCKED"] = True
+
+    if "STOP_OVERRIDE_REASON" not in out.columns:
+        out["STOP_OVERRIDE_REASON"] = ""
+    else:
+        out["STOP_OVERRIDE_REASON"] = out["STOP_OVERRIDE_REASON"].astype("object")
+    for idx in out.index[block_new_entry]:
+        prior = str(out.at[idx, "STOP_OVERRIDE_REASON"] or "").strip()
+        add = "JULY_PROFIT_DEFENSE: " + str(out.at[idx, "JULY_PROFIT_DEFENSE_REASON"])
+        out.at[idx, "STOP_OVERRIDE_REASON"] = f"{prior} | {add}" if prior else add
+
+    # 신규 매수 계약 차단. 점수 좋은 종목을 '승격'하지는 않고 손실위험 후보만 제거한다.
+    for col in ["BUY_NOW_ELIGIBLE", "BUY_NOW_PASS", "TOP_PICK", "IS_NOW_ENTRY"]:
+        if col in out.columns:
+            out.loc[block_new_entry, col] = 0
+    if "BUY_NOW_GRADE" in out.columns:
+        out.loc[block_new_entry, "BUY_NOW_GRADE"] = "AVOID"
+    if "BUY_NOW_REASON" in out.columns:
+        for idx in out.index[block_new_entry]:
+            prior = str(out.at[idx, "BUY_NOW_REASON"] or "").strip()
+            add = "7월 손실방어 차단"
+            out.at[idx, "BUY_NOW_REASON"] = f"{prior} · {add}" if prior else add
+    if "TOP_PICK_TYPE" in out.columns:
+        out["TOP_PICK_TYPE"] = out["TOP_PICK_TYPE"].astype("object")
+        out.loc[block_new_entry, "TOP_PICK_TYPE"] = ""
+
+    # ATTACK/ARMED 신규진입만 WAIT로 내린다. CARRY/보유 판단은 훼손하지 않는다.
+    active_route = block_new_entry & route.isin(["ATTACK", "ARMED"])
+    if active_route.any():
+        out.loc[active_route, "ROUTE"] = Route.WAIT
+        if "상태" in out.columns:
+            out.loc[active_route, "상태"] = Route.WAIT
+        if "IS_ACTIVE" in out.columns:
+            out.loc[active_route, "IS_ACTIVE"] = False
+        if "IS_WATCH" in out.columns:
+            out.loc[active_route, "IS_WATCH"] = True
+
+    return out
+
+
 def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
     """IS_NOW_ENTRY — shared_utils.compute_is_now_entry 벡터 적용.
     
@@ -806,11 +1017,11 @@ def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
         route = df.get("ROUTE", pd.Series("", index=df.index))
         return (route.isin(["ATTACK"])).astype(int)
     
-    close = pd.to_numeric(df.get("종가", 0), errors="coerce").fillna(0)
-    entry = pd.to_numeric(df.get("추천매수가", 0), errors="coerce").fillna(0)
+    close = pd.to_numeric(df.get("종가", pd.Series(0, index=df.index)), errors="coerce").fillna(0)
+    entry = pd.to_numeric(df.get("추천매수가", pd.Series(0, index=df.index)), errors="coerce").fillna(0)
     # ATR_Pct(decimal) 우선, ATR_PCT(percentage)도 허용 — 내부 정규화
     atr = df.get("ATR_Pct", df.get("ATR_PCT", pd.Series(0.02, index=df.index)))
-    mcap = pd.to_numeric(df.get("시가총액(억원)", 0), errors="coerce").fillna(0)
+    mcap = pd.to_numeric(df.get("시가총액(억원)", pd.Series(0, index=df.index)), errors="coerce").fillna(0)
     
     return pd.Series(
         [_cine(c, e, a, m) for c, e, a, m in zip(close, entry, atr, mcap)],
@@ -826,11 +1037,12 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
       1. TOP_PICK (1 먼저)
       2. IS_NOW_ENTRY (1 먼저, adaptive 기반)
       3. ROUTE_PRIORITY (낮을수록 먼저: ATTACK=1 → CARRY=7)
-      4. ELITE_SCORE (높을수록)
-      5. RR_NOW_TP1 (높을수록)
-      6. BALANCE_SCORE (높을수록)
-      7. ENTRY_GAP_PCT (낮을수록)
-      8. DISPLAY_SCORE (높을수록)
+      4. JULY_PROFIT_DEFENSE_SCORE (높을수록)
+      5. ELITE_SCORE (높을수록)
+      6. RR_NOW_TP1 (높을수록)
+      7. BALANCE_SCORE (높을수록)
+      8. ENTRY_GAP_PCT (낮을수록)
+      9. DISPLAY_SCORE (높을수록)
     
     다른 단계에서 IS_NOW_ENTRY를 ROUTE==ATTACK으로 세팅했어도 
     여기서 adaptive로 덮어쓴다. 순서가 SSOT.
@@ -847,6 +1059,7 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
     # 정렬 축 모두 존재 확인 (없으면 중립 값으로 채움)
     for col, default in [
         ("TOP_PICK", 0), ("IS_NOW_ENTRY", 0),
+        ("JULY_PROFIT_DEFENSE_SCORE", 50),
         ("ELITE_SCORE", 0), ("RR_NOW_TP1", 0),
         ("BALANCE_SCORE", 0), ("ENTRY_GAP_PCT", 99),
         ("DISPLAY_SCORE", 0),
@@ -858,9 +1071,9 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
 
     # SORT_SPEC 적용
     df = df.sort_values(
-        by=["TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "ELITE_SCORE",
+        by=["TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "JULY_PROFIT_DEFENSE_SCORE", "ELITE_SCORE",
             "RR_NOW_TP1", "BALANCE_SCORE", "ENTRY_GAP_PCT", "DISPLAY_SCORE"],
-        ascending=[False, False, True, False, False, False, True, False],
+        ascending=[False, False, True, False, False, False, False, True, False],
         kind="mergesort",   # 안정 정렬 (동점 시 원래 순서 유지)
     ).reset_index(drop=True)
 
@@ -1073,6 +1286,21 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             log(f"🧬 [v3.9.26] No-Buy Breaker 비활성/보류 — {_dec}")
     except Exception as e:
         logger.warning(f"⚠️ apply_evidence_gated_no_buy_breaker 실패 (기존 공식추천 유지): {e}")
+
+    # [v3.9.28] July Profit Defense Gate — 5~6월 손실국면 기반 신규진입 방어/정렬
+    try:
+        _official_before_july = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                                     & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        df_out = add_july_profit_defense_columns(df_out, enforce=True)
+        _blocked_july = int(pd.to_numeric(df_out.get("JULY_PROFIT_BLOCK_FLAG", 0), errors="coerce").fillna(0).astype(int).sum())
+        _profile_july = int(pd.to_numeric(df_out.get("JULY_PROFIT_PROFILE_PASS", 0), errors="coerce").fillna(0).astype(int).sum())
+        _official_after_july = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                                    & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        df_out = finalize_sort(df_out)
+        df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+        log(f"🛡️ [v3.9.28] July Profit Defense 적용 — profile_pass {_profile_july} · block {_blocked_july} · official {_official_before_july}->{_official_after_july}")
+    except Exception as e:
+        logger.warning(f"⚠️ July Profit Defense 실패 (기존 추천 유지): {e}")
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)

@@ -1,0 +1,6 @@
+﻿combo,all_n,all_win_rate_pct,all_avg_net_pct,all_median_net_pct,all_sum_net_pct,all_worst_net_pct,recent_n,recent_win_rate_pct,recent_avg_net_pct,recent_median_net_pct,recent_sum_net_pct,recent_worst_net_pct
+ALL_TOP3,163,25.8,-2.17,-5.64,-353.28,-22.58,80,17.5,-5.31,-12.18,-425.0,-22.58
+BREADTH45_RET5_5_VOLQ12_STRUCT80,26,57.7,10.27,6.86,266.92,-15.38,9,66.7,15.98,21.0,143.83,-15.38
+BREADTH45_VWAP15_RET5_5_STRUCT80,17,64.7,10.18,10.99,173.14,-15.27,6,83.3,23.15,21.0,138.88,-8.54
+BREADTH45_POC40_RET5_5_FINAL75,18,55.6,8.9,2.55,160.28,-15.27,8,62.5,16.32,20.34,130.59,-8.54
+PASS_EBS_RR12_CLEAN_HEAT,40,32.5,-1.66,-5.42,-66.29,-15.34,23,26.1,-3.28,-10.6,-75.4,-15.34
