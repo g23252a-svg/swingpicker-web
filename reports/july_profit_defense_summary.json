@@ -1,0 +1,72 @@
+{
+  "top1": {
+    "n": 67,
+    "win_rate_pct": 26.9,
+    "avg_net_pct": -1.58,
+    "median_net_pct": -5.33,
+    "sum_net_pct": -105.61,
+    "worst_net_pct": -22.58
+  },
+  "top3": {
+    "n": 163,
+    "win_rate_pct": 25.8,
+    "avg_net_pct": -2.17,
+    "median_net_pct": -5.64,
+    "sum_net_pct": -353.28,
+    "worst_net_pct": -22.58
+  },
+  "top3_path": "data/backtest_top3_trades_20260623.csv",
+  "top3_by_month": {
+    "2026-02": {
+      "n": 3,
+      "win_rate_pct": 0.0,
+      "avg_net_pct": -4.96,
+      "median_net_pct": -5.31,
+      "sum_net_pct": -14.89,
+      "worst_net_pct": -5.33
+    },
+    "2026-03": {
+      "n": 27,
+      "win_rate_pct": 18.5,
+      "avg_net_pct": -3.95,
+      "median_net_pct": -5.31,
+      "sum_net_pct": -106.75,
+      "worst_net_pct": -15.35
+    },
+    "2026-04": {
+      "n": 53,
+      "win_rate_pct": 43.4,
+      "avg_net_pct": 3.65,
+      "median_net_pct": 0.0,
+      "sum_net_pct": 193.36,
+      "worst_net_pct": -15.27
+    },
+    "2026-05": {
+      "n": 57,
+      "win_rate_pct": 17.5,
+      "avg_net_pct": -5.07,
+      "median_net_pct": -12.18,
+      "sum_net_pct": -288.99,
+      "worst_net_pct": -15.4
+    },
+    "2026-06": {
+      "n": 23,
+      "win_rate_pct": 17.4,
+      "avg_net_pct": -5.91,
+      "median_net_pct": -10.19,
+      "sum_net_pct": -136.01,
+      "worst_net_pct": -22.58
+    }
+  },
+  "current_latest": {
+    "profile_pass": 0,
+    "block": 56,
+    "new_entry_blocked": 39,
+    "official_before": 0,
+    "official_after": 0,
+    "level_counts": {
+      "CAUTION": 344,
+      "BLOCK": 56
+    }
+  }
+}
