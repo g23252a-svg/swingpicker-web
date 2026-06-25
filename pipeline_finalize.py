@@ -1004,6 +1004,289 @@ def add_july_profit_defense_columns(df: pd.DataFrame, enforce: bool = True) -> p
 
     return out
 
+# [v3.9.29] Profit Recovery Suite — 손실 조합 차단 + 회복 후보 점수화
+# ═══════════════════════════════════════════════════════════
+# 데이터 근거(2026-02~06 backtest_top3_trades_20260624 + recommend 스냅샷 join):
+#   - ret_5d>=5 & VWAP_GAP>=20/POC_GAP>=60 조합은 표본 대부분이 손절권으로 악화.
+#   - ret_5d<=0 & MARKET_BREADTH>=50 조합은 최근 표본에서 상대적으로 우수.
+#   - FINAL>=80 & MARKET_BREADTH>=60 조합도 방어적 회복장에서 우수.
+# 목적:
+#   1) 공식 신규매수 승격은 하지 않는다.
+#   2) 이미 생성된 신규진입 후보 중 명백한 손실 충돌 조합은 차단/감액한다.
+#   3) 무매수일에도 사용자가 볼 수 있는 관찰 우선순위와 비중 multiplier를 제공한다.
+RECOVERY_BREADTH_GOOD = 50.0
+RECOVERY_BREADTH_STRONG = 60.0
+RECOVERY_RET5_PULLBACK_MAX = 0.0
+RECOVERY_RET5_OVERHEAT_MIN = 5.0
+RECOVERY_RET5_STRONG_OVERHEAT_MIN = 10.0
+RECOVERY_VWAP_FOMO_MIN = 20.0
+RECOVERY_VWAP_STRICT_MIN = 15.0
+RECOVERY_POC_FOMO_MIN = 60.0
+RECOVERY_POC_STRICT_MIN = 40.0
+RECOVERY_WEAK_PULLBACK_RET5 = -10.0
+
+
+def _rec_num(df: pd.DataFrame, col: str, default: float = np.nan) -> pd.Series:
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce")
+    return pd.Series(default, index=df.index, dtype="float64")
+
+
+def _rec_flag(df: pd.DataFrame, col: str) -> pd.Series:
+    if col not in df.columns:
+        return pd.Series(False, index=df.index, dtype=bool)
+    return pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int).eq(1)
+
+
+def _rec_str(df: pd.DataFrame, col: str, default: str = "") -> pd.Series:
+    if col in df.columns:
+        return df[col].fillna(default).astype(str)
+    return pd.Series(default, index=df.index, dtype="object")
+
+
+def add_profit_recovery_suite_columns(df: pd.DataFrame, enforce: bool = True) -> pd.DataFrame:
+    """v3.9.29 Profit Recovery Suite.
+
+    추가 컬럼:
+      PROFIT_RECOVERY_SCORE      : 0~100 회복장 대응 점수
+      PROFIT_RECOVERY_TIER       : A / B / C / BLOCK
+      PROFIT_RECOVERY_SETUP      : PULLBACK_BREADTH / QUALITY_BREADTH / WATCH / RISK_COLLISION
+      PROFIT_RECOVERY_BLOCK_FLAG : 신규진입 차단 플래그
+      PROFIT_RECOVERY_SIZE_MULT  : 실전 비중 multiplier(0.00~0.70)
+      PROFIT_RECOVERY_ACTION     : UI/운영용 문구
+      PROFIT_RECOVERY_REASON     : 사람이 읽는 사유
+
+    이 함수는 좋은 후보를 공식 승격하지 않는다. 손실 조합 차단/비중 축소/정렬 보조만 수행한다.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    out = df.copy()
+
+    breadth = _rec_num(out, "MARKET_BREADTH", np.nan)
+    ret5 = _rec_num(out, "ret_5d_%", np.nan)
+    ret1 = _rec_num(out, "ret_1d_%", np.nan)
+    vwap = _rec_num(out, "VWAP_GAP", np.nan)
+    poc = _rec_num(out, "POC_GAP", np.nan)
+    volq = _rec_num(out, "Vol_Quality", np.nan)
+    final = _rec_num(out, "FINAL_SCORE", np.nan)
+    display = _rec_num(out, "DISPLAY_SCORE", np.nan)
+    struct = _rec_num(out, "STRUCT_SCORE", np.nan)
+    timing = _rec_num(out, "TIMING_SCORE", np.nan)
+    elite = _rec_num(out, "ELITE_SCORE", np.nan)
+    rr = _rec_num(out, "RR_NOW_TP1", np.nan)
+    rsi = _rec_num(out, "RSI14", np.nan)
+    sector_rs = _rec_num(out, "SECTOR_RS", np.nan)
+    guard_penalty = _rec_num(out, "GUARD_PENALTY_TOTAL", 0.0).fillna(0.0)
+
+    july_level = _rec_str(out, "JULY_PROFIT_DEFENSE_LEVEL").str.upper().str.strip()
+    entry_edge = _rec_str(out, "ENTRY_EDGE_LEVEL").str.upper().str.strip()
+    entry_risk = _rec_str(out, "ENTRY_RISK_LEVEL").str.upper().str.strip()
+    route = _rec_str(out, "ROUTE").str.upper().str.strip()
+
+    abnormal_guard = _rec_flag(out, "ABNORMAL_HISTORY_GUARD_FLAG")
+    spike_guard = _rec_flag(out, "SPIKE_REVERSAL_GUARD_FLAG")
+    market_warning = _rec_flag(out, "MARKET_WARNING_GUARD_FLAG")
+    long_collapse = _rec_flag(out, "LONG_HISTORY_COLLAPSE_FLAG")
+    july_block = _rec_flag(out, "JULY_PROFIT_BLOCK_FLAG")
+    data_integrity_bad = ~_rec_flag(out, "DATA_INTEGRITY_OK") if "DATA_INTEGRITY_OK" in out.columns else pd.Series(False, index=out.index)
+
+    # 손실을 크게 만든 조합: 강한 단기상승 + VWAP/POC 괴리 = 추격 손절 확률 높음.
+    fomo_collision = (
+        ((ret5.fillna(0) >= RECOVERY_RET5_OVERHEAT_MIN) & (vwap.fillna(0) >= RECOVERY_VWAP_FOMO_MIN))
+        | ((ret5.fillna(0) >= RECOVERY_RET5_OVERHEAT_MIN) & (poc.fillna(0) >= RECOVERY_POC_FOMO_MIN))
+        | ((ret5.fillna(0) >= RECOVERY_RET5_STRONG_OVERHEAT_MIN) & (vwap.fillna(0) >= RECOVERY_VWAP_STRICT_MIN))
+        | ((ret5.fillna(0) >= RECOVERY_RET5_STRONG_OVERHEAT_MIN) & (poc.fillna(0) >= RECOVERY_POC_STRICT_MIN))
+    )
+
+    # 약한 시장에서 낙폭만 큰 종목은 회복장이 아니라 추가 하락/손절 가능성이 높다.
+    weak_knife = (ret5.fillna(0) <= RECOVERY_WEAK_PULLBACK_RET5) & (breadth.fillna(50) < 45.0)
+    weak_sector_low_rsi = (sector_rs.fillna(0) <= 0.0) & (rsi.fillna(50) <= 55.0) & (ret5.fillna(0) <= -3.0)
+    guard_collision = abnormal_guard | spike_guard | market_warning | long_collapse | entry_edge.eq("BLOCK") | july_block | data_integrity_bad
+
+    hard_block = fomo_collision | weak_knife | guard_collision
+
+    recovery_quality_core = (
+        ((final.fillna(0) >= 65.0) | (display.fillna(0) >= 65.0) | (struct.fillna(0) >= 80.0))
+        & (rr.fillna(0) >= 0.8)
+        & ((timing.fillna(0) >= 15.0) | (volq.fillna(0) >= 1.4))
+    )
+    pullback_breadth = (
+        (ret5.fillna(99) <= RECOVERY_RET5_PULLBACK_MAX)
+        & (ret5.fillna(-99) >= -15.0)
+        & (breadth.fillna(0) >= RECOVERY_BREADTH_GOOD)
+        & (volq.fillna(0) >= 1.0)
+        & (vwap.fillna(999) <= 20.0)
+        & (poc.fillna(999) <= 60.0)
+        & recovery_quality_core
+        & (~guard_collision)
+    )
+    quality_breadth = (
+        ((final.fillna(0) >= 80.0) | (display.fillna(0) >= 80.0) | (struct.fillna(0) >= 90.0))
+        & (breadth.fillna(0) >= RECOVERY_BREADTH_STRONG)
+        & (ret5.fillna(99) <= 5.0)
+        & (vwap.fillna(999) <= 20.0)
+        & (volq.fillna(0) >= 1.0)
+        & (rr.fillna(0) >= 0.8)
+        & (~guard_collision)
+    )
+    realistic_rr = (
+        (rr.fillna(99) <= 1.3)
+        & (rr.fillna(0) >= 0.6)
+        & (breadth.fillna(0) >= RECOVERY_BREADTH_GOOD)
+        & (poc.fillna(999) <= 40.0)
+        & (~guard_collision)
+    )
+
+    score = pd.Series(45.0, index=out.index, dtype="float64")
+    score += np.where(breadth >= RECOVERY_BREADTH_GOOD, 10.0, 0.0)
+    score += np.where(breadth >= RECOVERY_BREADTH_STRONG, 6.0, 0.0)
+    score -= np.where(breadth < 35.0, 12.0, 0.0)
+    score += np.where(ret5 <= 0.0, 12.0, 0.0)
+    score += np.where((ret5 > 0.0) & (ret5 <= 5.0), 4.0, 0.0)
+    score -= np.where(ret5 >= 5.0, 8.0, 0.0)
+    score -= np.where(ret5 >= 10.0, 8.0, 0.0)
+    score += np.where(volq >= 1.2, 6.0, 0.0)
+    score += np.where(final >= 75.0, 8.0, 0.0)
+    score += np.where(display >= 75.0, 4.0, 0.0)
+    score += np.where(struct >= 90.0, 8.0, 0.0)
+    score += np.where(timing >= 40.0, 4.0, 0.0)
+    score += np.where(elite >= 50.0, 4.0, 0.0)
+    score += np.where((rr >= 0.8) & (rr <= 2.0), 5.0, 0.0)
+    score -= np.where(rr > 5.0, 4.0, 0.0)
+    score += np.where(vwap <= 15.0, 5.0, 0.0)
+    score -= np.where(vwap >= RECOVERY_VWAP_FOMO_MIN, 8.0, 0.0)
+    score += np.where(poc <= 40.0, 5.0, 0.0)
+    score -= np.where(poc >= RECOVERY_POC_FOMO_MIN, 8.0, 0.0)
+    score += np.where(sector_rs >= 0.0, 4.0, 0.0)
+    score += np.where(rsi >= 50.0, 3.0, 0.0)
+    score -= np.where(weak_sector_low_rsi, 7.0, 0.0)
+    score -= np.where(guard_penalty > 0.0, np.minimum(guard_penalty, 20.0) * 0.4, 0.0)
+    score += np.where(pullback_breadth, 10.0, 0.0)
+    score += np.where(quality_breadth, 8.0, 0.0)
+    score += np.where(realistic_rr, 4.0, 0.0)
+    score -= np.where(fomo_collision, 28.0, 0.0)
+    score -= np.where(weak_knife, 18.0, 0.0)
+    score -= np.where(guard_collision, 30.0, 0.0)
+    score = pd.Series(np.clip(score, 0.0, 100.0), index=out.index).round(1)
+
+    setup = pd.Series("WATCH", index=out.index, dtype="object")
+    setup.loc[pullback_breadth] = "PULLBACK_BREADTH"
+    setup.loc[quality_breadth & ~pullback_breadth] = "QUALITY_BREADTH"
+    setup.loc[realistic_rr & ~(pullback_breadth | quality_breadth)] = "REALISTIC_RR"
+    setup.loc[fomo_collision] = "FOMO_COLLISION"
+    setup.loc[weak_knife] = "WEAK_KNIFE"
+    setup.loc[guard_collision] = "GUARD_BLOCK"
+
+    tier = pd.Series("C", index=out.index, dtype="object")
+    tier.loc[(score >= 65.0) & (pullback_breadth | quality_breadth | realistic_rr)] = "B"
+    tier.loc[(score >= 82.0) & (pullback_breadth | quality_breadth)] = "A"
+    tier.loc[hard_block] = "BLOCK"
+
+    size_mult = pd.Series(0.20, index=out.index, dtype="float64")
+    size_mult.loc[tier.eq("B")] = 0.35
+    size_mult.loc[tier.eq("A")] = 0.50
+    size_mult.loc[pullback_breadth | quality_breadth] = np.maximum(size_mult.loc[pullback_breadth | quality_breadth], 0.50)
+    size_mult.loc[(tier.eq("A")) & (july_level.eq("PASS"))] = 0.70
+    size_mult.loc[hard_block] = 0.0
+    size_mult = size_mult.round(2)
+
+    action = pd.Series("관찰", index=out.index, dtype="object")
+    action.loc[tier.eq("A") & ~hard_block] = "소액 후보"
+    action.loc[(tier.eq("A")) & (july_level.eq("PASS")) & ~hard_block] = "최우선 관찰"
+    action.loc[tier.eq("B") & ~hard_block] = "관찰 후보"
+    action.loc[hard_block] = "신규진입 차단"
+
+    reasons = []
+    for i in out.index:
+        bits = []
+        if bool(pullback_breadth.loc[i]):
+            bits.append("회복형 눌림+시장폭")
+        if bool(quality_breadth.loc[i]):
+            bits.append("품질+시장폭")
+        if bool(realistic_rr.loc[i]):
+            bits.append("현실형 RR")
+        if bool(fomo_collision.loc[i]):
+            bits.append("단기상승+VWAP/POC 추격충돌")
+        if bool(weak_knife.loc[i]):
+            bits.append("약한 시장 낙폭주")
+        if bool(weak_sector_low_rsi.loc[i]):
+            bits.append("섹터 약세+RSI 약함")
+        if bool(guard_collision.loc[i]):
+            bits.append("기존 guard/JULY 차단")
+        if pd.notna(breadth.loc[i]):
+            bits.append(f"시장폭 {breadth.loc[i]:.1f}")
+        if pd.notna(ret5.loc[i]):
+            bits.append(f"5일 {ret5.loc[i]:.1f}%")
+        if not bits:
+            bits.append("중립")
+        reasons.append(" · ".join(bits[:5]))
+
+    out["PROFIT_RECOVERY_SCORE"] = score
+    out["PROFIT_RECOVERY_TIER"] = tier
+    out["PROFIT_RECOVERY_SETUP"] = setup
+    out["PROFIT_RECOVERY_BLOCK_FLAG"] = hard_block.astype(int)
+    out["PROFIT_RECOVERY_SIZE_MULT"] = size_mult
+    out["PROFIT_RECOVERY_ACTION"] = action
+    out["PROFIT_RECOVERY_REASON"] = reasons
+
+    if not enforce:
+        return out
+
+    top_pick = _rec_flag(out, "TOP_PICK")
+    buy_eligible = _rec_flag(out, "BUY_NOW_ELIGIBLE")
+    buy_pass = _rec_flag(out, "BUY_NOW_PASS")
+    is_now = _rec_flag(out, "IS_NOW_ENTRY")
+    new_entry_like = top_pick | buy_eligible | buy_pass | is_now | route.isin(["ATTACK", "ARMED"])
+    block_new_entry = hard_block & new_entry_like
+
+    if "NEW_ENTRY_BLOCKED" not in out.columns:
+        out["NEW_ENTRY_BLOCKED"] = False
+    out.loc[block_new_entry, "NEW_ENTRY_BLOCKED"] = True
+
+    if "STOP_OVERRIDE_REASON" not in out.columns:
+        out["STOP_OVERRIDE_REASON"] = ""
+    else:
+        out["STOP_OVERRIDE_REASON"] = out["STOP_OVERRIDE_REASON"].astype("object")
+    for idx in out.index[block_new_entry]:
+        prior = str(out.at[idx, "STOP_OVERRIDE_REASON"] or "").strip()
+        add = "PROFIT_RECOVERY: " + str(out.at[idx, "PROFIT_RECOVERY_REASON"])
+        out.at[idx, "STOP_OVERRIDE_REASON"] = f"{prior} | {add}" if prior else add
+
+    for col in ["BUY_NOW_ELIGIBLE", "BUY_NOW_PASS", "TOP_PICK", "IS_NOW_ENTRY"]:
+        if col in out.columns:
+            out.loc[block_new_entry, col] = 0
+    if "BUY_NOW_GRADE" in out.columns:
+        out.loc[block_new_entry, "BUY_NOW_GRADE"] = "AVOID"
+    if "BUY_NOW_REASON" in out.columns:
+        for idx in out.index[block_new_entry]:
+            prior = str(out.at[idx, "BUY_NOW_REASON"] or "").strip()
+            add = "수익회복 패치 차단"
+            out.at[idx, "BUY_NOW_REASON"] = f"{prior} · {add}" if prior else add
+    if "TOP_PICK_TYPE" in out.columns:
+        out["TOP_PICK_TYPE"] = out["TOP_PICK_TYPE"].astype("object")
+        out.loc[block_new_entry, "TOP_PICK_TYPE"] = ""
+
+    active_route = block_new_entry & route.isin(["ATTACK", "ARMED"])
+    if active_route.any():
+        out.loc[active_route, "ROUTE"] = Route.WAIT
+        if "상태" in out.columns:
+            out.loc[active_route, "상태"] = Route.WAIT
+        if "IS_ACTIVE" in out.columns:
+            out.loc[active_route, "IS_ACTIVE"] = False
+        if "IS_WATCH" in out.columns:
+            out.loc[active_route, "IS_WATCH"] = True
+
+    # 켈리/추천금액은 추천 계약을 바꾸지 않는 범위에서 안전 multiplier만 반영한다.
+    # 0.70 이하로 cap하여 7월 회복 국면에서도 풀베팅을 방지한다.
+    for amount_col in ["추천금액(만원)", "켈리_수량", "추천수량"]:
+        if amount_col in out.columns:
+            vals = pd.to_numeric(out[amount_col], errors="coerce")
+            has_val = vals.notna() & (vals > 0)
+            out.loc[has_val, amount_col] = (vals.loc[has_val] * size_mult.loc[has_val]).round(0)
+
+    return out
+
 
 def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
     """IS_NOW_ENTRY — shared_utils.compute_is_now_entry 벡터 적용.
@@ -1038,7 +1321,8 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
       2. IS_NOW_ENTRY (1 먼저, adaptive 기반)
       3. ROUTE_PRIORITY (낮을수록 먼저: ATTACK=1 → CARRY=7)
       4. JULY_PROFIT_DEFENSE_SCORE (높을수록)
-      5. ELITE_SCORE (높을수록)
+      5. PROFIT_RECOVERY_SCORE (높을수록)
+      6. ELITE_SCORE (높을수록)
       6. RR_NOW_TP1 (높을수록)
       7. BALANCE_SCORE (높을수록)
       8. ENTRY_GAP_PCT (낮을수록)
@@ -1060,6 +1344,7 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
     for col, default in [
         ("TOP_PICK", 0), ("IS_NOW_ENTRY", 0),
         ("JULY_PROFIT_DEFENSE_SCORE", 50),
+        ("PROFIT_RECOVERY_SCORE", 50),
         ("ELITE_SCORE", 0), ("RR_NOW_TP1", 0),
         ("BALANCE_SCORE", 0), ("ENTRY_GAP_PCT", 99),
         ("DISPLAY_SCORE", 0),
@@ -1071,9 +1356,9 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
 
     # SORT_SPEC 적용
     df = df.sort_values(
-        by=["TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "JULY_PROFIT_DEFENSE_SCORE", "ELITE_SCORE",
+        by=["TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "JULY_PROFIT_DEFENSE_SCORE", "PROFIT_RECOVERY_SCORE", "ELITE_SCORE",
             "RR_NOW_TP1", "BALANCE_SCORE", "ENTRY_GAP_PCT", "DISPLAY_SCORE"],
-        ascending=[False, False, True, False, False, False, False, True, False],
+        ascending=[False, False, True, False, False, False, False, False, True, False],
         kind="mergesort",   # 안정 정렬 (동점 시 원래 순서 유지)
     ).reset_index(drop=True)
 
@@ -1301,6 +1586,21 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"🛡️ [v3.9.28] July Profit Defense 적용 — profile_pass {_profile_july} · block {_blocked_july} · official {_official_before_july}->{_official_after_july}")
     except Exception as e:
         logger.warning(f"⚠️ July Profit Defense 실패 (기존 추천 유지): {e}")
+
+    # [v3.9.29] Profit Recovery Suite — 손실 조합 차단 + 회복 후보 정렬/비중 보정
+    try:
+        _official_before_rec = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                                    & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        df_out = add_profit_recovery_suite_columns(df_out, enforce=True)
+        _blocked_rec = int(pd.to_numeric(df_out.get("PROFIT_RECOVERY_BLOCK_FLAG", 0), errors="coerce").fillna(0).astype(int).sum())
+        _a_rec = int((df_out.get("PROFIT_RECOVERY_TIER", pd.Series("", index=df_out.index)).astype(str) == "A").sum())
+        _official_after_rec = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                                   & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        df_out = finalize_sort(df_out)
+        df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+        log(f"💹 [v3.9.29] Profit Recovery Suite 적용 — A {_a_rec} · block {_blocked_rec} · official {_official_before_rec}->{_official_after_rec}")
+    except Exception as e:
+        logger.warning(f"⚠️ Profit Recovery Suite 실패 (기존 추천 유지): {e}")
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)

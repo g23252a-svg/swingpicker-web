@@ -1,0 +1,101 @@
+{
+  "rows": 367,
+  "official_new_buy_count": 0,
+  "profit_recovery_tier_counts": {
+    "C": 294,
+    "BLOCK": 44,
+    "B": 19,
+    "A": 10
+  },
+  "profit_recovery_setup_counts": {
+    "WATCH": 293,
+    "GUARD_BLOCK": 43,
+    "REALISTIC_RR": 20,
+    "PULLBACK_BREADTH": 10,
+    "FOMO_COLLISION": 1
+  },
+  "profit_recovery_block_count": 44,
+  "july_block_count": 42,
+  "top10": [
+    {
+      "LDY_RANK": 1,
+      "종목코드": "067310",
+      "종목명": "하나마이크론",
+      "PROFIT_RECOVERY_SCORE": 100.0,
+      "PROFIT_RECOVERY_TIER": "A",
+      "PROFIT_RECOVERY_ACTION": "최우선 관찰"
+    },
+    {
+      "LDY_RANK": 2,
+      "종목코드": "084370",
+      "종목명": "유진테크",
+      "PROFIT_RECOVERY_SCORE": 100.0,
+      "PROFIT_RECOVERY_TIER": "A",
+      "PROFIT_RECOVERY_ACTION": "최우선 관찰"
+    },
+    {
+      "LDY_RANK": 3,
+      "종목코드": "010690",
+      "종목명": "화신",
+      "PROFIT_RECOVERY_SCORE": 100.0,
+      "PROFIT_RECOVERY_TIER": "A",
+      "PROFIT_RECOVERY_ACTION": "최우선 관찰"
+    },
+    {
+      "LDY_RANK": 4,
+      "종목코드": "005440",
+      "종목명": "현대지에프홀딩스",
+      "PROFIT_RECOVERY_SCORE": 94.0,
+      "PROFIT_RECOVERY_TIER": "B",
+      "PROFIT_RECOVERY_ACTION": "관찰 후보"
+    },
+    {
+      "LDY_RANK": 5,
+      "종목코드": "079550",
+      "종목명": "LIG디펜스앤에어로스페이스",
+      "PROFIT_RECOVERY_SCORE": 88.0,
+      "PROFIT_RECOVERY_TIER": "A",
+      "PROFIT_RECOVERY_ACTION": "최우선 관찰"
+    },
+    {
+      "LDY_RANK": 6,
+      "종목코드": "383220",
+      "종목명": "F&F",
+      "PROFIT_RECOVERY_SCORE": 82.0,
+      "PROFIT_RECOVERY_TIER": "C",
+      "PROFIT_RECOVERY_ACTION": "관찰"
+    },
+    {
+      "LDY_RANK": 7,
+      "종목코드": "000815",
+      "종목명": "삼성화재우",
+      "PROFIT_RECOVERY_SCORE": 96.0,
+      "PROFIT_RECOVERY_TIER": "A",
+      "PROFIT_RECOVERY_ACTION": "소액 후보"
+    },
+    {
+      "LDY_RANK": 8,
+      "종목코드": "101530",
+      "종목명": "해태제과식품",
+      "PROFIT_RECOVERY_SCORE": 81.0,
+      "PROFIT_RECOVERY_TIER": "C",
+      "PROFIT_RECOVERY_ACTION": "관찰"
+    },
+    {
+      "LDY_RANK": 9,
+      "종목코드": "064350",
+      "종목명": "현대로템",
+      "PROFIT_RECOVERY_SCORE": 76.0,
+      "PROFIT_RECOVERY_TIER": "C",
+      "PROFIT_RECOVERY_ACTION": "관찰"
+    },
+    {
+      "LDY_RANK": 10,
+      "종목코드": "347850",
+      "종목명": "디앤디파마텍",
+      "PROFIT_RECOVERY_SCORE": 73.0,
+      "PROFIT_RECOVERY_TIER": "C",
+      "PROFIT_RECOVERY_ACTION": "관찰"
+    }
+  ]
+}
