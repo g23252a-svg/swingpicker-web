@@ -1,12 +1,12 @@
 {
-  "asof_ymd": "20260624",
-  "generated_at": "2026-06-24T22:41:12.811394",
+  "asof_ymd": "20260625",
+  "generated_at": "2026-06-25T22:38:13.635823",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
-  "declared_wr_active": 0.486,
-  "declared_wr_top_pick": 0.486,
+  "declared_wr_active": null,
+  "declared_wr_top_pick": null,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
@@ -70,40 +70,40 @@
     "monotone_avg_ret_excess": false
   },
   "realized_wr": 0.3408,
-  "realized_wr_top_pick": 0.3408,
-  "realized_wr_top_pick_n": 39,
-  "realized_wr_active": 0.3408,
-  "realized_wr_active_n": 39,
-  "declared_vs_realized_gap_active": 0.1452,
-  "declared_vs_realized_gap_top_pick": 0.1452,
-  "declared_vs_realized_gap": 0.1452,
+  "realized_wr_top_pick": null,
+  "realized_wr_top_pick_n": 0,
+  "realized_wr_active": null,
+  "realized_wr_active_n": 0,
+  "declared_vs_realized_gap_active": null,
+  "declared_vs_realized_gap_top_pick": null,
+  "declared_vs_realized_gap": null,
   "avg_ret_excess_pct": -5.0229,
   "top_pick_funnel": {
-    "trade_ymd": "20260624",
-    "total": 367,
+    "trade_ymd": "20260625",
+    "total": 360,
     "aggressive_funnel": {
-      "total": 367,
-      "route_active": 2,
-      "hard_gate": 1,
-      "elite_75": 1,
-      "struct_80": 1,
-      "timing_70": 1,
-      "tp1_15": 1,
-      "final": 1
+      "total": 360,
+      "route_active": 1,
+      "hard_gate": 0,
+      "elite_75": 0,
+      "struct_80": 0,
+      "timing_70": 0,
+      "tp1_15": 0,
+      "final": 0
     },
     "stable_funnel": {
-      "total": 367,
-      "route_active": 2,
-      "hard_gate": 1,
-      "elite_70": 1,
+      "total": 360,
+      "route_active": 1,
+      "hard_gate": 0,
+      "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
       "wr_55": 0,
       "mature": 0,
       "final": 0
     },
-    "top_pick_count": 1,
-    "aggressive_count": 1,
+    "top_pick_count": 0,
+    "aggressive_count": 0,
     "stable_count": 0
   },
   "top_pick_stable_7day_avg": 0.0,
@@ -119,19 +119,19 @@
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "min_rr=1.48"
+      "detail": "TOP_PICK 0건"
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
-      "status": "PASS",
-      "detail": "gap_top_pick=14.5% (n=39)"
+      "status": "SKIP",
+      "detail": "TOP_PICK 매칭 sufficient bin 없음"
     }
   ],
   "ci_soft": [
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "OK",
-      "detail": "gap_active=14.5% (n=39)"
+      "detail": "active 매칭 sufficient bin 없음"
     },
     {
       "gate": "wilson_monotonicity",
@@ -155,7 +155,7 @@
   ],
   "ci_hard_all_pass": true,
   "ci_soft_any_warn": true,
-  "top_pick_count": 1,
+  "top_pick_count": 0,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": 1.48
+  "top_pick_min_rr": null
 }

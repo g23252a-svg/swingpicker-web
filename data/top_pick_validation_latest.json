@@ -1,36 +1,16 @@
 {
-  "trade_ymd": "20260624",
-  "top_pick_count": 1,
-  "top_pick_by_type": {
-    "AGGRESSIVE": 1
-  },
-  "avg_elite": 77.6,
-  "avg_rr": 1.48,
-  "min_rr": 1.48,
+  "trade_ymd": "20260625",
+  "top_pick_count": 0,
+  "top_pick_by_type": {},
+  "avg_elite": null,
+  "avg_rr": null,
+  "min_rr": null,
   "rr_lt_1_count": 0,
-  "avg_balance": 69.4,
-  "avg_win_rate": 0.486,
+  "avg_balance": null,
+  "avg_win_rate": null,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 10485,
-  "routes": {
-    "ATTACK": 1
-  },
-  "picks": [
-    {
-      "종목코드": "080220",
-      "종목명": "제주반도체",
-      "TOP_PICK_TYPE": "AGGRESSIVE",
-      "ELITE_SCORE": 77.6,
-      "RR_NOW_TP1": 1.48,
-      "BALANCE_SCORE": 69.4,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 22.2,
-      "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.486,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 10485
-    }
-  ]
+  "est_win_rate_n": 10640,
+  "routes": {},
+  "picks": []
 }
