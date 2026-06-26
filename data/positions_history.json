@@ -4622,5 +4622,30 @@
       "160980_20260619_WARN_DRAWDOWN_20260624",
       "160980_20260619_STOP_HIT_20260625"
     ]
+  },
+  {
+    "code": "004710",
+    "name": "한솔테크닉스",
+    "entry_ymd": "20260623",
+    "entry_px": 12870.0,
+    "qty": 0,
+    "stop_px": 10930.0,
+    "stop_px_initial": 10930.0,
+    "take_px1": 16430.0,
+    "take_px2": 17090.0,
+    "trailing_high": 15200.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260626",
+    "last_close_px": 10310.0,
+    "unrealized_pnl_pct": -19.89,
+    "realized_pnl_pct": -19.89,
+    "close_ymd": "20260626",
+    "close_px": 10310.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "004710_20260623_WARN_DRAWDOWN_20260624",
+      "004710_20260623_WARN_DRAWDOWN_20260625",
+      "004710_20260623_STOP_HIT_20260626"
+    ]
   }
 ]

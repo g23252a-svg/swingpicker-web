@@ -113,22 +113,6 @@
       "ev": 10.31
     },
     {
-      "S_min": 90,
-      "T_min": 70,
-      "AI_min": 60,
-      "routes": [
-        "ATTACK",
-        "ARMED"
-      ],
-      "dq_exclude": 0,
-      "n": 205,
-      "win_rate": 73.2,
-      "avg_ret": 10.6,
-      "avg_win": 17.25,
-      "avg_loss": 7.53,
-      "ev": 10.6
-    },
-    {
       "S_min": 80,
       "T_min": 80,
       "AI_min": 60,
@@ -143,6 +127,22 @@
       "avg_win": 17.5,
       "avg_loss": 8.11,
       "ev": 10.57
+    },
+    {
+      "S_min": 90,
+      "T_min": 70,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "dq_exclude": 0,
+      "n": 206,
+      "win_rate": 72.8,
+      "avg_ret": 10.51,
+      "avg_win": 17.25,
+      "avg_loss": 7.55,
+      "ev": 10.51
     },
     {
       "S_min": 80,
@@ -193,20 +193,20 @@
       "ev": 12.4
     },
     {
-      "S_min": 80,
-      "T_min": 60,
+      "S_min": 70,
+      "T_min": 70,
       "AI_min": 70,
       "routes": [
         "ATTACK",
         "ARMED"
       ],
       "dq_exclude": 0,
-      "n": 285,
-      "win_rate": 71.9,
-      "avg_ret": 9.77,
-      "avg_win": 16.8,
-      "avg_loss": 8.26,
-      "ev": 9.77
+      "n": 184,
+      "win_rate": 71.7,
+      "avg_ret": 10.06,
+      "avg_win": 17.13,
+      "avg_loss": 7.89,
+      "ev": 10.06
     }
   ],
   "top_combos_ev": [
@@ -307,22 +307,6 @@
       "ev": 10.77
     },
     {
-      "S_min": 90,
-      "T_min": 70,
-      "AI_min": 60,
-      "routes": [
-        "ATTACK",
-        "ARMED"
-      ],
-      "dq_exclude": 0,
-      "n": 205,
-      "win_rate": 73.2,
-      "avg_ret": 10.6,
-      "avg_win": 17.25,
-      "avg_loss": 7.53,
-      "ev": 10.6
-    },
-    {
       "S_min": 80,
       "T_min": 80,
       "AI_min": 60,
@@ -337,6 +321,22 @@
       "avg_win": 17.5,
       "avg_loss": 8.11,
       "ev": 10.57
+    },
+    {
+      "S_min": 90,
+      "T_min": 70,
+      "AI_min": 60,
+      "routes": [
+        "ATTACK",
+        "ARMED"
+      ],
+      "dq_exclude": 0,
+      "n": 206,
+      "win_rate": 72.8,
+      "avg_ret": 10.51,
+      "avg_win": 17.25,
+      "avg_loss": 7.55,
+      "ev": 10.51
     },
     {
       "S_min": 90,
@@ -372,11 +372,11 @@
     }
   ],
   "meta": {
-    "total_trades": 37215,
-    "total_win_rate": 48.5,
-    "matched_days": 73,
+    "total_trades": 37615,
+    "total_win_rate": 48.2,
+    "matched_days": 74,
     "horizon": 3,
     "min_samples": 10
   },
-  "generated_at": "2026-06-25T22:38:43.228522"
+  "generated_at": "2026-06-26T22:27:45.043102"
 }

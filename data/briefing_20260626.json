@@ -1,0 +1,24 @@
+{
+  "trade_date": "20260626",
+  "generated_at": "2026-06-26 22:27:52",
+  "count": 1,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "475150",
+      "name": "SK이터닉스",
+      "route": "ARMED",
+      "score": 88.9,
+      "close": 43200,
+      "entry": 43200,
+      "stop": 36700,
+      "target1": 61900,
+      "target2": 69300,
+      "est_win_rate": 0.486,
+      "rr": 2.9,
+      "sector": "건설·부동산",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/475150"
+    }
+  ]
+}

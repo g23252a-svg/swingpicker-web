@@ -1,41 +1,24 @@
 {
-  "trade_date": "20260624",
-  "generated_at": "2026-06-24 22:41:57",
-  "count": 2,
+  "trade_date": "20260626",
+  "generated_at": "2026-06-26 22:27:52",
+  "count": 1,
   "stocks": [
     {
       "rank": 1,
-      "code": "080220",
-      "name": "제주반도체",
-      "route": "ATTACK",
-      "score": 89.0,
-      "close": 112900,
-      "entry": 112900,
-      "stop": 95900,
-      "target1": 138000,
-      "target2": 144000,
-      "est_win_rate": 0.486,
-      "rr": 1.5,
-      "sector": "반도체",
-      "market": "KOSDAQ",
-      "url": "https://ldyprotrader.com/stock/080220"
-    },
-    {
-      "rank": 2,
-      "code": "041830",
-      "name": "인바디",
+      "code": "475150",
+      "name": "SK이터닉스",
       "route": "ARMED",
-      "score": 87.0,
-      "close": 46300,
-      "entry": 45600,
-      "stop": 41700,
-      "target1": 50000,
-      "target2": 53300,
+      "score": 88.9,
+      "close": 43200,
+      "entry": 43200,
+      "stop": 36700,
+      "target1": 61900,
+      "target2": 69300,
       "est_win_rate": 0.486,
-      "rr": 1.1,
-      "sector": "기타",
-      "market": "KOSDAQ",
-      "url": "https://ldyprotrader.com/stock/041830"
+      "rr": 2.9,
+      "sector": "건설·부동산",
+      "market": "KOSPI",
+      "url": "https://ldyprotrader.com/stock/475150"
     }
   ]
 }

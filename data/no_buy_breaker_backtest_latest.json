@@ -1,19 +1,19 @@
 {
   "version": "3.9.26b",
   "data_dir": "data",
-  "files": 86,
-  "no_buy_days": 86,
-  "candidate_rows": 11,
+  "files": 87,
+  "no_buy_days": 87,
+  "candidate_rows": 14,
   "realized_rows": 7,
-  "pending_rows": 4,
+  "pending_rows": 7,
   "rules": [
     {
       "RULE_ID": "RULE_A_STRUCT90_TIMING60",
       "RULE_DESC": "ROUTE active + BUY_NOW_PASS + EBS + STRUCT>=90 + TIMING>=60 + FINAL>=75 + RR>=1.10",
-      "CANDIDATE_N": 4,
+      "CANDIDATE_N": 5,
       "REALIZED_N": 3,
-      "PENDING_N": 1,
-      "VALIDATION_COVERAGE": 75.0,
+      "PENDING_N": 2,
+      "VALIDATION_COVERAGE": 60.0,
       "N": 3,
       "WIN_RATE_5D": 0.0,
       "AVG_RET_5D": -7.29,
@@ -29,9 +29,9 @@
     {
       "RULE_ID": "RULE_B_FINAL80_ENTRY_CLEAN",
       "RULE_DESC": "ROUTE active + BUY_NOW_PASS + FINAL>=80 + entry gap/VWAP/POC clean",
-      "CANDIDATE_N": 1,
+      "CANDIDATE_N": 2,
       "REALIZED_N": 0,
-      "PENDING_N": 1,
+      "PENDING_N": 2,
       "VALIDATION_COVERAGE": 0.0,
       "N": 0,
       "WIN_RATE_5D": 0.0,
@@ -48,9 +48,9 @@
     {
       "RULE_ID": "RULE_C_HIGH_STRUCT_LOW_TIMING_RECOVERY",
       "RULE_DESC": "High STRUCT recovery: STRUCT>=95 + TIMING>=55 + AI>=70 + clean risk",
-      "CANDIDATE_N": 0,
+      "CANDIDATE_N": 1,
       "REALIZED_N": 0,
-      "PENDING_N": 0,
+      "PENDING_N": 1,
       "VALIDATION_COVERAGE": 0.0,
       "N": 0,
       "WIN_RATE_5D": 0.0,
@@ -62,7 +62,7 @@
       "RECENT_N": 0,
       "RECENT_AVG_RET_5D": 0.0,
       "DECISION": "REJECT_INSUFFICIENT_SAMPLE",
-      "REJECT_REASON": "NO_CANDIDATE"
+      "REJECT_REASON": "PENDING_OUTCOME"
     },
     {
       "RULE_ID": "RULE_D_ROUTE_ARMED_CLEAN_ENTRY",
