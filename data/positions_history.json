@@ -4647,5 +4647,56 @@
       "004710_20260623_WARN_DRAWDOWN_20260625",
       "004710_20260623_STOP_HIT_20260626"
     ]
+  },
+  {
+    "code": "011070",
+    "name": "LG이노텍",
+    "entry_ymd": "20260610",
+    "entry_px": 1090000.0,
+    "qty": 0,
+    "stop_px": 926000.0,
+    "stop_px_initial": 926000.0,
+    "take_px1": 1788000.0,
+    "take_px2": 2209000.0,
+    "trailing_high": 1320000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260629",
+    "last_close_px": 915000.0,
+    "unrealized_pnl_pct": -16.06,
+    "realized_pnl_pct": -16.06,
+    "close_ymd": "20260629",
+    "close_px": 915000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "011070_20260610_WARN_DRAWDOWN_20260623",
+      "011070_20260610_WARN_DRAWDOWN_20260624",
+      "011070_20260610_WARN_DRAWDOWN_20260625",
+      "011070_20260610_WARN_DRAWDOWN_20260626",
+      "011070_20260610_STOP_HIT_20260629"
+    ]
+  },
+  {
+    "code": "161890",
+    "name": "한국콜마",
+    "entry_ymd": "20260625",
+    "entry_px": 86600.0,
+    "qty": 0,
+    "stop_px": 80000.0,
+    "stop_px_initial": 80000.0,
+    "take_px1": 93800.0,
+    "take_px2": 97000.0,
+    "trailing_high": 99700.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260629",
+    "last_close_px": 99400.0,
+    "unrealized_pnl_pct": 14.78,
+    "realized_pnl_pct": 14.78,
+    "close_ymd": "20260629",
+    "close_px": 99400.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "161890_20260625_TP1_HIT_20260629",
+      "161890_20260625_TP2_HIT_20260629"
+    ]
   }
 ]

@@ -2,9 +2,40 @@
   "asof_file": "recommend_latest.csv",
   "official_buy_count": 0,
   "alpha_pick_count": 0,
-  "near_candidate_count": 0,
-  "near_candidates": [],
-  "rule_pass_count": 0,
+  "near_candidate_count": 2,
+  "near_candidates": [
+    {
+      "종목코드": "207940",
+      "종목명": "삼성바이오로직스",
+      "HISTORICAL_ALPHA_SCORE": 53.1,
+      "TIMING_SCORE": 76.0,
+      "외인순매수": 23168,
+      "RR_NOW_TP1": 0.04,
+      "FINAL_SCORE": 59.2,
+      "VWAP_GAP": 0.93,
+      "POC_GAP": -8.85,
+      "STRUCT_SCORE": 58.3,
+      "ENTRY_RISK_LEVEL": "GREEN",
+      "ROUTE": "WAIT",
+      "MARKET_BREADTH": 87.8
+    },
+    {
+      "종목코드": "009420",
+      "종목명": "한올바이오파마",
+      "HISTORICAL_ALPHA_SCORE": 42.7,
+      "TIMING_SCORE": 100.0,
+      "외인순매수": 1932,
+      "RR_NOW_TP1": 0.05,
+      "FINAL_SCORE": 86.1,
+      "VWAP_GAP": 27.17,
+      "POC_GAP": 22.98,
+      "STRUCT_SCORE": 87.2,
+      "ENTRY_RISK_LEVEL": "ORANGE",
+      "ROUTE": "OVERHEAT",
+      "MARKET_BREADTH": 87.8
+    }
+  ],
+  "rule_pass_count": 2,
   "rr_floor": 1.2,
   "rule_source": "FALLBACK",
   "selected_rule": {
@@ -22,10 +53,10 @@
     "win_test": null,
     "ret_test": null,
     "oos_pass": false,
-    "baseline_test": 24.3
+    "baseline_test": 24.0
   },
   "baseline_train": 39.6,
-  "baseline_test": 24.3,
+  "baseline_test": 24.0,
   "oos_rules_found": 0,
   "total_rules_evaluated": 0,
   "alpha_picks": [],
