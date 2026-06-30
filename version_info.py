@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.4.0",
+        "date": "2026-06-30",
+        "type": "minor",
+        "title": "v24.4 — Profit Momentum Overlay(PMS): 데이터 검증 수익종목 캐치 레인 (SHADOW)",
+        "items": [
+            "📈 **데이터 발견 (추측 아님 · 실데이터 walk-forward):** per_trade_log 16,093건 + recommend 88일(2/26~6/26)을 (rec_date,code)로 조인한 1,834 라벨 패널에서 H5 실현수익률과의 관계를 전반기(IS)/후반기(OOS)로 분리 측정했습니다. **RSI14·VWAP_GAP·DISPLAY_SCORE·거래강도·TIMING_SCORE·거래대금**이 두 시기 모두 동일 부호의 강한 양의 상관(예: RSI14 ρ 0.45/0.24)이었고, 반대로 시스템 핵심 지표인 **RR_NOW_TP1(ρ -0.50/-0.29)·ELITE_SCORE(-0.34/-0.19)·AXIS_GAP·SECTOR_RANK는 역상관**이었습니다. ELITE_SCORE 역상관은 ARMED/WAIT/ATTACK/NEUTRAL/CARRY **모든 ROUTE 내부에서 유지**되어 조건부 편향(collider)이 아님을 확인했습니다.",
+            "🔬 **OOS 검증 (2026-04-30~06-22, 횡보레짐 · 벤치마크 +0.04%/승률40%):** 모멘텀-확인 6피처의 일별 횡단면 백분위 순위 평균으로 PMS를 구성(IS 데이터로만 설계, 룩어헤드 없음)해 OOS 일별 Top-3 선택 실현수익을 비교한 결과 — 현행 ELITE_SCORE **-1.68%**(승률40%·손절급42%·중앙값-7.6%) → **PMS +17.68%**(승률80%·손절급9%·중앙값+20.8%). 대박(+30%↑)을 +20%로 상한 처리해도 PMS +11.6% vs ELITE -3.9%로 소수 대박 의존이 아니며, 꼬리위험도 PMS가 작음(최악 -15.5% vs -43.4%). 5·6월 모두 80% 승률로 월별 안정.",
+            "🛡️ **SHADOW 기본(enforce=False) — 공식 추천 절대 불변:** 신규 `profit_momentum.py`가 그림자 컬럼(`PMS_SCORE`/`PMS_RANK`/`PMS_PROFIT_PICK`/`PMS_BLEND_RANK`/`PMS_REASON`)과 별도 'PMS 추천 레인'(유동성·품질 floor 통과분 당일 상위 N)만 생성하고, **TOP_PICK·BUY_NOW_ELIGIBLE은 한 글자도 변경하지 않습니다**(enforce=True여도 정렬 보조키만 노출). DataIntegrityConfig.demote_official / GuardConfig.guard_enforce_top_pick과 동일한 안전 토글 철학.",
+            "⚠️ **한계 명시:** 표본은 4개월·단일(모멘텀 우호) 레짐이고 PMS='강세 매수'로 DipSniper(눌림매수)와 **반대 방향**입니다. 급락·평균회귀 레짐에서 과열주가 가장 크게 깨질 수 있어 우위가 소멸/역전될 수 있습니다. 따라서 기본은 SHADOW이며, **라이브에서 PMS_PROFIT_PICK의 선언↔실현을 수 주 비교한 뒤** `PmsConfig.pms_enforce`/정렬 채택 여부를 직접 결정하는 것을 권장합니다.",
+            "🧰 **SSOT·테스트:** `PmsConfig`(collector_config)에 6피처·floor·top_n·blend_weight·enforce를 SSOT로 추가하고 CollectorConfig facade에 연결했습니다. 회귀/안전 테스트 13개(tests/test_profit_momentum_v244.py) — enforce 양쪽 공식 컬럼 불변·일별 순위·유동성 floor·결측 강건·방향성 검증 포함. 실데이터(recommend_latest 383종목)에서 PMS가 한올바이오파마/SK/한국콜마(고RSI·저ELITE)를 포착함을 확인. 기존 테스트 전부 통과.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.3.0",
         "date": "2026-06-30",
         "type": "minor",
@@ -695,7 +709,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.12.1"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.13.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 

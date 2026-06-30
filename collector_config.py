@@ -499,6 +499,46 @@ class DataIntegrityConfig:
             raise ValueError(f"surge_ret10_pct={self.surge_ret10_pct}: 양수 필요")
 
 
+@dataclass(frozen=True)
+class PmsConfig:
+    """profit_momentum.py 파라미터 — Profit Momentum Overlay (PMS, v24.4).
+
+    [근거] per_trade_log 16,093건 + recommend 88일 조인 패널(1,834 라벨)에서
+    H5 실현수익률과 walk-forward(전반/후반) 모두 동일 부호의 양의 상관을 보인
+    6개 모멘텀-확인 피처(RSI14/VWAP_GAP/거래강도/TIMING_SCORE/거래대금/DISPLAY_SCORE).
+    OOS Top-3 선택 실현수익 현행 ELITE -1.68% → PMS +17.68%(승률 80%, 손절급 9%).
+
+    [enforce=False 기본] 본 오버레이는 공식 TOP_PICK/BUY_NOW_ELIGIBLE를 변경하지 않는
+    SHADOW이다. 표본이 4개월·단일(모멘텀 우호) 레짐이고 DipSniper(눌림매수)와 반대
+    방향이라, 라이브에서 선언↔실현 비교 후 enforce를 켜는 것을 권장한다.
+    (DataIntegrityConfig.demote_official / GuardConfig.guard_enforce_top_pick과 동일 철학)
+    """
+    # (피처, 폴백후보 튜플) — 결측 시 폴백 순서로 탐색
+    pms_features: tuple = (
+        ("RSI14", ()),
+        ("VWAP_GAP", ()),
+        ("거래강도", ()),
+        ("TIMING_SCORE", ()),
+        ("거래대금(억원)", ()),
+        ("DISPLAY_SCORE", ("FINAL_SCORE",)),
+    )
+    pms_top_n: int = 3                 # 'PMS 추천 레인' 당일 상위 N
+    pms_min_turnover_eok: float = 50.0 # 유동성 floor(억원) — GUARD #1과 동일 철학
+    pms_min_display: float = 0.0       # 품질 floor(DISPLAY_SCORE). 0이면 비활성
+    pms_blend_weight: float = 0.5      # ELITE 순위 ↔ PMS 순위 블렌드 가중(그림자)
+    pms_enforce: bool = False          # 공식 추천 변경 금지(기본). True여도 정렬 보조키만 노출
+
+    def __post_init__(self):
+        if not self.pms_features:
+            raise ValueError("pms_features: 최소 1개 피처 필요")
+        if self.pms_top_n < 1:
+            raise ValueError(f"pms_top_n={self.pms_top_n}: 1 이상이어야 함")
+        if not (0.0 <= self.pms_blend_weight <= 1.0):
+            raise ValueError(f"pms_blend_weight={self.pms_blend_weight}: 0~1 범위")
+        if self.pms_min_turnover_eok < 0:
+            raise ValueError(f"pms_min_turnover_eok={self.pms_min_turnover_eok}: 음수 불가")
+
+
 # ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
@@ -521,7 +561,7 @@ class CollectorConfig:
     __slots__ = (
         "data", "indicator", "scoring", "macro",
         "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane", "stop_override",
-        "data_integrity",
+        "data_integrity", "pms",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -540,6 +580,7 @@ class CollectorConfig:
         momentum_lane: 'MomentumLaneConfig' = None,
         stop_override: 'StopOverrideConfig' = None,
         data_integrity: 'DataIntegrityConfig' = None,
+        pms: 'PmsConfig' = None,
         base_dir: str = None,
         config_version: str = "2.4.0",
     ):
@@ -555,6 +596,7 @@ class CollectorConfig:
         self.momentum_lane = momentum_lane or MomentumLaneConfig()
         self.stop_override = stop_override or StopOverrideConfig()
         self.data_integrity = data_integrity or DataIntegrityConfig()
+        self.pms = pms or PmsConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -563,7 +605,7 @@ class CollectorConfig:
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
             self.policy, self.guard, self.momentum_lane, self.stop_override,
-            self.data_integrity, self.secrets,
+            self.data_integrity, self.pms, self.secrets,
         )
 
     def __getattr__(self, name: str):

@@ -1624,6 +1624,23 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         logger.warning(f"⚠️ Profit Recovery Suite 실패 (기존 추천 유지): {e}")
 
+    # [v24.4] Profit Momentum Overlay (PMS) — 데이터 검증 SHADOW (공식 추천 불변)
+    # 근거: per_trade_log 16,093건 walk-forward — 모멘텀확인 6피처가 H5 실현수익과
+    # 안정적 순상관(OOS Top-3 현행 -1.68% → PMS +17.68%). enforce=False면 그림자 컬럼만.
+    try:
+        from profit_momentum import add_profit_momentum_columns, pms_summary
+        try:
+            from collector_config import DEFAULT_CONFIG as _PMS_CFG
+            _pms_enforce = bool(getattr(getattr(_PMS_CFG, "pms", None), "pms_enforce", False))
+        except Exception:
+            _PMS_CFG, _pms_enforce = None, False
+        df_out = add_profit_momentum_columns(df_out, config=_PMS_CFG, enforce=_pms_enforce)
+        _ps = pms_summary(df_out)
+        log(f"📈 [v24.4] Profit Momentum Overlay (SHADOW{'·ENFORCE정렬보조' if _pms_enforce else ''}) — "
+            f"profit_pick {_ps.get('n_profit_pick', 0)} · PMS평균 {_ps.get('pms_mean', 0)} · p90 {_ps.get('pms_p90', 0)}")
+    except Exception as e:
+        logger.warning(f"⚠️ Profit Momentum Overlay 실패 (기존 추천 유지): {e}")
+
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
     op_d = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{ctx.tag}' if ctx.tag else ''}.csv")
