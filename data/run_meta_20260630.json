@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20260630",
+  "macro_risk": "CRITICAL",
+  "macro_msg": "환율 1535원 [06/28] (CRITICAL)",
+  "market_breadth": 38.5,
+  "pass_ebs": 6,
+  "rec_limit": 3,
+  "n_stocks": 346,
+  "run_status": "OK",
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK",
+  "scoring_axes": "STRUCT+TIMING+AI+SECTOR",
+  "w_struct": 0.55,
+  "w_timing": 0.25,
+  "w_ai": 0.2
+}
