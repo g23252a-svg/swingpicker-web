@@ -174,3 +174,20 @@ def test_col_safe_parsing():
     assert _col(r, "b") == 12.5
     assert _col(r, "c", default=99) == 99
     assert _col(r, "x", default=7) == 7  # 없는 컬럼
+
+
+# ── v24.6: NiceGUI 경로 ─────────────────────────────────────────
+def test_include_css_toggle():
+    df = _frame(3)
+    no_css = build_cards_html(df, include_css=False)
+    with_css = build_cards_html(df, include_css=True)
+    assert "<style>" not in no_css
+    assert with_css.startswith("<style>")
+    assert "sp-card" in with_css  # 카드 본문도 포함
+
+
+def test_nicegui_renderer_graceful_without_nicegui():
+    # nicegui 미설치 환경에서 예외 없이 None 반환(기존 화면 보존)
+    from components.action_cards import render_action_cards_nicegui
+    assert render_action_cards_nicegui(_frame(3)) is None
+    assert render_action_cards_nicegui(pd.DataFrame()) is None  # 빈 df도 안전

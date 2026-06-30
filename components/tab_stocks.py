@@ -4011,6 +4011,14 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         official_decision=official_decision,
     )
 
+    # ── [v24.6] 액션 카드 레인 — 모바일 우선 (판단먼저 + 가격사다리 + PMS레인) ──
+    # 🏆 실전 후보 직후. 공식 산식 불변, 표시 전용. PMS 컬럼 있으면 PMS 레인도 분리 표시.
+    try:
+        from components.action_cards import render_action_cards_nicegui
+        render_action_cards_nicegui(df, max_cards=8)
+    except Exception as _ac_e:
+        _logger.warning(f"액션 카드 레인 렌더 실패 (기존 화면 유지): {_ac_e}")
+
     # ── [v3.9.4] 종목 리스트 직전 — Top Pick 컨텍스트 안내 ──
     # "신규 매수 주의" 상태일 때 바로 아래에 종목 카드가 "🟣 핵심 관찰"로 떠서
     # "방금은 주의라며 왜 핵심 관찰?" 충돌이 생김. 명확한 안내로 해소.

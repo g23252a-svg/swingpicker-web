@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.6.0",
+        "date": "2026-06-30",
+        "type": "patch",
+        "title": "v24.6 — 액션 카드 NiceGUI 정식 적용 (라이브 앱 tab_stocks, 🏆 실전 후보 근처)",
+        "items": [
+            "🃏 **액션 카드를 실제 라이브 앱(NiceGUI)에 적용:** v24.5 카드 뷰는 구 Streamlit `dashboard.py`(현재 미배포)에 들어가 라이브에 반영되지 않았습니다. 라이브 진입점은 `main.py`(NiceGUI) → `components/tab_stocks.py`이므로, `render_action_cards_nicegui()`를 신설해 `tab_stocks.py`의 '🏆 오늘의 실전 후보' 직후에 카드 레인을 추가했습니다.",
+            "♻️ **로직 100% 재사용:** 판단(매수구간/눌림대기/추격주의)·가격 사다리·verdict·PMS 레인 분리 로직은 그대로 두고, 출력만 `ui.html(build_cards_html(df, include_css=True))`로 교체. build_cards_html에 include_css 옵션 추가(NiceGUI는 CSS를 HTML과 함께, Streamlit은 세션 1회 주입).",
+            "🛡️ **표시 전용·무위험:** 공식 산식(TOP_PICK+BUY_NOW_ELIGIBLE) 불변. 내부 try/except로 카드 레인 실패 시 기존 화면 그대로 유지. nicegui 미가용/빈 df면 조용히 건너뜀. 필터 칩(전체/매수구간/눌림대기/PMS레인)은 NiceGUI ui.button으로 네이티브 구현.",
+            "🧪 **검증:** tests/test_action_cards_v245.py 22개 — include_css 토글·nicegui graceful 추가. 기존 NiceGUI API(ui.html/set_content/ui.button/.props)가 코드베이스에서 사용 중인 패턴과 일치함을 교차확인.",
+            "📝 참고: v24.3(벡터화)·v24.4(PMS)는 엔진 파이프라인 패치라 프레임워크 무관하게 정상 적용 상태. 구 dashboard.py의 v24.5 변경은 미배포 dead code이며 무해(원하면 별도 정리).",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.5.0",
         "date": "2026-06-30",
         "type": "minor",

@@ -309,8 +309,13 @@ def build_cards_html(df: pd.DataFrame,
                      *,
                      max_cards: Optional[int] = 30,
                      show_pms: bool = True,
-                     filter_mode: str = "전체") -> str:
-    """카드 피드 HTML 문자열 (오프라인 렌더/테스트 가능)."""
+                     filter_mode: str = "전체",
+                     include_css: bool = False) -> str:
+    """카드 피드 HTML 문자열 (오프라인 렌더/테스트 가능).
+
+    include_css=True면 스코프 CSS(<style>)를 앞에 포함 — NiceGUI ui.html()용.
+    (Streamlit은 _inject_css로 세션당 1회 주입하므로 False 유지)
+    """
     work = df.copy()
     # 정렬: DISPLAY_SCORE 내림차순 (확신도순)
     if "DISPLAY_SCORE" in work.columns:
@@ -355,4 +360,57 @@ def build_cards_html(df: pd.DataFrame,
         parts.append('<div style="color:#5C6B83;font-size:13px;padding:20px;text-align:center">'
                      '해당 조건의 종목이 없습니다.</div>')
     parts.append("</div>")
-    return "".join(parts)
+    body = "".join(parts)
+    return (_CSS + body) if include_css else body
+
+
+# ── NiceGUI 렌더러 (라이브 앱 = main.py → tab_stocks.py) ─────────
+def render_action_cards_nicegui(df: pd.DataFrame,
+                                *,
+                                max_cards: Optional[int] = 8,
+                                show_pms: bool = True,
+                                filter_mode: str = "전체",
+                                title: str = "🃏 액션 카드"):
+    """NiceGUI용 액션 카드 레인. tab_stocks.py(render_tab_stocks) drop-in.
+
+    사용:
+        from components.action_cards import render_action_cards_nicegui
+        render_action_cards_nicegui(df, max_cards=8)   # 🏆 실전 후보 근처
+
+    · 순수 build_cards_html을 재사용하고 ui.html()로 출력(include_css=True).
+    · 데이터 없거나 nicegui 미가용이면 조용히 건너뜀(기존 화면 영향 0).
+    """
+    try:
+        from nicegui import ui
+    except Exception:
+        return  # NiceGUI 환경 아님 — 무시
+
+    if df is None or len(df) == 0:
+        return
+
+    # 필터 칩(네이티브) — 선택값에 따라 build_cards_html 재호출
+    state = {"mode": filter_mode}
+    try:
+        with ui.column().classes("w-full gap-2"):
+            ui.label(title).classes("text-sm font-bold text-slate-300 mt-2")
+            html_holder = ui.html("").classes("w-full")
+
+            def _refresh():
+                html_holder.set_content(
+                    build_cards_html(df, max_cards=max_cards, show_pms=show_pms,
+                                     filter_mode=state["mode"], include_css=True)
+                )
+
+            with ui.row().classes("gap-1 flex-wrap"):
+                for label in ["전체", "매수 구간", "눌림 대기", "PMS 레인"]:
+                    def _mk(lb):
+                        def _click():
+                            state["mode"] = lb
+                            _refresh()
+                        return _click
+                    btn = ui.button(label, on_click=_mk(label))
+                    btn.props("flat dense no-caps size=sm").classes("text-xs")
+            _refresh()
+    except Exception:
+        # NiceGUI 컨텍스트 밖에서 호출되는 등 예외 시 무시 (기존 화면 보존)
+        return
