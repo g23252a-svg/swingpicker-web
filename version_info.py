@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.5.0",
+        "date": "2026-06-30",
+        "type": "minor",
+        "title": "v24.5 — '오늘의 추천' 모바일 액션 카드 (판단먼저 + 가격사다리 + PMS레인)",
+        "items": [
+            "🃏 **핵심화면 재설계 (모바일 우선):** 순정 위젯 스택 대신 액션 카드로. 종목마다 ① <b>판단을 먼저</b>(매수 구간 / 눌림 대기 / 추격 주의) ② <b>가격 사다리</b>로 손절·진입·현재·목표를 한 줄에 시각화 ③ 핵심 스탯(확신도 게이지·RSI·거래대금·TP1확률·ROUTE). 신규 `components/action_cards.py`.",
+            "🎯 **'지금 뭘 해야 하나'를 명확히:** 공식 BUY_NOW_GRADE의 'AVOID'는 사실 '지금 시장가 매수 금지'(진입가 위)를 뜻할 뿐인데, 카드는 현재가-진입가 갭으로 <b>'눌림 대기'(지정가 걸고 대기)와 '추격 주의'(이격 과대·과열)를 구분</b>해 행동 가능한 신호로 바꿉니다. 경계 임계값(PULLBACK_WAIT_MAX_PCT=12%, OVERHEAT_RSI=75)은 튜닝 포인트로 노출.",
+            "⚡ **PMS 추천 레인 분리:** v24.4 PMS_PROFIT_PICK을 별도 레인으로(‘SHADOW · 검증중’ 태그). 공식 추천과 시각적으로 구분되어 비교가 쉬움. PMS 컬럼이 없으면 공식 레인만 표시(하위 호환).",
+            "🛡️ **무위험 opt-in 통합:** dashboard.py tab2 보기 토글에 ‘✨ 카드’를 <b>추가</b>(기존 리스트/칸반 뷰 불변), try/except 폴백 포함. CSS는 sp- 프리픽스로 스코프되어 기존 v18 테마와 충돌 0. 기존 `get_buy_now_display`·실제 컬럼(종가/추천매수가/손절가/추천매도가1/RSI14/DISPLAY_SCORE/ROUTE) 재사용.",
+            "🧰 **테스트:** tests/test_action_cards_v245.py 20개 — verdict 경계·가격사다리 좌표 클램프·PMS 레인 분리·필터·결측 강건·CSS 스코프 검증. streamlit 없이 build_cards_html로 오프라인 렌더 가능. 실데이터(recommend_latest 383종목) 렌더 확인.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.4.0",
         "date": "2026-06-30",
         "type": "minor",
@@ -709,7 +723,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.13.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.14.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 

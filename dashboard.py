@@ -3872,9 +3872,19 @@ with tab2:
 
         st.divider()
         st.markdown(f"### 🔥 집중 공략 후보 ({len(active_view)}개)")
-        view_type = st.radio("보기 방식", ["📋 리스트", "🃏 칸반"], horizontal=True, label_visibility="collapsed", key="v_type_final")
+        view_type = st.radio("보기 방식", ["✨ 카드", "📋 리스트", "🃏 칸반"], horizontal=True, label_visibility="collapsed", key="v_type_final")
         
-        if view_type == "📋 리스트":
+        if view_type == "✨ 카드":
+            # [v24.5] 모바일 우선 액션 카드 — 판단먼저 + 가격사다리 + PMS레인 분리
+            try:
+                from components.action_cards import render_action_cards
+                _ac_mode = st.radio("카드 필터", ["전체", "매수 구간", "눌림 대기", "PMS 레인"],
+                                    horizontal=True, label_visibility="collapsed", key="ac_filter_final")
+                render_action_cards(active_view, is_admin=is_admin, filter_mode=_ac_mode)
+            except Exception as _ac_e:
+                st.warning(f"카드 뷰 로드 실패 — 리스트로 표시합니다: {_ac_e}")
+                st.dataframe(active_view[[c for c in cols if c in active_view.columns]], use_container_width=True, column_config=cfg, hide_index=True, height=500)
+        elif view_type == "📋 리스트":
             st.dataframe(active_view[[c for c in cols if c in active_view.columns]], use_container_width=True, column_config=cfg, hide_index=True, height=500)
         else:
             render_kanban_board(active_view)
