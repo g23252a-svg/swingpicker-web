@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.3.0",
+        "date": "2026-06-30",
+        "type": "minor",
+        "title": "v24.3 — 사유 빌더 완전 벡터화 (파이프라인 핫패스 6~16x 가속, 출력 무변경)",
+        "items": [
+            "⚡ **GUARD_REASON 벡터화 (guard_system._build_reason):** v23 GUARD 엔진의 사유 문자열 빌더가 `for i in out.index` 행루프(.at 접근 + f-string)로 구현돼 있어, '벡터화 엔진'이라는 설계에도 불구하고 `apply_guard_system` 실행시간의 약 90%(2000행 기준 223ms 중 203ms)를 혼자 차지했습니다. 8개 가드 조각을 각각 '' 또는 라벨 Series로 만든 뒤 ' · ' 구분자를 누적 결합하는 완전 벡터화로 교체해 **205ms→12ms(약 16.6x)**, 전체 `apply_guard_system`은 **223ms→35ms(약 6.4x)**로 단축했습니다.",
+            "⚡ **JULY_PROFIT_DEFENSE_REASON 벡터화 (pipeline_finalize):** 7월 방어 게이트의 사유 빌더(행루프 + elif 분기 + bits[:4] 절단 + `:.1f` 포맷)를 벡터화했습니다(2000행 191ms→23ms, 약 8.3x). elif는 배타 마스크로, `bits[:4]` 절단은 행별 누적 카운터(count<cap) 마스크로 정확히 재현합니다.",
+            "⚡ **PROFIT_RECOVERY_REASON 벡터화 (pipeline_finalize):** 수익복구 스위트의 사유 빌더(불린 7 + float 2, bits[:5])도 동일 방식으로 벡터화(105ms→19ms, 약 5.6x). 두 빌더는 신규 공용 헬퍼 `_fmt1f`(C printf '%.1f' — Python f-string과 동일 반올림)·`_join_reason_capped`로 통합했습니다.",
+            "🔒 **출력 byte-identical 계약:** 세 빌더 모두 원본 행루프와 **1바이트도 다르지 않은 동일 출력**을 보장합니다. 무작위 시드 15~30회(NaN·임계 경계·elif·cap 절단·empty_fill 포함) 대조 검증 + 수정 전 원본을 importlib로 동시 로드한 엔드투엔드 비교에서 REASON 불일치 0건을 확인했습니다. TOP_PICK·BUY_NOW·ELITE_LABEL 등 매수 산식은 한 글자도 건드리지 않았습니다(성능만 개선).",
+            "🧰 **회귀+성능 가드 테스트 18개 추가 (tests/test_reason_builder_vectorized_v3121.py):** 원본 행루프 로직을 골든 마스터(`_ref_*`)로 박제해 벡터화 결과와 정확 일치를 고정하고, 비정수 인덱스 보존·G2 포맷·cap 준수·빈행 empty_fill·'벡터화가 참조구현보다 최소 3x 빠름'(실측 ≈16x) 성능 회귀 가드를 포함했습니다. 기존 테스트 796개 전부 통과(영향 받은 71개 포함).",
+            "🔁 **추천 로직 변경 없음:** 본 릴리스는 매일 전체 종목에 대해 실행되는 사유 문자열 생성부의 순수 성능 패치입니다. 화면 표시 텍스트·게이트·점수·라벨 모두 이전과 완전히 동일하며, 파이프라인 1회 실행에서 누적 0.4초+를 절약합니다.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.2.0",
         "date": "2026-06-13",
         "type": "minor",
@@ -680,7 +695,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.12.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.12.1"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 

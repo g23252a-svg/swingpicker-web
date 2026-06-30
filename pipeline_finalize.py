@@ -835,6 +835,34 @@ def _july_str(df: pd.DataFrame, col: str, default: str = "") -> pd.Series:
     return pd.Series(default, index=df.index, dtype="object")
 
 
+# ── 벡터화 사유 빌더 헬퍼 (v3.12.1) ─────────────────────────────
+# 기존 `for i in out.index` f-string 루프를 대체. 출력 byte-identical 보장.
+def _fmt1f(series: pd.Series, idx) -> pd.Series:
+    """f'{x:.1f}' 벡터화 (C printf '%.1f' — Python format과 동일 반올림).
+
+    NaN → 'nan' 문자열. 호출측에서 notna/임계 마스크로 제외되므로 안전.
+    """
+    arr = pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64")
+    return pd.Series(np.char.mod("%.1f", arr), index=idx, dtype="object")
+
+
+def _join_reason_capped(idx, bit_series, cap: int, empty_fill: str) -> pd.Series:
+    """조각 Series 목록을 ' · '로 결합. 행별 최대 cap개만 채택(원본 bits[:cap]).
+
+    각 bit_series 원소는 미발동 시 '' 이어야 한다. 발동(비어있지 않음) 조각을
+    앞에서부터 cap개까지만 채택하고, 하나도 없으면 empty_fill로 채운다.
+    완전 벡터화 — 행 루프 없음.
+    """
+    count = pd.Series(0, index=idx, dtype="int64")
+    result = pd.Series("", index=idx, dtype="object")
+    for b in bit_series:
+        include = (b.fillna("") != "") & (count < cap)
+        result = result + pd.Series("", index=idx, dtype="object").mask(include, " · " + b)
+        count = count + include.astype("int64")
+    result = result.mask(count == 0, empty_fill)
+    return result.str.replace("^ · ", "", regex=True)
+
+
 def add_july_profit_defense_columns(df: pd.DataFrame, enforce: bool = True) -> pd.DataFrame:
     """v3.9.28 July Profit Defense Gate.
 
@@ -915,36 +943,37 @@ def add_july_profit_defense_columns(df: pd.DataFrame, enforce: bool = True) -> p
     level.loc[profile_pass & (~hard_block)] = "PASS"
     level.loc[hard_block] = "BLOCK"
 
-    reasons = []
-    for i in out.index:
-        bits = []
-        if bool(profile_pass.loc[i]) and not bool(hard_block.loc[i]):
-            bits.append("7월 방어 profile 통과")
-        if pd.notna(ret5.loc[i]) and ret5.loc[i] > JULY_BLOCK_RET5_MAX:
-            bits.append(f"5일 과열 {ret5.loc[i]:.1f}%")
-        elif pd.notna(ret5.loc[i]) and ret5.loc[i] > JULY_PROFILE_RET5_MAX:
-            bits.append(f"5일 상승 {ret5.loc[i]:.1f}% > {JULY_PROFILE_RET5_MAX:.0f}%")
-        if pd.notna(breadth.loc[i]) and breadth.loc[i] < JULY_BLOCK_BREADTH_MIN:
-            bits.append(f"시장폭 약함 {breadth.loc[i]:.1f}")
-        if pd.notna(vwap.loc[i]) and vwap.loc[i] > JULY_BLOCK_VWAP_MAX:
-            bits.append(f"VWAP 과열 {vwap.loc[i]:.1f}")
-        elif pd.notna(vwap.loc[i]) and vwap.loc[i] > JULY_PROFILE_VWAP_MAX:
-            bits.append(f"VWAP {vwap.loc[i]:.1f} > {JULY_PROFILE_VWAP_MAX:.0f}")
-        if pd.notna(poc.loc[i]) and poc.loc[i] > JULY_BLOCK_POC_MAX:
-            bits.append(f"POC 과열 {poc.loc[i]:.1f}")
-        elif pd.notna(poc.loc[i]) and poc.loc[i] > JULY_PROFILE_POC_MAX:
-            bits.append(f"POC {poc.loc[i]:.1f} > {JULY_PROFILE_POC_MAX:.0f}")
-        if bool(abnormal_guard.loc[i]):
-            bits.append("비정상 이력 guard")
-        if bool(spike_guard.loc[i]):
-            bits.append("급등반전 guard")
-        if entry_edge.loc[i] == "BLOCK":
-            bits.append("ENTRY_EDGE BLOCK")
-        if entry_risk.loc[i] == "ORANGE" and pd.notna(ret5.loc[i]) and ret5.loc[i] > 10.0:
-            bits.append("ORANGE + 단기과열")
-        if not bits:
-            bits.append("중립/관찰")
-        reasons.append(" · ".join(bits[:4]))
+    # 사유 빌더 — 완전 벡터화(v3.12.1, 원본 bits[:4] 루프와 byte-identical)
+    _idx = out.index
+    _E = lambda: pd.Series("", index=_idx, dtype="object")
+    _r5 = pd.to_numeric(ret5, errors="coerce"); _rf = _fmt1f(_r5, _idx)
+    _bd = pd.to_numeric(breadth, errors="coerce"); _bf = _fmt1f(_bd, _idx)
+    _vw = pd.to_numeric(vwap, errors="coerce"); _vf = _fmt1f(_vw, _idx)
+    _pc = pd.to_numeric(poc, errors="coerce"); _pf = _fmt1f(_pc, _idx)
+    _ee = entry_edge.astype("object"); _er = entry_risk.astype("object")
+
+    _m_r_hot = (_r5 > JULY_BLOCK_RET5_MAX).fillna(False)
+    _m_r_up = (_r5 > JULY_PROFILE_RET5_MAX).fillna(False) & ~_m_r_hot
+    _m_v_hot = (_vw > JULY_BLOCK_VWAP_MAX).fillna(False)
+    _m_v_up = (_vw > JULY_PROFILE_VWAP_MAX).fillna(False) & ~_m_v_hot
+    _m_p_hot = (_pc > JULY_BLOCK_POC_MAX).fillna(False)
+    _m_p_up = (_pc > JULY_PROFILE_POC_MAX).fillna(False) & ~_m_p_hot
+
+    _bits = [
+        _E().mask(profile_pass.astype(bool) & ~hard_block.astype(bool), "7월 방어 profile 통과"),
+        _E().mask(_m_r_up, "5일 상승 " + _rf + f"% > {JULY_PROFILE_RET5_MAX:.0f}%")
+            .mask(_m_r_hot, "5일 과열 " + _rf + "%"),
+        _E().mask((_bd < JULY_BLOCK_BREADTH_MIN).fillna(False), "시장폭 약함 " + _bf),
+        _E().mask(_m_v_up, "VWAP " + _vf + f" > {JULY_PROFILE_VWAP_MAX:.0f}")
+            .mask(_m_v_hot, "VWAP 과열 " + _vf),
+        _E().mask(_m_p_up, "POC " + _pf + f" > {JULY_PROFILE_POC_MAX:.0f}")
+            .mask(_m_p_hot, "POC 과열 " + _pf),
+        _E().mask(abnormal_guard.astype(bool), "비정상 이력 guard"),
+        _E().mask(spike_guard.astype(bool), "급등반전 guard"),
+        _E().mask(_ee.eq("BLOCK"), "ENTRY_EDGE BLOCK"),
+        _E().mask(_er.eq("ORANGE") & (_r5 > 10.0).fillna(False), "ORANGE + 단기과열"),
+    ]
+    reasons = _join_reason_capped(_idx, _bits, 4, "중립/관찰")
 
     out["JULY_PROFIT_DEFENSE_SCORE"] = score
     out["JULY_PROFIT_PROFILE_PASS"] = profile_pass.astype(int)
@@ -1197,30 +1226,23 @@ def add_profit_recovery_suite_columns(df: pd.DataFrame, enforce: bool = True) ->
     action.loc[tier.eq("B") & ~hard_block] = "관찰 후보"
     action.loc[hard_block] = "신규진입 차단"
 
-    reasons = []
-    for i in out.index:
-        bits = []
-        if bool(pullback_breadth.loc[i]):
-            bits.append("회복형 눌림+시장폭")
-        if bool(quality_breadth.loc[i]):
-            bits.append("품질+시장폭")
-        if bool(realistic_rr.loc[i]):
-            bits.append("현실형 RR")
-        if bool(fomo_collision.loc[i]):
-            bits.append("단기상승+VWAP/POC 추격충돌")
-        if bool(weak_knife.loc[i]):
-            bits.append("약한 시장 낙폭주")
-        if bool(weak_sector_low_rsi.loc[i]):
-            bits.append("섹터 약세+RSI 약함")
-        if bool(guard_collision.loc[i]):
-            bits.append("기존 guard/JULY 차단")
-        if pd.notna(breadth.loc[i]):
-            bits.append(f"시장폭 {breadth.loc[i]:.1f}")
-        if pd.notna(ret5.loc[i]):
-            bits.append(f"5일 {ret5.loc[i]:.1f}%")
-        if not bits:
-            bits.append("중립")
-        reasons.append(" · ".join(bits[:5]))
+    # 사유 빌더 — 완전 벡터화(v3.12.1, 원본 bits[:5] 루프와 byte-identical)
+    _idx2 = out.index
+    _E2 = lambda: pd.Series("", index=_idx2, dtype="object")
+    _bd2 = pd.to_numeric(breadth, errors="coerce")
+    _r52 = pd.to_numeric(ret5, errors="coerce")
+    _bits2 = [
+        _E2().mask(pullback_breadth.astype(bool), "회복형 눌림+시장폭"),
+        _E2().mask(quality_breadth.astype(bool), "품질+시장폭"),
+        _E2().mask(realistic_rr.astype(bool), "현실형 RR"),
+        _E2().mask(fomo_collision.astype(bool), "단기상승+VWAP/POC 추격충돌"),
+        _E2().mask(weak_knife.astype(bool), "약한 시장 낙폭주"),
+        _E2().mask(weak_sector_low_rsi.astype(bool), "섹터 약세+RSI 약함"),
+        _E2().mask(guard_collision.astype(bool), "기존 guard/JULY 차단"),
+        _E2().mask(_bd2.notna(), "시장폭 " + _fmt1f(_bd2, _idx2)),
+        _E2().mask(_r52.notna(), "5일 " + _fmt1f(_r52, _idx2) + "%"),
+    ]
+    reasons = _join_reason_capped(_idx2, _bits2, 5, "중립")
 
     out["PROFIT_RECOVERY_SCORE"] = score
     out["PROFIT_RECOVERY_TIER"] = tier
