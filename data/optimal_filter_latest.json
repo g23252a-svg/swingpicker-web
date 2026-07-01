@@ -193,20 +193,20 @@
       "ev": 10.15
     },
     {
-      "S_min": 60,
-      "T_min": 80,
+      "S_min": 80,
+      "T_min": 60,
       "AI_min": 70,
       "routes": [
         "ATTACK",
         "ARMED"
       ],
       "dq_exclude": 0,
-      "n": 98,
-      "win_rate": 71.4,
-      "avg_ret": 11.46,
-      "avg_win": 19.1,
-      "avg_loss": 7.65,
-      "ev": 11.46
+      "n": 288,
+      "win_rate": 71.5,
+      "avg_ret": 9.68,
+      "avg_win": 16.9,
+      "avg_loss": 8.47,
+      "ev": 9.68
     }
   ],
   "top_combos_ev": [
@@ -372,11 +372,11 @@
     }
   ],
   "meta": {
-    "total_trades": 38342,
-    "total_win_rate": 48.3,
-    "matched_days": 76,
+    "total_trades": 38719,
+    "total_win_rate": 48.6,
+    "matched_days": 77,
     "horizon": 3,
     "min_samples": 10
   },
-  "generated_at": "2026-06-30T22:22:14.151208"
+  "generated_at": "2026-07-01T22:53:10.572245"
 }
