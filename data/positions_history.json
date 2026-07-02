@@ -4698,5 +4698,32 @@
       "161890_20260625_TP1_HIT_20260629",
       "161890_20260625_TP2_HIT_20260629"
     ]
+  },
+  {
+    "code": "005930",
+    "name": "삼성전자",
+    "entry_ymd": "20260605",
+    "entry_px": 329000.0,
+    "qty": 0,
+    "stop_px": 286500.0,
+    "stop_px_initial": 286500.0,
+    "take_px1": 370000.0,
+    "take_px2": 405500.0,
+    "trailing_high": 374500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260702",
+    "last_close_px": 286000.0,
+    "unrealized_pnl_pct": -13.07,
+    "realized_pnl_pct": -13.07,
+    "close_ymd": "20260702",
+    "close_px": 286000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "005930_20260605_WARN_DRAWDOWN_20260608",
+      "005930_20260605_WARN_DRAWDOWN_20260610",
+      "005930_20260605_WARN_DRAWDOWN_20260611",
+      "005930_20260605_WARN_DRAWDOWN_20260623",
+      "005930_20260605_STOP_HIT_20260702"
+    ]
   }
 ]
