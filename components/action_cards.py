@@ -153,8 +153,8 @@ def _gauge_html(score: float, color: str) -> str:
     )
 
 
-_VERDICT_COLOR = {"buy": "var(--sp-buy)", "wait": "var(--sp-wait)",
-                  "avoid": "var(--sp-avoid)", "pms": "var(--sp-pms)"}
+_VERDICT_COLOR = {"buy": "#10B981", "wait": "#F59E0B",
+                  "avoid": "#EF4444", "pms": "#8B5CF6"}  # SVG stroke 속성엔 hex 필요(var 미해석)
 _ROUTE_CLASS = {"OVERHEAT": "sp-r-over", "ATTACK": "sp-r-atk", "ARMED": "sp-r-arm"}
 
 
@@ -182,8 +182,14 @@ def _card_html(row, lane: str = "official") -> str:
         v = _verdict(row)
         vk = v["key"]
         verdict_label, verdict_mark, sub = v["label"], v["mark"], v["sub"]
-        color = _VERDICT_COLOR.get(vk, "var(--sp-wait)")
+        color = _VERDICT_COLOR.get(vk, "#F59E0B")
         gauge_val, gauge_color = disp, color
+        # [v24.7] 매수구간 카드에 D+1 체크포인트 컷 표시 (컬럼 있을 때만, 하위호환)
+        if vk == "buy":
+            d1p = _col(row, "D1_CHECKPOINT_PRICE")
+            if d1p > 0:
+                sub += (f" <span style='color:#EF4444'>🛡 D+1 컷 {_i(d1p):,}원</span>"
+                        f" — 익일 종가 이탈 시 조기청산.")
 
     edge = f"sp-edge-{vk}"
     verdict_cls = f"sp-v-{vk}"
@@ -388,6 +394,13 @@ def render_action_cards_nicegui(df: pd.DataFrame,
     if df is None or len(df) == 0:
         return
 
+    # CSS는 <head>에 주입해야 적용됨 (NiceGUI ui.html 내부 <style>는 무시됨).
+    # 기존 DARK_CSS와 동일 방식(ui.add_head_html). 스코프(sp-)라 중복 주입도 무해.
+    try:
+        ui.add_head_html(_CSS)
+    except Exception:
+        pass
+
     # 필터 칩(네이티브) — 선택값에 따라 build_cards_html 재호출
     state = {"mode": filter_mode}
     try:
@@ -398,7 +411,7 @@ def render_action_cards_nicegui(df: pd.DataFrame,
             def _refresh():
                 html_holder.set_content(
                     build_cards_html(df, max_cards=max_cards, show_pms=show_pms,
-                                     filter_mode=state["mode"], include_css=True)
+                                     filter_mode=state["mode"], include_css=False)
                 )
 
             with ui.row().classes("gap-1 flex-wrap"):

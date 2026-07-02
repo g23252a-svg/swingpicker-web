@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.7.0",
+        "date": "2026-07-02",
+        "type": "minor",
+        "title": "v24.7 — D+1 Checkpoint(조기 손실컷): 손절 -87% 반납 문제의 데이터 검증 해법",
+        "items": [
+            "🔎 **문제 정량화 (per_trade_log 16,549건 · h5 1,878건):** TP 익절이 +13,772%p를 벌 때 손절이 -7,886%p를 반납 — **번 것의 87%가 손절로 증발**. 손절 평균 -13.6%(고정 -15%폭 근접)로 한 번 맞으면 큼.",
+            "📈 **핵심 발견 — D+1 종가가 5일 결말을 예고 (h1↔h5 페어 1,878건, 완벽 단조):** D1 ≤-7%면 5일 승률 4.5%·손절전이 86%(회생 불가), D1 ≥+7%면 5일 평균 +16.7%·승률 85%(달리는 놈은 계속). D1 ≤-4%(201건)는 즉시청산 -6.7% vs 5일보유 -9.3% → **조기청산 +2.5%p/건**, 63%는 결국 -13.5% 손절행.",
+            "🛡️ **비대칭 보험 검증 (walk-forward):** IS(강세장) 이득 +0.03%p로 비용 0, OOS(험한장) **+3.94%p/건**·손절전이 79% 방어. 밸런스≥70 좋은 종목에서도 +4.27%p — 예외 없음. 전체 h1-hold 풀(1,366건) 적용 시 총 +511%p. 컷 -4% 선택: -2%는 발동 25%로 왕복수수료·재진입 부담, -4%는 발동 15%로 robust.",
+            "🧩 **구현 (표시 전용 SHADOW):** 신규 `d1_checkpoint.py`가 추천 df에 `D1_CHECKPOINT_PCT/PRICE/REASON` 컬럼 부여 — '진입 후 D+1 종가 X원(-4%) 이탈 시 익일 조기청산 권고'를 가격으로 명시. `D1CheckpointConfig` SSOT(cut/-4%, min_entry, enabled). **TOP_PICK/BUY_NOW/손절가/시뮬레이터 불변.** 액션 카드 '매수 구간'에 🛡 D+1 컷 가격 표시(컬럼 없으면 생략, 하위호환).",
+            "🎨 **액션 카드 핫픽스 동봉 (v24.6.1):** NiceGUI에서 카드 스타일이 안 먹던 문제 — CSS를 `ui.add_head_html`로 head 주입(ui.html 내부 <style> 무시됨) + SVG 게이지 stroke를 hex로(var() 미해석). 이 패치의 action_cards.py에 포함되어 있어 별도 적용 불필요.",
+            "🧪 **검증:** tests/test_d1_checkpoint_v247.py 10개(공식컬럼 불변·가격 계산·결측 강건·config 토글) + 영향 스윕 94개 통과. 실데이터(recommend_latest 380종목) 컷가격 380개 정상 부여. ⚠️ 후속 권고: validation_engine에 D1 룰 shadow 시뮬 추가해 일일 자동검증에 반영(리포트 참조).",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.6.0",
         "date": "2026-06-30",
         "type": "patch",
@@ -737,7 +752,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.14.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.15.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 

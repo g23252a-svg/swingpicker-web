@@ -1641,6 +1641,20 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         logger.warning(f"⚠️ Profit Momentum Overlay 실패 (기존 추천 유지): {e}")
 
+    # [v24.7] D+1 Checkpoint (조기 손실컷) — 데이터 검증 표시 컬럼 (공식 산식/손절가 불변)
+    # 근거: h1↔h5 페어 1,878건 — D1≤-4% 조기청산 시 +2.5%p/건, OOS +3.94%p (비대칭 보험).
+    try:
+        from d1_checkpoint import add_d1_checkpoint_columns, d1_summary
+        try:
+            from collector_config import DEFAULT_CONFIG as _D1_CFG
+        except Exception:
+            _D1_CFG = None
+        df_out = add_d1_checkpoint_columns(df_out, config=_D1_CFG)
+        _ds = d1_summary(df_out)
+        log(f"🛡️ [v24.7] D+1 Checkpoint 표시 — {_ds.get('n_with_checkpoint', 0)}/{_ds.get('n_rows', 0)}종목 컷가격 부여")
+    except Exception as e:
+        logger.warning(f"⚠️ D+1 Checkpoint 실패 (기존 추천 유지): {e}")
+
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
     op_d = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{ctx.tag}' if ctx.tag else ''}.csv")

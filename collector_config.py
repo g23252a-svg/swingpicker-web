@@ -539,6 +539,27 @@ class PmsConfig:
             raise ValueError(f"pms_min_turnover_eok={self.pms_min_turnover_eok}: 음수 불가")
 
 
+@dataclass(frozen=True)
+class D1CheckpointConfig:
+    """d1_checkpoint.py 파라미터 — D+1 조기 손실컷 (v24.7, 표시 전용 SHADOW).
+
+    [근거] per_trade_log h1↔h5 페어 1,878건: D+1 종가 손익 → D+5 결말이 완벽 단조.
+    D1≤-4%(201건) 즉시청산 -6.7% vs 5일보유 -9.3% → +2.5%p/건, 손절전이 63%.
+    IS(강세장) +0.03%p(비용 0) / OOS(험한장) +3.94%p — 비대칭 보험.
+    -4% 선택: -2%는 발동 25%로 왕복수수료·재진입 부담, -4%는 발동 15%로 robust.
+    공식 산식/손절가/시뮬 불변 — 표시 컬럼(D1_CHECKPOINT_*)만 생성.
+    """
+    d1_cut_pct: float = -4.0
+    d1_min_entry: float = 100.0
+    d1_enabled: bool = True
+
+    def __post_init__(self):
+        if not (-15.0 <= self.d1_cut_pct <= -0.5):
+            raise ValueError(f"d1_cut_pct={self.d1_cut_pct}: -15~-0.5 범위")
+        if self.d1_min_entry < 0:
+            raise ValueError("d1_min_entry: 음수 불가")
+
+
 # ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
@@ -561,7 +582,7 @@ class CollectorConfig:
     __slots__ = (
         "data", "indicator", "scoring", "macro",
         "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane", "stop_override",
-        "data_integrity", "pms",
+        "data_integrity", "pms", "d1",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -581,6 +602,7 @@ class CollectorConfig:
         stop_override: 'StopOverrideConfig' = None,
         data_integrity: 'DataIntegrityConfig' = None,
         pms: 'PmsConfig' = None,
+        d1: 'D1CheckpointConfig' = None,
         base_dir: str = None,
         config_version: str = "2.4.0",
     ):
@@ -597,6 +619,7 @@ class CollectorConfig:
         self.stop_override = stop_override or StopOverrideConfig()
         self.data_integrity = data_integrity or DataIntegrityConfig()
         self.pms = pms or PmsConfig()
+        self.d1 = d1 or D1CheckpointConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -605,7 +628,7 @@ class CollectorConfig:
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
             self.policy, self.guard, self.momentum_lane, self.stop_override,
-            self.data_integrity, self.pms, self.secrets,
+            self.data_integrity, self.pms, self.d1, self.secrets,
         )
 
     def __getattr__(self, name: str):
