@@ -72,3 +72,4 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260629,000660,SK하이닉스,🏆 최강,EXECUTE,EXECUTED,,2026-06-30,0,
 20260630,009420,한올바이오파마,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-07-01,1,000660
 20260701,034730,SK,🏆 최강,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-07-02,1,000660
+20260702,089970,브이엠,🏆 최강,EXECUTE,EXECUTED,,2026-07-03,0,

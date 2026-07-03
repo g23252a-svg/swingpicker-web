@@ -1,8 +1,8 @@
 {
   "version": "3.9.26b",
   "data_dir": "data",
-  "files": 91,
-  "no_buy_days": 91,
+  "files": 92,
+  "no_buy_days": 92,
   "candidate_rows": 14,
   "realized_rows": 7,
   "pending_rows": 7,

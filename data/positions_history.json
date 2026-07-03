@@ -4725,5 +4725,53 @@
       "005930_20260605_WARN_DRAWDOWN_20260623",
       "005930_20260605_STOP_HIT_20260702"
     ]
+  },
+  {
+    "code": "067310",
+    "name": "하나마이크론",
+    "entry_ymd": "20260612",
+    "entry_px": 48950.0,
+    "qty": 0,
+    "stop_px": 41600.0,
+    "stop_px_initial": 41600.0,
+    "take_px1": 58500.0,
+    "take_px2": 66600.0,
+    "trailing_high": 57000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260703",
+    "last_close_px": 40750.0,
+    "unrealized_pnl_pct": -16.75,
+    "realized_pnl_pct": -16.75,
+    "close_ymd": "20260703",
+    "close_px": 40750.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "067310_20260612_WARN_DRAWDOWN_20260702",
+      "067310_20260612_STOP_HIT_20260703"
+    ]
+  },
+  {
+    "code": "093370",
+    "name": "후성",
+    "entry_ymd": "20260701",
+    "entry_px": 17310.0,
+    "qty": 0,
+    "stop_px": 14710.0,
+    "stop_px_initial": 14710.0,
+    "take_px1": 23550.0,
+    "take_px2": 27650.0,
+    "trailing_high": 20800.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260703",
+    "last_close_px": 14220.0,
+    "unrealized_pnl_pct": -17.85,
+    "realized_pnl_pct": -17.85,
+    "close_ymd": "20260703",
+    "close_px": 14220.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "093370_20260701_WARN_DRAWDOWN_20260702",
+      "093370_20260701_STOP_HIT_20260703"
+    ]
   }
 ]

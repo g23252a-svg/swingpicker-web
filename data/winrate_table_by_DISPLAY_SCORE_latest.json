@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "v20.8",
-    "as_of_ymd": "20260702",
+    "as_of_ymd": "20260703",
     "horizon_bdays": 5,
     "entry_rule": "next_open",
     "exit_rule": "horizon_close",
