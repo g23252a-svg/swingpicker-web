@@ -560,6 +560,27 @@ class D1CheckpointConfig:
             raise ValueError("d1_min_entry: 음수 불가")
 
 
+@dataclass(frozen=True)
+class FillConfig:
+    """Fill-Aware Validation (v24.8) — 검증 시뮬의 지정가 체결 검증 SSOT.
+
+    [배경] 기존 make_rank_validation_report는 entry(추천매수가) 도달 여부를 확인하지
+    않아 유령체결 편향이 있었다: OHLCV 전수검증 결과 로그 30%가 실제로 닿은 적 없는
+    가격에서 수익 기록(유령 승률 96%), 체결 가능분은 평균 -3.4%/승률 36%.
+    이 편향이 rank_validation/승률표시/PMS 백테스트(+17.7% → 실제 +0.7%)를 부풀렸다.
+
+    fill_window_days 내 저가 ≤ entry일 때만 체결 인정. 미체결은 rank_validation
+    집계와 per_trade_log에서 제외되고 N_UNFILLED/FILL_RATE_%로 별도 카운트된다.
+    끄면(False) 기존 동작 — 비교/디버그용.
+    """
+    fill_aware_enabled: bool = True
+    fill_window_days: int = 3   # 실전 카드의 'fill 3일' 규칙과 동일
+
+    def __post_init__(self):
+        if not (1 <= self.fill_window_days <= 10):
+            raise ValueError(f"fill_window_days={self.fill_window_days}: 1~10 범위")
+
+
 # ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
@@ -582,7 +603,7 @@ class CollectorConfig:
     __slots__ = (
         "data", "indicator", "scoring", "macro",
         "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane", "stop_override",
-        "data_integrity", "pms", "d1",
+        "data_integrity", "pms", "d1", "fill",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -603,6 +624,7 @@ class CollectorConfig:
         data_integrity: 'DataIntegrityConfig' = None,
         pms: 'PmsConfig' = None,
         d1: 'D1CheckpointConfig' = None,
+        fill: 'FillConfig' = None,
         base_dir: str = None,
         config_version: str = "2.4.0",
     ):
@@ -620,6 +642,7 @@ class CollectorConfig:
         self.data_integrity = data_integrity or DataIntegrityConfig()
         self.pms = pms or PmsConfig()
         self.d1 = d1 or D1CheckpointConfig()
+        self.fill = fill or FillConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -628,7 +651,7 @@ class CollectorConfig:
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
             self.policy, self.guard, self.momentum_lane, self.stop_override,
-            self.data_integrity, self.pms, self.d1, self.secrets,
+            self.data_integrity, self.pms, self.d1, self.fill, self.secrets,
         )
 
     def __getattr__(self, name: str):

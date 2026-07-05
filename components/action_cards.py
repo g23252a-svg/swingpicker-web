@@ -175,8 +175,9 @@ def _card_html(row, lane: str = "official") -> str:
         verdict_label, verdict_mark = "PMS Top", "⚡"
         color = _VERDICT_COLOR["pms"]
         elite = _col(row, "ELITE_SCORE")
-        sub = (f"모멘텀확인 6피처 <b>상위 {pms:.0f}점</b> — 공식 ELITE는 낮으나({elite:.0f}) "
-               f"데이터상 강세지속 후보. <b style='color:var(--sp-pms)'>실거래 전 비교용</b>.")
+        sub = (f"모멘텀확인 6피처 <b>상위 {pms:.0f}점</b> — "
+               f"<b style='color:#EF4444'>⚠️ 백테스트에서 체결편향 발견(로그 +17.7% → 실제 +0.7%), "
+               f"재검증 전까지 매수 참고 금지.</b> 추적 기록용으로만 표시.")
         gauge_val, gauge_color = (pms if pms > 0 else disp), color
     else:
         v = _verdict(row)
@@ -359,7 +360,7 @@ def build_cards_html(df: pd.DataFrame,
             parts.append(_card_html(row, lane="official"))
     if len(pms_df) > 0:
         parts.append('<div class="sp-lane pms">⚡ PMS 추천 레인 '
-                     '<span class="sp-tag">SHADOW · 검증중</span><span class="sp-ln"></span></div>')
+                     '<span class="sp-tag">⚠️ 편향 재검증 중 · 매수참고 금지</span><span class="sp-ln"></span></div>')
         for _, row in pms_df.iterrows():
             parts.append(_card_html(row, lane="pms"))
     if len(off_df) == 0 and len(pms_df) == 0:

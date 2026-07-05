@@ -32,6 +32,8 @@ PER_TRADE_COLS = [
     # [v4.0] 세그먼트 캘리브레이션용 축 — recommend 컬럼명과 동일하게 둬서
     # build(로그)·lookup(recommend) 양쪽에서 같은 키로 매칭된다. (append-only)
     "MACRO_REGIME_MODE", "ACTION_TIER", "ROUTE", "TOP_PICK_TYPE",
+    # [v24.8] Fill-Aware — 체결 검증 결과 (filled/unchecked, 체결일 1~fill_window)
+    "fill_status", "fill_day",
 ]
 
 

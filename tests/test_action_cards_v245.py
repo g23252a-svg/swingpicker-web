@@ -120,7 +120,7 @@ def test_build_feed_offline_no_streamlit():
 def test_pms_lane_separation():
     html = build_cards_html(_frame(6, with_pms=True))
     assert "PMS 추천 레인" in html
-    assert "SHADOW · 검증중" in html
+    assert "편향 재검증 중" in html  # [v24.8] PMS 경고 라벨로 변경
     # PMS pick 2개는 PMS 카드로
     assert html.count("sp-pms-card") == 2
 

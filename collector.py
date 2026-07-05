@@ -669,6 +669,18 @@ def make_rank_validation_report(
         rows = []
         per_trade_rows = []  # [v13] Kelly 캘리브레이션용 per-trade 히스토리
 
+        # ── [v24.8] Fill-Aware Validation — 지정가 체결 검증 설정 ──
+        # 배경: 기존 시뮬은 entry(추천매수가) 도달 여부를 확인하지 않아, 계속 오른
+        # 종목이 '못 산 낮은 가격'에서 수익으로 기록되는 유령체결 편향이 있었다
+        # (전수 검증: 로그 30%가 유령, 유령 승률 96% — REPORT_20260703_fill_bias).
+        # fill_window 내 저가 ≤ entry일 때만 체결로 인정하고, 미체결은 집계·로그에서 제외한다.
+        try:
+            _fill_cfg = getattr(DEFAULT_CONFIG, "fill", None)
+        except Exception:
+            _fill_cfg = None
+        _fill_enabled = bool(getattr(_fill_cfg, "fill_aware_enabled", True))
+        _fill_window = int(getattr(_fill_cfg, "fill_window_days", 3))
+
         for rec_ymd in target_days:
             rec_path = os.path.join(out_dir, rec_map[rec_ymd])
             try:
@@ -757,8 +769,11 @@ def make_rank_validation_report(
                         tp_hit = np.zeros(len(codes), dtype=bool)      # [v10.5]
                         exit_prices = np.full(len(codes), np.nan)
                         n_extreme = 0
+                        # [v24.8] 체결 추적 — fill_window 내 저가≤entry 시 체결
+                        filled = np.zeros(len(codes), dtype=bool)
+                        fill_day = np.zeros(len(codes), dtype=int)
 
-                        for _d, pmaps in mid_price_maps:
+                        for _di, (_d, pmaps) in enumerate(mid_price_maps):
                             arr_close = np.array([pmaps["close"].get(c, np.nan) for c in codes], dtype=float)
                             arr_low = np.array([pmaps["low"].get(c, np.nan) for c in codes], dtype=float)
                             arr_open = np.array([pmaps["open"].get(c, np.nan) for c in codes], dtype=float)
@@ -775,6 +790,19 @@ def make_rank_validation_report(
                             for j in range(len(codes)):
                                 if stop_hit[j] or tp_hit[j]:
                                     continue
+
+                                # [v24.8] 체결 게이트 — entry 도달 전에는 포지션 없음(SL/TP 판정 금지)
+                                if _fill_enabled and not filled[j]:
+                                    if (
+                                        _di < _fill_window
+                                        and np.isfinite(arr_low[j]) and np.isfinite(epx[j])
+                                        and epx[j] > 0 and arr_low[j] <= epx[j]
+                                    ):
+                                        filled[j] = True
+                                        fill_day[j] = _di + 1
+                                        # 체결 당일부터 SL/TP 판정 (장중 순서 모호성은 2차 오차 — 문서화)
+                                    else:
+                                        continue
 
                                 open_j = float(arr_open[j]) if np.isfinite(arr_open[j]) else 0.0
                                 low_j = float(arr_low[j]) if np.isfinite(arr_low[j]) else float(arr_close[j]) if np.isfinite(arr_close[j]) else 0.0
@@ -837,6 +865,15 @@ def make_rank_validation_report(
                         extreme_mask = mdd < -30.0
                         n_extreme = int(np.sum(extreme_mask & np.isfinite(mdd)))
 
+                        # [v24.8] 미체결 종목은 집계·로그에서 제외 (ret NaN → 아래 valid 필터가 자동 제거)
+                        _cand = np.isfinite(epx) & (epx > 0)
+                        if _fill_enabled:
+                            ret[~filled] = np.nan
+                            n_unfilled = int((_cand & ~filled).sum())
+                        else:
+                            filled[:] = _cand
+                            n_unfilled = 0
+
                         # ✅ (D-2) n 정의 + 샘플 0이면 skip
                         valid_ret = np.isfinite(ret)
                         valid = valid_ret & np.isfinite(mdd)
@@ -895,6 +932,9 @@ def make_rank_validation_report(
                                 "ROUTE": (pick["ROUTE"].iloc[j] if "ROUTE" in pick.columns else ""),
                                 "TOP_PICK_TYPE": (pick["TOP_PICK_TYPE"].iloc[j]
                                                   if "TOP_PICK_TYPE" in pick.columns else ""),
+                                # [v24.8] 체결 검증 — 미체결은 위 isfinite(ret) 가드로 이미 제외됨
+                                "fill_status": "filled" if _fill_enabled else "unchecked",
+                                "fill_day": int(fill_day[j]) if _fill_enabled else 0,
                             })
 
                         rows.append({
@@ -921,6 +961,9 @@ def make_rank_validation_report(
                             "MAX_CONSEC_LOSS": int(max((sum(1 for _ in g) for k, g in __import__('itertools').groupby(r < 0) if k), default=0)),
                             # [v10.3] 극단 이벤트 분리 추적 + 경고 플래그
                             "N_EXTREME": n_extreme,
+                            # [v24.8] 체결 깔때기 — N은 체결분만, 미체결은 별도 카운트
+                            "N_UNFILLED": n_unfilled,
+                            "FILL_RATE_%": round(float(n / (n + n_unfilled) * 100), 1) if (n + n_unfilled) > 0 else 100.0,
                             "RISK_FLAG": "🔴" if (float(np.nanmin(md)) < -10.0 or n_extreme > 0) else ("🟡" if float(np.nanmin(md)) < -6.0 else "🟢"),
                         })
 

@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.8.0",
+        "date": "2026-07-03",
+        "type": "major",
+        "title": "v24.8 — Fill-Aware Validation: 유령체결 편향 수술 (검증엔진·승률표시 정직화)",
+        "items": [
+            "🚨 **문제 (OHLCV 전수검증):** 기존 검증 시뮬(make_rank_validation_report)은 entry(추천매수가) 도달 여부를 확인하지 않았다. 전 로그 검증 결과 **판정가능 행의 37%(4,304건)가 유령체결** — 실제로 닿은 적 없는 지정가에서 수익 기록(유령 승률 96%). h5 성과가 유령포함 +7.0%/58% → **체결분만 +1.1%/46%**. rank_validation·승률표·PMS 백테스트(+17.7%→실제 +0.7%)가 전부 이 편향 위에 있었고, PMS 라이브 첫 픽(7/1)이 7/2 폭락에서 -14%로 즉시 노출됐다.",
+            "🔧 **핵심 수술 (collector.py 검증 루프):** fill_window(3일, 실전카드 'fill 3일'과 동일) 내 저가 ≤ entry일 때만 체결 인정. **미체결은 SL/TP 판정 자체가 금지**되고(포지션 없음), 집계·per_trade_log에서 제외된다. rank_validation에 `N_UNFILLED`/`FILL_RATE_%` 깔때기 컬럼 추가, per_trade_log에 `fill_status`/`fill_day` 기록. `FillConfig`(collector_config) SSOT — 끄면 기존 동작(비교/디버그용). 체결 당일 장중 순서 모호성은 2차 오차로 문서화.",
+            "🧹 **과거 로그 백필:** `scripts/backfill_fill_status.py`(1회 실행) — OHLCV parquet으로 전 이력 검증 후 유령 행을 per_trade_log_unfilled.csv로 아카이브 분리(원본 .bak 백업, --dry-run 지원). 실행 후 kelly 캘리브레이션·winrate·briefing 등 로그 소비자 전원이 코드 수정 없이 정직한 데이터를 읽게 된다.",
+            "⚠️ **PMS 긴급 조치:** 레인 태그 'SHADOW·검증중' → '⚠️ 편향 재검증 중·매수참고 금지', 카드 문구에 정직 수치(+17.7%→+0.7%) 명시, profit_momentum.py docstring 정정 공지. 컬럼 생성은 라이브 추적용으로 유지.",
+            "🧪 **검증:** tests/test_fill_aware_v248.py 7개 — 합성 유령/체결 시나리오 통합테스트(유령이 N에서 제외·N_UNFILLED 카운트·FILL_RATE 50%·체결분 성과 정확), 토글 off 시 기존 동작 복원, backfill 판정 단위테스트(최초도달일·창완결·unknown·h캡). 실데이터 dry-run: 16,778행 중 filled 7,421 / 유령 4,304 / unknown 5,053.",
+            "📝 상세 분석: REPORT_20260703_fill_bias.md (발견 경위·정직 재백테스트·D1컷 생존 확인 포함).",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.7.0",
         "date": "2026-07-02",
         "type": "minor",
@@ -752,7 +767,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.15.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.16.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 
