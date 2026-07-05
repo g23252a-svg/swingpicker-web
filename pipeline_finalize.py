@@ -1655,6 +1655,17 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         logger.warning(f"⚠️ D+1 Checkpoint 실패 (기존 추천 유지): {e}")
 
+    # [v24.9] 정직 확률 레이어 — 시장기저 2일 상승률(실측) + NO_EDGE 명시 (공식 산식 불변)
+    # 근거: OHLCV 29,703표본 walk-forward — 종목별 단기 상승확률 엣지 검증 실패(null),
+    # 기저율(51%→37%)이 지배변수. 지어낸 확률 대신 실측치와 미검증 상태를 표시한다.
+    try:
+        from honest_prob import add_srp_columns, srp_summary
+        df_out = add_srp_columns(df_out, data_dir=out_dir if 'out_dir' in dir() else "data")
+        _ss = srp_summary(df_out)
+        log(f"🎲 [v24.9] 정직확률 — 시장기저2일 {_ss.get('base_prob_2d')}% · {_ss.get('status')}")
+    except Exception as e:
+        logger.warning(f"⚠️ 정직확률 레이어 실패 (기존 추천 유지): {e}")
+
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
     op_d = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{ctx.tag}' if ctx.tag else ''}.csv")

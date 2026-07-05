@@ -15,6 +15,19 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.9.0",
+        "date": "2026-07-03",
+        "type": "minor",
+        "title": "v24.9 — 정직 확률 레이어: '단기 상승확률' 연구의 null 결과를 제품 진실로",
+        "items": [
+            "🔬 **연구 (OHLCV 29,703표본 · 84일 · 종가진입 · walk-forward):** '단기 상승확률 높은 종목' 랭킹을 정직 기준으로 재시도 — ① 24개 피처 vs 2일 수익 스피어만: 안정 엣지 사실상 전무(최대 |ρ|≈0.05, 모멘텀은 반기마다 부호반전) ② 시장레짐 조건부 확률: IS→OOS 캘리브레이션 붕괴(-4~-2% 버킷 30%→84% 역전) ③ 회피 컴포짓 십분위 스프레드 0.4%p. **결론: 현 유니버스·단기 지평에서 종목별 상승확률의 검증 가능한 엣지 없음(null).** 억지 점수는 유령체결 사태의 재판이므로 만들지 않는다.",
+            "🎲 **대신 진실을 표시 (`honest_prob.py`):** `SRP_BASE_PROB_2D` = 최근 20거래일 유니버스의 2일 상승 **실측** 비율(현재 39.6%, n=7,735 — '동전보다 나쁜 장'을 숫자로), `SRP_EDGE_STATUS='NO_EDGE_VALIDATED'` 명시, 카드 하단 한 줄 표시. 예측 주장 없음·기술통계만. 기저율이 51%↔37%로 출렁이는 것이 종목 요인보다 지배적이라는 발견을 그대로 제품화.",
+            "🧭 **실행 지침(검증 생존분):** 단기 성과의 레버는 선택이 아니라 관리 — D+1 컷 -4%(+1.1~1.6%p·꼬리 절반, v24.7), 지정가 미체결율 실측 37%(v24.8 백필) 인지, 기저확률 낮을 땐 신규진입 축소. 상세: REPORT_v249_srp_null_result.md.",
+            "🛡️ 안전: 공식 산식 불변, 파이프라인 try/except 무해 통합, 데이터 부재 시 조용히 생략. action_cards/version_info는 v24.8 기반(미적용 시 함께 반영됨). 테스트 8개.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.8.0",
         "date": "2026-07-03",
         "type": "major",
@@ -767,7 +780,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.16.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.17.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 

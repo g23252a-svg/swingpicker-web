@@ -211,6 +211,14 @@ def _card_html(row, lane: str = "official") -> str:
         rcls = _ROUTE_CLASS.get(route, "sp-r-wait")
         stat_cells.append(f"<div class='sp-stat'><div class='sp-route {rcls}'>{route}</div><div class='sp-sk' style='margin-top:5px'>루트</div></div>")
 
+    # [v24.9] 정직 기저확률 — 공식 레인 카드 하단 한 줄 (컬럼 있을 때만)
+    srp = _col(row, "SRP_BASE_PROB_2D")
+    srp_html = ""
+    if lane == "official" and srp > 0:
+        srp_html = (f"<div style='font-size:10px;color:var(--sp-t3);margin-top:8px'>"
+                    f"🎲 시장기저 2일 상승률 <b style='color:var(--sp-t2)'>{srp:.0f}%</b>"
+                    f" (실측 · 종목별 유의차 미검증)</div>")
+
     gauge = _gauge_html(gauge_val, gauge_color)
     stats = f"<div class='sp-stats'>{gauge}{''.join(stat_cells)}</div>" if stat_cells else ""
     code_html = f"<span class='sp-code'>{code}</span>" if code else ""
@@ -224,6 +232,7 @@ def _card_html(row, lane: str = "official") -> str:
   <div class="sp-sub">{sub}</div>
   {_ladder_html(row)}
   {stats}
+  {srp_html}
 </div>"""
 
 
