@@ -15,6 +15,18 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "24.9.1",
+        "date": "2026-07-06",
+        "type": "patch",
+        "title": "v24.9.1 — 모바일 탭 원복 버그 수정 (앱 전환 복귀 시 마지막 탭 유지)",
+        "items": [
+            "📱 **증상:** 모바일에서 타 앱(토스 등) 전환 후 복귀하면 첫 탭으로 초기화. 원인: 백그라운드 전환으로 웹소켓이 끊기고 유예(기본 3초) 초과 시 페이지 리로드 → 탭 선택이 클라이언트 메모리라 소실, 초기값 t1 하드코딩으로 원복.",
+            "🔧 **수정 (main.py 3지점):** ① 탭 전환 시 `app.storage.user['main_active_tab']`에 키 저장(기존 storage_secret/세션 인프라 재사용) ② 페이지 빌드 시 저장 키로 초기 탭·lazy 렌더 복원(비관리자 세션의 t8 등 무효 키는 t1 폴백) ③ `reconnect_timeout=60` — 60초 내 복귀는 리로드 없이 세션 그대로 유지(대부분의 앱 전환이 여기서 흡수됨).",
+            "🛡️ 안전: NiceGUI 허용범위(2.10.0~3.9.x) 양끝에서 reconnect_timeout 파라미터 지원 확인. storage 실패 시 try/except로 기존 동작 유지. 공식 산식·데이터 무관 순수 UI 패치.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.9.0",
         "date": "2026-07-03",
         "type": "minor",

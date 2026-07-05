@@ -328,9 +328,20 @@ async def index():
             tab_refs[key] = ui.tab(label)
             label_to_key[label] = key
 
+    # [v24.9.1] 모바일 복귀 시 탭 원복 방지 — 마지막 탭을 세션(storage.user)에 저장/복원.
+    # 배경: 모바일에서 타 앱(토스 등) 전환 시 웹소켓이 끊기고, 유예 초과 시 페이지가
+    # 리로드되며 클라이언트 탭 상태가 초기화됨 → 저장된 키로 초기 탭을 복원한다.
+    _saved_key = "t1"
+    try:
+        _cand = app.storage.user.get("main_active_tab", "t1")
+        if _cand in tab_refs:
+            _saved_key = _cand
+    except Exception:
+        pass
+
     # ─── 빈 컨테이너 패널 (Lazy Loading 핵심) ───
     containers = {}
-    with ui.tab_panels(tabs, value=tab_refs["t1"]).classes("w-full"):
+    with ui.tab_panels(tabs, value=tab_refs[_saved_key]).classes("w-full"):
         for key in tab_refs:
             with ui.tab_panel(tab_refs[key]):
                 containers[key] = ui.column().classes("w-full")
@@ -374,8 +385,8 @@ async def index():
                 logger.error(f"탭 렌더링 오류 [{key}]: {e}", exc_info=True)
                 ui.label(f"❌ 로딩 실패: {e}").classes("text-red-400")
 
-    # Tab 1 즉시 렌더 (기본 탭)
-    load_tab("t1")
+    # 초기 탭 즉시 렌더 (복원된 탭 또는 기본 t1)
+    load_tab(_saved_key)
 
     # 나머지는 클릭 시 Lazy 렌더
     def on_tab_change(e):
@@ -383,6 +394,11 @@ async def index():
         key = label_to_key.get(tab_val)
         if key:
             load_tab(key)
+            # [v24.9.1] 마지막 탭 저장 — 리로드/재접속 후 복원용
+            try:
+                app.storage.user["main_active_tab"] = key
+            except Exception:
+                pass
         # [업데이트 알림] 업데이트 탭 클릭 시 → 현재 버전을 '본 것'으로 저장 + 🔴 제거
         #   set_label()은 탭의 label(표시 텍스트)만 바꾸고 name(라우팅 키)은 유지하므로
         #   label_to_key 매핑이 깨지지 않는다.
@@ -443,6 +459,7 @@ if __name__ in {"__main__", "__mp_main__"}:
         favicon="💎",
         dark=True,
         storage_secret=os.environ["STORAGE_SECRET"],
+        reconnect_timeout=60.0,  # [v24.9.1] 모바일 앱 전환 시 60초 내 복귀는 리로드 없이 세션 유지
         reload=False,
         show=False,
     )
