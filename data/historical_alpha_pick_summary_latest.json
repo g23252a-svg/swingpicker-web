@@ -1,26 +1,10 @@
 {
   "asof_file": "recommend_latest.csv",
   "official_buy_count": 0,
-  "alpha_pick_count": 2,
-  "near_candidate_count": 1,
-  "near_candidates": [
-    {
-      "종목코드": "055550",
-      "종목명": "신한지주",
-      "HISTORICAL_ALPHA_SCORE": 42.7,
-      "TIMING_SCORE": 95.9,
-      "외인순매수": 5365,
-      "RR_NOW_TP1": 0.26,
-      "FINAL_SCORE": 58.7,
-      "VWAP_GAP": 8.74,
-      "POC_GAP": 7.35,
-      "STRUCT_SCORE": 47.3,
-      "ENTRY_RISK_LEVEL": "GREEN",
-      "ROUTE": "WAIT",
-      "MARKET_BREADTH": 56.1
-    }
-  ],
-  "rule_pass_count": 3,
+  "alpha_pick_count": 0,
+  "near_candidate_count": 0,
+  "near_candidates": [],
+  "rule_pass_count": 0,
   "rr_floor": 1.2,
   "rule_source": "FALLBACK",
   "selected_rule": {
@@ -38,56 +22,13 @@
     "win_test": null,
     "ret_test": null,
     "oos_pass": false,
-    "baseline_test": 22.5
+    "baseline_test": 23.5
   },
-  "baseline_train": 39.7,
-  "baseline_test": 22.5,
+  "baseline_train": 39.6,
+  "baseline_test": 23.5,
   "oos_rules_found": 0,
-  "total_rules_evaluated": 1,
-  "alpha_picks": [
-    {
-      "종목코드": "090430",
-      "종목명": "아모레퍼시픽",
-      "HISTORICAL_ALPHA_SCORE": 63.8,
-      "TIMING_SCORE": 58.4,
-      "외인순매수": 15514,
-      "RR_NOW_TP1": 2.82,
-      "FINAL_SCORE": 43.5,
-      "VWAP_GAP": -0.3,
-      "POC_GAP": -7.47,
-      "STRUCT_SCORE": 24.0,
-      "ENTRY_RISK_LEVEL": "GREEN",
-      "ROUTE": "WAIT",
-      "MARKET_BREADTH": 56.1,
-      "HISTORICAL_ALPHA_RULE_ID": "FALLBACK_T55_FRG_POC90",
-      "HISTORICAL_ALPHA_RULE_DESC": "TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드",
-      "HISTORICAL_ALPHA_WIN_RATE": null,
-      "HISTORICAL_ALPHA_AVG_RET": null,
-      "HISTORICAL_ALPHA_N": null,
-      "HISTORICAL_ALPHA_OOS_PASS": false
-    },
-    {
-      "종목코드": "006360",
-      "종목명": "GS건설",
-      "HISTORICAL_ALPHA_SCORE": 52.6,
-      "TIMING_SCORE": 70.8,
-      "외인순매수": 9107,
-      "RR_NOW_TP1": 1.35,
-      "FINAL_SCORE": 65.6,
-      "VWAP_GAP": -18.8,
-      "POC_GAP": -19.27,
-      "STRUCT_SCORE": 60.6,
-      "ENTRY_RISK_LEVEL": "GREEN",
-      "ROUTE": "WAIT",
-      "MARKET_BREADTH": 56.1,
-      "HISTORICAL_ALPHA_RULE_ID": "FALLBACK_T55_FRG_POC90",
-      "HISTORICAL_ALPHA_RULE_DESC": "TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드",
-      "HISTORICAL_ALPHA_WIN_RATE": null,
-      "HISTORICAL_ALPHA_AVG_RET": null,
-      "HISTORICAL_ALPHA_N": null,
-      "HISTORICAL_ALPHA_OOS_PASS": false
-    }
-  ],
+  "total_rules_evaluated": 0,
+  "alpha_picks": [],
   "backtest_method": "내일시가진입 TP+8/SL-4 5일, train/test OOS 검증",
   "disclaimer": "공식 신규매수 아님. OOS 검증 통과한 과거 통계 기반 기대값 후보(승률 37% 내외·baseline 33% 대비 +EV·RR로 버는 구조). 70% 적중 아님."
 }

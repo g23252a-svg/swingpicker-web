@@ -1,2 +1,1 @@
-﻿rule_id,desc,timing_min,frg_pos,poc_max,struct_min,breadth_max,n_train,win_train,ret_train,n_test,win_test,ret_test,win_rate,avg_ret,n,rr_test,oos_pass,edge_score
-T55_FRG_P90_SNA_BNA,TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드,55,True,90,,,353,42.8,0.73,314,23.9,-1.25,33.9,-0.2,667,1.85,False,-48.3
+﻿
