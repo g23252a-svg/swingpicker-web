@@ -581,6 +581,26 @@ class FillConfig:
             raise ValueError(f"fill_window_days={self.fill_window_days}: 1~10 범위")
 
 
+@dataclass(frozen=True)
+class ExitPlanConfig:
+    """exit_plan.py — v25.1 청산 규율 (표시 전용 SHADOW).
+
+    [근거] 정직 h5 1,275건 장중저가 시뮬: 손절 -15%→-7%로 평균 -3.17%→-2.04%·꼬리 42%→0%,
+    CARRY/NEUTRAL 제외로 -4.27%→-1.86%, TP+10% 결합 시 -0.05%/승률41%.
+    공식 산식/기존 손절가 불변 — EXIT_* 권고 컬럼만 부여.
+    """
+    stop_tight_pct: float = -7.0
+    tp_quick_pct: float = 10.0
+    min_entry: float = 100.0
+    exit_enabled: bool = True
+
+    def __post_init__(self):
+        if not (-15.0 <= self.stop_tight_pct <= -1.0):
+            raise ValueError(f"stop_tight_pct={self.stop_tight_pct}: -15~-1 범위")
+        if not (1.0 <= self.tp_quick_pct <= 50.0):
+            raise ValueError(f"tp_quick_pct={self.tp_quick_pct}: 1~50 범위")
+
+
 # ═══════════════════════════════════════════════════
 #  CollectorConfig — Facade (Composition + 하위 호환)
 # ═══════════════════════════════════════════════════
@@ -603,7 +623,7 @@ class CollectorConfig:
     __slots__ = (
         "data", "indicator", "scoring", "macro",
         "slippage", "time_stop", "secrets", "policy", "guard", "momentum_lane", "stop_override",
-        "data_integrity", "pms", "d1", "fill",
+        "data_integrity", "pms", "d1", "fill", "exit",
         "base_dir", "config_version",
         "_sub_configs",
     )
@@ -625,6 +645,7 @@ class CollectorConfig:
         pms: 'PmsConfig' = None,
         d1: 'D1CheckpointConfig' = None,
         fill: 'FillConfig' = None,
+        exit: 'ExitPlanConfig' = None,
         base_dir: str = None,
         config_version: str = "2.4.0",
     ):
@@ -643,6 +664,7 @@ class CollectorConfig:
         self.pms = pms or PmsConfig()
         self.d1 = d1 or D1CheckpointConfig()
         self.fill = fill or FillConfig()
+        self.exit = exit or ExitPlanConfig()
         self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
         self.config_version = config_version
 
@@ -651,7 +673,7 @@ class CollectorConfig:
             self.data, self.indicator, self.scoring,
             self.macro, self.slippage, self.time_stop,
             self.policy, self.guard, self.momentum_lane, self.stop_override,
-            self.data_integrity, self.pms, self.d1, self.fill, self.secrets,
+            self.data_integrity, self.pms, self.d1, self.fill, self.exit, self.secrets,
         )
 
     def __getattr__(self, name: str):

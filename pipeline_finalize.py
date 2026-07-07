@@ -1666,6 +1666,20 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         logger.warning(f"⚠️ 정직확률 레이어 실패 (기존 추천 유지): {e}")
 
+    # [v25.1] Exit Discipline Layer — 청산 규율 표시 (손절폭 조임/TP앞당김/ROUTE위험, 공식 불변)
+    # 근거: 정직 h5 시뮬 — SL-7%·CARRY/NEUTRAL제외·TP+10% 결합 시 -3.17%→-1.08%.
+    try:
+        from exit_plan import add_exit_plan_columns, exit_summary
+        try:
+            from collector_config import DEFAULT_CONFIG as _EX_CFG
+        except Exception:
+            _EX_CFG = None
+        df_out = add_exit_plan_columns(df_out, config=_EX_CFG)
+        _es = exit_summary(df_out)
+        log(f"🚪 [v25.1] 청산규율 — 고위험루트 {_es.get('high_avoid',0)} · 주의 {_es.get('caution',0)} · OK {_es.get('ok',0)}")
+    except Exception as e:
+        logger.warning(f"⚠️ Exit Plan 레이어 실패 (기존 추천 유지): {e}")
+
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)
     op_d = os.path.join(OUT_DIR, f"recommend_{trade_ymd}{f'_{ctx.tag}' if ctx.tag else ''}.csv")

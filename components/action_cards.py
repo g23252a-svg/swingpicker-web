@@ -191,6 +191,15 @@ def _card_html(row, lane: str = "official") -> str:
             if d1p > 0:
                 sub += (f" <span style='color:#EF4444'>🛡 D+1 컷 {_i(d1p):,}원</span>"
                         f" — 익일 종가 이탈 시 조기청산.")
+        # [v25.1] 청산 규율 — 고위험 루트 경고 + 권고 손절/익절선 (컬럼 있을 때만)
+        er = str(row.get("EXIT_ROUTE_RISK", "") or "")
+        if er == "HIGH_AVOID":
+            sub += (" <span style='color:#EF4444;font-weight:700'>⛔ 고위험 루트</span>"
+                    " — 정직검증상 진입 보류 권고.")
+        est = _col(row, "EXIT_STOP_TIGHT"); etp = _col(row, "EXIT_TP_QUICK")
+        if vk == "buy" and est > 0 and etp > 0:
+            sub += (f" <span style='color:var(--sp-t3)'>규율: 손절 {_i(est):,}(-7%)"
+                    f" · 1차익절 {_i(etp):,}(+10%)</span>")
 
     edge = f"sp-edge-{vk}"
     verdict_cls = f"sp-v-{vk}"

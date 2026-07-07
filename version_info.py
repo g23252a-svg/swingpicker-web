@@ -15,6 +15,21 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "25.1.0",
+        "date": "2026-07-07",
+        "type": "minor",
+        "title": "v25.1 — Exit Discipline Layer: 정직 로그가 드러낸 진짜 병목(청산 규율) 3-레버 표시",
+        "items": [
+            "🔬 **정직 로그의 맨얼굴:** 유령체결 백필 후 재측정한 h5(체결분 1,275건) = 평균 -4.27%/승률 33%. 문제는 종목 선택이 아니라 **청산 규율**이었다. 장중 저가 경로 시뮬(OHLCV)로 3개 레버를 확정.",
+            "① **ROUTE 위험등급 — 진입 자체가 문제인 구간:** CARRY 평균 -17.6%/SL률 74%, NEUTRAL -4.9%/68%. 이 둘 제외만으로 전체 -4.27%→-1.86%. '들어가지 말라'가 최대 알파. → EXIT_ROUTE_RISK(HIGH_AVOID/CAUTION/OK).",
+            "② **손절폭 조임:** 현행 손절 평균 -14.5%(거의 고정 -15%), stop_hit의 60%가 -10%↓. 손절선 -15%→-7%로 좁히면 평균 -3.17%→-2.04%, -10%↓ 꼬리 42%→0%. 한 방 손실을 반으로. → EXIT_STOP_TIGHT(진입가 -7%).",
+            "③ **TP 앞당김:** 1차 익절 +10% 결합 시 ①+② 위에서 평균 -0.05%/승률 41%(현행 -3.17%/32%). 합계손실 -3,161→-37%p. → EXIT_TP_QUICK(진입가 +10%).",
+            "🚪 **구현 (exit_plan.py, 표시 전용 SHADOW):** 위 3컬럼 + EXIT_PLAN_NOTE 부여, ExitPlanConfig SSOT(-7%/+10% 튜닝), 파이프라인 SRP 다음 wire. 액션 카드 매수구간에 '⛔ 고위험 루트'/'손절 X(-7%)·1차익절 Y(+10%)' 표시. **공식 산식·기존 손절가 컬럼 불변** — D1컷(v24.7)과 병행하는 권고선.",
+            "🧪 검증 9종(ROUTE 등급·손절/TP 계산·공식/손절가 불변·결측 강건·config·카드 표시) + 관련 회귀 통과. 실데이터: recommend_latest에 고위험 208·주의 8·OK 126 분류. 상세: REPORT_v251_exit_discipline.md.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "25.0.0",
         "date": "2026-07-06",
         "type": "major",
@@ -819,7 +834,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.18.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.19.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 
