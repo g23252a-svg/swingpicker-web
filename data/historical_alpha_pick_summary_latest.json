@@ -1,10 +1,56 @@
 {
   "asof_file": "recommend_latest.csv",
   "official_buy_count": 0,
-  "alpha_pick_count": 0,
-  "near_candidate_count": 0,
-  "near_candidates": [],
-  "rule_pass_count": 0,
+  "alpha_pick_count": 1,
+  "near_candidate_count": 3,
+  "near_candidates": [
+    {
+      "종목코드": "028300",
+      "종목명": "HLB",
+      "HISTORICAL_ALPHA_SCORE": 54.5,
+      "TIMING_SCORE": 67.9,
+      "외인순매수": 15510,
+      "RR_NOW_TP1": 0.5,
+      "FINAL_SCORE": 62.6,
+      "VWAP_GAP": -3.86,
+      "POC_GAP": 2.57,
+      "STRUCT_SCORE": 64.8,
+      "ENTRY_RISK_LEVEL": "GREEN",
+      "ROUTE": "WAIT",
+      "MARKET_BREADTH": 33.4
+    },
+    {
+      "종목코드": "003230",
+      "종목명": "삼양식품",
+      "HISTORICAL_ALPHA_SCORE": 51.0,
+      "TIMING_SCORE": 96.1,
+      "외인순매수": 14664,
+      "RR_NOW_TP1": 0.01,
+      "FINAL_SCORE": 60.6,
+      "VWAP_GAP": -2.38,
+      "POC_GAP": 2.43,
+      "STRUCT_SCORE": 54.1,
+      "ENTRY_RISK_LEVEL": "GREEN",
+      "ROUTE": "WAIT",
+      "MARKET_BREADTH": 33.4
+    },
+    {
+      "종목코드": "033780",
+      "종목명": "KT&G",
+      "HISTORICAL_ALPHA_SCORE": 50.4,
+      "TIMING_SCORE": 72.6,
+      "외인순매수": 15222,
+      "RR_NOW_TP1": 0.53,
+      "FINAL_SCORE": 49.8,
+      "VWAP_GAP": 2.97,
+      "POC_GAP": 6.85,
+      "STRUCT_SCORE": 47.5,
+      "ENTRY_RISK_LEVEL": "GREEN",
+      "ROUTE": "WAIT",
+      "MARKET_BREADTH": 33.4
+    }
+  ],
+  "rule_pass_count": 7,
   "rr_floor": 1.2,
   "rule_source": "FALLBACK",
   "selected_rule": {
@@ -28,7 +74,29 @@
   "baseline_test": 23.5,
   "oos_rules_found": 0,
   "total_rules_evaluated": 0,
-  "alpha_picks": [],
+  "alpha_picks": [
+    {
+      "종목코드": "055550",
+      "종목명": "신한지주",
+      "HISTORICAL_ALPHA_SCORE": 46.6,
+      "TIMING_SCORE": 82.8,
+      "외인순매수": 4453,
+      "RR_NOW_TP1": 1.59,
+      "FINAL_SCORE": 58.9,
+      "VWAP_GAP": 9.6,
+      "POC_GAP": 9.32,
+      "STRUCT_SCORE": 48.6,
+      "ENTRY_RISK_LEVEL": "GREEN",
+      "ROUTE": "WAIT",
+      "MARKET_BREADTH": 33.4,
+      "HISTORICAL_ALPHA_RULE_ID": "FALLBACK_T55_FRG_POC90",
+      "HISTORICAL_ALPHA_RULE_DESC": "TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드",
+      "HISTORICAL_ALPHA_WIN_RATE": null,
+      "HISTORICAL_ALPHA_AVG_RET": null,
+      "HISTORICAL_ALPHA_N": null,
+      "HISTORICAL_ALPHA_OOS_PASS": false
+    }
+  ],
   "backtest_method": "내일시가진입 TP+8/SL-4 5일, train/test OOS 검증",
   "disclaimer": "공식 신규매수 아님. OOS 검증 통과한 과거 통계 기반 기대값 후보(승률 37% 내외·baseline 33% 대비 +EV·RR로 버는 구조). 70% 적중 아님."
 }

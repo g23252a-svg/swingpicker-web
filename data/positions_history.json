@@ -4773,5 +4773,78 @@
       "093370_20260701_WARN_DRAWDOWN_20260702",
       "093370_20260701_STOP_HIT_20260703"
     ]
+  },
+  {
+    "code": "084370",
+    "name": "유진테크",
+    "entry_ymd": "20260625",
+    "entry_px": 162600.0,
+    "qty": 0,
+    "stop_px": 148500.0,
+    "stop_px_initial": 148500.0,
+    "take_px1": 201500.0,
+    "take_px2": 240000.0,
+    "trailing_high": 231500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260707",
+    "last_close_px": 146100.0,
+    "unrealized_pnl_pct": -10.15,
+    "realized_pnl_pct": -10.15,
+    "close_ymd": "20260707",
+    "close_px": 146100.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "084370_20260625_TP1_HIT_20260701",
+      "084370_20260625_STOP_HIT_20260707"
+    ]
+  },
+  {
+    "code": "122640",
+    "name": "예스티",
+    "entry_ymd": "20260626",
+    "entry_px": 33000.0,
+    "qty": 0,
+    "stop_px": 28050.0,
+    "stop_px_initial": 28050.0,
+    "take_px1": 44000.0,
+    "take_px2": 51400.0,
+    "trailing_high": 39500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260707",
+    "last_close_px": 27600.0,
+    "unrealized_pnl_pct": -16.36,
+    "realized_pnl_pct": -16.36,
+    "close_ymd": "20260707",
+    "close_px": 27600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "122640_20260626_WARN_DRAWDOWN_20260706",
+      "122640_20260626_STOP_HIT_20260707"
+    ]
+  },
+  {
+    "code": "062040",
+    "name": "산일전기",
+    "entry_ymd": "20260702",
+    "entry_px": 238000.0,
+    "qty": 0,
+    "stop_px": 202000.0,
+    "stop_px_initial": 202000.0,
+    "take_px1": 272500.0,
+    "take_px2": 341000.0,
+    "trailing_high": 255500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260707",
+    "last_close_px": 193400.0,
+    "unrealized_pnl_pct": -18.74,
+    "realized_pnl_pct": -18.74,
+    "close_ymd": "20260707",
+    "close_px": 193400.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "062040_20260702_WARN_DRAWDOWN_20260703",
+      "062040_20260702_WARN_DRAWDOWN_20260706",
+      "062040_20260702_STOP_HIT_20260707"
+    ]
   }
 ]
