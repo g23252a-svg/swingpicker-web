@@ -123,10 +123,10 @@
     }
   ],
   "outputs": {
-    "candidates": "data\\no_buy_breaker_candidates_latest.csv",
-    "trades": "data\\no_buy_breaker_trades_latest.csv",
-    "rules": "data\\no_buy_breaker_rules_latest.csv",
-    "days": "data\\no_buy_breaker_days_latest.csv",
-    "direct_outcomes": "data\\no_buy_breaker_direct_outcomes_latest.csv"
+    "candidates": "data/no_buy_breaker_candidates_latest.csv",
+    "trades": "data/no_buy_breaker_trades_latest.csv",
+    "rules": "data/no_buy_breaker_rules_latest.csv",
+    "days": "data/no_buy_breaker_days_latest.csv",
+    "direct_outcomes": "data/no_buy_breaker_direct_outcomes_latest.csv"
   }
 }
