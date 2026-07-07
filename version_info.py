@@ -15,6 +15,33 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "25.0.0",
+        "date": "2026-07-06",
+        "type": "major",
+        "title": "v25.0 — 공식 신호 소생술: Fill-Aware 룰 인증 엔진 (92일 발화 0회의 열쇠공정 교체)",
+        "items": [
+            "🔎 **진단:** 공식 신규매수(TOP_PICK∧BUY_NOW_ELIGIBLE)가 92일간 발화 0회. 원인은 버그가 아닌 v3.9.26 설계 봉인 — BUY_NOW_ELIGIBLE=1의 유일한 세터는 브레이커 승격(pipeline_finalize:779)이고, 그 열쇠인 PASS_PRODUCTION_GATE 룰이 한 번도 발급된 적 없음(rules_latest 4룰 전부 REJECT). 게다가 기존 인증 생성기는 per_trade_log 조인(유령체결)과 무검증 direct 경로로 성과를 계산 — 열쇠공정 자체가 오염된 저울 위에 있었음.",
+            "🔧 **엔진 교체 (scripts/no_buy_breaker_backtest_v3926.py in-place 재작성, ENGINE=FILL_AWARE_OHLCV_V25):** 데이터 소스를 OHLCV 실경로로 통째 교체 — 지정가 3일 체결검증(v24.8 규칙 동일), 체결일 기준 5거래일 보유, MDD, KOSPI 동일창 알파. UNFILLED(유령)·PENDING(미래데이터 부족)은 N에서 제외·분리 집계. 파일명/CLI/6개 산출물/CSV 선두 17컬럼/JSON payload 완전 호환 — nightly 자동 재심사(auto_collect.yml:102) 무수정 계속.",
+            "🛡️ **PASS 사다리 강화:** 기존 기준(N≥20·승률≥55·평균>0·알파>0·STOP_RISK≤35·평균MDD≥-7·최근20>0) 유지 + [신설] OOS(실현표본 후반부) N≥8 & 승률≥50 — 전반부에만 벌던 룰의 인증을 차단. STOP_RISK_RATE는 MDD≤-6% 비율로 실경로 재정의.",
+            "📉 **실데이터 첫 심사 (정직한 결과):** 후보 24건(5/21~, BUY_NOW_PASS 생성 이후) 중 체결 8건 — A룰 4건 승률25%/평균-11.2%, D룰 4건 25%/-10.6%, B/C 전원 미체결. **전 룰 REJECT_INSUFFICIENT_SAMPLE = 봉인 유지가 현재의 정답.** 하락기 ARMED+갭≤3 후보가 그대로 물림을 데이터가 확인. 입력컬럼이 이제 매일 생성되므로 표본이 자동 축적 — 좋은 레짐에서 룰이 실제로 벌면 게이트가 스스로 열린다.",
+            "🧪 **검증 13종:** 합성 PASS 시나리오(24표본 정직 증거 → 게이트 개통 + 로더 파싱), OOS 약세 차단(전체 승률 70%여도 후반 42% → REJECT_OOS_WEAK), 유령 분리(N_UNFILLED), 스키마 17컬럼 순서 보존, parquet 부재 강건성 + 레거시 테스트 2파일 v25 의미론 갱신(8/8). 실데이터 회귀: 파이프라인 로더 rules=[] 정상 파싱 · 공식 컬럼 불변.",
+            "📝 상세: REPORT_v250_official_signal_revival.md. 그린라이트 재정의: 기저확률 50%+ 2일 연속 + TOP_PICK≥1 (BE는 룰 인증 시 자동 합류).",
+        ],
+        "schema_min": 5
+    },
+    {
+        "version": "24.9.1",
+        "date": "2026-07-06",
+        "type": "patch",
+        "title": "v24.9.1 — 모바일 탭 원복 버그 수정 (앱 전환 복귀 시 마지막 탭 유지)",
+        "items": [
+            "📱 **증상:** 모바일에서 타 앱(토스 등) 전환 후 복귀하면 첫 탭으로 초기화. 원인: 백그라운드 전환으로 웹소켓이 끊기고 유예(기본 3초) 초과 시 페이지 리로드 → 탭 선택이 클라이언트 메모리라 소실, 초기값 t1 하드코딩으로 원복.",
+            "🔧 **수정 (main.py 3지점):** ① 탭 전환 시 `app.storage.user['main_active_tab']`에 키 저장(기존 storage_secret/세션 인프라 재사용) ② 페이지 빌드 시 저장 키로 초기 탭·lazy 렌더 복원(비관리자 세션의 t8 등 무효 키는 t1 폴백) ③ `reconnect_timeout=60` — 60초 내 복귀는 리로드 없이 세션 그대로 유지.",
+            "🛡️ 안전: NiceGUI 허용범위(2.10.0~3.9.x) 양끝에서 reconnect_timeout 파라미터 지원 확인. storage 실패 시 try/except로 기존 동작 유지. 공식 산식·데이터 무관 순수 UI 패치.",
+        ],
+        "schema_min": 5
+    },
+    {
         "version": "24.9.1",
         "date": "2026-07-06",
         "type": "patch",
@@ -792,7 +819,7 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.17.0"  # 추천 시스템 (collector / scoring / pipeline)
+RECOMMENDATION_ENGINE_VERSION = "3.18.0"  # 추천 시스템 (collector / scoring / pipeline)
 VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
 
 

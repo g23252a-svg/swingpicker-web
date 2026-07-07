@@ -12,6 +12,19 @@ import pandas as pd
 from pipeline_finalize import apply_evidence_gated_no_buy_breaker, get_no_buy_breaker_rule_mask
 from scripts.no_buy_breaker_backtest_v3926 import run_backtest
 
+def _write_ohlcv_parquet(data: Path, code: str = "000001", n_days: int = 12,
+                         entry_touch_low: float = 99.0, base: float = 100.0,
+                         daily_gain: float = 1.0):
+    """v25 엔진용 합성 OHLCV — 5월 1일부터 연속 n_days, 매일 저가가 entry(100)에 도달."""
+    import pandas as pd
+    dates = pd.to_datetime([f"2026-05-{d:02d}" for d in range(1, n_days + 1)])
+    rows = []
+    for i, ts in enumerate(dates):
+        c = base + daily_gain * i
+        rows.append({"Date": ts, "종목코드": code, "시가": base, "고가": c + 3,
+                     "저가": entry_touch_low, "종가": c, "거래량": 1000})
+    pd.DataFrame(rows).set_index("Date").to_parquet(data / "ohlcv_cache_20260601.parquet")
+
 
 def _candidate_row(**overrides):
     row = {
@@ -101,6 +114,7 @@ def test_backtest_requires_evidence_before_pass(tmp_path: Path):
         df.to_csv(data / f"recommend_{ymd}.csv", index=False, encoding="utf-8-sig")
         trade_rows.append({"date": ymd, "code": "000001", "net_pct": 5.0, "stop_hit": False})
     pd.DataFrame(trade_rows).to_csv(data / "backtest_top1_trades_20260599.csv", index=False, encoding="utf-8-sig")
+    _write_ohlcv_parquet(data, n_days=9)  # [v25] 체결검증 엔진용 실경로 공급 → 3일 전부 realized
     payload = run_backtest(str(data), str(out_dir))
     rules = pd.read_csv(out_dir / "no_buy_breaker_rules_latest.csv")
     assert payload["no_buy_days"] == 3
