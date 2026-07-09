@@ -4878,5 +4878,63 @@
       "170920_20260605_TP1_HIT_20260703",
       "170920_20260605_STOP_HIT_20260708"
     ]
+  },
+  {
+    "code": "028260",
+    "name": "삼성물산",
+    "entry_ymd": "20260605",
+    "entry_px": 460500.0,
+    "qty": 0,
+    "stop_px": 391000.0,
+    "stop_px_initial": 391000.0,
+    "take_px1": 565000.0,
+    "take_px2": 626000.0,
+    "trailing_high": 563000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260709",
+    "last_close_px": 378500.0,
+    "unrealized_pnl_pct": -17.81,
+    "realized_pnl_pct": -17.81,
+    "close_ymd": "20260709",
+    "close_px": 378500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "028260_20260605_WARN_DRAWDOWN_20260608",
+      "028260_20260605_WARN_DRAWDOWN_20260609",
+      "028260_20260605_WARN_DRAWDOWN_20260610",
+      "028260_20260605_WARN_DRAWDOWN_20260611",
+      "028260_20260605_WARN_DRAWDOWN_20260612",
+      "028260_20260605_WARN_DRAWDOWN_20260701",
+      "028260_20260605_WARN_DRAWDOWN_20260702",
+      "028260_20260605_WARN_DRAWDOWN_20260703",
+      "028260_20260605_WARN_DRAWDOWN_20260707",
+      "028260_20260605_WARN_DRAWDOWN_20260708",
+      "028260_20260605_STOP_HIT_20260709"
+    ]
+  },
+  {
+    "code": "013580",
+    "name": "계룡건설",
+    "entry_ymd": "20260706",
+    "entry_px": 23100.0,
+    "qty": 0,
+    "stop_px": 19630.0,
+    "stop_px_initial": 19630.0,
+    "take_px1": 30800.0,
+    "take_px2": 33300.0,
+    "trailing_high": 24750.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260709",
+    "last_close_px": 19500.0,
+    "unrealized_pnl_pct": -15.58,
+    "realized_pnl_pct": -15.58,
+    "close_ymd": "20260709",
+    "close_px": 19500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "013580_20260706_WARN_DRAWDOWN_20260707",
+      "013580_20260706_WARN_DRAWDOWN_20260708",
+      "013580_20260706_STOP_HIT_20260709"
+    ]
   }
 ]
