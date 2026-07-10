@@ -906,7 +906,7 @@ def render_tab_market(df, auth: str = "free"):
         # ── [v21.3] 엔진 상태 요약 ──
         macro_risk = meta.get("macro_risk", "—")
         breadth = meta.get("market_breadth", 0)
-        confidence = meta.get("confidence_score", 0)
+        confidence = meta.get("data_health_score", meta.get("confidence_score", 0))
         max_route = meta.get("max_allowed_route", "—")
         macro_msg = meta.get("macro_msg", "")
 
@@ -935,9 +935,10 @@ def render_tab_market(df, auth: str = "free"):
                     ui.label("상승 종목 비율").classes("text-xs text-gray-500")
 
                 with ui.card().classes("p-3 min-w-[130px] bg-[#1a1a2e] border border-gray-700 rounded-lg"):
-                    ui.label("엔진 신뢰도").classes("text-xs text-gray-400")
+                    ui.label("데이터 건강도").classes("text-xs text-gray-400")
                     cc = "#10B981" if confidence >= 80 else "#F59E0B" if confidence >= 50 else "#EF4444"
                     ui.label(f"{confidence:.0f}/100").classes("text-lg font-bold").style(f"color:{cc}")
+                    ui.label("수집·결측 상태 (성과 신뢰도 아님)").classes("text-[10px] text-gray-500")
                     # [Step J] 최대 허용 ROUTE도 한국어로 표시
                     # [v22.3.21] 매수금지 구간이면 매수성 ROUTE 단어 대신 '신규매수 보류'로 표시
                     #   (시장이 막은 날 '최대허용: 적극 매수' 등이 매수 가능으로 오해되는 것 방지)

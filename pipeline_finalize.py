@@ -1723,7 +1723,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             "rec_limit": ctx.rec_limit,
             "n_stocks": len(df_out),
             "run_status": _health.status if _health else "UNKNOWN",
-            "confidence_score": _health.confidence_score if _health else 0.0,
+            "data_health_score": _health.data_health_score if _health else 0.0,
+            "confidence_score": _health.data_health_score if _health else 0.0,  # legacy alias
             "max_allowed_route": _health.max_allowed_route if _health else "ATTACK",
             "scoring_axes": df_out["SCORING_AXES"].iloc[0] if "SCORING_AXES" in df_out.columns else "",
             "w_struct": float(df_out["W_STRUCT"].iloc[0]) if "W_STRUCT" in df_out.columns else 0.0,

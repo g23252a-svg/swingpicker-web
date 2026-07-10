@@ -68,6 +68,9 @@ jobs:
           echo "LDY_ADMIN_KEY  length: ${#LDY_ADMIN_KEY}"
           echo "MASTER_ADMIN_PW length: ${#MASTER_ADMIN_PW}"
 
+      - name: Mark run start
+        run: touch /tmp/swingpicker_run_started
+
       - name: Run Collector
         run: |
           echo ">>> Collector 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
@@ -81,38 +84,44 @@ jobs:
       - name: Run Backtest Validation
         run: |
           echo ">>> Backtest validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
-          python backtest_validation.py || {
-            echo "⚠️ backtest_validation 실패 — 기존 JSON 유지하고 계속 진행"
-            exit 0
-          }
+          python backtest_validation.py
           echo ">>> Backtest validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run Official Buy Validation
         run: |
           echo ">>> Official buy validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
-          python scripts/official_buy_validation.py --data-dir data --out-dir data || {
-            echo "⚠️ official_buy_validation 실패 — 기존 JSON 유지하고 계속 진행"
-            exit 0
-          }
+          python scripts/official_buy_validation.py --data-dir data --out-dir data
           echo ">>> Official buy validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run No-Buy Breaker Backtest
         run: |
           echo ">>> No-buy breaker backtest 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
-          python scripts/no_buy_breaker_backtest_v3926.py --data-dir data --out-dir data || {
-            echo "⚠️ no_buy_breaker_backtest 실패 — 기존 breaker 리포트 유지하고 계속 진행"
-            exit 0
-          }
+          python scripts/no_buy_breaker_backtest_v3926.py --data-dir data --out-dir data
           echo ">>> No-buy breaker backtest 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run Historical RR Alpha Pick
         run: |
           echo ">>> Historical RR Alpha Pick 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
-          python scripts/find_best_historical_alpha_combo_v22322.py --data-dir data --out-dir data || {
-            echo "⚠️ historical alpha pick 실패 — 기존 리포트 유지하고 계속 진행"
-            exit 0
-          }
+          python scripts/find_best_historical_alpha_combo_v22322.py --data-dir data --out-dir data
           echo ">>> Historical RR Alpha Pick 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+
+      - name: Verify fresh outputs
+        run: |
+          required=(
+            data/recommend_latest.csv
+            data/backtest_validation_latest.json
+            data/official_buy_validation_latest.json
+            data/no_buy_breaker_rules_latest.csv
+            data/historical_alpha_pick_summary_latest.json
+            data/historical_alpha_pick_latest.csv
+          )
+          for file in "${required[@]}"; do
+            test -s "$file" || { echo "::error::$file missing or empty"; exit 1; }
+            test "$file" -nt /tmp/swingpicker_run_started || {
+              echo "::error::$file was not regenerated in this run (stale artifact blocked)"
+              exit 1
+            }
+          done
 
       - name: Show outputs
         run: |
@@ -128,26 +137,13 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # .gitignore가 data/*를 막고 있으므로 -f(force)로 우회
+          # 자동화는 data 산출물만 stage한다. 코드·설정은 자동 커밋하지 않는다.
           git add -f data/*.csv data/*.json data/*.pkl data/*.pth || true
-          git add -f data/*.parquet || true
-          git add -f data/*.duckdb || true
-          
-          # data 외 코드 변경도 포함
-          git add -A
-          
+          git add -f data/*.parquet data/*.duckdb || true
+
           git diff --staged --quiet || {
             git commit -m "chore: add CSV $(date +'%Y-%m-%d %H:%M:%S %Z')"
-            
-            # 원격 변경사항 가져오기 (충돌 시 collector 결과물 우선)
-            git fetch origin main
-            git merge origin/main --no-edit -X ours --allow-unrelated-histories || {
-              echo "⚠️ Merge 충돌 → collector 결과물 강제 적용"
-              git checkout --ours -- data/ || true
-              git add -A
-              git commit --no-edit -m "chore: resolve conflict — keep collector output" || true
-            }
-            
-            git push origin main
+            # 원격 main이 움직였으면 덮어쓰기/ours merge 없이 안전하게 실패한다.
+            git push origin HEAD:main
           }
           echo "Done."

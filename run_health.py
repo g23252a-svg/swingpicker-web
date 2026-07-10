@@ -32,7 +32,7 @@ class RunHealth:
     warnings: List[str] = field(default_factory=list)
     data_freshness_ok: bool = True
     checks: Dict[str, bool] = field(default_factory=dict)
-    confidence_score: float = 100.0           # [v20.0] 0~100 신뢰도
+    confidence_score: float = 100.0           # legacy name: 데이터 수집/결측 건강도 0~100
     # [v20.6] macro 직접 저장 — Dashboard fallback 추론 불필요
     macro_risk: str = "NORMAL"
     market_breadth: float = 50.0
@@ -71,6 +71,11 @@ class RunHealth:
         self.checks[code] = True
 
     @property
+    def data_health_score(self) -> float:
+        """수집 성공·결측·fallback 상태 점수. 투자 성과 신뢰도가 아니다."""
+        return self.confidence_score
+
+    @property
     def max_allowed_route(self) -> str:
         """[v20.0.2] RUN_STATUS + 신뢰도 기반 최대 허용 ROUTE
 
@@ -107,7 +112,8 @@ class RunHealth:
         df["RUN_STATUS"] = self.status
         df["DEGRADED_REASONS"] = "|".join(self.reasons) if self.reasons else ""
         df["DATA_FRESHNESS_OK"] = self.data_freshness_ok
-        df["CONFIDENCE_SCORE"] = self.confidence_score
+        df["DATA_HEALTH_SCORE"] = self.data_health_score
+        df["CONFIDENCE_SCORE"] = self.data_health_score  # legacy alias
         df["MAX_ALLOWED_ROUTE"] = self.max_allowed_route
 
         # [v20.7] 축별 상태
@@ -129,7 +135,7 @@ class RunHealth:
     def summary(self) -> str:
         """사람이 읽기 좋은 요약"""
         emoji = {"OK": "🟢", "DEGRADED": "🟡", "CRITICAL": "🔴"}.get(self.status, "⚪")
-        lines = [f"{emoji} Run Status: {self.status} (신뢰도: {self.confidence_score:.0f}/100, 최대허용: {self.max_allowed_route})"]
+        lines = [f"{emoji} Run Status: {self.status} (데이터 건강도: {self.data_health_score:.0f}/100, 최대허용: {self.max_allowed_route})"]
         if self.reasons:
             lines.append(f"   Issues: {', '.join(self.reasons)}")
         if self.warnings:
@@ -311,7 +317,8 @@ def save_health(health: RunHealth, out_dir: str, trade_ymd: str) -> str:
         "warnings": health.warnings,
         "data_freshness_ok": health.data_freshness_ok,
         "checks": health.checks,
-        "confidence_score": health.confidence_score,
+        "data_health_score": health.data_health_score,
+        "confidence_score": health.data_health_score,  # legacy alias
         "max_allowed_route": health.max_allowed_route,
         "macro_risk": health.macro_risk,
         "market_breadth": health.market_breadth,

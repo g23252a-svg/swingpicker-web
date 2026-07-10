@@ -10,10 +10,29 @@ import os
 import logging
 from typing import List, Dict, Optional, Tuple, Any
 
+from build_manifest import (
+    APP_VERSION as MANIFEST_APP_VERSION,
+    RECOMMENDATION_ENGINE_VERSION as MANIFEST_RECOMMENDATION_ENGINE_VERSION,
+    VALIDATION_ENGINE_VERSION as MANIFEST_VALIDATION_ENGINE_VERSION,
+)
+
 logger = logging.getLogger("version_info")
 
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
+    {
+        "version": "25.1.1",
+        "date": "2026-07-10",
+        "type": "patch",
+        "title": "v25.1.1 — Safety Reset: 실패를 숨기지 않는 배포·검증 안전화",
+        "items": [
+            "🔇 신규 silent exception 6건을 로그 가능한 폴백으로 교체하고 CI hard gate를 복구.",
+            "🧪 일일 검증 하나라도 실패하면 신규 수집 산출물 커밋을 중단하고, 과거 JSON과 최신 CSV가 섞이지 않도록 변경.",
+            "🏷️ build_manifest.json을 UI·추천·검증 버전의 단일 출처로 도입하고 잘못된 버전 폴백 제거.",
+            "🩺 CONFIDENCE_SCORE를 데이터 건강도 의미로 명확화하고 DATA_HEALTH_SCORE 호환 컬럼 추가.",
+        ],
+        "schema_min": 5
+    },
     {
         "version": "25.1.0",
         "date": "2026-07-07",
@@ -819,8 +838,13 @@ def _parse_version(v_str: str) -> Tuple[int, ...]:
     try: return tuple(map(int, (v_str.split('.'))))
     except (ValueError, TypeError): return (0, 0, 0)  # [v20.6.4]
 
-# [📍 핵심 보급품] 앱 버전
-APP_VERSION = CHANGELOG[0]["version"] if CHANGELOG else "18.0.0"
+# [v25.1.1] build_manifest.json이 버전의 단일 출처다.
+APP_VERSION = MANIFEST_APP_VERSION
+if not CHANGELOG or CHANGELOG[0].get("version") != APP_VERSION:
+    raise RuntimeError(
+        "build_manifest.json app_version and CHANGELOG[0].version must match "
+        f"({APP_VERSION!r} != {CHANGELOG[0].get('version') if CHANGELOG else None!r})"
+    )
 VERSION_TUPLE = _parse_version(APP_VERSION)
 
 # ─────────────────────────────────────────────────────
@@ -833,9 +857,9 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 식별자에 가까워 추천 시스템 메인 상수로 그대로 쓰지 않는다.
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
-UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.19.0"  # 추천 시스템 (collector / scoring / pipeline)
-VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
+UI_VERSION = APP_VERSION
+RECOMMENDATION_ENGINE_VERSION = MANIFEST_RECOMMENDATION_ENGINE_VERSION
+VALIDATION_ENGINE_VERSION = MANIFEST_VALIDATION_ENGINE_VERSION
 
 
 def get_version_layer_label() -> str:

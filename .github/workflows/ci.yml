@@ -46,6 +46,9 @@ jobs:
       - name: 🔍 Layer & Import Cycle 검사
         run: python scripts/check_deps.py
 
+      - name: 🏷️ Build Manifest 검사
+        run: python scripts/check_build_manifest.py
+
       # 2) Silent Exception 검사 (AST + Baseline — Hard Fail)
       - name: 🔇 Silent Exception 검출 (AST)
         run: python scripts/check_silent_exceptions.py
