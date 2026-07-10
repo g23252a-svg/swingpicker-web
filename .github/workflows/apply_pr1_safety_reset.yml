@@ -5,19 +5,16 @@ on:
     branches:
       - codex/pr1-safety-reset-v2511
     paths:
-      - '.pr1_patch/**'
+      - '.pr1_payload/**'
       - '.github/workflows/apply_pr1_safety_reset.yml'
-  pull_request:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.head_ref == 'codex/pr1-safety-reset-v2511' || github.ref_name == 'codex/pr1-safety-reset-v2511'
+    if: github.ref_name == 'codex/pr1-safety-reset-v2511'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,20 +22,22 @@ jobs:
           ref: codex/pr1-safety-reset-v2511
           fetch-depth: 0
 
-      - name: Decode and apply reviewed patch
+      - name: Decode and verify reviewed patch
         shell: bash
         run: |
           set -euo pipefail
-          cat .pr1_patch/*.b64 | base64 --decode > /tmp/pr1_safety_reset.patch
+          test "$(find .pr1_payload -name 'part*.b64' | wc -l)" -eq 10
+          cat .pr1_payload/part*.b64 | base64 --decode > /tmp/pr1_safety_reset.patch
+          echo '407a866cdfac176f999514332299fad691433fb6915313f300d8ba86e418770c  /tmp/pr1_safety_reset.patch' | sha256sum -c -
           git apply --check /tmp/pr1_safety_reset.patch
-          git apply /tmp/pr1_safety_reset.patch
-          rm -rf .pr1_patch
-          rm -f .github/workflows/apply_pr1_safety_reset.yml
 
-      - name: Commit applied patch
+      - name: Apply and commit safety reset
         shell: bash
         run: |
           set -euo pipefail
+          git apply /tmp/pr1_safety_reset.patch
+          rm -rf .pr1_patch .pr1_payload
+          rm -f .github/workflows/apply_pr1_safety_reset.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
