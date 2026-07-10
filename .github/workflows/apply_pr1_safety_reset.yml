@@ -7,12 +7,17 @@ on:
     paths:
       - '.pr1_patch/**'
       - '.github/workflows/apply_pr1_safety_reset.yml'
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'codex/pr1-safety-reset-v2511' || github.ref_name == 'codex/pr1-safety-reset-v2511'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
