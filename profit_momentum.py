@@ -80,7 +80,7 @@ def _resolve_pms_config(config):
             if hasattr(DEFAULT_CONFIG, "pms"):
                 return DEFAULT_CONFIG.pms
         except Exception:
-            pass
+            logger.warning("PMS 설정 로드 실패 — 명시적 기본값 사용", exc_info=True)
         return _FallbackPmsConfig()
     if hasattr(config, "pms_features"):
         return config

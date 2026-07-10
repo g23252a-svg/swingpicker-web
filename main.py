@@ -62,12 +62,7 @@ try:
 except ImportError:
     JOURNAL_OK = False
 
-try:
-    from version_info import APP_VERSION, get_version_layer_label
-except Exception:
-    APP_VERSION = "12.3.0"
-    def get_version_layer_label():  # [v22.3.8 A2] fallback — import 실패 시 단일 표시
-        return f"v{APP_VERSION}"
+from version_info import APP_VERSION, get_version_layer_label
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ldy-nicegui")
@@ -337,7 +332,7 @@ async def index():
         if _cand in tab_refs:
             _saved_key = _cand
     except Exception:
-        pass
+        logger.warning("마지막 탭 상태 복원 실패 — 기본 탭으로 대체", exc_info=True)
 
     # ─── 빈 컨테이너 패널 (Lazy Loading 핵심) ───
     containers = {}
@@ -398,7 +393,7 @@ async def index():
             try:
                 app.storage.user["main_active_tab"] = key
             except Exception:
-                pass
+                logger.warning("마지막 탭 상태 저장 실패", exc_info=True)
         # [업데이트 알림] 업데이트 탭 클릭 시 → 현재 버전을 '본 것'으로 저장 + 🔴 제거
         #   set_label()은 탭의 label(표시 텍스트)만 바꾸고 name(라우팅 키)은 유지하므로
         #   label_to_key 매핑이 깨지지 않는다.
