@@ -7,6 +7,10 @@ on:
     paths:
       - '.pr1_payload/**'
       - '.github/workflows/apply_pr1_safety_reset.yml'
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +18,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.ref_name == 'codex/pr1-safety-reset-v2511'
+    if: github.head_ref == 'codex/pr1-safety-reset-v2511' || github.ref_name == 'codex/pr1-safety-reset-v2511'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
