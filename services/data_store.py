@@ -312,9 +312,9 @@ class DataStore:
                 for alias in ["DISPLAY_SCORE", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE"]:
                     df[alias] = df[primary]
 
-            # 배포 직후에도 새 production 계약을 즉시 적용한다. collector가
-            # 다음 CSV를 만들기 전까지 기존 recommend_latest를 읽더라도 첫
-            # 화면과 알림에서 연구 후보가 공식 매수로 승격되지 않는다.
+            # 배포 직후에도 v26.1 production 계약을 즉시 적용한다. collector가
+            # 다음 CSV를 만들기 전이라도 검증 셋업은 BUY/WATCH로 정확히 분리되고
+            # 기존 TOP_PICK 원점수는 공식 매수로 오인되지 않는다.
             try:
                 from services.recommendation_quality import apply_recommendation_quality_guard
                 df = apply_recommendation_quality_guard(df)

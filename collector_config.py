@@ -223,6 +223,10 @@ class MacroConfig:
     """환율/나스닥 임계치, ML 가중치, 추천 제한"""
     fx_caution: float = 1470.0
     fx_critical: float = 1490.0
+    # 높은 환율 '수준'은 포지션 축소 사유지만, 그 자체로 모든 종목을
+    # 무기한 차단하지 않는다.  고환율 상태에서 5거래일 급등까지 동반할
+    # 때만 CRITICAL로 격상한다.
+    fx_shock_5d_pct: float = 2.0
     nasdaq_caution: float = -1.5
     nasdaq_critical: float = -2.5
 
@@ -246,6 +250,10 @@ class MacroConfig:
         if self.fx_caution >= self.fx_critical:
             raise ValueError(
                 f"fx_caution({self.fx_caution}) >= fx_critical({self.fx_critical})"
+            )
+        if self.fx_shock_5d_pct <= 0:
+            raise ValueError(
+                f"fx_shock_5d_pct={self.fx_shock_5d_pct}: 0보다 커야 함"
             )
         if self.nasdaq_caution <= self.nasdaq_critical:
             raise ValueError(

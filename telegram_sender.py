@@ -64,9 +64,17 @@ def send_telegram_auto(
             code = str(row.get("종목코드", "")).zfill(6)
             route = row.get("ROUTE", "")
             score = row.get("DISPLAY_SCORE", row.get("FINAL_SCORE", 0))
-            buy = row.get("추천매수가", row.get("매수가", row.get("buy_price", 0)))
-            stop = row.get("손절가", row.get("stop_price", 0))
-            tp1 = row.get("추천매도가1", row.get("TP1", row.get("목표가1", 0)))
+            buy = row.get(
+                "PRODUCTION_ENTRY_PRICE",
+                row.get("추천매수가", row.get("매수가", row.get("buy_price", 0))),
+            )
+            stop = row.get(
+                "PRODUCTION_STOP_PRICE", row.get("손절가", row.get("stop_price", 0))
+            )
+            tp1 = row.get(
+                "PRODUCTION_TARGET_PRICE",
+                row.get("추천매도가1", row.get("TP1", row.get("목표가1", 0))),
+            )
 
             line = f"{i}. {name}({code}) {route}"
             line += f"\n   점수:{score:.0f} | 매수:{buy:,.0f} | SL:{stop:,.0f} | TP:{tp1:,.0f}"

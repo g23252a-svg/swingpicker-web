@@ -12,7 +12,7 @@ from daily_briefing import select_top3
 import telegram_sender_v2
 
 
-def test_daily_briefing_rejects_armed_even_if_flagged_production(tmp_path):
+def test_daily_briefing_uses_production_contract_without_legacy_route_filter(tmp_path):
     frame = pd.DataFrame(
         [
             {
@@ -36,7 +36,7 @@ def test_daily_briefing_rejects_armed_even_if_flagged_production(tmp_path):
 
     selected = select_top3(frame, str(tmp_path))
 
-    assert selected["종목코드"].tolist() == ["000660"]
+    assert selected["종목코드"].tolist() == ["005930", "000660"]
 
 
 def test_telegram_v2_sends_cash_instead_of_raw_rank(monkeypatch):
@@ -85,6 +85,9 @@ def test_telegram_v2_uses_official_price_column(monkeypatch):
                 "추천매수가": 70000,
                 "손절가": 66500,
                 "추천매도가1": 78000,
+                "PRODUCTION_ENTRY_PRICE": 69000,
+                "PRODUCTION_STOP_PRICE": 64800,
+                "PRODUCTION_TARGET_PRICE": 75900,
             }
         ]
     )
@@ -94,4 +97,6 @@ def test_telegram_v2_uses_official_price_column(monkeypatch):
     )
 
     assert "공식종목" in sent[0]
-    assert "70,000" in sent[0]
+    assert "69,000" in sent[0]
+    assert "64,800" in sent[0]
+    assert "75,900" in sent[0]

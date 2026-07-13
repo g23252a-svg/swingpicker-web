@@ -44,7 +44,11 @@ def test_only_production_buy_is_shown_as_buy():
             "손절가": 66500,
             "추천매도가1": 78000,
             "RR_NOW_TP1": 2.2,
-            "RECOMMENDED_WEIGHT_PCT": 5,
+            "PRODUCTION_ENTRY_PRICE": 69000,
+            "PRODUCTION_STOP_PRICE": 64800,
+            "PRODUCTION_TARGET_PRICE": 75900,
+            "PRODUCTION_RR": 1.64,
+            "RECOMMENDED_WEIGHT_PCT": 3,
             "ML_STATUS": "VALIDATED",
         },
         {
@@ -62,4 +66,7 @@ def test_only_production_buy_is_shown_as_buy():
     assert result["status"] == "BUY"
     assert result["production_count"] == 1
     assert [stock["code"] for stock in result["buys"]] == ["005930"]
-
+    assert result["buys"][0]["entry"] == 69000
+    assert result["buys"][0]["stop"] == 64800
+    assert result["buys"][0]["target"] == 75900
+    assert result["buys"][0]["weight"] == 3

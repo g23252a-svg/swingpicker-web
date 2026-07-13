@@ -141,7 +141,10 @@ def send_telegram_auto(
             code = str(row.get("종목코드", "")).zfill(6)
             route = row.get("ROUTE", "")
             score = row.get("DISPLAY_SCORE", row.get("FINAL_SCORE", 0))
-            buy = row.get("추천매수가", row.get("매수가", row.get("buy_price", 0)))
+            buy = row.get(
+                "PRODUCTION_ENTRY_PRICE",
+                row.get("추천매수가", row.get("매수가", row.get("buy_price", 0))),
+            )
 
             route_emoji = {"ATTACK": "🔴", "ARMED": "🟠", "WAIT": "🔵"}.get(route, "⚪")
             lines.append(f"{i}. {route_emoji}<b>{name}</b> ({code})")
@@ -153,8 +156,8 @@ def send_telegram_auto(
                 lines.append(f"   ⚠️ Hard Block: {hb}")
 
             # 손절/익절가
-            stop = row.get("손절가", row.get("stop_price", 0))
-            tp1 = row.get("추천매도가1", row.get("target_price_1", 0))
+            stop = row.get("PRODUCTION_STOP_PRICE", row.get("손절가", row.get("stop_price", 0)))
+            tp1 = row.get("PRODUCTION_TARGET_PRICE", row.get("추천매도가1", row.get("target_price_1", 0)))
             if stop > 0 and tp1 > 0:
                 lines.append(f"   손절: {int(stop):,} → 익절: {int(tp1):,}")
             lines.append("")
@@ -384,7 +387,7 @@ def send_telegram_enhanced(
                 "code": str(row.get("종목코드", "")).zfill(6),
                 "score": float(row.get("DISPLAY_SCORE", row.get("FINAL_SCORE", 0))),
                 "route": str(row.get("ROUTE", "")),
-                "buy_price": int(row.get("추천매수가", row.get("매수가", row.get("buy_price", 0))) or 0),
+                "buy_price": int(row.get("PRODUCTION_ENTRY_PRICE", row.get("추천매수가", row.get("매수가", row.get("buy_price", 0)))) or 0),
                 "reason": str(row.get("DART_REASON", row.get("AI_REASON", "")))[:60],
             })
         send_briefing_alert(

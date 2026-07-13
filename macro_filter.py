@@ -171,7 +171,7 @@ def check_macro_env(
     trade_ymd: str,
     config: CollectorConfig = DEFAULT_CONFIG,
 ) -> Tuple[str, str, int, int]:
-    """[v2.0] 환율/나스닥 기반 시장 위험도 판단.
+    """[v26.1] 환율/나스닥 기반 시장 위험도 판단.
 
     Returns: (risk_level, message, ebs_threshold, rec_limit)
 
@@ -210,8 +210,33 @@ def check_macro_env(
             messages.append(f"환율 데이터 {stale_days}일 지연 [{fx_date}] → stale")
             logger.warning(f"환율 데이터 stale: {stale_days} BDay 지연")
         elif fx_last >= config.macro_fx_critical:
-            risk_level = "CRITICAL"
-            messages.append(f"환율 {fx_last:.0f}원 [{fx_date}] (CRITICAL)")
+            # v26까지는 1,490원 이상이라는 절대 수준만으로 매일 CRITICAL이
+            # 되어 추천 경로가 수개월간 영구 0건이 될 수 있었다. 높은 수준은
+            # CAUTION으로 비중을 줄이고, 최근 5거래일 급등(shock)이 겹칠 때만
+            # CRITICAL로 신규매수를 차단한다.
+            fx_close = pd.to_numeric(fx["Close"], errors="coerce").dropna()
+            fx_5d_change = None
+            if len(fx_close) >= 6 and float(fx_close.iloc[-6]) > 0:
+                fx_5d_change = (
+                    float(fx_close.iloc[-1]) / float(fx_close.iloc[-6]) - 1
+                ) * 100
+            if (
+                fx_5d_change is not None
+                and fx_5d_change >= config.fx_shock_5d_pct
+            ):
+                risk_level = "CRITICAL"
+                messages.append(
+                    f"환율 {fx_last:.0f}원 [{fx_date}], "
+                    f"5일 {fx_5d_change:+.1f}% (급등 CRITICAL)"
+                )
+            else:
+                risk_level = _risk_max(risk_level, "CAUTION")
+                change_text = (
+                    f", 5일 {fx_5d_change:+.1f}%" if fx_5d_change is not None else ""
+                )
+                messages.append(
+                    f"환율 {fx_last:.0f}원 [{fx_date}]{change_text} (고환율 CAUTION)"
+                )
         elif fx_last >= config.macro_fx_caution:
             risk_level = _risk_max(risk_level, "CAUTION")
             messages.append(f"환율 {fx_last:.0f}원 [{fx_date}] (주의)")

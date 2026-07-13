@@ -1336,10 +1336,10 @@ def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
 
 
 def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
-    """Loss-defense SORT_SPEC — production decision first.
+    """Production SORT_SPEC — official decision first.
     
     정렬 우선순위 (내림차순 기준, 낮은 ROUTE_PRIORITY가 먼저):
-      1. PRODUCTION_BUY (엄격 품질게이트 통과 종목)
+      1. PRODUCTION_BUY (v26.1 체결/OOS 검증 규칙 통과 종목)
       2. QUALITY_GUARD_SCORE (현금/관찰일 때 가장 가까운 후보)
       3. TOP_PICK / IS_NOW_ENTRY / ROUTE_PRIORITY
       4. 기존 방어·회복·ELITE·RR·BALANCE 축
@@ -1684,8 +1684,9 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         logger.warning(f"⚠️ Exit Plan 레이어 실패 (기존 추천 유지): {e}")
 
-    # [loss-defense v1] 최종 production 계약. 이 단계는 후보를 새로 승격하지
-    # 않고 기존 TOP_PICK+BUY_NOW_ELIGIBLE를 더 엄격하게 거부할 수만 있다.
+    # [v26.1 profit-recovery] 최종 production 계약. 기존 공식 플래그의
+    # 영구 0건 교집합에 의존하지 않고 체결/OOS 검증 셋업을 하루 1개까지
+    # 승격하며, 약한 시장에서는 셋업을 WATCH로만 유지한다.
     try:
         from services.recommendation_quality import apply_recommendation_quality_guard
         _before_quality = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
@@ -1694,7 +1695,11 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
         df_out = finalize_sort(df_out)
         df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
-        log(f"🧱 [loss-defense v1] 최종 품질게이트 — official {_before_quality}->{_after_quality} · 현금보유 허용")
+        _watch_quality = int(df_out.get("ACTION_DECISION", pd.Series(dtype=str)).astype(str).eq("WATCH").sum())
+        log(
+            f"📈 [profit-recovery v1] 최종 품질게이트 — "
+            f"legacy official {_before_quality} · production {_after_quality} · watch {_watch_quality}"
+        )
     except Exception as e:
         logger.error(f"❌ 최종 품질게이트 실패 — 안전상 신규매수 전부 차단: {e}", exc_info=True)
         df_out["PRODUCTION_BUY"] = 0
