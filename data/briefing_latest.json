@@ -1,24 +1,7 @@
 {
-  "trade_date": "20260702",
-  "generated_at": "2026-07-02 22:13:51",
-  "count": 1,
-  "stocks": [
-    {
-      "rank": 1,
-      "code": "062040",
-      "name": "산일전기",
-      "route": "ARMED",
-      "score": 79.6,
-      "close": 238000,
-      "entry": 238000,
-      "stop": 202000,
-      "target1": 272500,
-      "target2": 341000,
-      "est_win_rate": 0.475,
-      "rr": 1.0,
-      "sector": "인프라·에너지",
-      "market": "KOSPI",
-      "url": "https://ldyprotrader.com/stock/062040"
-    }
-  ]
+  "trade_date": "20260713",
+  "generated_at": "2026-07-14 00:05:42",
+  "decision": "CASH",
+  "count": 0,
+  "stocks": []
 }

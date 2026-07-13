@@ -9,8 +9,8 @@
   "run_status": "OK",
   "confidence_score": 100.0,
   "max_allowed_route": "ATTACK",
-  "scoring_axes": "STRUCT+TIMING+AI+SECTOR",
-  "w_struct": 0.55,
-  "w_timing": 0.25,
-  "w_ai": 0.2
+  "scoring_axes": "STRUCT+TIMING+SECTOR",
+  "w_struct": 0.688,
+  "w_timing": 0.312,
+  "w_ai": 0.0
 }
