@@ -3961,6 +3961,16 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     # UI 표시/분류 전용이며 원본 CSV/추천 산식은 변경하지 않는다.
     df = _apply_holding_ssot_display_guard(df)
 
+    # [v26.1] 기본 종목탭은 운영 매수와 연구/관찰 신호를 분리한다.
+    # 기존 대형 화면은 긴급 롤백용 환경변수로만 유지한다.
+    if os.getenv("USE_LEGACY_STOCK_TAB", "0").strip().lower() not in {
+        "1", "true", "yes", "on",
+    }:
+        from components.stock_decision_tab import render_stock_decision_tab
+
+        render_stock_decision_tab(df, auth=auth, store=store)
+        return
+
     # ── [v3.7.11] 라벨링 + Top1 우선 선별 (pick_top3은 fallback) ──
     # Top1이 "진짜 수익 나는" 기본 모드. 🏆 최강이 없으면 pick_top3으로 폴백.
     # (UI에선 헤더 카드에 Top1을 강조 표시, 테이블엔 여러 종목도 함께 표시)
