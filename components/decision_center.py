@@ -25,16 +25,20 @@ def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
 
 
 def _stock_payload(row: pd.Series) -> dict[str, Any]:
+    production_entry = _number(row, "PRODUCTION_ENTRY_PRICE")
+    production_stop = _number(row, "PRODUCTION_STOP_PRICE")
+    production_target = _number(row, "PRODUCTION_TARGET_PRICE")
+    production_rr = _number(row, "PRODUCTION_RR")
     return {
         "code": str(row.get("종목코드", "")).split(".")[0].zfill(6),
         "name": str(row.get("종목명", "-")),
         "score": _number(row, "QUALITY_GUARD_SCORE"),
         "display_score": _number(row, "DISPLAY_SCORE"),
-        "entry": _number(row, "추천매수가"),
+        "entry": production_entry or _number(row, "추천매수가"),
         "close": _number(row, "종가"),
-        "stop": _number(row, "손절가"),
-        "target": _number(row, "추천매도가1"),
-        "rr": _number(row, "RR_NOW_TP1"),
+        "stop": production_stop or _number(row, "손절가"),
+        "target": production_target or _number(row, "추천매도가1"),
+        "rr": production_rr or _number(row, "RR_NOW_TP1"),
         "weight": _number(row, "RECOMMENDED_WEIGHT_PCT"),
         "reason": str(row.get("QUALITY_GUARD_REASON", "")),
         "route": str(row.get("ROUTE", "")),
@@ -84,12 +88,12 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
 
     if buys:
         title = f"오늘 신규매수 {len(buys)}개"
-        subtitle = "아래 종목만 최종 품질게이트를 통과했습니다. 지정가와 최대 비중을 지키세요."
+        subtitle = "체결·비용·시간순 검증을 통과한 종목입니다. 지정가·손절가·최대 비중을 지키세요."
         status = "BUY"
     else:
         title = "오늘은 신규매수하지 않습니다"
         nearest = watch[0]["reason"] if watch else "통과 후보 없음"
-        subtitle = f"현금 보유가 공식 결정입니다. 가장 가까운 후보도 ‘{nearest}’로 차단됐습니다."
+        subtitle = f"현금 보유가 공식 결정입니다. 가장 가까운 후보의 차단 사유: {nearest}"
         status = "CASH"
 
     return {
@@ -160,7 +164,10 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
             border:1px solid rgba(52,211,153,.4); }
           .sp-watch-card { background:rgba(15,23,42,.72)!important; border:1px solid rgba(100,116,139,.22); }
           .sp-price-cell { background:rgba(15,23,42,.55); border:1px solid rgba(148,163,184,.12); }
-          @media(max-width:720px){ .sp-price-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;} }
+          @media(max-width:720px){
+            .sp-price-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+            .sp-decision-title{font-size:1.25rem!important;line-height:1.35!important;word-break:keep-all;}
+          }
         </style>
         """
     )
@@ -176,7 +183,7 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                             "text-4xl " + ("text-amber-300" if cash else "text-emerald-300")
                         )
                         ui.label(summary["title"]).classes(
-                            "text-2xl md:text-4xl font-bold "
+                            "sp-decision-title text-xl md:text-4xl font-bold "
                             + ("text-amber-200" if cash else "text-emerald-200")
                         )
                     ui.label(summary["subtitle"]).classes("text-sm md:text-base text-slate-300 leading-relaxed")
@@ -195,7 +202,7 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                 color="#2563EB" if ml_ok else "#B45309",
             )
             ui.badge("하루 신규진입 최대 1종목", color="#334155")
-            ui.badge("종목당 최대 5%", color="#334155")
+            ui.badge("종목당 최대 3%", color="#334155")
 
         if summary["buys"]:
             ui.label("지금 살 수 있는 종목").classes("text-lg font-bold text-white mt-2")
@@ -205,7 +212,7 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
             with ui.card().classes("w-full p-4 rounded-2xl bg-amber-950/20 border border-amber-500/20"):
                 ui.label("왜 현금 보유인가요?").classes("font-bold text-amber-200")
                 ui.label(
-                    "좋은 후보가 없을 때 종목 수를 채우지 않습니다. 높은 원점수·AI 점수·관찰 후보는 공식 매수와 다릅니다."
+                    "시장 상승종목 비율이 30% 미만이거나 검증 규칙을 통과한 후보가 없으면 매수하지 않습니다. 관찰 후보는 매수 추천이 아닙니다."
                 ).classes("text-sm text-slate-300 mt-1")
 
         if summary["watch"]:
@@ -219,4 +226,3 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
         with ui.row().classes("w-full items-center justify-between gap-3 flex-wrap mt-2"):
             ui.label("전체 후보와 시장 지표는 ‘시장’ 및 ‘종목’ 탭에서 확인할 수 있습니다.").classes("text-xs text-slate-500")
             ui.label("성과 보장 아님 · 지정가/손절/비중 준수").classes("text-xs text-slate-600")
-

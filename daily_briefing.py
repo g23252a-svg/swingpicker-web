@@ -91,7 +91,10 @@ def select_top3(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
         )
     else:
         mask = pd.Series(False, index=df.index)
-    active = df[mask & df["ROUTE"].eq("ATTACK")].copy()
+    # v26.1 공식 계약은 검증된 수익회복 규칙이 SSOT다. 과거 ROUTE가
+    # ATTACK이 아니었다는 이유로 이미 PRODUCTION_BUY인 종목을 발송에서
+    # 다시 누락시키지 않는다.
+    active = df[mask].copy()
 
     if active.empty:
         logger.info("📝 브리핑: 최종 공식 신규매수 0건 — 현금 보유")
@@ -108,7 +111,7 @@ def select_top3(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
             logger.info(f"📝 브리핑: 목표가 달성 {excluded}건 제외")
 
     if active.empty:
-        logger.info("📝 브리핑: 목표가 제외 후 공식 ATTACK 종목 없음")
+        logger.info("📝 브리핑: 목표가 제외 후 공식 신규매수 종목 없음")
         return pd.DataFrame()
 
     # 3) 품질점수 우선, DISPLAY_SCORE 보조
@@ -168,9 +171,9 @@ def generate_briefing_md(top3: pd.DataFrame, trade_ymd: str, site_url: str = "ht
         route = str(row.get("ROUTE", "")).upper()
         score = _safe_float(row.get("DISPLAY_SCORE", 0))
         close = _safe_int(row.get("종가", 0))
-        entry = _safe_int(row.get("추천매수가", 0))
-        stop = _safe_int(row.get("손절가", 0))
-        t1 = _safe_int(row.get("추천매도가1", 0))
+        entry = _safe_int(row.get("PRODUCTION_ENTRY_PRICE", row.get("추천매수가", 0)))
+        stop = _safe_int(row.get("PRODUCTION_STOP_PRICE", row.get("손절가", 0)))
+        t1 = _safe_int(row.get("PRODUCTION_TARGET_PRICE", row.get("추천매도가1", 0)))
         est_wr = _safe_float(row.get("EST_WIN_RATE", 0))
 
         emoji = _route_emoji(route)
@@ -219,9 +222,9 @@ def generate_briefing_json(top3: pd.DataFrame, trade_ymd: str, site_url: str = "
     stocks = []
     for rank, (_, row) in enumerate(top3.iterrows(), 1):
         code = str(row.get("종목코드", "")).zfill(6)
-        entry = _safe_int(row.get("추천매수가", 0))
-        stop = _safe_int(row.get("손절가", 0))
-        t1 = _safe_int(row.get("추천매도가1", 0))
+        entry = _safe_int(row.get("PRODUCTION_ENTRY_PRICE", row.get("추천매수가", 0)))
+        stop = _safe_int(row.get("PRODUCTION_STOP_PRICE", row.get("손절가", 0)))
+        t1 = _safe_int(row.get("PRODUCTION_TARGET_PRICE", row.get("추천매도가1", 0)))
         risk = entry - stop if entry > 0 and stop > 0 else 1
 
         stocks.append({
