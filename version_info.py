@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "26.0.0",
+        "date": "2026-07-13",
+        "type": "major",
+        "title": "v26.0 — Loss Defense: 단일 공식결정·ML 신뢰도 게이트·현금보유 우선",
+        "items": [
+            "🧱 **PRODUCTION_BUY 단일 계약:** TOP_PICK·관찰 레인·원점수를 공식 매수와 분리. 기존 후보를 승격하지 않고 진입품질·손익비·저항여력·VWAP·데이터 무결성을 모두 통과한 종목만 최종 매수.",
+            "⏸ **현금 보유 정상화:** 공식 후보 0개를 고장으로 보지 않으며 No-Buy Breaker는 기본 OFF. 텔레그램·브리핑·포트폴리오 교체의 점수순 fallback 제거.",
+            "🧠 **ML reliability gate:** 시간순 OOS AUC·Brier·Top-decile lift를 모두 통과하지 못한 모델은 원시 점수만 감사용으로 남기고 추천 가중치 0. 기존 v19 모델은 검증 메타가 없어 자동 UNVALIDATED 처리.",
+            "🎯 **Decision Center UI:** 첫 화면을 오늘의 최종 결정으로 교체. 공식 매수 또는 현금 보유를 한 줄로 표시하고 관찰 후보는 접힌 보조 영역으로 격리.",
+            "📊 **실현성과 감사 수정:** TOP1/TOP3 중복 표본 제거, ML_SCORE 포함, 월별 순위상관 진단 추가. 기존 중복 기준 446건 대신 고유 Top3 신호 180건으로 평가.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "25.1.0",
         "date": "2026-07-07",
         "type": "minor",
@@ -834,8 +848,8 @@ VERSION_TUPLE = _parse_version(APP_VERSION)
 # 명시적 상수로만 박고, 변경 시 이 모듈을 SSOT로 갱신한다.
 # ─────────────────────────────────────────────────────
 UI_VERSION = APP_VERSION                  # CHANGELOG[0] 기반 자동 갱신
-RECOMMENDATION_ENGINE_VERSION = "3.19.0"  # 추천 시스템 (collector / scoring / pipeline)
-VALIDATION_ENGINE_VERSION = "3.9.5"       # 검증 엔진 (backtest / rank_validation)
+RECOMMENDATION_ENGINE_VERSION = "4.0.0"   # 추천 시스템 (production quality contract)
+VALIDATION_ENGINE_VERSION = "4.0.0"       # 검증 엔진 (dedup + ML reliability)
 
 
 def get_version_layer_label() -> str:

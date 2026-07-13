@@ -60,6 +60,16 @@ async def render_briefing_page():
 
     # 브리핑 데이터 로드
     data = _load_briefing()
+    if data and data.get("decision") == "CASH":
+        with ui.column().classes("w-full items-center p-12 max-w-2xl mx-auto"):
+            ui.label("⏸").classes("text-7xl mb-4 text-amber-300")
+            ui.label("오늘은 신규매수하지 않습니다").classes("text-2xl font-bold text-amber-200")
+            ui.label(
+                "최종 품질게이트를 통과한 종목이 없어 현금 보유가 공식 결정입니다.\n"
+                "관찰 후보와 높은 AI 점수는 매수 추천이 아닙니다."
+            ).classes("text-sm text-gray-300 text-center mt-3 whitespace-pre-line")
+        return
+
     if not data or not data.get("stocks"):
         with ui.column().classes("w-full items-center p-12"):
             ui.label("📝 아직 오늘의 브리핑이 없습니다").classes("text-xl text-gray-400")

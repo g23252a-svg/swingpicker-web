@@ -414,7 +414,23 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
 
     # ── [v19.2] 축 가용성 감지 ──
     _has_sector = "SECTOR_RANK" in x.columns and x["SECTOR_RANK"].notna().any()
-    _has_ml = "ML_SCORE" in x.columns and (x["ML_SCORE"].fillna(0) != 0).any()
+    # ML은 시간순 OOS reliability gate를 통과한 모델만 점수에 반영한다.
+    # ML_STATUS/ML_TRUSTED가 없는 legacy 입력은 기존 호환 동작을 유지한다.
+    _ml_raw = pd.to_numeric(
+        x.get("ML_SCORE", pd.Series(0.0, index=x.index)), errors="coerce"
+    ).fillna(0.0)
+    if "ML_TRUSTED" in x.columns or "ML_STATUS" in x.columns:
+        _trusted_flag = pd.to_numeric(
+            x.get("ML_TRUSTED", pd.Series(0, index=x.index)), errors="coerce"
+        ).fillna(0).astype(int) == 1
+        _trusted_status = x.get(
+            "ML_STATUS", pd.Series("", index=x.index)
+        ).fillna("").astype(str).str.upper().eq("VALIDATED")
+        _ml_effective = _ml_raw.where(_trusted_flag | _trusted_status, 0.0)
+    else:
+        _ml_effective = _ml_raw
+    x["ML_EFFECTIVE_SCORE"] = _ml_effective.clip(0, 100).round(1)
+    _has_ml = (_ml_effective != 0).any()
 
     # ── [v6.0] 벡터화된 스코어링 ──
     x["EBS"] = _vec_ebs(x, config=cfg)
@@ -425,9 +441,9 @@ def build_global_score(df: pd.DataFrame, macro_risk: str,
 
     if "ML_SCORE" not in x.columns:
         x["ML_SCORE"] = 0.0
-    x["AI_SCORE"] = x["ML_SCORE"].clip(0, 100).round(1)
+    x["AI_SCORE"] = x["ML_EFFECTIVE_SCORE"]
 
-    w_s, w_t, w_a = _calc_ml_weight(x["ML_SCORE"], macro_risk, config=cfg)
+    w_s, w_t, w_a = _calc_ml_weight(x["ML_EFFECTIVE_SCORE"], macro_risk, config=cfg)
 
     # [v19.2] ML 비활성 시 AI 가중치를 STRUCT/TIMING에 재배분
     if not _has_ml and w_a > 0:

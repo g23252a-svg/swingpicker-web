@@ -112,18 +112,36 @@ def send_telegram_auto(
         return
 
     try:
-        top = df.head(limit_count)
-        lines = [f"📊 <b>LDY Pro Trader [{trade_ymd}]</b>"]
+        if "PRODUCTION_BUY" in df.columns:
+            official_mask = pd.to_numeric(
+                df["PRODUCTION_BUY"], errors="coerce"
+            ).fillna(0).astype(int).eq(1)
+        elif {"TOP_PICK", "BUY_NOW_ELIGIBLE"}.issubset(df.columns):
+            official_mask = (
+                pd.to_numeric(df["TOP_PICK"], errors="coerce").fillna(0).astype(int).eq(1)
+                & pd.to_numeric(df["BUY_NOW_ELIGIBLE"], errors="coerce").fillna(0).astype(int).eq(1)
+            )
+        else:
+            official_mask = pd.Series(False, index=df.index)
+        top = df[official_mask].head(limit_count)
+        lines = [f"📊 <b>SwingPicker 오늘의 결정 [{trade_ymd}]</b>"]
         if market_summary:
             lines.append(market_summary)
         lines.append("")
+
+        if top.empty:
+            lines.extend([
+                "⏸ <b>오늘은 신규매수하지 않습니다.</b>",
+                "최종 품질게이트 통과 종목 0개 — 현금 보유가 공식 결정입니다.",
+                "관찰 후보와 높은 원점수는 매수 추천이 아닙니다.",
+            ])
 
         for i, (_, row) in enumerate(top.iterrows(), 1):
             name = row.get("종목명", row.get("name", ""))
             code = str(row.get("종목코드", "")).zfill(6)
             route = row.get("ROUTE", "")
             score = row.get("DISPLAY_SCORE", row.get("FINAL_SCORE", 0))
-            buy = row.get("매수가", row.get("buy_price", 0))
+            buy = row.get("추천매수가", row.get("매수가", row.get("buy_price", 0)))
 
             route_emoji = {"ATTACK": "🔴", "ARMED": "🟠", "WAIT": "🔵"}.get(route, "⚪")
             lines.append(f"{i}. {route_emoji}<b>{name}</b> ({code})")
@@ -346,15 +364,27 @@ def send_telegram_enhanced(
         return
 
     # ── 1. Top 3 브리핑 알림 ──
-    if send_briefing and not df.empty:
+    if "PRODUCTION_BUY" in df.columns:
+        _official_df = df[
+            pd.to_numeric(df["PRODUCTION_BUY"], errors="coerce").fillna(0).astype(int) == 1
+        ].copy()
+    elif {"TOP_PICK", "BUY_NOW_ELIGIBLE"}.issubset(df.columns):
+        _official_df = df[
+            pd.to_numeric(df["TOP_PICK"], errors="coerce").fillna(0).astype(int).eq(1)
+            & pd.to_numeric(df["BUY_NOW_ELIGIBLE"], errors="coerce").fillna(0).astype(int).eq(1)
+        ].copy()
+    else:
+        _official_df = df.iloc[0:0].copy()
+
+    if send_briefing and not _official_df.empty:
         top_stocks = []
-        for _, row in df.head(3).iterrows():
+        for _, row in _official_df.head(3).iterrows():
             top_stocks.append({
                 "name": row.get("종목명", ""),
                 "code": str(row.get("종목코드", "")).zfill(6),
                 "score": float(row.get("DISPLAY_SCORE", row.get("FINAL_SCORE", 0))),
                 "route": str(row.get("ROUTE", "")),
-                "buy_price": int(row.get("매수가", row.get("buy_price", 0)) or 0),
+                "buy_price": int(row.get("추천매수가", row.get("매수가", row.get("buy_price", 0))) or 0),
                 "reason": str(row.get("DART_REASON", row.get("AI_REASON", "")))[:60],
             })
         send_briefing_alert(

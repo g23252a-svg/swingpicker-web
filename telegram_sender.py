@@ -35,21 +35,38 @@ def send_telegram_auto(
         return
 
     try:
-        # 상위 N개 종목 메시지 구성
-        top = df.head(limit_count)
-        lines = [f"📊 LDY Pro Trader [{trade_ymd}]"]
+        # 최종 production 계약만 외부 발송한다. 예전처럼 df.head()를 보내면
+        # 관찰 후보가 매수 추천으로 오인된다.
+        if "PRODUCTION_BUY" in df.columns:
+            _mask = pd.to_numeric(df["PRODUCTION_BUY"], errors="coerce").fillna(0).astype(int) == 1
+        elif {"TOP_PICK", "BUY_NOW_ELIGIBLE"}.issubset(df.columns):
+            _mask = (
+                pd.to_numeric(df["TOP_PICK"], errors="coerce").fillna(0).astype(int).eq(1)
+                & pd.to_numeric(df["BUY_NOW_ELIGIBLE"], errors="coerce").fillna(0).astype(int).eq(1)
+            )
+        else:
+            _mask = pd.Series(False, index=df.index)
+        top = df[_mask].head(limit_count)
+        lines = [f"📊 SwingPicker 오늘의 결정 [{trade_ymd}]"]
         if market_summary:
             lines.append(market_summary)
         lines.append("")
+
+        if top.empty:
+            lines.extend([
+                "⏸ 오늘은 신규매수하지 않습니다.",
+                "최종 품질게이트 통과 종목 0개 — 현금 보유가 공식 결정입니다.",
+                "관찰 후보와 높은 원점수는 매수 추천이 아닙니다.",
+            ])
 
         for i, (_, row) in enumerate(top.iterrows(), 1):
             name = row.get("종목명", row.get("name", ""))
             code = str(row.get("종목코드", "")).zfill(6)
             route = row.get("ROUTE", "")
             score = row.get("DISPLAY_SCORE", row.get("FINAL_SCORE", 0))
-            buy = row.get("매수가", row.get("buy_price", 0))
+            buy = row.get("추천매수가", row.get("매수가", row.get("buy_price", 0)))
             stop = row.get("손절가", row.get("stop_price", 0))
-            tp1 = row.get("TP1", row.get("목표가1", 0))
+            tp1 = row.get("추천매도가1", row.get("TP1", row.get("목표가1", 0)))
 
             line = f"{i}. {name}({code}) {route}"
             line += f"\n   점수:{score:.0f} | 매수:{buy:,.0f} | SL:{stop:,.0f} | TP:{tp1:,.0f}"
@@ -73,7 +90,7 @@ def send_telegram_auto(
         }
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
-            logger.info(f"✉️ 텔레그램 발송 완료 ({limit_count}종목)")
+            logger.info(f"✉️ 텔레그램 발송 완료 (공식 {len(top)}종목)")
         else:
             logger.warning(f"텔레그램 발송 실패: {resp.status_code} {resp.text[:200]}")
 

@@ -28,7 +28,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import brier_score_loss, roc_auc_score
 from datetime import datetime
 
 # [v3.7.27 Phase 1] print → logger 전환 (운영 로그 집약)
@@ -668,6 +668,82 @@ _loaded_scaler = None
 _loaded_xgb_model = None
 _loaded_seq_length = SEQ_LENGTH
 _loaded_use_rolling_zscore = False  # [Fix 5] 플래그
+_loaded_model_reliable = False
+_loaded_model_validation = {}
+
+
+def evaluate_model_reliability(y_true, probabilities) -> dict:
+    """Return an auditable out-of-sample reliability verdict.
+
+    A model must beat the constant base-rate forecast on Brier score and show
+    both rank discrimination and top-decile lift.  Merely completing training
+    or producing a high internal KPI is not sufficient for production use.
+    """
+    y = (np.asarray(y_true, dtype=float) > 0).astype(np.float32)
+    p = np.clip(np.asarray(probabilities, dtype=float), 0.0, 1.0)
+    valid = np.isfinite(y) & np.isfinite(p)
+    y = y[valid]
+    p = p[valid]
+    n = int(len(y))
+    if n == 0:
+        return {
+            "reliable": False,
+            "reason": "NO_VALIDATION_SAMPLES",
+            "n": 0,
+            "auc": 0.5,
+            "brier": 1.0,
+            "baseline_brier": 1.0,
+            "top_decile_lift": 0.0,
+        }
+    base_rate = float(y.mean())
+    try:
+        auc = float(roc_auc_score(y, p))
+    except ValueError:
+        auc = 0.5
+    brier = float(brier_score_loss(y, p))
+    baseline_brier = float(brier_score_loss(y, np.full(n, base_rate)))
+    k = max(20, int(np.ceil(n * 0.10)))
+    k = min(k, n)
+    top_idx = np.argsort(p)[-k:]
+    top_rate = float(y[top_idx].mean()) if k else base_rate
+    top_lift = top_rate - base_rate
+    reliable = bool(
+        n >= 200
+        and auc >= 0.53
+        and brier <= baseline_brier * 0.98
+        and top_lift >= 0.05
+    )
+    failed = []
+    if n < 200:
+        failed.append("N<200")
+    if auc < 0.53:
+        failed.append("AUC<0.53")
+    if brier > baseline_brier * 0.98:
+        failed.append("BRIER_NO_GAIN")
+    if top_lift < 0.05:
+        failed.append("TOP_DECILE_LIFT<5PP")
+    return {
+        "reliable": reliable,
+        "reason": "PASS" if reliable else ",".join(failed),
+        "n": n,
+        "base_rate": round(base_rate, 6),
+        "auc": round(auc, 6),
+        "brier": round(brier, 6),
+        "baseline_brier": round(baseline_brier, 6),
+        "top_decile_rate": round(top_rate, 6),
+        "top_decile_lift": round(top_lift, 6),
+    }
+
+
+def _read_model_validation(meta_path: str = META_PATH) -> dict:
+    try:
+        with open(meta_path, "r", encoding="utf-8") as handle:
+            validation = json.load(handle).get("validation", {})
+        if not isinstance(validation, dict):
+            return {}
+        return validation
+    except Exception:
+        return {}
 
 
 def load_model() -> None:
@@ -679,6 +755,7 @@ def load_model() -> None:
     """
     global _loaded_lstm_model, _loaded_scaler, _loaded_xgb_model
     global _loaded_seq_length, _loaded_use_rolling_zscore
+    global _loaded_model_reliable, _loaded_model_validation
 
     with _model_lock:
         if _loaded_lstm_model is not None and _loaded_scaler is not None:
@@ -718,6 +795,14 @@ def load_model() -> None:
                 _loaded_scaler = scaler
                 _loaded_seq_length = seq_len
                 _loaded_use_rolling_zscore = use_rolling
+                _loaded_model_validation = (
+                    _read_model_validation(META_PATH)
+                    if os.path.normpath(model_path) == os.path.normpath(MODEL_PATH)
+                    else {}
+                )
+                _loaded_model_reliable = bool(
+                    _loaded_model_validation.get("reliable", False)
+                )
                 logger.info(f"✅ [ML] LSTM 로드: {model_path} "
                       f"(features={in_dim}, seq={seq_len}, rolling_z={use_rolling})")
 
@@ -727,7 +812,8 @@ def load_model() -> None:
                         with open(META_PATH, 'r') as f:
                             _meta = json.load(f)
                         logger.info(f"   → meta: version={_meta.get('version', '?')}, "
-                              f"features={len(_meta.get('feature_cols', []))}")
+                              f"features={len(_meta.get('feature_cols', []))}, "
+                              f"validated={_loaded_model_reliable}")
                     except Exception:
                         pass
 
@@ -911,21 +997,36 @@ def build_master_dataset(data_dir: str = "data") -> tuple:
         .drop_duplicates(subset=['date', 'code'], keep='last') \
         .sort_values('date')
 
+    # 날짜순 70/15/15. 모델/앙상블 선택용 validation과 production 승인용
+    # audit를 분리해 validation 재사용으로 인한 낙관 편향을 막는다.
     unique_dates = df_samples['date'].unique()
-    split_date = unique_dates[int(len(unique_dates) * 0.8)]
-    embargo_date = split_date - pd.offsets.BDay(5)
+    if len(unique_dates) < 30:
+        logger.warning(f"⚠️ [ML] 고유 거래일 부족: dates={len(unique_dates)}")
+        return None
+    val_start = unique_dates[int(len(unique_dates) * 0.70)]
+    audit_start = unique_dates[int(len(unique_dates) * 0.85)]
+    train_embargo = val_start - pd.offsets.BDay(5)
+    audit_embargo = audit_start - pd.offsets.BDay(5)
 
-    train_df = df_samples[df_samples['date'] < embargo_date]
-    val_df = df_samples[df_samples['date'] >= split_date]
+    train_df = df_samples[df_samples['date'] < train_embargo]
+    val_df = df_samples[
+        (df_samples['date'] >= val_start) & (df_samples['date'] < audit_embargo)
+    ]
+    audit_df = df_samples[df_samples['date'] >= audit_start]
 
-    if len(train_df) < 100 or len(val_df) < 50:
-        logger.warning(f"⚠️ [ML] 데이터 부족: train={len(train_df)}, val={len(val_df)}")
+    if len(train_df) < 100 or len(val_df) < 50 or len(audit_df) < 50:
+        logger.warning(
+            f"⚠️ [ML] 데이터 부족: train={len(train_df)}, "
+            f"val={len(val_df)}, audit={len(audit_df)}"
+        )
         return None
 
     X_train = np.stack(train_df['X'].values)
     X_val = np.stack(val_df['X'].values)
+    X_audit = np.stack(audit_df['X'].values)
     y_train = train_df['y'].values.astype(np.float32)
     y_val = val_df['y'].values.astype(np.float32)
+    y_audit = audit_df['y'].values.astype(np.float32)
 
     # [Fix 5] 스케일러는 하위 호환용으로 유지 + Rolling Z-score 병행
     scaler = StandardScaler()
@@ -936,6 +1037,7 @@ def build_master_dataset(data_dir: str = "data") -> tuple:
     # Rolling Z-score 적용
     X_train_s = _apply_rolling_zscore(X_train)
     X_val_s = _apply_rolling_zscore(X_val)
+    X_audit_s = _apply_rolling_zscore(X_audit)
 
     pos_ratio = (y_train > 0).mean()
     tier_dist = {
@@ -944,12 +1046,18 @@ def build_master_dataset(data_dir: str = "data") -> tuple:
         '0.67 (5%+)': ((y_train > 0.34) & (y_train <= 0.68)).mean(),
         '1.0 (7%+)': (y_train > 0.68).mean(),
     }
-    logger.info(f"📊 [ML] Soft Label 분포 (train={len(y_train)}, val={len(y_val)}):")
+    logger.info(
+        f"📊 [ML] Soft Label 분포 (train={len(y_train)}, "
+        f"val={len(y_val)}, audit={len(y_audit)}):"
+    )
     for k, v in tier_dist.items():
         logger.info(f"   {k}: {v:.1%}")
     logger.info(f"   양성 비율(>0): {pos_ratio:.2%}")
 
-    return X_train_s, y_train, X_val_s, y_val, val_df[['date', 'code']], n_feat, pos_ratio
+    return (
+        X_train_s, y_train, X_val_s, y_val, X_audit_s, y_audit,
+        audit_df[['date', 'code']], n_feat, pos_ratio,
+    )
 
 
 # ====================== Dataset ======================
@@ -1058,7 +1166,10 @@ def train_model(force: bool = False) -> bool:
         logger.warning("⚠️ [ML] 학습 데이터 부족으로 중단합니다.")
         return
 
-    X_tr, y_tr, X_val, y_val, meta_val, in_dim, pos_ratio = data
+    (
+        X_tr, y_tr, X_val, y_val, X_audit, y_audit,
+        meta_audit, in_dim, pos_ratio,
+    ) = data
 
     # ============= (1) LSTM 학습 =============
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1076,6 +1187,7 @@ def train_model(force: bool = False) -> bool:
     MAX_EPOCHS = 40
 
     val_loader = DataLoader(StockDataset(X_val, y_val), batch_size=128)
+    audit_loader = DataLoader(StockDataset(X_audit, y_audit), batch_size=128)
     y_val_binary = (y_val > 0).astype(np.float32)
 
     for epoch in range(MAX_EPOCHS):
@@ -1152,13 +1264,36 @@ def train_model(force: bool = False) -> bool:
 
     logger.info(f"✅ [LSTM] 학습 완료 (Best KPI: {best_kpi:.4f})")
 
+    # 저장된 best epoch를 다시 로드해 검증한다. 마지막 epoch의 확률을 쓰면
+    # early-stop best model과 앙상블 가중치가 서로 다른 모델을 가리킨다.
+    best_state = torch.load(MODEL_PATH, map_location=device, weights_only=True)
+    model.load_state_dict(best_state)
+    model.eval()
+    lstm_val_probs_list = []
+    with torch.no_grad():
+        for batch in val_loader:
+            v_X = batch[0].to(device)
+            lstm_val_probs_list.extend(
+                torch.sigmoid(model(v_X)).cpu().numpy().flatten()
+            )
+    lstm_val_probs = np.asarray(lstm_val_probs_list, dtype=float)
+    lstm_audit_probs_list = []
+    with torch.no_grad():
+        for batch in audit_loader:
+            a_X = batch[0].to(device)
+            lstm_audit_probs_list.extend(
+                torch.sigmoid(model(a_X)).cpu().numpy().flatten()
+            )
+    lstm_audit_probs = np.asarray(lstm_audit_probs_list, dtype=float)
+    validation_probs = lstm_audit_probs.copy()
+
     # ============= (2) XGBoost 학습 =============
-    lstm_val_probs = all_probs.copy()  # [Fix 4] 나중에 동적 가중치 계산용
 
     if XGB_OK:
         logger.info("🌲 XGBoost 앙상블 학습 시작...")
         X_tr_xgb = X_tr[:, -1, :]
         X_val_xgb = X_val[:, -1, :]
+        X_audit_xgb = X_audit[:, -1, :]
 
         y_tr_binary = (y_tr > 0).astype(np.float32)
 
@@ -1200,19 +1335,34 @@ def train_model(force: bool = False) -> bool:
             lstm_val_probs, xgb_val_probs, y_val
         )
         _save_ensemble_weights(w_lstm, w_xgb)
+        xgb_audit_probs = xgb_model.predict_proba(X_audit_xgb)[:, 1]
+        validation_probs = (
+            lstm_audit_probs * w_lstm + xgb_audit_probs * w_xgb
+        )
     else:
         _save_ensemble_weights(1.0, 0.0)
 
-    _save_meta(in_dim, pos_ratio, best_kpi)
+    validation = evaluate_model_reliability(y_audit, validation_probs)
+    validation["split"] = "chronological_audit_last_15pct"
+    validation["embargo_bdays"] = 5
+    logger.info(
+        "🧪 [ML] OOS reliability: %s (AUC=%.3f, Brier=%.4f/%.4f, lift=%+.1fpp, n=%d)",
+        "PASS" if validation["reliable"] else f"REJECT:{validation['reason']}",
+        validation["auc"], validation["brier"], validation["baseline_brier"],
+        validation["top_decile_lift"] * 100.0, validation["n"],
+    )
+    _save_meta(in_dim, pos_ratio, best_kpi, validation=validation)
 
-    global _loaded_lstm_model, _loaded_scaler
+    global _loaded_lstm_model, _loaded_scaler, _loaded_model_reliable, _loaded_model_validation
     _loaded_lstm_model = None
     _loaded_scaler = None
+    _loaded_model_reliable = False
+    _loaded_model_validation = {}
     load_model()
     logger.info("✅ [ML] v19.0 전체 학습 파이프라인 완료!")
 
 
-def _save_meta(in_dim, pos_ratio, best_kpi):
+def _save_meta(in_dim, pos_ratio, best_kpi, validation=None):
     meta = {
         "version": "19.0",
         "seq_length": SEQ_LENGTH,
@@ -1222,6 +1372,10 @@ def _save_meta(in_dim, pos_ratio, best_kpi):
         "stop_loss_pct": STOP_LOSS_PCT,
         "pos_ratio": round(float(pos_ratio), 4),
         "best_kpi": round(float(best_kpi), 4),
+        "validation": validation or {
+            "reliable": False,
+            "reason": "VALIDATION_NOT_RUN",
+        },
         "trained_at": datetime.now().isoformat(),
         "fixes": ["first_touch_labeling", "vectorized_inference",
                    "log_scaled_weights", "dynamic_ensemble", "rolling_zscore"],
@@ -1365,6 +1519,10 @@ def apply_ml_score(current_df: pd.DataFrame, full_ohlcv_map: dict) -> pd.DataFra
     """
     global _loaded_lstm_model, _loaded_scaler, _loaded_xgb_model
     global _loaded_seq_length, _loaded_use_rolling_zscore
+    global _loaded_model_reliable, _loaded_model_validation
+
+    current_df["ML_RAW_SCORE"] = 0.0
+    current_df["ML_TRUSTED"] = 0
 
     # [v23 Phase 1] V23_* 신호 attach — ML 추론 전에 먼저 (모델 없어도 작동)
     try:
@@ -1529,7 +1687,10 @@ def apply_ml_score(current_df: pd.DataFrame, full_ohlcv_map: dict) -> pd.DataFra
     hybrid_scores = (w_prob * prob_scores + w_pct * pct_scores).round(1)
 
     score_map = dict(zip(codes, hybrid_scores))
-    current_df["ML_SCORE"] = current_df["종목코드"].map(score_map).fillna(0.0)
+    raw_score = current_df["종목코드"].map(score_map).fillna(0.0)
+    current_df["ML_RAW_SCORE"] = raw_score
+    current_df["ML_TRUSTED"] = int(_loaded_model_reliable)
+    current_df["ML_SCORE"] = raw_score if _loaded_model_reliable else 0.0
 
     # --- 진단 로그 ---
     if codes:
@@ -1553,8 +1714,14 @@ def apply_ml_score(current_df: pd.DataFrame, full_ohlcv_map: dict) -> pd.DataFra
                   f"bot20%_prob={bot20_prob:.1f}, spread={spread:.1f}")
 
     # [v20.8] ML 상태 기록
+    _status = "VALIDATED" if _loaded_model_reliable else "UNVALIDATED_MODEL"
     current_df["ML_STATUS"] = current_df["종목코드"].map(
-        {c: "OK" for c in codes}
+        {c: _status for c in codes}
     ).fillna("NO_DATA")
+    if not _loaded_model_reliable:
+        logger.warning(
+            "🛑 [ML] 검증 게이트 미통과 — ML 가중치 0 (reason=%s)",
+            _loaded_model_validation.get("reason", "MISSING_VALIDATION"),
+        )
 
     return current_df

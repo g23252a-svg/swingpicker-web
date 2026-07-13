@@ -1336,19 +1336,13 @@ def _compute_is_now_entry_vectorized(df: pd.DataFrame) -> pd.Series:
 
 
 def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
-    """[v22] SORT_SPEC — 8축 정렬 SSOT.
+    """Loss-defense SORT_SPEC — production decision first.
     
     정렬 우선순위 (내림차순 기준, 낮은 ROUTE_PRIORITY가 먼저):
-      1. TOP_PICK (1 먼저)
-      2. IS_NOW_ENTRY (1 먼저, adaptive 기반)
-      3. ROUTE_PRIORITY (낮을수록 먼저: ATTACK=1 → CARRY=7)
-      4. JULY_PROFIT_DEFENSE_SCORE (높을수록)
-      5. PROFIT_RECOVERY_SCORE (높을수록)
-      6. ELITE_SCORE (높을수록)
-      6. RR_NOW_TP1 (높을수록)
-      7. BALANCE_SCORE (높을수록)
-      8. ENTRY_GAP_PCT (낮을수록)
-      9. DISPLAY_SCORE (높을수록)
+      1. PRODUCTION_BUY (엄격 품질게이트 통과 종목)
+      2. QUALITY_GUARD_SCORE (현금/관찰일 때 가장 가까운 후보)
+      3. TOP_PICK / IS_NOW_ENTRY / ROUTE_PRIORITY
+      4. 기존 방어·회복·ELITE·RR·BALANCE 축
     
     다른 단계에서 IS_NOW_ENTRY를 ROUTE==ATTACK으로 세팅했어도 
     여기서 adaptive로 덮어쓴다. 순서가 SSOT.
@@ -1364,6 +1358,7 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
 
     # 정렬 축 모두 존재 확인 (없으면 중립 값으로 채움)
     for col, default in [
+        ("PRODUCTION_BUY", 0), ("QUALITY_GUARD_SCORE", 0),
         ("TOP_PICK", 0), ("IS_NOW_ENTRY", 0),
         ("JULY_PROFIT_DEFENSE_SCORE", 50),
         ("PROFIT_RECOVERY_SCORE", 50),
@@ -1378,9 +1373,9 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
 
     # SORT_SPEC 적용
     df = df.sort_values(
-        by=["TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "JULY_PROFIT_DEFENSE_SCORE", "PROFIT_RECOVERY_SCORE", "ELITE_SCORE",
+        by=["PRODUCTION_BUY", "QUALITY_GUARD_SCORE", "TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "JULY_PROFIT_DEFENSE_SCORE", "PROFIT_RECOVERY_SCORE", "ELITE_SCORE",
             "RR_NOW_TP1", "BALANCE_SCORE", "ENTRY_GAP_PCT", "DISPLAY_SCORE"],
-        ascending=[False, False, True, False, False, False, False, False, True, False],
+        ascending=[False, False, False, False, True, False, False, False, False, False, True, False],
         kind="mergesort",   # 안정 정렬 (동점 시 원래 순서 유지)
     ).reset_index(drop=True)
 
@@ -1579,11 +1574,20 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         logger.warning(f"⚠️ add_abnormal_history_guard_columns 실패 (기존 추천 유지): {e}")
 
-    # [v3.9.26] Evidence-Gated No-Buy Breaker — 검증 통과 룰이 있을 때만 최대 1개 공식 승격
+    # [loss-defense] No-Buy Breaker는 기본 OFF. 현금 보유를 정상 결정으로 인정한다.
+    # 과거 리포트가 PASS여도 운영자가 명시적으로 ENABLE_NO_BUY_BREAKER=1을
+    # 설정하지 않으면 공식 후보를 억지로 만들지 않는다.
     try:
         _official_before = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
                                 & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
-        df_out = apply_evidence_gated_no_buy_breaker(df_out, out_dir=OUT_DIR)
+        _nbb_enabled = str(os.environ.get("ENABLE_NO_BUY_BREAKER", "0")).strip().lower() in {"1", "true", "yes", "on"}
+        if _nbb_enabled:
+            df_out = apply_evidence_gated_no_buy_breaker(df_out, out_dir=OUT_DIR)
+        else:
+            for _c in NO_BUY_BREAKER_OUTPUT_COLS:
+                if _c not in df_out.columns:
+                    df_out[_c] = "" if _c in {"NO_BUY_BREAKER_RULE_ID", "NO_BUY_BREAKER_DECISION"} else 0
+            df_out["NO_BUY_BREAKER_DECISION"] = "DISABLED_LOSS_DEFENSE"
         _official_after = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
                                & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
         if _official_after > _official_before:
@@ -1679,6 +1683,25 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"🚪 [v25.1] 청산규율 — 고위험루트 {_es.get('high_avoid',0)} · 주의 {_es.get('caution',0)} · OK {_es.get('ok',0)}")
     except Exception as e:
         logger.warning(f"⚠️ Exit Plan 레이어 실패 (기존 추천 유지): {e}")
+
+    # [loss-defense v1] 최종 production 계약. 이 단계는 후보를 새로 승격하지
+    # 않고 기존 TOP_PICK+BUY_NOW_ELIGIBLE를 더 엄격하게 거부할 수만 있다.
+    try:
+        from services.recommendation_quality import apply_recommendation_quality_guard
+        _before_quality = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                               & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        df_out = apply_recommendation_quality_guard(df_out)
+        _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
+        df_out = finalize_sort(df_out)
+        df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
+        log(f"🧱 [loss-defense v1] 최종 품질게이트 — official {_before_quality}->{_after_quality} · 현금보유 허용")
+    except Exception as e:
+        logger.error(f"❌ 최종 품질게이트 실패 — 안전상 신규매수 전부 차단: {e}", exc_info=True)
+        df_out["PRODUCTION_BUY"] = 0
+        df_out["BUY_NOW_ELIGIBLE"] = 0
+        df_out["ACTION_DECISION"] = "CASH"
+        df_out["RECOMMENDED_WEIGHT_PCT"] = 0.0
+        df_out["QUALITY_GUARD_REASON"] = "품질게이트 실행 실패"
 
     # ── CSV 저장 (분석 시점 불변 원본) ──
     ensure_dir(OUT_DIR)

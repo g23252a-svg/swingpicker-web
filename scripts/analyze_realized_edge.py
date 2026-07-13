@@ -37,7 +37,8 @@ import pandas as pd
 
 DEFAULT_NUMERIC_FEATURES = [
     "FINAL_SCORE", "DISPLAY_SCORE", "ELITE_SCORE",
-    "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE",
+    "STRUCT_SCORE", "TIMING_SCORE", "AI_SCORE", "ML_SCORE",
+    "ML_RAW_SCORE", "ML_EFFECTIVE_SCORE",
     "AXIS_MEAN", "AXIS_GAP", "BALANCE_SCORE",
     "RR_NOW_TP1", "ENTRY_GAP_PCT", "gap_pct",
     "VWAP_GAP", "POC_GAP", "RES_RATIO", "RES_RATIO_NEAR",
@@ -186,9 +187,14 @@ def load_trade_results(data_dir: Path) -> pd.DataFrame:
         return pd.DataFrame(columns=["source_set", "signal_date", "code_norm"])
 
     out = pd.concat(frames, ignore_index=True)
-    subset = ["source_set", "signal_date", "code_norm", "method", "fill_date", "outcome"]
+    # TOP1 is a strict subset of TOP3 in the cumulative backtest exports.  The
+    # former implementation counted the same signal twice and overstated n.
+    # Prefer TOP3 for overlapping rows, while retaining TOP1-only fixtures.
+    out["_source_priority"] = out["source_set"].map({"TOP3": 0, "TOP1": 1}).fillna(9)
+    out = out.sort_values("_source_priority", kind="mergesort")
+    subset = ["signal_date", "code_norm", "method", "fill_date", "outcome"]
     subset = [c for c in subset if c in out.columns]
-    out = out.drop_duplicates(subset=subset, keep="last")
+    out = out.drop_duplicates(subset=subset, keep="first").drop(columns=["_source_priority"])
 
     ret_col = "net_pct" if "net_pct" in out.columns else "ret_pct"
     out["realized_net_pct"] = pd.to_numeric(out.get(ret_col), errors="coerce")
@@ -334,6 +340,48 @@ def build_report(df: pd.DataFrame, slices: pd.DataFrame, min_n: int) -> dict:
     risk = slices[slices["verdict"] == "RISK"].sort_values(
         by=["return_alpha_pct", "win_alpha_pp"], ascending=[True, True]
     ).head(10) if not slices.empty else pd.DataFrame()
+    ml_diagnostic = {
+        "status": "NO_ML_SAMPLES",
+        "feature": None,
+        "n": 0,
+        "spearman": None,
+        "monthly_spearman": {},
+        "production_eligible": False,
+    }
+    for feature in ("ML_EFFECTIVE_SCORE", "ML_RAW_SCORE", "ML_SCORE", "AI_SCORE"):
+        if feature not in df.columns:
+            continue
+        score = pd.to_numeric(df[feature], errors="coerce")
+        realized = pd.to_numeric(df.get("realized_net_pct"), errors="coerce")
+        valid = score.notna() & realized.notna()
+        if int(valid.sum()) < 10:
+            continue
+        corr = score[valid].corr(realized[valid], method="spearman")
+        monthly = {}
+        if "signal_date" in df.columns:
+            month = df["signal_date"].astype(str).str[:6]
+            for key in sorted(month[valid].unique()):
+                mask = valid & month.eq(key)
+                if int(mask.sum()) >= 5:
+                    value = score[mask].corr(realized[mask], method="spearman")
+                    monthly[str(key)] = None if pd.isna(value) else round(float(value), 4)
+        stable_positive_months = sum(v is not None and v > 0 for v in monthly.values())
+        eligible = bool(
+            pd.notna(corr)
+            and float(corr) >= 0.10
+            and len(monthly) >= 3
+            and stable_positive_months >= max(2, int(len(monthly) * 0.6))
+        )
+        ml_diagnostic = {
+            "status": "VALIDATED" if eligible else "UNVALIDATED",
+            "feature": feature,
+            "n": int(valid.sum()),
+            "spearman": None if pd.isna(corr) else round(float(corr), 4),
+            "monthly_spearman": monthly,
+            "production_eligible": eligible,
+        }
+        break
+
     return {
         "version": "realized_edge_audit_v1",
         "purpose": "실전 수익률 예측력 개선을 위한 read-only alpha slice 검증",
@@ -341,9 +389,11 @@ def build_report(df: pd.DataFrame, slices: pd.DataFrame, min_n: int) -> dict:
             "production_effect": "none",
             "hard_gate_change": False,
             "min_n": min_n,
+            "deduplication": "TOP3 preferred over overlapping TOP1 signal",
             "promotion_rule": "n>=30, 월별 일관성, return_alpha>0, stop_alpha<=0 검증 전까지 공식 매수식에 반영 금지",
         },
         "baseline": baseline,
+        "ml_diagnostic": ml_diagnostic,
         "top_edge_slices": edge.to_dict(orient="records") if not edge.empty else [],
         "top_risk_slices": risk.to_dict(orient="records") if not risk.empty else [],
     }
