@@ -72,17 +72,29 @@ def _load_closed_tp_from_log(out_dir: str, lookback_days: int = 14) -> set:
 
 def select_top3(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
     """
-    ATTACK/ARMED 종목 중 목표가 미달성 상위 3종목 선정
+    최종 PRODUCTION_BUY 중 목표가 미달성 상위 3종목 선정.
+
+    TOP_PICK 또는 ATTACK/ARMED 단독은 브리핑 대상이 아니다. 연구 후보를
+    외부 발송에서 매수 추천처럼 보이게 만들던 경로를 차단한다.
 
     Returns: DataFrame (최대 3행)
     """
-    # 1) ATTACK / ARMED만
+    # 1) 최종 production 계약만
     df = df.copy()
     df["ROUTE"] = df["ROUTE"].astype(str).str.strip().str.upper()
-    active = df[df["ROUTE"].isin(["ATTACK", "ARMED"])].copy()
+    if "PRODUCTION_BUY" in df.columns:
+        mask = pd.to_numeric(df["PRODUCTION_BUY"], errors="coerce").fillna(0).astype(int) == 1
+    elif {"TOP_PICK", "BUY_NOW_ELIGIBLE"}.issubset(df.columns):
+        mask = (
+            pd.to_numeric(df["TOP_PICK"], errors="coerce").fillna(0).astype(int).eq(1)
+            & pd.to_numeric(df["BUY_NOW_ELIGIBLE"], errors="coerce").fillna(0).astype(int).eq(1)
+        )
+    else:
+        mask = pd.Series(False, index=df.index)
+    active = df[mask & df["ROUTE"].eq("ATTACK")].copy()
 
     if active.empty:
-        logger.info("📝 브리핑: ATTACK/ARMED 종목 없음")
+        logger.info("📝 브리핑: 최종 공식 신규매수 0건 — 현금 보유")
         return pd.DataFrame()
 
     # 2) 목표가 달성 종목 제외
@@ -96,12 +108,17 @@ def select_top3(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
             logger.info(f"📝 브리핑: 목표가 달성 {excluded}건 제외")
 
     if active.empty:
-        logger.info("📝 브리핑: 목표가 제외 후 ATTACK/ARMED 종목 없음")
+        logger.info("📝 브리핑: 목표가 제외 후 공식 ATTACK 종목 없음")
         return pd.DataFrame()
 
-    # 3) DISPLAY_SCORE 상위 3종목
+    # 3) 품질점수 우선, DISPLAY_SCORE 보조
     active["DISPLAY_SCORE"] = pd.to_numeric(active["DISPLAY_SCORE"], errors="coerce").fillna(0)
-    top3 = active.nlargest(3, "DISPLAY_SCORE")
+    active["QUALITY_GUARD_SCORE"] = pd.to_numeric(
+        active.get("QUALITY_GUARD_SCORE", active["DISPLAY_SCORE"]), errors="coerce"
+    ).fillna(0)
+    top3 = active.sort_values(
+        ["QUALITY_GUARD_SCORE", "DISPLAY_SCORE"], ascending=False
+    ).head(3)
 
     return top3
 
@@ -266,8 +283,41 @@ def generate_daily_briefing(
     # 상위 3종목 선정
     top3 = select_top3(df, out_dir)
     if top3.empty:
-        logger.info("📝 브리핑 대상 없음 (ATTACK/ARMED 0건)")
-        return {"count": 0, "codes": [], "md_path": "", "json_path": ""}
+        # stale latest 파일을 남기면 전날 종목이 오늘 추천처럼 노출된다.
+        # 0건 날에도 CASH 결정을 dated/latest 양쪽에 반드시 기록한다.
+        date_display = f"{trade_ymd[:4]}.{trade_ymd[4:6]}.{trade_ymd[6:]}"
+        md_content = (
+            f"# SwingPicker 오늘의 결정 ({date_display})\n\n"
+            "## 오늘은 신규매수하지 않습니다\n\n"
+            "최종 품질게이트를 통과한 종목이 없어 현금 보유가 공식 결정입니다.\n\n"
+            "관찰 후보와 높은 원점수는 매수 추천이 아닙니다.\n"
+        )
+        json_data = {
+            "trade_date": trade_ymd,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "decision": "CASH",
+            "count": 0,
+            "stocks": [],
+        }
+        md_dated = os.path.join(out_dir, f"briefing_{trade_ymd}.md")
+        md_latest = os.path.join(out_dir, "briefing_latest.md")
+        json_dated = os.path.join(out_dir, f"briefing_{trade_ymd}.json")
+        json_latest = os.path.join(out_dir, "briefing_latest.json")
+        for path in (md_dated, md_latest):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(md_content)
+        for path in (json_dated, json_latest):
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(json_data, handle, ensure_ascii=False, indent=2)
+        logger.info("📝 브리핑: CASH 결정 저장 (stale 추천 제거)")
+        return {
+            "count": 0,
+            "codes": [],
+            "names": [],
+            "decision": "CASH",
+            "md_path": md_dated,
+            "json_path": json_dated,
+        }
 
     codes = top3["종목코드"].astype(str).str.zfill(6).tolist()
     names = top3["종목명"].tolist()

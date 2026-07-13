@@ -226,17 +226,26 @@ def analyze_portfolio_swap(
 
 
 def _select_top_pick(recommend_df: pd.DataFrame) -> Optional[dict]:
-    """오늘 Top Pick — TOP_PICK=1 또는 DISPLAY_SCORE 최고."""
+    """오늘 교체 가능한 공식 후보.
+
+    신규 CSV에서는 PRODUCTION_BUY만 허용한다. 공식 후보 0개일 때 점수
+    최고 종목으로 폴백하면 보유주를 연구 후보로 갈아타는 위험이 생긴다.
+    """
     if recommend_df.empty:
         return None
-    # TOP_PICK 컬럼이 있고 1인 행 우선
-    if "TOP_PICK" in recommend_df.columns:
+    if "PRODUCTION_BUY" in recommend_df.columns:
         tp_rows = recommend_df[
-            pd.to_numeric(recommend_df["TOP_PICK"], errors="coerce") == 1
+            pd.to_numeric(recommend_df["PRODUCTION_BUY"], errors="coerce").fillna(0) == 1
         ]
-        if not tp_rows.empty:
-            return _row_to_pick_dict(tp_rows.iloc[0])
-    # fallback: DISPLAY_SCORE 최고
+        return _row_to_pick_dict(tp_rows.iloc[0]) if not tp_rows.empty else None
+    # legacy strict contract
+    if {"TOP_PICK", "BUY_NOW_ELIGIBLE"}.issubset(recommend_df.columns):
+        tp_rows = recommend_df[
+            pd.to_numeric(recommend_df["TOP_PICK"], errors="coerce").fillna(0).eq(1)
+            & pd.to_numeric(recommend_df["BUY_NOW_ELIGIBLE"], errors="coerce").fillna(0).eq(1)
+        ]
+        return _row_to_pick_dict(tp_rows.iloc[0]) if not tp_rows.empty else None
+    # very old CSV compatibility only
     score_col = None
     for c in ["DISPLAY_SCORE", "FINAL_SCORE"]:
         if c in recommend_df.columns:

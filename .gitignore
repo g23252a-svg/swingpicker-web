@@ -16,6 +16,7 @@ env/
 .env
 *.env
 .streamlit/secrets.toml
+.nicegui/
 
 data/*
 !data/.keep

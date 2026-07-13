@@ -4,7 +4,7 @@ SwingPicker — NiceGUI Full Edition
 ═══════════════════════════════════════
 순수 라우터 + Lazy Loading: 탭 클릭 시에만 렌더링
 
-Tab 1: 📊 시장 현황       → 즉시 로드 (기본 탭)
+Tab 1: 🎯 오늘의 결정     → 즉시 로드 (기본 탭)
 Tab 2~10: Lazy Loading    → 최초 클릭 시에만 렌더링
 Tab 10: 🧪 전략 샌드박스   → components/tab_backtest.py (Prime 전용)
 """
@@ -21,6 +21,7 @@ from services.auth import get_current_user, set_current_user, get_auth_status
 
 # ─── UI ───
 from components.ui_utils import DARK_CSS
+from components.decision_center import render_decision_center
 from views.login_page import login_page  # noqa: F401 — @ui.page('/login') 등록
 
 # ─── 탭 컴포넌트 ───
@@ -306,22 +307,25 @@ async def index():
     _has_new_update = bool(_last_seen != APP_VERSION)
     _update_label = "🧩 업데이트 🔴" if _has_new_update else "🧩 업데이트"
 
+    # 핵심 행동 탭을 앞에, 연구/운영 탭을 뒤에 둔다. 첫 화면에서는
+    # raw ranking이 아니라 PRODUCTION_BUY 한 가지 계약만 보여준다.
     TAB_DEFS = [
-        ("t1", "📊 시장"),
-        ("t2", "🔭 종목 분석"),
-        ("t3", "💼 내 자산"),
+        ("t0", "🎯 오늘"),
+        ("t2", "🔎 종목"),
+        ("t3", "💼 자산"),
+        ("t1", "🌐 시장"),
+        ("t7", "📈 성과"),
+        ("t9", "📓 일지"),
+        ("t10", "🧪 연구"),
         ("t11", "💎 멤버십"),
         ("t4", "📮 문의"),
-        ("t5", "⚖️ 약관"),
         ("t6", _update_label),
-        ("t7", "📈 성과"),
-        ("t10", "🧪 전략 샌드박스"),
-        ("t9", "📓 매매 일지"),
+        ("t5", "⚖️ 약관"),
     ]
     if auth == "admin":
         TAB_DEFS.append(("t8", "👑 관리"))
 
-    with ui.tabs().classes("w-full text-white") as tabs:
+    with ui.tabs().props("dense mobile-arrows outside-arrows").classes("w-full text-white") as tabs:
         tab_refs = {}
         label_to_key = {}
         for key, label in TAB_DEFS:
@@ -331,11 +335,18 @@ async def index():
     # [v24.9.1] 모바일 복귀 시 탭 원복 방지 — 마지막 탭을 세션(storage.user)에 저장/복원.
     # 배경: 모바일에서 타 앱(토스 등) 전환 시 웹소켓이 끊기고, 유예 초과 시 페이지가
     # 리로드되며 클라이언트 탭 상태가 초기화됨 → 저장된 키로 초기 탭을 복원한다.
-    _saved_key = "t1"
+    _saved_key = "t0"
     try:
-        _cand = app.storage.user.get("main_active_tab", "t1")
-        if _cand in tab_refs:
+        # UX 계약이 바뀐 첫 방문에는 기존 저장 탭보다 '오늘의 결정'을
+        # 한 번 우선 노출한다. 이후부터는 사용자의 마지막 탭을 복원한다.
+        _nav_version = "decision_center_v1"
+        _seen_nav_version = app.storage.user.get("main_nav_version", "")
+        _cand = app.storage.user.get("main_active_tab", "t0")
+        if _seen_nav_version == _nav_version and _cand in tab_refs:
             _saved_key = _cand
+        else:
+            app.storage.user["main_nav_version"] = _nav_version
+            app.storage.user["main_active_tab"] = "t0"
     except Exception:
         pass
 
@@ -354,6 +365,7 @@ async def index():
             ui.label("⚠️ trade_journal_tab 모듈 없음").classes("text-yellow-400")
 
     render_map = {
+        "t0": lambda: render_decision_center(df, auth),
         "t1": lambda: render_tab_market(df, auth),
         "t2": lambda: render_tab_stocks(df, auth, store),
         "t3": lambda: render_tab_portfolio(df, auth),

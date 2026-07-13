@@ -405,10 +405,18 @@ def _render_today_hero(df: pd.DataFrame, meta: dict = None, auth: str = "free"):
         # 변수명은 함수와 충돌 방지 위해 'route_blocked'로 (함수: is_route_blocked)
         route_blocked = is_route_blocked(max_route)
         
-        # TOP_PICK 종목 — ui_terms.is_truthy_flag 사용
+        # 최종 공식 종목. TOP_PICK 단독은 연구 후보일 뿐 매수 추천이 아니다.
+        # 신규 CSV는 PRODUCTION_BUY를 SSOT로 사용하고, legacy CSV에서만
+        # TOP_PICK + BUY_NOW_ELIGIBLE 교집합으로 보수적으로 폴백한다.
         top_picks = pd.DataFrame()
-        if 'TOP_PICK' in df.columns:
-            tp_mask = df['TOP_PICK'].apply(is_truthy_flag)
+        if 'PRODUCTION_BUY' in df.columns:
+            tp_mask = df['PRODUCTION_BUY'].apply(is_truthy_flag)
+            top_picks = df[tp_mask].copy()
+        elif 'TOP_PICK' in df.columns and 'BUY_NOW_ELIGIBLE' in df.columns:
+            tp_mask = (
+                df['TOP_PICK'].apply(is_truthy_flag)
+                & df['BUY_NOW_ELIGIBLE'].apply(is_truthy_flag)
+            )
             top_picks = df[tp_mask].copy()
         
         n_top = len(top_picks)
@@ -1591,4 +1599,3 @@ def _build_no_buy_gate_audit(df, meta=None) -> dict:
             })
 
     return {"counts": counts, "closest": closest, "macro_block": macro_block}
-

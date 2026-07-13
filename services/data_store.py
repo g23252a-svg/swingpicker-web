@@ -312,6 +312,20 @@ class DataStore:
                 for alias in ["DISPLAY_SCORE", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE"]:
                     df[alias] = df[primary]
 
+            # 배포 직후에도 새 production 계약을 즉시 적용한다. collector가
+            # 다음 CSV를 만들기 전까지 기존 recommend_latest를 읽더라도 첫
+            # 화면과 알림에서 연구 후보가 공식 매수로 승격되지 않는다.
+            try:
+                from services.recommendation_quality import apply_recommendation_quality_guard
+                df = apply_recommendation_quality_guard(df)
+            except Exception as exc:
+                _logger.exception("최종 품질게이트 적용 실패 — 신규매수 안전 차단: %s", exc)
+                df["PRODUCTION_BUY"] = 0
+                df["BUY_NOW_ELIGIBLE"] = 0
+                df["ACTION_DECISION"] = "CASH"
+                df["RECOMMENDED_WEIGHT_PCT"] = 0.0
+                df["QUALITY_GUARD_REASON"] = "품질게이트 실행 실패"
+
             ts_col = next((c for c in ["trade_date", "DATA_DATE"] if c in df.columns), None)
             self.data_ts = str(df[ts_col].iloc[0]) if ts_col else now_kst().strftime("%Y-%m-%d")
             self.scored = df
