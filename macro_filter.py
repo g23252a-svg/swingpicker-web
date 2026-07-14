@@ -204,14 +204,34 @@ def check_macro_env(
         fx_last = float(fx["Close"].iloc[-1])
         fx_date = fx.index[-1].strftime("%m/%d") if isinstance(fx.index, pd.DatetimeIndex) else "?"
 
+        # [v27] 환율 5거래일 상승률 — "급등 진행형" 판정.
+        # 데이터가 6행 미만이면 판단 불가 → 보수적으로 급등 취급 (기존 동작 유지).
+        fx_rise_5d = None
+        fx_close = fx["Close"].dropna()
+        if len(fx_close) >= 6:
+            prev5 = float(fx_close.iloc[-6])
+            if prev5 > 0:
+                fx_rise_5d = (fx_last / prev5 - 1.0) * 100.0
+        _rise_th = getattr(config, "fx_critical_rise_5d_pct", 1.5)
+        fx_rising = fx_rise_5d is None or fx_rise_5d >= _rise_th
+
         if not is_fresh:
             # [v2.2 #2] stale 데이터 → 경고 + CAUTION 격상
             data_failures += 1
             messages.append(f"환율 데이터 {stale_days}일 지연 [{fx_date}] → stale")
             logger.warning(f"환율 데이터 stale: {stale_days} BDay 지연")
-        elif fx_last >= config.macro_fx_critical:
+        elif fx_last >= config.macro_fx_critical and fx_rising:
+            # [v27] 레벨 높음 + 급등 진행형 → 진짜 위기
             risk_level = "CRITICAL"
-            messages.append(f"환율 {fx_last:.0f}원 [{fx_date}] (CRITICAL)")
+            _rise_txt = f", 5일 {fx_rise_5d:+.1f}%" if fx_rise_5d is not None else ""
+            messages.append(f"환율 {fx_last:.0f}원 [{fx_date}]{_rise_txt} (CRITICAL)")
+        elif fx_last >= config.macro_fx_critical:
+            # [v27] 레벨 높지만 안정/하락 → 구조적 고환율 레짐 (CAUTION).
+            # 절대 레벨만으로 CRITICAL을 유지하면 환율 재베이스 구간에서
+            # 추천이 수개월간 전면 차단됨 (2026-03~07 실측).
+            risk_level = _risk_max(risk_level, "CAUTION")
+            _rise_txt = f", 5일 {fx_rise_5d:+.1f}%" if fx_rise_5d is not None else ""
+            messages.append(f"환율 {fx_last:.0f}원 [{fx_date}]{_rise_txt} 고레벨·안정 (레짐 주의)")
         elif fx_last >= config.macro_fx_caution:
             risk_level = _risk_max(risk_level, "CAUTION")
             messages.append(f"환율 {fx_last:.0f}원 [{fx_date}] (주의)")

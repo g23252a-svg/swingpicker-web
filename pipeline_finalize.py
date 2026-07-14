@@ -1362,6 +1362,7 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
         ("TOP_PICK", 0), ("IS_NOW_ENTRY", 0),
         ("JULY_PROFIT_DEFENSE_SCORE", 50),
         ("PROFIT_RECOVERY_SCORE", 50),
+        ("ALPHA_SCORE", 0),  # [v29] 미검증/결측 → 0 (정렬 영향 없음)
         ("ELITE_SCORE", 0), ("RR_NOW_TP1", 0),
         ("BALANCE_SCORE", 0), ("ENTRY_GAP_PCT", 99),
         ("DISPLAY_SCORE", 0),
@@ -1372,10 +1373,12 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default)
 
     # SORT_SPEC 적용
+    # [v29] ALPHA_SCORE를 ELITE보다 앞에 — OOS 검증 통과한 유일한 종목 점수
+    # (알파 십분위 실측 승률 24%→41% 단조 vs ELITE는 역방향).
     df = df.sort_values(
-        by=["PRODUCTION_BUY", "QUALITY_GUARD_SCORE", "TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "JULY_PROFIT_DEFENSE_SCORE", "PROFIT_RECOVERY_SCORE", "ELITE_SCORE",
+        by=["PRODUCTION_BUY", "QUALITY_GUARD_SCORE", "TOP_PICK", "IS_NOW_ENTRY", "_ROUTE_PRIORITY", "JULY_PROFIT_DEFENSE_SCORE", "PROFIT_RECOVERY_SCORE", "ALPHA_SCORE", "ELITE_SCORE",
             "RR_NOW_TP1", "BALANCE_SCORE", "ENTRY_GAP_PCT", "DISPLAY_SCORE"],
-        ascending=[False, False, False, False, True, False, False, False, False, False, True, False],
+        ascending=[False, False, False, False, True, False, False, False, False, False, False, True, False],
         kind="mergesort",   # 안정 정렬 (동점 시 원래 순서 유지)
     ).reset_index(drop=True)
 
@@ -1446,6 +1449,24 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     # [v20.6] macro_risk 직접 저장
     df_out["MACRO_RISK"] = ctx.macro_risk
     df_out["MARKET_BREADTH"] = ctx.breadth.get("ALL", np.nan)
+
+    # [v28] 시장 레짐 판정 — UP(정상 진입)/NEUTRAL(사이즈 50%)/DOWN(진입 차단)
+    # 실측 (98일): UP 레짐 픽 평균 +5.1%/건, NEUTRAL +0.1%, DOWN은 손실 우세.
+    # 레짐은 GO/NO-GO·사이즈만 결정하고 랭킹에는 개입하지 않는다
+    # (UP 레짐에서도 POC 근접 랭킹이 점수 랭킹보다 +2.1%p 우월했음).
+    try:
+        from market_regime import compute_market_regime, inject_regime_columns
+        _regime_info = compute_market_regime(
+            trade_ymd, ctx.breadth.get("ALL"), data_dir=OUT_DIR,
+        )
+        df_out = inject_regime_columns(df_out, _regime_info)
+        log(f"🌡️ [v28] 레짐: {_regime_info['regime']} — {_regime_info['reason']}")
+    except Exception as e:
+        logger.warning(f"⚠️ 레짐 판정 실패 (NEUTRAL 취급): {e}")
+        df_out["MARKET_REGIME"] = "UNKNOWN"
+        df_out["REGIME_REASON"] = f"판정 실패: {e}"
+        df_out["REGIME_SIZE_MULT"] = 0.5
+        df_out["REGIME_ALLOW_ENTRY"] = 1
     # Run Health
     _health = None
     try:
@@ -1692,6 +1713,22 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                                & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
         df_out = apply_recommendation_quality_guard(df_out)
         _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
+        # [v29] 알파 점수 — 전일 학습된 검증 통과 모델로 당일 예측 (미검증 시 자동 미사용)
+        try:
+            from alpha_engine import score_today as _alpha_score_today
+            df_out = _alpha_score_today(df_out, data_dir=OUT_DIR)
+            if int(pd.to_numeric(df_out.get("ALPHA_VALIDATED", 0), errors="coerce").fillna(0).iloc[0]):
+                log("🧠 [v29] 알파모델 적용 — OOS 검증 통과분")
+            else:
+                log("🧠 [v29] 알파모델 미사용 (검증 미통과 또는 모델 없음)")
+        except Exception as _ae:
+            logger.warning(f"⚠️ 알파 점수 실패 (미사용 처리): {_ae}")
+        # [v28] "왜 이 종목인가" 근거 문장 — 실측 수치 기반, 리스크 병기
+        try:
+            from services.reco_evidence import add_evidence_columns
+            df_out = add_evidence_columns(df_out)
+        except Exception as _ee:
+            logger.warning(f"⚠️ 근거 문장 생성 실패 (추천 유지): {_ee}")
         df_out = finalize_sort(df_out)
         df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
         log(f"🧱 [loss-defense v1] 최종 품질게이트 — official {_before_quality}->{_after_quality} · 현금보유 허용")
@@ -1914,6 +1951,29 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         cs = auto_calibrate(OUT_DIR, trade_ymd)
         log(f"📊 캘리브레이션: {cs.get('n_trades',0)}건, 승률={cs.get('overall_winrate',0):.1%}")
     except Exception as e: log(f"⚠️ 자동 캘리브레이션 스킵: {e}")
+    # [v29] 알파모델 야간 재학습 + 워크포워드 재검증 (내일 실행분에 사용)
+    # 검증(OOS IC t≥2 · AUC≥0.52 · Q5-Q1>0) 실패 시 저장하지 않음 → 내일 자동 미사용.
+    try:
+        from alpha_engine import train_and_save
+        _am = train_and_save(OUT_DIR, trade_ymd)
+        if _am.get("validated"):
+            log(f"🧠 [v29] 알파 재학습 — OOS IC {_am.get('mean_ic')} (t={_am.get('ic_t')}) "
+                f"AUC {_am.get('auc')} → 검증 통과, 내일 적용")
+        else:
+            log(f"🧠 [v29] 알파 재학습 — 검증 미통과 ({_am.get('reason', 'gate 미달')}) → 미사용 유지")
+    except Exception as e:
+        log(f"⚠️ 알파 재학습 스킵: {e}")
+    # [v28] 점수 축 예측력 야간 감사 — 역주행(t<-2) 축 경고
+    # AI 축만 신뢰도 게이트가 있고 룰 기반 축은 무검증이던 비대칭 해소.
+    try:
+        from services.axis_ic_report import save_axis_ic_report
+        _icr = save_axis_ic_report(OUT_DIR, trade_ymd)
+        if _icr.get("ok"):
+            _warn_n = len(_icr.get("warnings", []))
+            log(f"🧭 [v28] 축 IC 감사: {_icr.get('n_days_used',0)}일 기준"
+                + (f" · ⚠️ 역주행 {_warn_n}축" if _warn_n else " · 이상 없음"))
+    except Exception as e:
+        log(f"⚠️ 축 IC 감사 스킵: {e}")
     # [v21.3] 조합 최적화
     try:
         from combo_optimizer import run_combo_optimization

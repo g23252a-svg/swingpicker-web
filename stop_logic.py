@@ -93,7 +93,11 @@ class StopConfig:
     adaptive_stop: bool = True
     adaptive_atr_mult: float = 2.0       # ATR% * this = base stop
     adaptive_floor_pct: float = 3.0      # absolute minimum stop %
-    adaptive_ceil_pct: float = 15.0      # absolute maximum stop %
+    # [v30] 15.0 → 8.0 — 청산 그리드 검증 (게이트 통과 후보 851건, train/OOS 분리):
+    #   ceil 15%: train 평균 -0.83%/건 · p5 -15.2% / OOS 평균 -7.28%
+    #   ceil  8%: train 평균 +1.03%/건 · p5  -8.2% / OOS 평균 -4.06%
+    #   → 평균 개선 + 꼬리손실 절반. v25.1 '손절폭 조임' 결론의 SSOT 승격.
+    adaptive_ceil_pct: float = 8.0       # absolute maximum stop %
     market_breadth: float = 50.0         # set by collector (0~100)
     use_tick_rounding: bool = True
 
@@ -432,11 +436,10 @@ def calc_stop_price(
     if c.adaptive_stop:
         # [v3.0] ATR-adaptive: stop width scales with actual volatility
         base_stop_pct = atr_pct * c.adaptive_atr_mult
-        # Market regime scaling: wider stops in weak markets
-        if c.market_breadth < 25:
-            base_stop_pct *= 1.4   # panic/crash: 40% wider
-        elif c.market_breadth < 40:
-            base_stop_pct *= 1.2   # weak: 20% wider
+        # [v30] 약세장 손절 확대(breadth<25 ×1.4 / <40 ×1.2) 제거.
+        # 실측 반박: 손절된 트레이드의 51%가 +5%를 먼저 찍고 -12~15%로 마감 —
+        # 약세장에서 넓힌 손절은 손실을 키우는 방향으로만 작동했다.
+        # 약세장 방어는 v27/v28 시장폭·레짐 게이트(진입 차단)가 담당한다.
         # Clamp to floor/ceiling
         base_stop_pct = max(c.adaptive_floor_pct, min(base_stop_pct, c.adaptive_ceil_pct))
     else:

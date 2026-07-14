@@ -336,6 +336,12 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
         # 사유 (UI 표시용 — score_reason은 우선순위 적용 후 결과)
         "score_reason": score_reason,
+        # [v28] 실측 근거/리스크/승률 + 레짐
+        "reco_evidence": _safe_str(row.get("RECO_EVIDENCE", ""), ""),
+        "reco_risk": _safe_str(row.get("RECO_RISK", ""), ""),
+        "honest_prob_pct": safe_float(row.get("HONEST_PROB_PCT")),
+        "market_regime": _safe_str(row.get("MARKET_REGIME", ""), ""),
+        "regime_reason": _safe_str(row.get("REGIME_REASON", ""), ""),
         # 원본 사유들 (Step 2D-2E 패널에서 직접 표시용)
         "elite_reason": elite_reason,
         "reason_top1": reason_top1,
@@ -438,6 +444,8 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "ai_comment": ai_comment,
         "score_risk": score_risk,
         "stop_reason": stop_reason,
+        # [v30] 본전스탑 전환가 (없으면 진입가×1.05 근사)
+        "be_trigger": safe_float(row.get("BE_TRIGGER_PRICE")),
         "bb_expanding": bb_expanding,
         "is_swing_support": is_swing_support,
         "vwap": vwap,
@@ -1290,7 +1298,57 @@ def render_v2_scores(n: dict):
     else:
         gap_tag = "주의"
 
+    # [v28] 실측 근거 패널 — 점수보다 먼저, "왜 이 종목인가"를 수치로
+    reco_evidence = str(n.get("reco_evidence", "") or "")
+    reco_risk = str(n.get("reco_risk", "") or "")
+    honest_prob = n.get("honest_prob_pct")
+    market_regime = str(n.get("market_regime", "") or "")
+    regime_reason = str(n.get("regime_reason", "") or "")
+    _regime_clr = {"UP": "var(--green)", "DOWN": "var(--red)"}.get(market_regime, "var(--orange)")
+
     with ui.element("div").classes("sd-v2").style("width: 100%;"):
+        if reco_evidence or reco_risk or market_regime:
+            _prob_html = ""
+            if honest_prob is not None and honest_prob > 0:
+                _prob_html = (
+                    f'<span style="font-size:15px; font-weight:900; color:var(--green);">'
+                    f'실측 승률 {honest_prob:.0f}%</span>'
+                    '<span style="font-size:10px; color:var(--text-dim);"> (이 점수 구간의 과거 성적)</span>'
+                )
+            _regime_html = ""
+            if market_regime:
+                _regime_html = (
+                    f'<span style="font-size:11px; font-weight:800; color:{_regime_clr}; '
+                    f'margin-left:8px;" title="{h_escape(regime_reason)}">'
+                    f'레짐 {h_escape(market_regime)}</span>'
+                )
+            _ev_items = "".join(
+                f'<div style="font-size:11.5px; color:var(--text-white); margin-top:3px;">'
+                f'✓ {h_escape(p.strip())}</div>'
+                for p in reco_evidence.split("·") if p.strip()
+            )
+            _risk_items = "".join(
+                f'<div style="font-size:11.5px; color:var(--orange); margin-top:3px;">'
+                f'⚠ {h_escape(p.strip())}</div>'
+                for p in reco_risk.split("·") if p.strip()
+            )
+            ui.html(f'''
+                <div style="margin-bottom:12px; padding:11px 13px; border-radius:10px;
+                            background: rgba(16,185,129,0.06);
+                            border: 1px solid rgba(16,185,129,0.25);">
+                    <div style="font-size:11px; font-weight:800; color:var(--text-gray);
+                                margin-bottom:5px;">
+                        📋 왜 이 종목인가 (실측 근거) {_regime_html}
+                    </div>
+                    {_prob_html}
+                    {_ev_items}
+                    {_risk_items or ""}
+                    <div style="font-size:10px; color:var(--text-dim); margin-top:5px;">
+                        아래 점수는 보조 지표입니다 — 점수가 높다고 확률이 높은 것이 아닙니다
+                        (하락장에서 고점수 역방향 실측 확인).
+                    </div>
+                </div>
+            ''')
         with ui.element("div").classes("scores").style(
             "display: grid; grid-template-columns: 140px 1fr 130px 130px 130px; "
             "gap: 8px; margin-bottom: 12px; width: 100%;"
@@ -1455,10 +1513,75 @@ def render_v2_price_plan(n: dict):
     else:
         rr_tag = "—"
 
+    # ── [v30] 가격 사다리 시각화 ──
+    # 손절~TP3 구간을 세로 축으로, 각 레벨의 위치·%·근거를 한눈에.
+    be_trigger = n.get("be_trigger") or (entry * 1.05 if entry else 0)
+    ladder_html = ""
+    if entry and stop and tp1 and stop < entry < tp1:
+        lo = stop * 0.985
+        hi = max(tp3 or 0, tp2 or 0, tp1) * 1.015
+        span = hi - lo if hi > lo else 1
+
+        def _pos(p):
+            return max(0.0, min(100.0, (hi - p) / span * 100.0))
+
+        def _row_lv(price, label, color, pct_txt, bold=False):
+            if not price or price <= 0:
+                return ""
+            w = "800" if bold else "600"
+            return (
+                f'<div style="position:absolute; top:{_pos(price):.1f}%; left:0; right:0;'
+                f' transform:translateY(-50%); display:flex; align-items:center; gap:6px;">'
+                f'<div style="flex:0 0 54px; text-align:right; font-size:10.5px;'
+                f' font-weight:{w}; color:{color};">{label}</div>'
+                f'<div style="flex:1; border-top:2px {"solid" if bold else "dashed"} {color};'
+                f' opacity:{1.0 if bold else 0.65};"></div>'
+                f'<div style="flex:0 0 118px; font-size:11px; font-weight:{w}; color:{color};">'
+                f'{int(round(price)):,} <span style="font-size:9.5px; opacity:0.8;">{pct_txt}</span></div>'
+                f'</div>'
+            )
+
+        def _pct_of_entry(p):
+            return f"({(p/entry-1)*100:+.1f}%)" if entry else ""
+
+        rows_html = "".join([
+            _row_lv(tp3, "TP3", "var(--green)", _pct_of_entry(tp3)),
+            _row_lv(tp2, "TP2", "var(--green)", _pct_of_entry(tp2)),
+            _row_lv(tp1, "TP1", "var(--green)", _pct_of_entry(tp1), bold=True),
+            _row_lv(be_trigger, "본전전환", "var(--orange)", _pct_of_entry(be_trigger)),
+            _row_lv(close, "현재가", "var(--text-white)", _pct_of_entry(close), bold=True),
+            _row_lv(entry, "진입", "#60A5FA", "(기준)", bold=True),
+            _row_lv(stop, "손절", "var(--red)", _pct_of_entry(stop), bold=True),
+        ])
+        # 배경 존: 진입 위 = 수익권(초록 틴트), 아래 = 손실권(빨강 틴트)
+        entry_pos = _pos(entry)
+        ladder_html = f'''
+        <div style="margin:10px 0 12px 0;">
+          <div style="font-size:10.5px; color:var(--text-dim); margin-bottom:4px;">
+            📐 가격 사다리 (손절→목표 구간 내 현재 위치)
+          </div>
+          <div style="position:relative; height:190px; border-radius:8px; overflow:hidden;
+                      background: linear-gradient(180deg,
+                        rgba(16,185,129,0.10) 0%,
+                        rgba(16,185,129,0.04) {entry_pos:.1f}%,
+                        rgba(239,68,68,0.05) {entry_pos:.1f}%,
+                        rgba(239,68,68,0.14) 100%);
+                      border: 1px solid rgba(148,163,184,0.15); padding: 4px 6px;">
+            {rows_html}
+          </div>
+          <div style="font-size:10px; color:var(--text-dim); margin-top:4px;">
+            손절 = 2×ATR(변동폭)·스윙로우 지지선 기준, 최대 -8% 캡 ·
+            목표 = 3.5×ATR (이 종목이 실제로 움직이는 폭) ·
+            +5% 도달 시 손절선을 진입가로 상향(본전전환)
+            — 규칙 실측: 표본 851건 train +1.03%/건·꼬리 -8.2% (기존 -0.83%/-15.2%)
+          </div>
+        </div>'''
+
     ui.html(f'''
     <div class="sd-v2">
       <div class="panel">
         <div class="panel-title"><span class="num">1</span>가격 플랜</div>
+        {ladder_html}
 
         <div class="panel-row">
           <span class="lbl" title="전일 종가 (기준일 마감가)">종가</span>

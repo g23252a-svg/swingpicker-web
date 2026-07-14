@@ -192,6 +192,31 @@ def _refresh_carry_rows(ctx: PipelineContext, prev_df: pd.DataFrame,
             legacy_df["종목코드"] = legacy_codes[:len(legacy_df)]
             legacy_df["ROW_BUILD_MODE"] = "CARRY_LEGACY"
             legacy_df["DATA_FRESHNESS_OK"] = False
+            # [v27.0.1] legacy 스냅샷이라도 종가만은 현재가로 갱신.
+            # 스냅샷 통째 복사는 종가까지 며칠 묵은 가격으로 남겨
+            # 화면 표시가·실제가가 최대 +199%까지 벌어졌다 (2026-07-13 실측 40건).
+            # 추천매수가/손절가는 보유 기준선이므로 유지, 종가/등락률만 갱신.
+            _price_refreshed = []
+            for _i, _lrow in legacy_df.iterrows():
+                _lc = str(_lrow.get("종목코드", "")).zfill(6)
+                _lohlcv = carry_ohlcv.get(_lc)
+                if _lohlcv is None or _lohlcv.empty or "종가" not in _lohlcv.columns:
+                    _price_refreshed.append(False)
+                    continue
+                _closes = pd.to_numeric(_lohlcv["종가"], errors="coerce").dropna()
+                if _closes.empty:
+                    _price_refreshed.append(False)
+                    continue
+                legacy_df.at[_i, "종가"] = float(_closes.iloc[-1])
+                if len(_closes) >= 2 and float(_closes.iloc[-2]) > 0:
+                    legacy_df.at[_i, "등락률"] = round(
+                        (float(_closes.iloc[-1]) / float(_closes.iloc[-2]) - 1) * 100, 2
+                    )
+                _price_refreshed.append(True)
+            legacy_df["CARRY_PRICE_REFRESHED"] = _price_refreshed
+            _n_refreshed = sum(_price_refreshed)
+            if _n_refreshed:
+                log(f"   💱 CARRY legacy 종가 현행화: {_n_refreshed}/{len(legacy_df)}건")
             # Legacy 패널티: DISPLAY_SCORE -15 (강화)
             if "DISPLAY_SCORE" in legacy_df.columns:
                 legacy_df["DISPLAY_SCORE"] = (

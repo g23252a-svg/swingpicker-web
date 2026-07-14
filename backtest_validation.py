@@ -174,18 +174,76 @@ def rank_score(stats: dict, label: str) -> float:
     return base * rr_mult * label_mult
 
 
+# [v27] 고확률 진입 게이트 — 실현 트레이드 157건 (2026-02~07) 검증:
+#   POC_GAP ≤20 & MARKET_BREADTH ≥35 결합 시
+#   일별 최강 Top3 전략: 평균 -2.2%/건·승률 33% → 평균 +2.3%/건·승률 50%
+#   (누적 -287% → +96%, 동일 기간·동일 체결/청산 규칙 재시뮬레이션)
+# 컬럼 없거나 파싱 불가 시 통과 (legacy CSV 호환).
+V27_POC_GAP_MAX = 20.0
+V27_BREADTH_MIN = 35.0
+# [v29] 알파 바닥 필터 — 당일 알파 백분위(0~100) 하한
+V29_ALPHA_FLOOR = 30.0
+
+
+def _v27_float_or_none(raw) -> Optional[float]:
+    """CSV 원시값 → float, 누락/파싱불가 → None (legacy CSV 호환)."""
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _v27_entry_gate_ok(row: dict) -> bool:
+    """POC 확장 차단 + 시장폭 하한 + 데이터 신선도. NaN/누락은 통과."""
+    poc = _v27_float_or_none(row.get("POC_GAP"))
+    if poc is not None and poc > V27_POC_GAP_MAX:
+        return False
+    br = _v27_float_or_none(row.get("MARKET_BREADTH"))
+    if br is not None and br < V27_BREADTH_MIN:
+        return False
+    # [v27.0.1] stale 가격 행 차단 — CARRY legacy 스냅샷은 종가가 며칠 묵어
+    # 실제가와 크게 벌어질 수 있다 (2026-07-13 실측 최대 +199%).
+    fresh_raw = str(row.get("DATA_FRESHNESS_OK", "")).strip().lower()
+    if fresh_raw in ("0", "0.0", "false", "f", "no", "n"):
+        return False
+    # [v29] 알파 바닥 필터 — 검증 통과 모델이 있을 때만 작동.
+    # OOS 실측: 알파 하위 30% 제외 시 픽 평균 +3.51% → +4.20%/건,
+    # 6월 -15% 트레이드 1건 회피. 컬럼 없거나 미검증(0) → 통과.
+    validated_raw = str(row.get("ALPHA_VALIDATED", "")).strip().lower()
+    if validated_raw in ("1", "1.0", "true"):
+        alpha = _v27_float_or_none(row.get("ALPHA_SCORE"))
+        if alpha is not None and alpha < V29_ALPHA_FLOOR:
+            return False
+    return True
+
+
+def _v27_poc_sort_key(row: dict) -> float:
+    """[v27] 후보 정렬용 POC_GAP — 낮을수록 가치영역 근접 (우선).
+
+    실측 (게이트 통과 후보, 2026-02~07):
+      rank_score 내림차순 Top3: 평균 +1.14%/건 · 승률 42%
+      POC_GAP 오름차순 Top3:    평균 +2.17%/건 · 승률 45% (누적 +106%)
+    누락/파싱불가 → 99.0 (후순위, legacy CSV는 전원 99 → rank_score 순 유지).
+    """
+    poc = _v27_float_or_none(row.get("POC_GAP"))
+    return 99.0 if poc is None else poc
+
+
 def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
                     min_rank: float = 40.0) -> list:
     """[v3.7.11] 하루치 recommend rows → Top 1 (🏆 최강 중 rank_score 1위).
 
     백테스트 +11.49% (36일)를 달성한 전략의 핵심 함수.
     pick_top3_codes와 달리 "rank 1위 1종목"만 반환.
+    [v27] POC 확장/시장폭 게이트 추가.
     """
     candidates = []
     for row in day_csv_rows:
         stats = compute_axis_stats(row)
         lbl = elite_label(stats, thresholds)
         if lbl != "🏆 최강":
+            continue
+        if not _v27_entry_gate_ok(row):
             continue
         score = rank_score(stats, lbl)
         if score < min_rank:
@@ -196,6 +254,7 @@ def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "sector": str(row.get("업종", "")),
             "label":  lbl,
             "score":  score,
+            "poc":    _v27_poc_sort_key(row),  # v27
             "entry":  _fnum(row.get("추천매수가", 0)),
             "tp1":    _fnum(row.get("추천매도가1", 0)),
             "tp2":    _fnum(row.get("추천매도가2", 0)),  # v3.8.3
@@ -205,7 +264,8 @@ def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
         })
     if not candidates:
         return []
-    candidates.sort(key=lambda r: -r["score"])
+    # [v27] 가치영역 근접 우선 (POC_GAP 오름차순) → rank_score 보조
+    candidates.sort(key=lambda r: (r["poc"], -r["score"]))
     return [candidates[0]]
 
 
@@ -215,12 +275,15 @@ def pick_top3_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
 
     ✅ 즉시진입은 백테스트 net 기준 -0.22%로 확인되어 제외.
     오직 🏆 최강(+1.28%)만 사용.
+    [v27] POC 확장/시장폭 게이트 추가.
     """
     candidates = []
     for row in day_csv_rows:
         stats = compute_axis_stats(row)
         lbl = elite_label(stats, thresholds)
         if lbl != "🏆 최강":  # v3.7.10: ✅ 즉시진입 배제
+            continue
+        if not _v27_entry_gate_ok(row):
             continue
         score = rank_score(stats, lbl)
         if score < min_rank:
@@ -231,6 +294,7 @@ def pick_top3_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "sector": str(row.get("업종", "")),
             "label":  lbl,
             "score":  score,
+            "poc":    _v27_poc_sort_key(row),  # v27
             "entry":  _fnum(row.get("추천매수가", 0)),
             "tp1":    _fnum(row.get("추천매도가1", 0)),
             "tp2":    _fnum(row.get("추천매도가2", 0)),  # v3.8.3
@@ -238,7 +302,8 @@ def pick_top3_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "stop":   _fnum(row.get("손절가", 0)),
             "close":  _fnum(row.get("종가", 0)),
         })
-    candidates.sort(key=lambda r: -r["score"])
+    # [v27] 가치영역 근접 우선 (POC_GAP 오름차순) → rank_score 보조
+    candidates.sort(key=lambda r: (r["poc"], -r["score"]))
     picked = []
     seen_sectors: set = set()
     for c in candidates:

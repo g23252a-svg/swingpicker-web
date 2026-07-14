@@ -1086,6 +1086,19 @@ def _compute_axis_stats(row) -> dict:
     rr    = _nz(row.get("RR_NOW_TP1", 0))
     # [v3.7.25] 🛡️ 콤보 라벨 판정용 — ROUTE 포함
     route = str(row.get("ROUTE", "") or "")
+    # [v27] POC 확장/시장폭 게이트용 — 누락 시 None (통과)
+    try:
+        poc_gap = float(row.get("POC_GAP"))
+    except (TypeError, ValueError):
+        poc_gap = None
+    try:
+        breadth = float(row.get("MARKET_BREADTH"))
+    except (TypeError, ValueError):
+        breadth = None
+    # [v27.0.1] stale 가격 행 (CARRY legacy 스냅샷 등) — 명시적 False만 차단
+    fresh = str(row.get("DATA_FRESHNESS_OK", "")).strip().lower() not in (
+        "0", "0.0", "false", "f", "no", "n"
+    )
 
     # [v3.7.3] RR이 CSV에 없거나 0이면 종가 기준으로 즉석 재계산
     # (과거 파이프라인에서 ELITE 공식 적용 이전 종목 호환)
@@ -1111,7 +1124,30 @@ def _compute_axis_stats(row) -> dict:
         # [v3.7.25] 🛡️ 콤보 판정용 추가 필드
         "s_raw":     s,         "t_raw":    t,
         "ai_raw":    a,         "route":    route,
+        # [v27] 고확률 진입 게이트용
+        "poc_gap":   poc_gap,   "breadth":  breadth,
+        "fresh":     fresh,     # [v27.0.1] stale 가격 차단용
     }
+
+
+# [v27] 고확률 진입 게이트 — backtest_validation._v27_entry_gate_ok와 동일 기준.
+# 실현 트레이드 157건 (2026-02~07) 검증: POC_GAP ≤20 & 시장폭 ≥35 결합 시
+# 일별 최강 Top3 전략 평균 -2.2%/건·승률 33% → +2.3%/건·승률 50%.
+V27_POC_GAP_MAX = 20.0
+V27_BREADTH_MIN = 35.0
+
+
+def _v27_gate_ok(stats: dict) -> bool:
+    """POC 확장 차단 + 시장폭 하한 + 신선도. 값 누락(None)은 통과 (legacy 호환)."""
+    poc = stats.get("poc_gap")
+    if poc is not None and poc > V27_POC_GAP_MAX:
+        return False
+    br = stats.get("breadth")
+    if br is not None and br < V27_BREADTH_MIN:
+        return False
+    if not stats.get("fresh", True):
+        return False
+    return True
 
 
 def _elite_label(stats: dict) -> tuple:
@@ -1147,6 +1183,31 @@ def _elite_label(stats: dict) -> tuple:
     ai  = stats.get("ai_raw", 0)
     rt  = stats.get("route",  "")
 
+    # [v27] 고확률 진입 게이트 — 콤보/최강/즉시진입 등 매매성 라벨 전부 적용.
+    # 게이트 탈락 시 확장추격 경고 라벨로 강등 (실측: POC>20 승률 12~23%).
+    gate_ok = _v27_gate_ok(stats)
+    would_be_top = (
+        (s >= 90 and t >= 80 and ai >= 60 and rt in ("ATTACK", "ARMED"))
+        or (am >= 70 and bal >= 70 and gap <= 3.0 and rr >= 0.8)
+        or (amn >= 50 and bal >= 70 and gap <= 5.0)
+    )
+    if would_be_top and not gate_ok:
+        poc = stats.get("poc_gap")
+        br = stats.get("breadth")
+        why = []
+        if poc is not None and poc > V27_POC_GAP_MAX:
+            why.append(f"POC 확장 {poc:.0f}% (>20)")
+        if br is not None and br < V27_BREADTH_MIN:
+            why.append(f"시장폭 {br:.0f}% (<35)")
+        if not stats.get("fresh", True):
+            why.append("가격 데이터 stale (재계산 실패 스냅샷)")
+        return (
+            "⚠️ 확장추격",
+            "#EF4444",  # 빨강 (위험 경고)
+            "고점수이나 진입 게이트 탈락 · " + " · ".join(why)
+            + " · 해당 구간 실측 승률 12~23%",
+        )
+
     # ── 🛡️ 콤보 (v3.7.25: 실성능 최고 · 고점수 관찰 종목) ──
     # combo_optimizer.py 그리드 서치 결과 반영
     # 즉석 walk-forward: IS 64% → OOS 92% (오버피팅 아님)
@@ -1157,13 +1218,13 @@ def _elite_label(stats: dict) -> tuple:
             f"실성능 1위 (n=112, EV +25.77%, 승률 83.9%) · S{s:.0f} T{t:.0f} AI{ai:.0f}",
         )
 
-    # ── 🏆 최강 (v3.7.6 기준 · v3.7.25 관찰 모드로 전환) ──
-    # ⚠️ 표본 n=6 · 매매 풀에서 제외 · 관찰용으로만 표시
+    # ── 🏆 최강 (v3.7.6 기준 · v27 고확률 게이트 통과 시) ──
+    # [v27] POC≤20 & 시장폭≥35 게이트 결합 실측: 평균 +2.3%/건 · 승률 50% (n=42)
     if am >= 70 and bal >= 70 and gap <= 3.0 and rr >= 0.8:
         return (
             "🏆 최강",
             "#F59E0B",  # 금색
-            f"👁️ 관찰중 · 매매 제외 · 표본 n=6 (신뢰 LOW) · 통계 축적 대기",
+            f"고확률 게이트 통과 · 실측 승률 50% (n=42, 2026-02~07) · POC/시장폭 검증",
         )
 
     # ── ✅ 내부 즉시진입 라벨 (화면 표시는 관찰 후보 — 공식 신규매수 아님) ──
@@ -1221,6 +1282,7 @@ def _rank_score(stats: dict, label: str = "") -> float:
     elif label == "✅ 즉시진입": label_mult = 1.30
     elif label == "🏆 최강":     label_mult = 0.50  # 관찰 모드 (이전 1.00)
     elif label == "⚠️ 추격":     label_mult = 0.70
+    elif label == "⚠️ 확장추격": label_mult = 0.30  # [v27] 실측 승률 12~23% — 최하위
     else:                         label_mult = 0.50
 
     return base * rr_mult * label_mult
