@@ -3447,16 +3447,12 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
         # [v3.9.4] 상세 검증 정보를 ui.expansion으로 감싸 회원 기본 뷰에서 접기
         # 회원은 위 요약만 봐도 충분. 펼치면 신호/실집행/WF/Rolling 등 전체 확인.
         # [v3.9.5] 관리자는 기본 펼침 (디버그/운영 편의)
-        _is_admin = (auth == "admin")
-        _expansion_title = (
-            "🔬 상세 검증 정보 (관리자 — 기본 펼침)"
-            if _is_admin
-            else "🔬 상세 검증 정보 보기 (관리자/고급 사용자용)"
-        )
+        # [v31] 상세 검증은 관리자 포함 전원 기본 접힘 — 화면 밀도 개선
+        _expansion_title = "🔬 상세 검증 정보 (펼쳐 보기)"
         with ui.expansion(
             _expansion_title,
             icon="biotech",
-            value=_is_admin,  # 관리자만 기본 열림
+            value=False,
         ).classes(
             "w-full mt-2 bg-[rgba(139,92,246,0.05)] "
             "border border-[rgba(139,92,246,0.2)] rounded"
@@ -4010,6 +4006,101 @@ def _table_score_display(row: pd.Series):
     return _nb_score_cell(row)
 
 
+def _render_hero_strip(df: pd.DataFrame, official_decision: dict | None) -> None:
+    """[v31] 히어로 스트립 — '오늘 뭘 해야 하는가'를 카드 하나로.
+
+    기존 판정카드+행동요약+레인 3종이 각각 '오늘 0개'를 반복 설명하던 것을
+    단일 스트립으로 압축. 나머지는 접힌 서랍으로 이동.
+    """
+    d = official_decision or {}
+    status = str(d.get("status", ""))
+    n_official = int(d.get("official_count", 0) or 0)
+
+    def _first(col, default=""):
+        try:
+            if col in df.columns and len(df):
+                v = df[col].iloc[0]
+                return default if pd.isna(v) else v
+        except Exception:
+            return default
+        return default
+
+    regime = str(_first("MARKET_REGIME", "")).upper()
+    regime_reason = str(_first("REGIME_REASON", ""))
+    try:
+        breadth = float(_first("MARKET_BREADTH", float("nan")))
+    except (TypeError, ValueError):
+        breadth = float("nan")
+    alpha_on = False
+    try:
+        if "ALPHA_VALIDATED" in df.columns and len(df):
+            alpha_on = bool(int(pd.to_numeric(df["ALPHA_VALIDATED"], errors="coerce").fillna(0).iloc[0]))
+    except Exception:
+        alpha_on = False
+
+    if n_official > 0:
+        action_txt, action_sub = f"매수 후보 {n_official}종목", "품질게이트 통과 — 아래 실전 후보 확인"
+        accent, icon = "#10B981", "🟢"
+    else:
+        action_txt, action_sub = "현금 유지", "품질게이트 통과 종목 없음 — 관찰만"
+        accent, icon = "#94A3B8", "⚪"
+
+    regime_map = {
+        "UP": ("상승 레짐", "#10B981"),
+        "NEUTRAL": ("중립 레짐", "#F59E0B"),
+        "DOWN": ("하락 레짐", "#EF4444"),
+    }
+    regime_txt, regime_clr = regime_map.get(regime, ("레짐 미산출", "#64748B"))
+
+    breadth_html = ""
+    if breadth == breadth:  # not NaN
+        pct = max(0.0, min(100.0, breadth))
+        bar_clr = "#10B981" if pct >= 50 else ("#F59E0B" if pct >= 35 else "#EF4444")
+        breadth_html = f'''
+          <div style="min-width:170px;">
+            <div style="font-size:10px; color:#94A3B8; margin-bottom:3px;">
+              시장폭 (상승 종목 비율) · 진입 하한 35%</div>
+            <div style="position:relative; height:10px; border-radius:5px; background:rgba(148,163,184,0.15);">
+              <div style="position:absolute; left:0; top:0; bottom:0; width:{pct:.0f}%;
+                          border-radius:5px; background:{bar_clr};"></div>
+              <div style="position:absolute; left:35%; top:-2px; bottom:-2px; width:2px;
+                          background:rgba(255,255,255,0.5);"></div>
+            </div>
+            <div style="font-size:11px; font-weight:800; color:{bar_clr}; margin-top:3px;">{pct:.0f}%</div>
+          </div>'''
+
+    alpha_chip = (
+        '<span style="font-size:10px; padding:2px 8px; border-radius:10px;'
+        ' background:rgba(16,185,129,0.15); color:#34D399; font-weight:700;">🧠 알파모델 검증통과</span>'
+        if alpha_on else
+        '<span style="font-size:10px; padding:2px 8px; border-radius:10px;'
+        ' background:rgba(148,163,184,0.12); color:#94A3B8; font-weight:700;">🧠 알파모델 미적용 (규칙 기반)</span>'
+    )
+
+    ui.html(f'''
+    <div style="width:100%; margin-bottom:14px; padding:16px 18px; border-radius:14px;
+                background: linear-gradient(135deg, rgba(30,41,59,0.9), rgba(15,23,42,0.95));
+                border: 1px solid {accent}44; box-shadow: 0 4px 24px rgba(0,0,0,0.25);">
+      <div style="display:flex; align-items:center; gap:22px; flex-wrap:wrap;">
+        <div style="flex:0 0 auto;">
+          <div style="font-size:11px; color:#94A3B8; font-weight:700; letter-spacing:0.5px;">오늘의 판단</div>
+          <div style="font-size:24px; font-weight:900; color:{accent}; line-height:1.2;">{icon} {action_txt}</div>
+          <div style="font-size:11px; color:#CBD5E1; margin-top:2px;">{action_sub}</div>
+        </div>
+        <div style="flex:0 0 auto; padding:6px 14px; border-radius:10px;
+                    background:{regime_clr}18; border:1px solid {regime_clr}55;"
+             title="{regime_reason}">
+          <div style="font-size:10px; color:#94A3B8;">시장 레짐</div>
+          <div style="font-size:15px; font-weight:900; color:{regime_clr};">{regime_txt}</div>
+        </div>
+        {breadth_html}
+        <div style="flex:1 1 auto; display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap;">
+          {alpha_chip}
+        </div>
+      </div>
+    </div>''')
+
+
 def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     """Tab 2: AI & Quant 추천 종목
 
@@ -4033,29 +4124,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     top3_codes = top1_codes if top1_codes else top3_fallback
 
     ui.label("🎯 AI & Quant 추천 종목").classes(
-        "text-xl font-bold text-white mb-4"
+        "text-xl font-bold text-white mb-2"
     )
 
-    # [v22.3.13] 오늘 공식 신규진입 판정 — 매수/보류 이유를 Top Pick 카드보다 먼저 표시
-    official_decision = _render_daily_official_decision_card(df)
-
-    # [v22.3.31] 최종 행동 요약 — 사용자가 "그래서 오늘 뭘 해야 하는지" 먼저 확인
-    _render_today_action_summary_card(df, official_decision=official_decision)
-
-    # [v22.3.27] 검증승률 기반 추천 후보 — 공식 0개인 날에도 승률 좋은 지표 후보를 상단 표시
-    _render_winrate_action_lane(df, official_decision=official_decision)
-
-    # [v22.3.18] 공식/진입위치/고점수/보유관리 후보 유형 분리
-    _render_candidate_triage_card(df, official_decision=official_decision)
-
-    # [v22.3.22] RR 알파 후보 — 공식과 별도인 OOS 검증형 실전 후보 레인
-    _render_historical_alpha_pick_card(df)
-
-    # [v23.1] ⚡ 모멘텀 후보 — ROUTE=OVERHEAT & GUARD 통과 종목 (공식과 별도 레인)
-    _render_momentum_lane_card(df)
-
-    # [v22.3.24] 백데이터 기반 스윙 알파 후보 — 공식 산식과 별도인 보조 레인
-    _render_swing_alpha_oos_card(df)
+    # ── [v31] 히어로 스트립 — 오늘의 판단 한 장 ──
+    # 판정 계산은 유지하되(다른 카드들이 사용), 시각 표시는 스트립 하나로 압축.
+    official_decision = _build_daily_official_decision(df)
+    _render_hero_strip(df, official_decision)
 
     # [Step AC P0-4] Top Pick 카드 클릭 → 상세 패널 렌더 (closure: detail_area는 아래에서 정의됨)
     def _on_top_pick_click(code: str):
@@ -4066,25 +4141,35 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         detail_area.clear()
         _render_stock_detail(code, match.iloc[0], df)
 
-    # ── [v3.7] Top 3 헤더 카드 (백테스트 검증 기반) ──
-    # [v3.9.5] auth 전달 — 관리자는 상세 검증 expansion 기본 열림
+    # ── [v3.7] Top 3 헤더 카드 (백테스트 검증 기반) — 실전 후보는 항상 노출 ──
     _render_top3_card(
         df, top3_codes, on_card_click=_on_top_pick_click, auth=auth,
         official_decision=official_decision,
     )
 
-    # ── [v24.6] 액션 카드 레인 — 모바일 우선 (판단먼저 + 가격사다리 + PMS레인) ──
-    # 🏆 실전 후보 직후. 공식 산식 불변, 표시 전용. PMS 컬럼 있으면 PMS 레인도 분리 표시.
-    try:
-        from components.action_cards import render_action_cards_nicegui
-        render_action_cards_nicegui(df, max_cards=8)
-    except Exception as _ac_e:
-        _logger.warning(f"액션 카드 레인 렌더 실패 (기존 화면 유지): {_ac_e}")
-
-    # ── [v3.9.4] 종목 리스트 직전 — Top Pick 컨텍스트 안내 ──
-    # "신규 매수 주의" 상태일 때 바로 아래에 종목 카드가 "🟣 핵심 관찰"로 떠서
-    # "방금은 주의라며 왜 핵심 관찰?" 충돌이 생김. 명확한 안내로 해소.
-    _render_candidate_context_notice(official_decision=official_decision)
+    # ── [v31] 판정 근거·보조 레인 서랍 — 기본 접힘 ──
+    # 기존에 세로로 쌓이던 7개 카드(판정·행동요약·승률레인·유형분리·
+    # RR알파·모멘텀·스윙알파·액션카드)를 전부 이 안으로 이동.
+    with ui.expansion(
+        "📂 판정 근거 · 보조 후보 레인 (펼쳐 보기)",
+        icon="folder_open",
+    ).classes(
+        "w-full mb-3 bg-[rgba(148,163,184,0.04)] "
+        "border border-[rgba(148,163,184,0.15)] rounded"
+    ).props("dense"):
+        _render_daily_official_decision_card(df)
+        _render_today_action_summary_card(df, official_decision=official_decision)
+        _render_winrate_action_lane(df, official_decision=official_decision)
+        _render_candidate_triage_card(df, official_decision=official_decision)
+        _render_historical_alpha_pick_card(df)
+        _render_momentum_lane_card(df)
+        _render_swing_alpha_oos_card(df)
+        try:
+            from components.action_cards import render_action_cards_nicegui
+            render_action_cards_nicegui(df, max_cards=8)
+        except Exception as _ac_e:
+            _logger.warning(f"액션 카드 레인 렌더 실패 (기존 화면 유지): {_ac_e}")
+        _render_candidate_context_notice(official_decision=official_decision)
 
     # ── 뷰모드 + 필터 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-2"):
@@ -4158,192 +4243,202 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             value="🎯 기본",
         )
 
-    # [v3.7.18] 라벨 기준 투명 공개 (사용자 혼란 방지)
-    # 라벨별 종목 수도 함께 표시
-    # [v3.7.25] 🛡️ 콤보 카운트 추가
-    if "ELITE_LABEL" in df.columns:
-        n_combo = int((df["ELITE_LABEL"] == "🛡️ 콤보").sum())
-        n_strong = int((df["ELITE_LABEL"] == "🏆 최강").sum())
-        n_instant = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
-        n_chase = int((df["ELITE_LABEL"] == "⚠️ 추격").sum())
-        n_none = int(df["ELITE_LABEL"].fillna("").eq("").sum())
-    else:
-        n_combo = n_strong = n_instant = n_chase = n_none = 0
-
-    with ui.card().classes(
-        "w-full p-2 mb-3 bg-[rgba(255,255,255,0.02)] "
-        "border border-[rgba(255,255,255,0.05)] rounded"
-    ):
-        with ui.row().classes("w-full gap-6 items-center flex-wrap"):
-            ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
-            # [Step AE] 라벨명을 외부 리뷰안 한글로 표시 (내부값은 그대로 유지)
-            # [v3.7.25] 핵심 관찰 최우선 표시 (고점수 관찰 · 실성능 1위)
-            ui.label(
-                f"🟣 핵심 관찰 ({n_combo}): S≥90 · T≥80 · AI≥60 · 고점수 관찰 "
-                f"[n=112 EV +25.77% 승률 83.9%]"
-            ).classes("text-xs text-purple-400 font-bold")
-            ui.label(
-                f"🔵 관심관찰 ({n_strong}): 평균≥70 · 균형≥70 · 갭≤3% · 손익비≥0.8 "
-                f"[n=6 · 👁️ 관찰중 · 매매 제외]"
-            ).classes("text-xs text-gray-500 line-through opacity-60")
-            ui.label(
-                f"🟡 관찰 후보 ({n_instant}): 최소≥50 · 균형≥70 · 갭≤5% · 공식 신규매수 아님"
-            ).classes("text-xs text-green-400")
-            ui.label(
-                f"🟠 추격주의 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
-            ).classes("text-xs text-orange-400")
-            if n_none > 0:
-                ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
-            ui.label(
-                "※ 점수 '검증제외' 표시는 DISPLAY_SCORE 0/음수 또는 legacy/stale 표시 후보입니다."
-            ).classes("text-[10px] text-gray-600")
-
-    # [v3.9.8] 진입 위험 표시 기준 (ENTRY_RISK 범례)
-    # 회원이 종목 카드/테이블의 🔴/🟠 뱃지를 보고 "이게 뭐지?" 못 알게 만들기 위한 범례
-    if "ENTRY_RISK_LEVEL" in df.columns:
-        # [v3.9.11 hotfix] strip().upper() — silent miss 방지
-        _lvl_norm = df["ENTRY_RISK_LEVEL"].astype(str).str.strip().str.upper()
-        n_red = int((_lvl_norm == "RED").sum())
-        n_orange = int((_lvl_norm == "ORANGE").sum())
-        n_green = int((_lvl_norm == "GREEN").sum())
-        with ui.card().classes(
-            "w-full p-2 mb-3 bg-[rgba(255,80,80,0.04)] "
-            "border border-[rgba(239,68,68,0.2)] rounded"
-        ):
-            with ui.row().classes("w-full items-start gap-2 mb-1"):
-                ui.label("🚨").classes("text-sm")
-                ui.label("진입 위험 표시 기준").classes(
-                    "text-xs text-rose-300 font-bold"
-                )
-            with ui.column().classes("gap-0.5 pl-5"):
-                ui.label(
-                    f"🔴 진입 위험 ({n_red}): STRUCT 70~85 구간 + VWAP 8% 이상 떠 있음 "
-                    f"— 최근 검증에서 손실 위험 높게 나타난 조합"
-                ).classes("text-[11px] text-red-300")
-                ui.label(
-                    f"🟠 과열 주의 ({n_orange}): STRUCT 최상급 아닌데 VWAP 15% 이상 — "
-                    f"강한 모멘텀일 수 있으나 추격 진입 주의"
-                ).classes("text-[11px] text-orange-300")
-                ui.label(
-                    f"— 특이 위험 없음 ({n_green}): 현재 기준 별도 진입 위험 신호 없음"
-                ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "※ 위험 표시는 자동 제외가 아니라 진입 전 확인 신호입니다."
-            ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
-
-    # [v22.3.10] ENTRY_EDGE shadow 표시 기준 — 공식 매수식 변경 없음
-    if "ENTRY_EDGE_LEVEL" in df.columns:
-        _edge_norm = df["ENTRY_EDGE_LEVEL"].astype(str).str.strip().str.upper()
-        n_edge_caution = int((_edge_norm == "CAUTION").sum())
-        n_edge_green = int((_edge_norm == "GREEN").sum())
-        with ui.card().classes(
-            "w-full p-2 mb-3 bg-[rgba(245,158,11,0.04)] "
-            "border border-[rgba(245,158,11,0.2)] rounded"
-        ):
-            with ui.row().classes("w-full items-start gap-2 mb-1"):
-                ui.label("🧪").classes("text-sm")
-                ui.label("ENTRY_EDGE shadow 표시").classes(
-                    "text-xs text-amber-300 font-bold"
-                )
-            with ui.column().classes("gap-0.5 pl-5"):
-                ui.label(
-                    f"🟠 감점 관찰 ({n_edge_caution}): B_red shadow — "
-                    "STRUCT 70~85 + VWAP_GAP>8 조합에 ENTRY_EDGE_SCORE -15"
-                ).classes("text-[11px] text-amber-300")
-                ui.label(
-                    f"🟢 정상 ({n_edge_green}): 현재 ENTRY_EDGE 감점 없음"
-                ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "※ ENTRY_EDGE는 표시/감점 전용 shadow 컬럼입니다. "
-                "BUY_NOW_ELIGIBLE 공식 신규매수 기준은 변경하지 않습니다."
-            ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
-
-    # [v3.7.26] 스코어 용어집 (접이식) — 사용자 지적: "스코어 너무 많음" 해결
-    # 기본 닫힘 · 펼치면 각 스코어의 정체 + 공식을 한눈에
+    # ── [v31] 기준·범례·용어집 서랍 — 기본 접힘 ──
+    # 라벨 기준 / 진입 위험 범례 / ENTRY_EDGE shadow / 스코어 용어집을 하나로.
     with ui.expansion(
-        "📖 스코어 용어집 — 각 스코어가 뭘 의미하는지 (클릭하면 펼침)",
-        icon="help_outline",
+        "📖 기준 · 범례 · 용어집 (펼쳐 보기)",
+        icon="menu_book",
     ).classes(
-        "w-full mb-3 bg-[rgba(139,92,246,0.05)] "
-        "border border-[rgba(139,92,246,0.2)] rounded"
+        "w-full mb-3 bg-[rgba(139,92,246,0.04)] "
+        "border border-[rgba(139,92,246,0.15)] rounded"
     ).props("dense"):
-        with ui.column().classes("w-full gap-1 p-2"):
-            # ── 핵심 스코어 3축 ──
-            ui.label("🧱 핵심 3축 (실전 매매 기본)").classes(
-                "text-xs text-purple-300 font-bold mt-1"
-            )
-            # [Step AF-4] 회원 친화 별명 연결 (테이블 헤더는 짧게 유지)
-            ui.label(
-                "  · S (= 기초체력): 추세·정배열·VWAP 위치 등 기본기 — 0~100"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "  · T (= 진입타이밍): RSI·MACD·거래량·TRIGGER 등 진입 시점 — 0~100"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "  · AI (= AI상승확률, =ML): 머신러닝 예측값 — 약 7~91 범위"
-            ).classes("text-[11px] text-gray-400")
+        # [v3.7.18] 라벨 기준 투명 공개 (사용자 혼란 방지)
+        # 라벨별 종목 수도 함께 표시
+        # [v3.7.25] 🛡️ 콤보 카운트 추가
+        if "ELITE_LABEL" in df.columns:
+            n_combo = int((df["ELITE_LABEL"] == "🛡️ 콤보").sum())
+            n_strong = int((df["ELITE_LABEL"] == "🏆 최강").sum())
+            n_instant = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
+            n_chase = int((df["ELITE_LABEL"] == "⚠️ 추격").sum())
+            n_none = int(df["ELITE_LABEL"].fillna("").eq("").sum())
+        else:
+            n_combo = n_strong = n_instant = n_chase = n_none = 0
 
-            # ── 파생 통계 ──
-            ui.label("🔢 파생 통계 (3축에서 계산)").classes(
-                "text-xs text-purple-300 font-bold mt-2"
-            )
-            ui.label(
-                "  · 평균: (S + T + AI) / 3"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "  · 균형: 100 - (MAX - MIN) × 1.25  "
-                "(3축 편차 적을수록 높음)"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "  · 진입갭%: (현재가 - 추천매수가) / 추천매수가 × 100"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "    +면 추격 위험 · -면 할인/대기 구간 (Step AD: signed)"
-            ).classes("text-[10px] text-gray-500 ml-2")
-            ui.label(
-                "  · RR (= 손익비): (T1 - 현재가) / (현재가 - 손절가)"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "    지금 진입 시 손익비 (현재가 기준 · 테이블/상세 일치)"
-            ).classes("text-[10px] text-gray-500 ml-2")
+        with ui.card().classes(
+            "w-full p-2 mb-3 bg-[rgba(255,255,255,0.02)] "
+            "border border-[rgba(255,255,255,0.05)] rounded"
+        ):
+            with ui.row().classes("w-full gap-6 items-center flex-wrap"):
+                ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
+                # [Step AE] 라벨명을 외부 리뷰안 한글로 표시 (내부값은 그대로 유지)
+                # [v3.7.25] 핵심 관찰 최우선 표시 (고점수 관찰 · 실성능 1위)
+                ui.label(
+                    f"🟣 핵심 관찰 ({n_combo}): S≥90 · T≥80 · AI≥60 · 고점수 관찰 "
+                    f"[n=112 EV +25.77% 승률 83.9%]"
+                ).classes("text-xs text-purple-400 font-bold")
+                ui.label(
+                    f"🔵 관심관찰 ({n_strong}): 평균≥70 · 균형≥70 · 갭≤3% · 손익비≥0.8 "
+                    f"[n=6 · 👁️ 관찰중 · 매매 제외]"
+                ).classes("text-xs text-gray-500 line-through opacity-60")
+                ui.label(
+                    f"🟡 관찰 후보 ({n_instant}): 최소≥50 · 균형≥70 · 갭≤5% · 공식 신규매수 아님"
+                ).classes("text-xs text-green-400")
+                ui.label(
+                    f"🟠 추격주의 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
+                ).classes("text-xs text-orange-400")
+                if n_none > 0:
+                    ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
+                ui.label(
+                    "※ 점수 '검증제외' 표시는 DISPLAY_SCORE 0/음수 또는 legacy/stale 표시 후보입니다."
+                ).classes("text-[10px] text-gray-600")
 
-            # ── 종합 점수 ──
-            ui.label("🏭 종합 점수 (파이프라인 산출)").classes(
-                "text-xs text-purple-300 font-bold mt-2"
-            )
-            ui.label(
-                "  · 점수 (DISPLAY): S×40% + T×40% + AI×20% + 보너스 − 페널티"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "  · 종합 (ELITE): 안정 진입 품질 등급 (갭 작을수록 높음)"
-            ).classes("text-[11px] text-gray-400")
-            ui.label(
-                "  · 랭크 (ELITE_RANK): 평균×(균형/100)×RR보정×라벨보정 "
-                "(Top 선별용 내부 점수)"
-            ).classes("text-[11px] text-gray-400")
+        # [v3.9.8] 진입 위험 표시 기준 (ENTRY_RISK 범례)
+        # 회원이 종목 카드/테이블의 🔴/🟠 뱃지를 보고 "이게 뭐지?" 못 알게 만들기 위한 범례
+        if "ENTRY_RISK_LEVEL" in df.columns:
+            # [v3.9.11 hotfix] strip().upper() — silent miss 방지
+            _lvl_norm = df["ENTRY_RISK_LEVEL"].astype(str).str.strip().str.upper()
+            n_red = int((_lvl_norm == "RED").sum())
+            n_orange = int((_lvl_norm == "ORANGE").sum())
+            n_green = int((_lvl_norm == "GREEN").sum())
+            with ui.card().classes(
+                "w-full p-2 mb-3 bg-[rgba(255,80,80,0.04)] "
+                "border border-[rgba(239,68,68,0.2)] rounded"
+            ):
+                with ui.row().classes("w-full items-start gap-2 mb-1"):
+                    ui.label("🚨").classes("text-sm")
+                    ui.label("진입 위험 표시 기준").classes(
+                        "text-xs text-rose-300 font-bold"
+                    )
+                with ui.column().classes("gap-0.5 pl-5"):
+                    ui.label(
+                        f"🔴 진입 위험 ({n_red}): STRUCT 70~85 구간 + VWAP 8% 이상 떠 있음 "
+                        f"— 최근 검증에서 손실 위험 높게 나타난 조합"
+                    ).classes("text-[11px] text-red-300")
+                    ui.label(
+                        f"🟠 과열 주의 ({n_orange}): STRUCT 최상급 아닌데 VWAP 15% 이상 — "
+                        f"강한 모멘텀일 수 있으나 추격 진입 주의"
+                    ).classes("text-[11px] text-orange-300")
+                    ui.label(
+                        f"— 특이 위험 없음 ({n_green}): 현재 기준 별도 진입 위험 신호 없음"
+                    ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "※ 위험 표시는 자동 제외가 아니라 진입 전 확인 신호입니다."
+                ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
 
-            # ── 라벨 가중치 ──
-            ui.label("🏷️ 라벨 가중치 (랭크 계산에 곱해지는 배수)").classes(
-                "text-xs text-purple-300 font-bold mt-2"
-            )
-            ui.label(
-                # [Step AE] 라벨 가중치 설명 한글화
-                "  · 🟣 핵심 관찰 ×1.50 (고점수 관찰)  "
-                "· 🟡 관찰 후보 ×1.30 (공식 신규매수 아님)  "
-                "· 🔵 관심관찰 ×0.50 (관찰 모드)  "
-                "· 🟠 추격주의 ×0.70"
-            ).classes("text-[11px] text-gray-400")
+        # [v22.3.10] ENTRY_EDGE shadow 표시 기준 — 공식 매수식 변경 없음
+        if "ENTRY_EDGE_LEVEL" in df.columns:
+            _edge_norm = df["ENTRY_EDGE_LEVEL"].astype(str).str.strip().str.upper()
+            n_edge_caution = int((_edge_norm == "CAUTION").sum())
+            n_edge_green = int((_edge_norm == "GREEN").sum())
+            with ui.card().classes(
+                "w-full p-2 mb-3 bg-[rgba(245,158,11,0.04)] "
+                "border border-[rgba(245,158,11,0.2)] rounded"
+            ):
+                with ui.row().classes("w-full items-start gap-2 mb-1"):
+                    ui.label("🧪").classes("text-sm")
+                    ui.label("ENTRY_EDGE shadow 표시").classes(
+                        "text-xs text-amber-300 font-bold"
+                    )
+                with ui.column().classes("gap-0.5 pl-5"):
+                    ui.label(
+                        f"🟠 감점 관찰 ({n_edge_caution}): B_red shadow — "
+                        "STRUCT 70~85 + VWAP_GAP>8 조합에 ENTRY_EDGE_SCORE -15"
+                    ).classes("text-[11px] text-amber-300")
+                    ui.label(
+                        f"🟢 정상 ({n_edge_green}): 현재 ENTRY_EDGE 감점 없음"
+                    ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "※ ENTRY_EDGE는 표시/감점 전용 shadow 컬럼입니다. "
+                    "BUY_NOW_ELIGIBLE 공식 신규매수 기준은 변경하지 않습니다."
+                ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
 
-            # ── 실전 팁 ──
-            ui.label("💡 실전 매매 시 우선 확인 순서").classes(
-                "text-xs text-yellow-400 font-bold mt-2"
-            )
-            # [Step AF-2] 실전 팁 — 한글 라벨 + 친절한 표현
-            ui.label(
-                "  ① 공식 신규매수 기준(TOP_PICK+BUY_NOW_ELIGIBLE) 우선 확인  "
-                "→ ② 관찰 후보는 매매 제외  →  ③ 종합점수 70+  →  ④ 손익비(RR) 1.0+  "
-                "→ ⑤ 진입갭 ±5% 이내  →  ⑥ S/T/AI 세부 확인"
-            ).classes("text-[11px] text-gray-300")
+        # [v3.7.26] 스코어 용어집 (접이식) — 사용자 지적: "스코어 너무 많음" 해결
+        # 기본 닫힘 · 펼치면 각 스코어의 정체 + 공식을 한눈에
+        with ui.expansion(
+            "📖 스코어 용어집 — 각 스코어가 뭘 의미하는지 (클릭하면 펼침)",
+            icon="help_outline",
+        ).classes(
+            "w-full mb-3 bg-[rgba(139,92,246,0.05)] "
+            "border border-[rgba(139,92,246,0.2)] rounded"
+        ).props("dense"):
+            with ui.column().classes("w-full gap-1 p-2"):
+                # ── 핵심 스코어 3축 ──
+                ui.label("🧱 핵심 3축 (실전 매매 기본)").classes(
+                    "text-xs text-purple-300 font-bold mt-1"
+                )
+                # [Step AF-4] 회원 친화 별명 연결 (테이블 헤더는 짧게 유지)
+                ui.label(
+                    "  · S (= 기초체력): 추세·정배열·VWAP 위치 등 기본기 — 0~100"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "  · T (= 진입타이밍): RSI·MACD·거래량·TRIGGER 등 진입 시점 — 0~100"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "  · AI (= AI상승확률, =ML): 머신러닝 예측값 — 약 7~91 범위"
+                ).classes("text-[11px] text-gray-400")
+
+                # ── 파생 통계 ──
+                ui.label("🔢 파생 통계 (3축에서 계산)").classes(
+                    "text-xs text-purple-300 font-bold mt-2"
+                )
+                ui.label(
+                    "  · 평균: (S + T + AI) / 3"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "  · 균형: 100 - (MAX - MIN) × 1.25  "
+                    "(3축 편차 적을수록 높음)"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "  · 진입갭%: (현재가 - 추천매수가) / 추천매수가 × 100"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "    +면 추격 위험 · -면 할인/대기 구간 (Step AD: signed)"
+                ).classes("text-[10px] text-gray-500 ml-2")
+                ui.label(
+                    "  · RR (= 손익비): (T1 - 현재가) / (현재가 - 손절가)"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "    지금 진입 시 손익비 (현재가 기준 · 테이블/상세 일치)"
+                ).classes("text-[10px] text-gray-500 ml-2")
+
+                # ── 종합 점수 ──
+                ui.label("🏭 종합 점수 (파이프라인 산출)").classes(
+                    "text-xs text-purple-300 font-bold mt-2"
+                )
+                ui.label(
+                    "  · 점수 (DISPLAY): S×40% + T×40% + AI×20% + 보너스 − 페널티"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "  · 종합 (ELITE): 안정 진입 품질 등급 (갭 작을수록 높음)"
+                ).classes("text-[11px] text-gray-400")
+                ui.label(
+                    "  · 랭크 (ELITE_RANK): 평균×(균형/100)×RR보정×라벨보정 "
+                    "(Top 선별용 내부 점수)"
+                ).classes("text-[11px] text-gray-400")
+
+                # ── 라벨 가중치 ──
+                ui.label("🏷️ 라벨 가중치 (랭크 계산에 곱해지는 배수)").classes(
+                    "text-xs text-purple-300 font-bold mt-2"
+                )
+                ui.label(
+                    # [Step AE] 라벨 가중치 설명 한글화
+                    "  · 🟣 핵심 관찰 ×1.50 (고점수 관찰)  "
+                    "· 🟡 관찰 후보 ×1.30 (공식 신규매수 아님)  "
+                    "· 🔵 관심관찰 ×0.50 (관찰 모드)  "
+                    "· 🟠 추격주의 ×0.70"
+                ).classes("text-[11px] text-gray-400")
+
+                # ── 실전 팁 ──
+                ui.label("💡 실전 매매 시 우선 확인 순서").classes(
+                    "text-xs text-yellow-400 font-bold mt-2"
+                )
+                # [Step AF-2] 실전 팁 — 한글 라벨 + 친절한 표현
+                ui.label(
+                    "  ① 공식 신규매수 기준(TOP_PICK+BUY_NOW_ELIGIBLE) 우선 확인  "
+                    "→ ② 관찰 후보는 매매 제외  →  ③ 종합점수 70+  →  ④ 손익비(RR) 1.0+  "
+                    "→ ⑤ 진입갭 ±5% 이내  →  ⑥ S/T/AI 세부 확인"
+                ).classes("text-[11px] text-gray-300")
+
 
     # [v3.7.22] CSV 다운로드 권한 제어 — prime/admin만 허용
     # - guest/free: 다운로드 버튼 비활성 (잠금 상태 + Prime 안내)
