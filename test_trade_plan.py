@@ -296,8 +296,21 @@ class TestSpecialCases:
                                 mcap=50000, exec_rule=rule_v2)
         assert plan.exec_rule_id == "v2_tp_first"
 
-    def test_rr_ssot(self):
+    def test_tp_is_atr_based_v30(self):
+        # [v30] TP1 = entry + 3.5×ATR — 목표가는 손절폭이 아니라 변동폭에 비례.
+        # (구계약 TP=risk×rr_mult는 손절이 넓을수록 목표가 같이 멀어져
+        #  TP1 도달률 23%에 그침 — 청산 그리드 검증으로 교체)
         plan = build_trade_plan(buy=10000, atr_val=300, last_c=10000, mcap=50000)
+        expected_tp1 = plan.entry + 3.5 * 300
+        assert abs(plan.tp1 - expected_tp1) <= plan.entry * 0.01  # tick 라운딩 허용
+        # RR은 여전히 1 이상이어야 함 (게이트 계약)
+        risk = plan.entry - plan.stop
+        if risk > 0:
+            assert (plan.tp1 - plan.entry) / risk >= 1.0
+
+    def test_rr_fallback_when_atr_invalid_v30(self):
+        # ATR 무효 → 기존 risk×rr_mult 폴백 유지
+        plan = build_trade_plan(buy=10000, atr_val=0, last_c=10000, mcap=50000)
         risk = plan.entry - plan.stop
         if risk > 0:
             implied_rr = (plan.tp1 - plan.entry) / risk

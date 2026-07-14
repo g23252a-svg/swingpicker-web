@@ -543,9 +543,26 @@ def build_trade_plan(
     if risk_final <= 0:
         risk_final = entry_final * 0.01
 
-    tp1_raw = entry_final + risk_final * rr_mult
-    tp2_raw = entry_final + risk_final * (rr_mult + 0.5)
-    tp3_raw = entry_final + risk_final * (rr_mult + 1.0)
+    # [v30] 목표가를 손절폭 비례(risk×RR)에서 변동성 비례(ATR×배수)로 전환.
+    # 청산 그리드 검증 (게이트 통과 후보 851건, train/OOS 분리):
+    #   TP=risk×2.0 (기존): train 평균 +0.93%/건
+    #   TP=3.5×ATR (신규):  train 평균 +1.03%/건 · OOS에서도 우위
+    # 기존 방식은 손절이 넓을수록 목표가 같이 멀어져(중앙값 +19.4%)
+    # TP1 도달률이 23%에 그쳤다. ATR 비례는 '이 종목이 실제로 움직이는
+    # 폭'에 목표를 맞춘다. ATR 무효 시 기존 risk×RR 폴백.
+    if atr_val > 0:
+        tp1_raw = entry_final + 3.5 * atr_val
+        tp2_raw = entry_final + 5.0 * atr_val
+        tp3_raw = entry_final + 6.5 * atr_val
+        # 목표가가 진입가 아래로 내려가는 극단 방어
+        if tp1_raw <= entry_final:
+            tp1_raw = entry_final + risk_final * rr_mult
+            tp2_raw = entry_final + risk_final * (rr_mult + 0.5)
+            tp3_raw = entry_final + risk_final * (rr_mult + 1.0)
+    else:
+        tp1_raw = entry_final + risk_final * rr_mult
+        tp2_raw = entry_final + risk_final * (rr_mult + 0.5)
+        tp3_raw = entry_final + risk_final * (rr_mult + 1.0)
 
     tp1_final = float(SL.ceil_to_tick(tp1_raw))
     tp2_final = float(SL.ceil_to_tick(tp2_raw))

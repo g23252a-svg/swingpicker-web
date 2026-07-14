@@ -45,7 +45,13 @@ import pandas as pd
 
 logger = logging.getLogger("exit_plan")
 
-EXIT_OUTPUT_COLS = ["EXIT_ROUTE_RISK", "EXIT_STOP_TIGHT", "EXIT_TP_QUICK", "EXIT_PLAN_NOTE"]
+EXIT_OUTPUT_COLS = ["EXIT_ROUTE_RISK", "EXIT_STOP_TIGHT", "EXIT_TP_QUICK",
+                    "BE_TRIGGER_PRICE", "EXIT_PLAN_NOTE"]
+
+# [v30] 본전스탑 전환 트리거 (+5%) — 청산 그리드 검증 상위 8개 조합 전부에
+# BE+5%가 포함됨 (표본 851건). +5% 도달 시 손절선을 진입가로 올려
+# '이겼다가 -12%로 마감'(손절 트레이드의 51%가 +5% 선터치)을 차단한다.
+BE_TRIGGER_PCT = 5.0
 
 _HIGH_AVOID_ROUTES = {"CARRY", "NEUTRAL"}
 _CAUTION_ROUTES = {"ATTACK", "OVERHEAT"}
@@ -102,6 +108,8 @@ def add_exit_plan_columns(df: pd.DataFrame, config=None) -> pd.DataFrame:
     valid = entry.notna() & (entry >= min_entry)
     out["EXIT_STOP_TIGHT"] = (entry * (1.0 + stop_pct / 100.0)).round(0).where(valid)
     out["EXIT_TP_QUICK"] = (entry * (1.0 + tp_pct / 100.0)).round(0).where(valid)
+    # [v30] 본전스탑 전환가 — 이 가격 도달 시 손절선을 진입가(+수수료)로 상향
+    out["BE_TRIGGER_PRICE"] = (entry * (1.0 + BE_TRIGGER_PCT / 100.0)).round(0).where(valid)
 
     # 사람이 읽는 요약
     def _note(i):
@@ -112,7 +120,11 @@ def add_exit_plan_columns(df: pd.DataFrame, config=None) -> pd.DataFrame:
             parts.append("⚠️ 과열/추격 주의")
         if valid.iat[i]:
             st = int(out["EXIT_STOP_TIGHT"].iat[i]); tp = int(out["EXIT_TP_QUICK"].iat[i])
-            parts.append(f"손절 {st:,}({stop_pct:.0f}%)·1차익절 {tp:,}(+{tp_pct:.0f}%)")
+            be = int(out["BE_TRIGGER_PRICE"].iat[i])
+            parts.append(
+                f"손절 {st:,}({stop_pct:.0f}%)·본전전환 {be:,}(+{BE_TRIGGER_PCT:.0f}%)"
+                f"·1차익절 {tp:,}(+{tp_pct:.0f}%)"
+            )
         return " · ".join(parts)
 
     out["EXIT_PLAN_NOTE"] = [_note(i) for i in range(len(out))]
