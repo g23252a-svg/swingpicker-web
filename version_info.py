@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "29.0.0",
+        "date": "2026-07-14",
+        "type": "major",
+        "title": "v29.0 — ALPHA_SCORE: 검증 통과가 조건인 예측 점수 (AI 축 재건)",
+        "items": [
+            "🧠 **알파 엔진 (alpha_engine.py):** 과거 일별 추천 CSV(운영 생성 — lookahead 구조적 불가)+OHLCV 선행수익률로 GBDT 학습. 레짐 변수(시장폭 등)를 입력에 포함해 장세 따라 판단이 바뀌는 점수. 월 단위 워크포워드 최초 검증: **OOS IC +0.15~0.20 (t=+7)** · AUC 0.61 · Q5-Q1 +5.1%/5일 — 같은 OOS에서 FINAL_SCORE IC -0.04, ELITE -0.065.",
+            "✅ **'고점수=고확률' 복원:** 알파 십분위 실측 승률 하위 24% → 상위 41%로 단조 정렬. ALPHA_WIN_PROB(십분위 캘리브레이션 승률)로 화면에 그대로 표시.",
+            "🚦 **정직성 계약:** 매일 밤 재학습+워크포워드 재검증 → OOS IC t≥2 AND AUC≥0.52 AND Q5-Q1>0 전부 통과해야 사용(ALPHA_VALIDATED=1). 실패 시 자동 미사용+화면 명시. 검증 수치는 alpha_model_meta.json에 공개.",
+            "🎯 **픽 개선:** 알파 하위 30% 후보 제외 — OOS 픽 평균 +3.51%→+4.20%/건, 6월 -15% 트레이드 회피. 순위표는 ALPHA_SCORE 우선 정렬 (검증 통과 시).",
+            "🔬 **설계 검증 기록:** 후보군 내 정렬은 POC 근접이 알파 정렬보다 우월(+3.51% vs +2.25%)해 픽 정렬 유지 — 알파는 전 종목 순위·바닥 필터에만 사용. 누출 검사(ret 컬럼=과거수익률 corr 1.000) 통과.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "28.0.0",
         "date": "2026-07-14",
         "type": "major",

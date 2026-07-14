@@ -181,6 +181,8 @@ def rank_score(stats: dict, label: str) -> float:
 # 컬럼 없거나 파싱 불가 시 통과 (legacy CSV 호환).
 V27_POC_GAP_MAX = 20.0
 V27_BREADTH_MIN = 35.0
+# [v29] 알파 바닥 필터 — 당일 알파 백분위(0~100) 하한
+V29_ALPHA_FLOOR = 30.0
 
 
 def _v27_float_or_none(raw) -> Optional[float]:
@@ -204,6 +206,14 @@ def _v27_entry_gate_ok(row: dict) -> bool:
     fresh_raw = str(row.get("DATA_FRESHNESS_OK", "")).strip().lower()
     if fresh_raw in ("0", "0.0", "false", "f", "no", "n"):
         return False
+    # [v29] 알파 바닥 필터 — 검증 통과 모델이 있을 때만 작동.
+    # OOS 실측: 알파 하위 30% 제외 시 픽 평균 +3.51% → +4.20%/건,
+    # 6월 -15% 트레이드 1건 회피. 컬럼 없거나 미검증(0) → 통과.
+    validated_raw = str(row.get("ALPHA_VALIDATED", "")).strip().lower()
+    if validated_raw in ("1", "1.0", "true"):
+        alpha = _v27_float_or_none(row.get("ALPHA_SCORE"))
+        if alpha is not None and alpha < V29_ALPHA_FLOOR:
+            return False
     return True
 
 

@@ -137,12 +137,28 @@ def build_evidence_row(row: dict) -> tuple:
     if fresh in ("0", "0.0", "false", "f", "no", "n"):
         risks.append("가격 데이터 stale — 표시가와 실제가 다를 수 있음")
 
-    # ── ML 정직 표기 ──
-    w_ai = _num(row, "W_AI")
-    ai_score = _num(row, "AI_SCORE", 0) or 0
-    ml_trusted = str(row.get("ML_TRUSTED", "")).strip().lower() in ("1", "true")
-    if (w_ai is not None and w_ai <= 0) or (not ml_trusted and ai_score == 0):
-        reasons.append("AI 예측 미사용 (검증 미통과로 가중치 0 — 룰 기반 판단만 반영)")
+    # ── AI(알파모델) 정직 표기 — 검증 통과 시 예측 근거, 아니면 미사용 명시 ──
+    alpha_validated = str(row.get("ALPHA_VALIDATED", "")).strip().lower() in ("1", "1.0", "true")
+    alpha_score = _num(row, "ALPHA_SCORE")
+    alpha_prob = _num(row, "ALPHA_WIN_PROB")
+    if alpha_validated and alpha_score is not None:
+        _prob_txt = (
+            f" — 이 구간 실측 승률 {alpha_prob*100:.0f}%" if alpha_prob is not None else ""
+        )
+        if alpha_score >= 70:
+            reasons.append(
+                f"AI 알파모델 예측 상위 {100-alpha_score:.0f}% (OOS 검증 통과 모델{_prob_txt})"
+            )
+        elif alpha_score < 30:
+            risks.append(
+                f"AI 알파모델 예측 하위 {alpha_score:.0f}%{_prob_txt} — 픽 제외 구간"
+            )
+    else:
+        w_ai = _num(row, "W_AI")
+        ai_score = _num(row, "AI_SCORE", 0) or 0
+        ml_trusted = str(row.get("ML_TRUSTED", "")).strip().lower() in ("1", "true")
+        if (w_ai is not None and w_ai <= 0) or (not ml_trusted and ai_score == 0):
+            reasons.append("AI 예측 미사용 (검증 미통과로 가중치 0 — 룰 기반 판단만 반영)")
 
     return (" · ".join(reasons), " · ".join(risks), honest_prob)
 
