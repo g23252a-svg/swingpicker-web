@@ -55,3 +55,21 @@ def test_hero_strip_legacy_csv_without_new_columns():
 
 def test_hero_strip_nan_breadth():
     _render_hero_strip(_df(MARKET_BREADTH=float("nan")), {"official_count": 0})
+
+
+def test_verification_excluded_mask_demotes_stale_rows():
+    from components.tab_stocks import _verification_excluded_mask
+
+    df = pd.DataFrame({
+        "DISPLAY_SCORE": [85.0, 0.0, -5.0, 0.0, 0.0],
+        "IS_REAL_HOLDING": [False, False, False, True, False],
+        "ROUTE": ["WAIT", "WAIT", "NEUTRAL", "WAIT", "CARRY"],
+    })
+    m = _verification_excluded_mask(df)
+    # 정상 점수 → 유지 / 0·음수 비보유 → 제외 / 실보유·CARRY → 유지
+    assert m.tolist() == [False, True, True, False, False]
+
+
+def test_verification_excluded_mask_empty_df():
+    from components.tab_stocks import _verification_excluded_mask
+    assert _verification_excluded_mask(pd.DataFrame()).empty
