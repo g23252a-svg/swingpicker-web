@@ -787,6 +787,20 @@ def compute_elite_score(df: pd.DataFrame,
         errors="coerce"
     ).fillna(0)
 
+    # [v27] POC 확장(extension) hard gate — 볼륨프로파일 POC 대비 괴리
+    # 실현 트레이드 157건 검증 (2026-02~07):
+    #   POC_GAP (0,10]  → 승률 40% / (10,20] → 48%
+    #   POC_GAP (20,30] → 승률 20% / (30,50] → 12% / 50+ → 23%
+    # → 20% 초과 확장 구간은 통계적으로 추격 매수. TOP_PICK에서 차단.
+    # POC_GAP 컬럼이 없거나 NaN이면 통과 (legacy CSV 호환).
+    _poc_max = float(getattr(DEFAULT_CONFIG.macro, "poc_gap_max_entry", 20.0))
+    _poc_gap = pd.to_numeric(
+        x.get("POC_GAP", pd.Series(np.nan, index=x.index)),
+        errors="coerce"
+    )
+    _poc_ok = _poc_gap.isna() | (_poc_gap <= _poc_max)
+    x["EXTENSION_BLOCK"] = (~_poc_ok).astype(int)
+
     # 공통 하드게이트
     _hard_gate = (
         _route_active
@@ -796,6 +810,7 @@ def compute_elite_score(df: pd.DataFrame,
         & (_turnover >= 50)
         & (entry_gap <= 5.0)
         & (_rr_now >= 1.0)  # [v22.3] 손익비 하한 강제
+        & _poc_ok           # [v27] POC 확장 차단
     )
 
     # AGGRESSIVE: 손익비 우선 (TP1 15%+)

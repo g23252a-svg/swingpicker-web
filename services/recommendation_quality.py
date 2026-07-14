@@ -17,17 +17,31 @@ import numpy as np
 import pandas as pd
 
 
-POLICY_VERSION = "loss_defense_v1"
+POLICY_VERSION = "high_prob_v27"
 # Realised audit through 2026-07-10 showed ARMED entries materially negative.
 # Keep ARMED visible as research/WATCH, but require ATTACK for a new position.
 ACTIVE_ROUTES = frozenset({"ATTACK"})
 DANGEROUS_MACRO = frozenset({"WARNING", "CRITICAL"})
+# [v27] Realised-trade audit 2026-02..07 (n=157):
+#  - POC_GAP <=20 win-rate 40-48%; >20 win-rate 12-23%.  Extension chase kills EV.
+#  - MARKET_BREADTH >=35 combined with the POC gate flips the daily-pick
+#    strategy from -2.2%/trade (33% win) to +2.3%/trade (50% win).
+# Missing columns / NaN pass the gate (legacy CSV compatibility).
+POC_GAP_MAX = 20.0
+BREADTH_MIN = 35.0
 
 
 def _num(df: pd.DataFrame, column: str, default: float = 0.0) -> pd.Series:
     if column not in df.columns:
         return pd.Series(default, index=df.index, dtype="float64")
     return pd.to_numeric(df[column], errors="coerce").fillna(default)
+
+
+def _num_nan(df: pd.DataFrame, column: str) -> pd.Series:
+    """Numeric column preserving NaN (missing column -> all-NaN)."""
+    if column not in df.columns:
+        return pd.Series(np.nan, index=df.index, dtype="float64")
+    return pd.to_numeric(df[column], errors="coerce")
 
 
 def _text(df: pd.DataFrame, column: str, default: str = "") -> pd.Series:
@@ -127,6 +141,8 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     july_block = _flag(df, "JULY_PROFIT_BLOCK_FLAG")
     fresh = _flag(df, "DATA_FRESHNESS_OK", True)
     evidence = _flag(df, "QUALITY_GUARD_PASS")
+    poc_gap = _num_nan(df, "POC_GAP")
+    breadth = _num_nan(df, "MARKET_BREADTH")
 
     result: list[str] = []
     for i in range(len(df)):
@@ -168,6 +184,12 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
             row_reasons.append("손실방어 차단")
         if not bool(fresh.iloc[i]):
             row_reasons.append("데이터 신선도 실패")
+        _poc = poc_gap.iloc[i]
+        if pd.notna(_poc) and _poc > POC_GAP_MAX:
+            row_reasons.append(f"POC 확장 {_poc:.0f}% (추격 위험)")
+        _br = breadth.iloc[i]
+        if pd.notna(_br) and _br < BREADTH_MIN:
+            row_reasons.append(f"시장폭 {_br:.0f}% (내부 약세)")
         result.append(" · ".join(row_reasons[:4]) or "품질점수 미달")
     return pd.Series(result, index=df.index, dtype="object")
 
@@ -220,6 +242,12 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
     july_block = _flag(out, "JULY_PROFIT_BLOCK_FLAG")
     fresh = _flag(out, "DATA_FRESHNESS_OK", True)
 
+    # [v27] extension / market-internal gates — NaN passes (legacy compat)
+    poc_gap = _num_nan(out, "POC_GAP")
+    breadth = _num_nan(out, "MARKET_BREADTH")
+    poc_ok = poc_gap.isna() | (poc_gap <= POC_GAP_MAX)
+    breadth_ok = breadth.isna() | (breadth >= BREADTH_MIN)
+
     evidence_pass = (
         grade.eq("BUY")
         & (buy_now_score >= 70)
@@ -238,6 +266,8 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
         & ~recovery_block
         & ~july_block
         & fresh
+        & poc_ok
+        & breadth_ok
         & (score >= 70)
     )
     production_candidates = top & eligible_before & evidence_pass

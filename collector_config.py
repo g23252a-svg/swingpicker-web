@@ -226,6 +226,20 @@ class MacroConfig:
     nasdaq_caution: float = -1.5
     nasdaq_critical: float = -2.5
 
+    # [v27] 환율 레짐 판정 — 절대 레벨만으로 CRITICAL을 유지하면
+    # 환율이 구조적으로 높은 구간(예: 1500원대 안착)에서 시스템이
+    # 수개월간 전면 차단됨 (2026-03~07 실측: 90일 중 56일 CRITICAL).
+    # CRITICAL은 "레벨 높음 + 최근 급등 진행형"일 때만.
+    # 고레벨이지만 안정/하락 중이면 CAUTION (고환율 레짐).
+    fx_critical_rise_5d_pct: float = 1.5   # 5거래일 상승률 임계 (%)
+
+    # [v27] 고확률 진입 게이트 — 2026-02~07 실현 트레이드 157건 검증:
+    #  · POC_GAP ≤20: 승률 40~48%, 초과: 12~23% (경계 명확)
+    #  · MARKET_BREADTH ≥35 결합 시 평균 +2.3%/건, 승률 50%
+    #    (기존 전체: 평균 -2.2%/건, 승률 33%)
+    poc_gap_max_entry: float = 20.0        # POC 괴리 상한 (%) — 확장 추격 차단
+    breadth_min_entry: float = 35.0        # 시장폭 하한 (%) — 내부 약세장 차단
+
     rec_limit_default: int = 5
     rec_limit_caution: int = 3
 
@@ -259,6 +273,16 @@ class MacroConfig:
             raise ValueError(
                 f"rec_limit_caution({self.rec_limit_caution}) > "
                 f"rec_limit_default({self.rec_limit_default})"
+            )
+        if self.fx_critical_rise_5d_pct <= 0:
+            raise ValueError(
+                f"fx_critical_rise_5d_pct={self.fx_critical_rise_5d_pct}: 양수 필요"
+            )
+        if self.poc_gap_max_entry <= 0:
+            raise ValueError(f"poc_gap_max_entry={self.poc_gap_max_entry}: 양수 필요")
+        if not (0 <= self.breadth_min_entry <= 100):
+            raise ValueError(
+                f"breadth_min_entry={self.breadth_min_entry}: 0~100 범위"
             )
 
     # 기존 접두사 호환 (macro_filter.py: config.macro_fx_caution)
