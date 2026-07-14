@@ -56,7 +56,7 @@ def _resolve_config(config):
             if hasattr(DEFAULT_CONFIG, "d1"):
                 return DEFAULT_CONFIG.d1
         except Exception:
-            pass
+            logger.warning("D+1 설정 로드 실패 — 폴백 설정 사용", exc_info=True)
         return _FallbackD1Config()
     if hasattr(config, "d1_cut_pct"):
         return config

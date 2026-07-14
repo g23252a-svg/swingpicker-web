@@ -4,7 +4,7 @@ components/action_cards.py — v24.5 '오늘의 추천' 액션 카드 렌더러
 ═══════════════════════════════════════════════════════════════════
 모바일 우선 재설계. 핵심 화면을 순정 위젯 스택 대신 액션 카드로:
   ① 판단 먼저 — 매수구간 / 눌림대기 / 추격주의 (verdict)
-  ② 가격 사다리 — 손절·진입·현재·목표를 한 줄에 시각화 (signature)
+  ② 가격 사다리 — 손절·진입·현재·1차 익절을 한 줄에 시각화 (signature)
   ③ PMS 추천 레인 분리 (v24.4 SHADOW, 검증중 태그)
 
 설계 원칙
@@ -23,9 +23,14 @@ components/action_cards.py — v24.5 '오늘의 추천' 액션 카드 렌더러
 from __future__ import annotations
 
 import math
+import logging
 from typing import Optional
 
 import pandas as pd
+
+from services.recommendation_quality import production_buy_mask
+
+logger = logging.getLogger(__name__)
 
 try:
     import streamlit as st
@@ -74,6 +79,12 @@ PULLBACK_WAIT_MAX_PCT = 12.0
 OVERHEAT_RSI = 75.0
 
 
+def _upside_pct(entry: float, target: float) -> float:
+    if entry <= 0 or target <= 0:
+        return 0.0
+    return (target / entry - 1.0) * 100.0
+
+
 # ── verdict: 지금 뭘 해야 하나 ───────────────────────────────────
 def _verdict(row) -> dict:
     """현재가 vs 진입가를 1차 기준으로 행동 판단.
@@ -113,8 +124,9 @@ def _ladder_html(row) -> str:
     buy = _col(row, "추천매수가")
     cur = _col(row, "종가", "현재가")
     tp = _col(row, "추천매도가1")
+    tp_pct = _upside_pct(buy, tp)
     pts = [("stop", "손절", stop), ("buy", "진입", buy),
-           ("now", "현재", cur), ("tp", "목표", tp)]
+           ("now", "현재", cur), ("tp", "1차 익절", tp)]
     vals = [v for _, _, v in pts if v > 0]
     if len(vals) < 2:
         return ""
@@ -129,13 +141,44 @@ def _ladder_html(row) -> str:
         if v <= 0:
             continue
         cls = "now" if key == "now" else key
+        label_text = f"{lab} {_i(v):,}"
+        if key == "tp" and tp_pct > 0:
+            label_text = f"{lab} +{tp_pct:.1f}%"
         marks.append(
             f"<div class='sp-mk sp-{cls}' style='left:{pos(v):.1f}%'>"
             f"<div class='sp-pin'></div>"
-            f"<div class='sp-lab'>{lab} {_i(v):,}</div></div>"
+            f"<div class='sp-lab'>{label_text}</div></div>"
         )
     return (f"<div class='sp-ladder'><div class='sp-track'>"
             f"<div class='sp-bar'></div>{''.join(marks)}</div></div>")
+
+
+def _targets_html(row) -> str:
+    """Separate the model's first take-profit from its extension target.
+
+    추천매도가1 is intentionally a first exit level, not a ceiling for the
+    stock.  Showing 추천매도가2 alongside its upside prevents the first level
+    from being mistaken for the model's final valuation.
+    """
+    entry = _col(row, "추천매수가")
+    tp1 = _col(row, "추천매도가1")
+    tp2 = _col(row, "추천매도가2")
+    cells = []
+    for label, value, css in [
+        ("1차 익절", tp1, "sp-target-1"),
+        ("연장 목표", tp2, "sp-target-2"),
+    ]:
+        if value <= 0:
+            continue
+        if label == "연장 목표" and tp1 > 0 and value <= tp1:
+            continue
+        upside = _upside_pct(entry, value)
+        pct = f"+{upside:.1f}%" if upside >= 0 else f"{upside:.1f}%"
+        cells.append(
+            f"<div class='sp-target {css}'><span>{label}</span>"
+            f"<b>{_i(value):,}</b><em>{pct}</em></div>"
+        )
+    return f"<div class='sp-targets'>{''.join(cells)}</div>" if cells else ""
 
 
 # ── 점수 게이지 (DISPLAY_SCORE 원형) ────────────────────────────
@@ -179,6 +222,14 @@ def _card_html(row, lane: str = "official") -> str:
                f"<b style='color:#EF4444'>⚠️ 백테스트에서 체결편향 발견(로그 +17.7% → 실제 +0.7%), "
                f"재검증 전까지 매수 참고 금지.</b> 추적 기록용으로만 표시.")
         gauge_val, gauge_color = (pms if pms > 0 else disp), color
+    elif lane == "watch":
+        vk = "wait"
+        verdict_label, verdict_mark = "관찰 후보", "◐"
+        color = _VERDICT_COLOR["wait"]
+        gauge_val, gauge_color = disp, color
+        reason = str(row.get("QUALITY_GUARD_REASON", "") or "최종 품질 기준 미달")
+        sub = ("<b>매수 추천 아님.</b> 공식 품질게이트를 통과하지 못했습니다. "
+               f"<span style='color:var(--sp-t3)'>{reason}</span>")
     else:
         v = _verdict(row)
         vk = v["key"]
@@ -199,7 +250,7 @@ def _card_html(row, lane: str = "official") -> str:
         est = _col(row, "EXIT_STOP_TIGHT"); etp = _col(row, "EXIT_TP_QUICK")
         if vk == "buy" and est > 0 and etp > 0:
             sub += (f" <span style='color:var(--sp-t3)'>규율: 손절 {_i(est):,}(-7%)"
-                    f" · 1차익절 {_i(etp):,}(+10%)</span>")
+                    f" · 50% 부분익절 {_i(etp):,}(+10%)</span>")
 
     edge = f"sp-edge-{vk}"
     verdict_cls = f"sp-v-{vk}"
@@ -215,7 +266,7 @@ def _card_html(row, lane: str = "official") -> str:
         ttxt = f"{turn/10000:.1f}조" if turn >= 10000 else f"{turn:,.0f}억"
         stat_cells.append(f"<div class='sp-stat'><div class='sp-sv'>{ttxt}</div><div class='sp-sk'>거래대금</div></div>")
     if tp_prob > 0 and lane != "pms":
-        stat_cells.append(f"<div class='sp-stat'><div class='sp-sv'>{tp_prob:.0f}%</div><div class='sp-sk'>TP1확률</div></div>")
+        stat_cells.append(f"<div class='sp-stat'><div class='sp-sv'>{tp_prob:.0f}/100</div><div class='sp-sk'>목표 근거점수</div></div>")
     if route:
         rcls = _ROUTE_CLASS.get(route, "sp-r-wait")
         stat_cells.append(f"<div class='sp-stat'><div class='sp-route {rcls}'>{route}</div><div class='sp-sk' style='margin-top:5px'>루트</div></div>")
@@ -240,6 +291,7 @@ def _card_html(row, lane: str = "official") -> str:
   </div>
   <div class="sp-sub">{sub}</div>
   {_ladder_html(row)}
+  {_targets_html(row)}
   {stats}
   {srp_html}
 </div>"""
@@ -287,6 +339,14 @@ _CSS = """<style>
 .sp-stop .sp-pin{background:var(--sp-avoid)}.sp-stop .sp-lab{color:var(--sp-avoid)}
 .sp-buy .sp-pin{background:var(--sp-buy)}.sp-buy .sp-lab{color:var(--sp-buy)}
 .sp-tp .sp-pin{background:var(--sp-info)}.sp-tp .sp-lab{color:var(--sp-info)}
+.sp-targets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:17px}
+.sp-target{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 8px;padding:8px 10px;
+  border:1px solid var(--sp-line);border-radius:10px;background:rgba(15,23,42,.45)}
+.sp-target span{font-size:9.5px;color:var(--sp-t3);font-weight:700}.sp-target b{font-size:12px;color:var(--sp-t1);
+  font-family:var(--sp-mono)}.sp-target em{grid-column:2;font-size:10px;font-style:normal;font-weight:700;color:var(--sp-info)}
+.sp-target-2 em{color:#A78BFA}
+.sp-cash{padding:14px;border-radius:12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2)}
+.sp-cash b{display:block;color:#FCD34D;font-size:14px}.sp-cash span{display:block;color:var(--sp-t2);font-size:11px;margin-top:3px}
 .sp-stats{display:flex;gap:6px;margin-top:16px;padding-top:11px;border-top:1px solid var(--sp-line);align-items:center}
 .sp-stat{flex:1;text-align:center}
 .sp-sv{font-size:13px;font-weight:700;font-family:var(--sp-mono);color:var(--sp-t1)}
@@ -314,11 +374,12 @@ def render_action_cards(df: pd.DataFrame,
                         *,
                         is_admin: bool = False,
                         max_cards: Optional[int] = 30,
-                        show_pms: bool = True,
-                        filter_mode: str = "전체") -> None:
+                        show_pms: bool = False,
+                        filter_mode: str = "공식 매수") -> None:
     """추천 df를 액션 카드로 렌더. dashboard.py tab1/tab2 drop-in.
 
-    filter_mode: '전체' | '매수 구간' | '눌림 대기' | 'PMS 레인'
+    filter_mode: '공식 매수' | '관찰 후보' | '전체' | 'PMS 레인'
+    기본 화면은 공식 매수만 노출한다. 구버전 가격 필터도 계속 허용한다.
     """
     if st is None:
         raise RuntimeError("streamlit 미설치 — build_cards_html()로 오프라인 렌더 사용")
@@ -333,8 +394,8 @@ def render_action_cards(df: pd.DataFrame,
 def build_cards_html(df: pd.DataFrame,
                      *,
                      max_cards: Optional[int] = 30,
-                     show_pms: bool = True,
-                     filter_mode: str = "전체",
+                     show_pms: bool = False,
+                     filter_mode: str = "공식 매수",
                      include_css: bool = False) -> str:
     """카드 피드 HTML 문자열 (오프라인 렌더/테스트 가능).
 
@@ -342,46 +403,74 @@ def build_cards_html(df: pd.DataFrame,
     (Streamlit은 _inject_css로 세션당 1회 주입하므로 False 유지)
     """
     work = df.copy()
-    # 정렬: DISPLAY_SCORE 내림차순 (확신도순)
-    if "DISPLAY_SCORE" in work.columns:
-        work = work.sort_values("DISPLAY_SCORE", ascending=False)
+    # 정렬: 최종 품질게이트 점수를 우선하고, 없으면 기존 표시점수를 사용한다.
+    sort_col = "QUALITY_GUARD_SCORE" if "QUALITY_GUARD_SCORE" in work.columns else "DISPLAY_SCORE"
+    if sort_col in work.columns:
+        work = work.sort_values(sort_col, ascending=False)
 
     # 공식 vs PMS 레인 분리
     has_pms = "PMS_PROFIT_PICK" in work.columns
-    if has_pms and show_pms:
-        pms_df = work[pd.to_numeric(work["PMS_PROFIT_PICK"], errors="coerce").fillna(0).astype(int) == 1]
-        off_df = work[~work.index.isin(pms_df.index)]
+    if has_pms:
+        pms_mask = pd.to_numeric(
+            work["PMS_PROFIT_PICK"], errors="coerce"
+        ).fillna(0).astype(int).eq(1)
+        off_df = work[~pms_mask]
+        pms_df = work[pms_mask] if show_pms else work.iloc[0:0]
     else:
         pms_df, off_df = work.iloc[0:0], work
+
+    production = production_buy_mask(off_df)
+    has_production = bool(production.any())
+    official_df = off_df[production]
+    action = off_df.get("ACTION_DECISION", pd.Series("CASH", index=off_df.index))
+    action = action.fillna("CASH").astype(str).str.upper()
+    watch_df = off_df[(~production) & action.eq("WATCH")]
 
     # 필터
     def _vk(row):
         return _verdict(row)["key"]
 
-    if filter_mode == "매수 구간":
-        off_df = off_df[off_df.apply(lambda r: _vk(r) == "buy", axis=1)]
+    if filter_mode == "공식 매수":
+        watch_df = watch_df.iloc[0:0]
         pms_df = pms_df.iloc[0:0]
-    elif filter_mode == "눌림 대기":
-        off_df = off_df[off_df.apply(lambda r: _vk(r) == "wait", axis=1)]
+    elif filter_mode == "관찰 후보":
+        official_df = official_df.iloc[0:0]
+        pms_df = pms_df.iloc[0:0]
+    elif filter_mode == "매수 구간":  # 구버전 API 호환
+        official_df = official_df[official_df.apply(lambda r: _vk(r) == "buy", axis=1)]
+        watch_df = watch_df[watch_df.apply(lambda r: _vk(r) == "buy", axis=1)]
+        pms_df = pms_df.iloc[0:0]
+    elif filter_mode == "눌림 대기":  # 구버전 API 호환
+        official_df = official_df[official_df.apply(lambda r: _vk(r) == "wait", axis=1)]
+        watch_df = watch_df[watch_df.apply(lambda r: _vk(r) == "wait", axis=1)]
         pms_df = pms_df.iloc[0:0]
     elif filter_mode == "PMS 레인":
-        off_df = off_df.iloc[0:0]
+        official_df = official_df.iloc[0:0]
+        watch_df = watch_df.iloc[0:0]
 
     if max_cards:
-        off_df = off_df.head(max_cards)
+        official_df = official_df.head(max_cards)
+        watch_df = watch_df.head(min(3, max_cards))
         pms_df = pms_df.head(max(3, max_cards // 5))
 
     parts = ['<div class="sp-feed">']
-    if len(off_df) > 0:
-        parts.append('<div class="sp-lane">📋 공식 추천 <span class="sp-ln"></span> DipSniper</div>')
-        for _, row in off_df.iterrows():
+    if not has_production:
+        parts.append('<div class="sp-cash"><b>오늘 공식 매수 0개 · 현금 보유</b>'
+                     '<span>품질게이트를 통과한 종목이 없습니다. 관찰 후보는 매수 추천이 아닙니다.</span></div>')
+    if len(official_df) > 0:
+        parts.append('<div class="sp-lane">✓ 공식 매수 <span class="sp-ln"></span> 품질게이트 통과</div>')
+        for _, row in official_df.iterrows():
             parts.append(_card_html(row, lane="official"))
+    if len(watch_df) > 0:
+        parts.append('<div class="sp-lane">◐ 관찰 후보 <span class="sp-tag">매수 추천 아님</span><span class="sp-ln"></span></div>')
+        for _, row in watch_df.iterrows():
+            parts.append(_card_html(row, lane="watch"))
     if len(pms_df) > 0:
         parts.append('<div class="sp-lane pms">⚡ PMS 추천 레인 '
                      '<span class="sp-tag">⚠️ 편향 재검증 중 · 매수참고 금지</span><span class="sp-ln"></span></div>')
         for _, row in pms_df.iterrows():
             parts.append(_card_html(row, lane="pms"))
-    if len(off_df) == 0 and len(pms_df) == 0:
+    if len(official_df) == 0 and len(watch_df) == 0 and len(pms_df) == 0 and has_production:
         parts.append('<div style="color:#5C6B83;font-size:13px;padding:20px;text-align:center">'
                      '해당 조건의 종목이 없습니다.</div>')
     parts.append("</div>")
@@ -393,9 +482,9 @@ def build_cards_html(df: pd.DataFrame,
 def render_action_cards_nicegui(df: pd.DataFrame,
                                 *,
                                 max_cards: Optional[int] = 8,
-                                show_pms: bool = True,
-                                filter_mode: str = "전체",
-                                title: str = "🃏 액션 카드"):
+                                show_pms: bool = False,
+                                filter_mode: str = "공식 매수",
+                                title: str = "오늘의 매매 액션"):
     """NiceGUI용 액션 카드 레인. tab_stocks.py(render_tab_stocks) drop-in.
 
     사용:
@@ -418,7 +507,7 @@ def render_action_cards_nicegui(df: pd.DataFrame,
     try:
         ui.add_head_html(_CSS)
     except Exception:
-        pass
+        logger.warning("NiceGUI 액션카드 CSS 주입 실패", exc_info=True)
 
     # 필터 칩(네이티브) — 선택값에 따라 build_cards_html 재호출
     state = {"mode": filter_mode}
@@ -434,7 +523,10 @@ def render_action_cards_nicegui(df: pd.DataFrame,
                 )
 
             with ui.row().classes("gap-1 flex-wrap"):
-                for label in ["전체", "매수 구간", "눌림 대기", "PMS 레인"]:
+                labels = ["공식 매수", "관찰 후보"]
+                if show_pms:
+                    labels.append("PMS 레인")
+                for label in labels:
                     def _mk(lb):
                         def _click():
                             state["mode"] = lb

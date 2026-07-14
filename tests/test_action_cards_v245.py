@@ -9,8 +9,9 @@ v24.5 액션 카드 렌더러 회귀 테스트.
   2. verdict 분기: 매수구간/눌림대기/추격주의 가격 경계 정확.
   3. 가격 사다리 좌표 2~98% 클램프, 결측 강건.
   4. PMS 레인 분리(PMS_PROFIT_PICK==1만), 컬럼 없으면 공식 레인만.
-  5. 필터(전체/매수구간/눌림대기/PMS레인) 동작.
-  6. 스코프 CSS·sp- 프리픽스(전역 충돌 방지).
+  5. 필터(공식매수/관찰후보/전체/PMS레인)와 구버전 가격필터 동작.
+  6. PRODUCTION_BUY가 아닌 카드는 공식 추천으로 표시하지 않음.
+  7. 스코프 CSS·sp- 프리픽스(전역 충돌 방지).
 """
 import pandas as pd
 import pytest
@@ -23,7 +24,7 @@ from components.action_cards import (
 
 def _row(**kw):
     base = dict(종목명="테스트", 종목코드="123456", 종가=10000, 추천매수가=10000,
-                손절가=9000, 추천매도가1=12000, RSI14=60, DISPLAY_SCORE=70,
+                손절가=9000, 추천매도가1=12000, 추천매도가2=14000, RSI14=60, DISPLAY_SCORE=70,
                 ELITE_SCORE=50, ROUTE="WAIT", **{"거래대금(억원)": 200})
     base.update(kw)
     return pd.Series(base)
@@ -72,8 +73,9 @@ def test_verdict_no_entry():
 # ── 가격 사다리 ──────────────────────────────────────────────────
 def test_ladder_has_four_marks():
     html = _ladder_html(_row(손절가=9000, 추천매수가=10000, 종가=10500, 추천매도가1=12000))
-    for lab in ["손절", "진입", "현재", "목표"]:
+    for lab in ["손절", "진입", "현재", "1차 익절"]:
         assert lab in html
+    assert "+20.0%" in html
     assert "sp-ladder" in html
 
 
@@ -101,9 +103,10 @@ def _frame(n=6, with_pms=False):
     rows = []
     for i in range(n):
         r = dict(종목명=f"종목{i}", 종목코드=f"{i:06d}", 종가=10000 + i * 100,
-                 추천매수가=10000, 손절가=9000, 추천매도가1=12000,
+                 추천매수가=10000, 손절가=9000, 추천매도가1=12000, 추천매도가2=14000,
                  RSI14=50 + i, DISPLAY_SCORE=90 - i, ELITE_SCORE=40 + i,
-                 ROUTE="WAIT", **{"거래대금(억원)": 100 + i * 50})
+                 ROUTE="WAIT", PRODUCTION_BUY=1, ACTION_DECISION="BUY",
+                 **{"거래대금(억원)": 100 + i * 50})
         if with_pms:
             r["PMS_PROFIT_PICK"] = 1 if i < 2 else 0
             r["PMS_SCORE"] = 95 - i * 3
@@ -114,11 +117,11 @@ def _frame(n=6, with_pms=False):
 def test_build_feed_offline_no_streamlit():
     html = build_cards_html(_frame(5))
     assert "sp-feed" in html and html.count("sp-card") == 5
-    assert "공식 추천" in html
+    assert "공식 매수" in html
 
 
 def test_pms_lane_separation():
-    html = build_cards_html(_frame(6, with_pms=True))
+    html = build_cards_html(_frame(6, with_pms=True), show_pms=True, filter_mode="전체")
     assert "PMS 추천 레인" in html
     assert "편향 재검증 중" in html  # [v24.8] PMS 경고 라벨로 변경
     # PMS pick 2개는 PMS 카드로
@@ -141,9 +144,44 @@ def test_filter_buy_zone_only():
 
 
 def test_filter_pms_lane():
-    html = build_cards_html(_frame(6, with_pms=True), filter_mode="PMS 레인")
-    assert "공식 추천" not in html
+    html = build_cards_html(_frame(6, with_pms=True), show_pms=True, filter_mode="PMS 레인")
+    assert "공식 매수" not in html
     assert "PMS 추천 레인" in html
+
+
+def test_non_production_rows_are_never_called_official():
+    df = _frame(3)
+    df["PRODUCTION_BUY"] = 0
+    df["ACTION_DECISION"] = "CASH"
+    html = build_cards_html(df)
+    assert "오늘 공식 매수 0개" in html
+    assert "품질게이트 통과" not in html
+    assert html.count("sp-card") == 0
+
+
+def test_watch_candidates_require_explicit_view_and_warning():
+    df = _frame(3)
+    df["PRODUCTION_BUY"] = 0
+    df["ACTION_DECISION"] = "WATCH"
+    df["QUALITY_GUARD_REASON"] = "즉시매수 기준 미달"
+    html = build_cards_html(df, filter_mode="관찰 후보")
+    assert "관찰 후보" in html
+    assert "매수 추천 아님" in html
+    assert "품질게이트 통과" not in html
+    assert html.count("sp-card") == 3
+
+
+def test_legacy_official_fallback_is_conservative():
+    df = _frame(1).drop(columns=["PRODUCTION_BUY"])
+    df["TOP_PICK"] = 1
+    df["BUY_NOW_ELIGIBLE"] = 1
+    html = build_cards_html(df)
+    assert "품질게이트 통과" in html
+
+
+def test_pms_is_hidden_from_default_action_view():
+    html = build_cards_html(_frame(6, with_pms=True))
+    assert "PMS 추천 레인" not in html
 
 
 def test_empty_frame_safe():
@@ -156,7 +194,7 @@ def test_missing_columns_graceful():
     # 최소 컬럼만
     df = pd.DataFrame([{"종목명": "X", "종목코드": "000001"}])
     html = build_cards_html(df)
-    assert "X" in html and "sp-card" in html  # 예외 없이 렌더
+    assert "오늘 공식 매수 0개" in html  # 예외 없이 보수적 렌더
 
 
 def test_scoped_css_prefix():
