@@ -44,9 +44,9 @@
 20260423,031980,피에스케이홀딩스,True,False,True,False,,,79.4,79.4,70.9,WAIT,1.41,0.0,18.07,131.97,,recommend_20260423.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260423,327260,RF머트리얼즈,True,False,True,False,,,79.1,79.1,73.0,WAIT,2.03,0.0,41.78,374.6,,recommend_20260423.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260430,001780,알루코,True,False,True,False,,,86.0,86.0,79.7,ARMED,1.08,0.0,10.48,18.2,,recommend_20260430.csv,OPEN,-0.22,0.0,10.0,,3005.0,,,backtest_top3_trades_20260501.csv,True,False,0.22,CASH_AVOIDED_LOSS,NOT_OFFICIAL_BUY
-20260430,012800,대창,True,False,True,False,,,86.5,86.5,79.4,ARMED,0.87,0.0,9.75,11.1,,recommend_20260430.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260430,012800,대창,True,False,True,False,,,86.5,86.5,79.4,ARMED,0.87,0.0,9.75,11.1,,recommend_20260430.csv,NOT_FILLED,0.0,0.0,0.0,,0.0,False,False,backtest_top3_trades_20260714.csv,True,False,-0.0,CASH_NEUTRAL,NOT_OFFICIAL_BUY
 20260501,001780,알루코,True,False,True,False,,,86.0,86.0,79.7,ARMED,1.08,0.0,10.48,18.2,,recommend_20260501.csv,OPEN,2.94,3.16,1.0,2026-05-04,3100.0,,,backtest_top3_trades_20260504.csv,True,True,-2.94,CASH_OPPORTUNITY_COST,NOT_OFFICIAL_BUY
-20260501,012800,대창,True,False,True,False,,,86.5,86.5,79.4,ARMED,0.87,0.0,9.75,11.1,,recommend_20260501.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260501,012800,대창,True,False,True,False,,,86.5,86.5,79.4,ARMED,0.87,0.0,9.75,11.1,,recommend_20260501.csv,NOT_FILLED,0.0,0.0,0.0,,0.0,False,False,backtest_top3_trades_20260714.csv,True,False,-0.0,CASH_NEUTRAL,NOT_OFFICIAL_BUY
 20260506,001720,신영증권,True,False,True,False,,,84.5,84.5,76.6,ATTACK,3.74,0.0,-0.02,47.33,,recommend_20260506.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260506,042510,라온시큐어,True,False,True,False,,,88.3,88.3,85.5,ARMED,1.53,1.5,1.69,2.94,,recommend_20260506.csv,NOT_FILLED,0.0,0.0,0.0,,0.0,,,backtest_top1_trades_20260507.csv,True,False,-0.0,CASH_NEUTRAL,NOT_OFFICIAL_BUY
 20260507,389020,자람테크놀로지,True,False,True,False,,,84.6,84.6,75.4,ARMED,1.0,0.0,6.46,37.59,,recommend_20260507.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY

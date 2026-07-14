@@ -4936,5 +4936,84 @@
       "013580_20260706_WARN_DRAWDOWN_20260708",
       "013580_20260706_STOP_HIT_20260709"
     ]
+  },
+  {
+    "code": "145020",
+    "name": "휴젤",
+    "entry_ymd": "20260630",
+    "entry_px": 264000.0,
+    "qty": 0,
+    "stop_px": 229000.0,
+    "stop_px_initial": 229000.0,
+    "take_px1": 276500.0,
+    "take_px2": 324500.0,
+    "trailing_high": 290500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260714",
+    "last_close_px": 227000.0,
+    "unrealized_pnl_pct": -14.02,
+    "realized_pnl_pct": -14.02,
+    "close_ymd": "20260714",
+    "close_px": 227000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "145020_20260630_WARN_DRAWDOWN_20260706",
+      "145020_20260630_WARN_DRAWDOWN_20260707",
+      "145020_20260630_WARN_DRAWDOWN_20260708",
+      "145020_20260630_WARN_DRAWDOWN_20260709",
+      "145020_20260630_WARN_DRAWDOWN_20260710",
+      "145020_20260630_WARN_DRAWDOWN_20260713",
+      "145020_20260630_STOP_HIT_20260714"
+    ]
+  },
+  {
+    "code": "009420",
+    "name": "한올바이오파마",
+    "entry_ymd": "20260701",
+    "entry_px": 61600.0,
+    "qty": 0,
+    "stop_px": 52300.0,
+    "stop_px_initial": 52300.0,
+    "take_px1": 70000.0,
+    "take_px2": 82600.0,
+    "trailing_high": 66100.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260714",
+    "last_close_px": 50300.0,
+    "unrealized_pnl_pct": -18.34,
+    "realized_pnl_pct": -18.34,
+    "close_ymd": "20260714",
+    "close_px": 50300.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "009420_20260701_WARN_DRAWDOWN_20260706",
+      "009420_20260701_WARN_DRAWDOWN_20260709",
+      "009420_20260701_WARN_DRAWDOWN_20260710",
+      "009420_20260701_WARN_DRAWDOWN_20260713",
+      "009420_20260701_STOP_HIT_20260714"
+    ]
+  },
+  {
+    "code": "271560",
+    "name": "오리온",
+    "entry_ymd": "20260708",
+    "entry_px": 140300.0,
+    "qty": 0,
+    "stop_px": 128600.0,
+    "stop_px_initial": 128600.0,
+    "take_px1": 145300.0,
+    "take_px2": 161500.0,
+    "trailing_high": 143200.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260714",
+    "last_close_px": 128400.0,
+    "unrealized_pnl_pct": -8.48,
+    "realized_pnl_pct": -8.48,
+    "close_ymd": "20260714",
+    "close_px": 128400.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "271560_20260708_STOP_HIT_20260714"
+    ]
   }
 ]
