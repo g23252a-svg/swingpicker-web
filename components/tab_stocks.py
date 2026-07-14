@@ -3987,6 +3987,22 @@ def _render_today_action_summary_card(df: pd.DataFrame, official_decision: dict 
     return summary
 
 
+def _verification_excluded_mask(df: pd.DataFrame) -> pd.Series:
+    """[v31.1] '검증제외' 판정 (벡터) — _table_score_display와 동일 규칙.
+
+    DISPLAY_SCORE ≤0 이고 실보유·CARRY가 아닌 행. 정렬에서 맨 아래로 보내는 데 사용.
+    """
+    if df is None or len(df) == 0:
+        return pd.Series(dtype=bool)
+    display = pd.to_numeric(df.get("DISPLAY_SCORE", pd.Series(0, index=df.index)),
+                            errors="coerce").fillna(0)
+    holding = df.get("IS_REAL_HOLDING", pd.Series(False, index=df.index))
+    holding = holding.astype(str).str.strip().str.lower().isin(
+        {"1", "1.0", "true", "t", "yes", "y"})
+    route = df.get("ROUTE", pd.Series("", index=df.index)).astype(str).str.upper()
+    return (display <= 0) & (~holding) & (~route.str.contains("CARRY", na=False))
+
+
 def _table_score_display(row: pd.Series):
     # [v22.3.31] DISPLAY_SCORE 0/음수인 비보유 종목은 테이블에서 숫자 0 대신 검증제외로 표시.
     # _nb_score_cell의 CARRY 보유 표시 가드는 유지한다.
@@ -4689,6 +4705,17 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             else:
                 fdf = fdf.sort_values("_route_rank")
             fdf = fdf.drop(columns=["_route_rank"])
+        # [v31.1] '검증제외' 행은 어떤 정렬 모드에서든 맨 아래로 (안정 정렬 —
+        # 유효 행 사이의 순서는 위 정렬 결과 유지). stale/legacy 행이 점수 컬럼의
+        # 잔존값 때문에 상단을 차지하던 문제 해소.
+        try:
+            _excl = _verification_excluded_mask(fdf)
+            if _excl.any():
+                fdf = fdf.assign(_verif_excl=_excl.astype(int)).sort_values(
+                    "_verif_excl", ascending=True, kind="mergesort"
+                ).drop(columns=["_verif_excl"])
+        except Exception as _ve:
+            _logger.debug(f"검증제외 정렬 강등 스킵: {_ve}")
         # [v3.7.18] 접근 제한 — admin/premium은 전체 CSV (이전엔 50개 제한)
         # guest/free만 미리보기 제한, 나머지는 CSV 전체 노출
         limits = {"guest": 3, "free": 5}
