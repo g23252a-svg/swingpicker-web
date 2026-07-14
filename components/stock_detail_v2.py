@@ -336,6 +336,12 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
         # 사유 (UI 표시용 — score_reason은 우선순위 적용 후 결과)
         "score_reason": score_reason,
+        # [v28] 실측 근거/리스크/승률 + 레짐
+        "reco_evidence": _safe_str(row.get("RECO_EVIDENCE", ""), ""),
+        "reco_risk": _safe_str(row.get("RECO_RISK", ""), ""),
+        "honest_prob_pct": safe_float(row.get("HONEST_PROB_PCT")),
+        "market_regime": _safe_str(row.get("MARKET_REGIME", ""), ""),
+        "regime_reason": _safe_str(row.get("REGIME_REASON", ""), ""),
         # 원본 사유들 (Step 2D-2E 패널에서 직접 표시용)
         "elite_reason": elite_reason,
         "reason_top1": reason_top1,
@@ -1290,7 +1296,57 @@ def render_v2_scores(n: dict):
     else:
         gap_tag = "주의"
 
+    # [v28] 실측 근거 패널 — 점수보다 먼저, "왜 이 종목인가"를 수치로
+    reco_evidence = str(n.get("reco_evidence", "") or "")
+    reco_risk = str(n.get("reco_risk", "") or "")
+    honest_prob = n.get("honest_prob_pct")
+    market_regime = str(n.get("market_regime", "") or "")
+    regime_reason = str(n.get("regime_reason", "") or "")
+    _regime_clr = {"UP": "var(--green)", "DOWN": "var(--red)"}.get(market_regime, "var(--orange)")
+
     with ui.element("div").classes("sd-v2").style("width: 100%;"):
+        if reco_evidence or reco_risk or market_regime:
+            _prob_html = ""
+            if honest_prob is not None and honest_prob > 0:
+                _prob_html = (
+                    f'<span style="font-size:15px; font-weight:900; color:var(--green);">'
+                    f'실측 승률 {honest_prob:.0f}%</span>'
+                    '<span style="font-size:10px; color:var(--text-dim);"> (이 점수 구간의 과거 성적)</span>'
+                )
+            _regime_html = ""
+            if market_regime:
+                _regime_html = (
+                    f'<span style="font-size:11px; font-weight:800; color:{_regime_clr}; '
+                    f'margin-left:8px;" title="{h_escape(regime_reason)}">'
+                    f'레짐 {h_escape(market_regime)}</span>'
+                )
+            _ev_items = "".join(
+                f'<div style="font-size:11.5px; color:var(--text-white); margin-top:3px;">'
+                f'✓ {h_escape(p.strip())}</div>'
+                for p in reco_evidence.split("·") if p.strip()
+            )
+            _risk_items = "".join(
+                f'<div style="font-size:11.5px; color:var(--orange); margin-top:3px;">'
+                f'⚠ {h_escape(p.strip())}</div>'
+                for p in reco_risk.split("·") if p.strip()
+            )
+            ui.html(f'''
+                <div style="margin-bottom:12px; padding:11px 13px; border-radius:10px;
+                            background: rgba(16,185,129,0.06);
+                            border: 1px solid rgba(16,185,129,0.25);">
+                    <div style="font-size:11px; font-weight:800; color:var(--text-gray);
+                                margin-bottom:5px;">
+                        📋 왜 이 종목인가 (실측 근거) {_regime_html}
+                    </div>
+                    {_prob_html}
+                    {_ev_items}
+                    {_risk_items or ""}
+                    <div style="font-size:10px; color:var(--text-dim); margin-top:5px;">
+                        아래 점수는 보조 지표입니다 — 점수가 높다고 확률이 높은 것이 아닙니다
+                        (하락장에서 고점수 역방향 실측 확인).
+                    </div>
+                </div>
+            ''')
         with ui.element("div").classes("scores").style(
             "display: grid; grid-template-columns: 140px 1fr 130px 130px 130px; "
             "gap: 8px; margin-bottom: 12px; width: 100%;"

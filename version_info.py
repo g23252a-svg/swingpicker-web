@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "28.0.0",
+        "date": "2026-07-14",
+        "type": "major",
+        "title": "v28.0 — Regime-Adaptive & Honest Display: 레짐 대응·점수 착시 제거·실측 근거 표시",
+        "items": [
+            "🌡️ **시장 레짐 엔진 (market_regime.py):** KOSPI 추세+시장폭으로 UP/NEUTRAL/DOWN 판정. UP=정상 진입(실측 픽 평균 +5.1%/건), NEUTRAL=사이즈 50%(실측 +0.1%), DOWN=신규진입 차단. 레짐은 GO/NO-GO·사이즈만 결정 — 랭킹은 레짐 무관 POC 근접순이 우월함을 검증(UP 레짐에서도 +5.1% vs 점수순 +3.0%).",
+            "🧭 **점수 축 IC 야간 감사 (axis_ic_report):** 룰 기반 축(STRUCT/TIMING)도 AI와 동일한 검증을 받도록 매일 최근 60일 횡단면 IC 자동 측정. 실측: STRUCT IC -0.049(t=-2.8)·ELITE -0.064(t=-3.9) 역주행 확인, POC_GAP은 설계 방향대로 유효. 역주행 축은 경고 로그+JSON 리포트.",
+            "📋 **'왜 이 종목인가' 실측 근거 패널 (reco_evidence):** 점수 대신 근거 문장을 1순위 표시 — 실측 승률(표본수 병기), 가치영역 근접(구간별 실측 승률), 손익비(손절/목표 %), 레짐, 스퀴즈/저점추세. 리스크(확장·과열·유동성·stale)도 반드시 병기.",
+            "🪞 **점수 착시 제거:** 상세 화면에 '점수는 보조 지표 — 점수가 높다고 확률이 높은 것이 아님(하락장 역방향 실측)' 명시. 실측 승률(HONEST_PROB_PCT)이 MATURE 표본에서만 강조 표시.",
+            "🤖 **ML 정직 표기:** AI 축 미사용 상태(검증 미통과, 가중치 0)를 근거 문장에 그대로 노출 — '작동하는 척' 금지.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "27.0.0",
         "date": "2026-07-14",
         "type": "major",

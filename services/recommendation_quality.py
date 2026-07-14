@@ -143,6 +143,7 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     evidence = _flag(df, "QUALITY_GUARD_PASS")
     poc_gap = _num_nan(df, "POC_GAP")
     breadth = _num_nan(df, "MARKET_BREADTH")
+    regime_col = _text(df, "MARKET_REGIME", "")
 
     result: list[str] = []
     for i in range(len(df)):
@@ -190,6 +191,8 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
         _br = breadth.iloc[i]
         if pd.notna(_br) and _br < BREADTH_MIN:
             row_reasons.append(f"시장폭 {_br:.0f}% (내부 약세)")
+        if regime_col.iloc[i] == "DOWN":
+            row_reasons.append("하락 레짐 (신규진입 차단)")
         result.append(" · ".join(row_reasons[:4]) or "품질점수 미달")
     return pd.Series(result, index=df.index, dtype="object")
 
@@ -247,6 +250,14 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
     breadth = _num_nan(out, "MARKET_BREADTH")
     poc_ok = poc_gap.isna() | (poc_gap <= POC_GAP_MAX)
     breadth_ok = breadth.isna() | (breadth >= BREADTH_MIN)
+    # [v28] regime gate — DOWN blocks new entries; missing column passes.
+    regime = _text(out, "MARKET_REGIME", "")
+    regime_ok = ~regime.eq("DOWN")
+    # [v28] regime sizing — NEUTRAL/UNKNOWN halve the recommended weight.
+    regime_mult = pd.to_numeric(
+        out.get("REGIME_SIZE_MULT", pd.Series(1.0, index=out.index)),
+        errors="coerce",
+    ).fillna(1.0).clip(0.0, 1.0)
 
     evidence_pass = (
         grade.eq("BUY")
@@ -268,6 +279,7 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
         & fresh
         & poc_ok
         & breadth_ok
+        & regime_ok
         & (score >= 70)
     )
     production_candidates = top & eligible_before & evidence_pass
@@ -290,9 +302,10 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
     out["ACTION_DECISION"] = np.select(
         [production, watch], ["BUY", "WATCH"], default="CASH"
     )
+    # [v28] 레짐 사이징: UP=100%, NEUTRAL/UNKNOWN=50%, DOWN=0 (진입 자체 차단됨)
     out["RECOMMENDED_WEIGHT_PCT"] = np.where(
         production,
-        np.where(score >= 85, 5.0, 3.0),
+        np.where(score >= 85, 5.0, 3.0) * regime_mult,
         0.0,
     )
     return out
