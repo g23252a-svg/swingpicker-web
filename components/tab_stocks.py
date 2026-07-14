@@ -1095,6 +1095,10 @@ def _compute_axis_stats(row) -> dict:
         breadth = float(row.get("MARKET_BREADTH"))
     except (TypeError, ValueError):
         breadth = None
+    # [v27.0.1] stale 가격 행 (CARRY legacy 스냅샷 등) — 명시적 False만 차단
+    fresh = str(row.get("DATA_FRESHNESS_OK", "")).strip().lower() not in (
+        "0", "0.0", "false", "f", "no", "n"
+    )
 
     # [v3.7.3] RR이 CSV에 없거나 0이면 종가 기준으로 즉석 재계산
     # (과거 파이프라인에서 ELITE 공식 적용 이전 종목 호환)
@@ -1122,6 +1126,7 @@ def _compute_axis_stats(row) -> dict:
         "ai_raw":    a,         "route":    route,
         # [v27] 고확률 진입 게이트용
         "poc_gap":   poc_gap,   "breadth":  breadth,
+        "fresh":     fresh,     # [v27.0.1] stale 가격 차단용
     }
 
 
@@ -1133,12 +1138,14 @@ V27_BREADTH_MIN = 35.0
 
 
 def _v27_gate_ok(stats: dict) -> bool:
-    """POC 확장 차단 + 시장폭 하한. 값 누락(None)은 통과 (legacy 호환)."""
+    """POC 확장 차단 + 시장폭 하한 + 신선도. 값 누락(None)은 통과 (legacy 호환)."""
     poc = stats.get("poc_gap")
     if poc is not None and poc > V27_POC_GAP_MAX:
         return False
     br = stats.get("breadth")
     if br is not None and br < V27_BREADTH_MIN:
+        return False
+    if not stats.get("fresh", True):
         return False
     return True
 
@@ -1192,6 +1199,8 @@ def _elite_label(stats: dict) -> tuple:
             why.append(f"POC 확장 {poc:.0f}% (>20)")
         if br is not None and br < V27_BREADTH_MIN:
             why.append(f"시장폭 {br:.0f}% (<35)")
+        if not stats.get("fresh", True):
+            why.append("가격 데이터 stale (재계산 실패 스냅샷)")
         return (
             "⚠️ 확장추격",
             "#EF4444",  # 빨강 (위험 경고)

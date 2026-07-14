@@ -106,7 +106,21 @@ class RunHealth:
         """CSV에 건강 상태 컬럼 주입"""
         df["RUN_STATUS"] = self.status
         df["DEGRADED_REASONS"] = "|".join(self.reasons) if self.reasons else ""
-        df["DATA_FRESHNESS_OK"] = self.data_freshness_ok
+        # [v27.0.1] run-level 스칼라로 덮어쓰지 않고 row-level False 보존.
+        # CARRY legacy 폴백(pipeline_calibrate)이 행 단위로 False를 심는데,
+        # 여기서 통째로 덮어쓰면 5일 묵은 가격(실제가 대비 +199% 괴리)이
+        # 신선한 데이터로 둔갑해 모든 freshness 게이트가 무력화된다.
+        _run_fresh = bool(self.data_freshness_ok)
+        if "DATA_FRESHNESS_OK" in df.columns:
+            _row_fresh = (
+                df["DATA_FRESHNESS_OK"]
+                .fillna(True)
+                .astype(str).str.strip().str.lower()
+                .isin({"1", "1.0", "true", "t", "yes", "y"})
+            )
+            df["DATA_FRESHNESS_OK"] = _row_fresh & _run_fresh
+        else:
+            df["DATA_FRESHNESS_OK"] = _run_fresh
         df["CONFIDENCE_SCORE"] = self.confidence_score
         df["MAX_ALLOWED_ROUTE"] = self.max_allowed_route
 

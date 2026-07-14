@@ -205,3 +205,43 @@ def test_fx_high_and_rising_is_critical(monkeypatch):
     )
     risk, msg, _, _ = mf.check_macro_env("20260713")
     assert risk == "CRITICAL"
+
+
+# ═══════════════════════════════════════════════════
+# 5. [v27.0.1] stale 가격 (CARRY legacy 스냅샷) 방어
+# ═══════════════════════════════════════════════════
+
+def test_entry_gate_blocks_stale_price_rows():
+    # CARRY legacy 스냅샷: 종가가 며칠 묵음 (실측 최대 +199% 괴리)
+    assert not _v27_entry_gate_ok(
+        {"POC_GAP": "5.0", "MARKET_BREADTH": "60", "DATA_FRESHNESS_OK": "False"}
+    )
+    assert not _v27_entry_gate_ok({"DATA_FRESHNESS_OK": "0"})
+    # 명시적 True / 누락은 통과
+    assert _v27_entry_gate_ok({"DATA_FRESHNESS_OK": "True"})
+    assert _v27_entry_gate_ok({"DATA_FRESHNESS_OK": ""})
+
+
+def test_run_health_preserves_row_level_freshness_false():
+    """run-level 스칼라 주입이 CARRY legacy의 row-level False를 덮어쓰면 안 된다."""
+    from run_health import RunHealth
+
+    rh = RunHealth()
+    rh.data_freshness_ok = True  # 실행 자체는 신선
+    df = pd.DataFrame({
+        "종목코드": ["000001", "049480"],
+        "DATA_FRESHNESS_OK": [True, False],  # 049480 = CARRY legacy stale
+    })
+    out = rh.inject_columns(df)
+    assert bool(out.loc[0, "DATA_FRESHNESS_OK"]) is True
+    assert bool(out.loc[1, "DATA_FRESHNESS_OK"]) is False
+
+
+def test_run_health_scalar_false_blocks_all_rows():
+    from run_health import RunHealth
+
+    rh = RunHealth()
+    rh.data_freshness_ok = False  # 실행 전체가 stale
+    df = pd.DataFrame({"종목코드": ["000001"], "DATA_FRESHNESS_OK": [True]})
+    out = rh.inject_columns(df)
+    assert bool(out.loc[0, "DATA_FRESHNESS_OK"]) is False

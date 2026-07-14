@@ -192,12 +192,17 @@ def _v27_float_or_none(raw) -> Optional[float]:
 
 
 def _v27_entry_gate_ok(row: dict) -> bool:
-    """POC 확장 차단 + 시장폭 하한. NaN/누락은 통과."""
+    """POC 확장 차단 + 시장폭 하한 + 데이터 신선도. NaN/누락은 통과."""
     poc = _v27_float_or_none(row.get("POC_GAP"))
     if poc is not None and poc > V27_POC_GAP_MAX:
         return False
     br = _v27_float_or_none(row.get("MARKET_BREADTH"))
     if br is not None and br < V27_BREADTH_MIN:
+        return False
+    # [v27.0.1] stale 가격 행 차단 — CARRY legacy 스냅샷은 종가가 며칠 묵어
+    # 실제가와 크게 벌어질 수 있다 (2026-07-13 실측 최대 +199%).
+    fresh_raw = str(row.get("DATA_FRESHNESS_OK", "")).strip().lower()
+    if fresh_raw in ("0", "0.0", "false", "f", "no", "n"):
         return False
     return True
 
