@@ -34,6 +34,7 @@ def _stock_payload(row: pd.Series) -> dict[str, Any]:
         "close": _number(row, "종가"),
         "stop": _number(row, "손절가"),
         "target": _number(row, "추천매도가1"),
+        "target2": _number(row, "추천매도가2"),
         "rr": _number(row, "RR_NOW_TP1"),
         "weight": _number(row, "RECOMMENDED_WEIGHT_PCT"),
         "reason": str(row.get("QUALITY_GUARD_REASON", "")),
@@ -108,6 +109,13 @@ def _money(value: float) -> str:
     return f"{value:,.0f}원" if value > 0 else "—"
 
 
+def _move_from_entry(entry: float, price: float) -> str:
+    if entry <= 0 or price <= 0:
+        return ""
+    move = (price / entry - 1.0) * 100.0
+    return f"{move:+.1f}% vs 진입"
+
+
 def _render_buy_card(stock: dict[str, Any]) -> None:
     with ui.card().classes("sp-buy-card w-full p-5 rounded-2xl"):
         with ui.row().classes("w-full items-start justify-between gap-3"):
@@ -120,16 +128,18 @@ def _render_buy_card(stock: dict[str, Any]) -> None:
             with ui.column().classes("items-end gap-0"):
                 ui.label(f"품질 {stock['score']:.0f}").classes("text-xl font-bold text-emerald-300")
                 ui.label(f"최대 {stock['weight']:.0f}% 비중").classes("text-xs text-slate-300")
+                ui.label(f"손익비 {stock['rr']:.2f}:1").classes("text-xs text-slate-400")
         with ui.grid(columns=4).classes("sp-price-grid w-full gap-2 mt-3"):
-            for label, value, css in [
-                ("지정 매수가", _money(stock["entry"]), "text-blue-300"),
-                ("손절가", _money(stock["stop"]), "text-rose-300"),
-                ("1차 목표", _money(stock["target"]), "text-emerald-300"),
-                ("손익비", f"{stock['rr']:.2f}:1", "text-white"),
+            for label, value, detail, css in [
+                ("지정 매수가", _money(stock["entry"]), "익일 지정가 기준", "text-blue-300"),
+                ("손절가", _money(stock["stop"]), _move_from_entry(stock["entry"], stock["stop"]), "text-rose-300"),
+                ("1차 익절", _money(stock["target"]), _move_from_entry(stock["entry"], stock["target"]), "text-emerald-300"),
+                ("연장 목표", _money(stock["target2"]), _move_from_entry(stock["entry"], stock["target2"]), "text-violet-300"),
             ]:
                 with ui.column().classes("sp-price-cell gap-0 rounded-xl p-3"):
                     ui.label(label).classes("text-[11px] text-slate-400")
                     ui.label(value).classes(f"text-base font-bold {css}")
+                    ui.label(detail or "—").classes("text-[10px] text-slate-500")
         ui.button(
             "근거와 차트 보기",
             on_click=lambda code=stock["code"]: ui.navigate.to(f"/stock/{code}"),

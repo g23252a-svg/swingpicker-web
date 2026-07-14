@@ -43,6 +43,7 @@ def test_only_production_buy_is_shown_as_buy():
             "추천매수가": 70000,
             "손절가": 66500,
             "추천매도가1": 78000,
+            "추천매도가2": 85000,
             "RR_NOW_TP1": 2.2,
             "RECOMMENDED_WEIGHT_PCT": 5,
             "ML_STATUS": "VALIDATED",
@@ -62,4 +63,6 @@ def test_only_production_buy_is_shown_as_buy():
     assert result["status"] == "BUY"
     assert result["production_count"] == 1
     assert [stock["code"] for stock in result["buys"]] == ["005930"]
+    assert result["buys"][0]["target"] == 78000
+    assert result["buys"][0]["target2"] == 85000
 
