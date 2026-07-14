@@ -183,22 +183,22 @@ V27_POC_GAP_MAX = 20.0
 V27_BREADTH_MIN = 35.0
 
 
+def _v27_float_or_none(raw) -> Optional[float]:
+    """CSV 원시값 → float, 누락/파싱불가 → None (legacy CSV 호환)."""
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _v27_entry_gate_ok(row: dict) -> bool:
     """POC 확장 차단 + 시장폭 하한. NaN/누락은 통과."""
-    poc_raw = row.get("POC_GAP", "")
-    if poc_raw not in ("", None):
-        try:
-            if float(poc_raw) > V27_POC_GAP_MAX:
-                return False
-        except (TypeError, ValueError):
-            pass
-    br_raw = row.get("MARKET_BREADTH", "")
-    if br_raw not in ("", None):
-        try:
-            if float(br_raw) < V27_BREADTH_MIN:
-                return False
-        except (TypeError, ValueError):
-            pass
+    poc = _v27_float_or_none(row.get("POC_GAP"))
+    if poc is not None and poc > V27_POC_GAP_MAX:
+        return False
+    br = _v27_float_or_none(row.get("MARKET_BREADTH"))
+    if br is not None and br < V27_BREADTH_MIN:
+        return False
     return True
 
 
@@ -210,10 +210,8 @@ def _v27_poc_sort_key(row: dict) -> float:
       POC_GAP 오름차순 Top3:    평균 +2.17%/건 · 승률 45% (누적 +106%)
     누락/파싱불가 → 99.0 (후순위, legacy CSV는 전원 99 → rank_score 순 유지).
     """
-    try:
-        return float(row.get("POC_GAP"))
-    except (TypeError, ValueError):
-        return 99.0
+    poc = _v27_float_or_none(row.get("POC_GAP"))
+    return 99.0 if poc is None else poc
 
 
 def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
