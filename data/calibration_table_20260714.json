@@ -265,9 +265,9 @@
     "score_lo":60,
     "score_hi":70.0,
     "score_center":65.0,
-    "p_calibrated":0.2748,
-    "n_effective":220.7,
-    "n_raw":275
+    "p_calibrated":0.2737,
+    "n_effective":221.6,
+    "n_raw":276
   },
   {
     "method":"ELITE_SCORE",
