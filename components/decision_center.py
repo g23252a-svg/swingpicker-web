@@ -8,12 +8,17 @@ never presented as equivalent to an official production decision here.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 import pandas as pd
 from nicegui import ui
 
 from services.recommendation_quality import production_buy_mask
+
+
+MARKET_BREADTH_FLOOR = 35.0
+DANGEROUS_MARKET_RISK = {"CRITICAL", "WARNING"}
 
 
 def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
@@ -24,7 +29,81 @@ def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
         return default
 
 
+def _humanize_reason(reason: Any) -> str:
+    """Translate engine-oriented rejection text into a user-facing reason."""
+    raw = str(reason or "").strip()
+    if not raw:
+        return "최종 매수 기준을 통과하지 못했습니다"
+
+    parts = [part.strip() for part in re.split(r"\s*[·•]\s*", raw) if part.strip()]
+    translated: list[str] = []
+    for part in parts:
+        if part == "TOP_PICK 아님":
+            text = "최종 선별 단계 미통과"
+        elif part == "즉시매수 기준 미달":
+            text = "즉시 매수 조건 미충족"
+        elif part.startswith("진입등급 "):
+            text = f"진입 등급이 낮음 ({part.removeprefix('진입등급 ')})"
+        elif part.startswith("즉시매수점수 "):
+            text = f"즉시 매수 점수 부족 ({part.removeprefix('즉시매수점수 ')})"
+        elif part == "공격형 검증 실패":
+            text = "공격형 후보의 과거 검증 미통과"
+        elif part.startswith("진입위험 "):
+            text = f"진입 위험이 높음 ({part.removeprefix('진입위험 ')})"
+        elif part == "경로 WAIT":
+            text = "진입 타이밍 대기"
+        elif part.startswith("경로 "):
+            text = f"매수 경로 조건 미충족 ({part.removeprefix('경로 ')})"
+        elif part.startswith("시장위험 "):
+            text = f"시장 위험 단계가 높음 ({part.removeprefix('시장위험 ')})"
+        elif part.startswith("MFI "):
+            text = f"수급 강도가 적정 범위 밖 (MFI {part.removeprefix('MFI ')})"
+        elif part == "상단여력 부족":
+            text = "목표가까지 상승 여력 부족"
+        elif part == "VWAP 적정구간 아님":
+            text = "현재가가 적정 진입 구간 밖"
+        elif part.startswith("손익비 "):
+            text = f"예상 손익비 부족 ({part.removeprefix('손익비 ')})"
+        elif part.startswith("기본점수 "):
+            text = f"기본 품질 점수 부족 ({part.removeprefix('기본점수 ')})"
+        elif part.startswith("POC 확장 "):
+            text = f"단기 급등 후 추격 위험 ({part.removeprefix('POC 확장 ')})"
+        elif part.startswith("시장폭 "):
+            match = re.search(r"([0-9]+(?:\.[0-9]+)?)%", part)
+            pct = f" {match.group(1)}%" if match else ""
+            text = f"상승 종목 비율{pct}로 시장 내부가 약함"
+        elif part.startswith("하락 레짐"):
+            text = "하락장이라 신규 진입 차단"
+        elif part == "품질점수 미달":
+            text = "최종 품질 점수 부족"
+        else:
+            text = part
+        if text not in translated:
+            translated.append(text)
+    return " · ".join(translated) if translated else "최종 매수 기준을 통과하지 못했습니다"
+
+
+def _reason_items(reason: Any, limit: int = 3) -> list[str]:
+    return [
+        item.strip()
+        for item in _humanize_reason(reason).split(" · ")
+        if item.strip()
+    ][:limit]
+
+
+def _dominant_text(df: pd.DataFrame, key: str, default: str) -> str:
+    if key not in df.columns:
+        return default
+    values = df[key].dropna().astype(str).str.strip()
+    values = values[~values.isin(["", "nan", "None"])]
+    if values.empty:
+        return default
+    mode = values.mode()
+    return str(mode.iloc[0] if not mode.empty else values.iloc[0])
+
+
 def _stock_payload(row: pd.Series) -> dict[str, Any]:
+    raw_reason = str(row.get("QUALITY_GUARD_REASON", ""))
     return {
         "code": str(row.get("종목코드", "")).split(".")[0].zfill(6),
         "name": str(row.get("종목명", "-")),
@@ -37,7 +116,9 @@ def _stock_payload(row: pd.Series) -> dict[str, Any]:
         "target2": _number(row, "추천매도가2"),
         "rr": _number(row, "RR_NOW_TP1"),
         "weight": _number(row, "RECOMMENDED_WEIGHT_PCT"),
-        "reason": str(row.get("QUALITY_GUARD_REASON", "")),
+        "reason": _humanize_reason(raw_reason),
+        "reason_items": _reason_items(raw_reason),
+        "raw_reason": raw_reason,
         "route": str(row.get("ROUTE", "")),
         "decision": str(row.get("ACTION_DECISION", "CASH")),
     }
@@ -49,11 +130,20 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
             "status": "NO_DATA",
             "title": "추천 데이터를 확인할 수 없습니다",
             "subtitle": "새로고침 또는 수집 상태를 확인하세요.",
+            "action_label": "데이터 상태를 확인하세요",
+            "action_detail": "추천 데이터가 준비되기 전에는 주문하지 마세요.",
+            "next_check": "데이터 수집 완료 후 다시 확인",
             "buys": [],
             "watch": [],
+            "blockers": ["추천 데이터 없음"],
+            "gates": [],
             "production_count": 0,
             "watch_count": 0,
             "ml_status": "NO_DATA",
+            "market_breadth": None,
+            "market_ready": False,
+            "macro_risk": "UNKNOWN",
+            "market_regime": "UNKNOWN",
         }
 
     work = df.copy()
@@ -71,11 +161,11 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     watch_df = work[(~production) & action.eq("WATCH")].sort_values(
         "_quality", ascending=False
     ).head(3)
-    if watch_df.empty:
-        watch_df = work[~production].sort_values("_quality", ascending=False).head(3)
 
     buys = [_stock_payload(row) for _, row in buys_df.iterrows()]
     watch = [_stock_payload(row) for _, row in watch_df.iterrows()]
+    production_count = int(production.sum())
+    watch_count = int(action.eq("WATCH").sum())
     ml_values = (
         work.get("ML_STATUS", pd.Series("UNKNOWN", index=work.index))
         .fillna("UNKNOWN")
@@ -83,25 +173,106 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     )
     ml_status = ml_values.iloc[0] if len(ml_values) else "UNKNOWN"
 
+    breadth_values = pd.to_numeric(
+        work.get("MARKET_BREADTH", pd.Series(float("nan"), index=work.index)),
+        errors="coerce",
+    ).dropna()
+    market_breadth = float(breadth_values.median()) if len(breadth_values) else None
+    macro_risk = _dominant_text(work, "MACRO_RISK", "UNKNOWN").upper()
+    market_regime = _dominant_text(work, "MARKET_REGIME", "UNKNOWN").upper()
+    breadth_ready = market_breadth is None or market_breadth >= MARKET_BREADTH_FLOOR
+    market_ready = (
+        breadth_ready
+        and macro_risk not in DANGEROUS_MARKET_RISK
+        and market_regime != "DOWN"
+    )
+
+    nearest_reason = watch[0]["raw_reason"] if watch else ""
+    blockers: list[str] = []
+    if market_breadth is not None and market_breadth < MARKET_BREADTH_FLOOR:
+        blockers.append(
+            f"상승 종목 비율 {market_breadth:.0f}%로 기준 {MARKET_BREADTH_FLOOR:.0f}% 미만"
+        )
+    if market_regime == "DOWN":
+        blockers.append("하락장이라 신규 진입 차단")
+    if macro_risk in DANGEROUS_MARKET_RISK:
+        blockers.append(f"시장 위험 단계가 높음 ({macro_risk})")
+    for item in _reason_items(nearest_reason, limit=6):
+        if item not in blockers:
+            blockers.append(item)
+        if len(blockers) >= 3:
+            break
+    if not blockers and not buys:
+        blockers = ["최종 매수 기준을 통과한 종목이 없음"]
+
     if buys:
         title = f"오늘 신규매수 {len(buys)}개"
-        subtitle = "아래 종목만 최종 품질게이트를 통과했습니다. 지정가와 최대 비중을 지키세요."
+        subtitle = "아래 공식 매수 카드만 주문 후보입니다. 지정가·손절가·최대 비중을 함께 지키세요."
+        action_label = "공식 후보의 지정가 주문만 준비하세요"
+        action_detail = "현재가 추격매수는 하지 말고, 지정가가 체결되지 않으면 그대로 보내세요."
+        next_check = "체결 후 손절가와 1차 익절가를 동시에 등록"
         status = "BUY"
     else:
         title = "오늘은 신규매수하지 않습니다"
-        nearest = watch[0]["reason"] if watch else "통과 후보 없음"
-        subtitle = f"현금 보유가 공식 결정입니다. 가장 가까운 후보도 ‘{nearest}’로 차단됐습니다."
+        subtitle = "공식 매수 종목이 0개입니다. 관찰 후보는 조건에 가까울 뿐 주문 대상이 아닙니다."
+        action_label = "신규 주문을 넣지 말고 현금을 유지하세요"
+        action_detail = "높은 점수나 관찰 표시는 매수 신호가 아닙니다. 공식 매수가 생길 때까지 기다리세요."
+        next_check = "다음 데이터 갱신 후 시장과 최종 후보를 다시 확인"
         status = "CASH"
+
+    breadth_value = (
+        f"상승 종목 {market_breadth:.0f}%" if market_breadth is not None else "시장폭 데이터 없음"
+    )
+    market_detail = f"신규 진입 기준 {MARKET_BREADTH_FLOOR:.0f}% 이상"
+    if market_regime == "DOWN":
+        market_detail += " · 현재 하락장"
+    elif macro_risk not in {"NORMAL", "UNKNOWN", ""}:
+        market_detail += f" · 위험 {macro_risk}"
+    gates = [
+        {
+            "step": "1",
+            "label": "시장 환경",
+            "status": "통과" if market_ready else "대기",
+            "value": breadth_value,
+            "detail": market_detail,
+            "tone": "green" if market_ready else "amber",
+        },
+        {
+            "step": "2",
+            "label": "후보 검증",
+            "status": "통과" if production_count else ("관찰" if watch_count else "없음"),
+            "value": f"공식 {production_count}개 · 관찰 {watch_count}개",
+            "detail": "관찰 후보는 주문 대상이 아님",
+            "tone": "green" if production_count else "amber",
+        },
+        {
+            "step": "3",
+            "label": "오늘 주문",
+            "status": "가능" if production_count else "보류",
+            "value": "지정가 주문" if production_count else "신규 주문 없음",
+            "detail": "공식 매수 카드만 실행",
+            "tone": "green" if production_count else "slate",
+        },
+    ]
 
     return {
         "status": status,
         "title": title,
         "subtitle": subtitle,
+        "action_label": action_label,
+        "action_detail": action_detail,
+        "next_check": next_check,
         "buys": buys,
         "watch": watch,
-        "production_count": int(production.sum()),
-        "watch_count": int(action.eq("WATCH").sum()),
+        "blockers": blockers,
+        "gates": gates,
+        "production_count": production_count,
+        "watch_count": watch_count,
         "ml_status": ml_status,
+        "market_breadth": market_breadth,
+        "market_ready": market_ready,
+        "macro_risk": macro_risk,
+        "market_regime": market_regime,
     }
 
 
@@ -147,14 +318,19 @@ def _render_buy_card(stock: dict[str, Any]) -> None:
 
 
 def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
-    with ui.card().classes("sp-watch-card w-full p-4 rounded-xl"):
-        with ui.row().classes("w-full items-center justify-between gap-2"):
-            with ui.row().classes("items-center gap-2"):
-                ui.badge("매수 아님", color="#475569")
+    with ui.card().classes("sp-watch-card w-full p-4 rounded-2xl"):
+        with ui.column().classes("gap-1 min-w-0"):
+            with ui.row().classes("items-center gap-2 flex-wrap"):
+                ui.badge("매수 아님", color="#B45309").classes("font-bold")
                 ui.label(f"{rank}. {stock['name']}").classes("font-bold text-slate-100")
                 ui.label(stock["code"]).classes("text-xs text-slate-500")
-            ui.label(f"품질 {stock['score']:.0f}").classes("text-sm font-bold text-amber-300")
-        ui.label(stock["reason"] or "최종 기준 미달").classes("text-sm text-slate-400 mt-1")
+            ui.label(stock["reason"] or "최종 기준 미달").classes(
+                "text-sm text-slate-300 leading-relaxed"
+            )
+        ui.button(
+            "근거 보기",
+            on_click=lambda code=stock["code"]: ui.navigate.to(f"/stock/{code}"),
+        ).props("flat dense no-caps").classes("self-end text-xs text-slate-300 mt-1")
 
 
 def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
@@ -164,13 +340,29 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
         """
         <style>
           .sp-decision-shell { max-width: 1120px; margin: 0 auto; }
-          .sp-decision-hero { background:linear-gradient(135deg,#0f172a 0%,#111c35 55%,#172033 100%)!important;
-            border:1px solid rgba(148,163,184,.18); box-shadow:0 18px 50px rgba(0,0,0,.25); }
+          .sp-decision-hero { background:#0d172b!important;
+            border:1px solid rgba(148,163,184,.2); box-shadow:none!important; }
+          .sp-decision-status { background:rgba(2,6,23,.38); border:1px solid rgba(148,163,184,.14); }
+          .sp-next-check { background:rgba(15,23,42,.64); border:1px solid rgba(148,163,184,.12); }
+          .sp-gate-card { background:#111827!important; border:1px solid rgba(148,163,184,.17); box-shadow:none!important; }
+          .sp-gate-step { width:1.75rem; height:1.75rem; border-radius:9999px; display:flex; align-items:center;
+            justify-content:center; background:#1e293b; color:#cbd5e1; font-size:.75rem; font-weight:800; }
+          .sp-blocker-card { background:rgba(69,26,3,.18)!important; border:1px solid rgba(245,158,11,.22); box-shadow:none!important; }
+          .sp-blocker-number { width:1.5rem; height:1.5rem; border-radius:9999px; display:flex; align-items:center;
+            justify-content:center; background:rgba(245,158,11,.16); color:#fcd34d; font-size:.7rem; font-weight:800; flex:none; }
           .sp-buy-card { background:linear-gradient(135deg,rgba(6,78,59,.72),rgba(15,23,42,.95))!important;
-            border:1px solid rgba(52,211,153,.4); }
-          .sp-watch-card { background:rgba(15,23,42,.72)!important; border:1px solid rgba(100,116,139,.22); }
+            border:1px solid rgba(52,211,153,.4); box-shadow:none!important; }
+          .sp-watch-card { background:#111827!important; border:1px solid rgba(100,116,139,.22); box-shadow:none!important; }
           .sp-price-cell { background:rgba(15,23,42,.55); border:1px solid rgba(148,163,184,.12); }
-          @media(max-width:720px){ .sp-price-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;} }
+          .sp-rule-pill { background:rgba(15,23,42,.65); border:1px solid rgba(148,163,184,.12); }
+          @media(max-width:720px){
+            .sp-price-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+            .sp-gate-grid{grid-template-columns:1fr!important;}
+            .sp-decision-hero{padding:1.25rem!important;border-radius:1.25rem!important;}
+            .sp-decision-title{font-size:1.55rem!important;line-height:1.32!important;word-break:keep-all;}
+            .sp-decision-status{width:100%;align-items:flex-start!important;}
+            .sp-rule-row{display:grid!important;grid-template-columns:1fr!important;}
+          }
         </style>
         """
     )
@@ -179,54 +371,82 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
         cash = summary["status"] != "BUY"
         with ui.card().classes("sp-decision-hero w-full p-6 md:p-8 rounded-3xl"):
             with ui.row().classes("w-full items-start justify-between gap-4 flex-wrap"):
-                with ui.column().classes("gap-2 max-w-3xl"):
-                    ui.label("오늘의 최종 결정").classes("text-xs font-bold tracking-[0.18em] text-slate-400 uppercase")
-                    with ui.row().classes("items-center gap-3"):
-                        ui.label("⏸" if cash else "✓").classes(
-                            "text-4xl " + ("text-amber-300" if cash else "text-emerald-300")
-                        )
-                        ui.label(summary["title"]).classes(
-                            "text-2xl md:text-4xl font-bold "
-                            + ("text-amber-200" if cash else "text-emerald-200")
-                        )
-                    ui.label(summary["subtitle"]).classes("text-sm md:text-base text-slate-300 leading-relaxed")
-                with ui.column().classes("items-end gap-1"):
+                with ui.column().classes("gap-2 max-w-3xl grow"):
+                    ui.label("오늘 해야 할 일").classes(
+                        "text-xs font-bold tracking-[0.18em] text-slate-400 uppercase"
+                    )
+                    ui.label(summary["action_label"]).classes(
+                        "sp-decision-title text-2xl md:text-4xl font-bold "
+                        + ("text-amber-200" if cash else "text-emerald-200")
+                    )
+                    ui.label(summary["action_detail"]).classes(
+                        "text-sm md:text-base text-slate-300 leading-relaxed"
+                    )
+                with ui.column().classes("sp-decision-status items-end gap-1 rounded-2xl px-4 py-3 min-w-[150px]"):
+                    ui.label("최종 결정").classes("text-[10px] font-bold tracking-wider text-slate-500")
                     ui.badge(
-                        "CASH" if cash else "BUY",
+                        "CASH · 주문 보류" if cash else "BUY · 지정가",
                         color="#F59E0B" if cash else "#10B981",
                     ).classes("text-sm font-bold px-3 py-1")
-                    ui.label(f"관찰 {summary['watch_count']}개").classes("text-xs text-slate-500")
+                    ui.label(f"공식 매수 {summary['production_count']}개").classes("text-xs text-slate-400")
+            with ui.row().classes("sp-next-check w-full items-start gap-3 rounded-xl p-3 mt-4"):
+                ui.label("다음 확인").classes("text-xs font-bold text-sky-300 shrink-0")
+                ui.label(summary["next_check"]).classes("text-xs md:text-sm text-slate-300")
 
-        with ui.row().classes("w-full gap-2 flex-wrap"):
-            ui.badge(f"공식 매수 {summary['production_count']}개", color="#10B981" if not cash else "#475569")
-            ml_ok = summary["ml_status"] == "VALIDATED"
-            ui.badge(
-                "ML 검증 통과" if ml_ok else "ML 추천 가중치 제외",
-                color="#2563EB" if ml_ok else "#B45309",
-            )
-            ui.badge("하루 신규진입 최대 1종목", color="#334155")
-            ui.badge("종목당 최대 5%", color="#334155")
+        ui.label("매수 가능 여부").classes("text-lg font-bold text-white mt-1")
+        with ui.grid(columns=3).classes("sp-gate-grid w-full gap-2"):
+            for gate in summary["gates"]:
+                status_color = {
+                    "green": "#059669",
+                    "amber": "#B45309",
+                    "slate": "#475569",
+                }[gate["tone"]]
+                with ui.card().classes("sp-gate-card w-full p-4 rounded-2xl"):
+                    with ui.row().classes("w-full items-center justify-between gap-2"):
+                        with ui.row().classes("items-center gap-2"):
+                            ui.label(gate["step"]).classes("sp-gate-step")
+                            ui.label(gate["label"]).classes("text-sm font-bold text-slate-200")
+                        ui.badge(gate["status"], color=status_color).classes("font-bold")
+                    ui.label(gate["value"]).classes("text-lg font-bold text-white mt-3")
+                    ui.label(gate["detail"]).classes("text-xs text-slate-500 mt-1")
 
         if summary["buys"]:
-            ui.label("지금 살 수 있는 종목").classes("text-lg font-bold text-white mt-2")
+            ui.label("오늘의 공식 매수").classes("text-lg font-bold text-white mt-2")
             for stock in summary["buys"]:
                 _render_buy_card(stock)
         else:
-            with ui.card().classes("w-full p-4 rounded-2xl bg-amber-950/20 border border-amber-500/20"):
-                ui.label("왜 현금 보유인가요?").classes("font-bold text-amber-200")
-                ui.label(
-                    "좋은 후보가 없을 때 종목 수를 채우지 않습니다. 높은 원점수·AI 점수·관찰 후보는 공식 매수와 다릅니다."
-                ).classes("text-sm text-slate-300 mt-1")
+            with ui.card().classes("sp-blocker-card w-full p-4 md:p-5 rounded-2xl"):
+                ui.label("오늘 매수가 막힌 이유").classes("font-bold text-amber-200")
+                with ui.column().classes("w-full gap-2 mt-2"):
+                    for index, reason in enumerate(summary["blockers"], 1):
+                        with ui.row().classes("w-full items-start gap-2"):
+                            ui.label(str(index)).classes("sp-blocker-number")
+                            ui.label(reason).classes("text-sm text-slate-200 leading-relaxed")
 
         if summary["watch"]:
-            with ui.expansion("가장 가까운 관찰 후보 (매수 추천 아님)", icon="visibility").classes(
-                "w-full rounded-xl border border-slate-700/60"
-            ):
-                with ui.column().classes("w-full gap-2 p-2"):
-                    for rank, stock in enumerate(summary["watch"], 1):
-                        _render_watch_card(stock, rank)
+            with ui.row().classes("w-full items-end justify-between gap-3 flex-wrap mt-2"):
+                with ui.column().classes("gap-0"):
+                    ui.label("가장 가까운 관찰 후보").classes("text-lg font-bold text-white")
+                    ui.label("조건에 가까운 순서이며 매수 추천이 아닙니다.").classes("text-xs text-slate-500")
+                ui.badge(f"전체 관찰 {summary['watch_count']}개", color="#475569")
+            for rank, stock in enumerate(summary["watch"], 1):
+                _render_watch_card(stock, rank)
+            if summary["watch_count"] > len(summary["watch"]):
+                ui.label(
+                    f"상위 {len(summary['watch'])}개만 표시했습니다. 나머지 {summary['watch_count'] - len(summary['watch'])}개는 종목 탭에서 확인하세요."
+                ).classes("text-xs text-slate-500")
 
-        with ui.row().classes("w-full items-center justify-between gap-3 flex-wrap mt-2"):
-            ui.label("전체 후보와 시장 지표는 ‘시장’ 및 ‘종목’ 탭에서 확인할 수 있습니다.").classes("text-xs text-slate-500")
-            ui.label("성과 보장 아님 · 지정가/손절/비중 준수").classes("text-xs text-slate-600")
+        with ui.row().classes("sp-rule-row w-full gap-2 mt-2"):
+            for text in [
+                "공식 매수 0개면 주문 없음",
+                "관찰 후보·AI 점수만으로 매수 금지",
+                "매수 시 지정가·손절가·비중 동시 준수",
+            ]:
+                with ui.row().classes("sp-rule-pill items-center gap-2 rounded-xl px-3 py-2 grow"):
+                    ui.label("✓").classes("text-emerald-400 font-bold")
+                    ui.label(text).classes("text-xs text-slate-400")
+
+        ui.label("성과를 보장하지 않습니다. 오늘 탭의 공식 결정과 가격 규칙을 함께 지켜야 검증 결과와 실제 운용의 차이를 줄일 수 있습니다.").classes(
+            "text-xs text-slate-600 mt-1"
+        )
 

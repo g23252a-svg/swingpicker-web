@@ -339,7 +339,7 @@ async def index():
     try:
         # UX 계약이 바뀐 첫 방문에는 기존 저장 탭보다 '오늘의 결정'을
         # 한 번 우선 노출한다. 이후부터는 사용자의 마지막 탭을 복원한다.
-        _nav_version = "decision_center_v1"
+        _nav_version = "decision_center_v2"
         _seen_nav_version = app.storage.user.get("main_nav_version", "")
         _cand = app.storage.user.get("main_active_tab", "t0")
         if _seen_nav_version == _nav_version and _cand in tab_refs:

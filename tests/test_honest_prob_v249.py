@@ -80,7 +80,8 @@ def test_card_shows_base_prob():
     df = pd.DataFrame([{"종목명": "테스트", "종목코드": "123456", "종가": 10000,
                         "추천매수가": 10000, "손절가": 9000, "추천매도가1": 12000,
                         "RSI14": 60, "DISPLAY_SCORE": 70, "ROUTE": "WAIT",
-                        "거래대금(억원)": 200, "SRP_BASE_PROB_2D": 39.6}])
+                        "거래대금(억원)": 200, "SRP_BASE_PROB_2D": 39.6,
+                        "PRODUCTION_BUY": 1, "ACTION_DECISION": "BUY"}])
     h = build_cards_html(df)
     assert "시장기저 2일 상승률" in h and "40%" in h or "39" in h
     # 컬럼 없으면 표시 생략
