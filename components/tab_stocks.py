@@ -3429,17 +3429,30 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
         # 결론과 4지표를 상단에 명확히 표시. 그 아래 기존 상세 검증은
         # "상세 검증 정보(검증 데이터)"라는 명시적 라벨 아래 둠.
         # ═══════════════════════════════════════════════════
-        _render_member_summary(
-            capital_top1=capital_top1,
-            signal_top1=signal_top1,
-            daily_top1=daily_top1,
-            confidence=confidence,
-            # [v3.9.5] shadow 신호 반영 — 시장 위험 패턴 누적 시 판정 강화
-            pre_entry_risk=bt.get("pre_entry_risk_shadow") or {},
-            struct_risk=bt.get("struct_risk_shadow") or {},
-            # [v22.3.18] 공식 신규매수 0개면 성과 카드도 '진입' 문구 금지
-            official_decision=official_decision,
-        )
+        # [v31.4] 후보 0개인 날은 통계 타일을 기본 뷰에서 제거 — 히어로 스트립이
+        # 이미 '현금 유지'를 말하고 있어 중복. 성과 지표는 상세 검증 서랍으로 이동.
+        if not top3_codes:
+            _obs_txt = ""
+            if "ELITE_LABEL" in df.columns:
+                _obs_n = int((df["ELITE_LABEL"] == "🏆 최강").sum()) + \
+                    int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
+                if _obs_n > 0:
+                    _obs_txt = f" · 관찰 후보 {_obs_n}개 (테이블에서 확인 — 매수 아님)"
+            ui.label(
+                "⚪ 오늘 실전 후보 없음 — 관찰 전용" + _obs_txt
+            ).classes("text-sm text-gray-300 font-semibold mb-1")
+        if top3_codes:
+            _render_member_summary(
+                capital_top1=capital_top1,
+                signal_top1=signal_top1,
+                daily_top1=daily_top1,
+                confidence=confidence,
+                # [v3.9.5] shadow 신호 반영 — 시장 위험 패턴 누적 시 판정 강화
+                pre_entry_risk=bt.get("pre_entry_risk_shadow") or {},
+                struct_risk=bt.get("struct_risk_shadow") or {},
+                # [v22.3.18] 공식 신규매수 0개면 성과 카드도 '진입' 문구 금지
+                official_decision=official_decision,
+            )
 
         # ───────────────────────────────────────────
         # 📊 아래는 상세 검증 정보 — 어렵게 느껴지면 위 요약만 봐도 OK
@@ -3457,6 +3470,17 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
             "w-full mt-2 bg-[rgba(139,92,246,0.05)] "
             "border border-[rgba(139,92,246,0.2)] rounded"
         ).props("dense"):
+            # [v31.4] 후보 0개인 날: 통계 타일(회원 요약)을 서랍 안으로 이동
+            if not top3_codes:
+                _render_member_summary(
+                    capital_top1=capital_top1,
+                    signal_top1=signal_top1,
+                    daily_top1=daily_top1,
+                    confidence=confidence,
+                    pre_entry_risk=bt.get("pre_entry_risk_shadow") or {},
+                    struct_risk=bt.get("struct_risk_shadow") or {},
+                    official_decision=official_decision,
+                )
             # 헤더에서 옮긴 기술 요약 한 줄 (옛 summary_text)
             ui.label(summary_text).classes(
                 "text-[10px] text-gray-500 mb-2 italic"
@@ -3688,57 +3712,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 ).classes(f"text-[10px] {fresh_cls} mb-2 italic")
 
         if not top3_codes:
-            # [v3.9.22b-hotfix] BUY_NOW_ELIGIBLE=1 종목 0건 우선 표시
-            # 평가 명시: "TOP_PICK 후보는 있으나 BUY_NOW 기준상 관찰/추격금지"
-            _has_eligible_col = "BUY_NOW_ELIGIBLE" in df.columns
-            _has_top_pick = (
-                ("TOP_PICK" in df.columns)
-                and (df["TOP_PICK"].astype(str).str.upper()
-                     .isin(["1", "1.0", "TRUE", "Y", "YES"]).any())
-            )
-            if _has_eligible_col and _has_top_pick:
-                # TOP_PICK은 있는데 ELIGIBLE 0건 → "오늘 매수 적합 없음" 강조
-                ui.label(
-                    "🟡 오늘 공식 신규 매수 가능 종목 없음"
-                ).classes("text-base text-amber-400 font-bold mb-1")
-                ui.label(
-                    "TOP_PICK 후보는 있으나 TOP_PICK+BUY_NOW_ELIGIBLE 기준상 "
-                    "공식 신규매수 대상이 아닙니다. 관찰/관망 권장."
-                ).classes("text-xs text-gray-400 mb-2")
-            else:
-                # [Step AC P0-3] 기존 빈 상태 메시지 (TOP_PICK도 없거나 legacy CSV)
-                ui.label(
-                    "🟡 공식 신규매수 0개 · 관찰 후보만 있음 → 오늘은 매매 보류"
-                ).classes("text-sm text-yellow-400 font-semibold mb-1")
-
-            # [Step AE] 차선 후보 / 관찰 후보 카운트 — 한글 표시 (raw 비교 유지)
-            if "ELITE_LABEL" in df.columns:
-                strong_n = int((df["ELITE_LABEL"] == "🏆 최강").sum())
-                instant_n = int((df["ELITE_LABEL"] == "✅ 즉시진입").sum())
-                parts = []
-                if instant_n > 0:
-                    parts.append(f"🟡 관찰 후보 {instant_n}개 (공식 신규 매수 아님)")
-                if strong_n > 0:
-                    parts.append(f"🔵 관심관찰 {strong_n}개 (👁️ 관찰 · 매매 제외)")
-                if parts:
-                    ui.label(
-                        "📋 후보 — " + " · ".join(parts) +
-                        " · 테이블 라벨 필터로 확인 가능"
-                    ).classes("text-xs text-gray-400 mb-1")
-
-            # 과거 백테스트 (있을 때만)
-            if strong_stats and strong_stats.get("n", 0) > 0:
-                tp1 = strong_stats["tp1_rate"] * 100
-                ev = strong_stats["ev"]
-                ui.label(
-                    f"(과거 🔵 관심관찰 검증: {strong_stats['n']}건 · "
-                    f"TP1 {tp1:.1f}% · EV {ev:+.2f}%)"
-                ).classes("text-[11px] text-gray-500 mb-1 italic")
-
-            ui.label(
-                "🟣 핵심 관찰: S≥90·T≥80·AI≥60·고점수 관찰 · 공식 신규매수 아님  ·  "
-                "🟡 관찰 후보: 최소≥50·균형≥70·갭≤5% · 공식 신규매수 아님"
-            ).classes("text-xs text-gray-500 mt-1")
+            # [v31.4] 빈 상태 — 요약 한 줄은 카드 상단(위)에서 이미 표시됨.
             return
 
         with ui.row().classes("w-full gap-3 flex-wrap"):
