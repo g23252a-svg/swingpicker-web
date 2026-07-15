@@ -116,3 +116,21 @@ def test_validation_scorecard_smoke():
     }
     _render_validation_scorecard(bt)
     _render_validation_scorecard({})
+
+
+def test_decision_card_checklist_smoke():
+    from components.tab_stocks import _render_daily_official_decision_card
+
+    # 현금 유지 상태 (약세장 + 신호 없음 + 품질 통과 존재)
+    df = pd.DataFrame({
+        "종목코드": ["000001", "000002"], "종목명": ["A", "B"],
+        "TOP_PICK": [0, 0], "BUY_NOW_ELIGIBLE": [0, 0],
+        "MARKET_BREADTH": [22.0, 22.0], "ROUTE": ["WAIT", "NEUTRAL"],
+        "BUY_NOW_PASS": [1, 0], "FINAL_SCORE": [91.0, 60.0],
+        "ELITE_SCORE": [53.0, 40.0], "RR_NOW_TP1": [2.1, 1.0],
+    })
+    d = _render_daily_official_decision_card(df)
+    assert d["status"].startswith("CASH_HOLD")
+    # 빈 df 방어
+    d2 = _render_daily_official_decision_card(pd.DataFrame())
+    assert d2["status"] == "NO_DATA"
