@@ -2,40 +2,9 @@
   "asof_file": "recommend_latest.csv",
   "official_buy_count": 0,
   "alpha_pick_count": 1,
-  "near_candidate_count": 2,
-  "near_candidates": [
-    {
-      "종목코드": "021240",
-      "종목명": "코웨이",
-      "HISTORICAL_ALPHA_SCORE": 53.2,
-      "TIMING_SCORE": 80.6,
-      "외인순매수": 9608,
-      "RR_NOW_TP1": 0.83,
-      "FINAL_SCORE": 74.6,
-      "VWAP_GAP": 5.24,
-      "POC_GAP": 14.04,
-      "STRUCT_SCORE": 68.5,
-      "ENTRY_RISK_LEVEL": "GREEN",
-      "ROUTE": "WAIT",
-      "MARKET_BREADTH": 22.3
-    },
-    {
-      "종목코드": "323410",
-      "종목명": "카카오뱅크",
-      "HISTORICAL_ALPHA_SCORE": 42.4,
-      "TIMING_SCORE": 70.8,
-      "외인순매수": 8847,
-      "RR_NOW_TP1": 0.73,
-      "FINAL_SCORE": 78.8,
-      "VWAP_GAP": 0.79,
-      "POC_GAP": -14.16,
-      "STRUCT_SCORE": 86.9,
-      "ENTRY_RISK_LEVEL": "GREEN",
-      "ROUTE": "WAIT",
-      "MARKET_BREADTH": 22.3
-    }
-  ],
-  "rule_pass_count": 3,
+  "near_candidate_count": 0,
+  "near_candidates": [],
+  "rule_pass_count": 1,
   "rr_floor": 1.2,
   "rule_source": "FALLBACK",
   "selected_rule": {
@@ -55,10 +24,10 @@
     "oos_pass": false,
     "baseline_test": 22.6
   },
-  "baseline_train": 38.9,
+  "baseline_train": 38.6,
   "baseline_test": 22.6,
   "oos_rules_found": 0,
-  "total_rules_evaluated": 1,
+  "total_rules_evaluated": 2,
   "alpha_picks": [
     {
       "종목코드": "011200",
@@ -73,7 +42,7 @@
       "STRUCT_SCORE": 50.6,
       "ENTRY_RISK_LEVEL": "GREEN",
       "ROUTE": "WAIT",
-      "MARKET_BREADTH": 22.3,
+      "MARKET_BREADTH": 27.6,
       "HISTORICAL_ALPHA_RULE_ID": "FALLBACK_T55_FRG_POC90",
       "HISTORICAL_ALPHA_RULE_DESC": "TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드",
       "HISTORICAL_ALPHA_WIN_RATE": null,
