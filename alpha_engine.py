@@ -66,7 +66,13 @@ def _load_ohlcv_panel(data_dir: str):
     o.index = pd.to_datetime(o.index)
     close = o.pivot_table(index=o.index, columns="종목코드", values="종가", aggfunc="last").sort_index()
     open_ = o.pivot_table(index=o.index, columns="종목코드", values="시가", aggfunc="last").sort_index()
+    # [v31.8] 가격 0/음수 글리치 방어 — 시가=0 행(거래정지 등)이 있으면
+    # fwd가 ±inf로 오염되어 Q5-Q1 스프레드가 -inf → 검증이 통째로 탈락한다
+    # (2026-07-15 실측: 시가=0 86행 → validated=False → 알파 미표시).
+    close = close.where(close > 0)
+    open_ = open_.where(open_ > 0)
     fwd = close.shift(-(_HOLD_BDAYS + 1)) / open_.shift(-1) - 1
+    fwd = fwd.where(np.isfinite(fwd))
     return close, fwd
 
 
@@ -115,6 +121,7 @@ def build_training_panel(data_dir: str = "data", max_days: int = 200):
         rec = rec[np.isclose(cc, rec["종목코드"].map(close.loc[d]), rtol=0.01)]
         rec["_fwd"] = rec["종목코드"].map(fwd.loc[d])
         rec = rec.dropna(subset=["_fwd"])
+        rec = rec[np.isfinite(rec["_fwd"])]  # [v31.8] inf 방어 (이중 안전망)
         if len(rec) < 30:
             continue
         rec["_ymd"] = ymd
@@ -172,11 +179,15 @@ def walk_forward_validate(panel: pd.DataFrame, feats: list, min_train_days: int 
         return {"ok": False, "reason": f"OOS 일수 부족 ({oos['_ymd'].nunique()}일)"}
     ics, spreads = [], []
     for _, g in oos.groupby("_ymd"):
+        # [v31.8] non-finite 수익률 방어 (0원 시가 글리치 등)
+        g = g[np.isfinite(pd.to_numeric(g["_fwd"], errors="coerce"))]
         if len(g) < 50:
             continue
         ics.append(float(np.corrcoef(g["_pred"].rank(), g["_fwd"].rank())[0, 1]))
         q = pd.qcut(g["_pred"], 5, labels=False, duplicates="drop")
-        spreads.append(float(g.loc[q == q.max(), "_fwd"].mean() - g.loc[q == 0, "_fwd"].mean()))
+        _sp = float(g.loc[q == q.max(), "_fwd"].mean() - g.loc[q == 0, "_fwd"].mean())
+        if np.isfinite(_sp):
+            spreads.append(_sp)
     ics = np.array(ics)
     t = float(ics.mean() / (ics.std(ddof=1) / np.sqrt(len(ics)))) if ics.std(ddof=1) > 0 else 0.0
     try:
