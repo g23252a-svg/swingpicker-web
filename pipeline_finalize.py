@@ -1713,16 +1713,26 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                                & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
         df_out = apply_recommendation_quality_guard(df_out)
         _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
-        # [v29] 알파 점수 — 전일 학습된 검증 통과 모델로 당일 예측 (미검증 시 자동 미사용)
+        # [v29→v31.3] 알파 점수 — 스코어링 직전에 이번 실행에서 학습+검증.
+        # 배치 러너가 매번 새 체크아웃이라 모델 바이너리(.gitignore)가 남지
+        # 않음 → '메타는 검증통과인데 모델 없음 → 영구 미사용' 버그 수정.
+        # 학습 패널은 선행수익률이 확정된 과거(≥6영업일 전)만 포함 — 누출 없음.
         try:
+            from alpha_engine import train_and_save as _alpha_train
             from alpha_engine import score_today as _alpha_score_today
+            _am = _alpha_train(OUT_DIR, trade_ymd)
+            if _am.get("validated"):
+                log(f"🧠 [v29] 알파 학습 — OOS IC {_am.get('mean_ic')} (t={_am.get('ic_t')}) "
+                    f"AUC {_am.get('auc')} → 검증 통과")
+            else:
+                log(f"🧠 [v29] 알파 학습 — 검증 미통과 ({_am.get('reason', 'gate 미달')}) → 미사용")
             df_out = _alpha_score_today(df_out, data_dir=OUT_DIR)
             if int(pd.to_numeric(df_out.get("ALPHA_VALIDATED", 0), errors="coerce").fillna(0).iloc[0]):
-                log("🧠 [v29] 알파모델 적용 — OOS 검증 통과분")
+                log("🧠 [v29] 알파 점수 적용 완료")
             else:
-                log("🧠 [v29] 알파모델 미사용 (검증 미통과 또는 모델 없음)")
+                log("🧠 [v29] 알파 점수 미적용 (검증 미통과 또는 데이터 부족)")
         except Exception as _ae:
-            logger.warning(f"⚠️ 알파 점수 실패 (미사용 처리): {_ae}")
+            logger.warning(f"⚠️ 알파 학습/점수 실패 (미사용 처리): {_ae}")
         # [v28] "왜 이 종목인가" 근거 문장 — 실측 수치 기반, 리스크 병기
         try:
             from services.reco_evidence import add_evidence_columns
@@ -1951,18 +1961,7 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         cs = auto_calibrate(OUT_DIR, trade_ymd)
         log(f"📊 캘리브레이션: {cs.get('n_trades',0)}건, 승률={cs.get('overall_winrate',0):.1%}")
     except Exception as e: log(f"⚠️ 자동 캘리브레이션 스킵: {e}")
-    # [v29] 알파모델 야간 재학습 + 워크포워드 재검증 (내일 실행분에 사용)
-    # 검증(OOS IC t≥2 · AUC≥0.52 · Q5-Q1>0) 실패 시 저장하지 않음 → 내일 자동 미사용.
-    try:
-        from alpha_engine import train_and_save
-        _am = train_and_save(OUT_DIR, trade_ymd)
-        if _am.get("validated"):
-            log(f"🧠 [v29] 알파 재학습 — OOS IC {_am.get('mean_ic')} (t={_am.get('ic_t')}) "
-                f"AUC {_am.get('auc')} → 검증 통과, 내일 적용")
-        else:
-            log(f"🧠 [v29] 알파 재학습 — 검증 미통과 ({_am.get('reason', 'gate 미달')}) → 미사용 유지")
-    except Exception as e:
-        log(f"⚠️ 알파 재학습 스킵: {e}")
+    # [v31.3] 알파 학습은 스코어링 직전(위)으로 이동 — 야간 별도 재학습 제거.
     # [v28] 점수 축 예측력 야간 감사 — 역주행(t<-2) 축 경고
     # AI 축만 신뢰도 게이트가 있고 룰 기반 축은 무검증이던 비대칭 해소.
     try:
