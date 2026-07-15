@@ -4192,7 +4192,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     # ── [v31] 기준·범례·용어집 서랍 — 기본 접힘 ──
     # 라벨 기준 / 진입 위험 범례 / ENTRY_EDGE shadow / 스코어 용어집을 하나로.
     with ui.expansion(
-        "📖 기준 · 범례 · 용어집 (펼쳐 보기)",
+        "📖 판정 기준 · 위험 신호",
         icon="menu_book",
     ).classes(
         "w-full mb-3 bg-[rgba(139,92,246,0.04)] "
@@ -4210,93 +4210,266 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         else:
             n_combo = n_strong = n_instant = n_chase = n_none = 0
 
-        with ui.card().classes(
-            "w-full p-2 mb-3 bg-[rgba(255,255,255,0.02)] "
-            "border border-[rgba(255,255,255,0.05)] rounded"
-        ):
-            with ui.row().classes("w-full gap-6 items-center flex-wrap"):
-                ui.label("🏷️ 라벨 기준:").classes("text-xs text-gray-500 font-bold")
-                # [Step AE] 라벨명을 외부 리뷰안 한글로 표시 (내부값은 그대로 유지)
-                # [v3.7.25] 핵심 관찰 최우선 표시 (고점수 관찰 · 실성능 1위)
-                ui.label(
-                    f"🟣 핵심 관찰 ({n_combo}): S≥90 · T≥80 · AI≥60 · 고점수 관찰 "
-                    f"[n=112 EV +25.77% 승률 83.9%]"
-                ).classes("text-xs text-purple-400 font-bold")
-                ui.label(
-                    f"🔵 관심관찰 ({n_strong}): 평균≥70 · 균형≥70 · 갭≤3% · 손익비≥0.8 "
-                    f"[n=6 · 👁️ 관찰중 · 매매 제외]"
-                ).classes("text-xs text-gray-500 line-through opacity-60")
-                ui.label(
-                    f"🟡 관찰 후보 ({n_instant}): 최소≥50 · 균형≥70 · 갭≤5% · 공식 신규매수 아님"
-                ).classes("text-xs text-green-400")
-                ui.label(
-                    f"🟠 추격주의 ({n_chase}): 갭>5% · 평균≥60 (추격 비추)"
-                ).classes("text-xs text-orange-400")
-                if n_none > 0:
-                    ui.label(f"(기준 미달 {n_none}개)").classes("text-xs text-gray-600")
-                ui.label(
-                    "※ 점수 '검증제외' 표시는 DISPLAY_SCORE 0/음수 또는 legacy/stale 표시 후보입니다."
-                ).classes("text-[10px] text-gray-600")
-
-        # [v3.9.8] 진입 위험 표시 기준 (ENTRY_RISK 범례)
-        # 회원이 종목 카드/테이블의 🔴/🟠 뱃지를 보고 "이게 뭐지?" 못 알게 만들기 위한 범례
+        # [v31.8] 긴 설명형 범례를 '공식 신호 → 현재 분포 → 라벨 → 위험' 순서로 재구성.
+        # 색상만으로 의미를 구분하지 않고 아이콘·텍스트·숫자를 함께 표시한다.
+        n_red = n_orange = n_green = 0
         if "ENTRY_RISK_LEVEL" in df.columns:
-            # [v3.9.11 hotfix] strip().upper() — silent miss 방지
-            _lvl_norm = df["ENTRY_RISK_LEVEL"].astype(str).str.strip().str.upper()
-            n_red = int((_lvl_norm == "RED").sum())
-            n_orange = int((_lvl_norm == "ORANGE").sum())
-            n_green = int((_lvl_norm == "GREEN").sum())
-            with ui.card().classes(
-                "w-full p-2 mb-3 bg-[rgba(255,80,80,0.04)] "
-                "border border-[rgba(239,68,68,0.2)] rounded"
-            ):
-                with ui.row().classes("w-full items-start gap-2 mb-1"):
-                    ui.label("🚨").classes("text-sm")
-                    ui.label("진입 위험 표시 기준").classes(
-                        "text-xs text-rose-300 font-bold"
-                    )
-                with ui.column().classes("gap-0.5 pl-5"):
-                    ui.label(
-                        f"🔴 진입 위험 ({n_red}): STRUCT 70~85 구간 + VWAP 8% 이상 떠 있음 "
-                        f"— 최근 검증에서 손실 위험 높게 나타난 조합"
-                    ).classes("text-[11px] text-red-300")
-                    ui.label(
-                        f"🟠 과열 주의 ({n_orange}): STRUCT 최상급 아닌데 VWAP 15% 이상 — "
-                        f"강한 모멘텀일 수 있으나 추격 진입 주의"
-                    ).classes("text-[11px] text-orange-300")
-                    ui.label(
-                        f"— 특이 위험 없음 ({n_green}): 현재 기준 별도 진입 위험 신호 없음"
-                    ).classes("text-[11px] text-gray-400")
-                ui.label(
-                    "※ 위험 표시는 자동 제외가 아니라 진입 전 확인 신호입니다."
-                ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
+            _lvl_norm = df["ENTRY_RISK_LEVEL"].fillna("").astype(str).str.upper()
+            n_red = int(_lvl_norm.eq("RED").sum())
+            n_orange = int(_lvl_norm.eq("ORANGE").sum())
+            n_green = int((~_lvl_norm.isin(["RED", "ORANGE"])).sum())
 
-        # [v22.3.10] ENTRY_EDGE shadow 표시 기준 — 공식 매수식 변경 없음
+        n_edge_caution = n_edge_green = 0
         if "ENTRY_EDGE_LEVEL" in df.columns:
-            _edge_norm = df["ENTRY_EDGE_LEVEL"].astype(str).str.strip().str.upper()
-            n_edge_caution = int((_edge_norm == "CAUTION").sum())
-            n_edge_green = int((_edge_norm == "GREEN").sum())
-            with ui.card().classes(
-                "w-full p-2 mb-3 bg-[rgba(245,158,11,0.04)] "
-                "border border-[rgba(245,158,11,0.2)] rounded"
-            ):
-                with ui.row().classes("w-full items-start gap-2 mb-1"):
-                    ui.label("🧪").classes("text-sm")
-                    ui.label("ENTRY_EDGE shadow 표시").classes(
-                        "text-xs text-amber-300 font-bold"
+            _edge_norm = df["ENTRY_EDGE_LEVEL"].fillna("").astype(str).str.upper()
+            n_edge_caution = int(_edge_norm.eq("CAUTION").sum())
+            n_edge_green = int((~_edge_norm.eq("CAUTION")).sum())
+
+        # 가장 중요한 경계부터 먼저 보여준다: 라벨/shadow는 공식 신규매수 신호가 아니다.
+        with ui.card().classes(
+            "w-full p-3 mb-3 bg-[rgba(15,23,42,0.78)] "
+            "border border-[rgba(148,163,184,0.20)] rounded-lg"
+        ):
+            with ui.row().classes("w-full items-center justify-between gap-3 flex-wrap"):
+                with ui.column().classes("gap-0"):
+                    ui.label("현재 목록 분포").classes(
+                        "text-xs text-slate-200 font-bold"
                     )
-                with ui.column().classes("gap-0.5 pl-5"):
+                    ui.label("숫자는 지금 화면에 잡힌 종목 수입니다").classes(
+                        "text-[10px] text-slate-500"
+                    )
+                with ui.row().classes("gap-2 items-center flex-wrap"):
+                    ui.label(f"🟣 핵심 {n_combo}").classes(
+                        "text-[11px] text-purple-200 font-bold px-2 py-1 rounded-full "
+                        "border border-purple-500/30 bg-purple-500/10"
+                    )
+                    ui.label(f"🔵 관심 {n_strong}").classes(
+                        "text-[11px] text-sky-200 font-bold px-2 py-1 rounded-full "
+                        "border border-sky-500/30 bg-sky-500/10"
+                    )
+                    ui.label(f"🟡 후보 {n_instant}").classes(
+                        "text-[11px] text-amber-200 font-bold px-2 py-1 rounded-full "
+                        "border border-amber-500/30 bg-amber-500/10"
+                    )
+                    ui.label(f"🟠 추격주의 {n_chase}").classes(
+                        "text-[11px] text-orange-200 font-bold px-2 py-1 rounded-full "
+                        "border border-orange-500/30 bg-orange-500/10"
+                    )
+                    if "ENTRY_RISK_LEVEL" in df.columns:
+                        ui.label(f"🚨 위험 {n_red + n_orange}").classes(
+                            "text-[11px] text-red-200 font-bold px-2 py-1 rounded-full "
+                            "border border-red-500/30 bg-red-500/10"
+                        )
+                    if "ENTRY_EDGE_LEVEL" in df.columns:
+                        ui.label(f"🧪 shadow {n_edge_caution}").classes(
+                            "text-[11px] text-yellow-100 font-bold px-2 py-1 rounded-full "
+                            "border border-yellow-500/30 bg-yellow-500/10"
+                        )
+
+            with ui.row().classes(
+                "w-full mt-3 px-3 py-2 gap-2 items-center flex-wrap "
+                "bg-[rgba(16,185,129,0.08)] border border-emerald-500/20 rounded"
+            ):
+                ui.label("✓ 공식 신규매수").classes(
+                    "text-[11px] text-emerald-300 font-extrabold"
+                )
+                ui.label("TOP_PICK + BUY_NOW_ELIGIBLE").classes(
+                    "text-[11px] text-white font-bold px-2 py-0.5 rounded "
+                    "bg-emerald-500/20 border border-emerald-500/30"
+                )
+                ui.label("두 조건을 모두 통과한 종목만 해당").classes(
+                    "text-[11px] text-slate-300"
+                )
+                ui.label("아래 라벨·위험·shadow는 매수 신호가 아닙니다").classes(
+                    "text-[10px] text-slate-500 ml-auto"
+                )
+
+        ui.label("🏷️ 종목 라벨").classes(
+            "text-xs text-slate-300 font-bold mb-2"
+        )
+        with ui.row().classes("w-full gap-2 items-stretch flex-wrap mb-2"):
+            with ui.card().classes(
+                "min-w-[220px] flex-1 p-3 bg-[rgba(168,85,247,0.07)] "
+                "border border-purple-500/20 rounded-lg"
+            ):
+                with ui.row().classes("w-full items-center justify-between gap-2"):
+                    ui.label("🟣 핵심 관찰").classes(
+                        "text-sm text-purple-200 font-extrabold"
+                    )
+                    ui.label(f"{n_combo}개").classes(
+                        "text-xs text-purple-100 font-bold px-2 py-0.5 rounded-full "
+                        "bg-purple-500/20"
+                    )
+                ui.label("과거 검증 성과가 가장 좋았던 고점수 관찰군").classes(
+                    "text-[11px] text-slate-300 mt-1"
+                )
+                ui.label("S ≥ 90 · T ≥ 80 · AI ≥ 60").classes(
+                    "text-[10px] text-purple-300 font-mono mt-2"
+                )
+                ui.label("과거 검증 n=112 · EV +25.77% · 승률 83.9%").classes(
+                    "text-[10px] text-slate-500"
+                )
+                ui.label("관찰 라벨 · 공식 신규매수는 별도 판정").classes(
+                    "text-[10px] text-purple-300 mt-2 font-bold"
+                )
+
+            with ui.card().classes(
+                "min-w-[220px] flex-1 p-3 bg-[rgba(14,165,233,0.06)] "
+                "border border-sky-500/20 rounded-lg"
+            ):
+                with ui.row().classes("w-full items-center justify-between gap-2"):
+                    ui.label("🔵 관심 관찰").classes(
+                        "text-sm text-sky-200 font-extrabold"
+                    )
+                    ui.label(f"{n_strong}개").classes(
+                        "text-xs text-sky-100 font-bold px-2 py-0.5 rounded-full "
+                        "bg-sky-500/20"
+                    )
+                ui.label("조건은 좋지만 표본이 적어 매매에서 제외한 관심군").classes(
+                    "text-[11px] text-slate-300 mt-1"
+                )
+                ui.label("평균 ≥ 70 · 균형 ≥ 70 · 갭 ≤ 3% · 손익비 ≥ 0.8").classes(
+                    "text-[10px] text-sky-300 font-mono mt-2"
+                )
+                ui.label("과거 검증 n=6").classes(
+                    "text-[10px] text-slate-500"
+                )
+                ui.label("👁️ 관찰 전용 · 매매 제외").classes(
+                    "text-[10px] text-sky-300 mt-2 font-bold"
+                )
+
+            with ui.card().classes(
+                "min-w-[220px] flex-1 p-3 bg-[rgba(234,179,8,0.06)] "
+                "border border-yellow-500/20 rounded-lg"
+            ):
+                with ui.row().classes("w-full items-center justify-between gap-2"):
+                    ui.label("🟡 관찰 후보").classes(
+                        "text-sm text-yellow-100 font-extrabold"
+                    )
+                    ui.label(f"{n_instant}개").classes(
+                        "text-xs text-yellow-50 font-bold px-2 py-0.5 rounded-full "
+                        "bg-yellow-500/20"
+                    )
+                ui.label("기본 점수와 균형 조건을 통과한 후보군").classes(
+                    "text-[11px] text-slate-300 mt-1"
+                )
+                ui.label("최소 ≥ 50 · 균형 ≥ 70 · 갭 ≤ 5%").classes(
+                    "text-[10px] text-yellow-200 font-mono mt-2"
+                )
+                ui.label("라벨만으로는 진입을 허용하지 않습니다").classes(
+                    "text-[10px] text-slate-500"
+                )
+                ui.label("공식 신규매수 아님").classes(
+                    "text-[10px] text-yellow-200 mt-2 font-bold"
+                )
+
+            with ui.card().classes(
+                "min-w-[220px] flex-1 p-3 bg-[rgba(249,115,22,0.06)] "
+                "border border-orange-500/20 rounded-lg"
+            ):
+                with ui.row().classes("w-full items-center justify-between gap-2"):
+                    ui.label("🟠 추격 주의").classes(
+                        "text-sm text-orange-200 font-extrabold"
+                    )
+                    ui.label(f"{n_chase}개").classes(
+                        "text-xs text-orange-100 font-bold px-2 py-0.5 rounded-full "
+                        "bg-orange-500/20"
+                    )
+                ui.label("현재가가 추천 매수가보다 이미 많이 오른 종목").classes(
+                    "text-[11px] text-slate-300 mt-1"
+                )
+                ui.label("갭 > 5% · 평균 ≥ 60").classes(
+                    "text-[10px] text-orange-300 font-mono mt-2"
+                )
+                ui.label("상승 모멘텀과 안전한 진입은 다른 문제입니다").classes(
+                    "text-[10px] text-slate-500"
+                )
+                ui.label("추격 진입 비추천").classes(
+                    "text-[10px] text-orange-300 mt-2 font-bold"
+                )
+
+        with ui.row().classes("w-full gap-2 items-center flex-wrap mb-3 px-1"):
+            if n_none > 0:
+                ui.label(f"기준 미달 {n_none}개").classes(
+                    "text-[10px] text-slate-500 px-2 py-1 rounded "
+                    "bg-white/[0.03] border border-white/[0.06]"
+                )
+            ui.label(
+                "'검증제외'는 DISPLAY_SCORE가 0 이하이거나 legacy/stale인 표시 후보입니다."
+            ).classes("text-[10px] text-slate-600")
+
+        if "ENTRY_RISK_LEVEL" in df.columns or "ENTRY_EDGE_LEVEL" in df.columns:
+            ui.label("🚨 진입 전 경고").classes(
+                "text-xs text-slate-300 font-bold mb-2"
+            )
+
+        with ui.row().classes("w-full gap-2 items-stretch flex-wrap mb-3"):
+            if "ENTRY_RISK_LEVEL" in df.columns:
+                with ui.card().classes(
+                    "min-w-[280px] flex-1 p-3 bg-[rgba(239,68,68,0.05)] "
+                    "border border-red-500/20 rounded-lg"
+                ):
+                    with ui.row().classes("w-full items-center justify-between gap-2"):
+                        with ui.column().classes("gap-0"):
+                            ui.label("가격 · 구조 위험").classes(
+                                "text-sm text-red-100 font-extrabold"
+                            )
+                            ui.label("진입 전에 가격 위치를 다시 확인").classes(
+                                "text-[10px] text-slate-500"
+                            )
+                        with ui.row().classes("gap-1 items-center"):
+                            ui.label(f"🔴 {n_red}").classes(
+                                "text-[11px] text-red-200 font-bold px-2 py-0.5 "
+                                "rounded-full bg-red-500/15"
+                            )
+                            ui.label(f"🟠 {n_orange}").classes(
+                                "text-[11px] text-orange-200 font-bold px-2 py-0.5 "
+                                "rounded-full bg-orange-500/15"
+                            )
                     ui.label(
-                        f"🟠 감점 관찰 ({n_edge_caution}): B_red shadow — "
-                        "STRUCT 70~85 + VWAP_GAP>8 조합에 ENTRY_EDGE_SCORE -15"
-                    ).classes("text-[11px] text-amber-300")
+                        "🔴 진입 위험 · STRUCT 70~85 + VWAP 위 8% 이상"
+                    ).classes("text-[11px] text-red-200 mt-2")
                     ui.label(
-                        f"🟢 정상 ({n_edge_green}): 현재 ENTRY_EDGE 감점 없음"
-                    ).classes("text-[11px] text-gray-400")
-                ui.label(
-                    "※ ENTRY_EDGE는 표시/감점 전용 shadow 컬럼입니다. "
-                    "BUY_NOW_ELIGIBLE 공식 신규매수 기준은 변경하지 않습니다."
-                ).classes("text-[10px] text-gray-500 italic mt-1 pl-5")
+                        "🟠 과열 주의 · 최상급 구조가 아니면서 VWAP 위 15% 이상"
+                    ).classes("text-[11px] text-orange-200 mt-1")
+                    ui.label(f"별도 위험 신호 없음 {n_green}개").classes(
+                        "text-[10px] text-slate-500 mt-2"
+                    )
+                    ui.label("위험 표시는 자동 제외가 아닌 진입 전 확인 신호입니다").classes(
+                        "text-[10px] text-slate-400 mt-2 font-bold"
+                    )
+
+            if "ENTRY_EDGE_LEVEL" in df.columns:
+                with ui.card().classes(
+                    "min-w-[280px] flex-1 p-3 bg-[rgba(245,158,11,0.05)] "
+                    "border border-amber-500/20 rounded-lg"
+                ):
+                    with ui.row().classes("w-full items-center justify-between gap-2"):
+                        with ui.column().classes("gap-0"):
+                            ui.label("ENTRY_EDGE 보조 감점").classes(
+                                "text-sm text-amber-100 font-extrabold"
+                            )
+                            ui.label("진입 품질을 설명하는 shadow 지표").classes(
+                                "text-[10px] text-slate-500"
+                            )
+                        ui.label(f"🧪 감점 {n_edge_caution}").classes(
+                            "text-[11px] text-amber-100 font-bold px-2 py-0.5 "
+                            "rounded-full bg-amber-500/15"
+                        )
+                    ui.label(
+                        "🟠 B_red · STRUCT 70~85 + VWAP_GAP > 8 → -15점"
+                    ).classes("text-[11px] text-amber-200 mt-2")
+                    ui.label(f"감점 없음 {n_edge_green}개").classes(
+                        "text-[10px] text-slate-500 mt-2"
+                    )
+                    ui.label("공식 매수식 미반영").classes(
+                        "text-[10px] text-amber-100 font-bold mt-2 px-2 py-1 "
+                        "rounded bg-amber-500/10 border border-amber-500/20 self-start"
+                    )
+                    ui.label(
+                        "표시·보조 감점 전용이며 BUY_NOW_ELIGIBLE 기준은 바꾸지 않습니다"
+                    ).classes("text-[10px] text-slate-400 mt-2")
+
 
         # [v3.7.26] 스코어 용어집 (접이식) — 사용자 지적: "스코어 너무 많음" 해결
         # 기본 닫힘 · 펼치면 각 스코어의 정체 + 공식을 한눈에
