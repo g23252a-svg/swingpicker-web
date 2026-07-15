@@ -348,7 +348,7 @@ async def index():
             app.storage.user["main_nav_version"] = _nav_version
             app.storage.user["main_active_tab"] = "t0"
     except Exception:
-        pass
+        logger.warning("메인 탭 복원 상태를 읽거나 초기화하지 못했습니다", exc_info=True)
 
     # ─── 빈 컨테이너 패널 (Lazy Loading 핵심) ───
     containers = {}
@@ -410,7 +410,7 @@ async def index():
             try:
                 app.storage.user["main_active_tab"] = key
             except Exception:
-                pass
+                logger.warning("현재 메인 탭 상태를 저장하지 못했습니다", exc_info=True)
         # [업데이트 알림] 업데이트 탭 클릭 시 → 현재 버전을 '본 것'으로 저장 + 🔴 제거
         #   set_label()은 탭의 label(표시 텍스트)만 바꾸고 name(라우팅 키)은 유지하므로
         #   label_to_key 매핑이 깨지지 않는다.

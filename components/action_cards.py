@@ -23,9 +23,12 @@ components/action_cards.py — v24.5 '오늘의 추천' 액션 카드 렌더러
 from __future__ import annotations
 
 import math
+import logging
 from typing import Optional
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 try:
     import streamlit as st
@@ -418,7 +421,7 @@ def render_action_cards_nicegui(df: pd.DataFrame,
     try:
         ui.add_head_html(_CSS)
     except Exception:
-        pass
+        logger.warning("NiceGUI 액션 카드 CSS 주입 실패", exc_info=True)
 
     # 필터 칩(네이티브) — 선택값에 따라 build_cards_html 재호출
     state = {"mode": filter_mode}

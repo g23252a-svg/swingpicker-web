@@ -68,7 +68,7 @@ def _resolve(config):
             if hasattr(DEFAULT_CONFIG, "exit"):
                 return DEFAULT_CONFIG.exit
         except Exception:
-            pass
+            logger.debug("청산 규율 설정 로드 실패; 안전 기본값 사용", exc_info=True)
         return _FallbackExitConfig()
     if hasattr(config, "stop_tight_pct"):
         return config
