@@ -94,3 +94,20 @@ def test_evidence_flags_low_alpha_as_risk():
 def test_evidence_falls_back_to_honest_unused():
     e, _, _ = build_evidence_row({"ALPHA_VALIDATED": 0, "AI_SCORE": 0, "ML_TRUSTED": 0})
     assert "AI 예측 미사용" in e
+
+
+def test_walk_forward_survives_infinite_returns():
+    """[v31.8] 시가=0 글리치로 _fwd에 inf가 섞여도 검증이 오염되지 않아야 한다.
+
+    실측 (2026-07-15): OHLCV 시가=0 86행 → Q5-Q1 스프레드 -inf →
+    IC t=6.8·AUC 0.60인데도 validated=False → 알파가 하루 걸러 꺼짐.
+    """
+    p = _synthetic_panel(signal=0.6, seed=2)
+    # 일부 행 수익률을 ±inf로 오염 (글리치 재현)
+    idx = p.sample(frac=0.01, random_state=0).index
+    p.loc[idx, "_fwd"] = np.inf
+    p.loc[idx[: len(idx) // 2], "_fwd"] = -np.inf
+    r = ae.walk_forward_validate(p, ["F1", "F2"])
+    assert r["ok"]
+    assert np.isfinite(r["q5q1_spread_pct"])
+    assert r["validated"]  # 신호가 살아 있으므로 통과해야 정상
