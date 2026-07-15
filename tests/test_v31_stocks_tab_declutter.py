@@ -93,3 +93,26 @@ def test_table_alpha_display():
     import numpy as np
     r4 = pd.Series({"ALPHA_VALIDATED": 1, "ALPHA_SCORE": np.nan})
     assert _table_alpha_display(r4) == "—"
+
+
+def test_validation_scorecard_smoke():
+    from components.tab_stocks import _render_validation_scorecard
+
+    # 실데이터 스키마 형태 + 빈 dict 모두 크래시 없이 렌더
+    bt = {
+        "days_covered": 99,
+        "signal_top1": {"n_signals_total": 37, "n_filled": 31,
+                        "ev_net_pct": -0.79, "tp1_rate": 0.258, "fill_rate": 0.84},
+        "capital_portfolio_top1": {"n_trades_filled": 11, "total_return_pct": -36.74,
+                                   "max_drawdown_pct": 57.3, "initial_capital": 10_000_000},
+        "capital_portfolio": {"n_trades_filled": 26, "total_return_pct": 12.59,
+                              "max_drawdown_pct": 17.4},
+        "daily_portfolio_summary": {"n_days": 37, "avg_daily_portfolio_ret": 1.75,
+                                    "positive_rate": 0.57, "n_positive_days": 21},
+        "confidence": {"level": "LOW", "reason": "표본 11건"},
+        "methodology": {"horizon_days": 10, "fill_window_days": 3,
+                        "fee_pct_roundtrip": 0.22, "date_range": ["2026-02-26", "2026-07-14"]},
+        "generated_at": "2026-07-15T11:37:00",
+    }
+    _render_validation_scorecard(bt)
+    _render_validation_scorecard({})
