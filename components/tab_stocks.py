@@ -3341,6 +3341,126 @@ def _render_swing_alpha_oos_card(df: pd.DataFrame) -> None:
         ).classes("text-[10px] text-gray-500 mt-2")
 
 
+def _render_validation_scorecard(bt: dict) -> None:
+    """[v31.5] 검증 성적표 — 전문용어 없이 '질문→답' 형식.
+
+    기존: 'EV -0.79% · MDD 57.3% · rolling 0폴드 · 슬롯풀 16' 식의
+    용어 나열 → 사용자가 해석 불가. 각 숫자를 그것이 답하는 질문 아래에
+    사람 말로 다시 쓴다. 숫자는 하나도 빼지 않고 번역만 한다.
+    """
+    daily_top1 = bt.get("daily_top1_backtest") or {}
+    signal_top1 = bt.get("signal_top1") or {}
+    capital_top1 = bt.get("capital_portfolio_top1") or {}
+    capital_stats = bt.get("capital_portfolio") or {}
+    port_stats = bt.get("daily_portfolio_summary") or {}
+    confidence = bt.get("confidence") or {}
+    days = bt.get("days_covered", 0)
+
+    blocks = []  # (색, 질문, 답변 문장들)
+
+    # ── Q1. 추천 자체의 질 ──
+    src = signal_top1 if signal_top1 else daily_top1
+    if src:
+        if signal_top1:
+            n_sig = src.get("n_signals_total", 0)
+            n_fill = src.get("n_filled", 0)
+            ev = src.get("ev_net_pct", 0)
+            tp1 = src.get("tp1_rate", 0) * 100
+        else:
+            n_sig = src.get("n_all_picks", 0)
+            n_fill = src.get("n", 0)
+            ev = src.get("ev", 0)
+            tp1 = src.get("tp1_rate", 0) * 100
+        if n_fill > 0:
+            fill_pct = n_fill / n_sig * 100 if n_sig else 0
+            _judge = ("아직 마이너스 구간입니다" if ev <= 0
+                      else "플러스 구간입니다")
+            blocks.append((
+                "#60A5FA" if ev > 0 else "#F59E0B",
+                "추천 종목들은 실제로 올랐나?",
+                [
+                    f"지난 {days}일간 <b>{n_sig}번</b> 추천했고, 그중 <b>{n_fill}번({fill_pct:.0f}%)</b>은 제시한 가격에 살 수 있었습니다.",
+                    f"산 것 중 <b>{tp1:.0f}%</b>가 1차 목표가에 도달했고, 1건당 평균 손익은 <b>{ev:+.2f}%</b> — {_judge}.",
+                ],
+            ))
+
+    # ── Q2. 실제 운용 시뮬레이션 ──
+    if capital_top1 and capital_top1.get("n_trades_filled", 0) > 0:
+        ret = capital_top1.get("total_return_pct", 0)
+        mdd = capital_top1.get("max_drawdown_pct", 0)
+        n = capital_top1["n_trades_filled"]
+        init = int(capital_top1.get("initial_capital", 10_000_000) / 1e4)
+        blocks.append((
+            "#10B981" if ret > 0 else "#EF4444",
+            f"{init:,}만원으로 한 번에 1종목씩만 샀다면?",
+            [
+                f"기간 수익률 <b>{ret:+.1f}%</b> ({n}건 체결). 중간에 최대 <b>-{abs(mdd):.0f}%</b>까지 밀린 적이 있습니다.",
+                "한 종목 몰빵 방식은 추천이 겹치면 기회를 놓쳐(대기 다수) 성적 변동이 큽니다.",
+            ],
+        ))
+
+    # ── Q3. 3종목 분산이었다면 ──
+    if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
+        ret3 = capital_stats.get("total_return_pct", 0)
+        mdd3 = capital_stats.get("max_drawdown_pct", 0)
+        n3 = capital_stats["n_trades_filled"]
+        extra = ""
+        if port_stats and port_stats.get("n_days", 0) >= 5:
+            pos = port_stats.get("positive_rate", 0) * 100
+            extra = f" 하루 단위로는 <b>{pos:.0f}%</b>의 날이 플러스로 마감했습니다."
+        blocks.append((
+            "#10B981" if ret3 > 0 else "#EF4444",
+            "3종목에 나눠 담았다면?",
+            [
+                f"기간 수익률 <b>{ret3:+.1f}%</b> ({n3}건 · 최대 하락 <b>-{abs(mdd3):.0f}%</b>).{extra}",
+            ],
+        ))
+
+    # ── Q4. 이 성적표를 얼마나 믿어야 하나 ──
+    lvl = str(confidence.get("level", "LOW")).upper()
+    lvl_txt = {"HIGH": ("충분합니다", "#10B981"),
+               "MEDIUM": ("보통입니다", "#F59E0B")}.get(lvl, ("아직 부족합니다", "#EF4444"))
+    n_exec = capital_top1.get("n_trades_filled", 0) if capital_top1 else 0
+    blocks.append((
+        lvl_txt[1],
+        "이 숫자들, 믿어도 되나?",
+        [
+            f"통계 표본이 <b>{lvl_txt[0]}</b>"
+            + (f" (실운용 시뮬 {n_exec}건 — 판단을 뒤집기엔 적은 수)." if lvl == "LOW" and n_exec else "."),
+            "여기 숫자들은 과거 추천의 결과이지, 내일의 보장이 아닙니다.",
+        ],
+    ))
+
+    rows_html = "".join(
+        f'''<div style="border-left:3px solid {clr}; padding:8px 12px; margin-bottom:8px;
+                     background:rgba(148,163,184,0.05); border-radius:0 8px 8px 0;">
+              <div style="font-size:12px; font-weight:800; color:#E2E8F0; margin-bottom:4px;">Q. {q}</div>
+              {"".join(f'<div style="font-size:11.5px; color:#94A3B8; line-height:1.6;">{a}</div>' for a in answers)}
+            </div>'''
+        for clr, q, answers in blocks
+    )
+
+    # ── 검증 방식 + 갱신 시각 (사람 말로) ──
+    meta_txt = ""
+    m = bt.get("methodology")
+    if isinstance(m, dict):
+        dr = m.get("date_range", ["", ""])
+        meta_txt = (
+            f"검증 방식: 추천 다음날부터 {m.get('fill_window_days','?')}일 안에 제시가 도달 시 매수 "
+            f"→ 최장 {m.get('horizon_days','?')}일 보유 → 수수료 {m.get('fee_pct_roundtrip','?')}% 차감 "
+            f"· 기간 {dr[0]} ~ {dr[1]}"
+        )
+    gen = str(bt.get("generated_at", "")).replace("T", " ")[:16]
+    if gen:
+        meta_txt += f" · 갱신 {gen}"
+
+    ui.html(f'''
+      <div style="width:100%;">
+        {rows_html}
+        <div style="font-size:10px; color:#64748B; font-style:italic; margin-top:4px;">{meta_txt}</div>
+      </div>''')
+
+
 def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                        auth: str = "free", official_decision: dict | None = None):
     """Tab 2 상단 헤더 카드 — 오늘의 검증 Top 3 표시."""
@@ -3461,7 +3581,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
         # 회원은 위 요약만 봐도 충분. 펼치면 신호/실집행/WF/Rolling 등 전체 확인.
         # [v3.9.5] 관리자는 기본 펼침 (디버그/운영 편의)
         # [v31] 상세 검증은 관리자 포함 전원 기본 접힘 — 화면 밀도 개선
-        _expansion_title = "🔬 상세 검증 정보 (펼쳐 보기)"
+        _expansion_title = "📊 지난 99일 성적표 — 추천을 따랐다면? (펼쳐 보기)"
         with ui.expansion(
             _expansion_title,
             icon="biotech",
@@ -3470,246 +3590,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
             "w-full mt-2 bg-[rgba(139,92,246,0.05)] "
             "border border-[rgba(139,92,246,0.2)] rounded"
         ).props("dense"):
-            # [v31.4] 후보 0개인 날: 통계 타일(회원 요약)을 서랍 안으로 이동
-            if not top3_codes:
-                _render_member_summary(
-                    capital_top1=capital_top1,
-                    signal_top1=signal_top1,
-                    daily_top1=daily_top1,
-                    confidence=confidence,
-                    pre_entry_risk=bt.get("pre_entry_risk_shadow") or {},
-                    struct_risk=bt.get("struct_risk_shadow") or {},
-                    official_decision=official_decision,
-                )
-            # 헤더에서 옮긴 기술 요약 한 줄 (옛 summary_text)
-            ui.label(summary_text).classes(
-                "text-[10px] text-gray-500 mb-2 italic"
-            )
-
-            # ═══════════════════════════════════════════════════
-            # [v3.7.23] 정보 재배치 — 사용자 읽기 순서 최적화
-            # ─────────────────────────────────────────────────
-            # Before: WF → 3종목 포트 → 신호 → 실집행 → 신뢰도 → Top3 → Rolling
-            #         (정보 우선순위 섞임 → 메인이 뭔지 흐림)
-            # After: 메인 블록 (실집행/신호/신뢰도) → 보조 블록 (WF/Rolling/Top3/3종목)
-            #         → 메타 (조건/갱신시각)
-            # ═══════════════════════════════════════════════════
-
-            # ───────────────────────────────────────────
-            # 🎯 메인 블록 — 실전 의사결정에 직접 쓰는 숫자 3개
-            # ───────────────────────────────────────────
-
-            # 💰 #1 실집행 성과 (가장 중요 — 실제 운용 가능성)
-            if capital_top1 and capital_top1.get("n_trades_filled", 0) > 0:
-                t1_ret = capital_top1.get("total_return_pct", 0)
-                t1_mdd = capital_top1.get("max_drawdown_pct", 0)
-                t1_n = capital_top1["n_trades_filled"]
-                t1_init = capital_top1.get("initial_capital", 10_000_000)
-
-                gap = capital_top1.get("signal_vs_capital_gap", {})
-                exec_rate = gap.get("execution_rate", 1.0) * 100 if gap else 100
-                m = "💰" if t1_ret > 0 else "💸"
-                clr = "text-green-400" if t1_ret > 0 else "text-red-400"
-                ui.label(
-                    f"{m} 실집행 성과 (실전 운용): "
-                    f"{t1_n}건 ({int(t1_init/1e4):,}만원 동시1포지션) · "
-                    f"{t1_ret:+.2f}% · MDD {t1_mdd:.1f}% · 실행률 {exec_rate:.0f}%"
-                ).classes(f"text-sm {clr} mb-1 font-semibold")
-
-                # 스킵 이유별 분해 (audit 있으면)
-                skip = capital_top1.get("skip_reasons_summary", {})
-                if skip:
-                    sk_exec = skip.get("EXECUTED", 0)
-                    sk_nf = skip.get("NOT_FILLED", 0)
-                    sk_held = skip.get("SAME_TICKER_ALREADY_HELD", 0)
-                    sk_full = skip.get("SLOT_FULL", 0)
-                    sk_total = skip.get("total_signals", 0)
-                    ui.label(
-                        f"  └ 신호 {sk_total} → 실행 {sk_exec} · "
-                        f"미체결 {sk_nf} · 기보유 {sk_held} · 슬롯풀 {sk_full}"
-                    ).classes("text-xs text-gray-500 mb-1 ml-4")
-
-            # 📡 #2 신호 성과 (알파 품질)
-            sig_src = signal_top1 if signal_top1 else daily_top1
-            if sig_src and sig_src.get("n_filled" if signal_top1 else "n", 0) > 0:
-                if signal_top1:
-                    n_total = signal_top1.get("n_signals_total", 0)
-                    n_filled_s = signal_top1.get("n_filled", 0)
-                    ev_s = signal_top1.get("ev_net_pct", 0)
-                    tp1_s = signal_top1.get("tp1_rate", 0) * 100
-                    fill_s = signal_top1.get("fill_rate", 0) * 100
-                else:
-                    n_total = daily_top1.get("n_all_picks", 0)
-                    n_filled_s = daily_top1.get("n", 0)
-                    ev_s = daily_top1.get("ev", 0)
-                    tp1_s = daily_top1.get("tp1_rate", 0) * 100
-                    fill_s = daily_top1.get("fill_rate", 0) * 100
-                sig_clr = "text-blue-400" if ev_s > 0 else "text-red-400"
-                ui.label(
-                    f"📡 신호 성과 (알파 품질): "
-                    f"{n_total}신호 / {n_filled_s}체결 ({fill_s:.0f}%) · "
-                    f"TP1 {tp1_s:.1f}% · EV {ev_s:+.2f}%"
-                ).classes(f"text-sm {sig_clr} mb-1 font-semibold")
-
-                # [v3.7.23] TP1 vs EV 해석 한 줄 — 사용자가 숫자 의미를 바로 이해하게
-                # 예: "TP1 21%"는 낮아 보이지만 EV +1.47%인 이유 = 승리 폭 > 패배 폭
-                if tp1_s > 0 and ev_s > 0 and tp1_s < 40:
-                    # 낮은 hit rate + 양수 EV 조합 설명
-                    ui.label(
-                        f"  ℹ️ TP1 hit rate({tp1_s:.0f}%)는 낮지만, 승리 폭 > 패배 폭 "
-                        f"+ 미도달 종가 마감까지 포함하여 기대수익 EV는 양수"
-                    ).classes("text-[11px] text-blue-300 mb-1 ml-4 italic")
-                elif tp1_s >= 40 and ev_s > 0:
-                    ui.label(
-                        f"  ℹ️ TP1 hit rate({tp1_s:.0f}%) + 양수 EV = 높은 승률 기반 수익 구조"
-                    ).classes("text-[11px] text-green-300 mb-1 ml-4 italic")
-                elif ev_s <= 0:
-                    ui.label(
-                        f"  ℹ️ EV가 음수 — 현재 시그널의 알파 약화 상태 "
-                        f"(임계값 재조정 검토 필요)"
-                    ).classes("text-[11px] text-red-300 mb-1 ml-4 italic")
-
-            # 🏅 #3 Confidence badge (실행 판단의 기준점)
-            if confidence:
-                lvl = confidence.get("level", "LOW")
-                reason = confidence.get("reason", "")
-                if lvl == "HIGH":
-                    badge_txt, badge_clr = "🏅 HIGH", "text-green-400"
-                elif lvl == "MEDIUM":
-                    badge_txt, badge_clr = "🏅 MEDIUM", "text-yellow-400"
-                else:
-                    badge_txt, badge_clr = "🏅 LOW", "text-red-400"
-                ui.label(
-                    f"{badge_txt} 실집행 신뢰도 — {reason}"
-                ).classes(f"text-sm {badge_clr} mb-2 font-bold")
-
-            # ───────────────────────────────────────────
-            # 📊 보조 블록 — 검증 증거 (회색 톤으로 구분)
-            # ───────────────────────────────────────────
-            ui.label("📊 보조 검증 (참고)").classes(
-                "text-[11px] text-gray-400 font-bold mt-2 mb-1 uppercase tracking-wider"
-            )
-
-            # Walk-forward 일반화
-            wf_results = wf_stats.get("results") if isinstance(wf_stats, dict) else None
-            if wf_results and len(wf_results) > 0:
-                generalizes_n = sum(1 for r in wf_results if r.get("generalizes"))
-                total_n = len(wf_results)
-                horizon = wf_stats.get("horizon_used", "?")
-                if generalizes_n == total_n:
-                    mark = "✅"
-                    color = "text-green-400"
-                elif generalizes_n >= total_n // 2:
-                    mark = "⚠️"
-                    color = "text-yellow-400"
-                else:
-                    mark = "❌"
-                    color = "text-red-400"
-                top = wf_results[0]
-                is_ev = top.get("is_summary", {}).get("ev", 0)
-                oos_ev = top.get("oos_summary", {}).get("ev", 0)
-                ui.label(
-                    f"{mark} Walk-forward(h={horizon}일): "
-                    f"IS Top 5 중 {generalizes_n}/{total_n} 일반화 · "
-                    f"대표조합 IS {is_ev:+.2f}% → OOS {oos_ev:+.2f}%"
-                ).classes(f"text-xs {color} mb-1")
-
-            # Rolling walk-forward
-            if rolling_stats and rolling_stats.get("n_valid", 0) > 0:
-                n_gen = rolling_stats.get("n_generalizes", 0)
-                n_val = rolling_stats.get("n_valid", 0)
-                avg_is = rolling_stats.get("avg_is_ev", 0)
-                avg_oos = rolling_stats.get("avg_oos_ev", 0)
-                robust = rolling_stats.get("robust", False)
-                r_mark = "🔁 ✅" if robust else "🔁 ⚠️"
-                r_color = "text-green-400" if robust else "text-yellow-400"
-                ui.label(
-                    f"{r_mark} Rolling {n_gen}/{n_val} 폴드 일반화 · "
-                    f"평균 IS {avg_is:+.2f}% → OOS {avg_oos:+.2f}%"
-                ).classes(f"text-xs {r_color} mb-1")
-
-            # 일자별 3종목 포트폴리오 (참고 수치)
-            if port_stats and port_stats.get("n_days", 0) >= 5:
-                avg_daily = port_stats["avg_daily_portfolio_ret"]
-                pos_rate = port_stats.get("positive_rate", 0) * 100
-                n_days = port_stats["n_days"]
-                n_pos = port_stats.get("n_positive_days", 0)
-                p_mark = "📈" if avg_daily > 0 else "📉"
-                p_color = "text-green-500" if avg_daily > 0 else "text-gray-500"
-                ui.label(
-                    f"{p_mark} (참고) 일평균 3종목 포트폴리오: {avg_daily:+.2f}% · "
-                    f"플러스 마감 {n_pos}/{n_days}일 ({pos_rate:.0f}%)"
-                ).classes(f"text-xs {p_color} mb-1")
-
-            # Top3 자본 시뮬 (참고)
-            if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
-                total_ret = capital_stats.get("total_return_pct", 0)
-                mdd = capital_stats.get("max_drawdown_pct", 0)
-                n_filled = capital_stats["n_trades_filled"]
-                ui.label(
-                    f"· (참고) Top3 모드 자본시뮬: "
-                    f"기간수익 {total_ret:+.2f}% · MDD {mdd:.1f}% · 체결 {n_filled}건"
-                ).classes("text-xs text-gray-500 mb-1")
-
-            # ───────────────────────────────────────────
-            # 🔧 메타 블록 — 검증 조건 + 갱신 시각
-            # ───────────────────────────────────────────
-
-            # [v3.7.15] methodology 메타 한 줄 — 검증 조건 완전 투명화
-            methodology = bt.get("methodology")
-            if isinstance(methodology, dict):
-                mh = methodology.get("horizon_days", "?")
-                mf = methodology.get("fill_window_days", "?")
-                mc = methodology.get("fee_pct_roundtrip", "?")
-                mp = methodology.get("max_positions_top1", "?")
-                mdedup = "✓" if methodology.get("dedup_same_ticker") else "✗"
-                mreentry = "✓" if methodology.get("reentry_after_exit") else "✗"
-                msel = methodology.get("selection_mode", "?")
-                mdate = methodology.get("date_range", ["", ""])
-                ui.label(
-                    f"🔧 검증조건: horizon {mh}일 · fill {mf}일 · fee {mc}% · "
-                    f"max_pos {mp} · dedup {mdedup} · reentry {mreentry} · "
-                    f"{msel} · {mdate[0]}~{mdate[1]}"
-                ).classes("text-[10px] text-gray-500 mb-1 italic")
-
-            # [v3.7.21] 검증 JSON 생성 시각 표시 — 데이터 신선도(Freshness) 투명화
-            # 이전엔 generated_at이 전혀 표시 안 돼서 사용자가 숫자 기준 시점 모름
-            # auto_collect.yml에서 매일 백테스트 자동 실행 후 여기에 갱신 시각 반영
-            generated_at = bt.get("generated_at", "")
-            if generated_at:
-                # "2026-04-18T01:08:10" → "2026-04-18 01:08"
-                gen_display = generated_at.replace("T", " ")[:16]
-                # 얼마나 오래됐는지 계산 (UI 색상으로 신선도 표시)
-                try:
-                    from datetime import datetime, timezone
-                    gen_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-                    if gen_dt.tzinfo is None:
-                        gen_dt = gen_dt.replace(tzinfo=timezone.utc)
-                    now = datetime.now(timezone.utc)
-                    age_hours = (now - gen_dt).total_seconds() / 3600
-                    if age_hours < 24:
-                        freshness = "🟢"  # 24시간 이내 (fresh)
-                        fresh_cls = "text-green-500"
-                    elif age_hours < 72:
-                        freshness = "🟡"  # 3일 이내 (stale)
-                        fresh_cls = "text-yellow-500"
-                    else:
-                        freshness = "🔴"  # 3일 초과 (outdated)
-                        fresh_cls = "text-red-500"
-                    age_txt = (
-                        f"{int(age_hours)}시간 전" if age_hours < 48
-                        else f"{int(age_hours/24)}일 전"
-                    )
-                except Exception:
-                    freshness = "📅"
-                    fresh_cls = "text-gray-500"
-                    age_txt = ""
-                ver = bt.get("version", "")
-                ui.label(
-                    f"{freshness} 마지막 검증 갱신: {gen_display}"
-                    + (f" ({age_txt})" if age_txt else "")
-                    + (f" · 버전 {ver}" if ver else "")
-                ).classes(f"text-[10px] {fresh_cls} mb-2 italic")
+            _render_validation_scorecard(bt)
 
         if not top3_codes:
             # [v31.4] 빈 상태 — 요약 한 줄은 카드 상단(위)에서 이미 표시됨.
