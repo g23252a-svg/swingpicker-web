@@ -73,3 +73,23 @@ def test_verification_excluded_mask_demotes_stale_rows():
 def test_verification_excluded_mask_empty_df():
     from components.tab_stocks import _verification_excluded_mask
     assert _verification_excluded_mask(pd.DataFrame()).empty
+
+
+def test_table_alpha_display():
+    from components.tab_stocks import _table_alpha_display
+
+    # 검증 통과 + 승률 → "92 (41%)"
+    r = pd.Series({"ALPHA_VALIDATED": 1, "ALPHA_SCORE": 92.3, "ALPHA_WIN_PROB": 0.4116})
+    assert _table_alpha_display(r) == "92 (41%)"
+    # 검증 통과 + 승률 없음 → 백분위만
+    r2 = pd.Series({"ALPHA_VALIDATED": "1", "ALPHA_SCORE": 55.0})
+    assert _table_alpha_display(r2) == "55"
+    # 미검증 → 대시 (검증 통과했을 때만 신뢰하는 계약)
+    r3 = pd.Series({"ALPHA_VALIDATED": 0, "ALPHA_SCORE": 92.3})
+    assert _table_alpha_display(r3) == "—"
+    # 컬럼 없음 (legacy) → 대시
+    assert _table_alpha_display(pd.Series({"종목명": "x"})) == "—"
+    # NaN 점수 → 대시
+    import numpy as np
+    r4 = pd.Series({"ALPHA_VALIDATED": 1, "ALPHA_SCORE": np.nan})
+    assert _table_alpha_display(r4) == "—"
