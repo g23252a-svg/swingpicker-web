@@ -385,6 +385,7 @@ tab_stocks.py — Tab 2: 종목 분석 (테이블 + 칸반 + 상세)
 import asyncio
 import os
 import logging
+from html import escape as h_escape
 from typing import Optional, Any, Dict, List
 
 import pandas as pd
@@ -2890,81 +2891,133 @@ def _render_candidate_triage_card(df: pd.DataFrame, official_decision: dict | No
         ).classes("text-[10px] text-gray-500 mt-1")
 
 def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
-    """[v22.3.13] 종목탭 상단 공식 신규진입 판정 카드."""
+    """[v31.6] 오늘 신규진입 판정 — '왜 사는가/왜 안 사는가' 체크리스트.
+
+    기존: 'ROUTE active 0개 · BUY_NOW_PASS 73개 · breaker DISABLED_LOSS_DEFENSE'
+    식 내부용어 나열 → 조건별 ✓/✗ 체크리스트 + 사람 말 설명으로 재작성.
+    판정 산식(_build_daily_official_decision)은 그대로, 표시만 바꾼다.
+    """
     d = _build_daily_official_decision(df)
     status = d.get("status")
-    if status == "OFFICIAL_BUY_AVAILABLE":
-        border = "border-emerald-500/40 bg-emerald-500/8"
-        icon = "🟢"
-        title_cls = "text-emerald-300"
-    elif status == "CASH_HOLD_TOP_PICK_DEFERRED":
-        border = "border-amber-500/40 bg-amber-500/8"
-        icon = "🟡"
-        title_cls = "text-amber-300"
+
+    # ── 데이터 추출 (df에서 직접 — 문자열 파싱 대신) ──
+    def _first_num(col):
+        try:
+            if col in df.columns and len(df):
+                v = pd.to_numeric(df[col], errors="coerce").iloc[0]
+                return None if pd.isna(v) else float(v)
+        except Exception:
+            return None
+        return None
+
+    breadth = _first_num("MARKET_BREADTH")
+    route_u = df.get("ROUTE", pd.Series(dtype=str)).astype(str).str.upper()
+    n_active = int(route_u.isin(["ATTACK", "ARMED"]).sum())
+    n_quality = 0
+    if "BUY_NOW_PASS" in df.columns:
+        n_quality = int(_series_truthy(df["BUY_NOW_PASS"]).sum())
+
+    # ── 체크리스트 행: (통과여부, 제목, 사람 말 설명) ──
+    checks = []
+    if breadth is not None:
+        b_ok = breadth >= 35
+        if b_ok:
+            _b_desc = f"상승 종목 비율 {breadth:.0f}% — 진입 허용 구간(35% 이상)입니다."
+        else:
+            _b_desc = (f"상승 종목이 {breadth:.0f}%뿐인 내부 약세장 — "
+                       "이 구간 신규 진입은 실측상 평균 -5.9%였습니다.")
+        checks.append((b_ok, "시장 상태", _b_desc))
+    if n_active > 0:
+        _a_desc = f"돌파/진입 대기 신호가 켜진 종목 {n_active}개."
     else:
-        border = "border-slate-500/30 bg-slate-500/8"
-        icon = "⚪"
-        title_cls = "text-slate-300"
+        _a_desc = "돌파 신호가 켜진 종목이 없습니다 — 전 종목이 관망/중립 단계."
+    checks.append((n_active > 0, "진입 신호", _a_desc))
+    if n_quality > 0:
+        _q_desc = (f"품질 조건(자리·손익비·유동성)을 통과한 종목 {n_quality}개 — "
+                   "시장이 풀리면 이 안에서 후보가 나옵니다.")
+    else:
+        _q_desc = "품질 조건을 통과한 종목이 없습니다."
+    checks.append((n_quality > 0, "종목 품질", _q_desc))
 
-    with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
-        with ui.row().classes("w-full items-center justify-between gap-2"):
-            ui.label(f"{icon} 오늘 신규진입 판정 — {d.get('title', '')}").classes(
-                f"text-base font-bold {title_cls}"
-            )
-            ui.badge(
-                f"공식 {int(d.get('official_count', 0))} · TOP_PICK {int(d.get('top_pick_count', 0))}",
-                color="#F59E0B" if status == "CASH_HOLD_TOP_PICK_DEFERRED" else "#10B981",
-            ).classes("text-xs")
-        ui.label(d.get("summary", "")).classes("text-xs text-gray-300 mt-1")
+    n_official = int(d.get("official_count", 0) or 0)
+    if status == "OFFICIAL_BUY_AVAILABLE":
+        icon, headline, accent = "🟢", f"오늘 매수 후보 {n_official}종목", "#10B981"
+    elif status == "CASH_HOLD_TOP_PICK_DEFERRED":
+        icon, headline, accent = "🟡", "후보는 있지만 진입 조건 미달 — 오늘은 보류", "#F59E0B"
+    else:
+        icon, headline, accent = "⚪", "오늘은 사지 않습니다 (현금 유지)", "#94A3B8"
 
-        pick = d.get("top_pick") or {}
-        if pick:
-            metric_bits = []
-            if pick.get("final") is not None:
-                metric_bits.append(f"FINAL {pick['final']:.1f}")
-            if pick.get("elite") is not None:
-                metric_bits.append(f"ELITE {pick['elite']:.1f}")
-            if pick.get("rr") is not None:
-                metric_bits.append(f"RR {pick['rr']:.2f}")
-            if pick.get("vwap_gap") is not None:
-                metric_bits.append(f"VWAP {pick['vwap_gap']:+.1f}%")
-            ui.label(
-                f"TOP_PICK: {pick.get('name', '-')} {pick.get('code', '')}"
-                + (" · " + " · ".join(metric_bits) if metric_bits else "")
-            ).classes("text-xs text-white mt-2 font-semibold")
+    rows_html = ""
+    for ok, title, desc in checks:
+        mark = "✓" if ok else "✗"
+        clr = "#34D399" if ok else "#F87171"
+        rows_html += (
+            '<div style="display:flex; gap:10px; align-items:flex-start; padding:5px 0;">'
+            + f'<div style="flex:0 0 18px; text-align:center; font-weight:900; color:{clr};">{mark}</div>'
+            + f'<div style="flex:0 0 72px; font-size:11.5px; font-weight:800; color:#CBD5E1;">{title}</div>'
+            + f'<div style="flex:1; font-size:11.5px; color:#94A3B8; line-height:1.5;">{h_escape(desc)}</div>'
+            + '</div>'
+        )
 
-        nearest = d.get("nearest_candidate") or {}
-        if nearest:
-            metric_bits = []
-            if nearest.get("final") is not None:
-                metric_bits.append(f"FINAL {nearest['final']:.1f}")
-            if nearest.get("elite") is not None:
-                metric_bits.append(f"ELITE {nearest['elite']:.1f}")
-            if nearest.get("rr") is not None:
-                metric_bits.append(f"RR {nearest['rr']:.2f}")
-            if nearest.get("gap") is not None:
-                metric_bits.append(f"GAP {nearest['gap']:.1f}%")
-            reason_txt = " · ".join(nearest.get("reasons") or [])
-            ui.label(
-                f"가장 가까운 관찰 후보: {nearest.get('name', '-')} {nearest.get('code', '')}"
-                + (" · " + " · ".join(metric_bits) if metric_bits else "")
-                + (f" · 미달 사유: {reason_txt}" if reason_txt else "")
-            ).classes("text-xs text-blue-200 mt-2 font-semibold")
+    # ── 재개 조건 (사람 말) ──
+    resume_html = ""
+    if status != "OFFICIAL_BUY_AVAILABLE":
+        parts = []
+        if breadth is not None and breadth < 35:
+            parts.append("시장이 돌아서고(상승 종목 35% 이상)")
+        if n_active == 0:
+            parts.append("돌파 신호가 켜진 종목이 나오면")
+        resume_txt = (" ".join(parts) or "조건 충족 시") + " 자동으로 매수 후보가 다시 올라옵니다."
+        resume_html = (
+            '<div style="font-size:11px; color:#CBD5E1; margin-top:6px; padding-top:6px; '
+            'border-top:1px dashed rgba(148,163,184,0.25);">🔄 '
+            + h_escape(resume_txt) + '</div>'
+        )
 
-        blockers = d.get("blockers") or []
-        if blockers:
-            ui.label("보류/차단 사유").classes("text-[11px] text-amber-200 font-bold mt-2")
-            for reason in blockers[:6]:
-                ui.label(f"• {reason}").classes("text-[11px] text-gray-300 leading-snug")
+    # ── 아깝게 탈락 1위 / 1순위 (사람 말 번역) ──
+    _REASON_KR = {
+        "ROUTE WAIT": "돌파 신호 대기 (관망 단계)",
+        "ROUTE NEUTRAL": "방향성 없음 (중립 단계)",
+        "ROUTE OVERHEAT": "과열 구간 (진입 부적합)",
+    }
+    nearest_html = ""
+    nearest = d.get("nearest_candidate") or {}
+    pick = d.get("top_pick") or {}
+    if status == "OFFICIAL_BUY_AVAILABLE" and pick:
+        nearest_html = (
+            '<div style="font-size:11.5px; color:#6EE7B7; margin-top:6px; font-weight:700;">'
+            + f'1순위: {h_escape(str(pick.get("name", "-")))} {h_escape(str(pick.get("code", "")))}'
+            + ' — 아래 실전 후보 카드에서 상세 확인</div>'
+        )
+    elif nearest:
+        bits = []
+        if nearest.get("final") is not None:
+            bits.append(f"점수 {nearest['final']:.0f}점")
+        if nearest.get("rr") is not None:
+            bits.append(f"손익비 {nearest['rr']:.1f}")
+        reasons = [
+            _REASON_KR.get(str(r).strip(), str(r)) for r in (nearest.get("reasons") or [])
+        ]
+        nearest_html = (
+            '<div style="font-size:11.5px; color:#93C5FD; margin-top:6px;">'
+            + f'🥈 아깝게 탈락 1위: <b>{h_escape(str(nearest.get("name", "-")))}</b>'
+            + (f' — {" · ".join(bits)}는 충분' if bits else "")
+            + (f', 남은 건 {h_escape(reasons[0])}' if reasons else "")
+            + '</div>'
+        )
 
-        conditions = d.get("conversion_conditions") or []
-        if conditions:
-            ui.label("진입 가능 전환 조건").classes("text-[11px] text-blue-200 font-bold mt-2")
-            ui.label(" · ".join(conditions[:5])).classes("text-[11px] text-gray-400 leading-snug")
-
-        ui.label(
-            "※ 이 카드는 표시/설명 전용입니다. 공식 신규매수 산식은 TOP_PICK + BUY_NOW_ELIGIBLE 그대로 유지합니다."
-        ).classes("text-[10px] text-gray-500 mt-2")
+    _head_html = (
+        f'<div style="font-size:15px; font-weight:900; color:{accent}; '
+        f'margin-bottom:6px;">{icon} {h_escape(headline)}</div>'
+    )
+    with ui.card().classes(
+        "w-full p-4 mb-3 rounded-xl border"
+    ).style(f"border-color:{accent}44; background:rgba(148,163,184,0.03);"):
+        ui.html(
+            '<div style="width:100%;">'
+            + _head_html + rows_html + resume_html + nearest_html
+            + '</div>'
+        )
     return d
 
 
