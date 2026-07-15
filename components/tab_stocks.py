@@ -4003,6 +4003,29 @@ def _verification_excluded_mask(df: pd.DataFrame) -> pd.Series:
     return (display <= 0) & (~holding) & (~route.str.contains("CARRY", na=False))
 
 
+def _table_alpha_display(row: pd.Series) -> str:
+    """[v31.2] 테이블 '🧠알파' 셀 — 검증 통과 행만 '백분위 (실측승률%)'.
+
+    미검증/결측 → '—' (알파는 검증 통과했을 때만 신뢰하는 계약).
+    """
+    validated = str(row.get("ALPHA_VALIDATED", "")).strip().lower() in ("1", "1.0", "true")
+    if not validated:
+        return "—"
+    try:
+        alpha = float(row.get("ALPHA_SCORE"))
+    except (TypeError, ValueError):
+        return "—"
+    if alpha != alpha:  # NaN
+        return "—"
+    try:
+        prob = float(row.get("ALPHA_WIN_PROB"))
+    except (TypeError, ValueError):
+        prob = float("nan")
+    if prob == prob and prob > 0:
+        return f"{alpha:.0f} ({prob*100:.0f}%)"
+    return f"{alpha:.0f}"
+
+
 def _table_score_display(row: pd.Series):
     # [v22.3.31] DISPLAY_SCORE 0/음수인 비보유 종목은 테이블에서 숫자 0 대신 검증제외로 표시.
     # _nb_score_cell의 CARRY 보유 표시 가드는 유지한다.
@@ -4246,9 +4269,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             value="전체", label="위험",
         ).classes("min-w-[130px]")
         # [v3.7.24] "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준 명확화)
+        # [v31.2] 🧠 알파순 신설 + 기본값 — 검증 통과한 예측 점수 순.
+        # 알파 미적용 데이터(legacy)면 정렬 로직에서 랭크순으로 자동 폴백.
         sort_mode = ui.toggle(
-            ["🔢 점수순", "🧱 3축최저순", "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"],
-            value="🏆 랭크순",
+            ["🧠 알파순", "🔢 점수순", "🧱 3축최저순", "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"],
+            value="🧠 알파순",
         )
         # [v3.7.26] 테이블 보기 모드 — 기본(핵심만) vs 고급(전체)
         # 사용자 지적: "스코어들이 너무 많은데 로직들좀 설명해봐"
@@ -4666,7 +4691,21 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             elif rv == "ORANGE 이상":
                 fdf = fdf[lvl.isin(["RED", "ORANGE"])]
         # [v3.7] 정렬 로직 확장
-        if sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
+        if sort_mode.value == "🧠 알파순":
+            # [v31.2] 검증 통과 알파 점수 내림차순. 컬럼 없거나 전부 결측
+            # (legacy CSV·알파 미검증일)이면 랭크순으로 자동 폴백.
+            _alpha_col = pd.to_numeric(
+                fdf.get("ALPHA_SCORE", pd.Series(dtype=float)), errors="coerce"
+            )
+            if _alpha_col.notna().any():
+                fdf = fdf.assign(_alpha_sort=_alpha_col).sort_values(
+                    "_alpha_sort", ascending=False, na_position="last"
+                ).drop(columns=["_alpha_sort"])
+            elif "ELITE_RANK_SCORE" in fdf.columns:
+                fdf = fdf.sort_values("ELITE_RANK_SCORE", ascending=False)
+            elif "DISPLAY_SCORE" in fdf.columns:
+                fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
+        elif sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
         elif sort_mode.value == "🧱 3축최저순":
             # [Step AD] '밸런스순' → '3축최저순' 으로 정확한 의미 표기
@@ -4747,7 +4786,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             # [v22.3.10] ENTRY_EDGE shadow 점수 — 공식 매수식 미반영
             {"name": "edge", "label": "Edge", "field": "edge", "align": "center", "sortable": True},
             {"name": "name", "label": "종목명", "field": "name", "align": "left"},
-            # 점수 = DISPLAY_SCORE (파이프라인 최종, 화면 메인 숫자)
+            # [v31.2] 🧠알파 = ALPHA_SCORE (OOS 검증 통과한 유일한 예측 점수)
+            # 검증 통과 시 화면 메인 숫자. 괄호는 해당 구간 실측 승률.
+            {"name": "alpha", "label": "🧠알파", "field": "alpha",
+             "align": "center", "sortable": True},
+            # 점수 = DISPLAY_SCORE (기존 룰 점수 — 보조 지표, 실측상 확률과 무관)
             {"name": "score", "label": "점수", "field": "score",
              "align": "center", "sortable": True},
             {"name": "s", "label": "S", "field": "s",
@@ -4818,6 +4861,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 # 0~한자리가 나와 'S 98인데 점수 0' 모순이 생김 → '보유'로 표시(혼란 방지).
                 # 비-CARRY는 기존대로 DISPLAY_SCORE 그대로.
                 "score": _table_score_display(r),
+                # [v31.2] 알파 점수 — 검증 통과(ALPHA_VALIDATED=1) 행만 숫자 표시
+                "alpha": _table_alpha_display(r),
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
                 "t":     f'{_nz(r.get("TIMING_SCORE",  0)):.0f}',
                 "ai":    f'{_nz(r.get("AI_SCORE",      0)):.0f}',
