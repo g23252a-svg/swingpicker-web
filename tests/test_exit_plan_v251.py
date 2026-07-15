@@ -97,6 +97,7 @@ def test_card_shows_exit_discipline():
         "종목명": "테스트", "종목코드": "123456", "종가": 10000,
         "추천매수가": 10000, "손절가": 9000, "추천매도가1": 12000,
         "RSI14": 60, "DISPLAY_SCORE": 70, "ROUTE": "WAIT", "거래대금(억원)": 200,
+        "PRODUCTION_BUY": 1, "ACTION_DECISION": "BUY",
         "EXIT_STOP_TIGHT": 9300, "EXIT_TP_QUICK": 11000, "EXIT_ROUTE_RISK": "OK",
     }])
     h = build_cards_html(df)
