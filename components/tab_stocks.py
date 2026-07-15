@@ -2859,35 +2859,44 @@ def _render_winrate_action_lane(df: pd.DataFrame, official_decision: dict | None
             "공식 신규매수 산식(TOP_PICK + BUY_NOW_ELIGIBLE)은 변경하지 않습니다."
         ).classes("text-[10px] text-gray-500 mt-2")
 
+def _lane_stub(text: str, color: str = "text-gray-500") -> None:
+    """[v31.7] 빈 보조 레인용 한 줄 표시 — 빈 카드 대신 얇은 라인."""
+    ui.label(text).classes(f"text-[11.5px] {color} mb-2 pl-1")
+
+
 def _render_candidate_triage_card(df: pd.DataFrame, official_decision: dict | None = None) -> None:
-    """[v22.3.18] 공식/비공식/보유관리 후보 유형 분리 카드."""
+    """[v22.3.18→v31.7] 관찰 후보 분류 — 빈 날은 한 줄, 있는 날만 카드."""
     if official_decision and _official_decision_allows_entry(official_decision):
         return
 
     triage = _build_candidate_triage(df)
+    entry_w = triage.get("entry_watch", []) or []
+    high_w = triage.get("high_score_watch", []) or []
+    hold_m = triage.get("holding_manage", []) or []
+
+    # [v31.7] 전부 비어 있으면 한 줄로 끝 — '없음/해당없음' 나열 방지
+    if not entry_w and not high_w and not hold_m:
+        _lane_stub("🧭 관찰 후보 분류: 오늘은 분류할 후보가 없습니다.")
+        return
 
     with ui.card().classes("w-full p-3 mb-3 bg-slate-900/20 border border-slate-500/30 rounded-lg"):
-        ui.label("🧭 오늘의 후보 유형 분리 — 공식 판정 SSOT").classes(
+        ui.label("🧭 관찰 후보 분류 (매수 추천 아님)").classes(
             "text-sm font-bold text-slate-200 mb-1"
         )
-        ui.label(
-            "공식 매수 추천은 TOP_PICK + BUY_NOW_ELIGIBLE만 인정합니다. "
-            "아래 후보는 성격별 관찰 분류이며 공식 신규매수가 아닐 수 있습니다."
-        ).classes("text-[11px] text-gray-400 mb-2")
-        ui.label("공식 매수 추천: 없음").classes("text-[11px] text-slate-300 font-semibold")
-        ui.label("진입위치 관찰: " + _triage_line_with_reason(triage.get("entry_watch", []))).classes(
-            "text-[11px] text-emerald-200 leading-snug"
-        )
-        ui.label("고점수 관찰: " + _triage_line_with_reason(triage.get("high_score_watch", []))).classes(
-            "text-[11px] text-blue-200 leading-snug"
-        )
-        if triage.get("holding_manage"):
-            ui.label("보유관리: " + _triage_line_with_reason(triage.get("holding_manage", []))).classes(
+        if entry_w:
+            ui.label("📍 자리 좋은 후보 (가격 위치 깨끗): " + _triage_line_with_reason(entry_w)).classes(
+                "text-[11px] text-emerald-200 leading-snug"
+            )
+        if high_w:
+            ui.label("🔢 점수 높은 후보 (진입조건은 별도): " + _triage_line_with_reason(high_w)).classes(
+                "text-[11px] text-blue-200 leading-snug"
+            )
+        if hold_m:
+            ui.label("💼 보유중 관리 대상: " + _triage_line_with_reason(hold_m)).classes(
                 "text-[11px] text-amber-200 leading-snug"
             )
         ui.label(
-            "※ 진입위치 관찰은 센서뷰처럼 가격 위치가 깨끗한 후보, 고점수 관찰은 해성디에스처럼 점수는 높지만 진입조건이 별도인 후보를 뜻합니다. "
-            "각 줄의 `사유:`는 해당 후보가 왜 공식 신규매수가 아닌지를 나타냅니다."
+            "각 줄의 '사유:'는 왜 공식 매수가 아닌지입니다."
         ).classes("text-[10px] text-gray-500 mt-1")
 
 def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
@@ -3098,31 +3107,30 @@ def _render_historical_alpha_pick_card(df: pd.DataFrame) -> None:
 
     win = rule.get("win_test", rule.get("win_rate"))
     base = rule.get("baseline_test", summary.get("baseline_test", 33.0))
-    win_txt = _fmt_num(win, 0, "%") if win is not None else "—"
-    base_txt = _fmt_num(base, 0, "%") if base is not None else "33%"
-    oos_txt = "OOS 검증 통과" if rule.get("oos_pass") else "fallback"
+
+    # [v31.7] 픽 0개 + 근접 후보도 없으면 한 줄로 끝
+    _n_a = len(tier_a) if tier_a is not None else 0
+    _n_b = len(tier_b) if tier_b is not None else 0
+    if _n_a == 0 and _n_b == 0:
+        _lane_stub("⚡ 손익비형 레인: 오늘 조건에 맞는 후보가 없습니다.")
+        return
 
     with ui.card().classes("w-full p-4 mb-4 rounded-xl border border-purple-500/40 bg-purple-500/8"):
         with ui.row().classes("w-full items-center justify-between gap-2"):
-            ui.label("⚡ RR 알파 후보 (OOS 검증형)").classes("text-base font-bold text-purple-300")
-            ui.badge(
-                f"RR 알파 {len(tier_a) if tier_a is not None else 0} · 승률 {win_txt}",
-                color="#A855F7",
-            ).classes("text-xs")
+            ui.label("⚡ 손익비형 후보 (참고 레인)").classes("text-base font-bold text-purple-300")
+            ui.badge(f"{_n_a}개", color="#A855F7").classes("text-xs")
 
         ui.label(
-            "승률로 먹는 후보가 아니라 RR(손익비)로 기대값을 만드는 후보입니다. "
-            f"과거 전반부에서 찾고 후반부(OOS)에서 재현된 조건 기준 — {oos_txt}."
+            "자주 이기는 게 아니라, 이길 때 크게 이기는 구조(손익비)로 기대값을 만드는 후보입니다. "
+            "찾는 조건: 타이밍 양호 + 외국인 순매수 유입 + 밀집가 근접 + 위험 가드 통과 + 손익비 1.2 이상."
         ).classes("text-xs text-gray-300 mt-1")
 
-        ui.label(
-            f"선정 근거: {rule.get('desc', '-')} · RR≥{RR_FLOOR:.1f}"
-        ).classes("text-[11px] text-purple-200 mt-1 font-semibold")
-
-        ui.label(
-            f"과거 유사조건: 승률 {win_txt} (baseline {base_txt}) · "
-            f"train승 {_fmt_num(rule.get('win_train'), 0, '%')} / test승 {_fmt_num(rule.get('win_test'), 0, '%')}"
-        ).classes("text-[11px] text-gray-400 leading-snug")
+        # 과거 같은 조건의 실측 승률 (숫자 있을 때만 표시 — 'train승 —' 나열 금지)
+        if win is not None and base is not None:
+            ui.label(
+                f"과거 같은 조건의 실측 승률: {_fmt_num(win, 0, '%')} (전체 평균 {_fmt_num(base, 0, '%')})"
+                + ("" if rule.get("oos_pass") else " · 검증 표본 축적 중이라 참고만")
+            ).classes("text-[11px] text-gray-400 leading-snug")
 
         def _bits(row):
             bits = []
@@ -3147,21 +3155,19 @@ def _render_historical_alpha_pick_card(df: pd.DataFrame) -> None:
             return " · ".join(bits)
 
         if tier_a is not None and len(tier_a) > 0:
-            ui.label("RR 알파 픽 (실전 후보)").classes("text-[11px] text-emerald-300 font-bold mt-2")
             for i, (_, row) in enumerate(tier_a.iterrows(), 1):
                 nm = row.get("종목명", "-")
                 cd = str(row.get("종목코드", "")).zfill(6)
-                score = _fmt_num(row.get("HISTORICAL_ALPHA_SCORE"), 0)
                 ui.label(
-                    f"{i}위 {nm} {cd} · ALPHA {score} · {_bits(row)}"
+                    f"{i}위 {nm} {cd} · {_bits(row)}"
                 ).classes("text-xs text-white mt-1 font-semibold")
         else:
             ui.label(
-                f"RR 알파 픽: 0개 — OOS 통과 {rule_pass_n}개 있으나 RR {RR_FLOOR:.1f} 미만은 실전 후보에서 제외"
+                f"오늘 픽 없음 — 조건 통과 {rule_pass_n}개 있으나 손익비 {RR_FLOOR:.1f} 미만이라 제외"
             ).classes("text-[11px] text-amber-200 font-bold mt-2")
 
         if tier_b is not None and len(tier_b) > 0:
-            ui.label("근접 관찰 후보 (매수 아님)").classes("text-[11px] text-slate-300 font-bold mt-2")
+            ui.label("아깝게 못 미친 후보 (관찰만)").classes("text-[11px] text-slate-300 font-bold mt-2")
             for _, row in tier_b.iterrows():
                 nm = row.get("종목명", "-")
                 cd = str(row.get("종목코드", "")).zfill(6)
@@ -3170,9 +3176,7 @@ def _render_historical_alpha_pick_card(df: pd.DataFrame) -> None:
                 ).classes("text-[11px] text-gray-400 leading-snug")
 
         ui.label(
-            "※ 공식 신규매수(TOP_PICK+BUY_NOW_ELIGIBLE)와 별개입니다. "
-            "RR 알파 픽만 실전 후보이며, 근접 후보는 관찰용입니다. "
-            "진입·청산·손절은 본인 판단입니다."
+            "공식 매수 추천과는 별개의 참고 아이디어입니다 — 진입·청산은 본인 판단."
         ).classes("text-[10px] text-gray-500 mt-2")
 
 
@@ -3200,6 +3204,15 @@ def _render_momentum_lane_card(df: pd.DataFrame) -> None:
     if len(a) == 0 and len(b) == 0 and not risk_off:
         return  # 표시할 것 없음 — 빈 카드 방지
 
+    # [v31.7] 픽 0개 (위험회피 OFF 포함) → 한 줄로 끝
+    if len(a) == 0 and len(b) == 0:
+        _lane_stub(
+            "🔥 과열돌파형 레인: 오늘 꺼짐 — 시장 하락 전환 시 자동 OFF되는 참고용 레인입니다."
+            if risk_off else
+            "🔥 과열돌파형 레인: 오늘 조건에 맞는 후보가 없습니다."
+        )
+        return
+
     if "MOMENTUM_LANE_RANK" in a.columns and len(a) > 0:
         a = a.sort_values("MOMENTUM_LANE_RANK")
 
@@ -3218,24 +3231,21 @@ def _render_momentum_lane_card(df: pd.DataFrame) -> None:
 
     with ui.card().classes("w-full p-4 mb-4 rounded-xl border border-amber-500/40 bg-amber-500/8"):
         with ui.row().classes("w-full items-center justify-between gap-2"):
-            ui.label("⚡ 모멘텀 후보 (과열 돌파)").classes("text-base font-bold text-amber-300")
-            ui.badge(
-                f"모멘텀 {len(a)} · 모니터링 전용",
-                color="#F59E0B",
-            ).classes("text-xs")
+            ui.label("🔥 과열돌파형 후보 (구경만)").classes("text-base font-bold text-amber-300")
+            ui.badge(f"{len(a)}개 · 매수 아님", color="#F59E0B").classes("text-xs")
 
         ui.label(
-            "'과열'로 공식 매수에서 빠진 종목입니다. 백테스트의 T+3 +16%는 추천일 종가 진입 기준이며, "
-            "익일 시가 진입 시에는 손실(-24.6%)이었습니다. 매수 신호가 아닌 모니터링 전용입니다."
+            "과열 판정으로 공식 매수에서 빠졌지만 더 갈 수도 있는 종목입니다. "
+            "주의: 이 유형은 다음날 아침에 사면 실측 평균 -24.6%였습니다 — 절대 추격 금지, 구경만."
         ).classes("text-xs text-gray-300 mt-1")
 
         if risk_off:
             ui.label(
-                "🌊 오늘은 시장 위험회피(KOSPI 하락 전환) — 모멘텀 레인 OFF"
+                "🌊 오늘은 시장 하락 전환으로 이 레인 자동 OFF"
             ).classes("text-xs text-amber-200 font-bold mt-2")
 
         if len(a) > 0:
-            ui.label("⚡ 모멘텀 픽 (모멘텀 강도순)").classes(
+            ui.label("과열돌파 픽 (강도순)").classes(
                 "text-[11px] text-emerald-300 font-bold mt-2")
             for _, row in a.iterrows():
                 rank = int(pd.to_numeric(row.get("MOMENTUM_LANE_RANK", 0), errors="coerce") or 0)
@@ -3332,37 +3342,30 @@ def _render_swing_alpha_oos_card(df: pd.DataFrame) -> None:
     win = profile.get("win_test")
     base = profile.get("baseline_test")
     ret = profile.get("ret_test")
-    badge_txt = f"스윙 알파 {len(picks) if picks is not None else 0} · OOS승 {_fmt(win, 0, '%')}"
-    border = "border-cyan-500/40 bg-cyan-500/8" if oos else "border-slate-500/30 bg-slate-500/8"
 
-    with ui.card().classes(f"w-full p-4 mb-4 rounded-xl border {border}"):
+    # [v31.7] 검증 미통과 또는 픽/근접 모두 0 → 한 줄로 끝
+    _n_picks = len(picks) if picks is not None else 0
+    _n_near = len(near) if near is not None else 0
+    if not oos:
+        _lane_stub("🚀 스윙형 레인: 과거 데이터 검증이 아직 부족해 표시하지 않습니다 (표본 쌓이면 자동 활성화).")
+        return
+    if _n_picks == 0 and _n_near == 0:
+        _lane_stub("🚀 스윙형 레인: 오늘 조건(수익폭·위험·수급 동시 충족)에 맞는 후보가 없습니다.")
+        return
+
+    with ui.card().classes("w-full p-4 mb-4 rounded-xl border border-cyan-500/40 bg-cyan-500/8"):
         with ui.row().classes("w-full items-center justify-between gap-2"):
-            ui.label("🚀 스윙 알파 후보 (백데이터 OOS)").classes(
-                "text-base font-bold text-cyan-300" if oos else "text-base font-bold text-slate-300"
-            )
-            ui.badge(badge_txt, color="#06B6D4" if oos else "#64748B").classes("text-xs")
+            ui.label("🚀 스윙형 후보 (참고 레인)").classes("text-base font-bold text-cyan-300")
+            ui.badge(f"{_n_picks}개", color="#06B6D4").classes("text-xs")
 
         ui.label(
-            "과거 recommend/OHLC 백데이터를 train/test로 나눠, 상승확률·EV·손익비가 함께 살아남은 "
-            "스윙형 profile을 오늘 CSV에 적용합니다."
+            "과거 데이터에서 상승확률·기대수익·손익비가 함께 검증된 유형에 맞는 오늘의 종목입니다. "
+            + (f"과거 같은 유형의 실측 승률 {_fmt(win, 0, '%')} (전체 평균 {_fmt(base, 0, '%')})."
+               if win is not None else "")
         ).classes("text-xs text-gray-300 mt-1")
 
-        ui.label(
-            f"선정 profile: {profile.get('desc', '-')}"
-        ).classes("text-[11px] text-cyan-200 mt-1 font-semibold")
-
-        ui.label(
-            f"OOS 결과: test승 {_fmt(win, 0, '%')} (baseline {_fmt(base, 0, '%')}) · "
-            f"test EV {_fmt(ret, 2, '%')} · 표본 train {int(profile.get('n_train', 0) or 0)} / "
-            f"test {int(profile.get('n_test', 0) or 0)} · 오늘 profile 통과 {profile_pass_n}개"
-        ).classes("text-[11px] text-gray-400 leading-snug")
-
-        if not oos:
-            ui.label(
-                "스윙 알파 profile OOS 검증이 충분하지 않아 실전 후보를 표시하지 않습니다."
-            ).classes("text-[11px] text-amber-200 font-bold mt-2")
-        elif picks is not None and len(picks) > 0:
-            ui.label("스윙 알파 픽 (비공식 후보)").classes("text-[11px] text-emerald-300 font-bold mt-2")
+        if picks is not None and len(picks) > 0:
+            ui.label("오늘의 스윙형 픽").classes("text-[11px] text-emerald-300 font-bold mt-2")
             for i, (_, row) in enumerate(picks.iterrows(), 1):
                 nm = row.get("종목명", "-")
                 cd = str(row.get("종목코드", "")).zfill(6)
@@ -3372,13 +3375,8 @@ def _render_swing_alpha_oos_card(df: pd.DataFrame) -> None:
                 reason = str(row.get("SWING_ALPHA_REASON", "") or "")
                 if reason:
                     ui.label(f"   └ {reason}").classes("text-[10px] text-gray-400 leading-snug")
-        else:
-            ui.label(
-                "스윙 알파 픽: 0개 — OOS profile은 있으나 오늘은 수익폭/위험/수급 조건이 동시에 맞는 종목이 없습니다."
-            ).classes("text-[11px] text-amber-200 font-bold mt-2")
-
         if near is not None and len(near) > 0:
-            ui.label("근접 후보 — 조건 일부 미달, 매수 아님").classes(
+            ui.label("아깝게 못 미친 후보 (관찰만)").classes(
                 "text-[11px] text-slate-300 font-bold mt-2"
             )
             for _, row in near.head(3).iterrows():
@@ -3389,8 +3387,7 @@ def _render_swing_alpha_oos_card(df: pd.DataFrame) -> None:
                 )
 
         ui.label(
-            "※ 공식 신규매수(TOP_PICK+BUY_NOW_ELIGIBLE)와 별개입니다. "
-            "스윙 알파는 백데이터 기반 보조 레인이며, 자동매수 신호가 아닙니다."
+            "공식 매수 추천과는 별개의 참고 아이디어입니다 — 진입·청산은 본인 판단."
         ).classes("text-[10px] text-gray-500 mt-2")
 
 
@@ -4105,7 +4102,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         "border border-[rgba(148,163,184,0.15)] rounded"
     ).props("dense"):
         _render_daily_official_decision_card(df)
-        _render_today_action_summary_card(df, official_decision=official_decision)
+        # [v31.7] 행동요약 카드 제거 — 히어로 스트립+판정 체크리스트와 중복
         _render_winrate_action_lane(df, official_decision=official_decision)
         _render_candidate_triage_card(df, official_decision=official_decision)
         _render_historical_alpha_pick_card(df)
