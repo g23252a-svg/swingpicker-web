@@ -45,7 +45,9 @@ def test_regime_down_on_breadth_collapse_even_above_ma():
     k = _kospi(list(range(2400, 2400 + 25)))  # 지수는 상승 추세여도
     r = compute_market_regime("20260713", market_breadth=22.5, kospi_df=k)
     assert r["regime"] == REGIME_DOWN  # 내부 붕괴 우선
-    assert r["size_mult"] == 0.0
+    # [v32] 알파 전면 게이트 도입 — DOWN도 축소 사이즈(0.3)로 상위10% 진입 허용.
+    # 진짜 위험한 하락(risk_off)은 NEW_ENTRY_BLOCKED가 별도 하드블록.
+    assert r["size_mult"] == 0.3
     assert r["allow_new_entry"] is False
 
 

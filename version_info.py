@@ -15,6 +15,33 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "32.1.0",
+        "date": "2026-07-16",
+        "type": "major",
+        "title": "v32.1 — ROUTE 자체 치료: 상태 판정 방향 재설계",
+        "items": [
+            "🔬 **ROUTE가 왜 지는지 해부 (피처별 OOS IC):** 기존 ATTACK은 거의 전부 역방향 피처로 조립 — 거래품질 IC -0.10(t=-7.5, 최강 역신호), MACD기울기 -0.055, 레인지위치(고가근접) -0.012, MFI -0.048, 타이밍 +0.004(무의미). 유일한 양(+) 구조는 저점추세(rising lows) +0.031. 즉 '고품질 거래로 신고가 돌파' 종목을 사라는 신호였고 시장은 그걸 평균회귀로 역주행시킴.",
+            "🧭 **ROUTE 재설계 — 강도=검증 알파, 상태=올바른 방향 기술구조:** ATTACK = 알파≥레짐문턱 AND MA20 위 AND 저점추세≥0 AND 비과열. ARMED = 알파≥문턱-15 AND (스퀴즈|MA20위) AND 비과열. OVERHEAT = 5일급등≥15%|MFI≥85|RSI≥78(실측 역신호). 검증 통과일에만 재판정하며 CARRY/청산 상태는 보존.",
+            "📊 **치료 검증 (OOS 상태별 알파):** ATTACK -4.64%p→**+3.70%p**(승률 23%→36%), ARMED -0.38%p→+1.56%p, OVERHEAT -0.55%p→-2.16%p(위험 정확 표시). 순서가 ATTACK>ARMED>WAIT>OVERHEAT로 정상화 — ATTACK이 진짜 최고 신호가 됨.",
+            "🧩 **역할 분리:** ROUTE=치료된 상태 라벨(사람이 읽는 강도), TOP_PICK/PRODUCTION_BUY=알파 진입 게이트(risk_off·손실방어 존중). 7/15 예: ROUTE ATTACK 23종목(구조·알파 강함)이지만 risk_off로 실제 진입은 0 — 상태와 행동이 정직하게 분리.",
+        ],
+        "schema_min": 5,
+    },
+    {
+        "version": "32.0.0",
+        "date": "2026-07-16",
+        "type": "major",
+        "title": "v32.0 — ROUTE 게이트 대개혁: 알파 전면 진입 게이트",
+        "items": [
+            "🔬 **ROUTE 역신호 실증 (3~7월 워크포워드 OOS, 미래정보 미사용):** ROUTE ATTACK(가장 강한 매수 신호)의 시장 대비 알파 -2.9%p (t=-3.56, p=0.0004) — 5개월 전부 음수, 상승·하락 국면 모두 음수. ARMED는 알파 0.0%p (p=0.99) 완전 노이즈. ELITE_SCORE도 IC -0.06 (t=-5.30)로 '점수 높을수록 수익 낮음' 역상관 확정.",
+            "🧠 **진입 게이트를 ROUTE→검증 알파로 전면 교체:** TOP_PICK/PRODUCTION_BUY의 `ROUTE ∈ {ATTACK, ARMED}` 거부권을 4곳(scoring_engine 하드게이트·finalize route-cap·recommendation_quality ACTIVE_ROUTES) 모두 제거. 진입 게이트 = 리스크가드(자리·손익비·유동성·확장) + 검증 알파 백분위. ROUTE는 UI 타이밍 배지로만 존치.",
+            "🎯 **레짐 적응형 선별 (상승30%/중립20%/하락10%):** 알파 백분위 문턱을 레짐별로 가변 — UP≥70·NEUTRAL≥80·DOWN≥90. DOWN도 축소 사이즈(0.3)로 상위10% 진입 허용(실측: 내부약세 알파 최상위 픽 +0.84%/승률51%). 진짜 위험한 하락(risk_off=KOSPI<하락MA20)은 NEW_ENTRY_BLOCKED가 별도 하드블록으로 유지(실측: risk_off 알파 픽 승률 17%).",
+            "📊 **반사실 검증:** 알파 top3 실현 +0.81%/승률41% vs ROUTE ATK/ARM -5.91% vs 유니버스(무작위) -4.26% (44 OOS일, 유니버스 대비 +5.07%p). 알파 모델 OOS IC +0.19 (t=6.8, AUC 0.60), Q5-Q1 +5.05%p, 십분위 승률 24%→41% 단조.",
+            "🗣️ **판정 카드·근접도 알파화:** '오늘의 판단' 체크리스트의 진입신호를 ROUTE active→AI 알파 통과분으로, '아깝게 탈락 1위' 근접도를 알파 점수 기준으로 재작성. '경로 X' 대신 '알파 N점(진입선 M점 미달)'로 표기.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "31.1.0",
         "date": "2026-07-15",
         "type": "minor",

@@ -17,9 +17,10 @@ import numpy as np
 import pandas as pd
 
 
-POLICY_VERSION = "high_prob_v27"
-# Realised audit through 2026-07-10 showed ARMED entries materially negative.
-# Keep ARMED visible as research/WATCH, but require ATTACK for a new position.
+POLICY_VERSION = "alpha_gate_v32"
+# [v32] ROUTE는 더 이상 진입 게이트가 아니다(ATTACK 알파 -2.9%p, p=0.0004 실측).
+# 검증된 알파(ALPHA_GATE_ACTIVE)가 진입 SSOT. ACTIVE_ROUTES는 레거시 폴백
+# (알파 미검증일)에서만 참조되며, ROUTE 거부권 자체는 evidence_pass에서 제거됨.
 ACTIVE_ROUTES = frozenset({"ATTACK"})
 DANGEROUS_MACRO = frozenset({"WARNING", "CRITICAL"})
 # [v27] Realised-trade audit 2026-02..07 (n=157):
@@ -61,6 +62,14 @@ def _flag(df: pd.DataFrame, column: str, default: bool = False) -> pd.Series:
         .str.lower()
         .isin({"1", "1.0", "true", "t", "yes", "y"})
     )
+
+
+def _alpha_gate_on(df: pd.DataFrame) -> bool:
+    """[v32] 알파 전면 진입 게이트가 이 배치에서 활성인지 (컬럼 없으면 False)."""
+    if df is None or len(df) == 0 or "ALPHA_GATE_ACTIVE" not in df.columns:
+        return False
+    col = pd.to_numeric(df["ALPHA_GATE_ACTIVE"], errors="coerce").fillna(0).astype(int)
+    return bool(col.max() == 1)
 
 
 def _quality_score(df: pd.DataFrame) -> pd.Series:
@@ -144,6 +153,10 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     poc_gap = _num_nan(df, "POC_GAP")
     breadth = _num_nan(df, "MARKET_BREADTH")
     regime_col = _text(df, "MARKET_REGIME", "")
+    # [v32] 알파 게이트 활성 시 ROUTE·모멘텀 사유는 숨기고 알파 기준으로 설명.
+    alpha_gate_active = _alpha_gate_on(df)
+    ascore = _num_nan(df, "ALPHA_SCORE")
+    athr = _num_nan(df, "ALPHA_ENTRY_THRESHOLD")
 
     result: list[str] = []
     for i in range(len(df)):
@@ -154,30 +167,37 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
         if bool(top.iloc[i]) and bool(eligible.iloc[i]) and bool(evidence.iloc[i]):
             row_reasons.append("당일 신규진입 1종목 제한")
         if not bool(top.iloc[i]):
-            row_reasons.append("TOP_PICK 아님")
+            if alpha_gate_active:
+                _a, _t = ascore.iloc[i], athr.iloc[i]
+                if pd.notna(_a) and pd.notna(_t) and _a < _t:
+                    row_reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
+                else:
+                    row_reasons.append("진입 조건 미달")
+            else:
+                row_reasons.append("TOP_PICK 아님")
         elif not bool(eligible.iloc[i]):
             row_reasons.append("즉시매수 기준 미달")
-        if grade.iloc[i] != "BUY":
+        if not alpha_gate_active and grade.iloc[i] != "BUY":
             row_reasons.append(f"진입등급 {grade.iloc[i] or '없음'}")
-        if buy_now_score.iloc[i] < 70:
+        if not alpha_gate_active and buy_now_score.iloc[i] < 70:
             row_reasons.append(f"즉시매수점수 {buy_now_score.iloc[i]:.0f}")
-        if pick_type.iloc[i] == "AGGRESSIVE":
+        if not alpha_gate_active and pick_type.iloc[i] == "AGGRESSIVE":
             row_reasons.append("공격형 검증 실패")
-        if risk.iloc[i] != "GREEN":
+        if not alpha_gate_active and risk.iloc[i] != "GREEN":
             row_reasons.append(f"진입위험 {risk.iloc[i] or 'UNKNOWN'}")
-        if route.iloc[i] not in ACTIVE_ROUTES:
+        if not alpha_gate_active and route.iloc[i] not in ACTIVE_ROUTES:
             row_reasons.append(f"경로 {route.iloc[i] or '없음'}")
         if macro.iloc[i] in DANGEROUS_MACRO:
             row_reasons.append(f"시장위험 {macro.iloc[i]}")
-        if mfi.iloc[i] < 70 or mfi.iloc[i] > 88:
+        if not alpha_gate_active and (mfi.iloc[i] < 70 or mfi.iloc[i] > 88):
             row_reasons.append(f"MFI {mfi.iloc[i]:.0f}")
-        if res_near.iloc[i] < 0.13:
+        if not alpha_gate_active and res_near.iloc[i] < 0.13:
             row_reasons.append("상단여력 부족")
-        if vwap.iloc[i] < 4 or vwap.iloc[i] > 14:
+        if not alpha_gate_active and (vwap.iloc[i] < 4 or vwap.iloc[i] > 14):
             row_reasons.append("VWAP 적정구간 아님")
         if rr.iloc[i] < 1.3:
             row_reasons.append(f"손익비 {rr.iloc[i]:.2f}")
-        if display.iloc[i] < 70:
+        if not alpha_gate_active and display.iloc[i] < 70:
             row_reasons.append(f"기본점수 {display.iloc[i]:.0f}")
         if bool(abnormal.iloc[i]):
             row_reasons.append("가격이력 이상")
@@ -220,11 +240,18 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
     # Preserve the original legacy decision when the guard is applied more
     # than once (pipeline -> CSV -> data store).  This makes the operation
     # idempotent and keeps the audit trail intact.
-    eligible_source = (
-        "PRE_QUALITY_BUY_NOW_ELIGIBLE"
-        if "PRE_QUALITY_BUY_NOW_ELIGIBLE" in out.columns
-        else "BUY_NOW_ELIGIBLE"
-    )
+    # [v32] 알파 게이트 활성 시 알파가 진입 SSOT이므로, 이전 배치에서 남은
+    # stale PRE_QUALITY(ROUTE 게이트 산물)를 무시하고 현재 BUY_NOW_ELIGIBLE
+    # (알파 게이트가 방금 재계산)를 권위값으로 쓴다.  그렇지 않으면 재실행 시
+    # ROUTE 시절 0 값이 알파 픽을 부당하게 탈락시킨다(idempotency 버그).
+    if _alpha_gate_on(out):
+        eligible_source = "BUY_NOW_ELIGIBLE"
+    else:
+        eligible_source = (
+            "PRE_QUALITY_BUY_NOW_ELIGIBLE"
+            if "PRE_QUALITY_BUY_NOW_ELIGIBLE" in out.columns
+            else "BUY_NOW_ELIGIBLE"
+        )
     eligible_before = _flag(out, eligible_source)
     out["PRE_QUALITY_BUY_NOW_ELIGIBLE"] = eligible_before.astype(int)
 
@@ -259,29 +286,50 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
         errors="coerce",
     ).fillna(1.0).clip(0.0, 1.0)
 
-    evidence_pass = (
-        grade.eq("BUY")
-        & (buy_now_score >= 70)
-        & ~pick_type.eq("AGGRESSIVE")
-        & risk.eq("GREEN")
-        & route.isin(ACTIVE_ROUTES)
-        & ~macro.isin(DANGEROUS_MACRO)
-        & (mfi >= 70)
-        & (mfi <= 88)
-        & (res_near >= 0.13)
-        & (vwap >= 4)
-        & (vwap <= 14)
-        & (rr >= 1.30)
-        & (display >= 70)
+    # [v32] 알파 게이트 활성 여부 — 검증된 알파가 진입 SSOT일 때는
+    # ROUTE·모멘텀 형태(MFI밴드/VWAP밴드/상단여력/DISPLAY≥70/ROUTE==ATTACK)
+    # 필터를 걷어낸다. 이들은 실측 역상관(ELITE IC -0.06)이거나 ATTACK 편향이라
+    # 알파 픽을 부당하게 탈락시킨다. 손실방어·매크로·신선도·확장·레짐 가드는 유지.
+    alpha_gate_active = _alpha_gate_on(out)
+
+    # 손실방어·데이터·매크로 공통 가드 (양 경로 공통)
+    common_guard = (
+        ~macro.isin(DANGEROUS_MACRO)
         & ~abnormal
         & ~recovery_block
         & ~july_block
         & fresh
         & poc_ok
-        & breadth_ok
-        & regime_ok
-        & (score >= 70)
+        & (rr >= 1.30)
     )
+
+    if alpha_gate_active:
+        # 알파 진입 통과분(=새 TOP_PICK)에 공통 가드만 추가.
+        # [v32] breadth_ok / regime_ok 하드블록은 알파 경로에서 제외한다:
+        #   · risk_off 하드블록은 apply_alpha_entry_gate가 NEW_ENTRY_BLOCKED로 이미 강제.
+        #   · 내부약세(breadth<35=DOWN)는 실측상 알파 최상위 픽이 +0.84%/승률51%로 양호 —
+        #     하드블록 대신 레짐 적응형 문턱(하락 상위10%)과 사이즈 축소로 대응.
+        alpha_ok = _flag(out, "ALPHA_ENTRY_OK")
+        evidence_pass = alpha_ok & common_guard
+    else:
+        # 레거시 폴백 — 알파 미검증일 때만. ROUTE 거부권은 제거(역신호),
+        # 대신 기존 모멘텀형 근거로 near-miss를 걸러 보수적으로 유지.
+        evidence_pass = (
+            grade.eq("BUY")
+            & (buy_now_score >= 70)
+            & ~pick_type.eq("AGGRESSIVE")
+            & risk.eq("GREEN")
+            & common_guard
+            & breadth_ok
+            & regime_ok
+            & (mfi >= 70)
+            & (mfi <= 88)
+            & (res_near >= 0.13)
+            & (vwap >= 4)
+            & (vwap <= 14)
+            & (display >= 70)
+            & (score >= 70)
+        )
     production_candidates = top & eligible_before & evidence_pass
     rank_key = score * 1_000 + display
     production = production_candidates & rank_key.where(

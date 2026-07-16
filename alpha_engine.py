@@ -55,6 +55,41 @@ GATE_MIN_SPREAD = 0.0
 # 픽 바닥 필터 (당일 백분위)
 ALPHA_FLOOR_PCT = 30.0
 
+# ═══════════════════════════════════════════════════════════════
+# [v32] 알파 전면 진입 게이트 — ROUTE(ATTACK/ARMED) 거부권 대체
+# ───────────────────────────────────────────────────────────────
+# 근거(3~7월 워크포워드 OOS 실측, 미래정보 미사용):
+#   · ROUTE ATTACK 알파 -2.9%p (t=-3.56, p=0.0004) — 5개월 전부 음수, 양 국면 음수
+#   · ROUTE ARMED  알파  0.0%p (t=0.02, p=0.99) — 완전 노이즈
+#   · ELITE_SCORE  IC   -0.06 (t=-5.30) — 점수 높을수록 수익 낮음(역상관)
+#   · 알파 모델    IC   +0.19 (t=6.8, AUC 0.60), Q5-Q1 +5.05%p, 십분위 승률 24%→41% 단조
+#   반사실: 알파 top3 +0.81% vs ROUTE ATK/ARM -5.91% vs 유니버스 -4.26%
+# → ROUTE를 진입 게이트에서 제거하고 검증된 알파를 primary 게이트로.
+#   레짐 적응형 백분위 문턱(사용자 선택: 상승30%/하락10%):
+ALPHA_GATE_THRESHOLD = {
+    "UP": 70.0,       # 상승 국면 → 상위 30%
+    "NEUTRAL": 80.0,  # 중립 국면 → 상위 20%
+    "DOWN": 90.0,     # 하락 국면 → 상위 10% (진입 자체는 레짐 게이트가 추가 차단)
+    "UNKNOWN": 80.0,  # 미상 → 중립 취급
+}
+ALPHA_GATE_DEFAULT_THRESHOLD = 80.0
+
+# ═══════════════════════════════════════════════════════════════
+# [v32.1] ROUTE 자체 치료 — 상태 판정을 데이터 방향으로 재설계
+# ───────────────────────────────────────────────────────────────
+# 진단(3~7월 OOS): 기존 ATTACK은 역방향 피처로 조립 —
+#   거래품질 IC -0.10(t=-7.5), MACD기울기 -0.055(t=-4.7), 레인지위치 -0.012,
+#   MFI -0.048, 타이밍 +0.004(무의미). 유일한 양(+) 구조는 저점추세 +0.031.
+# 재설계: 강도=검증 알파, 상태=올바른 방향 기술구조(MA20 위 + 저점추세 상승 + 과열 제외).
+# 검증(OOS 상태별 알파): 기존 ATTACK -4.64%p → 신 ATTACK +3.70%p(승률 36%),
+#   ARMED -0.38→+1.56%p, OVERHEAT -0.55→-2.16%p(위험 정확 표시). 순서 정상화.
+_ROUTE_ARMED_ALPHA_GAP = 15.0     # ARMED 문턱 = ATTACK 문턱 - 15
+_ROUTE_OVERHEAT_RET5 = 15.0       # 5일 급등 → 과열(역신호)
+_ROUTE_OVERHEAT_MFI = 85.0
+_ROUTE_OVERHEAT_RSI = 78.0
+# ROUTE를 재계산해도 보존할 상태(보유/청산/캐리 의미). 신규진입 상태만 재판정.
+_ROUTE_PRESERVE = {"CARRY", "EXIT", "EXIT_WARNING", "BLOCKED"}
+
 _HOLD_BDAYS = 5  # t+1 시가 진입 → t+1+5 종가 (실거래 기준)
 
 
@@ -307,4 +342,157 @@ def score_today(df: pd.DataFrame, data_dir: str = "data") -> pd.DataFrame:
         out["ALPHA_SCORE"] = np.nan
         out["ALPHA_WIN_PROB"] = np.nan
         out["ALPHA_VALIDATED"] = 0
+    return out
+
+
+def _alpha_threshold_series(df: pd.DataFrame) -> pd.Series:
+    """레짐(MARKET_REGIME)별 알파 백분위 문턱 시리즈."""
+    regime = (
+        df.get("MARKET_REGIME", pd.Series("UNKNOWN", index=df.index))
+        .astype(str).str.upper().str.strip()
+    )
+    return regime.map(ALPHA_GATE_THRESHOLD).fillna(ALPHA_GATE_DEFAULT_THRESHOLD)
+
+
+def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
+    """[v32] 알파를 primary 진입 게이트로 적용 — ROUTE 거부권 대체.
+
+    검증 통과(ALPHA_VALIDATED==1)일 때만 작동한다:
+      TOP_PICK = 리스크가드(ENTRY_RISK_GATE_OK) AND 알파백분위 ≥ 레짐문턱
+    · ROUTE는 건드리지 않는다(타이밍 배지로만 존치).
+    · ENTRY_RISK_GATE_OK가 없으면(레거시) close>stop 등 기본 가드만 재구성.
+    · 미검증이면 TOP_PICK을 그대로 두고 ALPHA_GATE_ACTIVE=0 (레거시 폴백).
+
+    주입 컬럼:
+      ALPHA_GATE_ACTIVE, ALPHA_ENTRY_THRESHOLD, ALPHA_ENTRY_OK
+    """
+    out = df.copy()
+    n = len(out)
+    validated = (
+        int(pd.to_numeric(out.get("ALPHA_VALIDATED", 0), errors="coerce")
+            .fillna(0).astype(int).max()) == 1
+        if n else False
+    )
+    thr = _alpha_threshold_series(out) if n else pd.Series(dtype=float)
+    out["ALPHA_ENTRY_THRESHOLD"] = thr
+
+    if not validated:
+        out["ALPHA_GATE_ACTIVE"] = 0
+        out["ALPHA_ENTRY_OK"] = 0
+        return out
+
+    ascore = pd.to_numeric(out.get("ALPHA_SCORE", np.nan), errors="coerce")
+
+    # 리스크 가드 — scoring_engine이 심어둔 ENTRY_RISK_GATE_OK 우선 사용.
+    if "ENTRY_RISK_GATE_OK" in out.columns:
+        risk_ok = out["ENTRY_RISK_GATE_OK"].fillna(False).astype(bool)
+    else:
+        num = lambda c: pd.to_numeric(out.get(c, np.nan), errors="coerce")
+        close, stop, tp1, buy = num("종가"), num("손절가"), num("추천매도가1"), num("추천매수가")
+        risk = (close - stop).clip(lower=1)
+        reward = (tp1 - close).clip(lower=0)
+        rr = reward / risk
+        egap = (close - buy).abs() / buy.clip(lower=1) * 100
+        poc = num("POC_GAP")
+        tov = num("거래대금(억원)")
+        risk_ok = (
+            (close > stop) & (close < tp1) & (tov >= 50)
+            & (egap <= 5.0) & (rr >= 1.0) & (poc.isna() | (poc <= 20.0))
+        ).fillna(False)
+
+    # 손실방어 차단 플래그는 존중한다(7월방어·회복차단·신규진입차단).
+    def _blk(col):
+        if col in out.columns:
+            return pd.to_numeric(out[col], errors="coerce").fillna(0).astype(bool)
+        return pd.Series(False, index=out.index)
+    blocked = _blk("NEW_ENTRY_BLOCKED") | _blk("JULY_PROFIT_BLOCK_FLAG") | _blk("PROFIT_RECOVERY_BLOCK_FLAG")
+
+    entry_ok = risk_ok & ascore.notna() & (ascore >= thr) & (~blocked)
+    out["ALPHA_GATE_ACTIVE"] = 1
+    out["ALPHA_ENTRY_OK"] = entry_ok.astype(int)
+
+    # TOP_PICK 재정의 — 알파 게이트가 SSOT.
+    out["TOP_PICK"] = entry_ok.astype(int)
+    if "TOP_PICK_TYPE" not in out.columns:
+        out["TOP_PICK_TYPE"] = ""
+    out["TOP_PICK_TYPE"] = out["TOP_PICK_TYPE"].astype("object")
+    out.loc[entry_ok, "TOP_PICK_TYPE"] = "ALPHA"
+    out.loc[~entry_ok, "TOP_PICK_TYPE"] = ""
+
+    # BUY_NOW_ELIGIBLE = 새 TOP_PICK AND BUY_NOW_PASS (컬럼 없으면 통과 취급).
+    if "BUY_NOW_PASS" in out.columns:
+        bnp = pd.to_numeric(out["BUY_NOW_PASS"], errors="coerce").fillna(0).astype(int) == 1
+    else:
+        bnp = pd.Series(True, index=out.index)
+    out["BUY_NOW_ELIGIBLE"] = (entry_ok & bnp).astype(int)
+    return out
+
+
+def recompute_route_with_alpha(df: pd.DataFrame) -> pd.DataFrame:
+    """[v32.1] ROUTE 자체 치료 — 상태 판정을 데이터 방향으로 재계산.
+
+    검증 통과(ALPHA_VALIDATED==1)일 때만 신규진입 상태(ATTACK/ARMED/WAIT/OVERHEAT)를
+    재판정한다. 보유/청산/캐리 상태(_ROUTE_PRESERVE)는 그대로 보존.
+
+      · OVERHEAT = 5일급등≥15% OR MFI≥85 OR RSI≥78  (실측 역신호 -2.16%p)
+      · ATTACK   = 알파 ≥ 레짐문턱 AND MA20 위 AND 저점추세≥0 AND ~과열  (+3.70%p)
+      · ARMED    = 알파 ≥ 문턱-15 AND (스퀴즈 OR MA20 위) AND ~과열       (+1.56%p)
+      · WAIT     = 그 외
+
+    미검증이면 ROUTE를 건드리지 않는다(기존 기술 판정 유지).
+    ROUTE_REASON도 알파·구조 근거로 재작성.
+    """
+    out = df.copy()
+    n = len(out)
+    if n == 0:
+        return out
+    validated = int(pd.to_numeric(out.get("ALPHA_VALIDATED", 0), errors="coerce")
+                    .fillna(0).astype(int).max()) == 1
+    if not validated or "ALPHA_SCORE" not in out.columns:
+        return out
+
+    num = lambda c: pd.to_numeric(out.get(c, np.nan), errors="coerce")
+    ascore = num("ALPHA_SCORE")
+    thr = _alpha_threshold_series(out)
+    above = (num("Above_MA20") > 0).fillna(False)
+    lowt = num("Low_Trend_PCT")
+    ret5 = num("ret_5d_%")
+    mfi = num("MFI14")
+    rsi = num("RSI14")
+    sq = (num("TTM_SQUEEZE") > 0).fillna(False)
+
+    cur = out.get("ROUTE", pd.Series("", index=out.index)).astype(str).str.upper().str.strip()
+    preserve = cur.isin(_ROUTE_PRESERVE)
+
+    overheat = ((ret5 >= _ROUTE_OVERHEAT_RET5) | (mfi >= _ROUTE_OVERHEAT_MFI)
+                | (rsi >= _ROUTE_OVERHEAT_RSI)).fillna(False)
+    confirmed = above & (lowt.fillna(-99) >= 0)
+    a_ok = ascore.notna()
+
+    is_attack = a_ok & (ascore >= thr) & confirmed & (~overheat)
+    is_armed = (~is_attack) & a_ok & (ascore >= (thr - _ROUTE_ARMED_ALPHA_GAP)) & (sq | above) & (~overheat)
+    is_overheat = (~is_attack) & (~is_armed) & overheat
+
+    new_route = pd.Series("WAIT", index=out.index, dtype="object")
+    new_route[is_armed] = "ARMED"
+    new_route[is_attack] = "ATTACK"
+    new_route[is_overheat] = "OVERHEAT"
+    # 보존 상태는 원래 값 유지.
+    new_route[preserve] = out.loc[preserve, "ROUTE"].astype(str).values
+
+    # 사유 문자열 (알파·구조 근거)
+    reason = pd.Series("추세 관망", index=out.index, dtype="object")
+    reason[is_armed] = "알파 상위권 + 코일(스퀴즈/추세) — 진입 임박"
+    reason[is_attack] = "알파 상위 + MA20위·저점상승 확인 — 진입 우선"
+    reason[is_overheat] = "과열(급등·MFI·RSI) — 실측 역신호, 관망"
+    reason[preserve] = out.loc[preserve, "ROUTE_REASON"].astype(str).values if "ROUTE_REASON" in out.columns else ""
+
+    out["ROUTE_PREV"] = out.get("ROUTE", "")
+    out["ROUTE"] = new_route
+    out["ROUTE_REASON"] = reason
+    out["ROUTE_ALPHA_HEALED"] = 1
+    # 상태 동기화 컬럼 (소비처 SSOT)
+    _active = new_route.isin(["ATTACK", "ARMED"])
+    out["IS_ACTIVE"] = _active
+    out["IS_WATCH"] = new_route.eq("WAIT")
     return out

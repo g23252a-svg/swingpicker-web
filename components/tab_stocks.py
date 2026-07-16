@@ -1916,16 +1916,22 @@ def _build_market_no_buy_context(df: pd.DataFrame) -> str:
         below_ratio = max(0.0, 100.0 - above_ratio)
         parts.append(f"시장 {below_ratio:.0f}%가 20일선 아래")
 
-    route = df.get("ROUTE", pd.Series("", index=df.index)).astype(str).str.upper().str.strip()
-    active_n = int(route.isin(["ATTACK", "ARMED"]).sum())
-    if active_n > 0:
-        parts.append(f"ROUTE active {active_n}개")
+    # [v32] 진입 신호 = 검증 알파 통과분(TOP_PICK). ROUTE는 게이트 아님.
+    _alpha_on = (
+        "ALPHA_GATE_ACTIVE" in df.columns
+        and int(pd.to_numeric(df["ALPHA_GATE_ACTIVE"], errors="coerce").fillna(0).max()) == 1
+    )
+    if _alpha_on:
+        active_n = int(pd.to_numeric(df.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int).sum())
+        parts.append(f"AI 진입기준 통과 {active_n}개")
     else:
-        parts.append("ROUTE active 0개")
+        route = df.get("ROUTE", pd.Series("", index=df.index)).astype(str).str.upper().str.strip()
+        active_n = int(route.isin(["ATTACK", "ARMED"]).sum())
+        parts.append(f"진입신호 {active_n}개")
 
     if "BUY_NOW_PASS" in df.columns:
         pass_n = int(_series_truthy(df["BUY_NOW_PASS"]).sum())
-        parts.append(f"BUY_NOW_PASS {pass_n}개")
+        parts.append(f"품질통과 {pass_n}개")
 
     if "NO_BUY_BREAKER_DECISION" in df.columns:
         nbb_top = (
@@ -1954,7 +1960,18 @@ def _nearest_official_candidate(df: pd.DataFrame) -> dict | None:
     if bool(new_candidate_mask.any()):
         work = work.loc[new_candidate_mask].copy()
         route = route.loc[new_candidate_mask]
-    active = route.isin(["ATTACK", "ARMED"])
+    # [v32] 근접도는 검증 알파 기준. ROUTE active는 더 이상 신호가 아님.
+    _alpha_on = (
+        "ALPHA_GATE_ACTIVE" in work.columns
+        and int(pd.to_numeric(work["ALPHA_GATE_ACTIVE"], errors="coerce").fillna(0).max()) == 1
+    )
+    ascore = _num_series(work, "ALPHA_SCORE", 0)
+    athr = _num_series(work, "ALPHA_ENTRY_THRESHOLD", 80)
+    if _alpha_on:
+        # 알파가 문턱 근처(문턱-10 이상)면 '아깝게 탈락'으로 간주.
+        active = ascore >= (athr - 10)
+    else:
+        active = route.isin(["ATTACK", "ARMED"])
     final = _num_series(work, "FINAL_SCORE", 0)
     score = _num_series(work, "ELITE_SCORE", 0) if "ELITE_SCORE" in work.columns else final.copy()
     score = score.where(score.notna(), final)
@@ -1967,6 +1984,9 @@ def _nearest_official_candidate(df: pd.DataFrame) -> dict | None:
 
     # 표시용 near score: 공식산식이 아니라 '왜 0개인지' 설명하기 위한 근접도.
     work["_near_score"] = 0.0
+    # [v32] 알파 게이트 시 알파 점수 자체를 근접도의 주 축으로.
+    if _alpha_on:
+        work["_near_score"] += (ascore.clip(0, 100) * 0.36)  # 최대 +36
     work.loc[active, "_near_score"] += 18
     work.loc[buy_pass, "_near_score"] += 18
     work.loc[ebs_ok, "_near_score"] += 8
@@ -1987,7 +2007,11 @@ def _nearest_official_candidate(df: pd.DataFrame) -> dict | None:
     ).iloc[0]
 
     reasons: list[str] = []
-    if not active.loc[row.name]:
+    if _alpha_on:
+        _a, _t = float(ascore.loc[row.name]), float(athr.loc[row.name])
+        if _a < _t:
+            reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
+    elif not active.loc[row.name]:
         reasons.append(f"ROUTE {str(row.get('ROUTE', '-'))}")
     if not bool(buy_pass.loc[row.name]):
         reasons.append("BUY_NOW_PASS=0")
@@ -2920,8 +2944,18 @@ def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
         return None
 
     breadth = _first_num("MARKET_BREADTH")
-    route_u = df.get("ROUTE", pd.Series(dtype=str)).astype(str).str.upper()
-    n_active = int(route_u.isin(["ATTACK", "ARMED"]).sum())
+    # [v32] 진입 신호 = 검증된 알파가 문턱을 넘은 종목(TOP_PICK). ROUTE는 게이트 아님.
+    _alpha_on = (
+        "ALPHA_GATE_ACTIVE" in df.columns
+        and int(pd.to_numeric(df["ALPHA_GATE_ACTIVE"], errors="coerce").fillna(0).max()) == 1
+    )
+    if _alpha_on:
+        n_active = int(pd.to_numeric(df.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int).sum())
+        _reg = str(df.get("MARKET_REGIME", pd.Series(["NEUTRAL"])).iloc[0]).upper() if len(df) else "NEUTRAL"
+        _thr_kr = {"UP": "상위 30%", "DOWN": "상위 10%"}.get(_reg, "상위 20%")
+    else:
+        route_u = df.get("ROUTE", pd.Series(dtype=str)).astype(str).str.upper()
+        n_active = int(route_u.isin(["ATTACK", "ARMED"]).sum())
     n_quality = 0
     if "BUY_NOW_PASS" in df.columns:
         n_quality = int(_series_truthy(df["BUY_NOW_PASS"]).sum())
@@ -2936,11 +2970,21 @@ def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
             _b_desc = (f"상승 종목이 {breadth:.0f}%뿐인 내부 약세장 — "
                        "이 구간 신규 진입은 실측상 평균 -5.9%였습니다.")
         checks.append((b_ok, "시장 상태", _b_desc))
-    if n_active > 0:
-        _a_desc = f"돌파/진입 대기 신호가 켜진 종목 {n_active}개."
+    if _alpha_on:
+        _sig_title = "AI 진입 신호"
+        if n_active > 0:
+            _a_desc = (f"AI 알파 모델이 오늘 {_thr_kr} 진입 기준을 넘긴 종목 {n_active}개 "
+                       "(ROUTE 아닌 검증된 알파가 선별).")
+        else:
+            _a_desc = ("AI 알파 기준을 넘긴 종목이 없습니다 — 오늘은 진입 자리가 아닙니다 "
+                       "(하락 방어 차단 또는 알파 미달).")
     else:
-        _a_desc = "돌파 신호가 켜진 종목이 없습니다 — 전 종목이 관망/중립 단계."
-    checks.append((n_active > 0, "진입 신호", _a_desc))
+        _sig_title = "진입 신호"
+        if n_active > 0:
+            _a_desc = f"돌파/진입 대기 신호가 켜진 종목 {n_active}개."
+        else:
+            _a_desc = "진입 기준을 넘긴 종목이 없습니다 — 오늘은 진입 자리가 아닙니다."
+    checks.append((n_active > 0, _sig_title, _a_desc))
     if n_quality > 0:
         _q_desc = (f"품질 조건(자리·손익비·유동성)을 통과한 종목 {n_quality}개 — "
                    "시장이 풀리면 이 안에서 후보가 나옵니다.")
@@ -2975,7 +3019,8 @@ def _render_daily_official_decision_card(df: pd.DataFrame) -> dict:
         if breadth is not None and breadth < 35:
             parts.append("시장이 돌아서고(상승 종목 35% 이상)")
         if n_active == 0:
-            parts.append("돌파 신호가 켜진 종목이 나오면")
+            parts.append("AI 알파 상위 종목이 진입 기준을 넘으면"
+                         if _alpha_on else "진입 신호가 켜진 종목이 나오면")
         resume_txt = (" ".join(parts) or "조건 충족 시") + " 자동으로 매수 후보가 다시 올라옵니다."
         resume_html = (
             '<div style="font-size:11px; color:#CBD5E1; margin-top:6px; padding-top:6px; '

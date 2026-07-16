@@ -1709,17 +1709,16 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     # 않고 기존 TOP_PICK+BUY_NOW_ELIGIBLE를 더 엄격하게 거부할 수만 있다.
     try:
         from services.recommendation_quality import apply_recommendation_quality_guard
-        _before_quality = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
-                               & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
-        df_out = apply_recommendation_quality_guard(df_out)
-        _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
-        # [v29→v31.3] 알파 점수 — 스코어링 직전에 이번 실행에서 학습+검증.
+        # [v29→v31.3] 알파 점수 — 품질게이트 전에 이번 실행에서 학습+검증.
         # 배치 러너가 매번 새 체크아웃이라 모델 바이너리(.gitignore)가 남지
         # 않음 → '메타는 검증통과인데 모델 없음 → 영구 미사용' 버그 수정.
         # 학습 패널은 선행수익률이 확정된 과거(≥6영업일 전)만 포함 — 누출 없음.
+        # [v32] 알파는 진입 게이트 SSOT — 반드시 품질게이트보다 먼저 스코어링/게이팅.
         try:
             from alpha_engine import train_and_save as _alpha_train
             from alpha_engine import score_today as _alpha_score_today
+            from alpha_engine import apply_alpha_entry_gate as _alpha_gate
+            from alpha_engine import recompute_route_with_alpha as _alpha_route
             _am = _alpha_train(OUT_DIR, trade_ymd)
             if _am.get("validated"):
                 log(f"🧠 [v29] 알파 학습 — OOS IC {_am.get('mean_ic')} (t={_am.get('ic_t')}) "
@@ -1727,12 +1726,33 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             else:
                 log(f"🧠 [v29] 알파 학습 — 검증 미통과 ({_am.get('reason', 'gate 미달')}) → 미사용")
             df_out = _alpha_score_today(df_out, data_dir=OUT_DIR)
-            if int(pd.to_numeric(df_out.get("ALPHA_VALIDATED", 0), errors="coerce").fillna(0).iloc[0]):
-                log("🧠 [v29] 알파 점수 적용 완료")
+            # [v32.1] ROUTE 자체 치료 — 상태 판정을 데이터 방향으로 재계산.
+            # (기존 ATTACK -4.64%p → 신 ATTACK +3.70%p, 순서 정상화)
+            try:
+                _rt_old = df_out.get("ROUTE", pd.Series(dtype=str)).astype(str).str.upper()
+                _atk_old = int(_rt_old.isin(["ATTACK", "ARMED"]).sum())
+                df_out = _alpha_route(df_out)
+                if int(pd.to_numeric(df_out.get("ROUTE_ALPHA_HEALED", 0), errors="coerce").fillna(0).max() if len(df_out) else 0):
+                    _rt_new = df_out["ROUTE"].astype(str).str.upper()
+                    _atk_new = int(_rt_new.isin(["ATTACK", "ARMED"]).sum())
+                    log(f"🧭 [v32.1] ROUTE 치료 — ATTACK/ARMED {_atk_old}→{_atk_new} (강도=알파·상태=구조)")
+            except Exception as _re:
+                logger.warning(f"⚠️ ROUTE 치료 실패 (기존 ROUTE 유지): {_re}")
+            # [v32] 알파 전면 진입 게이트 — ROUTE 거부권 대체.
+            _tp_before = int(pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int).sum())
+            df_out = _alpha_gate(df_out)
+            if int(pd.to_numeric(df_out.get("ALPHA_GATE_ACTIVE", 0), errors="coerce").fillna(0).iloc[0] if len(df_out) else 0):
+                _tp_after = int(pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int).sum())
+                _reg = str(df_out.get("MARKET_REGIME", pd.Series([""])).iloc[0]) if len(df_out) else ""
+                log(f"🧠 [v32] 알파 전면 진입 게이트 적용 — 레짐 {_reg} · TOP_PICK {_tp_before}→{_tp_after} (ROUTE 거부권 제거)")
             else:
-                log("🧠 [v29] 알파 점수 미적용 (검증 미통과 또는 데이터 부족)")
+                log("🧠 [v32] 알파 미검증 → 레거시 폴백 게이트 (ROUTE 거부권 없이)")
         except Exception as _ae:
-            logger.warning(f"⚠️ 알파 학습/점수 실패 (미사용 처리): {_ae}")
+            logger.warning(f"⚠️ 알파 학습/점수/게이트 실패 (미사용 처리): {_ae}")
+        _before_quality = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
+                               & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
+        df_out = apply_recommendation_quality_guard(df_out)
+        _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
         # [v28] "왜 이 종목인가" 근거 문장 — 실측 수치 기반, 리스크 병기
         try:
             from services.reco_evidence import add_evidence_columns
