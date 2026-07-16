@@ -35,10 +35,14 @@ REGIME_DOWN = "DOWN"
 REGIME_UNKNOWN = "UNKNOWN"
 
 # 레짐별 신규 진입 사이즈 배수 (Kelly/추천 비중에 곱)
+# [v32] DOWN 0.0 → 0.3: 알파 전면 게이트 도입으로 하락 레짐에서도
+# 알파 최상위 10%만 축소 사이즈로 진입 허용(사용자 선택: 적응형·반감 사이즈).
+# 실측 근거: risk_off=False & 내부약세(breadth<35) 알파 픽 +0.84%/승률 51%.
+# 진짜 위험한 하락(risk_off=KOSPI<하락MA20)은 NEW_ENTRY_BLOCKED가 별도 하드블록.
 REGIME_SIZE_MULT = {
     REGIME_UP: 1.0,
     REGIME_NEUTRAL: 0.5,
-    REGIME_DOWN: 0.0,
+    REGIME_DOWN: 0.3,
     REGIME_UNKNOWN: 0.5,
 }
 

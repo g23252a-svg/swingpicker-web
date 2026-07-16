@@ -156,8 +156,9 @@ class TestEligibleColumn:
         평가 명시: PRIME 회원이 CSV 보면 TOP_PICK=0인데 BUY_NOW_PASS=1인
         종목이 매수 후보로 오해될 수 있음.
         """
-        # TOP_PICK 게이트 실패 — ROUTE를 NEUTRAL로 (ATTACK/ARMED 아닌)
-        df = _make_input_df([{"ROUTE": "NEUTRAL"}])
+        # [v32] ROUTE는 더 이상 TOP_PICK 게이트가 아니다(거부권 제거).
+        # 리스크 가드(손익비<1.0)로 TOP_PICK=0을 만든다: 목표가 10200 → RR 0.4.
+        df = _make_input_df([{"추천매도가1": 10200}])
         out, _ = scoring_module.compute_elite_score(df)
 
         # TOP_PICK=0이지만 BUY_NOW는 정상 종목이라 BUY 가능

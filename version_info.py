@@ -15,6 +15,20 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "32.0.0",
+        "date": "2026-07-16",
+        "type": "major",
+        "title": "v32.0 — ROUTE 게이트 대개혁: 알파 전면 진입 게이트",
+        "items": [
+            "🔬 **ROUTE 역신호 실증 (3~7월 워크포워드 OOS, 미래정보 미사용):** ROUTE ATTACK(가장 강한 매수 신호)의 시장 대비 알파 -2.9%p (t=-3.56, p=0.0004) — 5개월 전부 음수, 상승·하락 국면 모두 음수. ARMED는 알파 0.0%p (p=0.99) 완전 노이즈. ELITE_SCORE도 IC -0.06 (t=-5.30)로 '점수 높을수록 수익 낮음' 역상관 확정.",
+            "🧠 **진입 게이트를 ROUTE→검증 알파로 전면 교체:** TOP_PICK/PRODUCTION_BUY의 `ROUTE ∈ {ATTACK, ARMED}` 거부권을 4곳(scoring_engine 하드게이트·finalize route-cap·recommendation_quality ACTIVE_ROUTES) 모두 제거. 진입 게이트 = 리스크가드(자리·손익비·유동성·확장) + 검증 알파 백분위. ROUTE는 UI 타이밍 배지로만 존치.",
+            "🎯 **레짐 적응형 선별 (상승30%/중립20%/하락10%):** 알파 백분위 문턱을 레짐별로 가변 — UP≥70·NEUTRAL≥80·DOWN≥90. DOWN도 축소 사이즈(0.3)로 상위10% 진입 허용(실측: 내부약세 알파 최상위 픽 +0.84%/승률51%). 진짜 위험한 하락(risk_off=KOSPI<하락MA20)은 NEW_ENTRY_BLOCKED가 별도 하드블록으로 유지(실측: risk_off 알파 픽 승률 17%).",
+            "📊 **반사실 검증:** 알파 top3 실현 +0.81%/승률41% vs ROUTE ATK/ARM -5.91% vs 유니버스(무작위) -4.26% (44 OOS일, 유니버스 대비 +5.07%p). 알파 모델 OOS IC +0.19 (t=6.8, AUC 0.60), Q5-Q1 +5.05%p, 십분위 승률 24%→41% 단조.",
+            "🗣️ **판정 카드·근접도 알파화:** '오늘의 판단' 체크리스트의 진입신호를 ROUTE active→AI 알파 통과분으로, '아깝게 탈락 1위' 근접도를 알파 점수 기준으로 재작성. '경로 X' 대신 '알파 N점(진입선 M점 미달)'로 표기.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "31.1.0",
         "date": "2026-07-15",
         "type": "minor",

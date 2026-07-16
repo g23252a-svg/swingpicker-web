@@ -801,10 +801,13 @@ def compute_elite_score(df: pd.DataFrame,
     _poc_ok = _poc_gap.isna() | (_poc_gap <= _poc_max)
     x["EXTENSION_BLOCK"] = (~_poc_ok).astype(int)
 
-    # 공통 하드게이트
-    _hard_gate = (
-        _route_active
-        & (close > stop)
+    # [v32] 리스크 가드 (ROUTE 무관) — 자리·손익비·유동성·확장 방어.
+    # ROUTE(ATTACK/ARMED) 거부권은 제거한다. 실측상 ATTACK 알파 -2.9%p(p=0.0004),
+    # ARMED 노이즈로, ROUTE는 진입 게이트가 아니라 타이밍 배지로만 존치.
+    # 진입 게이트는 alpha_engine.apply_alpha_entry_gate가 검증된 알파로 재정의한다.
+    # 이 마스크는 알파 게이트/폴백 공통 리스크 가드로 재사용된다.
+    _risk_gate = (
+        (close > stop)
         & (close < tp1)
         & (_pass_ebs == 1)
         & (_turnover >= 50)
@@ -812,6 +815,11 @@ def compute_elite_score(df: pd.DataFrame,
         & (_rr_now >= 1.0)  # [v22.3] 손익비 하한 강제
         & _poc_ok           # [v27] POC 확장 차단
     )
+    x["ENTRY_RISK_GATE_OK"] = _risk_gate.astype(bool)
+
+    # 공통 하드게이트 (레거시 폴백용 — 알파 미검증일 때만 유효).
+    # ROUTE 거부권 제거됨. _route_active는 이제 사용하지 않지만 참고용으로 남긴다.
+    _hard_gate = _risk_gate
 
     # AGGRESSIVE: 손익비 우선 (TP1 15%+)
     _aggressive = (

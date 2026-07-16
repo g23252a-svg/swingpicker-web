@@ -197,10 +197,11 @@ class TestEbsTopPickBlock:
 
     def test_low_ebs_non_top_pick_eligible_zero(self, scoring_module):
         """EBS=4 AND TOP_PICK=0 → ELIGIBLE 강제 0."""
-        # TOP_PICK 게이트 실패시키기 (ROUTE NEUTRAL)
+        # [v32] ROUTE는 더 이상 TOP_PICK 게이트가 아니다(거부권 제거).
+        # 리스크 가드(손익비<1.0)로 TOP_PICK=0을 만든다: 목표가를 낮춰 RR 0.4.
         df = _make_input_df([{
             "EBS": 4,
-            "ROUTE": "NEUTRAL",  # TOP_PICK=0 만들기
+            "추천매도가1": 10200,  # RR=(10200-10000)/(10000-9500)=0.4 <1.0 → 게이트 탈락
         }])
         out, _ = scoring_module.compute_elite_score(df)
         assert out.iloc[0]["TOP_PICK"] == 0
