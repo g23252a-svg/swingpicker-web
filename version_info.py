@@ -15,6 +15,19 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "32.1.0",
+        "date": "2026-07-16",
+        "type": "major",
+        "title": "v32.1 — ROUTE 자체 치료: 상태 판정 방향 재설계",
+        "items": [
+            "🔬 **ROUTE가 왜 지는지 해부 (피처별 OOS IC):** 기존 ATTACK은 거의 전부 역방향 피처로 조립 — 거래품질 IC -0.10(t=-7.5, 최강 역신호), MACD기울기 -0.055, 레인지위치(고가근접) -0.012, MFI -0.048, 타이밍 +0.004(무의미). 유일한 양(+) 구조는 저점추세(rising lows) +0.031. 즉 '고품질 거래로 신고가 돌파' 종목을 사라는 신호였고 시장은 그걸 평균회귀로 역주행시킴.",
+            "🧭 **ROUTE 재설계 — 강도=검증 알파, 상태=올바른 방향 기술구조:** ATTACK = 알파≥레짐문턱 AND MA20 위 AND 저점추세≥0 AND 비과열. ARMED = 알파≥문턱-15 AND (스퀴즈|MA20위) AND 비과열. OVERHEAT = 5일급등≥15%|MFI≥85|RSI≥78(실측 역신호). 검증 통과일에만 재판정하며 CARRY/청산 상태는 보존.",
+            "📊 **치료 검증 (OOS 상태별 알파):** ATTACK -4.64%p→**+3.70%p**(승률 23%→36%), ARMED -0.38%p→+1.56%p, OVERHEAT -0.55%p→-2.16%p(위험 정확 표시). 순서가 ATTACK>ARMED>WAIT>OVERHEAT로 정상화 — ATTACK이 진짜 최고 신호가 됨.",
+            "🧩 **역할 분리:** ROUTE=치료된 상태 라벨(사람이 읽는 강도), TOP_PICK/PRODUCTION_BUY=알파 진입 게이트(risk_off·손실방어 존중). 7/15 예: ROUTE ATTACK 23종목(구조·알파 강함)이지만 risk_off로 실제 진입은 0 — 상태와 행동이 정직하게 분리.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "32.0.0",
         "date": "2026-07-16",
         "type": "major",

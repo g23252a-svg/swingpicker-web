@@ -1718,6 +1718,7 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             from alpha_engine import train_and_save as _alpha_train
             from alpha_engine import score_today as _alpha_score_today
             from alpha_engine import apply_alpha_entry_gate as _alpha_gate
+            from alpha_engine import recompute_route_with_alpha as _alpha_route
             _am = _alpha_train(OUT_DIR, trade_ymd)
             if _am.get("validated"):
                 log(f"🧠 [v29] 알파 학습 — OOS IC {_am.get('mean_ic')} (t={_am.get('ic_t')}) "
@@ -1725,6 +1726,18 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             else:
                 log(f"🧠 [v29] 알파 학습 — 검증 미통과 ({_am.get('reason', 'gate 미달')}) → 미사용")
             df_out = _alpha_score_today(df_out, data_dir=OUT_DIR)
+            # [v32.1] ROUTE 자체 치료 — 상태 판정을 데이터 방향으로 재계산.
+            # (기존 ATTACK -4.64%p → 신 ATTACK +3.70%p, 순서 정상화)
+            try:
+                _rt_old = df_out.get("ROUTE", pd.Series(dtype=str)).astype(str).str.upper()
+                _atk_old = int(_rt_old.isin(["ATTACK", "ARMED"]).sum())
+                df_out = _alpha_route(df_out)
+                if int(pd.to_numeric(df_out.get("ROUTE_ALPHA_HEALED", 0), errors="coerce").fillna(0).max() if len(df_out) else 0):
+                    _rt_new = df_out["ROUTE"].astype(str).str.upper()
+                    _atk_new = int(_rt_new.isin(["ATTACK", "ARMED"]).sum())
+                    log(f"🧭 [v32.1] ROUTE 치료 — ATTACK/ARMED {_atk_old}→{_atk_new} (강도=알파·상태=구조)")
+            except Exception as _re:
+                logger.warning(f"⚠️ ROUTE 치료 실패 (기존 ROUTE 유지): {_re}")
             # [v32] 알파 전면 진입 게이트 — ROUTE 거부권 대체.
             _tp_before = int(pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int).sum())
             df_out = _alpha_gate(df_out)

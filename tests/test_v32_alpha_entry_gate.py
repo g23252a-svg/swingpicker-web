@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import alpha_engine as ae
 from alpha_engine import (
     apply_alpha_entry_gate,
+    recompute_route_with_alpha,
     ALPHA_GATE_THRESHOLD,
     ALPHA_GATE_DEFAULT_THRESHOLD,
 )
@@ -164,3 +165,93 @@ def test_buy_now_eligible_recomputed_from_alpha_top_pick():
 def test_empty_df_safe():
     out = apply_alpha_entry_gate(pd.DataFrame())
     assert out.empty
+
+
+# ═══════════════════════════════════════════════════
+#  ROUTE 자체 치료 (recompute_route_with_alpha)
+# ═══════════════════════════════════════════════════
+
+def _rr(**overrides):
+    """ROUTE 재계산 입력 — 기술 구조 포함."""
+    row = {
+        "종목코드": "000001",
+        "ALPHA_VALIDATED": 1,
+        "ALPHA_SCORE": 95.0,
+        "MARKET_REGIME": "NEUTRAL",   # 문턱 80
+        "ROUTE": "WAIT",
+        "ROUTE_REASON": "추세 관망",
+        "Above_MA20": 1,
+        "Low_Trend_PCT": 3.0,          # 저점 상승
+        "ret_5d_%": 2.0,               # 비과열
+        "MFI14": 55.0,
+        "RSI14": 55.0,
+        "TTM_SQUEEZE": 0,
+    }
+    row.update(overrides)
+    return row
+
+
+def _rdf(rows):
+    return pd.DataFrame([_rr(**r) for r in rows])
+
+
+def test_route_unchanged_when_unvalidated():
+    df = _rdf([{"ALPHA_VALIDATED": 0, "ROUTE": "WAIT"}])
+    out = recompute_route_with_alpha(df)
+    assert out.iloc[0]["ROUTE"] == "WAIT"
+    assert "ROUTE_ALPHA_HEALED" not in out.columns
+
+
+def test_healed_attack_requires_alpha_structure_not_overheat():
+    # 알파 상위 + MA20위 + 저점상승 + 비과열 → ATTACK
+    out = recompute_route_with_alpha(_rdf([{"ALPHA_SCORE": 95.0}]))
+    assert out.iloc[0]["ROUTE"] == "ATTACK"
+    assert out.iloc[0]["ROUTE_ALPHA_HEALED"] == 1
+
+
+def test_high_alpha_but_below_ma20_is_not_attack():
+    # 알파 높아도 구조(MA20위·저점상승) 미확인이면 ATTACK 아님 → ARMED/WAIT.
+    out = recompute_route_with_alpha(_rdf([{"ALPHA_SCORE": 95.0, "Above_MA20": 0}]))
+    assert out.iloc[0]["ROUTE"] != "ATTACK"
+
+
+def test_extended_stock_is_overheat_even_with_alpha():
+    # 5일 급등(과열)은 알파 높아도 OVERHEAT (실측 역신호).
+    out = recompute_route_with_alpha(_rdf([{"ALPHA_SCORE": 99.0, "ret_5d_%": 20.0}]))
+    assert out.iloc[0]["ROUTE"] == "OVERHEAT"
+
+
+def test_high_mfi_or_rsi_is_overheat():
+    out = recompute_route_with_alpha(_rdf([
+        {"ALPHA_SCORE": 99.0, "MFI14": 88.0},
+        {"ALPHA_SCORE": 99.0, "RSI14": 80.0},
+    ]))
+    assert out.iloc[0]["ROUTE"] == "OVERHEAT"
+    assert out.iloc[1]["ROUTE"] == "OVERHEAT"
+
+
+def test_healed_armed_is_near_threshold_and_coiled():
+    # 알파가 문턱(80)-15=65~80 사이 + 스퀴즈 → ARMED (ATTACK 아님).
+    out = recompute_route_with_alpha(_rdf([
+        {"ALPHA_SCORE": 70.0, "TTM_SQUEEZE": 1, "Above_MA20": 0, "Low_Trend_PCT": -1.0}
+    ]))
+    assert out.iloc[0]["ROUTE"] == "ARMED"
+
+
+def test_low_alpha_is_wait():
+    out = recompute_route_with_alpha(_rdf([{"ALPHA_SCORE": 30.0}]))
+    assert out.iloc[0]["ROUTE"] == "WAIT"
+
+
+def test_carry_and_exit_states_preserved():
+    out = recompute_route_with_alpha(_rdf([
+        {"ROUTE": "CARRY", "ALPHA_SCORE": 95.0},
+        {"ROUTE": "EXIT_WARNING", "ALPHA_SCORE": 95.0},
+    ]))
+    assert out.iloc[0]["ROUTE"] == "CARRY"
+    assert out.iloc[1]["ROUTE"] == "EXIT_WARNING"
+
+
+def test_route_reason_rewritten_on_heal():
+    out = recompute_route_with_alpha(_rdf([{"ALPHA_SCORE": 95.0}]))
+    assert "알파" in out.iloc[0]["ROUTE_REASON"]
