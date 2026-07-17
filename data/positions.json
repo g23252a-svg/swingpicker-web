@@ -32,7 +32,7 @@
     "take_px2": 44250.0,
     "trailing_high": 43250.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 38300.0,
     "unrealized_pnl_pct": 4.36,
     "realized_pnl_pct": 0.0,
@@ -67,7 +67,7 @@
     "take_px2": 102300.0,
     "trailing_high": 99300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 71000.0,
     "unrealized_pnl_pct": -8.39,
     "realized_pnl_pct": 0.0,
@@ -89,7 +89,8 @@
       "290650_20260609_WARN_DRAWDOWN_20260713",
       "290650_20260609_WARN_DRAWDOWN_20260714",
       "290650_20260609_WARN_DRAWDOWN_20260715",
-      "290650_20260609_WARN_DRAWDOWN_20260716"
+      "290650_20260609_WARN_DRAWDOWN_20260716",
+      "290650_20260609_WARN_DRAWDOWN_20260717"
     ]
   },
   {
@@ -104,7 +105,7 @@
     "take_px2": 807000.0,
     "trailing_high": 737000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 701000.0,
     "unrealized_pnl_pct": 7.02,
     "realized_pnl_pct": 0.0,
@@ -130,7 +131,7 @@
     "take_px2": 100200.0,
     "trailing_high": 84600.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 79000.0,
     "unrealized_pnl_pct": -1.74,
     "realized_pnl_pct": 0.0,
@@ -157,7 +158,7 @@
     "take_px2": 299500.0,
     "trailing_high": 258500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 208500.0,
     "unrealized_pnl_pct": -8.15,
     "realized_pnl_pct": 0.0,
@@ -170,7 +171,8 @@
       "483650_20260702_WARN_DRAWDOWN_20260713",
       "483650_20260702_WARN_DRAWDOWN_20260714",
       "483650_20260702_WARN_DRAWDOWN_20260715",
-      "483650_20260702_WARN_DRAWDOWN_20260716"
+      "483650_20260702_WARN_DRAWDOWN_20260716",
+      "483650_20260702_WARN_DRAWDOWN_20260717"
     ]
   },
   {
@@ -185,7 +187,7 @@
     "take_px2": 34950.0,
     "trailing_high": 29700.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 26500.0,
     "unrealized_pnl_pct": -7.18,
     "realized_pnl_pct": 0.0,
@@ -198,7 +200,8 @@
       "003490_20260702_WARN_DRAWDOWN_20260713",
       "003490_20260702_WARN_DRAWDOWN_20260714",
       "003490_20260702_WARN_DRAWDOWN_20260715",
-      "003490_20260702_WARN_DRAWDOWN_20260716"
+      "003490_20260702_WARN_DRAWDOWN_20260716",
+      "003490_20260702_WARN_DRAWDOWN_20260717"
     ]
   },
   {
@@ -213,7 +216,7 @@
     "take_px2": 77200.0,
     "trailing_high": 62700.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 54200.0,
     "unrealized_pnl_pct": -3.21,
     "realized_pnl_pct": 0.0,
@@ -238,7 +241,7 @@
     "take_px2": 44850.0,
     "trailing_high": 32850.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 27300.0,
     "unrealized_pnl_pct": -6.67,
     "realized_pnl_pct": 0.0,
@@ -246,7 +249,8 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "006360_20260709_WARN_DRAWDOWN_20260716"
+      "006360_20260709_WARN_DRAWDOWN_20260716",
+      "006360_20260709_WARN_DRAWDOWN_20260717"
     ]
   },
   {
@@ -261,7 +265,7 @@
     "take_px2": 55800.0,
     "trailing_high": 49500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 46950.0,
     "unrealized_pnl_pct": 5.15,
     "realized_pnl_pct": 0.0,
@@ -282,7 +286,7 @@
     "take_px2": 17310.0,
     "trailing_high": 14990.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 12930.0,
     "unrealized_pnl_pct": -6.44,
     "realized_pnl_pct": 0.0,
@@ -290,7 +294,8 @@
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "005950_20260713_WARN_DRAWDOWN_20260716"
+      "005950_20260713_WARN_DRAWDOWN_20260716",
+      "005950_20260713_WARN_DRAWDOWN_20260717"
     ]
   },
   {
@@ -305,7 +310,7 @@
     "take_px2": 68200.0,
     "trailing_high": 57100.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 54500.0,
     "unrealized_pnl_pct": 12.49,
     "realized_pnl_pct": 0.0,
@@ -326,7 +331,7 @@
     "take_px2": 149800.0,
     "trailing_high": 119000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 118300.0,
     "unrealized_pnl_pct": 1.11,
     "realized_pnl_pct": 0.0,
@@ -347,7 +352,7 @@
     "take_px2": 24950.0,
     "trailing_high": 20500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 20050.0,
     "unrealized_pnl_pct": 1.47,
     "realized_pnl_pct": 0.0,
@@ -368,7 +373,7 @@
     "take_px2": 42000.0,
     "trailing_high": 37300.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 36050.0,
     "unrealized_pnl_pct": -1.23,
     "realized_pnl_pct": 0.0,
@@ -389,7 +394,7 @@
     "take_px2": 217500.0,
     "trailing_high": 135000.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 130300.0,
     "unrealized_pnl_pct": 6.11,
     "realized_pnl_pct": 0.0,
@@ -410,7 +415,7 @@
     "take_px2": 249000.0,
     "trailing_high": 215500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 208500.0,
     "unrealized_pnl_pct": 0.24,
     "realized_pnl_pct": 0.0,
@@ -431,7 +436,7 @@
     "take_px2": 273000.0,
     "trailing_high": 236500.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 229000.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
@@ -452,7 +457,7 @@
     "take_px2": 8880.0,
     "trailing_high": 6250.0,
     "status": "OPEN",
-    "last_check_ymd": "20260716",
+    "last_check_ymd": "20260717",
     "last_close_px": 5850.0,
     "unrealized_pnl_pct": 0.0,
     "realized_pnl_pct": 0.0,
