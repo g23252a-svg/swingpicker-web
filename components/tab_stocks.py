@@ -4066,6 +4066,27 @@ def _render_hero_strip(df: pd.DataFrame, official_decision: dict | None) -> None
         ' background:rgba(148,163,184,0.12); color:#94A3B8; font-weight:700;">🧠 알파모델 미적용 (규칙 기반)</span>'
     )
 
+    # [v34] 폭락 방어(risk_off) 잠금 칩 — 시장폭이 좋아 보여도 실제 차단자를 표시.
+    risk_off_chip = ""
+    try:
+        _neb = df.get("NEW_ENTRY_BLOCKED")
+        _sor = df.get("STOP_OVERRIDE_REASON")
+        _ro_on = (
+            _neb is not None and _sor is not None
+            and _neb.astype(str).str.strip().str.lower().isin(["1", "1.0", "true", "t"]).mean() >= 0.5
+            and _sor.astype(str).str.contains("risk_off", case=False).any()
+        )
+        if _ro_on:
+            risk_off_chip = (
+                '<span style="font-size:10px; padding:2px 8px; border-radius:10px;'
+                ' background:rgba(245,158,11,0.15); color:#FCD34D; font-weight:700;"'
+                ' title="코스피가 하락 중인 20일선 아래 — 해제선(20일선 -3%) 회복 시 자동 재개.'
+                ' 실측: 이 구간 반등 추격 승률 17%">🔒 폭락방어 작동중 · 회복 시 자동재개</span>'
+            )
+    except Exception as _roe:
+        _logger.warning(f"[v34] risk_off 칩 판정 실패 (표시 생략): {_roe}")
+        risk_off_chip = ""
+
     ui.html(f'''
     <div style="width:100%; margin-bottom:14px; padding:16px 18px; border-radius:14px;
                 background: linear-gradient(135deg, rgba(30,41,59,0.9), rgba(15,23,42,0.95));
@@ -4084,6 +4105,7 @@ def _render_hero_strip(df: pd.DataFrame, official_decision: dict | None) -> None
         </div>
         {breadth_html}
         <div style="flex:1 1 auto; display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap;">
+          {risk_off_chip}
           {alpha_chip}
         </div>
       </div>

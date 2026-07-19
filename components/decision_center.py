@@ -7,12 +7,15 @@ never presented as equivalent to an official production decision here.
 """
 from __future__ import annotations
 
+import logging
 import math
 import re
 from typing import Any
 
 import pandas as pd
 from nicegui import ui
+
+logger = logging.getLogger("decision_center")
 
 from services.recommendation_quality import production_buy_mask
 
@@ -76,7 +79,12 @@ def _humanize_reason(reason: Any) -> str:
             text = "하락장이라 신규 진입 차단"
         elif part == "품질점수 미달":
             text = "최종 품질 점수 부족"
+        elif part == "손실방어 차단":
+            text = "폭락 방어(risk_off) 차단 — 시장 회복 시 자동 해제"
+        elif part == "진입 조건 미달":
+            text = "AI 알파 진입 기준 미달"
         else:
+            # v32 알파 사유("알파 92점 (진입선 90점 미달)")는 이미 사람말 — 그대로 통과
             text = part
         if text not in translated:
             translated.append(text)
@@ -89,6 +97,65 @@ def _reason_items(reason: Any, limit: int = 3) -> list[str]:
         for item in _humanize_reason(reason).split(" · ")
         if item.strip()
     ][:limit]
+
+
+def _truthy_count(df: pd.DataFrame, col: str) -> int:
+    if col not in df.columns:
+        return 0
+    s = df[col].astype(str).str.strip().str.lower()
+    return int(s.isin(["1", "1.0", "true", "t", "yes"]).sum())
+
+
+def _risk_off_state(df: pd.DataFrame) -> dict[str, Any]:
+    """[v34] 폭락 방어(risk_off) 잠금 상태 + 해제 진행률.
+
+    7/16 실사용 피드백: 시장폭 88%로 '시장 환경 통과'인데 매수 0개 —
+    실제 차단자(risk_off)가 화면에 없어 '왜 안 사는지' 알 수 없었다.
+    df의 NEW_ENTRY_BLOCKED + STOP_OVERRIDE_REASON에서 잠금을 감지하고,
+    kospi_daily로 해제선(20일선 -3%)까지의 거리를 계산해 노출한다.
+    """
+    out: dict[str, Any] = {"active": False, "line": "", "progress": None}
+    try:
+        if df is None or df.empty:
+            return out
+        n_blocked = _truthy_count(df, "NEW_ENTRY_BLOCKED")
+        reason = df.get("STOP_OVERRIDE_REASON")
+        has_ro = bool(
+            reason is not None
+            and reason.astype(str).str.contains("risk_off", case=False).any()
+        )
+        if not (has_ro and n_blocked >= max(1, int(len(df) * 0.5))):
+            return out
+        out["active"] = True
+        out["line"] = "코스피가 하락 중인 20일선을 회복하면 자동 해제됩니다"
+        from market_regime import load_kospi_daily
+
+        k = load_kospi_daily("data")
+        if k is not None and not k.empty:
+            last = k.iloc[-1]
+            close, ma20 = float(last["close"]), last.get("ma20")
+            if pd.notna(ma20) and float(ma20) > 0:
+                ma20 = float(ma20)
+                unlock = ma20 * 0.97  # 해제선: 20일선 -3% 이내 (risk_off 판정식 역산)
+                dev_pct = (close / ma20 - 1.0) * 100.0
+                # 진행률: 폭락 최심부(-15%) → 해제선(-3%) 구간 매핑
+                prog = (dev_pct - (-15.0)) / ((-3.0) - (-15.0)) * 100.0
+                out["progress"] = max(0.0, min(100.0, prog))
+                out["line"] = (
+                    f"코스피 {close:,.0f} · 해제선 {unlock:,.0f}"
+                    f" (20일선 -3% 이내) · 현재 20일선 대비 {dev_pct:+.1f}%"
+                )
+    except Exception as e:
+        # 진행률 계산 실패는 표시 생략으로 강등 (잠금 감지 자체는 df만으로 완료)
+        logger.warning(f"risk_off 해제 진행률 계산 실패 (표시 생략): {e}")
+    return out
+
+
+def _alpha_gate_on(df: pd.DataFrame) -> bool:
+    """[v34] 이 배치가 알파 전면 게이트(v32)로 생성됐는지."""
+    if df is None or df.empty or "ALPHA_GATE_ACTIVE" not in df.columns:
+        return False
+    return _truthy_count(df, "ALPHA_GATE_ACTIVE") > 0
 
 
 def _dominant_text(df: pd.DataFrame, key: str, default: str) -> str:
@@ -104,11 +171,16 @@ def _dominant_text(df: pd.DataFrame, key: str, default: str) -> str:
 
 def _stock_payload(row: pd.Series) -> dict[str, Any]:
     raw_reason = str(row.get("QUALITY_GUARD_REASON", ""))
+    # [v34] AI 알파 — 검증된 예측 점수(당일 백분위)와 그 구간의 실측 승률
+    alpha = _number(row, "ALPHA_SCORE", default=float("nan"))
+    alpha_wp = _number(row, "ALPHA_WIN_PROB", default=float("nan"))
     return {
         "code": str(row.get("종목코드", "")).split(".")[0].zfill(6),
         "name": str(row.get("종목명", "-")),
         "score": _number(row, "QUALITY_GUARD_SCORE"),
         "display_score": _number(row, "DISPLAY_SCORE"),
+        "alpha": alpha,
+        "alpha_win_prob": alpha_wp,
         "entry": _number(row, "추천매수가"),
         "close": _number(row, "종가"),
         "stop": _number(row, "손절가"),
@@ -157,9 +229,17 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     ).fillna("CASH").astype(str).str.upper()
     work["_quality"] = quality
 
-    buys_df = work[production].sort_values("_quality", ascending=False).head(3)
+    # [v34] 알파 게이트 배치면 후보 정렬 = 검증 알파 우선 (v32 세계관 정합)
+    alpha_on = _alpha_gate_on(work)
+    work["_alpha"] = pd.to_numeric(
+        work.get("ALPHA_SCORE", pd.Series(float("nan"), index=work.index)),
+        errors="coerce",
+    ).fillna(-1)
+    _sort_cols = ["_alpha", "_quality"] if alpha_on else ["_quality"]
+
+    buys_df = work[production].sort_values(_sort_cols, ascending=False).head(3)
     watch_df = work[(~production) & action.eq("WATCH")].sort_values(
-        "_quality", ascending=False
+        _sort_cols, ascending=False
     ).head(3)
 
     buys = [_stock_payload(row) for _, row in buys_df.iterrows()]
@@ -180,21 +260,30 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     market_breadth = float(breadth_values.median()) if len(breadth_values) else None
     macro_risk = _dominant_text(work, "MACRO_RISK", "UNKNOWN").upper()
     market_regime = _dominant_text(work, "MARKET_REGIME", "UNKNOWN").upper()
+    # [v34] 폭락 방어(risk_off) — 실제 최상위 차단자를 화면에 드러낸다.
+    # 7/16 실사용: 시장폭 88% '통과' 표시인데 매수 0개 → 사용자가 이유를 알 수 없었음.
+    risk_off = _risk_off_state(work)
     breadth_ready = market_breadth is None or market_breadth >= MARKET_BREADTH_FLOOR
     market_ready = (
         breadth_ready
         and macro_risk not in DANGEROUS_MARKET_RISK
         and market_regime != "DOWN"
+        and not risk_off["active"]
     )
 
     nearest_reason = watch[0]["raw_reason"] if watch else ""
     blockers: list[str] = []
+    if risk_off["active"]:
+        blockers.append(
+            "폭락 방어(risk_off) 작동 중 — 코스피가 하락 중인 20일선 아래라 전 종목 신규 진입 차단"
+            " (실측: 이 구간 반등 추격은 승률 17%)"
+        )
     if market_breadth is not None and market_breadth < MARKET_BREADTH_FLOOR:
         blockers.append(
             f"상승 종목 비율 {market_breadth:.0f}%로 기준 {MARKET_BREADTH_FLOOR:.0f}% 미만"
         )
     if market_regime == "DOWN":
-        blockers.append("하락장이라 신규 진입 차단")
+        blockers.append("하락장이라 신규 진입은 AI 알파 최상위 10%만 축소 검토")
     if macro_risk in DANGEROUS_MARKET_RISK:
         blockers.append(f"시장 위험 단계가 높음 ({macro_risk})")
     for item in _reason_items(nearest_reason, limit=6):
@@ -217,7 +306,11 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         subtitle = "공식 매수 종목이 0개입니다. 관찰 후보는 조건에 가까울 뿐 주문 대상이 아닙니다."
         action_label = "신규 주문을 넣지 말고 현금을 유지하세요"
         action_detail = "높은 점수나 관찰 표시는 매수 신호가 아닙니다. 공식 매수가 생길 때까지 기다리세요."
-        next_check = "다음 데이터 갱신 후 시장과 최종 후보를 다시 확인"
+        next_check = (
+            "코스피가 해제선(20일선 -3% 이내)을 회복하면 매수 후보가 자동으로 올라옵니다"
+            if risk_off["active"]
+            else "다음 데이터 갱신 후 시장과 최종 후보를 다시 확인"
+        )
         status = "CASH"
 
     breadth_value = (
@@ -228,13 +321,30 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         market_detail += " · 현재 하락장"
     elif macro_risk not in {"NORMAL", "UNKNOWN", ""}:
         market_detail += f" · 위험 {macro_risk}"
+    # [v34] risk_off가 최상위 차단자 — 시장폭이 좋아도 '통과'로 오도하지 않는다.
+    if risk_off["active"]:
+        gate1_status, gate1_value = "차단", "🔒 폭락 방어 작동 중"
+        gate1_detail = "코스피가 하락 중인 20일선 아래 — 해제선 회복 시 자동 재개"
+    else:
+        gate1_status, gate1_value, gate1_detail = (
+            "통과" if market_ready else "대기"), breadth_value, market_detail
+    # [v34] 후보 검증 문구 — 알파 게이트 배치면 기준을 명시
+    _thr = pd.to_numeric(
+        work.get("ALPHA_ENTRY_THRESHOLD", pd.Series(float("nan"), index=work.index)),
+        errors="coerce",
+    ).dropna()
+    if alpha_on and len(_thr):
+        _top_pct = max(1, int(round(100 - float(_thr.iloc[0]))))
+        gate2_detail = f"기준: AI 알파 상위 {_top_pct}% + 자리·손익비 가드"
+    else:
+        gate2_detail = "관찰 후보는 주문 대상이 아님"
     gates = [
         {
             "step": "1",
             "label": "시장 환경",
-            "status": "통과" if market_ready else "대기",
-            "value": breadth_value,
-            "detail": market_detail,
+            "status": gate1_status,
+            "value": gate1_value,
+            "detail": gate1_detail,
             "tone": "green" if market_ready else "amber",
         },
         {
@@ -242,7 +352,7 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
             "label": "후보 검증",
             "status": "통과" if production_count else ("관찰" if watch_count else "없음"),
             "value": f"공식 {production_count}개 · 관찰 {watch_count}개",
-            "detail": "관찰 후보는 주문 대상이 아님",
+            "detail": gate2_detail,
             "tone": "green" if production_count else "amber",
         },
         {
@@ -273,6 +383,8 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         "market_ready": market_ready,
         "macro_risk": macro_risk,
         "market_regime": market_regime,
+        "risk_off": risk_off,       # [v34] 폭락 방어 잠금 상태(+해제 진행률)
+        "alpha_gate": alpha_on,     # [v34] 알파 전면 게이트 배치 여부
     }
 
 
@@ -295,6 +407,7 @@ def _render_buy_card(stock: dict[str, Any]) -> None:
                     ui.badge("공식 매수", color="#10B981").classes("font-bold")
                     ui.label(stock["name"]).classes("text-xl font-bold text-white")
                     ui.label(stock["code"]).classes("text-xs text-slate-400")
+                _alpha_chip(stock)
                 ui.label(stock["reason"]).classes("text-sm text-emerald-100")
             with ui.column().classes("items-end gap-0"):
                 ui.label(f"품질 {stock['score']:.0f}").classes("text-xl font-bold text-emerald-300")
@@ -317,6 +430,25 @@ def _render_buy_card(stock: dict[str, Any]) -> None:
         ).props("flat dense no-caps").classes("self-end text-blue-300 mt-2")
 
 
+def _alpha_chip(stock: dict[str, Any]) -> None:
+    """[v34] AI 알파 칩 — 검증된 예측 점수(당일 백분위) + 그 구간의 실측 승률."""
+    alpha = stock.get("alpha")
+    if alpha is None or not math.isfinite(alpha) or alpha < 0:
+        return
+    wp = stock.get("alpha_win_prob")
+    wp_txt = (
+        f" · 이 구간 실측 승률 {wp * 100:.0f}%"
+        if wp is not None and math.isfinite(wp) and 0 < wp < 1
+        else ""
+    )
+    with ui.row().classes("items-center gap-1 rounded-lg px-2 py-0.5").style(
+        "background:rgba(59,130,246,.12); border:1px solid rgba(96,165,250,.3); width:fit-content;"
+    ):
+        ui.label(f"🧠 AI 알파 {alpha:.1f}점{wp_txt}").classes(
+            "text-[11px] font-bold text-blue-200"
+        )
+
+
 def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
     with ui.card().classes("sp-watch-card w-full p-4 rounded-2xl"):
         with ui.column().classes("gap-1 min-w-0"):
@@ -324,6 +456,7 @@ def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
                 ui.badge("매수 아님", color="#B45309").classes("font-bold")
                 ui.label(f"{rank}. {stock['name']}").classes("font-bold text-slate-100")
                 ui.label(stock["code"]).classes("text-xs text-slate-500")
+            _alpha_chip(stock)
             ui.label(stock["reason"] or "최종 기준 미달").classes(
                 "text-sm text-slate-300 leading-relaxed"
             )
@@ -392,6 +525,30 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
             with ui.row().classes("sp-next-check w-full items-start gap-3 rounded-xl p-3 mt-4"):
                 ui.label("다음 확인").classes("text-xs font-bold text-sky-300 shrink-0")
                 ui.label(summary["next_check"]).classes("text-xs md:text-sm text-slate-300")
+            # [v34] 폭락 방어(risk_off) 잠금 스트립 — '왜 안 사는지'의 최상위 이유를
+            # 해제 조건·진행률과 함께 노출 (7/16 피드백: 차단자가 화면에 없었음)
+            _ro = summary.get("risk_off") or {}
+            if _ro.get("active"):
+                with ui.column().classes("w-full gap-1 rounded-xl p-3 mt-2").style(
+                    "background:rgba(180,83,9,.10); border:1px solid rgba(245,158,11,.28);"
+                ):
+                    ui.label(
+                        "🔒 폭락 방어(risk_off) 작동 중 — 폭락 후 반등 추격은 실측 승률 17%라 자동 차단합니다"
+                    ).classes("text-xs md:text-sm font-bold text-amber-200")
+                    if _ro.get("line"):
+                        ui.label(_ro["line"]).classes("text-xs text-slate-300")
+                    if _ro.get("progress") is not None:
+                        with ui.element("div").style(
+                            "width:100%; height:8px; background:rgba(148,163,184,.15);"
+                            " border-radius:6px; overflow:hidden; margin-top:2px;"
+                        ):
+                            ui.element("div").style(
+                                f"width:{_ro['progress']:.0f}%; height:100%;"
+                                " background:linear-gradient(90deg,#F59E0B,#10B981);"
+                            )
+                        ui.label(
+                            "해제 진행률 — 코스피가 20일선 -3% 이내로 회복하면 매수 후보가 자동 재개됩니다"
+                        ).classes("text-[10px] text-slate-500")
 
         ui.label("매수 가능 여부").classes("text-lg font-bold text-white mt-1")
         with ui.grid(columns=3).classes("sp-gate-grid w-full gap-2"):

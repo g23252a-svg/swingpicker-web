@@ -208,10 +208,12 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
         _poc = poc_gap.iloc[i]
         if pd.notna(_poc) and _poc > POC_GAP_MAX:
             row_reasons.append(f"POC 확장 {_poc:.0f}% (추격 위험)")
+        # [v34] 알파 게이트에선 시장폭/DOWN 레짐이 하드블록이 아니다(문턱 상향으로
+        # 대응) — 탈락 '사유'로 표기하면 오도. 레거시 폴백에서만 사유로 남긴다.
         _br = breadth.iloc[i]
-        if pd.notna(_br) and _br < BREADTH_MIN:
+        if not alpha_gate_active and pd.notna(_br) and _br < BREADTH_MIN:
             row_reasons.append(f"시장폭 {_br:.0f}% (내부 약세)")
-        if regime_col.iloc[i] == "DOWN":
+        if not alpha_gate_active and regime_col.iloc[i] == "DOWN":
             row_reasons.append("하락 레짐 (신규진입 차단)")
         result.append(" · ".join(row_reasons[:4]) or "품질점수 미달")
     return pd.Series(result, index=df.index, dtype="object")
