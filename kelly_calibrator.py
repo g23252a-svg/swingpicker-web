@@ -1074,6 +1074,17 @@ def apply_kelly_calibrated(
         # empirical 미가용: planned의 60%만 반영 (보수화)
         b_ratio = planned_b * 0.6
 
+    # [v33.1] 알파 행의 손익비 — ELITE 축 empirical은 축 불일치(알파 픽은
+    # ELITE가 낮은 게 정상)라 b를 부당하게 깎아 켈리가 전부 0이 된다
+    # (7/19 배치 실측). 알파 축의 실측 손익비로 교체:
+    #   OOS 알파≥80 (n=3,032): 평균승 +9.5% / 평균패 -8.5% → 원시 b=1.12
+    #   v30 손절 -8% 캡 반영(실제 운용 규칙): b=1.65
+    # → 알파 행은 b = min(planned, 1.65). planned가 더 타이트하면 planned.
+    _ALPHA_EMPIRICAL_B_5D = 1.65
+    if _use_alpha_p.any():
+        b_ratio = np.where(
+            _use_alpha_p, np.minimum(planned_b, _ALPHA_EMPIRICAL_B_5D), b_ratio)
+
     # Kelly fraction
     q = 1.0 - p
     f_raw = np.where(b_ratio > 0, p - (q / b_ratio), 0.0)
@@ -1113,3 +1124,62 @@ def apply_kelly_calibrated(
         df.loc[mask_pos, "추천금액(만원)"] = np.round(kelly_amt[mask_pos] / 10000, 1)
 
     return df
+
+
+# ═══════════════════════════════════════════════════
+#  [v33.1] 알파 게이트 이후 켈리 재계산 (사이징 배선)
+# ═══════════════════════════════════════════════════
+# 문제: apply_kelly_calibrated는 collector 단계에서 돌아 ALPHA_WIN_PROB
+# (finalize 단계에서 주입)를 보지 못한다 → KELLY_P_SOURCE가 전부 레거시.
+# 2026-07-19 첫 v33 배치에서 실측 확인된 배선 누락.
+# 해법: finalize의 알파 게이트 직후 이 함수로 켈리를 재계산해
+# 사이징 축을 검증 알파로 통일한다. 비활성 ROUTE 0원 정책은
+# 치료된 ROUTE(v32.1) 기준으로 재적용.
+
+_KELLY_INACTIVE_ROUTES = frozenset(
+    {"WAIT", "OVERHEAT", "EXIT_WARNING", "CARRY", "BLOCKED", "NEUTRAL"})
+
+
+def resize_kelly_with_alpha(
+    df: pd.DataFrame,
+    out_dir: str,
+    asof_ymd: Optional[str] = None,
+    total_capital: int = 10_000_000,
+) -> pd.DataFrame:
+    """[v33.1] 알파 게이트 활성 시 켈리 사이징 재계산.
+
+    · ALPHA_GATE_ACTIVE != 1 → 원본 그대로 (레거시 사이징 유지).
+    · 활성 → apply_kelly_calibrated 재호출: 검증 알파 행은 ALPHA_WIN_PROB가
+      p로 쓰이고 ELITE 문턱을 우회한다 (v33 로직이 이번엔 컬럼을 실제로 본다).
+    · 재계산 후 비활성 ROUTE(치료된 ROUTE 기준 WAIT/OVERHEAT/EXIT_WARNING/
+      CARRY/BLOCKED/NEUTRAL)는 베팅 0원 강제 — 표시 관례 유지.
+    · KELLY_ENGINE="v33_alpha_resize"로 경로 식별.
+    """
+    if df is None or len(df) == 0:
+        return df
+    if "ALPHA_GATE_ACTIVE" not in df.columns:
+        return df
+    _active = pd.to_numeric(df["ALPHA_GATE_ACTIVE"], errors="coerce").fillna(0).astype(int)
+    if int(_active.max()) != 1:
+        return df
+
+    out = apply_kelly_calibrated(
+        df,
+        out_dir=out_dir,
+        total_capital=total_capital,
+        method="ELITE_SCORE",
+        kelly_multiplier=0.5,
+        max_allocation=0.25,
+        min_score_threshold=60.0,
+        asof_ymd=asof_ymd,
+    )
+
+    if "ROUTE" in out.columns:
+        _inactive = out["ROUTE"].astype(str).str.upper().str.strip().isin(_KELLY_INACTIVE_ROUTES)
+        if _inactive.any():
+            for col in ["켈리_수량", "켈리_금액(원)", "추천수량", "추천금액(만원)",
+                        "KELLY_FRACTION"]:
+                if col in out.columns:
+                    out.loc[_inactive, col] = 0
+    out["KELLY_ENGINE"] = "v33_alpha_resize"
+    return out
