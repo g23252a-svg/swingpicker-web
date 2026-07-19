@@ -229,6 +229,20 @@ def _v27_poc_sort_key(row: dict) -> float:
     return 99.0 if poc is None else poc
 
 
+def _v33_alpha_sort_key(row: dict) -> float:
+    """[v33] 후보 정렬용 알파 — 높을수록 우선 (음수 반환, 오름차순 정렬용).
+
+    실측 (44 OOS일, 워크포워드): 알파 정렬 Top3 +0.81%/건·유니버스 대비 +5.07%p
+    vs POC 정렬 +2.17%/건. 검증된 알파(ALPHA_VALIDATED=1)가 있는 행만 우선권.
+    미검증/결측 → 0.0 (전원 동률 → 기존 POC→rank_score 순 유지, legacy 호환).
+    """
+    validated_raw = str(row.get("ALPHA_VALIDATED", "")).strip().lower()
+    if validated_raw not in ("1", "1.0", "true"):
+        return 0.0
+    alpha = _v27_float_or_none(row.get("ALPHA_SCORE"))
+    return 0.0 if alpha is None else -alpha
+
+
 def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
                     min_rank: float = 40.0) -> list:
     """[v3.7.11] 하루치 recommend rows → Top 1 (🏆 최강 중 rank_score 1위).
@@ -255,6 +269,7 @@ def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "label":  lbl,
             "score":  score,
             "poc":    _v27_poc_sort_key(row),  # v27
+            "alpha":  _v33_alpha_sort_key(row),  # v33 (음수=알파 높음)
             "entry":  _fnum(row.get("추천매수가", 0)),
             "tp1":    _fnum(row.get("추천매도가1", 0)),
             "tp2":    _fnum(row.get("추천매도가2", 0)),  # v3.8.3
@@ -264,8 +279,9 @@ def pick_top1_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
         })
     if not candidates:
         return []
-    # [v27] 가치영역 근접 우선 (POC_GAP 오름차순) → rank_score 보조
-    candidates.sort(key=lambda r: (r["poc"], -r["score"]))
+    # [v33] 검증 알파 내림차순 우선 (실측 +5.07%p) → POC → rank_score 보조.
+    # legacy CSV(알파 없음)는 alpha 전원 0 → 기존 (POC, rank) 순 그대로.
+    candidates.sort(key=lambda r: (r["alpha"], r["poc"], -r["score"]))
     return [candidates[0]]
 
 
@@ -295,6 +311,7 @@ def pick_top3_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "label":  lbl,
             "score":  score,
             "poc":    _v27_poc_sort_key(row),  # v27
+            "alpha":  _v33_alpha_sort_key(row),  # v33 (음수=알파 높음)
             "entry":  _fnum(row.get("추천매수가", 0)),
             "tp1":    _fnum(row.get("추천매도가1", 0)),
             "tp2":    _fnum(row.get("추천매도가2", 0)),  # v3.8.3
@@ -302,8 +319,9 @@ def pick_top3_codes(day_csv_rows: list, thresholds: Optional[dict] = None,
             "stop":   _fnum(row.get("손절가", 0)),
             "close":  _fnum(row.get("종가", 0)),
         })
-    # [v27] 가치영역 근접 우선 (POC_GAP 오름차순) → rank_score 보조
-    candidates.sort(key=lambda r: (r["poc"], -r["score"]))
+    # [v33] 검증 알파 내림차순 우선 (실측 +5.07%p) → POC → rank_score 보조.
+    # legacy CSV(알파 없음)는 alpha 전원 0 → 기존 (POC, rank) 순 그대로.
+    candidates.sort(key=lambda r: (r["alpha"], r["poc"], -r["score"]))
     picked = []
     seen_sectors: set = set()
     for c in candidates:

@@ -359,17 +359,36 @@ def build_calibration_table(
 
     weights = _time_weight(df["rec_date"], half_life_days, asof_date=asof_ymd)
 
+    # [v33] 이중 창 — 최근 30일 창(빠른 반응) + 90일 반감 배경(안정성).
+    # 90일 반감 단독으론 폭락장 거래가 수개월 지배해 회복장 표기 승률이
+    # 4~6주 늦게 따라옴. 최근 30일 표본이 충분(n≥8)한 빈은 50:50 블렌드.
+    _FAST_WINDOW_DAYS = 30
+    _FAST_MIN_N = 8
+    _fast_mask = np.zeros(len(df), dtype=bool)
+    try:
+        _rec_dt = pd.to_datetime(df["rec_date"].astype(str), format="%Y%m%d", errors="coerce")
+        if asof_ymd is not None:
+            _anchor = pd.to_datetime(str(asof_ymd).replace("-", "")[:8], format="%Y%m%d", errors="coerce")
+        else:
+            _anchor = _rec_dt.max()
+        if pd.notna(_anchor):
+            _fast_mask = ((_anchor - _rec_dt).dt.days <= _FAST_WINDOW_DAYS).fillna(False).values
+    except Exception as _fe:
+        _logger.warning(f"[v33] 이중 창 fast mask 실패 (90일 단독 폴백): {_fe}")
+
     rows = []
     for method in df["method"].unique():
         for horizon in df["horizon"].unique():
             mask_mh = (df["method"] == method) & (df["horizon"] == horizon)
             sub = df[mask_mh]
             w_sub = weights[mask_mh.values]
+            f_sub = _fast_mask[mask_mh.values]
 
             for lo, hi in score_bins:
                 mask_bin = (sub["score"] >= lo) & (sub["score"] < hi)
                 bin_df = sub[mask_bin]
                 bin_w = w_sub[mask_bin.values]
+                bin_f = f_sub[mask_bin.values]
 
                 if len(bin_df) == 0:
                     continue
@@ -381,7 +400,16 @@ def build_calibration_table(
                 if n_eff < min_effective_n:
                     continue
 
-                p_cal = _bayesian_win_rate(wins, bin_w)
+                p_slow = _bayesian_win_rate(wins, bin_w)
+
+                # [v33] 최근 30일 창 블렌드
+                p_cal = p_slow
+                n_fast = int(bin_f.sum())
+                p_fast = None
+                if n_fast >= _FAST_MIN_N:
+                    p_fast = _bayesian_win_rate(
+                        wins[bin_f], np.ones(n_fast, dtype=float))
+                    p_cal = 0.5 * p_fast + 0.5 * p_slow
 
                 rows.append({
                     "method": method,
@@ -392,6 +420,10 @@ def build_calibration_table(
                     "p_calibrated": round(p_cal, 4),
                     "n_effective": round(n_eff, 1),
                     "n_raw": n_raw,
+                    # [v33] 관측용 — 이중 창 진단
+                    "p_slow": round(float(p_slow), 4),
+                    "p_fast": (round(float(p_fast), 4) if p_fast is not None else None),
+                    "n_fast": n_fast,
                 })
 
     result = pd.DataFrame(rows)
@@ -1012,6 +1044,23 @@ def apply_kelly_calibrated(
                             asof_ymd=asof_ymd)
     p = np.asarray(p, dtype=float)
 
+    # [v33] 검증된 알파 승률 우선 — 신호는 v32에서 알파로 바꿨는데 베팅 크기는
+    # ELITE 기반 캘리브레이션(역상관 축, IC -0.06)이 결정하던 불일치 해소.
+    # ALPHA_VALIDATED==1이고 행별 ALPHA_WIN_PROB(십분위 실측 승률)가 있으면
+    # 그 행의 p로 사용. 미검증/결측 행은 기존 경로 유지.
+    _alpha_validated = False
+    if "ALPHA_VALIDATED" in df.columns:
+        _alpha_validated = bool(
+            pd.to_numeric(df["ALPHA_VALIDATED"], errors="coerce")
+            .fillna(0).astype(int).max() == 1
+        )
+    _use_alpha_p = np.zeros(len(df), dtype=bool)
+    if _alpha_validated and "ALPHA_WIN_PROB" in df.columns:
+        _awp = pd.to_numeric(df["ALPHA_WIN_PROB"], errors="coerce")
+        _use_alpha_p = _awp.notna().values & (_awp.values > 0) & (_awp.values < 1)
+        p = np.where(_use_alpha_p, _awp.fillna(0.0).values, p)
+    df["KELLY_P_SOURCE"] = np.where(_use_alpha_p, "ALPHA_WIN_PROB", f"CAL_{method}")
+
     # 손익비: planned (선언) vs empirical (실측)
     risk = buy - stop
     reward = target - buy
@@ -1030,7 +1079,10 @@ def apply_kelly_calibrated(
     f_raw = np.where(b_ratio > 0, p - (q / b_ratio), 0.0)
     f_safe = np.clip(f_raw * kelly_multiplier, 0.0, max_allocation)
 
-    valid = (scores >= min_score_threshold) & (buy > 0) & (stop > 0) & (target > 0) & (risk > 0)
+    # [v33] 점수 문턱: 알파 승률을 쓰는 행은 ELITE 문턱(≥60)을 우회 —
+    # 알파 상위 픽은 ELITE가 낮은 경우가 흔하다(역상관 축이므로).
+    _score_ok = np.where(_use_alpha_p, True, scores >= min_score_threshold)
+    valid = _score_ok & (buy > 0) & (stop > 0) & (target > 0) & (risk > 0)
     f_safe = np.where(valid, f_safe, 0.0)
 
     # [v23.0] GUARD 반영 — GUARD_KELLY_MULT(0~1)로 분율·손익비 축소

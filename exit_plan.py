@@ -46,15 +46,24 @@ import pandas as pd
 logger = logging.getLogger("exit_plan")
 
 EXIT_OUTPUT_COLS = ["EXIT_ROUTE_RISK", "EXIT_STOP_TIGHT", "EXIT_TP_QUICK",
-                    "BE_TRIGGER_PRICE", "EXIT_PLAN_NOTE"]
+                    "BE_TRIGGER_PRICE", "FAST_TP_PRICE", "EXIT_PLAN_NOTE"]
 
 # [v30] 본전스탑 전환 트리거 (+5%) — 청산 그리드 검증 상위 8개 조합 전부에
 # BE+5%가 포함됨 (표본 851건). +5% 도달 시 손절선을 진입가로 올려
 # '이겼다가 -12%로 마감'(손절 트레이드의 51%가 +5% 선터치)을 차단한다.
 BE_TRIGGER_PCT = 5.0
 
+# [v33] 빠른 부분익절 — 알파 엣지는 첫 2일에 집중(일당 +0.97%p → 10일 +0.49%p 반감).
+# OOS 실측(n=526): 2일차 +2% 이상 달린 픽은 이후 3일 평균 -0.90%(승률 40%) 되돌림.
+# → 2일 내 +2% 도달 시 절반 익절 + 잔여분 손절선 본전(BE) 상향.
+FAST_TP_PCT = 2.0
+FAST_TP_DAY = 2
+
+# [v32.1] 치료된 ROUTE 기준 위험 등급 — ATTACK은 이제 최고 신호(+3.70%p)라
+# '과열/추격 주의' 대상이 아니다. OVERHEAT(-2.16%p 실측)만 CAUTION.
 _HIGH_AVOID_ROUTES = {"CARRY", "NEUTRAL"}
-_CAUTION_ROUTES = {"ATTACK", "OVERHEAT"}
+_CAUTION_ROUTES_LEGACY = {"ATTACK", "OVERHEAT"}   # 치료 전(미검증일) 폴백
+_CAUTION_ROUTES_HEALED = {"OVERHEAT"}
 
 
 class _FallbackExitConfig:
@@ -96,10 +105,16 @@ def add_exit_plan_columns(df: pd.DataFrame, config=None) -> pd.DataFrame:
     tp_pct = float(getattr(cfg, "tp_quick_pct", 10.0))
     min_entry = float(getattr(cfg, "min_entry", 100.0))
 
-    # ROUTE 위험 등급
+    # ROUTE 위험 등급 — [v32.1] 치료된 ROUTE(ROUTE_ALPHA_HEALED)에선 ATTACK이
+    # 최고 신호이므로 CAUTION에서 제외. OVERHEAT(실측 -2.16%p)만 주의.
     route = out.get("ROUTE", pd.Series("", index=out.index)).astype(str).str.upper().str.strip()
+    _healed = False
+    if "ROUTE_ALPHA_HEALED" in out.columns:
+        _healed = bool(pd.to_numeric(out["ROUTE_ALPHA_HEALED"], errors="coerce")
+                       .fillna(0).astype(int).max() == 1)
+    caution_routes = _CAUTION_ROUTES_HEALED if _healed else _CAUTION_ROUTES_LEGACY
     risk = pd.Series("OK", index=out.index, dtype="object")
-    risk = risk.mask(route.isin(_CAUTION_ROUTES), "CAUTION")
+    risk = risk.mask(route.isin(caution_routes), "CAUTION")
     risk = risk.mask(route.isin(_HIGH_AVOID_ROUTES), "HIGH_AVOID")
     out["EXIT_ROUTE_RISK"] = risk
 
@@ -110,6 +125,9 @@ def add_exit_plan_columns(df: pd.DataFrame, config=None) -> pd.DataFrame:
     out["EXIT_TP_QUICK"] = (entry * (1.0 + tp_pct / 100.0)).round(0).where(valid)
     # [v30] 본전스탑 전환가 — 이 가격 도달 시 손절선을 진입가(+수수료)로 상향
     out["BE_TRIGGER_PRICE"] = (entry * (1.0 + BE_TRIGGER_PCT / 100.0)).round(0).where(valid)
+    # [v33] 빠른 부분익절선 — D+2 내 이 가격 도달 시 절반 익절 + 잔여 본전 상향.
+    # 실측: 2일차 +2%↑ 픽의 이후 3일 -0.90%(되돌림) → 되돌림을 실현이익으로 전환.
+    out["FAST_TP_PRICE"] = (entry * (1.0 + FAST_TP_PCT / 100.0)).round(0).where(valid)
 
     # 사람이 읽는 요약
     def _note(i):
@@ -121,9 +139,14 @@ def add_exit_plan_columns(df: pd.DataFrame, config=None) -> pd.DataFrame:
         if valid.iat[i]:
             st = int(out["EXIT_STOP_TIGHT"].iat[i]); tp = int(out["EXIT_TP_QUICK"].iat[i])
             be = int(out["BE_TRIGGER_PRICE"].iat[i])
+            ft = int(out["FAST_TP_PRICE"].iat[i])
             parts.append(
                 f"손절 {st:,}({stop_pct:.0f}%)·본전전환 {be:,}(+{BE_TRIGGER_PCT:.0f}%)"
                 f"·1차익절 {tp:,}(+{tp_pct:.0f}%)"
+            )
+            parts.append(
+                f"⚡ D+{FAST_TP_DAY}내 {ft:,}(+{FAST_TP_PCT:.0f}%) 도달 시 절반 익절"
+                "+잔여 본전 상향 (실측: 초반 급등 후 되돌림 -0.9%)"
             )
         return " · ".join(parts)
 
