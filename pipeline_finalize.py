@@ -1747,6 +1747,18 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 log(f"🧠 [v32] 알파 전면 진입 게이트 적용 — 레짐 {_reg} · TOP_PICK {_tp_before}→{_tp_after} (ROUTE 거부권 제거)")
             else:
                 log("🧠 [v32] 알파 미검증 → 레거시 폴백 게이트 (ROUTE 거부권 없이)")
+            # [v33.1] 켈리 사이징 배선 — collector 단계 켈리는 알파 주입 전에
+            # 돌아 ALPHA_WIN_PROB를 못 봤다(7/19 첫 배치 실측: KELLY_P_SOURCE
+            # 전부 레거시). 알파 게이트 직후 재계산해 사이징 축을 알파로 통일.
+            try:
+                from kelly_calibrator import resize_kelly_with_alpha
+                df_out = resize_kelly_with_alpha(df_out, OUT_DIR, asof_ymd=trade_ymd)
+                if "KELLY_P_SOURCE" in df_out.columns:
+                    _n_alpha_p = int((df_out["KELLY_P_SOURCE"].astype(str) == "ALPHA_WIN_PROB").sum())
+                    if _n_alpha_p:
+                        log(f"💰 [v33.1] 켈리 알파 사이징 재계산 — ALPHA_WIN_PROB 적용 {_n_alpha_p}건")
+            except Exception as _ke:
+                logger.warning(f"⚠️ 켈리 알파 재계산 실패 (기존 사이징 유지): {_ke}")
         except Exception as _ae:
             logger.warning(f"⚠️ 알파 학습/점수/게이트 실패 (미사용 처리): {_ae}")
         _before_quality = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)

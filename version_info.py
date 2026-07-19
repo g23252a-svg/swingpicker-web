@@ -15,6 +15,18 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "33.1.0",
+        "date": "2026-07-19",
+        "type": "patch",
+        "title": "v33.1 — 켈리 알파 사이징 배선 수정 (첫 배치 실측 후속)",
+        "items": [
+            "🔌 **배선 누락 수정:** v33의 켈리 알파 사이징이 첫 배치(7/19)에서 미작동 — 켈리는 collector 단계에서 도는데 ALPHA_WIN_PROB는 finalize에서 주입되어 켈리가 알파를 못 봄(KELLY_P_SOURCE 전부 레거시 실측). 알파 게이트 직후 `resize_kelly_with_alpha`로 재계산하도록 배선.",
+            "⚖️ **알파 축 실측 손익비:** ELITE 축 empirical b는 알파 픽(ELITE 낮음)에 축 불일치로 b를 부당 삭감 → 켈리 전부 0. 알파 축 실측(OOS n=3,032: 평균승 +9.5%/평균패 -8.5%, v30 손절 -8%캡 반영 b=1.65)으로 교체 — 알파 행 b = min(선언 RR, 1.65).",
+            "🧭 **비활성 ROUTE 0원 정책을 치료된 ROUTE 기준으로 재적용:** WAIT/OVERHEAT/CARRY/EXIT_WARNING/NEUTRAL 베팅 0원, ATTACK/ARMED만 사이징. KELLY_ENGINE=v33_alpha_resize로 경로 식별.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "33.0.0",
         "date": "2026-07-16",
         "type": "major",

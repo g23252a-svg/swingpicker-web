@@ -180,3 +180,39 @@ def test_dual_window_falls_back_when_fast_sparse(tmp_path):
             & (cal.score_lo <= 85) & (cal.score_hi > 85)].iloc[0]
     assert pd.isna(b["p_fast"]) or b["p_fast"] is None
     assert b["p_calibrated"] == b["p_slow"]
+
+
+# ═══════════════════════════════════════════════════
+# 5. [v33.1] 켈리 알파 사이징 배선 (finalize 재계산)
+# ═══════════════════════════════════════════════════
+# 7/19 첫 v33 배치 실측: collector 단계 켈리가 알파 주입 전에 돌아
+# KELLY_P_SOURCE 전부 레거시 → 알파 게이트 이후 재계산으로 배선.
+
+def test_resize_kelly_noop_when_gate_inactive(tmp_path):
+    from kelly_calibrator import resize_kelly_with_alpha
+    df = pd.DataFrame([_kelly_row(ALPHA_GATE_ACTIVE=0, 켈리_수량=7)])
+    out = resize_kelly_with_alpha(df, str(tmp_path))
+    assert out.iloc[0]["켈리_수량"] == 7          # 원본 유지
+    assert "KELLY_ENGINE" not in out.columns or out.iloc[0].get("KELLY_ENGINE") != "v33_alpha_resize"
+
+
+def test_resize_kelly_applies_alpha_p_for_active_route(tmp_path):
+    from kelly_calibrator import resize_kelly_with_alpha
+    df = pd.DataFrame([_kelly_row(
+        ALPHA_GATE_ACTIVE=1, ALPHA_VALIDATED=1, ALPHA_WIN_PROB=0.41,
+        ELITE_SCORE=10.0, ROUTE="ATTACK")])
+    out = resize_kelly_with_alpha(df, str(tmp_path))
+    assert out.iloc[0]["KELLY_P_SOURCE"] == "ALPHA_WIN_PROB"
+    assert out.iloc[0]["KELLY_ENGINE"] == "v33_alpha_resize"
+    assert out.iloc[0]["켈리_금액(원)"] > 0        # ATTACK은 사이징 유지
+
+
+def test_resize_kelly_zeroes_inactive_route(tmp_path):
+    from kelly_calibrator import resize_kelly_with_alpha
+    df = pd.DataFrame([_kelly_row(
+        ALPHA_GATE_ACTIVE=1, ALPHA_VALIDATED=1, ALPHA_WIN_PROB=0.41,
+        ROUTE="WAIT")])
+    out = resize_kelly_with_alpha(df, str(tmp_path))
+    # WAIT은 계산은 되지만(진단 컬럼 보존) 베팅 0원
+    assert out.iloc[0]["켈리_금액(원)"] == 0
+    assert out.iloc[0]["KELLY_FRACTION"] == 0
