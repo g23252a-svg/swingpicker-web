@@ -446,6 +446,7 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "stop_reason": stop_reason,
         # [v30] 본전스탑 전환가 (없으면 진입가×1.05 근사)
         "be_trigger": safe_float(row.get("BE_TRIGGER_PRICE")),
+        "fast_tp": safe_float(row.get("FAST_TP_PRICE")),  # [v33] D+2 빠른 부분익절선
         "bb_expanding": bb_expanding,
         "is_swing_support": is_swing_support,
         "vwap": vwap,
@@ -1516,6 +1517,8 @@ def render_v2_price_plan(n: dict):
     # ── [v30] 가격 사다리 시각화 ──
     # 손절~TP3 구간을 세로 축으로, 각 레벨의 위치·%·근거를 한눈에.
     be_trigger = n.get("be_trigger") or (entry * 1.05 if entry else 0)
+    # [v33] 빠른 부분익절선 (D+2 내 +2% 도달 시 절반 익절 — 실측: 초반 급등 후 되돌림 -0.9%)
+    fast_tp = n.get("fast_tp") or (entry * 1.02 if entry else 0)
     ladder_html = ""
     if entry and stop and tp1 and stop < entry < tp1:
         lo = stop * 0.985
@@ -1549,6 +1552,7 @@ def render_v2_price_plan(n: dict):
             _row_lv(tp2, "TP2", "var(--green)", _pct_of_entry(tp2)),
             _row_lv(tp1, "TP1", "var(--green)", _pct_of_entry(tp1), bold=True),
             _row_lv(be_trigger, "본전전환", "var(--orange)", _pct_of_entry(be_trigger)),
+            _row_lv(fast_tp, "⚡반익절", "#FBBF24", _pct_of_entry(fast_tp)),
             _row_lv(close, "현재가", "var(--text-white)", _pct_of_entry(close), bold=True),
             _row_lv(entry, "진입", "#60A5FA", "(기준)", bold=True),
             _row_lv(stop, "손절", "var(--red)", _pct_of_entry(stop), bold=True),
@@ -1572,7 +1576,8 @@ def render_v2_price_plan(n: dict):
           <div style="font-size:10px; color:var(--text-dim); margin-top:4px;">
             손절 = 2×ATR(변동폭)·스윙로우 지지선 기준, 최대 -8% 캡 ·
             목표 = 3.5×ATR (이 종목이 실제로 움직이는 폭) ·
-            +5% 도달 시 손절선을 진입가로 상향(본전전환)
+            +5% 도달 시 손절선을 진입가로 상향(본전전환) ·
+            ⚡ D+2 내 +2% 도달 시 절반 익절+잔여 본전 상향 (실측: 초반 급등 픽의 이후 3일 -0.9% 되돌림)
             — 규칙 실측: 표본 851건 train +1.03%/건·꼬리 -8.2% (기존 -0.83%/-15.2%)
           </div>
         </div>'''
