@@ -333,7 +333,24 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
             & (score >= 70)
         )
     production_candidates = top & eligible_before & evidence_pass
-    rank_key = score * 1_000 + display
+    # [v35] 하루 1종목 랭킹 — 알파 게이트 활성 시 검증 알파×손익비로 선정.
+    # 반사실 실측(46일, 후보풀=리스크가드+알파 상위 20%, 손절 -8%캡 실현수익):
+    #   품질점수 랭킹(기존): 평균 -1.29%/일 · 승률 33% · 누적 -59.5%  ← 역선택
+    #   알파 1등:            평균 +1.90%/일 · 승률 43% · 누적 +87.2%
+    #   알파×손익비(채택):    평균 +2.07%/일 · 승률 46% · 누적 +95.1%
+    # 품질점수에 포함된 DISPLAY(모멘텀 잔재, IC -0.03)가 풀 내 최악을 골라내던
+    # 구조. 단독 t=1.35(p=0.18, n=46)로 통계 확정은 아니나 검증 축과 방향 일치.
+    if alpha_gate_active:
+        _rank_alpha = pd.to_numeric(
+            out.get("ALPHA_SCORE", pd.Series(0, index=out.index)), errors="coerce"
+        ).fillna(0.0)
+        _rank_rr = pd.to_numeric(
+            out.get("RR_NOW_TP1", pd.Series(0, index=out.index)), errors="coerce"
+        ).fillna(0.0).clip(0.0, 3.0)
+        # 알파×RR 주축 + 품질점수 미세 타이브레이크
+        rank_key = _rank_alpha * _rank_rr * 1_000 + score
+    else:
+        rank_key = score * 1_000 + display
     production = production_candidates & rank_key.where(
         production_candidates
     ).rank(method="first", ascending=False).eq(1)

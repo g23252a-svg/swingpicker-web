@@ -131,3 +131,52 @@ def test_quality_reason_no_regime_block_text_under_alpha_gate():
     # 알파 게이트에선 DOWN/시장폭이 하드블록 사유로 표기되지 않는다
     assert "하락 레짐 (신규진입 차단)" not in reason
     assert "내부 약세" not in reason
+
+
+# ═══════════════════════════════════════════════════
+# [v35] 하루 1종목 랭킹 — 알파×손익비 (역선택 수정)
+# ═══════════════════════════════════════════════════
+# 실측(46일): 품질점수 랭킹 -1.29%/일(승률 33%) vs 알파×RR +2.07%/일(승률 46%).
+
+def _prod_row(**overrides):
+    row = _row(TOP_PICK=1, BUY_NOW_ELIGIBLE=1, ACTION_DECISION="BUY",
+               ALPHA_ENTRY_OK=1, RR_NOW_TP1=2.0, DATA_FRESHNESS_OK=True,
+               ABNORMAL_HISTORY_GUARD_FLAG=0, PROFIT_RECOVERY_BLOCK_FLAG=0,
+               JULY_PROFIT_BLOCK_FLAG=0, POC_GAP=8.0)
+    row.update(overrides)
+    return row
+
+
+def test_v35_daily_pick_ranked_by_alpha_not_quality():
+    from services.recommendation_quality import apply_recommendation_quality_guard
+    df = pd.DataFrame([
+        _prod_row(종목명="품질높음", QUALITY_GUARD_SCORE=95.0, DISPLAY_SCORE=90.0,
+                  ALPHA_SCORE=82.0, RR_NOW_TP1=1.5),
+        _prod_row(종목명="알파높음", QUALITY_GUARD_SCORE=70.0, DISPLAY_SCORE=40.0,
+                  ALPHA_SCORE=97.0, RR_NOW_TP1=2.5),
+    ])
+    out = apply_recommendation_quality_guard(df)
+    picked = out[out["PRODUCTION_BUY"] == 1]
+    assert len(picked) == 1
+    # 품질점수가 아니라 알파×RR이 높은 쪽이 공식 매수
+    assert picked.iloc[0]["종목명"] == "알파높음"
+
+
+def test_v35_legacy_rank_unchanged_without_alpha_gate():
+    from services.recommendation_quality import apply_recommendation_quality_guard
+    # 알파 미검증(레거시) — 기존 품질점수 랭킹 유지
+    base = dict(TOP_PICK=1, BUY_NOW_ELIGIBLE=1, BUY_NOW_GRADE="BUY",
+                BUY_NOW_SCORE=82, TOP_PICK_TYPE="STABLE",
+                ENTRY_RISK_LEVEL="GREEN", ROUTE="ATTACK", MACRO_RISK="NORMAL",
+                MFI14=74, RES_RATIO_NEAR=0.15, VWAP_GAP=10, RR_NOW_TP1=2.0,
+                DATA_FRESHNESS_OK=True, ABNORMAL_HISTORY_GUARD_FLAG=0,
+                PROFIT_RECOVERY_BLOCK_FLAG=0, JULY_PROFIT_BLOCK_FLAG=0,
+                POC_GAP=8.0, MARKET_BREADTH=55.0, 종목코드="000001")
+    df = pd.DataFrame([
+        dict(base, 종목명="점수높음", DISPLAY_SCORE=92.0),
+        dict(base, 종목명="점수낮음", DISPLAY_SCORE=75.0),
+    ])
+    out = apply_recommendation_quality_guard(df)
+    picked = out[out["PRODUCTION_BUY"] == 1]
+    assert len(picked) == 1
+    assert picked.iloc[0]["종목명"] == "점수높음"
