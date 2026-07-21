@@ -806,6 +806,36 @@ def _plotly_dark(fig, height=300):
     return fig
 
 
+# [v35.1] OHLCV parquet 모듈 캐시 — 종목 상세를 탭할 때마다 20.6만 행
+# 전체 parquet을 다시 읽던 구조(피크 +47MB/탭)가 모바일 '튕김'의 원인.
+# run.io_bound 스레드에서 동시 탭 시 47MB 스파이크가 N개 중첩 → Railway
+# 소형 인스턴스 OOM → 프로세스 재시작 → 접속 전원 웹소켓 단절.
+# 프로세스당 1회 로드(상주 ~13MB) 후 재사용, 새 parquet(야간 배치) 도착 시 갱신.
+import threading as _threading
+_OHLCV_CACHE: dict = {"file": None, "df": None}
+_OHLCV_CACHE_LOCK = _threading.Lock()
+
+
+def _load_ohlcv_cached():
+    """최신 ohlcv_cache parquet을 1회 로드해 재사용 (스레드 안전)."""
+    import os, glob, pandas as pd
+    here = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(here, "..", "data")
+    files = sorted(glob.glob(os.path.join(data_dir, "ohlcv_cache_*.parquet")),
+                   reverse=True)
+    if not files:
+        return None
+    latest = files[0]
+    with _OHLCV_CACHE_LOCK:
+        if _OHLCV_CACHE["file"] != latest:
+            df = pd.read_parquet(latest).reset_index()
+            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+            _OHLCV_CACHE["file"] = latest
+            _OHLCV_CACHE["df"] = df
+            _logger.info(f"[v35.1] OHLCV 캐시 로드: {os.path.basename(latest)} ({len(df):,}행)")
+        return _OHLCV_CACHE["df"]
+
+
 def _get_chart_data(code: str, days: int = 120):
     """캔들차트 데이터 (동기 — run.io_bound로 호출).
 
@@ -813,22 +843,16 @@ def _get_chart_data(code: str, days: int = 120):
     이전엔 period=120 키워드로 호출해서 TypeError → 항상 "데이터 로드 실패" 뜨고 있었음.
 
     우선순위:
-      1) data/ohlcv_cache_*.parquet (가장 최신, Railway에서도 작동 — pykrx 불필요)
+      1) data/ohlcv_cache_*.parquet — [v35.1] 모듈 캐시 재사용 (탭당 재로드 금지)
       2) data_source.get_ohlcv() (pykrx → FDR fallback)
     """
-    import os, glob, pandas as pd
+    import pandas as pd
     from datetime import datetime, timedelta
 
-    # ── 1) 로컬 parquet 우선 (Railway IP 차단 회피) ──
+    # ── 1) 로컬 parquet 캐시 우선 (Railway IP 차단 회피) ──
     try:
-        here = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.join(here, "..", "data")
-        # 가장 최신 parquet 파일 1개만 읽으면 누적된 전체 과거분이 들어있음
-        files = sorted(glob.glob(os.path.join(data_dir, "ohlcv_cache_*.parquet")),
-                       reverse=True)
-        if files:
-            df = pd.read_parquet(files[0]).reset_index()
-            df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+        df = _load_ohlcv_cached()
+        if df is not None:
             sub = df[df["종목코드"] == code].copy()
             if not sub.empty:
                 # 최근 `days` 영업일만
@@ -5075,6 +5099,31 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             .ldy-sticky-header .q-table__container {
                 max-height: 60vh;
             }
+            /* [v35.1] 스마트폰 최적화 — 테이블은 자체 가로 스크롤에 가두고
+               페이지 전체가 밀리지 않게. 셀 밀도·글자 크기 축소. */
+            .ldy-sticky-header {
+                max-width: 100vw;
+            }
+            .ldy-sticky-header .q-table__container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .ldy-sticky-header td, .ldy-sticky-header th {
+                padding: 4px 6px !important;
+                font-size: 11px !important;
+                white-space: nowrap;
+            }
+            /* 종목명 열은 화면에 고정 (가로 스크롤 중에도 어느 종목인지 보이게) */
+            .ldy-sticky-header td:nth-child(6), .ldy-sticky-header th:nth-child(6) {
+                position: sticky;
+                left: 0;
+                z-index: 1;
+                background: #1a1a2e !important;
+            }
+            /* 탭 타깃 최소 높이 (iOS 권장 44px) */
+            .ldy-sticky-header tbody tr {
+                min-height: 44px;
+            }
         }
         </style>
         ''')
@@ -5174,16 +5223,36 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 
     # ── 종목 상세 분석 ──
     def _on_stock_select(event, full_df: pd.DataFrame):
-        detail_area.clear()
-        sel = event.args.get("rows", []) if hasattr(event, "args") else []
-        if not sel:
-            return
-        code = sel[0].get("code", "")
-        match = full_df[full_df["종목코드"].astype(str).str.zfill(6) == code]
-        if match.empty:
-            return
-        row = match.iloc[0]
-        _render_stock_detail(code, row, full_df)
+        # [v35.1] 행 탭 핸들러 방어 — 어떤 예외도 세션을 죽이지 않게.
+        # 모바일에서 상세가 화면 밖(테이블 아래)에 렌더돼 '탭해도 반응 없음'으로
+        # 보이던 문제는 렌더 후 자동 스크롤로 해결.
+        code = "?"
+        try:
+            detail_area.clear()
+            sel = event.args.get("rows", []) if hasattr(event, "args") else []
+            if not sel:
+                return
+            code = sel[0].get("code", "")
+            match = full_df[full_df["종목코드"].astype(str).str.zfill(6) == code]
+            if match.empty:
+                ui.notify(f"종목 {code} 상세 데이터를 찾지 못했습니다", type="warning")
+                return
+            row = match.iloc[0]
+            _render_stock_detail(code, row, full_df)
+            # 모바일: 상세 패널로 부드럽게 스크롤 (데스크톱에도 무해)
+            try:
+                ui.run_javascript(
+                    f"getElement({detail_area.id}).scrollIntoView"
+                    "({behavior:'smooth', block:'start'})"
+                )
+            except Exception as _se:
+                _logger.debug(f"[v35.1] 상세 스크롤 스킵: {_se}")
+        except Exception as e:
+            _logger.warning(f"[v35.1] 종목 상세 렌더 실패 [{code}]: {e}", exc_info=True)
+            with detail_area:
+                ui.label("종목 상세를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.").classes(
+                    "text-sm text-amber-300"
+                )
 
     def _render_stock_detail(code: str, row, full_df: pd.DataFrame = None):
         # html escape helper (XSS 방지 + 디버그 메시지에 안전한 텍스트 삽입)
