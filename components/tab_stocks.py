@@ -3726,7 +3726,6 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 desc = str(r.get("ELITE_LABEL_DESC", ""))
                 s_v = _nz(r.get("STRUCT_SCORE", 0))
                 t_v = _nz(r.get("TIMING_SCORE", 0))
-                a_v = _nz(r.get("AI_SCORE", 0))
                 gap = _nz(r.get("GAP_PCT", 0))
                 rr  = _nz(r.get("RR_NOW_TP1", 0))
                 entry = int(_nz(r.get("추천매수가", 0)))
@@ -3775,7 +3774,8 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                                 "px-1.5 py-0.5 bg-amber-900/30 rounded"
                             )
                     ui.label(name).classes("text-base font-bold text-white")
-                    ui.label(f"S{s_v:.0f} T{t_v:.0f} AI{a_v:.0f}").classes(
+                    # [v37.2] AI 표기 제거 — 미검증 구모델 0점 고정(죽은 축)
+                    ui.label(f"S{s_v:.0f} T{t_v:.0f}").classes(
                         "text-xs text-gray-400 mt-0.5"
                     )
                     ui.label(f"🎯{entry:,}  🟢{tp1:,}  🛡️{stop:,}").classes(
@@ -4296,9 +4296,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         # [v31.2] 🧠 알파순 신설 + 기본값 — 검증 통과한 예측 점수 순.
         # 알파 미적용 데이터(legacy)면 정렬 로직에서 랭크순으로 자동 폴백.
         sort_mode = ui.toggle(
-            ["🧠 알파순", "🔢 점수순", "🧱 3축최저순", "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"],
+            ["🧠 알파순", "🔢 점수순", "🧱 S·T최저순", "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"],
             value=_restore(_tab_state, "sort", "🧠 알파순",
-                           ["🧠 알파순", "🔢 점수순", "🧱 3축최저순",
+                           ["🧠 알파순", "🔢 점수순", "🧱 S·T최저순",
                             "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"]),
         )
         # [v3.7.26] 테이블 보기 모드 — 기본(핵심만) vs 고급(전체)
@@ -4907,13 +4907,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
         elif sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
-        elif sort_mode.value == "🧱 3축최저순":
-            # [Step AD] '밸런스순' → '3축최저순' 으로 정확한 의미 표기
-            # min(S, T, AI) 내림차순 → 3축 모두 높은 종목 우선 (3축의 최저점이 높은 순)
+        elif sort_mode.value == "🧱 S·T최저순":
+            # [v37.2] AI 축 제외 — 미검증 구모델이 정직 게이트로 항상 0점이라
+            # min(S,T,AI)가 전 종목 0이 되어 정렬이 무력화되던 버그.
+            # min(S, T) 내림차순 → 두 축 모두 높은 종목 우선.
             s_col = fdf["STRUCT_SCORE"].fillna(0) if "STRUCT_SCORE" in fdf.columns else 0
             t_col = fdf["TIMING_SCORE"].fillna(0) if "TIMING_SCORE" in fdf.columns else 0
-            a_col = fdf["AI_SCORE"].fillna(0)     if "AI_SCORE"     in fdf.columns else 0
-            fdf = fdf.assign(_axis_min=pd.concat([s_col, t_col, a_col], axis=1).min(axis=1))
+            fdf = fdf.assign(_axis_min=pd.concat([s_col, t_col], axis=1).min(axis=1))
             fdf = fdf.sort_values("_axis_min", ascending=False).drop(columns=["_axis_min"])
         elif sort_mode.value == "⚖️ 균형순":
             # [Step AD] 진짜 균형순 신규 — BALANCE_CALC (= 100 - 축편차×1.25)
@@ -5013,8 +5013,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
              "align": "center", "sortable": True},
             {"name": "t", "label": "T", "field": "t",
              "align": "center", "sortable": True},
-            {"name": "ai", "label": "AI", "field": "ai",
-             "align": "center", "sortable": True},
+            # [v37.2] AI 컬럼 제거 — 구 LSTM/XGB 모델이 검증 미통과로
+            # v28-4 정직 게이트에 의해 항상 0점 처리됨(죽은 축).
+            # 검증 통과한 예측 점수는 🧠알파 컬럼이 이미 담당.
             {"name": "gap", "label": "진입갭%", "field": "gap",
              "align": "center", "sortable": True},
             # [v3.7.26] RR 컬럼 추가 — 실전 매매 의사결정의 핵심 지표
@@ -5081,7 +5082,6 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "alpha": _table_alpha_display(r),
                 "s":     f'{_nz(r.get("STRUCT_SCORE",  0)):.0f}',
                 "t":     f'{_nz(r.get("TIMING_SCORE",  0)):.0f}',
-                "ai":    f'{_nz(r.get("AI_SCORE",      0)):.0f}',
                 # [v3.7.24] 검증점수 → 종합/랭크 2개 분리 (구분 명확화)
                 # 종합 (elite): ELITE_SCORE (파이프라인 최종) > ELITE_RANK_SCORE 폴백
                 "elite": f'{_nz(r.get("ELITE_SCORE", r.get("ELITE_RANK_SCORE", 0))):.0f}',
@@ -5262,14 +5262,13 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     buy = int(_nz(r.get("추천매수가", 0)))
                     stop = int(_nz(r.get("손절가", 0)))
                     t1 = int(_nz(r.get("추천매도가1", 0)))
-                    # ── 3축 점수 서브라벨 (v3.6 복원) ──
+                    # ── 축 점수 서브라벨 — [v37.2] AI 표기 제거(죽은 축) ──
                     s_val  = _nz(r.get("STRUCT_SCORE",  0))
                     t_val  = _nz(r.get("TIMING_SCORE",  0))
-                    ai_val = _nz(r.get("AI_SCORE",      0))
                     bal    = _nz(r.get("BALANCE_CALC",  r.get("BALANCE_SCORE", 0)))
                     gap    = _nz(r.get("GAP_PCT", 0))
                     ui.label(
-                        f"S{s_val:.0f} T{t_val:.0f} AI{ai_val:.0f} · 균형{bal:.0f} · 갭{gap:.1f}%"
+                        f"S{s_val:.0f} T{t_val:.0f} · 균형{bal:.0f} · 갭{gap:.1f}%"
                     ).classes("text-xs text-gray-400 mt-1")
                     if buy > 0:
                         ui.label(
@@ -5547,7 +5546,6 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     # 3축 점수
                     s_val = _nz(row.get("STRUCT_SCORE", row.get("S_SCORE", 0)))
                     t_val = _nz(row.get("TIMING_SCORE", row.get("T_SCORE", 0)))
-                    ai_val = _nz(row.get("AI_SCORE", 0))
                     bal = _nz(row.get("BALANCE_CALC", row.get("BALANCE_SCORE", 0)))
                     # [v3.7.24] 테이블과 동일한 로직으로 통일
                     # 종합 = ELITE_SCORE 우선 (없으면 ELITE_RANK_SCORE 폴백)
@@ -5587,10 +5585,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                     # 해결: 실전 의사결정 핵심 6개만 먼저 표시, 나머지는 접이식
 
                     # ─── 🎯 핵심 지표 (항상 표시, 실전 매매 직접 활용) ───
-                    # S / T / AI (3축) · 갭% · RR · 종합
+                    # S / T (2축) · 갭% · RR · 종합
+                    # [v37.2] AI 미니바 제거 — 미검증 구모델 0점 고정(죽은 축)
                     rr_val = _nz(row.get("RR_NOW_TP1", 0))
-                    for lbl, val in [("S 구조", s_val), ("T 타이밍", t_val),
-                                      ("AI", ai_val)]:
+                    for lbl, val in [("S 구조", s_val), ("T 타이밍", t_val)]:
                         bc, tc = _clr_hex(val)
                         _mini_bar(lbl, f"{val:.0f}", val, bc, tc)
 

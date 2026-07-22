@@ -15,6 +15,17 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "37.2.0",
+        "date": "2026-07-22",
+        "type": "patch",
+        "title": "v37.2 — 죽은 AI 축 표시 제거 (항상 0점 혼란 해소)",
+        "items": [
+            "🧹 **AI 컬럼 제거:** 구 LSTM/XGB(v19) 모델은 OOS 검증 기록이 없어 v28-4 정직 게이트가 항상 0점 처리(UNVALIDATED_MODEL) — 0 고정 컬럼이 혼란만 유발해 테이블·카드·상세 미니바에서 제거. 검증 통과한 예측 점수는 🧠알파 컬럼이 계속 담당.",
+            "🧱 **정렬 교정:** '3축최저순'이 min(S,T,AI)=전종목 0으로 무력화되어 있던 버그 — AI 축 제외하고 'S·T최저순'으로 교정.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "37.1.0",
         "date": "2026-07-22",
         "type": "patch",
