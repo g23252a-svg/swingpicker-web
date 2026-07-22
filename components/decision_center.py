@@ -598,6 +598,8 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                 "공식 매수 0개면 주문 없음",
                 "관찰 후보·AI 점수만으로 매수 금지",
                 "매수 시 지정가·손절가·비중 동시 준수",
+                # [v37] 실측: 단일픽 집중 +0.4%/승률48% vs 상위 3~5종목 분산 +1.3%/56%
+                "한 종목 몰빵 금지 — 3~5종목 분산 (실측 승률 48%→56%)",
             ]:
                 with ui.row().classes("sp-rule-pill items-center gap-2 rounded-xl px-3 py-2 grow"):
                     ui.label("✓").classes("text-emerald-400 font-bold")
