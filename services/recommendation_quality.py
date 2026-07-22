@@ -157,6 +157,8 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     alpha_gate_active = _alpha_gate_on(df)
     ascore = _num_nan(df, "ALPHA_SCORE")
     athr = _num_nan(df, "ALPHA_ENTRY_THRESHOLD")
+    # [v37] 저점추세 게이트 — 컬럼 없으면(구버전 CSV) 통과 취급.
+    lt_ok = _flag(df, "ALPHA_LT_OK", True)
 
     result: list[str] = []
     for i in range(len(df)):
@@ -171,6 +173,9 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
                 _a, _t = ascore.iloc[i], athr.iloc[i]
                 if pd.notna(_a) and pd.notna(_t) and _a < _t:
                     row_reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
+                elif not bool(lt_ok.iloc[i]):
+                    # [v37] 알파는 통과했지만 저점추세 하락 — 실측 역신호 구간.
+                    row_reasons.append("저점추세 하락 (알파 통과·자리 미달)")
                 else:
                     row_reasons.append("진입 조건 미달")
             else:

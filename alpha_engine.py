@@ -439,12 +439,13 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
 
     검증 통과(ALPHA_VALIDATED==1)일 때만 작동한다:
       TOP_PICK = 리스크가드(ENTRY_RISK_GATE_OK) AND 알파백분위 ≥ 레짐문턱
+                 AND 저점추세 유지(Low_Trend_PCT ≥ 0, 결측은 통과)   [v37]
     · ROUTE는 건드리지 않는다(타이밍 배지로만 존치).
     · ENTRY_RISK_GATE_OK가 없으면(레거시) close>stop 등 기본 가드만 재구성.
     · 미검증이면 TOP_PICK을 그대로 두고 ALPHA_GATE_ACTIVE=0 (레거시 폴백).
 
     주입 컬럼:
-      ALPHA_GATE_ACTIVE, ALPHA_ENTRY_THRESHOLD, ALPHA_ENTRY_OK
+      ALPHA_GATE_ACTIVE, ALPHA_ENTRY_THRESHOLD, ALPHA_ENTRY_OK, ALPHA_LT_OK
     """
     out = df.copy()
     n = len(out)
@@ -487,7 +488,18 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
         return pd.Series(False, index=out.index)
     blocked = _blk("NEW_ENTRY_BLOCKED") | _blk("JULY_PROFIT_BLOCK_FLAG") | _blk("PROFIT_RECOVERY_BLOCK_FLAG")
 
-    entry_ok = risk_ok & ascore.notna() & (ascore >= thr) & (~blocked)
+    # [v37] 저점추세 결합 — 알파 통과 종목을 Low_Trend_PCT 방향으로 가르면
+    # LT≥0 +1.97%/승률48% vs LT<0 -0.12%/45% (OOS n=4,230, 일별페어드 p=0.015).
+    # 게이트 풀이 절반으로 정제되고 치료된 ATTACK 정의와도 일관된다.
+    # 결측은 통과 처리 — 데이터 이슈가 전면 차단으로 번지지 않게.
+    if "Low_Trend_PCT" in out.columns:
+        lt = pd.to_numeric(out["Low_Trend_PCT"], errors="coerce")
+    else:
+        lt = pd.Series(np.nan, index=out.index)
+    lt_ok = lt.isna() | (lt >= 0)
+    out["ALPHA_LT_OK"] = lt_ok.astype(int)
+
+    entry_ok = risk_ok & ascore.notna() & (ascore >= thr) & (~blocked) & lt_ok
     out["ALPHA_GATE_ACTIVE"] = 1
     out["ALPHA_ENTRY_OK"] = entry_ok.astype(int)
 
