@@ -15,6 +15,19 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "36.0.0",
+        "date": "2026-07-22",
+        "type": "minor",
+        "title": "v36.0 — 미국 지수 오버나이트 피처 (나스닥·S&P → 알파 모델)",
+        "items": [
+            "🇺🇸 **데이터 수집 신설:** scripts/collect_us_daily.py — 나스닥100(NDX)·S&P500 일봉을 FDR→yfinance→stooq 3단 폴백으로 수집, data/us_daily.csv 커밋 (collect_kospi_daily 워크플로에 통합, 실패해도 KOSPI 수집 불간섭). 첫 실행에 5년 히스토리 확보 → 알파 학습 전 기간에 소급 적용.",
+            "🧠 **알파 피처 4종 주입:** US_NDX_RET_1D/RET_5D/VS_MA20 + US_SPX_RET_1D. 근거: 코스피-나스닥 강연동(반도체 비중 ~30%, 외국인 수급, NQ 선물 24h — 7/22 장중 동조 급락 실관찰). 학습 패널·당일 스코어링 양쪽에 날짜 조인.",
+            "🔒 **look-ahead 원천 차단:** 한국 거래일 d의 피처는 반드시 us_date < d (merge_asof allow_exact_matches=False) — 미국 d일 마감은 한국 d+1 새벽에야 확정되므로 같은 날짜도 금지. 테스트로 고정.",
+            "⚖️ **가치 판정은 자동:** 시장 공통 피처는 GBDT가 종목 피처와의 상호작용으로 활용(예: 나스닥 약세 다음날 방어주 우위). 매일 밤 워크포워드 검증 게이트(IC t≥2·AUC≥0.52·스프레드>0)가 재평가 — 무가치하면 모델이 무시, 유해하면 알파 자체가 미사용 폴백. us_daily.csv 없으면 기존과 동일 동작.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "35.1.0",
         "date": "2026-07-21",
         "type": "patch",

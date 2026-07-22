@@ -1725,7 +1725,7 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                     f"AUC {_am.get('auc')} → 검증 통과")
             else:
                 log(f"🧠 [v29] 알파 학습 — 검증 미통과 ({_am.get('reason', 'gate 미달')}) → 미사용")
-            df_out = _alpha_score_today(df_out, data_dir=OUT_DIR)
+            df_out = _alpha_score_today(df_out, data_dir=OUT_DIR, trade_ymd=trade_ymd)
             # [v32.1] ROUTE 자체 치료 — 상태 판정을 데이터 방향으로 재계산.
             # (기존 ATTACK -4.64%p → 신 ATTACK +3.70%p, 순서 정상화)
             try:
