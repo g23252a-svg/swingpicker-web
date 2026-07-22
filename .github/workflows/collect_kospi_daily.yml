@@ -71,6 +71,15 @@ jobs:
           if [ -n "${{ inputs.end }}" ]; then ARGS="$ARGS --end ${{ inputs.end }}"; fi
           python scripts/collect_kospi_daily.py $ARGS
 
+      # [v36] 미국 지수(나스닥100·S&P500) 수집 — 알파 오버나이트 피처용.
+      # 실패해도 KOSPI 수집을 깨지 않는다 (스크립트가 항상 exit 0).
+      - name: US daily 수집 (NDX·SPX)
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.start }}" ]; then ARGS="$ARGS --start ${{ inputs.start }}"; fi
+          if [ -n "${{ inputs.end }}" ]; then ARGS="$ARGS --end ${{ inputs.end }}"; fi
+          python scripts/collect_us_daily.py $ARGS || true
+
       - name: 산출물 검증
         run: |
           if [ ! -f data/kospi_daily.csv ]; then
@@ -101,9 +110,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -f data/kospi_daily.csv
+          # [v36] us_daily.csv 수집 성공 시 같이 커밋 (없으면 스킵)
+          if [ -f data/us_daily.csv ]; then git add -f data/us_daily.csv; fi
           if git diff --staged --quiet; then
             echo "변경 없음 — 커밋 스킵"
           else
-            git commit -m "data: KOSPI daily 갱신 ($(date +%Y-%m-%d))"
+            git commit -m "data: KOSPI/US daily 갱신 ($(date +%Y-%m-%d))"
             git push
           fi
