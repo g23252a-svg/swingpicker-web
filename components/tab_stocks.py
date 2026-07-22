@@ -393,8 +393,8 @@ from nicegui import ui, run, app
 
 _logger = logging.getLogger(__name__)
 
-# [Step AC P0-6] sticky-header CSS 1회 주입 가드 (모듈 단위)
-_STICKY_CSS_INJECTED = False
+# [v37.1] sticky-header CSS 주입 가드는 클라이언트 속성으로 이동
+# (모듈 단위 플래그는 두 번째 클라이언트부터 CSS 누락 — 재접속 시 헤더 고정 실종)
 
 # [Step AE] 라벨/ROUTE 화면 표시 — 매핑 헬퍼 (ui_terms.py)
 # raw 비교는 절대 건드리지 말고, 표시만 매핑 통과
@@ -4206,15 +4206,37 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             _logger.warning(f"액션 카드 레인 렌더 실패 (기존 화면 유지): {_ac_e}")
         _render_candidate_context_notice(official_decision=official_decision)
 
+    # ── [v37.1] 필터 상태 영속화 ──
+    # 모바일에서 다른 앱 갔다 오면 소켓이 끊기고 페이지가 재로드되면서
+    # 필터/정렬/뷰모드가 전부 기본값으로 초기화되던 문제. 사용자별
+    # app.storage.user에 저장해 재로드 후에도 마지막 상태를 복원한다.
+    def _load_tab_state() -> dict:
+        try:
+            saved = app.storage.user.get("stocks_tab_state", {})
+            return dict(saved) if isinstance(saved, dict) else {}
+        except Exception as e:
+            _logger.debug("[tab_stocks] 탭 상태 로드 실패 (기본값 사용): %s", e)
+            return {}
+
+    def _restore(state: dict, key: str, default, valid) -> Any:
+        """저장값이 현재 옵션에 존재할 때만 복원 — 옵션 개편 시 안전."""
+        val = state.get(key, default)
+        return val if val in valid else default
+
+    _tab_state = _load_tab_state()
+
     # ── 뷰모드 + 필터 ──
     with ui.row().classes("w-full gap-4 items-center flex-wrap mb-2"):
         view_mode = ui.toggle(
-            ["📋 테이블", "🃏 칸반"], value="📋 테이블"
+            ["📋 테이블", "🃏 칸반"],
+            value=_restore(_tab_state, "view_mode", "📋 테이블",
+                           ["📋 테이블", "🃏 칸반"]),
         )
         # [v22.3.28] 종목명/종목코드 빠른 검색
         stock_search = ui.input(
             "종목 검색",
             placeholder="예: 삼성전자 / 005930 / 반도체",
+            value=str(_tab_state.get("search", "") or ""),
         ).props("dense clearable").classes("min-w-[220px]")
         ui.button(
             "🔍 검색 적용",
@@ -4236,7 +4258,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "WAIT":    "관망",
                 "NEUTRAL": "중립",
             },
-            value="전체", label="상태",
+            value=_restore(_tab_state, "route", "전체",
+                           ["전체", "ATTACK", "ARMED", "WAIT", "NEUTRAL"]),
+            label="상태",
         ).classes("min-w-[130px]")
         # [v3.7.18] 라벨 필터 추가 - 즉시진입 너무 많을 때 최강만 보기 등
         # [v3.7.25] 🛡️ 콤보 필터 추가 (고점수 관찰 종목)
@@ -4249,7 +4273,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "✅ 즉시진입": "🟡 관찰 후보",
                 "⚠️ 추격":   "🟠 추격주의",
             },
-            value="전체", label="라벨",
+            value=_restore(_tab_state, "label", "전체",
+                           ["전체", "🛡️ 콤보", "🏆 최강", "✅ 즉시진입", "⚠️ 추격"]),
+            label="라벨",
         ).classes("min-w-[140px]")
         # [v3.9.8] 위험 필터 — ENTRY_RISK_LEVEL 기반
         # 기본값은 "전체" — 회원이 직접 필터 선택하게 (숨김으로 인한 혼란 방지)
@@ -4262,14 +4288,18 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 "RED만 보기": "RED만 보기",
                 "ORANGE 이상": "ORANGE 이상",
             },
-            value="전체", label="위험",
+            value=_restore(_tab_state, "risk", "전체",
+                           ["전체", "RED 제외", "GREEN만", "RED만 보기", "ORANGE 이상"]),
+            label="위험",
         ).classes("min-w-[130px]")
         # [v3.7.24] "🏆 검증순" → "🏆 랭크순" (ELITE_RANK_SCORE 기준 명확화)
         # [v31.2] 🧠 알파순 신설 + 기본값 — 검증 통과한 예측 점수 순.
         # 알파 미적용 데이터(legacy)면 정렬 로직에서 랭크순으로 자동 폴백.
         sort_mode = ui.toggle(
             ["🧠 알파순", "🔢 점수순", "🧱 3축최저순", "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"],
-            value="🧠 알파순",
+            value=_restore(_tab_state, "sort", "🧠 알파순",
+                           ["🧠 알파순", "🔢 점수순", "🧱 3축최저순",
+                            "⚖️ 균형순", "🏆 랭크순", "🚦 상태순"]),
         )
         # [v3.7.26] 테이블 보기 모드 — 기본(핵심만) vs 고급(전체)
         # 사용자 지적: "스코어들이 너무 많은데 로직들좀 설명해봐"
@@ -4277,7 +4307,8 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         #       고급 보기 = 기존 전체 (11개)
         view_table_mode = ui.toggle(
             ["🎯 기본", "🔬 고급"],
-            value="🎯 기본",
+            value=_restore(_tab_state, "table_mode", "🎯 기본",
+                           ["🎯 기본", "🔬 고급"]),
         )
 
     # ── [v31] 기준·범례·용어집 서랍 — 기본 접힘 ──
@@ -4933,7 +4964,23 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         # admin/premium/pro는 제한 없음 → 전체 df 반환
         return fdf
 
+    def _persist_tab_state():
+        """[v37.1] 현재 필터/정렬/뷰 상태를 사용자 저장소에 기록."""
+        try:
+            app.storage.user["stocks_tab_state"] = {
+                "view_mode": view_mode.value,
+                "search": stock_search.value or "",
+                "route": route_filter.value,
+                "label": label_filter.value,
+                "risk": risk_filter.value,
+                "sort": sort_mode.value,
+                "table_mode": view_table_mode.value,
+            }
+        except Exception as e:
+            _logger.debug("[tab_stocks] 탭 상태 저장 실패 (무해): %s", e)
+
     def _build_view():
+        _persist_tab_state()
         table_area.clear()
         show = _filtered()
         with table_area:
@@ -5064,10 +5111,14 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             ':rows-per-page-options="[15, 30, 50, 100, 0]" '
             'virtual-scroll-sticky-size-start="0"'
         )
-        # [Step AB+AC P0-6] sticky header CSS — 모듈 플래그로 1회만 주입 (필터 토글 중복 방지)
-        global _STICKY_CSS_INJECTED
-        if not _STICKY_CSS_INJECTED:
-            _STICKY_CSS_INJECTED = True
+        # [v37.1] sticky header CSS — 클라이언트 단위 1회 주입.
+        # 기존 모듈 플래그는 프로세스당 1회라, 첫 접속 이후의 새 클라이언트
+        # (모바일 앱 전환 복귀 = 페이지 재로드 포함)에 CSS가 아예 빠져서
+        # 제목/헤더 고정이 사라지던 버그. 필터 토글 재렌더 중복은
+        # 클라이언트 속성 가드가 그대로 막아준다.
+        _client = ui.context.client
+        if not getattr(_client, "_ldy_sticky_css_done", False):
+            _client._ldy_sticky_css_done = True
             ui.add_head_html('''
         <style>
         .ldy-sticky-header .q-table__top,
@@ -5119,6 +5170,10 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 left: 0;
                 z-index: 1;
                 background: #1a1a2e !important;
+            }
+            /* [v37.1] 헤더행×종목명열 교차 모서리 — 양쪽 스크롤 모두에서 최상위 */
+            .ldy-sticky-header thead th:nth-child(6) {
+                z-index: 3 !important;
             }
             /* 탭 타깃 최소 높이 (iOS 권장 44px) */
             .ldy-sticky-header tbody tr {
