@@ -10,7 +10,8 @@ scripts/collect_us_daily.py
 alpha_engine이 이 CSV를 날짜 조인(look-ahead 방지: 한국일 d에는 us_date<d만)
 해 피처로 쓰며, 워크포워드 검증 게이트가 가치를 자동 판정한다.
 
-출력: data/us_daily.csv — date(미국 달력일 YYYYMMDD), ndx_close, spx_close
+출력: data/us_daily.csv — date(미국 달력일 YYYYMMDD), ndx_close, spx_close,
+      rut_close([v37.3] 러셀2000 — 분석용, 알파 피처는 ndx/spx만 사용)
 
 실행 (GitHub Actions — collect_kospi_daily.yml에서 KOSPI 수집 후):
     python scripts/collect_us_daily.py [--start YYYYMMDD] [--end YYYYMMDD]
@@ -32,6 +33,9 @@ _logger = logging.getLogger("collect_us_daily")
 _SYMBOLS = {
     "ndx_close": ("NDX", "^NDX", "^ndx"),      # 나스닥 100
     "spx_close": ("US500", "^GSPC", "^spx"),   # S&P 500
+    # [v37.3] 러셀 2000 — 미국 소형주. 지수별 오버나이트 상관 분석용
+    # (추가 컬럼은 outer-merge라 기존 ndx/spx 피처 파이프라인에 영향 없음).
+    "rut_close": ("RUT", "^RUT", "^rut"),
 }
 
 
