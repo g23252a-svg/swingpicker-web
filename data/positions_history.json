@@ -5054,5 +5054,37 @@
       "290650_20260609_WARN_DRAWDOWN_20260717",
       "290650_20260609_STOP_HIT_20260720"
     ]
+  },
+  {
+    "code": "003490",
+    "name": "대한항공",
+    "entry_ymd": "20260702",
+    "entry_px": 28550.0,
+    "qty": 0,
+    "stop_px": 25150.0,
+    "stop_px_initial": 25150.0,
+    "take_px1": 31200.0,
+    "take_px2": 34950.0,
+    "trailing_high": 29700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260722",
+    "last_close_px": 24900.0,
+    "unrealized_pnl_pct": -12.78,
+    "realized_pnl_pct": -12.78,
+    "close_ymd": "20260722",
+    "close_px": 24900.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "003490_20260702_WARN_DRAWDOWN_20260709",
+      "003490_20260702_WARN_DRAWDOWN_20260710",
+      "003490_20260702_WARN_DRAWDOWN_20260713",
+      "003490_20260702_WARN_DRAWDOWN_20260714",
+      "003490_20260702_WARN_DRAWDOWN_20260715",
+      "003490_20260702_WARN_DRAWDOWN_20260716",
+      "003490_20260702_WARN_DRAWDOWN_20260717",
+      "003490_20260702_WARN_DRAWDOWN_20260720",
+      "003490_20260702_WARN_DRAWDOWN_20260721",
+      "003490_20260702_STOP_HIT_20260722"
+    ]
   }
 ]
