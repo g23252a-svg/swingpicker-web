@@ -2,61 +2,61 @@
  "ok": true,
  "horizon_bdays": 5,
  "lookback_days": 60,
- "n_days_used": 51,
+ "n_days_used": 50,
  "axes": {
   "STRUCT_SCORE": {
-   "n_days": 51,
-   "mean_ic": -0.0468,
-   "t_stat": -2.57,
+   "n_days": 50,
+   "mean_ic": -0.05,
+   "t_stat": -2.73,
    "orientation": 1,
-   "pct_positive": 0.392,
+   "pct_positive": 0.38,
    "verdict": "역주행"
   },
   "TIMING_SCORE": {
-   "n_days": 51,
-   "mean_ic": -0.0018,
-   "t_stat": -0.12,
+   "n_days": 50,
+   "mean_ic": -0.0038,
+   "t_stat": -0.26,
    "orientation": 1,
-   "pct_positive": 0.51,
+   "pct_positive": 0.5,
    "verdict": "무신호"
   },
   "AI_SCORE": {
-   "n_days": 49,
-   "mean_ic": -0.1058,
-   "t_stat": -5.49,
+   "n_days": 48,
+   "mean_ic": -0.1066,
+   "t_stat": -5.42,
    "orientation": 1,
-   "pct_positive": 0.184,
+   "pct_positive": 0.188,
    "verdict": "역주행"
   },
   "FINAL_SCORE": {
-   "n_days": 51,
-   "mean_ic": -0.0571,
-   "t_stat": -3.22,
+   "n_days": 50,
+   "mean_ic": -0.0602,
+   "t_stat": -3.38,
    "orientation": 1,
-   "pct_positive": 0.373,
+   "pct_positive": 0.36,
    "verdict": "역주행"
   },
   "ELITE_SCORE": {
-   "n_days": 51,
-   "mean_ic": -0.0531,
-   "t_stat": -3.12,
+   "n_days": 50,
+   "mean_ic": -0.0552,
+   "t_stat": -3.21,
    "orientation": 1,
-   "pct_positive": 0.353,
+   "pct_positive": 0.34,
    "verdict": "역주행"
   },
   "POC_GAP": {
-   "n_days": 51,
-   "mean_ic": -0.0217,
-   "t_stat": -1.48,
+   "n_days": 50,
+   "mean_ic": -0.0231,
+   "t_stat": -1.55,
    "orientation": -1,
-   "pct_positive": 0.51,
+   "pct_positive": 0.5,
    "verdict": "무신호"
   }
  },
  "warnings": [
-  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0468 (t=-2.6, 51일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: AI_SCORE IC -0.1058 (t=-5.5, 49일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: FINAL_SCORE IC -0.0571 (t=-3.2, 51일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: ELITE_SCORE IC -0.0531 (t=-3.1, 51일) — 점수가 높을수록 수익률 낮음"
+  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0500 (t=-2.7, 50일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: AI_SCORE IC -0.1066 (t=-5.4, 48일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: FINAL_SCORE IC -0.0602 (t=-3.4, 50일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: ELITE_SCORE IC -0.0552 (t=-3.2, 50일) — 점수가 높을수록 수익률 낮음"
  ]
 }

@@ -1,6 +1,6 @@
 {
  "trained_ymd": "20260722",
- "n_features": 96,
+ "n_features": 100,
  "features": [
   "거래대금(억원)",
   "시가총액(억원)",
@@ -107,10 +107,10 @@
  "validated": true,
  "oos_days": 48,
  "oos_rows": 16062,
- "mean_ic": 0.2046,
- "ic_t": 7.74,
- "auc": 0.6101,
- "q5q1_spread_pct": 5.502,
+ "mean_ic": 0.1978,
+ "ic_t": 7.27,
+ "auc": 0.5999,
+ "q5q1_spread_pct": 5.363,
  "gate": {
   "min_ic_t": 2.0,
   "min_auc": 0.52,
@@ -120,62 +120,62 @@
   {
    "decile": 0,
    "n": 1582,
-   "win_rate": 0.2427,
-   "avg_fwd_pct": -7.04
+   "win_rate": 0.2402,
+   "avg_fwd_pct": -6.992
   },
   {
    "decile": 1,
    "n": 1601,
-   "win_rate": 0.238,
-   "avg_fwd_pct": -6.788
+   "win_rate": 0.2511,
+   "avg_fwd_pct": -6.462
   },
   {
    "decile": 2,
    "n": 1613,
-   "win_rate": 0.2641,
-   "avg_fwd_pct": -5.912
+   "win_rate": 0.2548,
+   "avg_fwd_pct": -6.084
   },
   {
    "decile": 3,
    "n": 1603,
-   "win_rate": 0.262,
-   "avg_fwd_pct": -5.318
+   "win_rate": 0.2651,
+   "avg_fwd_pct": -5.503
   },
   {
    "decile": 4,
    "n": 1596,
-   "win_rate": 0.2763,
-   "avg_fwd_pct": -5.296
+   "win_rate": 0.2776,
+   "avg_fwd_pct": -4.966
   },
   {
    "decile": 5,
    "n": 1615,
-   "win_rate": 0.2824,
-   "avg_fwd_pct": -4.39
+   "win_rate": 0.2848,
+   "avg_fwd_pct": -4.566
   },
   {
    "decile": 6,
    "n": 1607,
-   "win_rate": 0.3062,
-   "avg_fwd_pct": -3.669
+   "win_rate": 0.308,
+   "avg_fwd_pct": -3.704
   },
   {
    "decile": 7,
    "n": 1609,
-   "win_rate": 0.3344,
-   "avg_fwd_pct": -3.081
+   "win_rate": 0.3331,
+   "avg_fwd_pct": -3.134
   },
   {
    "decile": 8,
    "n": 1605,
-   "win_rate": 0.372,
-   "avg_fwd_pct": -2.084
+   "win_rate": 0.3664,
+   "avg_fwd_pct": -1.978
   },
   {
    "decile": 9,
    "n": 1631,
-   "win_rate": 0.4126,
-   "avg_fwd_pct": -0.495
+   "win_rate": 0.4096,
+   "avg_fwd_pct": -0.677
   }
  ],
  "model_saved": true
