@@ -5,12 +5,12 @@
     "score_lo":0,
     "score_hi":50.0,
     "score_center":25.0,
-    "p_calibrated":0.3042,
-    "n_effective":93.2,
-    "n_raw":182,
-    "p_slow":0.2959,
-    "p_fast":0.3125,
-    "n_fast":12
+    "p_calibrated":0.2983,
+    "n_effective":94.1,
+    "n_raw":183,
+    "p_slow":0.2936,
+    "p_fast":0.303,
+    "n_fast":13
   },
   {
     "method":"DISPLAY_SCORE",
