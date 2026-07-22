@@ -165,7 +165,73 @@ def build_training_panel(data_dir: str = "data", max_days: int = 200):
         return None
     panel = pd.concat(parts, ignore_index=True)
     panel["_y"] = panel.groupby("_ymd")["_fwd"].rank(pct=True)
+    # [v36] 미국 지수 오버나이트 피처 주입 (us_daily.csv 있을 때만)
+    panel = inject_us_features(panel, data_dir, ymd_col="_ymd")
     return panel
+
+
+# ═══════════════════════════════════════════════════════════════
+# [v36] 미국 지수 오버나이트 피처 — 나스닥·S&P 전일 마감
+# ───────────────────────────────────────────────────────────────
+# 근거: 코스피-나스닥 연동(반도체 비중 ~30% + 외국인 수급 + NQ 선물 24h).
+# look-ahead 방지가 핵심: 한국 거래일 d의 피처는 반드시 us_date < d 인
+# 마지막 미국 마감만 사용 (미국 d일 마감은 한국 d+1 새벽에야 확정).
+# 시장 공통 피처(종목 간 동일값)지만 GBDT가 종목 피처와의 상호작용으로
+# 활용(예: 나스닥 약세 다음날엔 저베타/방어주 우위). 가치는 워크포워드
+# 검증 게이트가 자동 판정 — 무가치하면 모델이 무시, 검증 실패 시 미사용.
+US_OVERNIGHT_COLS = ["US_NDX_RET_1D", "US_NDX_RET_5D", "US_NDX_VS_MA20",
+                   "US_SPX_RET_1D"]
+
+
+def _load_us_feature_table(data_dir: str):
+    """us_daily.csv → 미국 마감일 기준 피처 테이블 (없으면 None)."""
+    path = os.path.join(data_dir, "us_daily.csv")
+    if not os.path.exists(path):
+        return None
+    try:
+        us = pd.read_csv(path)
+        us["date"] = us["date"].astype(str).str.replace("-", "").str.slice(0, 8)
+        us = us.sort_values("date").reset_index(drop=True)
+        ndx = pd.to_numeric(us.get("ndx_close"), errors="coerce")
+        spx = pd.to_numeric(us.get("spx_close"), errors="coerce")
+        out = pd.DataFrame({"us_date": us["date"]})
+        out["US_NDX_RET_1D"] = ndx.pct_change() * 100
+        out["US_NDX_RET_5D"] = ndx.pct_change(5) * 100
+        ma20 = ndx.rolling(20, min_periods=10).mean()
+        out["US_NDX_VS_MA20"] = (ndx / ma20 - 1.0) * 100
+        out["US_SPX_RET_1D"] = spx.pct_change() * 100
+        return out.dropna(subset=["us_date"])
+    except Exception as e:
+        logger.warning(f"[v36] us_daily.csv 로드 실패 (피처 생략): {e}")
+        return None
+
+
+def inject_us_features(df: pd.DataFrame, data_dir: str,
+                       ymd_col: str = "_ymd") -> pd.DataFrame:
+    """한국 거래일별로 '그 전'(us_date < 한국일) 마지막 미국 피처를 조인.
+
+    us_daily.csv 없거나 로드 실패 → 원본 그대로 (피처 컬럼 미생성; GBDT는
+    학습 피처 목록에 없으면 자연히 미사용, 있는데 NaN이면 NaN 처리).
+    """
+    us = _load_us_feature_table(data_dir)
+    if us is None or df is None or len(df) == 0 or ymd_col not in df.columns:
+        return df
+    out = df.copy()
+    # merge_asof: 한국일 d에 대해 us_date <= d-1 (엄격히 과거) 마지막 행
+    left = pd.DataFrame({"_k_ymd": sorted(out[ymd_col].astype(str).unique())})
+    left["_k_dt"] = pd.to_datetime(left["_k_ymd"], format="%Y%m%d", errors="coerce")
+    right = us.copy()
+    right["_us_dt"] = pd.to_datetime(right["us_date"], format="%Y%m%d", errors="coerce")
+    right = right.dropna(subset=["_us_dt"]).sort_values("_us_dt")
+    left = left.dropna(subset=["_k_dt"]).sort_values("_k_dt")
+    joined = pd.merge_asof(
+        left, right, left_on="_k_dt", right_on="_us_dt",
+        direction="backward", allow_exact_matches=False,  # us_date < 한국일 (look-ahead 금지)
+    )
+    feat_map = joined.set_index("_k_ymd")[US_OVERNIGHT_COLS]
+    for c in US_OVERNIGHT_COLS:
+        out[c] = out[ymd_col].astype(str).map(feat_map[c])
+    return out
 
 
 def _make_model():
@@ -305,10 +371,13 @@ def load_meta(data_dir: str = "data") -> dict:
         return {}
 
 
-def score_today(df: pd.DataFrame, data_dir: str = "data") -> pd.DataFrame:
+def score_today(df: pd.DataFrame, data_dir: str = "data",
+                trade_ymd: str = None) -> pd.DataFrame:
     """오늘 추천 df에 ALPHA_SCORE(당일 백분위 0~100)·ALPHA_WIN_PROB·ALPHA_VALIDATED 주입.
 
     검증 미통과/모델 없음 → ALPHA_VALIDATED=0, 점수 NaN (사용처에서 자동 무시).
+    [v36] trade_ymd가 주어지면 미국 지수 오버나이트 피처를 조인해 예측에 사용
+    (학습과 동일하게 us_date < trade_ymd 만 — look-ahead 없음).
     """
     out = df.copy()
     out["ALPHA_SCORE"] = np.nan
@@ -324,6 +393,17 @@ def score_today(df: pd.DataFrame, data_dir: str = "data") -> pd.DataFrame:
         import joblib
         bundle = joblib.load(model_file)
         model, feats = bundle["model"], bundle["features"]
+        # [v36] 미국 피처 주입 — 임시 _ymd 컬럼으로 조인 후 제거
+        if trade_ymd and "US_NDX_RET_1D" not in out.columns:
+            try:
+                _tmp = out.copy()
+                _tmp["_ymd"] = str(trade_ymd)
+                _tmp = inject_us_features(_tmp, data_dir, ymd_col="_ymd")
+                for c in US_OVERNIGHT_COLS:
+                    if c in _tmp.columns:
+                        out[c] = _tmp[c].values
+            except Exception as _ue:
+                logger.warning(f"[v36] 미국 피처 주입 실패 (NaN 처리): {_ue}")
         X = pd.DataFrame({c: pd.to_numeric(out.get(c), errors="coerce")
                           if c in out.columns else np.nan for c in feats},
                          index=out.index)

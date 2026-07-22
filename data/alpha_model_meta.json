@@ -97,7 +97,11 @@
   "RR_NOW_TP1",
   "ENTRY_GAP_PCT",
   "TOP_PICK",
-  "TP1_PCT"
+  "TP1_PCT",
+  "US_NDX_RET_1D",
+  "US_NDX_RET_5D",
+  "US_NDX_VS_MA20",
+  "US_SPX_RET_1D"
  ],
  "ok": true,
  "validated": true,

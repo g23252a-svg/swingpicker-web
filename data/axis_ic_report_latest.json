@@ -44,6 +44,14 @@
    "pct_positive": 0.353,
    "verdict": "역주행"
   },
+  "ELITE_SCORE": {
+   "n_days": 50,
+   "mean_ic": -0.0552,
+   "t_stat": -3.21,
+   "orientation": 1,
+   "pct_positive": 0.34,
+   "verdict": "역주행"
+  },
   "POC_GAP": {
    "n_days": 51,
    "mean_ic": -0.0217,

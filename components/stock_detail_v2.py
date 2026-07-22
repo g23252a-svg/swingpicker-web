@@ -3495,9 +3495,25 @@ def _load_ohlcv_for_v2(code: str, days: int = 120):
             return sub_kr.tail(days).copy()
         return None
 
+    # [v35.1] parquet은 tab_stocks의 모듈 캐시를 재사용 — 탭 한 번에 최대
+    # 5개 파일을 통째로 읽던 구조(파일당 피크 +47MB)가 모바일 '튕김'(OOM →
+    # 프로세스 재시작 → 전 세션 웹소켓 단절)의 주범이었다.
+    try:
+        from components.tab_stocks import _load_ohlcv_cached
+        _cached = _load_ohlcv_cached()
+        if _cached is not None:
+            result = _try_extract(_cached, "ohlcv_cache(module-cache)")
+            if result is not None and not result.empty:
+                return result
+    except Exception as _ce:
+        import logging as _logging
+        _logging.getLogger("stock_detail_v2").debug(
+            f"[v35.1] OHLCV 모듈 캐시 경로 실패 (파일 폴백): {_ce}")
+
     for fp in files[:5]:
         try:
             if fp.endswith(".parquet"):
+                # [v35.1] 캐시 경로가 이미 실패한 경우의 폴백만 전체 로드 허용
                 df = pd.read_parquet(fp)
                 result = _try_extract(df, fp)
                 if result is not None and not result.empty:
