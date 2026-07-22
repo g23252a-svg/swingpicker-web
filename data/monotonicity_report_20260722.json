@@ -5,7 +5,7 @@
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
-  "declared_wr_active": 0.236,
+  "declared_wr_active": 0.279,
   "declared_wr_top_pick": null,
   "elite_monotonicity": {
     "valid": true,
@@ -75,17 +75,17 @@
   "realized_wr_top_pick_n": 0,
   "realized_wr_active": 0.3193,
   "realized_wr_active_n": 41,
-  "declared_vs_realized_gap_active": -0.0833,
+  "declared_vs_realized_gap_active": -0.0403,
   "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": -0.0833,
+  "declared_vs_realized_gap": -0.0403,
   "avg_ret_excess_pct": -5.4504,
   "top_pick_funnel": {
     "trade_ymd": "20260722",
-    "total": 323,
+    "total": 319,
     "aggressive_funnel": {
-      "total": 323,
+      "total": 319,
       "route_active": 0,
-      "hard_gate": 140,
+      "hard_gate": 137,
       "elite_75": 0,
       "struct_80": 0,
       "timing_70": 0,
@@ -93,9 +93,9 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 323,
+      "total": 319,
       "route_active": 0,
-      "hard_gate": 140,
+      "hard_gate": 137,
       "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
@@ -132,7 +132,7 @@
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "OK",
-      "detail": "gap_active=-8.3% (n=41)"
+      "detail": "gap_active=-4.0% (n=41)"
     },
     {
       "gate": "wilson_monotonicity",
