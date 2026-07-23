@@ -6,57 +6,57 @@
  "axes": {
   "STRUCT_SCORE": {
    "n_days": 50,
-   "mean_ic": -0.05,
-   "t_stat": -2.73,
+   "mean_ic": -0.0555,
+   "t_stat": -3.05,
    "orientation": 1,
-   "pct_positive": 0.38,
+   "pct_positive": 0.34,
    "verdict": "역주행"
   },
   "TIMING_SCORE": {
    "n_days": 50,
-   "mean_ic": -0.0038,
-   "t_stat": -0.26,
+   "mean_ic": -0.0031,
+   "t_stat": -0.21,
    "orientation": 1,
    "pct_positive": 0.5,
    "verdict": "무신호"
   },
   "AI_SCORE": {
-   "n_days": 48,
-   "mean_ic": -0.1066,
-   "t_stat": -5.42,
+   "n_days": 47,
+   "mean_ic": -0.1088,
+   "t_stat": -5.41,
    "orientation": 1,
-   "pct_positive": 0.188,
+   "pct_positive": 0.191,
    "verdict": "역주행"
   },
   "FINAL_SCORE": {
    "n_days": 50,
-   "mean_ic": -0.0602,
-   "t_stat": -3.38,
-   "orientation": 1,
-   "pct_positive": 0.36,
-   "verdict": "역주행"
-  },
-  "ELITE_SCORE": {
-   "n_days": 50,
-   "mean_ic": -0.0552,
-   "t_stat": -3.21,
+   "mean_ic": -0.064,
+   "t_stat": -3.65,
    "orientation": 1,
    "pct_positive": 0.34,
    "verdict": "역주행"
   },
+  "ELITE_SCORE": {
+   "n_days": 50,
+   "mean_ic": -0.0602,
+   "t_stat": -3.6,
+   "orientation": 1,
+   "pct_positive": 0.3,
+   "verdict": "역주행"
+  },
   "POC_GAP": {
    "n_days": 50,
-   "mean_ic": -0.0231,
-   "t_stat": -1.55,
+   "mean_ic": -0.0292,
+   "t_stat": -2.0,
    "orientation": -1,
-   "pct_positive": 0.5,
-   "verdict": "무신호"
+   "pct_positive": 0.46,
+   "verdict": "유효"
   }
  },
  "warnings": [
-  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0500 (t=-2.7, 50일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: AI_SCORE IC -0.1066 (t=-5.4, 48일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: FINAL_SCORE IC -0.0602 (t=-3.4, 50일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: ELITE_SCORE IC -0.0552 (t=-3.2, 50일) — 점수가 높을수록 수익률 낮음"
+  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0555 (t=-3.1, 50일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: AI_SCORE IC -0.1088 (t=-5.4, 47일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: FINAL_SCORE IC -0.0640 (t=-3.6, 50일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: ELITE_SCORE IC -0.0602 (t=-3.6, 50일) — 점수가 높을수록 수익률 낮음"
  ]
 }
