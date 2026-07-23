@@ -490,6 +490,12 @@ def _inject_v2_styles():
 
     ui.add_head_html("""
     <style>
+    /* [v38] 결정 히어로 상태 칩 */
+    .sd-v2 .dh-chip {
+      font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+      background: rgba(148,163,184,0.12); color: var(--text-gray);
+      white-space: nowrap;
+    }
     .sd-v2 {
       --bg-deep: #0F1117;
       --bg-card: #1A1D26;
@@ -3496,6 +3502,120 @@ def _load_ohlcv_debug_info(code: str) -> str:
     return "\n".join(lines)
 
 
+def render_v2_decision_hero(n: dict, rank: int = 0, total: int = 0,
+                            timestamp: str = ""):
+    """[v38] 결정 히어로 — 상세 상단 단일 카드.
+
+    옛 구조(5뱃지 헤더 + 시나리오 3카드 + 최종판정 띠 + 투자자 가이드)가
+    같은 판단을 4곳에 흩어놨던 것을 하나로 통합. '지금 뭘 해야 하나'를
+    맨 위에서 한 번에: 판정(SSOT=_verdict_grade) + 이유 + 핵심 지표 + 상태 칩.
+    """
+    name = h_escape(n["name"])
+    code = h_escape(n["code"])
+    route = n.get("route", "")
+    is_overheat = route == "OVERHEAT"
+    rr = n["rr_now_tp1"]
+    qty = int(n["qty"]) if n["qty"] else 0
+    top_pick = n.get("top_pick", False)
+
+    label, grad, icon = _verdict_grade(top_pick, qty, rr, is_overheat)
+    is_buy = icon in ("👑", "✓")
+
+    # 판정 이유 한 줄 — 매수면 강점, 관망이면 왜 대상 아닌지.
+    if is_overheat:
+        why = "과열 신호 — 추격 위험"
+    elif not top_pick:
+        why = "게이트 미통과 (알파·자리 조건 미달) — 관찰만"
+    elif qty == 0:
+        why = "켈리 사이즈 0 — 손익비/승률이 베팅 기준 미달"
+    elif rr < 1.0:
+        why = f"손익비 {rr:.2f} — 1.0 미만이라 진입 매력 낮음"
+    else:
+        why = h_escape(n.get("score_reason", "") or "진입 조건 충족")
+
+    honest = n.get("honest_prob_pct")
+    prob_txt = f"{honest:.0f}%" if honest else "—"
+    gap = n["entry_gap_pct"]
+    stop_pct = n["stop_loss_pct"]
+    pos = n["position_pct"]
+    amount = n["amount_man"]
+
+    def _metric(lbl, val, sub="", color="var(--text-white)"):
+        sub_html = f'<div style="font-size:9.5px;color:var(--text-dim);margin-top:1px;">{sub}</div>' if sub else ""
+        return (
+            f'<div style="flex:1;min-width:82px;text-align:center;padding:8px 6px;">'
+            f'<div style="font-size:9.5px;color:var(--text-gray);font-weight:700;letter-spacing:.02em;">{lbl}</div>'
+            f'<div style="font-size:19px;font-weight:900;color:{color};line-height:1.15;margin-top:2px;">{val}</div>'
+            f'{sub_html}</div>'
+        )
+
+    rr_color = "var(--green)" if rr >= 1.3 else ("var(--orange)" if rr >= 1.0 else "var(--red)")
+    metrics = "".join([
+        _metric("🧠 실측 승률", prob_txt, "이 점수 구간 과거", "var(--green)" if (honest or 0) >= 40 else "var(--text-white)"),
+        _metric("손익비 RR", f"{rr:.2f}", "TP1 기대 ÷ 손절", rr_color),
+        _metric("진입갭", f"{gap:+.1f}%", "종가 대비", "var(--text-white)"),
+        _metric("손절", f"{stop_pct:+.1f}%", "이탈 시 전량", "var(--red)"),
+        _metric("포지션", (f"{qty:,}주" if qty else f"{pos:.0f}%"),
+                (f"{amount:.0f}만원" if amount else "신규 부적합"),
+                "var(--text-white)" if qty else "var(--text-dim)"),
+    ])
+
+    # 상태 칩 — 관리자 신호 (ROUTE/TOP_PICK/레짐/EBS)
+    regime = n.get("market_regime", "") or "—"
+    tp_chip_bg = "rgba(16,185,129,0.18)" if top_pick else "rgba(148,163,184,0.12)"
+    tp_chip_c = "#34D399" if top_pick else "var(--text-dim)"
+    rank_txt = f"{total}개 중 {rank}위" if rank and total else ""
+    chips = (
+        f'<span class="dh-chip" style="background:{tp_chip_bg};color:{tp_chip_c};">'
+        f'TOP_PICK {"O" if top_pick else "—"}</span>'
+        f'<span class="dh-chip">ROUTE {h_escape(route)} ({h_escape(n.get("route_kr",""))})</span>'
+        f'<span class="dh-chip">레짐 {h_escape(regime)}</span>'
+        f'<span class="dh-chip">EBS {n["ebs"]}/{n["ebs_total"]}</span>'
+    )
+
+    ui.html(f'''
+    <div class="sd-v2" style="width:100%;">
+      <div class="dh-card" style="width:100%;border-radius:14px;overflow:hidden;
+           border:1px solid rgba(148,163,184,0.18);margin-bottom:12px;
+           background:linear-gradient(180deg, rgba(20,24,38,0.6), rgba(15,18,30,0.95));">
+        <!-- 상단: 종목명 + 판정 -->
+        <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;
+             background:{grad};">
+          <div style="font-size:30px;flex-shrink:0;">{icon}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:19px;font-weight:900;color:rgba(0,0,0,0.88);">{name}</span>
+              <span style="font-size:12px;font-weight:700;color:rgba(0,0,0,0.6);">({code})</span>
+              <span style="font-size:11px;color:rgba(0,0,0,0.55);">{h_escape(rank_txt)}</span>
+            </div>
+            <div style="font-size:15px;font-weight:900;color:rgba(0,0,0,0.9);margin-top:2px;">
+              {h_escape(label)}
+            </div>
+          </div>
+          <div style="font-size:10px;color:rgba(0,0,0,0.5);text-align:right;flex-shrink:0;">
+            {h_escape(timestamp) if timestamp else "—"}<br>SwingPicker
+          </div>
+        </div>
+        <!-- 이유 한 줄 -->
+        <div style="padding:9px 18px;font-size:12px;color:var(--text-gray);
+             border-bottom:1px solid rgba(148,163,184,0.12);">
+          <span style="color:{'var(--green)' if is_buy else 'var(--orange)'};font-weight:800;">
+          {'▲ 진입 근거' if is_buy else '● 관망 이유'}</span> · {why}
+        </div>
+        <!-- 핵심 지표 -->
+        <div style="display:flex;flex-wrap:wrap;padding:4px 8px;
+             border-bottom:1px solid rgba(148,163,184,0.12);">
+          {metrics}
+        </div>
+        <!-- 상태 칩 -->
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px;">
+          {chips}
+        </div>
+      </div>
+    </div>
+    ''')
+
+
 def render_stock_detail_v2_partial(row: Dict[str, Any],
                                     rank: int = 0,
                                     total: int = 0,
@@ -3549,59 +3669,62 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
 
     Last review score: 95/100 (운영 머지 후보권)
     """
-    # 정규화
+    # ── [v38] 근본 재설계 — 결정 우선 + 접이식 관리자 상세 ──
+    # 옛 구조: 5뱃지 헤더 → 점수영역 → 3열 그리드(패널4+차트+레이더) →
+    #          3분할(수익률/레벨/리스크) → 시나리오 3카드 → 최종판정 띠.
+    #   같은 판단이 4곳에 흩어지고 관리자 원시데이터가 평면으로 쏟아짐(조잡).
+    # 새 구조:
+    #   1) 결정 히어로 — 판정·이유·핵심지표·상태칩 (지금 뭘 하나 한눈에)
+    #   2) 가격 플랜 + 차트 2단 (실전 필수 — 항상 노출)
+    #   3) 접이식 '관리자 상세' — 점수·추세·모멘텀·수급·레이더·리스크 (기본 접힘)
     n = normalize_stock_row(row)
-
     _inject_v2_styles()
 
-    render_v2_header(n, rank=rank, total=total,
-                     timestamp=timestamp, combo_info=combo_info)
-    render_v2_scores(n)
-
-    # OHLCV 자동 로드 (외부 전달 안 했을 때)
     if ohlcv_df is None:
         ohlcv_df = _load_ohlcv_for_v2(n["code"], days=120)
 
-    # main-grid: 좌측 4패널 + 중앙 차트 + 우측 레이더
-    # inline style 강제 (NiceGUI ui.element가 CSS class만으로 grid 적용 안 되는 케이스 회피)
-    # 좌측 260px (가격 플랜 표시 여유) / 중앙 minmax(0,1fr) / 우측 300px (레이더 크게)
-    # v2-main-grid 클래스 추가 → 모바일 미디어 쿼리에서 명시적으로 타겟 가능
-    with ui.element("div").style(
-        "display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; "
-        "gap: 8px; width: 100%; margin-bottom: 12px; box-sizing: border-box;"
-    ).classes("sd-v2 v2-main-grid"):
+    # 1) 결정 히어로 (헤더·시나리오·최종판정·가이드 통합)
+    render_v2_decision_hero(n, rank=rank, total=total, timestamp=timestamp)
 
-        # 좌측 사이드: 패널 #1-4 (v2-left-panels 클래스)
+    # 2) 가격 플랜 + 차트 (2단, 항상 노출)
+    with ui.element("div").style(
+        "display: grid; grid-template-columns: 300px minmax(0, 1fr); "
+        "gap: 10px; width: 100%; margin-bottom: 12px; box-sizing: border-box;"
+    ).classes("sd-v2 v2-main-grid"):
         with ui.element("div").style(
             "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
         ).classes("v2-left-panels"):
             render_v2_price_plan(n)
-            render_v2_trend_mtf(n)
-            render_v2_momentum(n)
-            render_v2_supply(n)
-
-        # 중앙: 메인 캔들차트 + 보조 차트 4개 + 거래강도 게이지 + 3분할 패널
         with ui.element("div").style("min-width: 0;").classes("v2-center-col"):
             render_v2_chart(n, ohlcv_df=ohlcv_df)
             render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
-            # [Step 2F] 수익률현황 / 핵심레벨 / 리스크뉴스 (3분할)
-            render_v2_returns_levels_risk(n)
-            # [Step 2F] 시나리오 A/B/C (3카드)
-            render_v2_scenarios(n)
 
-        # 우측 사이드: 레이더 차트 (4축) + AXIS_GAP 큰 카드
-        # [v37.4] '투자자 가이드'는 최종 판정 띠와 완전 중복 → 제거.
+    # 3) 접이식 관리자 상세 — 기본 접힘 (원할 때만 펼침)
+    with ui.expansion(
+        "📊 상세 지표 · 점수 · 수급 (관리자)", icon="analytics",
+    ).classes(
+        "w-full sd-v2-detail-exp"
+    ).style(
+        "background: rgba(148,163,184,0.04); border: 1px solid rgba(148,163,184,0.14); "
+        "border-radius: 10px; margin-bottom: 12px;"
+    ):
+        # 실측 근거 + 점수 영역
+        render_v2_scores(n)
+        # 추세/모멘텀/수급 + 레이더 (2단)
         with ui.element("div").style(
-            "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
-        ).classes("v2-right-col"):
-            render_v2_radar(n)
-            render_v2_right_axisgap(n)
-
-    # [v37.4] 하단 4섹터(핵심요약·분할익절·DipSniper) 제거 — 각각 점수영역·
-    # 가격 사다리·최종 판정과 중복. 판정은 아래 '최종 판정 띠'로 단일화한다.
-
-    # [Step 2F] 최종 판정 띠 (페이지 최하단) — 단일 판정 SSOT
-    render_v2_final_verdict(n, rank=rank, total=total)
+            "display: grid; grid-template-columns: minmax(0,1fr) 300px; "
+            "gap: 8px; width: 100%; margin-top: 8px;"
+        ).classes("sd-v2 v2-main-grid"):
+            with ui.element("div").style(
+                "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
+            ):
+                render_v2_trend_mtf(n)
+                render_v2_momentum(n)
+                render_v2_supply(n)
+            with ui.element("div").style("min-width: 0;"):
+                render_v2_radar(n)
+        # 리스크 / 뉴스
+        render_v2_returns_levels_risk(n)
 
 # ═══════════════════════════════════════════════════════════════════
 # [v22.3.21] No-Buy / 관망 카드 렌더 (NiceGUI) — FOMO-safety
