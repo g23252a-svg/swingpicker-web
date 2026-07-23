@@ -82,12 +82,16 @@ def test_admin_detail_is_collapsible():
     assert "render_v2_supply(n)" in body
 
 
-def test_price_and_chart_always_shown():
+def test_main_view_is_hero_plus_action_rail_only():
+    # [v39] 재혁신 — 메인 뷰(첫 접이식 前)는 히어로 + 액션 레일 두 카드뿐.
+    # 차트·가격표는 접이식으로 이동(사용자: '차트 안 보여줘도 됨').
     body = SRC.split("def render_stock_detail_v2_partial")[1].split("\n_NB_GREEN")[0]
-    # 접이식 밖(항상 노출)에 가격 플랜·차트.
     before_exp = body.split("ui.expansion(")[0]
-    assert "render_v2_price_plan(n)" in before_exp
-    assert "render_v2_chart(" in before_exp
+    assert "render_v2_decision_hero(" in before_exp
+    assert "render_v2_action_rail(" in before_exp
+    # 차트는 메인 뷰에 없고 접이식 안에 있어야 함.
+    assert "render_v2_chart(" not in before_exp
+    assert "render_v2_chart(" in body
 
 
 # ── 히어로가 판정 SSOT를 반영 ──
