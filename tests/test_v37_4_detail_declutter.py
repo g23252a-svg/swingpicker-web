@@ -67,8 +67,8 @@ def test_assembly_drops_redundant_blocks():
     body = m.group(1)
     assert "render_v2_right_guide(n)" not in body
     assert "render_v2_bottom_sectors(" not in body
-    # 최종 판정 띠는 단일 판정으로 유지.
-    assert "render_v2_final_verdict(" in body
+    # [v38] 최종 판정은 결정 히어로로 흡수 — 단일 판정 SSOT 유지.
+    assert "render_v2_decision_hero(" in body
 
 
 def test_returns_levels_risk_keeps_only_risk():
