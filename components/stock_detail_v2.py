@@ -1525,68 +1525,51 @@ def render_v2_price_plan(n: dict):
     be_trigger = n.get("be_trigger") or (entry * 1.05 if entry else 0)
     # [v33] 빠른 부분익절선 (D+2 내 +2% 도달 시 절반 익절 — 실측: 초반 급등 후 되돌림 -0.9%)
     fast_tp = n.get("fast_tp") or (entry * 1.02 if entry else 0)
+    # [v39.1] 세로 사다리(절대위치)는 먼 TP3 탓에 손절·현재·진입·본전 라벨이
+    # 겹쳐 판독 불가 → 겹칠 수 없는 '정렬된 가격 레벨 표'로 교체.
+    # (막대형 위치 시각은 메인 화면의 가로 액션 레일이 담당)
     ladder_html = ""
     if entry and stop and tp1 and stop < entry < tp1:
-        lo = stop * 0.985
-        hi = max(tp3 or 0, tp2 or 0, tp1) * 1.015
-        span = hi - lo if hi > lo else 1
+        def _pct_of_entry(p):
+            return f"{(p/entry-1)*100:+.1f}%" if entry else ""
 
-        def _pos(p):
-            return max(0.0, min(100.0, (hi - p) / span * 100.0))
+        _levels = [
+            (tp3, "TP3", "var(--green)", "3차 목표"),
+            (tp2, "TP2", "var(--green)", "2차 목표"),
+            (tp1, "TP1", "var(--green)", "1차 목표"),
+            (be_trigger, "본전전환", "var(--orange)", "+5% 시 손절→본전"),
+            (fast_tp, "⚡반익절", "#FBBF24", "D+2 +2% 절반익절"),
+        ]
+        if entry and close and abs(close / entry - 1) < 0.003:
+            _levels.append((entry, "현재/진입", "#60A5FA", "기준가"))
+        else:
+            _levels.append((close, "현재가", "var(--text-white)", "현재가"))
+            _levels.append((entry, "진입", "#60A5FA", "기준가"))
+        _levels.append((stop, "손절", "var(--red)", "이탈 시 전량"))
+        _levels = [lv for lv in _levels if lv[0] and lv[0] > 0]
+        _levels.sort(key=lambda x: -x[0])   # 높은가 → 낮은가
 
-        def _row_lv(price, label, color, pct_txt, bold=False):
-            if not price or price <= 0:
-                return ""
-            w = "800" if bold else "600"
-            return (
-                f'<div style="position:absolute; top:{_pos(price):.1f}%; left:0; right:0;'
-                f' transform:translateY(-50%); display:flex; align-items:center; gap:6px;">'
-                f'<div style="flex:0 0 54px; text-align:right; font-size:10.5px;'
-                f' font-weight:{w}; color:{color};">{label}</div>'
-                f'<div style="flex:1; border-top:2px {"solid" if bold else "dashed"} {color};'
-                f' opacity:{1.0 if bold else 0.65};"></div>'
-                f'<div style="flex:0 0 118px; font-size:11px; font-weight:{w}; color:{color};">'
-                f'{int(round(price)):,} <span style="font-size:9.5px; opacity:0.8;">{pct_txt}</span></div>'
+        _rows = ""
+        for price, label, color, note in _levels:
+            _hl = ("현재" in label) or ("진입" in label)
+            bg = "background:rgba(96,165,250,0.10);" if _hl else ""
+            _rows += (
+                f'<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;'
+                f'border-left:3px solid {color};{bg}border-radius:4px;margin-bottom:2px;">'
+                f'<span style="flex:0 0 66px;font-size:11px;font-weight:800;color:{color};">{label}</span>'
+                f'<span style="flex:0 0 74px;text-align:right;font-size:12.5px;font-weight:800;'
+                f'color:var(--text-white);font-variant-numeric:tabular-nums;">{int(round(price)):,}</span>'
+                f'<span style="flex:0 0 52px;text-align:right;font-size:10.5px;font-weight:700;color:{color};">{_pct_of_entry(price)}</span>'
+                f'<span style="flex:1;font-size:9.5px;color:var(--text-dim);text-align:right;">{note}</span>'
                 f'</div>'
             )
-
-        def _pct_of_entry(p):
-            return f"({(p/entry-1)*100:+.1f}%)" if entry else ""
-
-        # [v38.1] 진입≈현재가(GAP 0%)면 라벨이 정확히 겹침 → 한 줄로 병합.
-        _entry_close_same = entry and close and abs(close / entry - 1) < 0.003
-        _cur_rows = (
-            [_row_lv(entry, "현재/진입", "#60A5FA", "(기준)", bold=True)]
-            if _entry_close_same else
-            [_row_lv(close, "현재가", "var(--text-white)", _pct_of_entry(close), bold=True),
-             _row_lv(entry, "진입", "#60A5FA", "(기준)", bold=True)]
-        )
-        rows_html = "".join([
-            _row_lv(tp3, "TP3", "var(--green)", _pct_of_entry(tp3)),
-            _row_lv(tp2, "TP2", "var(--green)", _pct_of_entry(tp2)),
-            _row_lv(tp1, "TP1", "var(--green)", _pct_of_entry(tp1), bold=True),
-            _row_lv(be_trigger, "본전전환", "var(--orange)", _pct_of_entry(be_trigger)),
-            _row_lv(fast_tp, "⚡반익절", "#FBBF24", _pct_of_entry(fast_tp)),
-            *_cur_rows,
-            _row_lv(stop, "손절", "var(--red)", _pct_of_entry(stop), bold=True),
-        ])
-        # 배경 존: 진입 위 = 수익권(초록 틴트), 아래 = 손실권(빨강 틴트)
-        entry_pos = _pos(entry)
         ladder_html = f'''
-        <div style="margin:10px 0 12px 0;">
-          <div style="font-size:10.5px; color:var(--text-dim); margin-bottom:4px;">
-            📐 가격 사다리 (손절→목표 구간 내 현재 위치)
+        <div style="margin:8px 0 10px 0;">
+          <div style="font-size:10.5px; color:var(--text-dim); margin-bottom:5px;">
+            📐 가격 레벨 (높은가 → 낮은가)
           </div>
-          <div style="position:relative; height:190px; border-radius:8px; overflow:hidden;
-                      background: linear-gradient(180deg,
-                        rgba(16,185,129,0.10) 0%,
-                        rgba(16,185,129,0.04) {entry_pos:.1f}%,
-                        rgba(239,68,68,0.05) {entry_pos:.1f}%,
-                        rgba(239,68,68,0.14) 100%);
-                      border: 1px solid rgba(148,163,184,0.15); padding: 4px 6px;">
-            {rows_html}
-          </div>
-          <div style="font-size:10px; color:var(--text-dim); margin-top:4px;">
+          {_rows}
+          <div style="font-size:10px; color:var(--text-dim); margin-top:5px;">
             손절 = 2×ATR·스윙로우 지지선, 최대 -8% 캡 · 목표 = 3.5×ATR ·
             +5% 도달 시 손절선 진입가 상향(본전) · ⚡ D+2 내 +2% 도달 시 절반 익절
           </div>

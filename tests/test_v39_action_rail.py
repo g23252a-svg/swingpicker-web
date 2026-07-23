@@ -97,3 +97,25 @@ def test_action_rail_shows_kelly_zero_as_unfit():
 
 def test_full_panel_v39_renders():
     sd.render_stock_detail_v2_partial(_row(), rank=126, total=323)
+
+
+def _plan_html(row):
+    cap = _CapUi()
+    orig = sd.ui
+    sd.ui = cap
+    try:
+        sd.render_v2_price_plan(sd.normalize_stock_row(row))
+    finally:
+        sd.ui = orig
+    return cap.htmls[-1]
+
+
+def test_price_levels_use_table_not_absolute_ladder():
+    # [v39.1] 겹치던 절대위치 사다리 → 겹칠 수 없는 정렬 표.
+    html = _plan_html(_row(추천매도가1=36650, 추천매도가2=49600, 추천매도가3=58500,
+                           종가=35500, 추천매수가=35500, 손절가=32650))
+    assert "가격 레벨" in html
+    assert "position:absolute" not in html  # 절대위치 제거 → 겹침 불가
+    # 모든 레벨이 각각의 행으로 존재.
+    for lv in ["TP3", "TP2", "TP1", "본전전환", "손절"]:
+        assert lv in html
