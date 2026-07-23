@@ -714,7 +714,7 @@ def _inject_v2_styles():
       border-radius: 8px;
       padding: 12px;
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);  /* [v37.4] AI 축 제거 → 2열 */
       gap: 8px;
       position: relative;
     }
@@ -1278,8 +1278,9 @@ def render_v2_scores(n: dict):
     entry_edge_reason = n.get("entry_edge_reason", "") or ""
     entry_edge_shadow_flag = int(n.get("entry_edge_shadow_flag", 0) or 0)
 
+    # [v37.4] AI 축 제거 — 구 LSTM/XGB 모델 검증 미통과로 항상 0점(죽은 축).
     # 강점 표기: 가장 높은 축이 85+ 일 때만 "강점 ★"
-    scores_dict = {"STRUCT": struct_s, "TIMING": timing_s, "AI": ai_s}
+    scores_dict = {"STRUCT": struct_s, "TIMING": timing_s}
     max_axis = max(scores_dict, key=scores_dict.get) if any(scores_dict.values()) else None
 
     def _axis_tag(name, val):
@@ -1289,7 +1290,6 @@ def render_v2_scores(n: dict):
 
     struct_tag, struct_clr = _axis_tag("STRUCT", struct_s)
     timing_tag, timing_clr = _axis_tag("TIMING", timing_s)
-    ai_tag, ai_clr = _axis_tag("AI", ai_s)
 
     # AXIS_GAP 평가
     if axis_gap < 15:
@@ -1363,9 +1363,11 @@ def render_v2_scores(n: dict):
                 </div>
             ''')
 
+            # [v37.4] AI=0 포함 3축 평균(axis_mean)은 오해 소지 — 2축 평균으로 표시.
+            _st_mean = (struct_s + timing_s) / 2.0
             ui.html(f'''
                 <div class="axis-mean">
-                    <div class="axis-title">3축 점수 (AXIS_MEAN {_fmt_score(axis_mean)})</div>
+                    <div class="axis-title">구조·타이밍 점수 (평균 {_fmt_score(_st_mean)})</div>
                     <div class="axis-cell struct">
                         <div class="axis-lbl">STRUCT</div>
                         <div class="axis-val">{_fmt_score(struct_s)}</div>
@@ -1375,11 +1377,6 @@ def render_v2_scores(n: dict):
                         <div class="axis-lbl">TIMING</div>
                         <div class="axis-val">{_fmt_score(timing_s)}</div>
                         <div class="axis-sub" style="color: {timing_clr};">{timing_tag}</div>
-                    </div>
-                    <div class="axis-cell ai">
-                        <div class="axis-lbl">AI</div>
-                        <div class="axis-val">{_fmt_score(ai_s)}</div>
-                        <div class="axis-sub" style="color: {ai_clr};">{ai_tag}</div>
                     </div>
                 </div>
             ''')
@@ -2599,59 +2596,13 @@ def render_v2_sub_charts(n: dict, ohlcv_df=None):
 
 def render_v2_returns_levels_risk(n: dict):
     """
-    [Step 2F] 차트 + 보조차트 아래 3분할 패널.
+    [Step 2F] 차트 아래 리스크/뉴스 패널.
 
-    A. 수익률 현황 — ret_1d/5d/10d/20d/60d/120d + rel_20/60/120
-    B. 핵심 레벨 — 현재가/매수가/HMA20/VWAP/SUPERTREND/손절/TP1/TP2/TP3 (점 색상)
-    C. 리스크 / 뉴스 — NEWS_SCORE + 뉴스 본문 + ROUTE_REASON + BB_Expanding + IS_SWING_SUPPORT
+    [v37.4] 수익률·핵심레벨은 좌측 '모멘텀'·'가격 사다리'와 완전 중복이라 제거,
+    고유 정보인 리스크/뉴스만 남긴다 —
+    NEWS_SCORE + 뉴스 본문 + ROUTE_REASON + BB_Expanding + IS_SWING_SUPPORT.
     """
-    # A. 수익률 현황
-    returns_rows = [
-        ("1일", n["ret_1d"]),
-        ("5일", n["ret_5d"]),
-        ("10일", n["ret_10d"]),
-        ("20일", n["ret_20d"]),
-        ("60일", n["ret_60d"]),
-        ("120일", n["ret_120d"]),
-        ("rel_20d", n["rel_20d"]),
-        ("rel_60d", n["rel_60d"]),
-        ("rel_120d", n["rel_120d"]),
-    ]
-    ret_html = ""
-    for label, val in returns_rows:
-        clr = "var(--green)" if val > 0 else ("var(--red)" if val < 0 else "var(--text-dim)")
-        ret_html += f'''
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;">
-          <span style="color: var(--text-gray);">{label}</span>
-          <span style="color: {clr}; font-weight: 700; font-variant-numeric: tabular-nums;">{val:+.2f}%</span>
-        </div>'''
-
-    # B. 핵심 레벨 (점 색상 + 가격)
-    levels = [
-        ("#EF4444", "현재가",     n["close"]),
-        ("#FACC15", "추천매수가",  n["entry"]),
-        ("#3B82F6", "HMA20",      n["hma20"]),
-        ("#06B6D4", "VWAP",       n.get("vwap", 0)),
-        ("#10B981", "SUPERTREND", n.get("supertrend_val_raw", n["supertrend_val"])),
-        ("#EF4444", "손절",       n["stop"]),
-        ("#10B981", "TP1",        n["tp1"]),
-        ("#10B981", "TP2",        n["tp2"]),
-        ("#10B981", "TP3",        n["tp3"]),
-    ]
-    level_html = ""
-    for color, label, price in levels:
-        if not price or price <= 0:
-            continue
-        level_html += f'''
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;">
-          <span style="display: flex; align-items: center; gap: 6px; color: var(--text-gray);">
-            <span style="width: 8px; height: 8px; background: {color}; border-radius: 50%; display: inline-block;"></span>
-            {label}
-          </span>
-          <span style="color: var(--text-white); font-weight: 700; font-variant-numeric: tabular-nums;">{int(price):,}</span>
-        </div>'''
-
-    # C. 리스크 / 뉴스
+    # 리스크 / 뉴스 (고유 정보만)
     news_score = n.get("news_score", 0)
     news_clr = "var(--green)" if news_score > 0 else ("var(--red)" if news_score < 0 else "var(--text-dim)")
     news_tag = "긍정" if news_score > 0 else ("악한 부정" if news_score < -0.2 else "부정" if news_score < 0 else "중립")
@@ -2672,31 +2623,16 @@ def render_v2_returns_levels_risk(n: dict):
     swing_text = "True" if is_swing else "False"
     swing_clr = "var(--green)" if is_swing else "var(--red)"
 
-    # 3분할 패널 HTML
+    # [v37.4] A(수익률)·B(핵심레벨)은 좌측 '모멘텀'·'가격 사다리' 패널과 완전 중복이라
+    # 제거. 고유 정보인 C(리스크/뉴스)만 폭 전체 단일 카드로 남긴다.
     ui.html(f'''
     <div class="sd-v2" style="margin-top: 8px; width: 100%;">
-      <div class="v2-three-split" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%;">
+      <div style="width: 100%;">
 
-        <!-- A. 수익률 현황 -->
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0;">
-          <div style="color: var(--green); font-size: 12px; font-weight: 800; text-align: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);">
-            A. 수익률 현황
-          </div>
-          {ret_html}
-        </div>
-
-        <!-- B. 핵심 레벨 -->
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0;">
-          <div style="color: var(--orange); font-size: 12px; font-weight: 800; text-align: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);">
-            B. 핵심 레벨
-          </div>
-          {level_html}
-        </div>
-
-        <!-- C. 리스크 / 뉴스 -->
+        <!-- 리스크 / 뉴스 -->
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0;">
           <div style="color: var(--red); font-size: 12px; font-weight: 800; text-align: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);">
-            C. 리스크 / 뉴스 ⚠️
+            리스크 / 뉴스 ⚠️
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 11px;">
             <span style="color: var(--text-gray);">NEWS_SCORE</span>
@@ -2934,24 +2870,23 @@ def render_v2_final_verdict(n: dict, rank: int = 0, total: int = 0):
 
 def render_v2_radar(n: dict):
     """
-    [Step 2E] 우측 레이더 차트 — 5축: STRUCT/TIMING/AI/BALANCE/TRIGGER.
+    [Step 2E] 우측 레이더 차트 — 4축: STRUCT/TIMING/BALANCE/TRIGGER.
 
+    [v37.4] AI 축 제거 — 구 LSTM/XGB 검증 미통과로 항상 0점(죽은 축).
     SVG 직접 그리기 (Plotly보다 가벼움, 정확한 위치 제어).
     """
     import math
     struct_s = n["struct_score"]
     timing_s = n["timing_score"]
-    ai_s = n["ai_score"]
     balance_s = n["balance_score"]
     trigger_s = n["trigger_score"]
 
-    # 5축, 각각 0-100 스케일
+    # 4축 다이아몬드, 각각 0-100 스케일
     axes = [
         ("STRUCT",  struct_s,  -90),    # 최상단
-        ("TIMING",  timing_s,  -18),    # 오른쪽 위
-        ("AI",      ai_s,       54),    # 오른쪽 아래
-        ("BALANCE", balance_s, 126),    # 왼쪽 아래
-        ("TRIGGER", trigger_s, 198),    # 왼쪽 위
+        ("TIMING",  timing_s,    0),    # 오른쪽
+        ("BALANCE", balance_s,  90),    # 최하단
+        ("TRIGGER", trigger_s, 180),    # 왼쪽
     ]
 
     # 그리기 좌표 (캔버스 240x240, 중심 120,120, 반지름 키움 + 라벨 여백 유지)
@@ -3023,7 +2958,7 @@ def render_v2_radar(n: dict):
         <div style="color: var(--purple); font-size: 12px; font-weight: 800;
                     text-align: center; margin-bottom: 8px; padding-bottom: 6px;
                     border-bottom: 1px solid var(--border);">
-          3축 밸런스 레이더
+          밸런스 레이더
         </div>
         <svg viewBox="-70 -20 380 290" style="width: 100%; height: 320px;">
           {grid_polys}
@@ -3040,8 +2975,6 @@ def render_v2_radar(n: dict):
           <div style="font-size: 11px; color: var(--green); font-weight: 700; text-align: right;">{struct_s:.1f}</div>
           <div style="font-size: 10px; color: var(--text-gray);">TIMING</div>
           <div style="font-size: 11px; color: var(--orange); font-weight: 700; text-align: right;">{timing_s:.1f}</div>
-          <div style="font-size: 10px; color: var(--text-gray);">AI</div>
-          <div style="font-size: 11px; color: var(--purple); font-weight: 700; text-align: right;">{ai_s:.1f}</div>
           <div style="font-size: 10px; color: var(--text-gray);">BALANCE</div>
           <div style="font-size: 11px; color: var(--cyan); font-weight: 700; text-align: right;">{balance_s:.1f}</div>
           <div style="font-size: 10px; color: var(--text-gray);">TRIGGER</div>
@@ -3665,18 +3598,18 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
             # [Step 2F] 시나리오 A/B/C (3카드)
             render_v2_scenarios(n)
 
-        # 우측 사이드: 레이더 차트 (5축) + AXIS_GAP 큰 카드 + 투자자 가이드
+        # 우측 사이드: 레이더 차트 (4축) + AXIS_GAP 큰 카드
+        # [v37.4] '투자자 가이드'는 최종 판정 띠와 완전 중복 → 제거.
         with ui.element("div").style(
             "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
         ).classes("v2-right-col"):
             render_v2_radar(n)
             render_v2_right_axisgap(n)
-            render_v2_right_guide(n)
 
-    # 하단 4섹터 (핵심 요약 / 분할 익절 / DipSniper / 비교 또는 KELLY)
-    render_v2_bottom_sectors(n, rank=rank, total=total, compare_name=compare_name)
+    # [v37.4] 하단 4섹터(핵심요약·분할익절·DipSniper) 제거 — 각각 점수영역·
+    # 가격 사다리·최종 판정과 중복. 판정은 아래 '최종 판정 띠'로 단일화한다.
 
-    # [Step 2F] 최종 판정 띠 (페이지 최하단)
+    # [Step 2F] 최종 판정 띠 (페이지 최하단) — 단일 판정 SSOT
     render_v2_final_verdict(n, rank=rank, total=total)
 
 # ═══════════════════════════════════════════════════════════════════
