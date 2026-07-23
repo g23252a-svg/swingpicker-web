@@ -1178,9 +1178,12 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
                     ci_lines.append(f'<div class="sub">FINAL {ci["_final_score"]:.1f}</div>')
             ci_html = "\n".join(ci_lines)
 
+            # [v37.5] 기존 매수신호형 라벨은 모든 종목에 붙어 오해됨(관망 종목도
+            # 매수로 표시). 실제 매수 판단은 TOP_PICK·최종 판정이 SSOT이므로
+            # 이 카드는 콤보/엘리트 '등급 라벨'임을 명확히 한다.
             ui.html(f'''
                 <div class="h-badge core">
-                    <div class="lbl">🌑 핵심매수</div>
+                    <div class="lbl">🏷️ 콤보 등급</div>
                     <div class="val">{combo_name}</div>
                     {ci_html}
                 </div>
@@ -1571,50 +1574,37 @@ def render_v2_price_plan(n: dict):
             {rows_html}
           </div>
           <div style="font-size:10px; color:var(--text-dim); margin-top:4px;">
-            손절 = 2×ATR(변동폭)·스윙로우 지지선 기준, 최대 -8% 캡 ·
-            목표 = 3.5×ATR (이 종목이 실제로 움직이는 폭) ·
-            +5% 도달 시 손절선을 진입가로 상향(본전전환) ·
-            ⚡ D+2 내 +2% 도달 시 절반 익절+잔여 본전 상향 (실측: 초반 급등 픽의 이후 3일 -0.9% 되돌림)
-            — 규칙 실측: 표본 851건 train +1.03%/건·꼬리 -8.2% (기존 -0.83%/-15.2%)
+            손절 = 2×ATR·스윙로우 지지선, 최대 -8% 캡 · 목표 = 3.5×ATR ·
+            +5% 도달 시 손절선 진입가 상향(본전) · ⚡ D+2 내 +2% 도달 시 절반 익절
           </div>
         </div>'''
+
+    # [v37.5] 사다리가 못 그려진 경우(손절≥진입 등)만 가격을 텍스트로 폴백 표시.
+    price_fallback_html = ""
+    if not ladder_html:
+        price_fallback_html = f'''
+        <div class="panel-row"><span class="lbl">종가</span><span class="val">{_fmt_won(close)}</span></div>
+        <div class="panel-row"><span class="lbl">추천매수가</span><span class="val">{_fmt_won(entry)} <span class="pct-small">(GAP {_fmt_pct_signed(entry_gap)})</span></span></div>
+        <div class="panel-row stop"><span class="lbl">손절가</span><span class="val red">{_fmt_won(stop)} <span class="pct-small">({_fmt_pct_signed(stop_loss)})</span></span></div>
+        <div class="panel-row tp"><span class="lbl">TP1</span><span class="val">{_fmt_won(tp1)} <span style="color: var(--green);">({_fmt_pct_signed(tp1_gain)})</span></span></div>
+        <div class="panel-row tp"><span class="lbl">TP2</span><span class="val">{_fmt_won(tp2)} <span style="color: var(--green);">({_fmt_pct_signed(tp2_gain)})</span></span></div>
+        <div class="panel-row tp"><span class="lbl">TP3</span><span class="val">{_fmt_won(tp3)} <span style="color: var(--green);">({_fmt_pct_signed(tp3_gain)})</span></span></div>'''
 
     ui.html(f'''
     <div class="sd-v2">
       <div class="panel">
         <div class="panel-title"><span class="num">1</span>가격 플랜</div>
         {ladder_html}
+        {price_fallback_html}
 
-        <div class="panel-row">
-          <span class="lbl" title="전일 종가 (기준일 마감가)">종가</span>
-          <span class="val">{_fmt_won(close)}</span>
+        <!-- [v37.5] 종가/매수가/손절/TP 가격행 제거 — 위 가격 사다리와 완전 중복.
+             사다리에 없는 '목표 근거(산출식·도달확률)'만 컴팩트로 남긴다. -->
+        <div class="tp-prob-line" style="margin-bottom:8px;">
+          🎯 목표 근거 ·
+          TP1 {h_escape(n["tp1_method"]) or "—"} {int(tp1_prob)}% ·
+          TP2 {h_escape(n["tp2_method"]) or "—"} {int(tp2_prob)}% ·
+          TP3 {h_escape(n["tp3_method"]) or "—"} {int(tp3_prob)}%
         </div>
-        <div class="panel-row">
-          <span class="lbl" title="시스템이 추천하는 분할 매수 진입가. GAP은 종가 대비 % 차이">추천매수가</span>
-          <span class="val">{_fmt_won(entry)} <span class="pct-small">(GAP {_fmt_pct_signed(entry_gap)})</span></span>
-        </div>
-        <div class="panel-row stop">
-          <span class="lbl" title="이 가격을 이탈하면 즉시 전량 손절. MAX_LOSS와 직결">손절가</span>
-          <span class="val red">{_fmt_won(stop)} <span class="pct-small">({_fmt_pct_signed(stop_loss)})</span></span>
-        </div>
-
-        <div class="panel-row tp">
-          <span class="lbl" title="1차 익절 목표가 (SWING_20D 기반, 도달 확률 표시)">TP1</span>
-          <span class="val">{_fmt_won(tp1)} <span style="color: var(--green);">({_fmt_pct_signed(tp1_gain)})</span></span>
-        </div>
-        <div class="tp-prob-line">{h_escape(n["tp1_method"]) or "—"} · {int(tp1_prob)}%</div>
-
-        <div class="panel-row tp">
-          <span class="lbl" title="2차 익절 목표가 (ATR x 배수 기반)">TP2</span>
-          <span class="val">{_fmt_won(tp2)} <span style="color: var(--green);">({_fmt_pct_signed(tp2_gain)})</span></span>
-        </div>
-        <div class="tp-prob-line">{h_escape(n["tp2_method"]) or "—"} · {int(tp2_prob)}%</div>
-
-        <div class="panel-row tp">
-          <span class="lbl" title="3차 익절 목표가 (피보나치 1.618 확장 기반)">TP3</span>
-          <span class="val">{_fmt_won(tp3)} <span style="color: var(--green);">({_fmt_pct_signed(tp3_gain)})</span></span>
-        </div>
-        <div class="tp-prob-line">{h_escape(n["tp3_method"]) or "—"} · {int(tp3_prob)}%</div>
 
         <div class="panel-row divider">
           <span class="lbl" title="현재 시점 Risk:Reward 비율 (TP1까지 기대수익 ÷ 손절 시 손실). 1.0 이상이면 양호">RR_NOW_TP1</span>
@@ -2775,6 +2765,24 @@ def render_v2_scenarios(n: dict):
 # Step 2F: 최종 판정 띠 (페이지 최하단)
 # ═══════════════════════════════════════════════════
 
+def _verdict_grade(top_pick: bool, qty: int, rr: float, is_overheat: bool):
+    """[v37.5] 최종 판정 등급 — (라벨, 색, 아이콘).
+
+    판정 SSOT = TOP_PICK 게이트. RR만 보고 '양호한 진입 후보'라고 하면 관망
+    (TOP_PICK 없음·KELLY 0) 종목도 매수 후보로 오표기됨(한국전력 사례).
+    → 과열 → 게이트 탈락(관망) → 통과분만 RR로 등급 순서로 판정.
+    """
+    if is_overheat:
+        return "과열 — 신규매수 부적합", "linear-gradient(135deg, #EF4444, #DC2626)", "⚠️"
+    if not top_pick or qty == 0:
+        return "관망 — 신규매수 대상 아님", "linear-gradient(135deg, #6B7280, #4B5563)", "—"
+    if rr >= 1.3:
+        return "실성능 검증된 콤보 등급", "linear-gradient(135deg, #FFD700, #FFA500)", "👑"
+    if rr >= 1.0:
+        return "양호한 진입 후보", "linear-gradient(135deg, #10B981, #059669)", "✓"
+    return "관망 권고 (RR 부족)", "linear-gradient(135deg, #6B7280, #4B5563)", "—"
+
+
 def render_v2_final_verdict(n: dict, rank: int = 0, total: int = 0):
     """
     [Step 2F] 최하단 최종 판정 띠.
@@ -2823,23 +2831,7 @@ def render_v2_final_verdict(n: dict, rank: int = 0, total: int = 0):
     if qty == 0:
         risks.append("KELLY 0주")
 
-    # 등급 라벨
-    if top_pick and rr >= 1.3 and not is_overheat:
-        verdict_label = "실성능 검증된 콤보 등급"
-        verdict_color = "linear-gradient(135deg, #FFD700, #FFA500)"
-        icon = "👑"
-    elif is_overheat or rr < 0.5:
-        verdict_label = "신규매수 부적합"
-        verdict_color = "linear-gradient(135deg, #EF4444, #DC2626)"
-        icon = "⚠️"
-    elif rr >= 1.0:
-        verdict_label = "양호한 진입 후보"
-        verdict_color = "linear-gradient(135deg, #10B981, #059669)"
-        icon = "✓"
-    else:
-        verdict_label = "관망 권고"
-        verdict_color = "linear-gradient(135deg, #6B7280, #4B5563)"
-        icon = "—"
+    verdict_label, verdict_color, icon = _verdict_grade(top_pick, qty, rr, is_overheat)
 
     rank_text = f"{total}개 중 {rank}위" if rank and total else ""
     strengths_text = " + ".join(strengths) if strengths else "—"
@@ -2858,7 +2850,6 @@ def render_v2_final_verdict(n: dict, rank: int = 0, total: int = 0):
             {h_escape(strengths_text)}. {h_escape(risks_text)}.
           </div>
         </div>
-        <div style="font-size: 36px; flex-shrink: 0;">🚀</div>
       </div>
     </div>
     ''')
