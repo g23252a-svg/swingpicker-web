@@ -3507,6 +3507,82 @@ def _load_ohlcv_debug_info(code: str) -> str:
     return "\n".join(lines)
 
 
+def render_v2_action_rail(n: dict):
+    """[v39] 실전 액션 레일 — 세로 사다리(190px)를 대체하는 콤팩트 가로 카드.
+
+    핵심만: 손절↔현재↔TP1 위치 바 1개 + 수치 한 줄 + 다음 목표 한 줄.
+    상세 가격표·차트는 아래 접이식으로 이동(사용자: '차트 안 보여줘도 됨').
+    """
+    close = n["close"]; entry = n["entry"]; stop = n["stop"]
+    tp1, tp2, tp3 = n["tp1"], n["tp2"], n["tp3"]
+    rr = n["rr_now_tp1"]
+    qty = int(n["qty"]) if n["qty"] else 0
+    amount = n["amount_man"]
+    time_stop = int(n["time_stop_days"]) if n["time_stop_days"] else 0
+    stop_pct = n["stop_loss_pct"]
+    tp1_gain = n["tp1_gain_pct"]
+
+    # 손절→TP1 구간에서 현재가 위치(%) — 실전 액션 존.
+    if entry and stop and tp1 and tp1 > stop:
+        cur_pos = max(0.0, min(100.0, (close - stop) / (tp1 - stop) * 100.0))
+        ent_pos = max(0.0, min(100.0, (entry - stop) / (tp1 - stop) * 100.0))
+    else:
+        cur_pos = ent_pos = 50.0
+
+    def _won(v):
+        return f"{int(round(v)):,}" if v else "—"
+
+    # 수치 한 줄
+    kelly_txt = (f"{qty:,}주 ({amount:.0f}만원)" if qty else "신규 부적합(0주)")
+    rr_c = "var(--green)" if rr >= 1.3 else ("var(--orange)" if rr >= 1.0 else "var(--red)")
+
+    # 다음 목표 (TP2/TP3) 한 줄
+    nxt = []
+    if tp2:
+        nxt.append(f"TP2 {_won(tp2)} <span style='color:var(--green);'>(+{(tp2/entry-1)*100:.0f}%)</span>" if entry else f"TP2 {_won(tp2)}")
+    if tp3:
+        nxt.append(f"TP3 {_won(tp3)} <span style='color:var(--green);'>(+{(tp3/entry-1)*100:.0f}%)</span>" if entry else f"TP3 {_won(tp3)}")
+    nxt_html = " · ".join(nxt) if nxt else "—"
+
+    ui.html(f'''
+    <div class="sd-v2" style="width:100%;margin-bottom:12px;">
+      <div style="background:var(--bg-card);border:1px solid rgba(148,163,184,0.18);
+           border-radius:12px;padding:14px 16px;">
+        <!-- 위치 바: 손절 ── 현재 ── TP1 -->
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;
+             font-weight:700;margin-bottom:6px;">
+          <span style="color:var(--red);">손절 {_won(stop)} <span style="opacity:.8;">({stop_pct:+.1f}%)</span></span>
+          <span style="color:var(--green);">TP1 {_won(tp1)} <span style="opacity:.8;">(+{tp1_gain:.1f}%)</span></span>
+        </div>
+        <div style="position:relative;height:12px;border-radius:8px;
+             background:linear-gradient(90deg, rgba(239,68,68,0.30), rgba(148,163,184,0.15) 45%, rgba(16,185,129,0.30));">
+          <!-- 진입 틱 -->
+          <div style="position:absolute;left:{ent_pos:.1f}%;top:-3px;width:2px;height:18px;
+               background:#60A5FA;transform:translateX(-1px);"></div>
+          <!-- 현재 마커 -->
+          <div style="position:absolute;left:{cur_pos:.1f}%;top:50%;
+               width:14px;height:14px;border-radius:50%;background:#fff;
+               border:3px solid #F59E0B;transform:translate(-50%,-50%);
+               box-shadow:0 0 0 3px rgba(245,158,11,0.25);"></div>
+        </div>
+        <div style="text-align:center;font-size:11px;color:var(--text-white);
+             font-weight:800;margin-top:6px;">
+          현재 {_won(close)} <span style="color:#60A5FA;font-weight:600;">· 진입 {_won(entry)}</span>
+        </div>
+        <!-- 수치 한 줄 -->
+        <div style="display:flex;flex-wrap:wrap;gap:10px 18px;justify-content:center;
+             margin-top:10px;padding-top:10px;border-top:1px solid rgba(148,163,184,0.12);
+             font-size:11.5px;">
+          <span style="color:var(--text-gray);">손익비 <b style="color:{rr_c};">{rr:.2f}</b></span>
+          <span style="color:var(--text-gray);">켈리 <b style="color:var(--text-white);">{kelly_txt}</b></span>
+          <span style="color:var(--text-gray);">타임스톱 <b style="color:var(--text-white);">{time_stop}일</b></span>
+          <span style="color:var(--text-gray);">다음 목표 <b style="color:var(--text-white);">{nxt_html}</b></span>
+        </div>
+      </div>
+    </div>
+    ''')
+
+
 def render_v2_decision_hero(n: dict, rank: int = 0, total: int = 0,
                             timestamp: str = ""):
     """[v38] 결정 히어로 — 상세 상단 단일 카드.
@@ -3674,48 +3750,39 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
 
     Last review score: 95/100 (운영 머지 후보권)
     """
-    # ── [v38] 근본 재설계 — 결정 우선 + 접이식 관리자 상세 ──
-    # 옛 구조: 5뱃지 헤더 → 점수영역 → 3열 그리드(패널4+차트+레이더) →
-    #          3분할(수익률/레벨/리스크) → 시나리오 3카드 → 최종판정 띠.
-    #   같은 판단이 4곳에 흩어지고 관리자 원시데이터가 평면으로 쏟아짐(조잡).
-    # 새 구조:
-    #   1) 결정 히어로 — 판정·이유·핵심지표·상태칩 (지금 뭘 하나 한눈에)
-    #   2) 가격 플랜 + 차트 2단 (실전 필수 — 항상 노출)
-    #   3) 접이식 '관리자 상세' — 점수·추세·모멘텀·수급·레이더·리스크 (기본 접힘)
+    # ── [v39] 재혁신 — 한 화면 콤팩트 + 차트/상세 전부 접이식 ──
+    # 사용자: "뭐가 콤팩트해졌는지 모르겠다, 아예 재혁신, 차트 안 보여줘도 됨."
+    # → 메인 뷰 = 결정 히어로 + 가로 액션 레일 두 카드로 끝(스크롤 없이 결정).
+    #   차트·점수·추세·수급·레이더·리스크는 전부 접이식(기본 접힘)으로 이동.
     n = normalize_stock_row(row)
     _inject_v2_styles()
 
-    if ohlcv_df is None:
-        ohlcv_df = _load_ohlcv_for_v2(n["code"], days=120)
-
-    # 1) 결정 히어로 (헤더·시나리오·최종판정·가이드 통합)
+    # 1) 결정 히어로 — 판정·이유·핵심지표·상태칩
     render_v2_decision_hero(n, rank=rank, total=total, timestamp=timestamp)
 
-    # 2) 가격 플랜 + 차트 (2단, 항상 노출)
-    with ui.element("div").style(
-        "display: grid; grid-template-columns: 300px minmax(0, 1fr); "
-        "gap: 10px; width: 100%; margin-bottom: 12px; box-sizing: border-box;"
-    ).classes("sd-v2 v2-main-grid"):
-        with ui.element("div").style(
-            "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
-        ).classes("v2-left-panels"):
-            render_v2_price_plan(n)
-        with ui.element("div").style("min-width: 0;").classes("v2-center-col"):
-            render_v2_chart(n, ohlcv_df=ohlcv_df)
-            render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
+    # 2) 실전 액션 레일 — 손절↔현재↔TP1 위치 바 + 수치 한 줄 (세로 사다리 대체)
+    render_v2_action_rail(n)
 
-    # 3) 접이식 관리자 상세 — 기본 접힘 (원할 때만 펼침)
+    # 3) 접이식 ① 차트 (기본 접힘 — 원할 때만)
+    with ui.expansion(
+        "📈 차트 보기 (캔들·보조지표)", icon="show_chart",
+    ).classes("w-full sd-v2-detail-exp").style(
+        "background: rgba(148,163,184,0.04); border: 1px solid rgba(148,163,184,0.14); "
+        "border-radius: 10px; margin-bottom: 8px;"
+    ):
+        if ohlcv_df is None:
+            ohlcv_df = _load_ohlcv_for_v2(n["code"], days=120)
+        render_v2_chart(n, ohlcv_df=ohlcv_df)
+        render_v2_sub_charts(n, ohlcv_df=ohlcv_df)
+
+    # 4) 접이식 ② 상세 지표 (점수·추세·모멘텀·수급·레이더·리스크·가격표)
     with ui.expansion(
         "📊 상세 지표 · 점수 · 수급 (관리자)", icon="analytics",
-    ).classes(
-        "w-full sd-v2-detail-exp"
-    ).style(
+    ).classes("w-full sd-v2-detail-exp").style(
         "background: rgba(148,163,184,0.04); border: 1px solid rgba(148,163,184,0.14); "
         "border-radius: 10px; margin-bottom: 12px;"
     ):
-        # 실측 근거 + 점수 영역
         render_v2_scores(n)
-        # 추세/모멘텀/수급 + 레이더 (2단)
         with ui.element("div").style(
             "display: grid; grid-template-columns: minmax(0,1fr) 300px; "
             "gap: 8px; width: 100%; margin-top: 8px;"
@@ -3723,12 +3790,12 @@ def render_stock_detail_v2_partial(row: Dict[str, Any],
             with ui.element("div").style(
                 "display: flex; flex-direction: column; gap: 8px; min-width: 0;"
             ):
+                render_v2_price_plan(n)   # 상세 가격표·사다리 (여기서 전체)
                 render_v2_trend_mtf(n)
                 render_v2_momentum(n)
                 render_v2_supply(n)
             with ui.element("div").style("min-width: 0;"):
                 render_v2_radar(n)
-        # 리스크 / 뉴스
         render_v2_returns_levels_risk(n)
 
 # ═══════════════════════════════════════════════════════════════════
