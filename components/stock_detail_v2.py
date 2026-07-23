@@ -1553,14 +1553,21 @@ def render_v2_price_plan(n: dict):
         def _pct_of_entry(p):
             return f"({(p/entry-1)*100:+.1f}%)" if entry else ""
 
+        # [v38.1] 진입≈현재가(GAP 0%)면 라벨이 정확히 겹침 → 한 줄로 병합.
+        _entry_close_same = entry and close and abs(close / entry - 1) < 0.003
+        _cur_rows = (
+            [_row_lv(entry, "현재/진입", "#60A5FA", "(기준)", bold=True)]
+            if _entry_close_same else
+            [_row_lv(close, "현재가", "var(--text-white)", _pct_of_entry(close), bold=True),
+             _row_lv(entry, "진입", "#60A5FA", "(기준)", bold=True)]
+        )
         rows_html = "".join([
             _row_lv(tp3, "TP3", "var(--green)", _pct_of_entry(tp3)),
             _row_lv(tp2, "TP2", "var(--green)", _pct_of_entry(tp2)),
             _row_lv(tp1, "TP1", "var(--green)", _pct_of_entry(tp1), bold=True),
             _row_lv(be_trigger, "본전전환", "var(--orange)", _pct_of_entry(be_trigger)),
             _row_lv(fast_tp, "⚡반익절", "#FBBF24", _pct_of_entry(fast_tp)),
-            _row_lv(close, "현재가", "var(--text-white)", _pct_of_entry(close), bold=True),
-            _row_lv(entry, "진입", "#60A5FA", "(기준)", bold=True),
+            *_cur_rows,
             _row_lv(stop, "손절", "var(--red)", _pct_of_entry(stop), bold=True),
         ])
         # 배경 존: 진입 위 = 수익권(초록 틴트), 아래 = 손실권(빨강 틴트)
@@ -2070,7 +2077,7 @@ def render_v2_chart(n: dict, ohlcv_df=None):
 
         ui.html(f'''
             <div style="background: var(--bg-card); border: 1px solid var(--border);
-                        border-radius: 8px; padding: 20px; min-height: 400px;
+                        border-radius: 8px; padding: 20px; min-height: 320px;
                         display: flex; flex-direction: column; align-items: center;
                         justify-content: center; color: #6B7280; font-size: 12px;">
                 <div style="font-size: 16px; margin-bottom: 12px;">📊 OHLCV 데이터 로드 실패</div>
@@ -2363,7 +2370,8 @@ def render_v2_chart(n: dict, ohlcv_df=None):
     ''')
 
     # ECharts 차트 렌더링
-    chart = ui.echart(option).style("width: 100%; height: 400px; background: #15171F; border-radius: 4px;")
+    # [v38.1] 콤팩트 — 400 → 320px (좌측 가격플랜과 높이 균형·차트 아래 길이 축소)
+    chart = ui.echart(option).style("width: 100%; height: 320px; background: #15171F; border-radius: 4px;")
 
     ui.html('</div></div>')
 
@@ -2526,47 +2534,45 @@ def render_v2_sub_charts(n: dict, ohlcv_df=None):
 
     strength_clr = "#10B981" if strength >= 1.0 else ("#F59E0B" if strength >= 0.7 else "#EF4444")
 
+    # [v38.1] 콤팩트 — 큰 숫자 22→17px, 스파크라인 50→30px, 패딩 축소로
+    # 차트 아래 보조지표 행 높이를 대폭 줄인다.
     ui.html(f'''
-    <div class="sd-v2" style="margin-top: 8px; width: 100%;">
-      <div class="v2-sub-charts" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 130px; gap: 8px; width: 100%;">
+    <div class="sd-v2" style="margin-top: 6px; width: 100%;">
+      <div class="v2-sub-charts" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 112px; gap: 6px; width: 100%;">
 
         <!-- RSI -->
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
-          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">RSI(14)</div>
-          <div style="color: {rsi_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{rsi14:.1f}</div>
-          {_mini_sparkline_svg(rsi_series, rsi_clr, baseline=50)}
-          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{rsi_tag}</div>
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;">
+          <div style="color: var(--text-gray); font-size: 9.5px; font-weight: 700;">RSI(14) <span style="color:{rsi_clr};font-weight:900;">{rsi14:.1f}</span></div>
+          {_mini_sparkline_svg(rsi_series, rsi_clr, baseline=50, height=30)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 2px;">{rsi_tag}</div>
         </div>
 
         <!-- MFI -->
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
-          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">MFI(14)</div>
-          <div style="color: {mfi_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{mfi14:.1f}</div>
-          {_mini_sparkline_svg(mfi_series, mfi_clr)}
-          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{mfi_tag}</div>
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;">
+          <div style="color: var(--text-gray); font-size: 9.5px; font-weight: 700;">MFI(14) <span style="color:{mfi_clr};font-weight:900;">{mfi14:.1f}</span></div>
+          {_mini_sparkline_svg(mfi_series, mfi_clr, height=30)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 2px;">{mfi_tag}</div>
         </div>
 
         <!-- MACD Slope -->
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
-          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">MACD Slope</div>
-          <div style="color: {macd_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{macd_slope:+.2f}%</div>
-          {_mini_histogram_svg(macd_series)}
-          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{macd_tag}</div>
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;">
+          <div style="color: var(--text-gray); font-size: 9.5px; font-weight: 700;">MACD <span style="color:{macd_clr};font-weight:900;">{macd_slope:+.2f}%</span></div>
+          {_mini_histogram_svg(macd_series, height=30)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 2px;">{macd_tag}</div>
         </div>
 
         <!-- V_POWER -->
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px;">
-          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700;">V_POWER</div>
-          <div style="color: {vpow_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin: 4px 0;">{v_power:+.2f}</div>
-          {_mini_histogram_svg(vpow_series)}
-          <div style="color: var(--text-dim); font-size: 9px; margin-top: 4px;">{vpow_tag}</div>
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;">
+          <div style="color: var(--text-gray); font-size: 9.5px; font-weight: 700;">V_POWER <span style="color:{vpow_clr};font-weight:900;">{v_power:+.2f}</span></div>
+          {_mini_histogram_svg(vpow_series, height=30)}
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: 2px;">{vpow_tag}</div>
         </div>
 
         <!-- 거래강도 게이지 -->
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
-                    padding: 8px; display: flex; flex-direction: column; align-items: center;">
-          <div style="color: var(--text-gray); font-size: 10px; font-weight: 700; margin-bottom: 4px;">거래강도</div>
-          <svg viewBox="0 0 120 70" style="height: 60px; width: 110px;">
+                    padding: 6px; display: flex; flex-direction: column; align-items: center; justify-content:center;">
+          <div style="color: var(--text-gray); font-size: 9.5px; font-weight: 700;">거래강도 <span style="color:{strength_clr};font-weight:900;">{strength:.2f}</span></div>
+          <svg viewBox="0 0 120 70" style="height: 44px; width: 92px;">
             <!-- 반원 배경 -->
             <path d="M 10 60 A 50 50 0 0 1 110 60" stroke="rgba(255,255,255,0.08)" stroke-width="10" fill="none"/>
             <!-- 색 구간: 빨강(0-0.7) / 주황(0.7-1.0) / 초록(1.0+) -->
@@ -2577,8 +2583,7 @@ def render_v2_sub_charts(n: dict, ohlcv_df=None):
             <line x1="60" y1="60" x2="{needle_x:.1f}" y2="{needle_y:.1f}" stroke="white" stroke-width="2"/>
             <circle cx="60" cy="60" r="3" fill="white"/>
           </svg>
-          <div style="color: {strength_clr}; font-size: 22px; font-weight: 900; line-height: 1; margin-top: -4px;">{strength:.2f}</div>
-          <div style="color: var(--text-dim); font-size: 9px; margin-top: 2px;">평균 {strength:.1f}배</div>
+          <div style="color: var(--text-dim); font-size: 9px; margin-top: -2px;">평균 {strength:.1f}배</div>
         </div>
 
       </div>
