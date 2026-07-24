@@ -5085,5 +5085,80 @@
       "003490_20260702_WARN_DRAWDOWN_20260720",
       "003490_20260702_STOP_HIT_20260722"
     ]
+  },
+  {
+    "code": "041830",
+    "name": "인바디",
+    "entry_ymd": "20260707",
+    "entry_px": 56000.0,
+    "qty": 0,
+    "stop_px": 47600.0,
+    "stop_px_initial": 47600.0,
+    "take_px1": 64200.0,
+    "take_px2": 77200.0,
+    "trailing_high": 62700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260724",
+    "last_close_px": 47500.0,
+    "unrealized_pnl_pct": -15.18,
+    "realized_pnl_pct": -15.18,
+    "close_ymd": "20260724",
+    "close_px": 47500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "041830_20260707_WARN_DRAWDOWN_20260710",
+      "041830_20260707_WARN_DRAWDOWN_20260713",
+      "041830_20260707_WARN_DRAWDOWN_20260714",
+      "041830_20260707_WARN_DRAWDOWN_20260720",
+      "041830_20260707_WARN_DRAWDOWN_20260722",
+      "041830_20260707_WARN_DRAWDOWN_20260723",
+      "041830_20260707_STOP_HIT_20260724"
+    ]
+  },
+  {
+    "code": "439090",
+    "name": "마녀공장",
+    "entry_ymd": "20260722",
+    "entry_px": 16430.0,
+    "qty": 0,
+    "stop_px": 15110.0,
+    "stop_px_initial": 15110.0,
+    "take_px1": 18000.0,
+    "take_px2": 19060.0,
+    "trailing_high": 16650.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260724",
+    "last_close_px": 15050.0,
+    "unrealized_pnl_pct": -8.4,
+    "realized_pnl_pct": -8.4,
+    "close_ymd": "20260724",
+    "close_px": 15050.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "439090_20260722_STOP_HIT_20260724"
+    ]
+  },
+  {
+    "code": "000270",
+    "name": "기아",
+    "entry_ymd": "20260722",
+    "entry_px": 146800.0,
+    "qty": 0,
+    "stop_px": 135000.0,
+    "stop_px_initial": 135000.0,
+    "take_px1": 162900.0,
+    "take_px2": 184200.0,
+    "trailing_high": 150300.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260724",
+    "last_close_px": 130500.0,
+    "unrealized_pnl_pct": -11.1,
+    "realized_pnl_pct": -11.1,
+    "close_ymd": "20260724",
+    "close_px": 130500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "000270_20260722_STOP_HIT_20260724"
+    ]
   }
 ]
