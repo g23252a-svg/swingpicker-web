@@ -1182,4 +1182,67 @@ def resize_kelly_with_alpha(
                 if col in out.columns:
                     out.loc[_inactive, col] = 0
     out["KELLY_ENGINE"] = "v33_alpha_resize"
+    out = apply_alpha_proportional_sizing(out)
+    return out
+
+
+# [v40] 알파 비례 사이징 상수 — 집중 과열 방지 상·하한.
+_ALPHA_TILT_HI = 2.0    # 동일가중 대비 최대 2배
+_ALPHA_TILT_LO = 0.5    # 최소 0.5배
+_ALPHA_TILT_BASE = 1.0  # 문턱 근접 종목도 기본 가중 유지
+# alpha_engine과 동일값 — 순환 import 회피 위해 로컬 상수(문턱 미상 시 폴백만 사용).
+ALPHA_GATE_DEFAULT_THRESHOLD = 85.0
+
+
+def apply_alpha_proportional_sizing(df: pd.DataFrame) -> pd.DataFrame:
+    """[v40] 알파 비례 포지션 사이징 — 동일가중을 알파-틸트로 교체.
+
+    근거(2/26~7/3 OOS, 게이트 통과 일별 포트폴리오, 페어드 t-검정):
+      · 동일가중 +1.35% → 알파 비례(상한 [0.5,2.0]) +1.70%  (+0.35%p, t=2.86, p=0.006)
+      · 강건성: 전·후반 양수, 상위3일 제외해도 t=2.20, 누적 +114.8% vs +86.1%.
+    모델이 실제 예측력(알파↑ → 수익↑ 단조)을 갖는데 동일가중이 그 신호를
+    버리고 있었음 → 고알파 종목에 자본을 더 배분(집중은 2배로 제한).
+
+    베팅 활성(켈리_수량>0) 행만 대상. 총 배분 자본은 보존(재정규화).
+    ALPHA_GATE_ACTIVE != 1 이면 무변경.
+    """
+    if df is None or len(df) == 0 or "ALPHA_GATE_ACTIVE" not in df.columns:
+        return df
+    _active_gate = pd.to_numeric(
+        df["ALPHA_GATE_ACTIVE"], errors="coerce").fillna(0).astype(int)
+    if int(_active_gate.max()) != 1:
+        return df
+    if "ALPHA_SCORE" not in df.columns or "켈리_수량" not in df.columns:
+        return df
+
+    out = df.copy()
+    ascore = pd.to_numeric(out["ALPHA_SCORE"], errors="coerce")
+    thr = pd.to_numeric(
+        out.get("ALPHA_ENTRY_THRESHOLD", ALPHA_GATE_DEFAULT_THRESHOLD),
+        errors="coerce").fillna(ALPHA_GATE_DEFAULT_THRESHOLD)
+    qty = pd.to_numeric(out["켈리_수량"], errors="coerce").fillna(0)
+
+    # 베팅 활성 = 수량>0 AND 알파 유효.
+    bet = (qty > 0) & ascore.notna()
+    out["ALPHA_SIZE_MULT"] = 1.0
+    if bet.sum() < 2:
+        return out  # 1종목이면 틸트 의미 없음.
+
+    tilt = (ascore[bet] - thr[bet]).clip(lower=0.0) + _ALPHA_TILT_BASE
+    mult = tilt / tilt.mean()
+    mult = mult.clip(_ALPHA_TILT_LO, _ALPHA_TILT_HI)
+    mult = mult / mult.mean()   # 총 배분 자본 보존.
+
+    out.loc[bet, "ALPHA_SIZE_MULT"] = mult
+    for col in ["켈리_수량", "켈리_금액(원)", "추천수량",
+                "추천금액(만원)", "KELLY_FRACTION"]:
+        if col in out.columns:
+            # int64 컬럼에 float 대입 시 LossySetitemError → 전체 float 캐스팅.
+            colvals = pd.to_numeric(out[col], errors="coerce").astype(float)
+            scaled = colvals[bet] * mult
+            if col in ("켈리_수량", "추천수량"):
+                scaled = scaled.round()
+            colvals.loc[bet] = scaled
+            out[col] = colvals
+    out["KELLY_ENGINE"] = "v40_alpha_tilt"
     return out
