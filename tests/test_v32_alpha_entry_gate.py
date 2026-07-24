@@ -53,11 +53,11 @@ def _df(rows):
 # ── 문턱 상수 ──
 
 def test_regime_thresholds_match_adaptive_choice():
-    # 사용자 선택: 상승 상위30%(≥70), 중립 상위20%(≥80), 하락 상위10%(≥90)
+    # [v40] NEUTRAL 80→85 상향 (OOS +1.35→+1.62%, t=2.08). UP/DOWN 유지.
     assert ALPHA_GATE_THRESHOLD["UP"] == 70.0
-    assert ALPHA_GATE_THRESHOLD["NEUTRAL"] == 80.0
+    assert ALPHA_GATE_THRESHOLD["NEUTRAL"] == 85.0
     assert ALPHA_GATE_THRESHOLD["DOWN"] == 90.0
-    assert ALPHA_GATE_DEFAULT_THRESHOLD == 80.0
+    assert ALPHA_GATE_DEFAULT_THRESHOLD == 85.0
 
 
 # ── 게이트 활성/비활성 ──
@@ -77,9 +77,9 @@ def test_gate_active_when_validated():
 
 # ── 레짐 적응형 문턱 ──
 
-def test_neutral_threshold_80_selects_top20():
-    # NEUTRAL: 알파 80 미만은 탈락, 80 이상은 통과.
-    df = _df([{"ALPHA_SCORE": 79.0}, {"ALPHA_SCORE": 81.0}])
+def test_neutral_threshold_85_selects_top15():
+    # [v40] NEUTRAL: 알파 85 미만은 탈락, 85 이상은 통과.
+    df = _df([{"ALPHA_SCORE": 84.0}, {"ALPHA_SCORE": 86.0}])
     out = apply_alpha_entry_gate(df)
     assert out.iloc[0]["TOP_PICK"] == 0
     assert out.iloc[1]["TOP_PICK"] == 1
@@ -95,8 +95,8 @@ def test_up_regime_is_more_permissive_than_down():
 
 
 def test_unknown_regime_defaults_to_neutral():
-    out = apply_alpha_entry_gate(_df([{"MARKET_REGIME": "UNKNOWN", "ALPHA_SCORE": 85.0}]))
-    assert out.iloc[0]["ALPHA_ENTRY_THRESHOLD"] == 80.0
+    out = apply_alpha_entry_gate(_df([{"MARKET_REGIME": "UNKNOWN", "ALPHA_SCORE": 86.0}]))
+    assert out.iloc[0]["ALPHA_ENTRY_THRESHOLD"] == 85.0
     assert out.iloc[0]["TOP_PICK"] == 1
 
 
