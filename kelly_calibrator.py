@@ -1192,6 +1192,13 @@ _ALPHA_TILT_LO = 0.5    # 최소 0.5배
 _ALPHA_TILT_BASE = 1.0  # 문턱 근접 종목도 기본 가중 유지
 # alpha_engine과 동일값 — 순환 import 회피 위해 로컬 상수(문턱 미상 시 폴백만 사용).
 ALPHA_GATE_DEFAULT_THRESHOLD = 85.0
+# [v41] 섹터 모멘텀 결합 — 강한 섹터(유니버스 내 섹터평균 5일수익 순위)의
+# 고알파 종목 오버웨이트. OOS: v40 틸트 +1.94% → ×섹터모멘텀 +2.28%
+# (+0.34%p, t=3.24, p=0.002). 대조군에서 개별 모멘텀 틸트(t=0.48)·
+# 섹터모멘텀 단독(t=-0.19)은 무효 — '강섹터×고알파' 상호작용만 유효.
+_SECMOM_LO = 0.5        # 최약 섹터 0.5배
+_SECMOM_HI = 1.5        # 최강 섹터 1.5배
+_COMBINED_CLIP = (0.3, 3.0)  # 결합 배수 상·하한
 
 
 def apply_alpha_proportional_sizing(df: pd.DataFrame) -> pd.DataFrame:
@@ -1231,6 +1238,23 @@ def apply_alpha_proportional_sizing(df: pd.DataFrame) -> pd.DataFrame:
     tilt = (ascore[bet] - thr[bet]).clip(lower=0.0) + _ALPHA_TILT_BASE
     mult = tilt / tilt.mean()
     mult = mult.clip(_ALPHA_TILT_LO, _ALPHA_TILT_HI)
+
+    # [v41] 섹터 모멘텀 팩터 — 전체 df(유니버스)에서 섹터별 평균 ret_5d_%를
+    # 구해 그 순위(pct)로 0.5~1.5배. 섹터/수익률 정보 없으면 중립(1.0).
+    secmom_factor = pd.Series(1.0, index=mult.index)
+    if "업종_대분류" in out.columns and "ret_5d_%" in out.columns:
+        _ret5 = pd.to_numeric(out["ret_5d_%"], errors="coerce")
+        _sec = out["업종_대분류"].astype(str).fillna("?")
+        _sec_mean = _ret5.groupby(_sec).transform("mean")
+        _rank = _sec_mean.rank(pct=True)
+        secmom_factor = (_SECMOM_LO + (_SECMOM_HI - _SECMOM_LO)
+                         * _rank.fillna(0.5)).reindex(mult.index).fillna(1.0)
+        out["SECTOR_MOM_FACTOR"] = 1.0
+        out.loc[bet, "SECTOR_MOM_FACTOR"] = secmom_factor
+
+    mult = mult * secmom_factor
+    mult = mult / mult.mean()
+    mult = mult.clip(*_COMBINED_CLIP)
     mult = mult / mult.mean()   # 총 배분 자본 보존.
 
     out.loc[bet, "ALPHA_SIZE_MULT"] = mult
