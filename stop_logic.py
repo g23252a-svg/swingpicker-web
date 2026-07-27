@@ -925,6 +925,23 @@ def _tp_volume_resistance(entry: float,
     }]
 
 
+# [v42] TP1 현실 상한 — 과거 배치 16,664건 실측: 3.5×ATR 초과 목표의 7일내
+# 도달률은 5% 이하(5+ATR는 2%, 8+ATR 0%)인데 고정 확률 45~80으로 표시되고
+# 있었고, 전체 TP1의 47%가 이 비현실 구간이었다(카카오 +57.6% RR 7.12 사례).
+_TP1_MAX_ATR_MULT = 3.5
+# 거리(ATR배수)별 실측 7일내 도달률(%) — 표시 확률의 SSOT.
+_TP_EMP_REACH = [(1.5, 46), (2.5, 23), (3.5, 12), (5.0, 5)]
+_TP_EMP_REACH_FAR = 2
+
+
+def _empirical_reach_prob(dist_atr: float) -> int:
+    """목표 거리(ATR 배수) → 실측 7일내 도달률(%)."""
+    for lim, prob in _TP_EMP_REACH:
+        if dist_atr <= lim:
+            return prob
+    return _TP_EMP_REACH_FAR
+
+
 def compute_realistic_targets(
     ohlcv: pd.DataFrame,
     entry: float,
@@ -1001,11 +1018,16 @@ def compute_realistic_targets(
             deduped.append(cand)
 
     # ── RR 필터: 최소 RR 미달 후보 제거 ──
+    # [v42] 근거리(≤3.5×ATR) 후보는 RR 미달이어도 보존 — RR 필터가 현실적
+    # 근거리 목표를 전멸시키고 먼 매물대만 남겨 TP1이 비현실(+57% 등)로
+    # 잡히던 역선택 수정 (카카오 RR 7.12 사례). RR은 게이트가 아니라 결과.
+    atr = _atr_from_ohlcv(ohlcv, 14)
     risk = entry - stop
     if risk > 0:
         deduped = [cd for cd in deduped
                    if (cd["price"] - entry) / risk >= c.tp_min_rr
-                   or cd["confidence"] >= 75]  # 고확률은 RR 낮아도 유지
+                   or cd["confidence"] >= 75
+                   or (atr > 0 and (cd["price"] - entry) <= atr * _TP1_MAX_ATR_MULT)]
 
     if not deduped:
         return _fallback_targets(entry, stop, c, use_tick)
@@ -1015,20 +1037,42 @@ def compute_realistic_targets(
     if not deduped:
         return _fallback_targets(entry, stop, c, use_tick)
 
+    # [v42] 실측 도달률 기반 확률 교정 — 과거 배치 16,664건 실측:
+    #   거리 0~1.5×ATR → 7일내 도달 46% / 1.5~2.5 → 23% / 2.5~3.5 → 12% /
+    #   3.5~5 → 5% / 5+ → 2%. 기존 method 고정 확률(45~80)은 거리 무시 착시.
+    if atr > 0:
+        for cd in deduped:
+            cd["dist_atr"] = round((cd["price"] - entry) / atr, 2)
+            cd["prob_emp"] = _empirical_reach_prob(cd["dist_atr"])
+    else:
+        for cd in deduped:
+            cd["dist_atr"] = None
+            cd["prob_emp"] = cd["confidence"]
+
     # ── TP 배정: confidence 순 정렬 후 3단계 배정 ──
     deduped.sort(key=lambda x: (-x["confidence"], x["price"]))
 
     result = {"N_CANDIDATES": len(deduped), "CANDIDATES": deduped}
 
-    # TP1: confidence 가장 높은 것 (보수적, 도달 확률 최고)
-    tp1 = deduped[0]
+    # TP1: [v42] 3.5×ATR 이내(현실 구간) 후보 중 confidence 최고.
+    # 전부 밖이면 ATR 2배 합성 목표로 폴백 — TP1은 '닿을 수 있는 1차 목표'가 SSOT.
+    near = [cd for cd in deduped
+            if atr <= 0 or (cd["price"] - entry) <= atr * _TP1_MAX_ATR_MULT]
+    if not near and atr > 0:
+        syn_price = entry + atr * 2.0
+        near = [{"price": syn_price, "pct": round((syn_price / entry - 1) * 100, 2),
+                 "method": "ATR_2x", "confidence": 70,
+                 "dist_atr": 2.0, "prob_emp": _empirical_reach_prob(2.0)}]
+        deduped = near + deduped
+        result["CANDIDATES"] = deduped
+    tp1 = (near or deduped)[0]
     tp1_price = ceil_to_tick(tp1["price"]) if use_tick else round(tp1["price"], 0)
     tp1_rr = (tp1_price - entry) / risk if risk > 0 else 0
     result.update({
         "TP1": int(tp1_price),
         "TP1_PCT": round((tp1_price / entry - 1) * 100, 1),
         "TP1_METHOD": tp1["method"],
-        "TP1_PROB": tp1["confidence"],
+        "TP1_PROB": tp1.get("prob_emp", tp1["confidence"]),
         "MIN_RR": round(tp1_rr, 1),
     })
 
@@ -1043,7 +1087,7 @@ def compute_realistic_targets(
             "TP2": int(tp2_price),
             "TP2_PCT": round((tp2_price / entry - 1) * 100, 1),
             "TP2_METHOD": tp2["method"],
-            "TP2_PROB": tp2["confidence"],
+            "TP2_PROB": tp2.get("prob_emp", tp2["confidence"]),
         })
 
         # TP3: TP2보다 더 높은 공격적 목표
@@ -1057,7 +1101,7 @@ def compute_realistic_targets(
                 "TP3": int(tp3_price),
                 "TP3_PCT": round((tp3_price / entry - 1) * 100, 1),
                 "TP3_METHOD": tp3["method"],
-                "TP3_PROB": tp3["confidence"],
+                "TP3_PROB": tp3.get("prob_emp", tp3["confidence"]),
             })
 
     return result
