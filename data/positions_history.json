@@ -5160,5 +5160,29 @@
     "alerted_events": [
       "000270_20260722_STOP_HIT_20260724"
     ]
+  },
+  {
+    "code": "004310",
+    "name": "현대약품",
+    "entry_ymd": "20260722",
+    "entry_px": 6510.0,
+    "qty": 0,
+    "stop_px": 5980.0,
+    "stop_px_initial": 5980.0,
+    "take_px1": 8470.0,
+    "take_px2": 9680.0,
+    "trailing_high": 7420.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260727",
+    "last_close_px": 5770.0,
+    "unrealized_pnl_pct": -11.37,
+    "realized_pnl_pct": -11.37,
+    "close_ymd": "20260727",
+    "close_px": 5770.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "004310_20260722_WARN_DRAWDOWN_20260724",
+      "004310_20260722_STOP_HIT_20260727"
+    ]
   }
 ]
