@@ -5184,5 +5184,79 @@
       "004310_20260722_WARN_DRAWDOWN_20260724",
       "004310_20260722_STOP_HIT_20260727"
     ]
+  },
+  {
+    "code": "352820",
+    "name": "하이브",
+    "entry_ymd": "20260715",
+    "entry_px": 208000.0,
+    "qty": 0,
+    "stop_px": 195900.0,
+    "stop_px_initial": 195900.0,
+    "take_px1": 241000.0,
+    "take_px2": 249000.0,
+    "trailing_high": 231500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260728",
+    "last_close_px": 188800.0,
+    "unrealized_pnl_pct": -9.23,
+    "realized_pnl_pct": -9.23,
+    "close_ymd": "20260728",
+    "close_px": 188800.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "352820_20260715_STOP_HIT_20260728"
+    ]
+  },
+  {
+    "code": "071050",
+    "name": "한국금융지주",
+    "entry_ymd": "20260716",
+    "entry_px": 229000.0,
+    "qty": 0,
+    "stop_px": 210500.0,
+    "stop_px_initial": 210500.0,
+    "take_px1": 263500.0,
+    "take_px2": 273000.0,
+    "trailing_high": 236500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260728",
+    "last_close_px": 193700.0,
+    "unrealized_pnl_pct": -15.41,
+    "realized_pnl_pct": -15.41,
+    "close_ymd": "20260728",
+    "close_px": 193700.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "071050_20260716_WARN_DRAWDOWN_20260720",
+      "071050_20260716_WARN_DRAWDOWN_20260722",
+      "071050_20260716_WARN_DRAWDOWN_20260724",
+      "071050_20260716_WARN_DRAWDOWN_20260727",
+      "071050_20260716_STOP_HIT_20260728"
+    ]
+  },
+  {
+    "code": "024840",
+    "name": "KBI메탈",
+    "entry_ymd": "20260724",
+    "entry_px": 4670.0,
+    "qty": 0,
+    "stop_px": 4295.0,
+    "stop_px_initial": 4295.0,
+    "take_px1": 5790.0,
+    "take_px2": 11760.0,
+    "trailing_high": 4900.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260728",
+    "last_close_px": 3890.0,
+    "unrealized_pnl_pct": -16.7,
+    "realized_pnl_pct": -16.7,
+    "close_ymd": "20260728",
+    "close_px": 3890.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "024840_20260724_WARN_DRAWDOWN_20260727",
+      "024840_20260724_STOP_HIT_20260728"
+    ]
   }
 ]
