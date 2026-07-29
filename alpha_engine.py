@@ -582,6 +582,26 @@ def recompute_route_with_alpha(df: pd.DataFrame) -> pd.DataFrame:
     reason[is_overheat] = "과열(급등·MFI·RSI) — 실측 역신호, 관망"
     reason[preserve] = out.loc[preserve, "ROUTE_REASON"].astype(str).values if "ROUTE_REASON" in out.columns else ""
 
+    # [v43] 위기 봉인 — 신규진입 차단 중에는 매수검토/진입대기 라벨 자체를 봉인.
+    # 진단(7월 폭락, 코스피 -17%): 게이트(TOP_PICK)는 차단을 존중해 공식 추천
+    # 0개인데, ROUTE 라벨은 차단을 무시하고 매수검토 10~23개를 계속 표시하는
+    # 이중 신호 — 이 라벨 추종 실측 2주 -3.1%(7/23분 -7.7%).
+    # 역사 실측: 차단일 ATTACK 승률 7%(비차단일 50%, 일별 t=-3.96), 같은 날
+    # 유니버스 평균 대비도 열세(t=-2.37) — 절대·상대 가치 모두 없음.
+    # 보존 라우트(CARRY/EXIT 등)는 건드리지 않고, 원 판정은 ROUTE_PRE_BLOCK에
+    # 보관해 차단 해제 시 다음 배치에서 자동 복귀.
+    def _blkflag(col):
+        if col in out.columns:
+            return pd.to_numeric(out[col], errors="coerce").fillna(0).astype(bool)
+        return pd.Series(False, index=out.index)
+    _blocked = (_blkflag("NEW_ENTRY_BLOCKED") | _blkflag("JULY_PROFIT_BLOCK_FLAG")
+                | _blkflag("PROFIT_RECOVERY_BLOCK_FLAG")) & (~preserve)
+    _sealed = _blocked & new_route.isin(["ATTACK", "ARMED"])
+    out["ROUTE_PRE_BLOCK"] = new_route.where(_sealed, "")
+    new_route = new_route.copy()
+    new_route[_sealed] = "WAIT"
+    reason[_sealed] = "🔒 신규진입 차단 중 — 매수검토 봉인 (방어 해제 시 자동 복귀)"
+
     out["ROUTE_PREV"] = out.get("ROUTE", "")
     out["ROUTE"] = new_route
     out["ROUTE_REASON"] = reason
