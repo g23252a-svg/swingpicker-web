@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20260730",
+  "macro_risk": "CAUTION",
+  "macro_msg": "나스닥 -1.7% [07/29] (주의)",
+  "market_breadth": 46.3,
+  "pass_ebs": 5,
+  "rec_limit": 5,
+  "n_stocks": 292,
+  "run_status": "OK",
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK",
+  "scoring_axes": "STRUCT+TIMING+SECTOR",
+  "w_struct": 0.5,
+  "w_timing": 0.5,
+  "w_ai": 0.0
+}

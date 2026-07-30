@@ -5363,5 +5363,30 @@
       "011780_20260724_WARN_DRAWDOWN_20260728",
       "011780_20260724_STOP_HIT_20260729"
     ]
+  },
+  {
+    "code": "257720",
+    "name": "실리콘투",
+    "entry_ymd": "20260714",
+    "entry_px": 36500.0,
+    "qty": 0,
+    "stop_px": 33550.0,
+    "stop_px_initial": 33550.0,
+    "take_px1": 40450.0,
+    "take_px2": 42000.0,
+    "trailing_high": 39000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260730",
+    "last_close_px": 33150.0,
+    "unrealized_pnl_pct": -9.18,
+    "realized_pnl_pct": -9.18,
+    "close_ymd": "20260730",
+    "close_px": 33150.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "257720_20260714_WARN_DRAWDOWN_20260720",
+      "257720_20260714_WARN_DRAWDOWN_20260729",
+      "257720_20260714_STOP_HIT_20260730"
+    ]
   }
 ]
