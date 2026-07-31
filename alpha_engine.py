@@ -437,6 +437,19 @@ def _alpha_threshold_series(df: pd.DataFrame) -> pd.Series:
     return regime.map(ALPHA_GATE_THRESHOLD).fillna(ALPHA_GATE_DEFAULT_THRESHOLD)
 
 
+def _alpha_validated_flag(df: pd.DataFrame) -> bool:
+    """[v45] ALPHA_VALIDATED 안전 판독 — 컬럼 결측 배치에서 크래시 방지.
+
+    구 CSV/degraded 배치는 ALPHA_VALIDATED가 없다. 기존 코드는 out.get(col, 0)이
+    스칼라 0을 반환해 .fillna() AttributeError로 죽었고, finalize의 try/except가
+    이를 삼켜 ROUTE 치료·알파 게이트가 조용히 건너뛰어졌다.
+    """
+    if df is None or len(df) == 0 or "ALPHA_VALIDATED" not in df.columns:
+        return False
+    v = pd.to_numeric(df["ALPHA_VALIDATED"], errors="coerce").fillna(0)
+    return int(v.astype(int).max()) == 1
+
+
 def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     """[v32] 알파를 primary 진입 게이트로 적용 — ROUTE 거부권 대체.
 
@@ -453,8 +466,7 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     n = len(out)
     validated = (
-        int(pd.to_numeric(out.get("ALPHA_VALIDATED", 0), errors="coerce")
-            .fillna(0).astype(int).max()) == 1
+        _alpha_validated_flag(out)
         if n else False
     )
     thr = _alpha_threshold_series(out) if n else pd.Series(dtype=float)
@@ -471,7 +483,8 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     if "ENTRY_RISK_GATE_OK" in out.columns:
         risk_ok = out["ENTRY_RISK_GATE_OK"].fillna(False).astype(bool)
     else:
-        num = lambda c: pd.to_numeric(out.get(c, np.nan), errors="coerce")
+        num = lambda c: (pd.to_numeric(out[c], errors="coerce")
+                         if c in out.columns else pd.Series(np.nan, index=out.index))
         close, stop, tp1, buy = num("종가"), num("손절가"), num("추천매도가1"), num("추천매수가")
         risk = (close - stop).clip(lower=1)
         reward = (tp1 - close).clip(lower=0)
@@ -541,12 +554,12 @@ def recompute_route_with_alpha(df: pd.DataFrame) -> pd.DataFrame:
     n = len(out)
     if n == 0:
         return out
-    validated = int(pd.to_numeric(out.get("ALPHA_VALIDATED", 0), errors="coerce")
-                    .fillna(0).astype(int).max()) == 1
+    validated = _alpha_validated_flag(out)
     if not validated or "ALPHA_SCORE" not in out.columns:
         return out
 
-    num = lambda c: pd.to_numeric(out.get(c, np.nan), errors="coerce")
+    num = lambda c: (pd.to_numeric(out[c], errors="coerce")
+                     if c in out.columns else pd.Series(np.nan, index=out.index))
     ascore = num("ALPHA_SCORE")
     thr = _alpha_threshold_series(out)
     above = (num("Above_MA20") > 0).fillna(False)

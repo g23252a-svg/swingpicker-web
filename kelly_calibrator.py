@@ -1080,7 +1080,11 @@ def apply_kelly_calibrated(
     #   OOS 알파≥80 (n=3,032): 평균승 +9.5% / 평균패 -8.5% → 원시 b=1.12
     #   v30 손절 -8% 캡 반영(실제 운용 규칙): b=1.65
     # → 알파 행은 b = min(planned, 1.65). planned가 더 타이트하면 planned.
-    _ALPHA_EMPIRICAL_B_5D = 1.65
+    # [v45] 현행 게이트(알파≥85 + 저점추세≥0)로 재측정 — 손절 -8% 캡 적용
+    #   n=1,735 (OOS 64일): 승률 40.5% · 평균승 +12.15% · 평균패 -6.71% → b=1.81
+    #   월별 b 1.22~2.29 (중앙 1.83) — 구 값 1.65는 알파≥80(저점추세 미적용,
+    #   b=1.62) 풀에서 측정한 것으로 현행 게이트를 과소평가.
+    _ALPHA_EMPIRICAL_B_5D = 1.81
     if _use_alpha_p.any():
         b_ratio = np.where(
             _use_alpha_p, np.minimum(planned_b, _ALPHA_EMPIRICAL_B_5D), b_ratio)
@@ -1098,10 +1102,17 @@ def apply_kelly_calibrated(
 
     # [v23.0] GUARD 반영 — GUARD_KELLY_MULT(0~1)로 분율·손익비 축소
     # guard_system이 부여한 컬럼이 있으면 차단(0)·감점(<1)을 Kelly 사이징에 직접 반영.
+    # [v45] GUARD_KELLY_MULT 사이징 곱셈 제거 — 실측 역선택.
+    # 게이트 통과 종목(알파≥85 & 저점추세≥0, n=131, 33일) 실현수익(-8% 캡):
+    #   가드가 '베팅 금지'(배수 0)한 종목  기대값 +1.12% · 승률 57%
+    #   가드가 '베팅 허용'(배수>0)한 종목  기대값 -2.76% · 승률 31%
+    #   diff +3.87%p (t=3.68, p=0.0002) — 가드가 최고 종목을 0주로 죽이고 있었다.
+    # 유니버스 차원도 동방향(비차단일 n=5,104: 가드0 -1.22% vs 가드>0 -3.79%,
+    # t=-2.64). ROUTE/ELITE가 역예측이던 v32 패턴과 동일 —
+    # 추세붕괴·RR 축으로 조립된 가드 점수가 수익과 역상관.
+    # 가드 판정 자체는 표시·경고용으로 보존하고 사이징에서만 분리한다.
     if "GUARD_KELLY_MULT" in df.columns:
-        _gm = pd.to_numeric(df["GUARD_KELLY_MULT"], errors="coerce").fillna(1.0).clip(0.0, 1.0).values
-        f_safe = f_safe * _gm
-        b_ratio = b_ratio * _gm
+        df["GUARD_KELLY_MULT_APPLIED"] = 0   # 진단: 사이징 미반영 표시
 
     # [v22] 관측 컬럼
     df["KELLY_PLANNED_B"] = np.round(planned_b, 3)
@@ -1112,11 +1123,44 @@ def apply_kelly_calibrated(
     df["KELLY_FINAL_B"] = np.round(b_ratio, 3)
     df["KELLY_FRACTION"] = np.round(f_safe, 4)
 
+    # [v45] 켈리 0 사유 투명화 — 게이트를 통과했는데 수량 0인 이유가 화면에
+    # 전혀 없어서 '개선했다는데 왜 추천이 없나'로 이어졌다. 켈리가 0을 주는 건
+    # 대개 정당한 거부(실측 승률 < 필요 승률)이므로 그 수치를 그대로 노출한다.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        _need_p = np.where(b_ratio > 0, 1.0 / (1.0 + b_ratio), np.nan)
+    _zero = f_safe <= 0
+    _reason = np.full(len(df), "", dtype=object)
+    _reason = np.where(
+        _zero & ~valid, "가격/손절 정보 불완전 — 사이징 불가", _reason)
+    _edge_short = _zero & valid & (b_ratio > 0)
+    _txt = np.array([
+        f"실측 승률 {pp*100:.0f}% < 필요 승률 {nn*100:.0f}%"
+        f" (손익비 {bb:.2f}) — 켈리 기준 미달"
+        if np.isfinite(nn) else "손익비 산출 불가 — 사이징 불가"
+        for pp, nn, bb in zip(p, _need_p, b_ratio)
+    ], dtype=object)
+    _reason = np.where(_edge_short, _txt, _reason)
+    _reason = np.where(
+        _zero & valid & ~(b_ratio > 0), "손익비 0 — 목표가가 진입가 이하", _reason)
+    df["KELLY_ZERO_REASON"] = _reason
+    df["KELLY_NEED_WIN_RATE"] = np.round(_need_p, 4)
+    _zero_reason_pre = _reason
+
     kelly_amt = (total_capital * f_safe).astype(int)
     kelly_qty = np.where(buy > 0, kelly_amt / buy, 0).astype(int)
 
     df["켈리_수량"] = kelly_qty
     df["켈리_금액(원)"] = kelly_amt
+    # [v45] 분율은 양수인데 1주 값이 배분액보다 커서 0주가 되는 경우도 사유 표기.
+    _sub_one = (kelly_qty <= 0) & (f_safe > 0)
+    if _sub_one.any():
+        _sub_txt = np.array([
+            f"배분액 {int(a):,}원 < 1주 가격 {int(bp):,}원 — 수량 0"
+            if bp > 0 else "진입가 없음 — 수량 0"
+            for a, bp in zip(kelly_amt, buy)
+        ], dtype=object)
+        df["KELLY_ZERO_REASON"] = np.where(
+            _sub_one, _sub_txt, df["KELLY_ZERO_REASON"].values)
 
     mask_pos = kelly_qty > 0
     if mask_pos.any():
@@ -1181,6 +1225,13 @@ def resize_kelly_with_alpha(
                         "KELLY_FRACTION"]:
                 if col in out.columns:
                     out.loc[_inactive, col] = 0
+            # [v45] 사유 표기 — 게이트는 통과했는데 상태(ROUTE)가 신규진입이
+            # 아니라 0주가 되는 경우가 '침묵의 0주'의 마지막 경로였다.
+            if "KELLY_ZERO_REASON" not in out.columns:
+                out["KELLY_ZERO_REASON"] = ""
+            _r = out["ROUTE"].astype(str).str.upper().str.strip()
+            out.loc[_inactive, "KELLY_ZERO_REASON"] = (
+                "상태 " + _r[_inactive] + " — 신규진입 상태 아님(사이징 제외)")
     out["KELLY_ENGINE"] = "v33_alpha_resize"
     out = apply_alpha_proportional_sizing(out)
     return out
