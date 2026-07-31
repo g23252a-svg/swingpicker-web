@@ -93,6 +93,20 @@ _LT_PCTL_FLOOR = 0.30          # 당일 하위 30% 제외
 _LT_PCTL_MIN_SAMPLE = 30       # 분위 안정화 최소 표본 — 미달 시 구 절대규칙 폴백
 
 # ═══════════════════════════════════════════════════════════════
+# [v47] 위험구간 — 검증된 숏 신호를 공매도 없이 실행 가능한 형태로
+# ───────────────────────────────────────────────────────────────
+# 누적 데이터에서 절대수익이 있던 쪽은 롱이 아니라 숏이었다(하위10% 숏
+# +2.01%/5일 t=+3.82). 그러나 개별종목 공매도는 개인 접근이 막혀 있어
+# 그대로 쓸 수 없다. 공매도 없이 가능한 형태 = '보유 중이면 매도 + 후보 배제'.
+#   알파 하위10% AND 저점추세 하위30%:
+#     엣지 -1.59%p (t=-4.43) · 승률 21.5%(유니버스 32.2%) · 12.8종목/일
+#     IS -2.16(t=-3.88) / OOS -1.03(t=-2.31) — 양 구간 유의
+#     FWD3 -1.31(t=-3.78) · FWD10 -2.17(t=-7.04) · FWD20 -1.77(t=-3.57)
+_DANGER_ALPHA_PCTL = 0.10      # 알파 당일 하위 10%
+_DANGER_LT_PCTL = 0.30         # 저점추세 당일 하위 30%
+_DANGER_MIN_SAMPLE = 30        # 미달 시 표시하지 않음(과잉경고 방지)
+
+# ═══════════════════════════════════════════════════════════════
 # [v32.1] ROUTE 자체 치료 — 상태 판정을 데이터 방향으로 재설계
 # ───────────────────────────────────────────────────────────────
 # 진단(3~7월 OOS): 기존 ATTACK은 역방향 피처로 조립 —
@@ -491,7 +505,9 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     if not validated:
         out["ALPHA_GATE_ACTIVE"] = 0
         out["ALPHA_ENTRY_OK"] = 0
-        return out
+        # [v47] 미검증이어도 컬럼은 항상 존재해야 한다(하위 소비자 KeyError 방지).
+        #       flag_danger_zone이 미검증을 스스로 판별해 전부 0으로 남긴다.
+        return flag_danger_zone(out)
 
     ascore = pd.to_numeric(out.get("ALPHA_SCORE", np.nan), errors="coerce")
 
@@ -570,6 +586,66 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     else:
         bnp = pd.Series(True, index=out.index)
     out["BUY_NOW_ELIGIBLE"] = (entry_ok & bnp).astype(int)
+
+    # [v47] 위험구간 표시 — 진입 금지에서 끝내지 않고 '보유 중이면 매도'까지.
+    out = flag_danger_zone(out, ascore=ascore, lt=lt)
+    return out
+
+
+def flag_danger_zone(df: pd.DataFrame, ascore=None, lt=None) -> pd.DataFrame:
+    """[v47] 위험구간(회피·매도) 표시 — 검증된 숏 신호를 공매도 없이 쓴다.
+
+    누적 백데이터에서 절대수익이 있던 쪽은 롱이 아니라 숏이었다. 그러나 개별종목
+    공매도는 개인 접근이 사실상 막혀 있어 그대로는 실행할 수 없다. 공매도 없이
+    쓸 수 있는 형태는 '보유 중이면 매도 + 후보에서 배제'이며, 이건 실행 가능하다.
+
+    규칙: 알파 당일 하위 10%  AND  저점추세 당일 하위 30%
+      유니버스 대비 엣지 -1.59%p (t=-4.43)  ·  승률 21.5% (유니버스 32.2%)
+      IS -2.16 (t=-3.88) / OOS -1.03 (t=-2.31)  — 양 구간 유의
+      전 보유기간 성립: FWD3 -1.31(t=-3.78) · FWD10 -2.17(t=-7.04)
+                        FWD20 -1.77(t=-3.57), 20일 승률 10.8%
+      절대 5일수익 -2.88% vs 유니버스 -1.28% → 회피만으로 +1.6%p 방어
+      해당 종목은 하루 평균 12.8개로 관리 가능한 규모다.
+
+    두 구성요소가 각각 독립 검증됐다:
+      · 저점추세 하위30% 단독 IS -0.85(t=-3.45) / OOS -0.84(t=-3.56) — 거의 동일
+      · 알파 순위는 야간 워크포워드 게이트가 매일 재검증(IC t≥2·AUC≥0.52)
+    미검증 배치에서는 경고를 내지 않는다(근거 없는 매도 유발 금지).
+
+    주입 컬럼: DANGER_ZONE, DANGER_ZONE_REASON
+    """
+    out = df
+    n = len(out)
+    out["DANGER_ZONE"] = 0
+    if "DANGER_ZONE_REASON" not in out.columns:
+        out["DANGER_ZONE_REASON"] = ""
+    out["DANGER_ZONE_REASON"] = out["DANGER_ZONE_REASON"].astype("object")
+    if n == 0 or not _alpha_validated_flag(out):
+        return out
+
+    # 컬럼 부재 시 out.get()은 스칼라를 반환한다 — v45와 같은 크래시를 막기 위해
+    # 항상 Series를 보장한다.
+    def _col(name):
+        return (pd.to_numeric(out[name], errors="coerce")
+                if name in out.columns else pd.Series(np.nan, index=out.index))
+
+    if ascore is None:
+        ascore = _col("ALPHA_SCORE")
+    if lt is None:
+        lt = _col("Low_Trend_PCT")
+
+    # 분위는 표본이 있어야 안정적 — 미달 시 표시하지 않는다(과잉경고 방지).
+    if int(ascore.notna().sum()) < _DANGER_MIN_SAMPLE or int(lt.notna().sum()) < _DANGER_MIN_SAMPLE:
+        return out
+
+    a_pctl = ascore.rank(pct=True)          # 낮을수록 나쁨
+    lt_pctl = lt.rank(pct=True)
+    danger = ((a_pctl <= _DANGER_ALPHA_PCTL) & (lt_pctl <= _DANGER_LT_PCTL)).fillna(False)
+    out["DANGER_ZONE"] = danger.astype(int)
+    out.loc[danger, "DANGER_ZONE_REASON"] = (
+        "⛔ 위험구간 — 알파 하위10% + 저점추세 하위30% "
+        "(실측 5일 -2.88%·승률 21.5%, 20일 승률 10.8%) · 보유 중이면 정리 검토"
+    )
     return out
 
 
