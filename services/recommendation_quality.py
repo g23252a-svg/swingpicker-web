@@ -159,6 +159,7 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     athr = _num_nan(df, "ALPHA_ENTRY_THRESHOLD")
     # [v37] 저점추세 게이트 — 컬럼 없으면(구버전 CSV) 통과 취급.
     lt_ok = _flag(df, "ALPHA_LT_OK", True)
+    ltp = _num_nan(df, "LOW_TREND_PCTL")   # [v46] 당일 분위(0~100) — 사유 문구용
 
     result: list[str] = []
     for i in range(len(df)):
@@ -174,8 +175,12 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
                 if pd.notna(_a) and pd.notna(_t) and _a < _t:
                     row_reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
                 elif not bool(lt_ok.iloc[i]):
-                    # [v37] 알파는 통과했지만 저점추세 하락 — 실측 역신호 구간.
-                    row_reasons.append("저점추세 하락 (알파 통과·자리 미달)")
+                    # [v46] 알파는 통과했지만 저점추세가 당일 하위권 — 실측 역신호.
+                    #   당일 하위30% 종목 엣지 -0.57%p·승률 26.9% (t=-2.19)
+                    _p = ltp.iloc[i]
+                    row_reasons.append(
+                        f"저점추세 당일 하위 {_p:.0f}% (알파 통과·자리 미달)"
+                        if pd.notna(_p) else "저점추세 하락 (알파 통과·자리 미달)")
                 else:
                     row_reasons.append("진입 조건 미달")
             else:
