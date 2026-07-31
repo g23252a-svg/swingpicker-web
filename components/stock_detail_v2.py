@@ -312,6 +312,10 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "route": route,
         "route_kr": ROUTE_KR_MAP.get(route, "중립"),
 
+        # [v47] 위험구간 — 진입 금지에서 끝내지 않고 '보유 중이면 정리'까지.
+        "danger_zone": _as_bool(row.get("DANGER_ZONE", 0)),
+        "danger_reason": _safe_str(row.get("DANGER_ZONE_REASON", ""), ""),
+
         # status 뱃지
         "top_pick": top_pick,
         "top_pick_type": top_pick_type or ("AGGRESSIVE" if top_pick else "—"),
@@ -2759,13 +2763,21 @@ def render_v2_scenarios(n: dict):
 # Step 2F: 최종 판정 띠 (페이지 최하단)
 # ═══════════════════════════════════════════════════
 
-def _verdict_grade(top_pick: bool, qty: int, rr: float, is_overheat: bool):
+def _verdict_grade(top_pick: bool, qty: int, rr: float, is_overheat: bool,
+                   danger_zone: bool = False):
     """[v37.5] 최종 판정 등급 — (라벨, 색, 아이콘).
 
     판정 SSOT = TOP_PICK 게이트. RR만 보고 '양호한 진입 후보'라고 하면 관망
     (TOP_PICK 없음·KELLY 0) 종목도 매수 후보로 오표기됨(한국전력 사례).
-    → 과열 → 게이트 탈락(관망) → 통과분만 RR로 등급 순서로 판정.
+    → 위험구간 → 과열 → 게이트 탈락(관망) → 통과분만 RR로 등급 순서로 판정.
+
+    [v47] 위험구간이 최우선이다. '관망'과 '정리 검토'는 보유자에게 전혀 다른
+    지시인데 기존 판정은 둘을 같은 회색 '관망'으로 뭉쳤다. 실측 5일 -2.88%·
+    승률 21.5%(20일 승률 10.8%)인 구간을 '관망'으로 표시하면 보유자가 방치한다.
     """
+    if danger_zone:
+        return ("위험구간 — 보유 시 정리 검토",
+                "linear-gradient(135deg, #B91C1C, #7F1D1D)", "⛔")
     if is_overheat:
         return "과열 — 신규매수 부적합", "linear-gradient(135deg, #EF4444, #DC2626)", "⚠️"
     if not top_pick or qty == 0:
@@ -2825,7 +2837,9 @@ def render_v2_final_verdict(n: dict, rank: int = 0, total: int = 0):
     if qty == 0:
         risks.append("KELLY 0주")
 
-    verdict_label, verdict_color, icon = _verdict_grade(top_pick, qty, rr, is_overheat)
+    danger_zone = bool(n.get("danger_zone", False))     # [v47]
+    verdict_label, verdict_color, icon = _verdict_grade(
+        top_pick, qty, rr, is_overheat, danger_zone)
 
     rank_text = f"{total}개 중 {rank}위" if rank and total else ""
     strengths_text = " + ".join(strengths) if strengths else "—"
@@ -3582,11 +3596,16 @@ def render_v2_decision_hero(n: dict, rank: int = 0, total: int = 0,
     qty = int(n["qty"]) if n["qty"] else 0
     top_pick = n.get("top_pick", False)
 
-    label, grad, icon = _verdict_grade(top_pick, qty, rr, is_overheat)
+    danger_zone = bool(n.get("danger_zone", False))     # [v47]
+    label, grad, icon = _verdict_grade(top_pick, qty, rr, is_overheat, danger_zone)
     is_buy = icon in ("👑", "✓")
 
     # 판정 이유 한 줄 — 매수면 강점, 관망이면 왜 대상 아닌지.
-    if is_overheat:
+    if danger_zone:
+        # [v47] 실측 근거를 그대로 노출 — 보유자에게 '방치 금지' 신호.
+        why = h_escape(n.get("danger_reason", "")
+                       or "위험구간 — 알파 하위10% + 저점추세 하위30%")
+    elif is_overheat:
         why = "과열 신호 — 추격 위험"
     elif not top_pick:
         why = "게이트 미통과 (알파·자리 조건 미달) — 관찰만"
