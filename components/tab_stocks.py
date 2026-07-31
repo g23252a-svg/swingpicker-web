@@ -4254,7 +4254,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
             {
                 "전체": "전체",
                 "ATTACK":  "매수검토",
-                "ARMED":   "진입대기",
+                "ARMED":   "구조미확인",
                 "WAIT":    "관망",
                 "NEUTRAL": "중립",
             },
@@ -5205,7 +5205,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         with ui.row().classes("w-full gap-4 flex-wrap items-start"):
             # [Step AE] 칸반 컬럼 제목 한글화 (내부 ROUTE는 비교에서 그대로 사용)
             _kanban_col(f"🚀 {_AE_ROUTE_MAP.get('ATTACK', '매수검토')}", df_atk, "#EF4444")
-            _kanban_col(f"🎯 {_AE_ROUTE_MAP.get('ARMED', '진입대기')}", df_arm, "#F59E0B")
+            _kanban_col(f"🎯 {_AE_ROUTE_MAP.get('ARMED', '구조미확인')}", df_arm, "#F59E0B")
             _kanban_col(f"👀 {_AE_ROUTE_MAP.get('WAIT', '관망')}", df_watch, "#3B82F6")
 
     def _kanban_col(title: str, sub_df: pd.DataFrame, color: str):
@@ -5750,7 +5750,7 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
 # ui_terms.ROUTE_LABELS의 외부 리뷰안 용어 그대로 사용 — 화면 간 용어 일관성
 ROUTE_KR = {
     "ATTACK":   "매수검토",
-    "ARMED":    "진입대기",
+    "ARMED":    "구조미확인",
     "WAIT":     "관망",
     "OVERHEAT": "과열주의",
     "NEUTRAL":  "중립",
