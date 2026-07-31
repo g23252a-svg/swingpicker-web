@@ -23,7 +23,7 @@
 # [Step AE] 외부 리뷰안 — 행동 중심 부드러운 표현 (마케팅 톤 X)
 ROUTE_LABELS = {
     "ATTACK":       "매수검토",
-    "ARMED":        "진입대기",
+    "ARMED":        "구조미확인",
     "WAIT":         "관망",
     "NEUTRAL":      "중립",
     "CARRY":        "보유관리",

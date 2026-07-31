@@ -89,7 +89,7 @@ def _safe_str(v, default="—") -> str:
 
 ROUTE_KR_MAP = {
     "ATTACK":   "매수검토",
-    "ARMED":    "진입대기",
+    "ARMED":    "구조미확인",
     "WAIT":     "관망",
     "NEUTRAL":  "중립",
     "OVERHEAT": "과열주의",

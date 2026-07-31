@@ -602,6 +602,23 @@ def recompute_route_with_alpha(df: pd.DataFrame) -> pd.DataFrame:
     new_route[_sealed] = "WAIT"
     reason[_sealed] = "🔒 신규진입 차단 중 — 매수검토 봉인 (방어 해제 시 자동 복귀)"
 
+    # [v44] 폭락 추격 경고 — 극단 과매도 반등 매수는 실측 손실.
+    # 1.5년 주가 패널(유동성 200억+, 차단 기간) 실측 10일 수익:
+    #   MA20 이격 -15% 이하        -3.57% (승률 41%)
+    #   과매도(RSI<35) & 이격-15%↓  -2.14% (승률 44%)
+    #   과매도 & 대형(거래대금1000억+) -1.30% (승률 50%)
+    # 반면 구조 유지(MA20 위 + 저점상승)는 +5.68%(승률 62%) — 즉 '많이 빠졌으니
+    # 반등한다'가 아니라 '구조가 살아있나'가 갈림. 낙폭 큰 우량주 추격을 경고한다.
+    _rsi_w = num("RSI14")
+    _dev_w = num("이격도") if "이격도" in out.columns else pd.Series(np.nan, index=out.index)
+    _deep = _dev_w.where(_dev_w.notna(), lowt)      # 이격도 없으면 저점추세로 대체
+    chase_warn = (_deep <= -15.0) & (~preserve)
+    chase_warn = chase_warn.fillna(False)
+    out["CRASH_CHASE_WARN"] = chase_warn.astype(int)
+    # 봉인 사유(v43)가 우선 — 봉인 행은 MA20 위라 원래 이 조건에 안 걸리지만 명시.
+    reason[chase_warn & new_route.eq("WAIT") & (~_sealed)] = (
+        "⚠️ 낙폭 과대 — 반등 추격 실측 손실(이격 -15%↓ 10일 -3.6%·승률 41%)")
+
     out["ROUTE_PREV"] = out.get("ROUTE", "")
     out["ROUTE"] = new_route
     out["ROUTE_REASON"] = reason
