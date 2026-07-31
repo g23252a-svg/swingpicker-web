@@ -78,6 +78,21 @@ ALPHA_GATE_THRESHOLD = {
 ALPHA_GATE_DEFAULT_THRESHOLD = 85.0
 
 # ═══════════════════════════════════════════════════════════════
+# [v46] 저점추세 게이트 — 절대 문턱 → 당일 횡단면 분위
+# ───────────────────────────────────────────────────────────────
+# 누적 백데이터 정밀 분석(스냅샷 105일 × OHLCV 캐시 합집합 1,709종목,
+# 진입 t+1시가·-8% 장중스톱·t+5종가, 일별평균 페어드 t):
+#   현행 LT≥0       엣지 +0.16%p  t=+1.30   ← 유의하지 않음
+#   신규 LT 분위>30%  엣지 +0.32%p  t=+5.29   (IS +3.30 / OOS +4.29)
+# 절대 문턱이 실패한 이유는 선별도가 날마다 요동친 것 — LT<0 종목이
+# 중앙일 61.4%라 어떤 날은 거의 전부 차단, 어떤 날은 거의 전부 통과.
+# 임계 민감도가 분위 0.20~0.50에서 t=3.6~5.3으로 평탄해 특정값 과최적화가 아니며,
+# 474회 단일피처 탐색에서 BH-FDR·OOS를 동시 통과한 2개 중 하나가
+# 'Low_Trend_PCT 하위30%'였다(독립 교차확인).
+_LT_PCTL_FLOOR = 0.30          # 당일 하위 30% 제외
+_LT_PCTL_MIN_SAMPLE = 30       # 분위 안정화 최소 표본 — 미달 시 구 절대규칙 폴백
+
+# ═══════════════════════════════════════════════════════════════
 # [v32.1] ROUTE 자체 치료 — 상태 판정을 데이터 방향으로 재설계
 # ───────────────────────────────────────────────────────────────
 # 진단(3~7월 OOS): 기존 ATTACK은 역방향 피처로 조립 —
@@ -455,13 +470,14 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
 
     검증 통과(ALPHA_VALIDATED==1)일 때만 작동한다:
       TOP_PICK = 리스크가드(ENTRY_RISK_GATE_OK) AND 알파백분위 ≥ 레짐문턱
-                 AND 저점추세 유지(Low_Trend_PCT ≥ 0, 결측은 통과)   [v37]
+                 AND 저점추세 당일 분위 > 30% (결측은 통과)          [v46]
     · ROUTE는 건드리지 않는다(타이밍 배지로만 존치).
     · ENTRY_RISK_GATE_OK가 없으면(레거시) close>stop 등 기본 가드만 재구성.
     · 미검증이면 TOP_PICK을 그대로 두고 ALPHA_GATE_ACTIVE=0 (레거시 폴백).
 
     주입 컬럼:
-      ALPHA_GATE_ACTIVE, ALPHA_ENTRY_THRESHOLD, ALPHA_ENTRY_OK, ALPHA_LT_OK
+      ALPHA_GATE_ACTIVE, ALPHA_ENTRY_THRESHOLD, ALPHA_ENTRY_OK, ALPHA_LT_OK,
+      LOW_TREND_PCTL, ALPHA_LT_RULE                                  [v46]
     """
     out = df.copy()
     n = len(out)
@@ -504,15 +520,36 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
         return pd.Series(False, index=out.index)
     blocked = _blk("NEW_ENTRY_BLOCKED") | _blk("JULY_PROFIT_BLOCK_FLAG") | _blk("PROFIT_RECOVERY_BLOCK_FLAG")
 
-    # [v37] 저점추세 결합 — 알파 통과 종목을 Low_Trend_PCT 방향으로 가르면
-    # LT≥0 +1.97%/승률48% vs LT<0 -0.12%/45% (OOS n=4,230, 일별페어드 p=0.015).
-    # 게이트 풀이 절반으로 정제되고 치료된 ATTACK 정의와도 일관된다.
-    # 결측은 통과 처리 — 데이터 이슈가 전면 차단으로 번지지 않게.
+    # [v46] 저점추세 게이트를 '절대 0' → '당일 횡단면 하위분위 제외'로 교체.
+    #
+    # v37의 LT≥0은 유니버스 105일(n=45,389) 재측정에서 엣지 +0.16%p·t=+1.30 —
+    # 유의하지 않았다. 원인은 선별도가 날에 따라 요동친 것: LT<0 종목이 중앙일
+    # 61.4%라 어떤 날은 거의 다 막고 어떤 날은 거의 다 통과시킨다.
+    # 같은 날 안에서 상대 순위로 자르면 선별도가 고정된다:
+    #   LT 분위>30%  엣지 +0.32%p  t=+5.29  (IS +3.30 / OOS +4.29)
+    #   FWD3 t=+4.27 · FWD10 t=+4.48 · FWD20 t=+1.95 (현행은 FWD20에서 음수)
+    #   임계 민감도 평탄(분위 0.20~0.50에서 t=3.6~5.3) → 특정값 과최적화 아님
+    # 두 규칙의 차집합이 결정적:
+    #   현행만 통과(신규가 탈락) n=2,077  평균 -1.95% 승률26.9% 엣지 -0.57 t=-2.19
+    #   신규만 통과(현행이 탈락) n=9,940  평균 -0.57% 승률33.3% 엣지 +0.43 t=+2.53
+    # 즉 절대 문턱은 손실군을 들여보내면서 수익군을 버리고 있었다.
+    # 부수 효과로 유지율 51.5% → 70.1%: 후보가 덜 사라진다.
     if "Low_Trend_PCT" in out.columns:
         lt = pd.to_numeric(out["Low_Trend_PCT"], errors="coerce")
     else:
         lt = pd.Series(np.nan, index=out.index)
-    lt_ok = lt.isna() | (lt >= 0)
+
+    # 분위는 표본이 있어야 안정적 — 부족하면 구 절대규칙으로 폴백.
+    if int(lt.notna().sum()) >= _LT_PCTL_MIN_SAMPLE:
+        pctl = lt.rank(pct=True)
+        out["LOW_TREND_PCTL"] = (pctl * 100).round(1)
+        lt_ok = lt.isna() | (pctl > _LT_PCTL_FLOOR)
+        out["ALPHA_LT_RULE"] = f"pctl>{_LT_PCTL_FLOOR:.2f}"
+    else:
+        out["LOW_TREND_PCTL"] = np.nan
+        lt_ok = lt.isna() | (lt >= 0)
+        out["ALPHA_LT_RULE"] = "abs>=0"      # 표본 부족 폴백
+    # 결측은 통과 처리 — 데이터 이슈가 전면 차단으로 번지지 않게.
     out["ALPHA_LT_OK"] = lt_ok.astype(int)
 
     entry_ok = risk_ok & ascore.notna() & (ascore >= thr) & (~blocked) & lt_ok
