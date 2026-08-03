@@ -5388,5 +5388,59 @@
       "257720_20260714_WARN_DRAWDOWN_20260729",
       "257720_20260714_STOP_HIT_20260730"
     ]
+  },
+  {
+    "code": "383220",
+    "name": "F&F",
+    "entry_ymd": "20260618",
+    "entry_px": 80400.0,
+    "qty": 0,
+    "stop_px": 69700.0,
+    "stop_px_initial": 69700.0,
+    "take_px1": 89000.0,
+    "take_px2": 100200.0,
+    "trailing_high": 84600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260803",
+    "last_close_px": 61800.0,
+    "unrealized_pnl_pct": -23.13,
+    "realized_pnl_pct": -23.13,
+    "close_ymd": "20260803",
+    "close_px": 61800.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "383220_20260618_WARN_DRAWDOWN_20260622",
+      "383220_20260618_WARN_DRAWDOWN_20260623",
+      "383220_20260618_WARN_DRAWDOWN_20260624",
+      "383220_20260618_WARN_DRAWDOWN_20260625",
+      "383220_20260618_WARN_DRAWDOWN_20260626",
+      "383220_20260618_WARN_DRAWDOWN_20260720",
+      "383220_20260618_WARN_DRAWDOWN_20260722",
+      "383220_20260618_WARN_DRAWDOWN_20260724",
+      "383220_20260618_STOP_HIT_20260803"
+    ]
+  },
+  {
+    "code": "049720",
+    "name": "고려신용정보",
+    "entry_ymd": "20260727",
+    "entry_px": 9580.0,
+    "qty": 0,
+    "stop_px": 9080.0,
+    "stop_px_initial": 9080.0,
+    "take_px1": 11940.0,
+    "take_px2": 12660.0,
+    "trailing_high": 10800.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260803",
+    "last_close_px": 9060.0,
+    "unrealized_pnl_pct": -5.43,
+    "realized_pnl_pct": -5.43,
+    "close_ymd": "20260803",
+    "close_px": 9060.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "049720_20260727_STOP_HIT_20260803"
+    ]
   }
 ]

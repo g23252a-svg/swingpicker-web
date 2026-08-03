@@ -1,5 +1,5 @@
 {
- "trained_ymd": "20260731",
+ "trained_ymd": "20260803",
  "n_features": 100,
  "features": [
   "거래대금(억원)",
@@ -105,12 +105,12 @@
  ],
  "ok": true,
  "validated": true,
- "oos_days": 55,
- "oos_rows": 18022,
- "mean_ic": 0.233,
- "ic_t": 8.55,
- "auc": 0.6088,
- "q5q1_spread_pct": 6.029,
+ "oos_days": 56,
+ "oos_rows": 18028,
+ "mean_ic": 0.2204,
+ "ic_t": 7.87,
+ "auc": 0.5999,
+ "q5q1_spread_pct": 5.675,
  "gate": {
   "min_ic_t": 2.0,
   "min_auc": 0.52,
@@ -120,62 +120,62 @@
   {
    "decile": 0,
    "n": 1773,
-   "win_rate": 0.225,
-   "avg_fwd_pct": -8.449
+   "win_rate": 0.2239,
+   "avg_fwd_pct": -8.196
   },
   {
    "decile": 1,
-   "n": 1798,
-   "win_rate": 0.2353,
-   "avg_fwd_pct": -6.683
+   "n": 1802,
+   "win_rate": 0.2503,
+   "avg_fwd_pct": -6.653
   },
   {
    "decile": 2,
-   "n": 1804,
-   "win_rate": 0.2511,
-   "avg_fwd_pct": -6.498
+   "n": 1802,
+   "win_rate": 0.2597,
+   "avg_fwd_pct": -6.308
   },
   {
    "decile": 3,
-   "n": 1799,
-   "win_rate": 0.2579,
-   "avg_fwd_pct": -6.129
+   "n": 1802,
+   "win_rate": 0.2453,
+   "avg_fwd_pct": -6.464
   },
   {
    "decile": 4,
-   "n": 1797,
-   "win_rate": 0.2888,
-   "avg_fwd_pct": -5.026
+   "n": 1794,
+   "win_rate": 0.2781,
+   "avg_fwd_pct": -5.146
   },
   {
    "decile": 5,
-   "n": 1807,
-   "win_rate": 0.2955,
-   "avg_fwd_pct": -4.46
+   "n": 1811,
+   "win_rate": 0.2943,
+   "avg_fwd_pct": -4.496
   },
   {
    "decile": 6,
-   "n": 1806,
-   "win_rate": 0.3267,
-   "avg_fwd_pct": -3.471
+   "n": 1808,
+   "win_rate": 0.3296,
+   "avg_fwd_pct": -3.704
   },
   {
    "decile": 7,
-   "n": 1797,
-   "win_rate": 0.3389,
-   "avg_fwd_pct": -3.097
+   "n": 1796,
+   "win_rate": 0.3313,
+   "avg_fwd_pct": -2.651
   },
   {
    "decile": 8,
-   "n": 1805,
-   "win_rate": 0.364,
-   "avg_fwd_pct": -2.168
+   "n": 1808,
+   "win_rate": 0.3617,
+   "avg_fwd_pct": -2.354
   },
   {
    "decile": 9,
-   "n": 1836,
-   "win_rate": 0.4052,
-   "avg_fwd_pct": -1.058
+   "n": 1832,
+   "win_rate": 0.3957,
+   "avg_fwd_pct": -1.403
   }
  ],
  "model_saved": true

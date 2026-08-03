@@ -1,8 +1,8 @@
 {
-  "trade_ymd": "20260731",
+  "trade_ymd": "20260803",
   "macro_risk": "NORMAL",
   "macro_msg": "매크로 정상",
-  "market_breadth": 88.8,
+  "market_breadth": 56.2,
   "pass_ebs": 4,
   "rec_limit": 5,
   "n_stocks": 328,
