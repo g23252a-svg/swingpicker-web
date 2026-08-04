@@ -125,11 +125,91 @@ _ROUTE_PRESERVE = {"CARRY", "EXIT", "EXIT_WARNING", "BLOCKED"}
 _HOLD_BDAYS = 5  # t+1 시가 진입 → t+1+5 종가 (실거래 기준)
 
 
+_UNION_PATH = "ohlcv_union.parquet"
+_UNION_COLS = ["시가", "종가"]        # 학습 패널이 쓰는 것만 (용량·시간 절약)
+
+
+def _build_ohlcv_union(data_dir: str, pq: list) -> pd.DataFrame | None:
+    """[v50] 일별 OHLCV 캐시 합집합 — 생존편향 제거용.
+
+    각 캐시는 '그날의 유니버스'만 담고 이력 창은 약 375거래일로 고정이다.
+    최신 캐시 하나만 읽으면 유니버스에서 밀려난 종목의 가격이 통째로 사라지고,
+    build_training_panel의 dropna(_fwd)에서 조용히 탈락한다.
+
+    실측(최근 60배치): 등장 종목 1,026개 중 455개가 최신 캐시에 없어
+    학습 행의 14.4%가 사라졌다. 탈락은 무작위가 아니다 —
+      탈락 종목 5일수익 -1.89%(승률 26.3%) vs 생존 종목 -1.22%(33.5%)
+      일별 페어드 t=+5.50
+    즉 모델이 '나빠질 종목'을 학습에서 못 보고 있었다.
+
+    수정 효과(워크포워드 4폴드, 평가 대상 동일):
+      IC +0.1236(t=+7.45) → +0.1509(t=+9.83)
+      게이트 엣지 t=+3.86 → +4.71 · 상위10% 승률 38.2% → 39.3%
+      상위10% 실현수익은 -0.24%p(t=-0.77)로 유의한 변화 없음.
+    IC와 게이트 견고성이 개선되므로 채택하되, 수익 개선을 주장하지 않는다.
+    (야간 검증 게이트가 IC 기준이라 IC 상승은 미검증 폴백 위험을 낮춘다.)
+
+    비용 관리: 합집합을 data/ohlcv_union.parquet에 캐싱하고 새 캐시만 증분
+    병합한다. 매 배치 112개 파일을 다시 읽지 않는다.
+    """
+    union_fp = os.path.join(data_dir, _UNION_PATH)
+    have = None
+    if os.path.exists(union_fp):
+        try:
+            have = pd.read_parquet(union_fp)
+        except Exception as e:
+            logger.warning(f"[v50] 합집합 캐시 읽기 실패 — 재구축: {e}")
+            have = None
+
+    def _norm(d: pd.DataFrame) -> pd.DataFrame:
+        d = d.reset_index()
+        dcol = "Date" if "Date" in d.columns else d.columns[0]
+        d = d.rename(columns={dcol: "Date"})
+        d["Date"] = pd.to_datetime(d["Date"])
+        d["종목코드"] = d["종목코드"].astype(str).str.zfill(6)
+        for c in _UNION_COLS:
+            d[c] = pd.to_numeric(d.get(c), errors="coerce").astype("float32")
+        return d[["Date", "종목코드"] + _UNION_COLS]
+
+    # 증분 대상: 합집합에 없는 (종목,일자)를 가진 캐시만 — 최신 몇 개로 충분.
+    todo = pq if have is None else pq[-3:]
+    parts = [have] if have is not None else []
+    for f in todo:
+        try:
+            parts.append(_norm(pd.read_parquet(f)))
+        except Exception as e:
+            logger.warning(f"[v50] 캐시 스킵 {os.path.basename(f)}: {e}")
+    if not parts:
+        return None
+    out = (pd.concat(parts, ignore_index=True)
+             .drop_duplicates(["종목코드", "Date"], keep="last")
+             .sort_values(["종목코드", "Date"], ignore_index=True))
+    try:
+        out.to_parquet(union_fp, index=False)
+    except Exception as e:
+        logger.warning(f"[v50] 합집합 캐시 저장 실패(진행은 계속): {e}")
+    return out
+
+
 def _load_ohlcv_panel(data_dir: str):
     pq = sorted(glob.glob(os.path.join(data_dir, "ohlcv_cache_*.parquet")))
+    pq = [p for p in pq if "latest" not in os.path.basename(p)]
     if not pq:
         return None, None
-    o = pd.read_parquet(pq[-1])
+
+    # [v50] 합집합 우선 — 실패하면 기존 동작(최신 캐시 1개)으로 폴백.
+    o = None
+    try:
+        uni = _build_ohlcv_union(data_dir, pq)
+        if uni is not None and len(uni) > 0:
+            n_codes = uni["종목코드"].nunique()
+            o = uni.set_index("Date")
+            logger.info(f"[v50] 합집합 학습 패널: {len(uni):,}행 · 종목 {n_codes}")
+    except Exception as e:
+        logger.warning(f"[v50] 합집합 구축 실패 — 최신 캐시로 폴백: {e}")
+        o = None
+    if o is None:
+        o = pd.read_parquet(pq[-1])
     o.index = pd.to_datetime(o.index)
     close = o.pivot_table(index=o.index, columns="종목코드", values="종가", aggfunc="last").sort_index()
     open_ = o.pivot_table(index=o.index, columns="종목코드", values="시가", aggfunc="last").sort_index()
