@@ -415,7 +415,42 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
            Route.EXIT_WARNING:6,"EXIT_WARNING":6,Route.CARRY:7,"CARRY":7}
     df_out["ACTION_PRIORITY"] = df_out["ROUTE"].map(_am).fillna(7).astype(int)
     pm = df_out.index < 120
-    sk, sa = ["ACTION_PRIORITY", _sort_col], [True, False]
+
+    # [v52] 1차 정렬키를 ACTION_PRIORITY → 검증된 알파로 교체.
+    #
+    # ACTION_PRIORITY는 위에서 보듯 ROUTE의 결정적 재라벨(_am 맵)이다. ROUTE는
+    # v32에서 이미 역예측 판정을 받았고(ATTACK 알파 -2.9%p, t=-3.56, p=0.0004),
+    # 재라벨이 원본보다 많은 정보를 가질 수 없다. 실측도 그대로였다:
+    #   · 일별 스피어만 IC가 풀 정의 16종 전부에서 IS 음수(설계방향) → OOS 양수(역방향)
+    #     16/16 대 0/16 완전 반전. IS·OOS 부호일치 0/16.
+    #   · 군평균 순서 vs 설계순서 rho=-0.107(p=0.82) — 무상관.
+    #     실제 순서 2,4,3,7,5,6,1 로 '최우선' prio=1(ATTACK)이 7군 중 최악
+    #     (일평균 -2.61% vs 나머지 -1.27%, t=-3.48, p=0.001).
+    #   · 알파백분위 통제 후 부분IC가 원IC와 사실상 동일 → 한계기여 0.
+    #   · 물량 86%인 prio3 vs prio4 대비는 32셀 중 30셀에서 prio4가 우수(역방향)이나
+    #     16풀 전부 p>0.05로 유의하지 않다 = 방향도 못 정한다.
+    # prio=1이 최악인 이유는 기계적으로 특정된다 — 중위 진입갭 9.8%(prio3은 0.0%),
+    # 중위 RR 0.27(1.62), -8% 스톱 체결률 59.7%(50.1%). 즉 '최우선' 라벨이
+    # 추격진입·손익비 붕괴 종목을 가리키고 있었다.
+    #
+    # 교체 근거는 '개선'이 아니라 '근거 없는 축을 SSOT 정렬 최상위에서 내린다'다.
+    # 알파 1차 정렬은 유니버스 9셀 전부에서 prio 1차보다 나쁘지 않았고(최대 +1.29%p)
+    # 풀에서는 유리했으나(+0.86~+0.98%p) 어느 셀도 유의하지 않다 — 무해한 단순화로
+    # 제안하며 수익 개선을 주장하지 않는다.
+    # ACTION_PRIORITY는 컬럼·표시 라벨로 그대로 유지하고 2차 정렬키로만 남긴다.
+    _alpha_col = None
+    if "ALPHA_SCORE" in df_out.columns:
+        _asc = pd.to_numeric(df_out["ALPHA_SCORE"], errors="coerce")
+        _val = pd.to_numeric(df_out.get("ALPHA_VALIDATED", 0), errors="coerce").fillna(0)
+        # 검증 통과(ALPHA_VALIDATED==1)이고 실제 값이 있을 때만 1차키로 승격.
+        if float(_val.max() or 0) == 1.0 and _asc.notna().sum() >= max(10, int(len(df_out) * 0.5)):
+            df_out["ALPHA_SCORE"] = _asc.fillna(-1.0)
+            _alpha_col = "ALPHA_SCORE"
+    if _alpha_col:
+        sk, sa = [_alpha_col, _sort_col, "ACTION_PRIORITY"], [False, False, True]
+    else:
+        # 알파 미검증·미산출 배치는 기존 동작 유지 (레거시 폴백).
+        sk, sa = ["ACTION_PRIORITY", _sort_col], [True, False]
     df_out = pd.concat([df_out[pm].sort_values(sk, ascending=sa), df_out[~pm].sort_values(sk, ascending=sa)], ignore_index=True)
     df_out["LDY_RANK"] = np.arange(1, len(df_out)+1)
     # UI 호환

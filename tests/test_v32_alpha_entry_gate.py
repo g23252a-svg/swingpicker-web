@@ -53,8 +53,14 @@ def _df(rows):
 # ── 문턱 상수 ──
 
 def test_regime_thresholds_match_adaptive_choice():
-    # [v40] NEUTRAL 80→85 상향 (OOS +1.35→+1.62%, t=2.08). UP/DOWN 유지.
-    assert ALPHA_GATE_THRESHOLD["UP"] == 70.0
+    # [v40] NEUTRAL 80→85 상향 (OOS +1.35→+1.62%, t=2.08).
+    # [v52] UP 70→90. v40이 '검증 범위 밖'으로 남긴 값을 처음 검정한 결과
+    #   근거가 전무했다 — UP 내부 임계 스윕 80셀 중 66셀 음수·유의 0셀,
+    #   UP 내부 알파 기울기 -0.07%p(t=-0.10)로 판별력 자체가 없고,
+    #   70이 추가로 들여보내는 밴드는 n=851·평균 -1.40%·승률 31.6%로
+    #   무여과 기저(-1.86%·30.8%)와 동급이었다.
+    #   자세한 근거는 tests/test_v52_sort_and_regime.py 참조.
+    assert ALPHA_GATE_THRESHOLD["UP"] == 90.0
     assert ALPHA_GATE_THRESHOLD["NEUTRAL"] == 85.0
     assert ALPHA_GATE_THRESHOLD["DOWN"] == 90.0
     assert ALPHA_GATE_DEFAULT_THRESHOLD == 85.0
@@ -86,12 +92,24 @@ def test_neutral_threshold_85_selects_top15():
     assert out.iloc[1]["TOP_PICK_TYPE"] == "ALPHA"
 
 
-def test_up_regime_is_more_permissive_than_down():
-    # 같은 알파 75점: 상승(≥70)은 통과, 하락(≥90)은 탈락.
-    up = apply_alpha_entry_gate(_df([{"ALPHA_SCORE": 75.0, "MARKET_REGIME": "UP"}]))
-    down = apply_alpha_entry_gate(_df([{"ALPHA_SCORE": 75.0, "MARKET_REGIME": "DOWN"}]))
-    assert up.iloc[0]["TOP_PICK"] == 1
+def test_neutral_regime_is_more_permissive_than_up_and_down():
+    """[v52] '상승장은 더 관대해야 한다'는 설계 의도가 실측에서 기각됐다.
+
+    UP 레짐에서는 알파가 아예 판별하지 않는다(기울기 -0.07%p, t=-0.10).
+    반면 NEUTRAL은 임계-수익이 강하게 단조(rho=+0.98)이고 v40에서 85가
+    검증됐다. 따라서 이제 가장 관대한 레짐은 UP이 아니라 NEUTRAL이다.
+    UP·DOWN은 동일한 보수적 기본값 90을 쓴다.
+    """
+    args = {"ALPHA_SCORE": 87.0}
+    neu = apply_alpha_entry_gate(_df([{**args, "MARKET_REGIME": "NEUTRAL"}]))
+    up = apply_alpha_entry_gate(_df([{**args, "MARKET_REGIME": "UP"}]))
+    down = apply_alpha_entry_gate(_df([{**args, "MARKET_REGIME": "DOWN"}]))
+    assert neu.iloc[0]["TOP_PICK"] == 1
+    assert up.iloc[0]["TOP_PICK"] == 0
     assert down.iloc[0]["TOP_PICK"] == 0
+    # UP과 DOWN은 이제 같은 임계
+    assert (float(up.iloc[0]["ALPHA_ENTRY_THRESHOLD"])
+            == float(down.iloc[0]["ALPHA_ENTRY_THRESHOLD"]) == 90.0)
 
 
 def test_unknown_regime_defaults_to_neutral():
