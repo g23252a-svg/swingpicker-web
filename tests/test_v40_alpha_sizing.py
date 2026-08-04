@@ -38,9 +38,10 @@ def _gate_df(alphas, thr=85.0, qty=100):
 def test_neutral_threshold_raised_to_85():
     assert ALPHA_GATE_THRESHOLD["NEUTRAL"] == 85.0
     assert ALPHA_GATE_DEFAULT_THRESHOLD == 85.0
-    # UP/DOWN은 유지 (검증 범위 밖).
-    assert ALPHA_GATE_THRESHOLD["UP"] == 70.0
+    # DOWN 90 유지 (v52 재검정에서 국소 최적 — 80/85와 구별 불가, 95는 열화).
     assert ALPHA_GATE_THRESHOLD["DOWN"] == 90.0
+    # [v52] UP은 70→90. v40 시점의 '검증 범위 밖 유지'가 v52에서 기각됐다.
+    assert ALPHA_GATE_THRESHOLD["UP"] == 90.0
 
 
 # ── 알파 비례 사이징 ──
