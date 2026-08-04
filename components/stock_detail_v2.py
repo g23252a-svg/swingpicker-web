@@ -316,6 +316,14 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "danger_zone": _as_bool(row.get("DANGER_ZONE", 0)),
         "danger_reason": _safe_str(row.get("DANGER_ZONE_REASON", ""), ""),
 
+        # [v53] v45가 만든 0주 사유를 화면까지 연결한다.
+        #   v45의 핵심은 '침묵의 0주 금지'였는데 컬럼만 만들고 UI 배선이 빠져
+        #   사용자에게는 여전히 '신규 부적합(0주)'로만 보였다 — 수정이 미완이었다.
+        "kelly_zero_reason": _safe_str(row.get("KELLY_ZERO_REASON", ""), ""),
+        "kelly_need_win_rate": safe_float(row.get("KELLY_NEED_WIN_RATE", 0)) or 0.0,
+        # [v44] 낙폭 과대 추격 경고 (이격 -15%↓ 구간 실측 손실).
+        "crash_chase_warn": _as_bool(row.get("CRASH_CHASE_WARN", 0)),
+
         # status 뱃지
         "top_pick": top_pick,
         "top_pick_type": top_pick_type or ("AGGRESSIVE" if top_pick else "—"),
@@ -1118,6 +1126,30 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
     ebs_class = "ebs" if pass_ebs else "ebs fail"
     ebs_pass_text = "PASS" if pass_ebs else "WAIT"
 
+    # [v53] ACTION_PRIORITY 표시 정직화.
+    #   v52 실측: 이 축은 ROUTE의 결정적 재라벨이고 예측력이 없다 —
+    #   일별 스피어만 IC가 풀 16종 전부 IS 음수(설계방향) → OOS 양수(역방향),
+    #   IS·OOS 부호일치 0/16, 군평균 vs 설계순서 rho -0.107(p=0.82).
+    #   특히 '최우선'인 prio=1(ATTACK)이 7군 중 최악이다
+    #   (일평균 -2.61% vs 나머지 -1.27%, t=-3.48, p=0.001) —
+    #   중위 진입갭 9.8% · 중위 RR 0.27 · 스톱 체결률 59.7%로
+    #   추격진입·손익비 붕괴 종목을 가리키는 라벨이었다.
+    #   v52에서 정렬 1차키에서 내렸으므로 화면에서도 '우선순위'로 읽히면 안 된다.
+    #   숫자를 지우지는 않는다(디버깅·대조용) — 다만 상태 라벨임을 명시하고
+    #   prio=1은 오히려 주의 표시를 붙인다.
+    _prio_kr = {1: "ATTACK", 2: "ARMED", 3: "WAIT", 4: "NEUTRAL",
+                5: "OVERHEAT", 6: "EXIT_WARNING", 7: "CARRY"}
+    _pname = _prio_kr.get(action_priority, "?")
+    if action_priority == 1:
+        priority_html = (
+            f'<span title="v52 실측: prio=1(ATTACK) 군은 7군 중 최악 '
+            f'(-2.61%/일, t=-3.48). 진입갭·손익비 확인 필요.">'
+            f'상태 <strong>{_pname}</strong> '
+            f'<span style="color:#FCD34D;">⚠</span></span>'
+        )
+    else:
+        priority_html = f'상태 <strong>{_pname}</strong>'
+
     # IS_ACTIVE 클래스
     active_class = "active" if is_active else "inactive"
     active_text = "True" if is_active else "False"
@@ -1256,7 +1288,7 @@ def render_v2_header(n: dict, rank: int = 0, total: int = 0,
                 <div class="h-badge {ebs_class}">
                     <div class="lbl">EBS <span style="color: white;">{ebs}</span>/{ebs_total}</div>
                     <div class="pass">{ebs_pass_text}</div>
-                    <div class="priority">ACTION_PRIORITY <strong>{action_priority}</strong></div>
+                    <div class="priority">{priority_html}</div>
                     <div class="{active_class}">IS_ACTIVE {active_text}</div>
                 </div>
             ''')
@@ -3530,8 +3562,37 @@ def render_v2_action_rail(n: dict):
         return f"{int(round(v)):,}" if v else "—"
 
     # 수치 한 줄
-    kelly_txt = (f"{qty:,}주 ({amount:.0f}만원)" if qty else "신규 부적합(0주)")
+    kelly_txt = (f"{qty:,}주 ({amount:.0f}만원)" if qty else "0주")
     rr_c = "var(--green)" if rr >= 1.3 else ("var(--orange)" if rr >= 1.0 else "var(--red)")
+
+    # [v53] 0주 사유를 화면에 붙인다 — v45의 '침묵의 0주 금지'를 완결.
+    #   v45가 KELLY_ZERO_REASON·KELLY_NEED_WIN_RATE를 만들었으나 UI 배선이
+    #   빠져 사용자는 '신규 부적합(0주)'만 보고 이유를 알 수 없었다.
+    #   사유 컬럼이 없는 구 CSV에서는 최소한의 일반 문구로 대체한다.
+    zero_html = ""
+    if not qty:
+        _zr = str(n.get("kelly_zero_reason", "") or "").strip()
+        _need = float(n.get("kelly_need_win_rate", 0) or 0)
+        if not _zr:
+            _zr = ("켈리 기준 미달 — 손익비 대비 승률 부족" if _need <= 0
+                   else f"켈리 기준 미달 — 필요 승률 {_need * 100:.0f}% 미달")
+        zero_html = (
+            '<div style="margin-top:8px;padding:7px 10px;border-radius:8px;'
+            'background:rgba(148,163,184,0.10);border-left:3px solid #94A3B8;'
+            'font-size:11px;line-height:1.5;color:var(--text-gray);">'
+            '<b style="color:var(--text-white);">0주 사유</b> · ' + h_escape(_zr) + '</div>'
+        )
+
+    # [v44] 낙폭 과대 추격 경고 — 이격 -15% 이하 구간의 실측 손실을 노출.
+    chase_html = ""
+    if bool(n.get("crash_chase_warn", False)):
+        chase_html = (
+            '<div style="margin-top:8px;padding:7px 10px;border-radius:8px;'
+            'background:rgba(245,158,11,0.12);border-left:3px solid #F59E0B;'
+            'font-size:11px;line-height:1.5;color:#FCD34D;">'
+            '<b>낙폭 과대</b> · 반등 추격은 실측 손실 구간 '
+            '(이격 -15%↓ 10일 -3.6% · 승률 41%)</div>'
+        )
 
     # 다음 목표 (TP2/TP3) 한 줄
     nxt = []
@@ -3575,6 +3636,8 @@ def render_v2_action_rail(n: dict):
           <span style="color:var(--text-gray);">타임스톱 <b style="color:var(--text-white);">{time_stop}일</b></span>
           <span style="color:var(--text-gray);">다음 목표 <b style="color:var(--text-white);">{nxt_html}</b></span>
         </div>
+        {zero_html}
+        {chase_html}
       </div>
     </div>
     ''')

@@ -3,6 +3,19 @@
 
 표시 전용 패치이므로 `_build_candidate_triage` 분류 결과는 v22.3.18 그대로 두고,
 각 후보 줄에 '왜 공식 신규매수가 아닌지' 사유가 올바르게 붙는지만 고정한다.
+
+[v53 갱신] 사유 임계값이 게이트 실제값과 어긋나 있어 정정했다.
+  · RR 1.2 → 1.0 : 게이트 실제값은 `RR_NOW_TP1 >= 1.0`(scoring_engine
+    `_risk_gate`). 1.2로 표시하면 게이트를 통과한 종목에 '부족'이라는
+    거짓 사유가 붙는다.
+  · POC 30 → 20 : 게이트 실제값은 `POC_GAP <= 20`(v27 검증 — 20% 초과
+    구간 승률 20%/12%). 30으로 두면 실제로 차단되는 21~30% 구간을
+    '양호'로 표시한다.
+  · 사유 순서에 위험구간(v47)·0주 사유(v45)를 최상위로 추가.
+    위험구간은 20일 승률 10.8%로 '왜 못 사는가'보다 강한 정보다.
+  · 문구도 정정: 'TOP_PICK 미선정' → '게이트 미통과',
+    'BUY_NOW 미충족' → '즉시매수 조건 미충족' (내부 컬럼명 노출 제거).
+따라서 아래 기대문구는 v53 기준으로 갱신됐다.
 """
 
 import sys
@@ -46,7 +59,8 @@ def test_high_score_watch_reason_shows_vwap_and_poc_overheat():
         "eligible": False,
     }
     reason = _candidate_watch_reason(item)
-    assert reason == "VWAP 과열 +29% · POC 과열 +70%"
+    # [v53] POC 임계가 20이라 POC가 먼저, 그다음 VWAP.
+    assert reason == "POC 과열 +70% (게이트 20% 초과) · VWAP 과열 +29%"
 
 
 def test_entry_watch_reason_shows_official_gating_only():
@@ -61,7 +75,7 @@ def test_entry_watch_reason_shows_official_gating_only():
         "eligible": False,
     }
     reason = _candidate_watch_reason(item)
-    assert reason == "TOP_PICK 미선정 · BUY_NOW 미충족"
+    assert reason == "게이트 미통과 · 즉시매수 조건 미충족"
 
 
 def test_reason_capped_at_two_by_default():
@@ -76,23 +90,34 @@ def test_reason_capped_at_two_by_default():
         "eligible": False,
     }
     reason = _candidate_watch_reason(item)
-    assert reason == "VWAP 과열 +15% · POC 과열 +40%"
+    assert reason == "POC 과열 +40% (게이트 20% 초과) · VWAP 과열 +15%"
     assert reason.count("·") == 1  # 정확히 2개 사유
 
 
 def test_reason_priority_rr_before_gating():
-    """과열이 없으면 RR 부족이 TOP_PICK 미선정보다 먼저 표시된다."""
+    """과열이 없으면 손익비 부족이 게이트 미통과보다 먼저 표시된다.
+
+    [v53] RR 1.10은 게이트(>=1.0)를 통과하므로 더 이상 '부족'이 아니다.
+    부족 판정을 보려면 1.0 미만이어야 한다.
+    """
     item = {
         "name": "RR부족",
         "score": 82.0,
-        "rr": 1.10,
+        "rr": 0.90,
         "vwap_gap": 3.0,
         "poc_gap": 10.0,
         "top_pick": False,
         "eligible": False,
     }
     reason = _candidate_watch_reason(item)
-    assert reason == "RR 부족 1.10 · TOP_PICK 미선정"
+    assert reason == "손익비 부족 0.90 (게이트 1.0 미달) · 게이트 미통과"
+
+
+def test_rr_passing_gate_is_not_flagged_as_short():
+    """[v53] 게이트를 통과한 RR을 '부족'이라 적으면 거짓 사유다."""
+    item = {"name": "RR통과", "rr": 1.10, "vwap_gap": 3.0, "poc_gap": 10.0,
+            "top_pick": False, "eligible": False}
+    assert "손익비 부족" not in _candidate_watch_reason(item)
 
 
 def test_reason_fallback_when_nothing_flags():
@@ -157,5 +182,5 @@ def test_triage_reasons_match_v22318_classification():
     entry_line = _triage_line_with_reason(triage["entry_watch"])
     high_line = _triage_line_with_reason(triage["high_score_watch"])
 
-    assert "센서뷰" in entry_line and "TOP_PICK 미선정" in entry_line
-    assert "해성디에스" in high_line and "VWAP 과열 +29%" in high_line
+    assert "센서뷰" in entry_line and "게이트 미통과" in entry_line
+    assert "해성디에스" in high_line and "POC 과열 +70%" in high_line
