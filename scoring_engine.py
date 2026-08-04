@@ -18,6 +18,7 @@ from shared_utils import nz_num, safe_float
 from collector_config import DEFAULT_CONFIG, CollectorConfig
 
 
+
 # ═══════════════════════════════════════════════════
 #  1. 벡터화된 스코어 함수
 # ═══════════════════════════════════════════════════
@@ -758,7 +759,8 @@ def compute_elite_score(df: pd.DataFrame,
     x["ELITE_REASON"] = x.apply(_reason, axis=1)
 
     # ═══ TOP_PICK — v22 이원화 ═══
-    _pass_ebs = x.get("PASS_EBS", pd.Series(1, index=x.index)).fillna(1).astype(int)
+    # [v51] _pass_ebs는 리스크 게이트에서 제거됐다(예측력 미확인 — 아래 _risk_gate
+    #       주석 참조). PASS_EBS 컬럼 자체는 표시·알파 피처로 계속 산출된다.
     _turnover = pd.to_numeric(x.get("거래대금(억원)", 0), errors="coerce").fillna(0)
     _tp1_pct = ((tp1 - close) / close.clip(lower=1) * 100).round(1)
     x["TP1_PCT"] = _tp1_pct
@@ -782,6 +784,12 @@ def compute_elite_score(df: pd.DataFrame,
 
     # [v22.3] RR_NOW_TP1 hard gate — 손익비 1.0 미만 TOP_PICK 차단
     # 평가 피드백 96.5점 핵심 항목: "STABLE 타입이라도 RR<1.0이면 추천 자격 X"
+    #
+    # [v51 검토·유지] RR 결측이 배치를 전면 차단한다는 의심을 검증했으나 기각.
+    # RR_NOW_TP1은 위(733행)에서 종가·손절가·추천매도가1로 매 배치 재계산되므로
+    # 프로덕션에서는 결측이 될 수 없다. 2026-04-01~09의 '추천 0건'은
+    # 그 시점 CSV에 RR_NOW_TP1 컬럼이 아직 없었던 것(04-10 도입)에서 비롯된
+    # 리서치 패널 아티팩트이며 런타임 결함이 아니다 — 우회 경로를 넣지 않는다.
     _rr_now = pd.to_numeric(
         x.get("RR_NOW_TP1", pd.Series(0, index=x.index)),
         errors="coerce"
@@ -806,10 +814,31 @@ def compute_elite_score(df: pd.DataFrame,
     # ARMED 노이즈로, ROUTE는 진입 게이트가 아니라 타이밍 배지로만 존치.
     # 진입 게이트는 alpha_engine.apply_alpha_entry_gate가 검증된 알파로 재정의한다.
     # 이 마스크는 알파 게이트/폴백 공통 리스크 가드로 재사용된다.
+    # [v51] PASS_EBS 거부권 제거 — 4개 렌즈 적대적 검증에서 예측력 미확인.
+    #
+    # 한계기여(나머지 6조건 통과 풀 내 통과 vs 탈락, 일별평균 페어드):
+    #   차이 -0.21%p  t=-0.36  p=0.72   (IS -0.62 / OOS +0.04)
+    # 4개 렌즈 전부 이 결론을 반증하지 못했다:
+    #   · 풀정의: 알파상위 5~30% × 저점추세하한 .20~.50 = 16셀에서 p<0.05가 0/16,
+    #     표본 4.6배인 유니버스 전체에서도 -0.23%p t=-1.42 (IS·OOS 동시 음수)
+    #   · 시간: 월 3/4 음수·|t|>2 0개월, 에피소드 -0.09(t=-0.13), 부트 CI 0 포함
+    #   · 교란: 13변수 층화(13/13 p>0.26)·성향점수매칭 6종·일FE회귀 전부 |t|<1.1
+    #   · 보유기간: FWD3/5/10/20 × ALL/IS/OOS = 12셀 전부 p>0.36 (최대 |t|=0.92)
+    # 제거 영향(짝맞춘 69일 포트폴리오): 통과 898→1,495행(일평균 11.8→19.7, +66%)
+    #   수익차 +0.05%p(t=+0.49) · NW5 t=+0.64 · 4지평·월별 전부 |t|<0.9
+    #   위험 동등~미세개선: MaxDD -77.7(기존 -82.0) · 스톱적중 32.8%(33.4%)
+    #                       sd 4.47(4.52) · 최악5분위 -6.24(-6.33)
+    # 구조적 근거: EBS는 5개 이진체크 합(저점추세>0·거래품질·MACD기울기·RSI대역·
+    #   TTM/BB확장)이고 그중 둘이 이미 검증된 저점추세 게이트(v46 t=+5.29)와
+    #   중복이다 — 보호 기능의 상당부분이 이미 상류에 있다.
+    # 한계(정직 기록): 검정력이 낮아 '효과 없음'이 아니라 '±1.5%p 이내는 탐지 불가'가
+    #   정확한 진술이다. 통과율이 86.6→52.4→67.4%로 표류해 완화폭이 고정적이지 않다.
+    #   RR·POC와 묶어 제거하면 중립성이 상쇄된다(-EBS-POC t=-1.63, 셋다 에피소드
+    #   OOS t=-2.58 p=0.014) → 단독 제거만 유효하다.
+    # PASS_EBS 컬럼 자체는 표시·알파 피처로 그대로 유지한다(정의 불변 = skew 없음).
     _risk_gate = (
         (close > stop)
         & (close < tp1)
-        & (_pass_ebs == 1)
         & (_turnover >= 50)
         & (entry_gap <= 5.0)
         & (_rr_now >= 1.0)  # [v22.3] 손익비 하한 강제
