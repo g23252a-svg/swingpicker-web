@@ -90,9 +90,36 @@ def test_action_rail_marks_current_between_stop_and_tp1():
     assert m and 0.0 < float(m.group(1)) < 100.0
 
 
-def test_action_rail_shows_kelly_zero_as_unfit():
+def test_action_rail_shows_kelly_zero_with_reason():
+    """[v53] 0주는 사유와 함께 표시해야 한다.
+
+    v39는 '신규 부적합(0주)'로만 적었다. v45가 KELLY_ZERO_REASON을 만들어
+    0주 사유를 분류했는데(실측 승률 vs 필요 승률 / 배분액<1주 가격 /
+    상태 미달 / 가격정보 불완전) UI 배선이 빠져 화면에는 안 나왔다.
+    '침묵의 0주 금지'가 v45의 목적이므로 사유 노출까지가 완결이다.
+    """
     html = _rail_html(_row(켈리_수량=0))
-    assert "신규 부적합" in html
+    assert "0주" in html
+    assert "0주 사유" in html, "사유 블록이 없다 — 침묵의 0주"
+
+
+def test_action_rail_uses_engine_zero_reason_when_present():
+    html = _rail_html(_row(켈리_수량=0,
+                          KELLY_ZERO_REASON="실측 승률 41% < 필요 승률 36%"))
+    assert "실측 승률 41%" in html
+
+
+def test_action_rail_zero_reason_falls_back_without_column():
+    """구 CSV(사유 컬럼 없음)에서도 최소 문구는 나와야 한다."""
+    row = _row(켈리_수량=0)
+    row.pop("KELLY_ZERO_REASON", None)
+    html = _rail_html(row)
+    assert "켈리 기준 미달" in html
+
+
+def test_action_rail_no_zero_block_when_qty_positive():
+    html = _rail_html(_row(켈리_수량=12))
+    assert "0주 사유" not in html
 
 
 def test_full_panel_v39_renders():

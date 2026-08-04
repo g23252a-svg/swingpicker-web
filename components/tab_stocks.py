@@ -2345,6 +2345,14 @@ def _candidate_row_payload(row: pd.Series) -> dict:
         "eligible": _bool_like(row.get("BUY_NOW_ELIGIBLE", 0)),
         "top_pick": _bool_like(row.get("TOP_PICK", 0)),
         "real_holding": _bool_like(row.get("IS_REAL_HOLDING", 0)),
+        # [v53] v47 위험구간을 목록까지 연결한다. 상세 페이지에만 있으면
+        #   보유 종목을 목록에서 스캔하는 사용자가 정리 신호를 놓친다.
+        #   실측: 알파 하위10% + 저점추세 하위30% → 5일 -2.88%·승률 21.5%,
+        #   20일 승률 10.8% (엣지 -1.59%p, t=-4.43, IS·OOS 양쪽 유의).
+        "danger_zone": _bool_like(row.get("DANGER_ZONE", 0)),
+        # [v53] v45 0주 사유 — '침묵의 0주' 금지를 목록에서도 지킨다.
+        "qty": _num_like(row.get("켈리_수량"), 0) or 0,
+        "kelly_zero_reason": str(row.get("KELLY_ZERO_REASON", "") or "").strip(),
     }
 
 
@@ -2441,30 +2449,57 @@ def _triage_line(items: list[dict], empty_text: str = "해당 없음") -> str:
 def _candidate_watch_reason(item: dict, max_reasons: int = 2) -> str:
     """[v22.3.19] 관찰 후보가 '왜 공식 신규매수가 아닌지' 1줄 사유.
 
-    우선순위(임계값은 v22.3.18 `_build_candidate_triage` 분류 기준과 동일):
-      VWAP 과열(>10%) → POC 과열(>30%) → RR 부족(<1.2)
-      → TOP_PICK 미선정 → BUY_NOW 미충족
+    우선순위:
+      위험구간 → 낙폭추격 → POC 과열 → VWAP 과열 → RR 부족
+      → 0주 사유 → TOP_PICK 미선정 → BUY_NOW 미충족
     최대 `max_reasons`개를 뽑아 ' · '로 잇는다. 표시 전용이며 산식은 건드리지 않는다.
+
+    [v53] 실측과 어긋난 임계값을 게이트 실제값에 맞추고, v44~v47이 만든
+    구체 사유를 목록에도 노출한다.
+      · RR 임계 1.2 → 1.0: 게이트 실제값은 `RR_NOW_TP1 >= 1.0`이다
+        (scoring_engine `_risk_gate`). 1.2로 표시하면 통과한 종목을
+        '부족'이라 적는 거짓 사유가 된다.
+      · POC 임계 30 → 20: 게이트 실제값은 `POC_GAP <= 20`
+        (v27 검증 — 20% 초과 구간 승률 20%/12%).
+      · 위험구간(v47)·0주 사유(v45)를 최상위 사유로 승격 — 둘 다
+        '왜 못 사는가'보다 강한 정보다(위험구간은 20일 승률 10.8%).
     """
     reasons: list[str] = []
+
+    # [v47] 위험구간이 있으면 그것이 가장 중요한 사유다.
+    if item.get("danger_zone", False):
+        reasons.append("⛔ 위험구간 (보유 시 정리 검토)")
+
+    poc_gap = item.get("poc_gap")
+    if poc_gap is not None and poc_gap > 20.0:
+        reasons.append(f"POC 과열 +{poc_gap:.0f}% (게이트 20% 초과)")
 
     vwap_gap = item.get("vwap_gap")
     if vwap_gap is not None and vwap_gap > 10.0:
         reasons.append(f"VWAP 과열 +{vwap_gap:.0f}%")
 
-    poc_gap = item.get("poc_gap")
-    if poc_gap is not None and poc_gap > 30.0:
-        reasons.append(f"POC 과열 +{poc_gap:.0f}%")
-
     rr = item.get("rr")
-    if rr is not None and rr < 1.2:
-        reasons.append(f"RR 부족 {rr:.2f}")
+    if rr is not None and rr < 1.0:
+        reasons.append(f"손익비 부족 {rr:.2f} (게이트 1.0 미달)")
+
+    # [v45] 게이트는 통과했는데 수량이 0이면 그 사유가 핵심이다.
+    #   단 'qty 키 부재'는 0이 아니다 — 수량 정보가 없는 payload(구 호출부·
+    #   부분 dict)에 '켈리 0주'를 붙이면 없는 사실을 단정하게 된다.
+    #   키가 실제로 있고 그 값이 0일 때만 사유를 낸다.
+    if item.get("top_pick", False) and "qty" in item:
+        try:
+            _q = float(item.get("qty") or 0)
+        except (TypeError, ValueError):
+            _q = None
+        if _q is not None and _q <= 0:
+            _zr = str(item.get("kelly_zero_reason", "") or "").strip()
+            reasons.append(_zr if _zr else "켈리 0주 (배분 기준 미달)")
 
     if not item.get("top_pick", False):
-        reasons.append("TOP_PICK 미선정")
+        reasons.append("게이트 미통과")
 
     if not item.get("eligible", False):
-        reasons.append("BUY_NOW 미충족")
+        reasons.append("즉시매수 조건 미충족")
 
     if not reasons:
         return "공식 신규매수 조건 미충족"
