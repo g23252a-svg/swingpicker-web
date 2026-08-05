@@ -13,11 +13,20 @@ candidate.
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
+logger = logging.getLogger("recommendation_quality")
 
-POLICY_VERSION = "alpha_gate_v32"
+
+# [v54] 공식 매수 계약이 바뀌었으므로 버전을 올린다 — 알파 진입 SSOT(v32)는
+# 그대로이고, 여기에 '공식 매수는 실행 가능하다'가 추가됐다. CSV에 남는
+# QUALITY_POLICY_VERSION으로 어느 계약이 그 행을 만들었는지 감사할 수 있고,
+# daily_briefing의 production_buy_sizable 게이트가 구 계약 산출물을 오판하지
+# 않도록(SKIP) 구분하는 데도 쓰인다.
+POLICY_VERSION = "alpha_gate_v54"
 # [v32] ROUTE는 더 이상 진입 게이트가 아니다(ATTACK 알파 -2.9%p, p=0.0004 실측).
 # 검증된 알파(ALPHA_GATE_ACTIVE)가 진입 SSOT. ACTIVE_ROUTES는 레거시 폴백
 # (알파 미검증일)에서만 참조되며, ROUTE 거부권 자체는 evidence_pass에서 제거됨.
@@ -62,6 +71,41 @@ def _flag(df: pd.DataFrame, column: str, default: bool = False) -> pd.Series:
         .str.lower()
         .isin({"1", "1.0", "true", "t", "yes", "y"})
     )
+
+
+# [v54] 사이징이 0으로 강제되는 ROUTE — kelly_calibrator와 같은 집합이어야 한다.
+# 실제 거부권은 두 곳에서 걸린다:
+#   · kelly_calibrator.resize_kelly_with_alpha (알파 게이트 활성 경로, 6종)
+#   · collector.apply_kelly_betting (레거시 경로, NEUTRAL 제외 5종)
+# 후자는 전자의 부분집합이므로 상위집합 하나로 판정한다(보수적 방향).
+# 값 자체는 kelly_calibrator._KELLY_INACTIVE_ROUTES를 지연 import로 읽어
+# SSOT를 유지하고, import 실패 시에만 아래 리터럴로 폴백한다.
+# test_v54_first_pick_contradictions.py가 두 집합의 동일성을 검사한다.
+_KELLY_INACTIVE_ROUTES_FALLBACK = frozenset(
+    {"WAIT", "OVERHEAT", "EXIT_WARNING", "CARRY", "BLOCKED", "NEUTRAL"})
+
+
+def _inactive_routes() -> frozenset:
+    try:  # 순환 import 회피 — 함수 내부에서만 참조
+        from kelly_calibrator import _KELLY_INACTIVE_ROUTES
+
+        routes = frozenset(str(r).strip().upper() for r in _KELLY_INACTIVE_ROUTES)
+        if routes:
+            return routes
+        logger.warning(
+            "kelly_calibrator._KELLY_INACTIVE_ROUTES가 비어 있음 → 폴백 리터럴 사용")
+    except Exception as e:
+        # 폴백이 있으므로 판정은 계속되지만, SSOT가 끊긴 사실은 남긴다.
+        logger.warning(f"_KELLY_INACTIVE_ROUTES 참조 실패 ({e}) → 폴백 리터럴 사용")
+    return _KELLY_INACTIVE_ROUTES_FALLBACK
+
+
+def _route_sizable_mask(df: pd.DataFrame) -> pd.Series:
+    """ROUTE가 신규 사이징을 허용하는가 (컬럼·값 없으면 통과 — 레거시 호환)."""
+    if "ROUTE" not in df.columns:
+        return pd.Series(True, index=df.index, dtype=bool)
+    route = _text(df, "ROUTE", "")
+    return route.eq("") | ~route.isin(_inactive_routes())
 
 
 def _alpha_gate_on(df: pd.DataFrame) -> bool:
@@ -160,6 +204,8 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     # [v37] 저점추세 게이트 — 컬럼 없으면(구버전 CSV) 통과 취급.
     lt_ok = _flag(df, "ALPHA_LT_OK", True)
     ltp = _num_nan(df, "LOW_TREND_PCTL")   # [v46] 당일 분위(0~100) — 사유 문구용
+    # [v54] 사이징 불가(ROUTE)로 탈락한 경우 '1종목 제한'이라 적으면 거짓 사유가 된다.
+    sizable = _route_sizable_mask(df)
 
     result: list[str] = []
     for i in range(len(df)):
@@ -168,7 +214,11 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
             continue
         row_reasons: list[str] = []
         if bool(top.iloc[i]) and bool(eligible.iloc[i]) and bool(evidence.iloc[i]):
-            row_reasons.append("당일 신규진입 1종목 제한")
+            if not bool(sizable.iloc[i]):
+                row_reasons.append(
+                    f"상태 {route.iloc[i] or '없음'} — 신규진입 상태 아님(0주)")
+            else:
+                row_reasons.append("당일 신규진입 1종목 제한")
         if not bool(top.iloc[i]):
             if alpha_gate_active:
                 _a, _t = ascore.iloc[i], athr.iloc[i]
@@ -342,7 +392,48 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
             & (display >= 70)
             & (score >= 70)
         )
-    production_candidates = top & eligible_before & evidence_pass
+    # [v54] 실행 가능성을 공식 매수의 조건으로 넣는다 — SSOT 불일치 수정.
+    #
+    # 결함: PRODUCTION_BUY는 여기서 ROUTE를 보지 않고 정해지는데,
+    # kelly_calibrator.resize_kelly_with_alpha는 _KELLY_INACTIVE_ROUTES에 걸리면
+    # 켈리 수량을 0으로 강제한다. 두 곳이 서로 모르고 각자 판정하므로
+    # '공식 매수 · 엄격 매수 기준 통과 · 최대 2% 비중'으로 표시된 종목이
+    # 동시에 '0주 · 추천금액 0만원'이 되는 모순이 발생했다.
+    #   실측 사례 024060 흥구석유 20260805:
+    #     PRODUCTION_BUY=1 · BUY_NOW_ELIGIBLE=1 · TOP_PICK=1
+    #     ROUTE=WAIT → 켈리_수량 0 · 추천금액 0만원 (POSITION_PCT는 100%)
+    #   사용자가 첫 실전 픽에서 바로 발견했다.
+    #
+    # 고치는 방법이 둘 있고, 수익 실측으로는 갈리지 않았다.
+    #   (A) 켈리의 ROUTE 거부권 제거 → 픽이 실제로 매수 가능해진다
+    #   (B) 사이징 불가 상태를 공식 매수라 부르지 않는다 → 픽이 줄어든다
+    # 처음에는 (B)를 지지하는 실측을 얻었다고 판단했다(게이트 통과 풀 1,495행·
+    # 69일에서 사이징 가능 +4.09% vs 차단 -1.13%). 그러나 분해해 보니 이 근거는
+    # 이 프로젝트의 채택 기준을 통과하지 못한다:
+    #   · ATTACK n=9 — v32가 실제로 검정한 축(ATTACK 알파 -2.9%p, p=0.0004)은
+    #     지금 풀에서 표본이 없어 재현도 반증도 불가하다. 즉 v54 측정은
+    #     v32와 모순된 것이 아니라 다른 것(대부분 ARMED)을 본 것이다.
+    #   · +4%는 사실상 ARMED 효과(n=46·18일, t=+1.16, p=0.26)이고
+    #     IS만 표본이 되며 OOS는 검정 불가 — 'IS/OOS 양쪽 유의' 기준 미달.
+    #   · 교란이 크다: 사이징 가능 행은 RR이 낮고(1.96 vs 3.32, t=-8.63)
+    #     POC 확장이 덜하다(-1.02 vs -7.90, t=+4.88). 층화하면 셀이 비어버린다.
+    #   · 날짜 클러스터 부트 CI95 [-1.82, +15.78] — 0을 포함, 에피소드 6건.
+    # 따라서 수익 근거는 채택 사유가 아니다(이 주석에 남겨 재사용을 막는다).
+    #
+    # (B)를 고른 이유는 위험 비대칭이다. (A)는 검증된 적 없는 방향으로 실제
+    # 자금을 태운다 — 켈리의 ROUTE 0원 정책 자체가 v32에서 '표시 관례'로
+    # 유지된 미검증 규칙이고(kelly_calibrator.resize_kelly_with_alpha 주석),
+    # 그 상태(WAIT=타이밍 미도래)에 자금을 넣어도 되는지는 아무도 측정하지
+    # 않았다. (B)는 새 위험을 만들지 않고, 사이징 엔진이 자금을 거부하는 것을
+    # 화면이 '공식 매수'라 부르지 않게만 한다. 되돌리기도 한 줄이다.
+    # v32의 결론은 보존된다: ROUTE는 여전히 근거(evidence_pass)가 아니고
+    # QUALITY_GUARD_PASS에 영향을 주지 않는다 — 실행 가능성 판정에만 쓴다.
+    #
+    # 비용은 정직하게 적는다: 같은 풀 기준 공식 매수가 나오는 날이 69일 중
+    # 18일(26%)로 줄어든다. 나머지 날은 후보가 '관망 + 0주 사유'로 표시된다
+    # (v53 배선) — 살 수 없는 것을 공식 매수로 적는 것보다 정직하다.
+    route_sizable = _route_sizable_mask(out)
+    production_candidates = top & eligible_before & evidence_pass & route_sizable
     # [v35] 하루 1종목 랭킹 — 알파 게이트 활성 시 검증 알파×손익비로 선정.
     # 반사실 실측(46일, 후보풀=리스크가드+알파 상위 20%, 손절 -8%캡 실현수익):
     #   품질점수 랭킹(기존): 평균 -1.29%/일 · 승률 33% · 누적 -59.5%  ← 역선택
@@ -386,6 +477,25 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
         0.0,
     )
     return out
+
+
+def awaiting_execution_mask(df: pd.DataFrame) -> pd.Series:
+    """[v54] 근거는 통과했으나 상태(ROUTE) 때문에 사이징이 0인 후보.
+
+    v54가 '살 수 없는 것을 공식 매수라 부르지 않기'로 바꾼 대가로, 공식 매수가
+    0개인 날이 늘어난다. 그 날 화면이 그냥 '현금'만 말하면 사용자는 엔진이
+    아무것도 찾지 못한 것으로 읽는다 — 실제로는 종목은 찾았고 타이밍 상태가
+    아직 아닌 것이다. 그 차이를 화면에 넘기기 위한 마스크.
+    """
+    if df is None or len(df) == 0:
+        return pd.Series(False, index=getattr(df, "index", None), dtype=bool)
+    evidence = (_flag(df, "QUALITY_GUARD_PASS")
+                if "QUALITY_GUARD_PASS" in df.columns
+                else pd.Series(False, index=df.index, dtype=bool))
+    eligible = _flag(df, "PRE_QUALITY_BUY_NOW_ELIGIBLE") if \
+        "PRE_QUALITY_BUY_NOW_ELIGIBLE" in df.columns else _flag(df, "BUY_NOW_ELIGIBLE")
+    return (_flag(df, "TOP_PICK") & eligible & evidence
+            & ~_route_sizable_mask(df) & ~production_buy_mask(df))
 
 
 def production_buy_mask(df: pd.DataFrame) -> pd.Series:

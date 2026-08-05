@@ -352,6 +352,8 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "reco_evidence": _safe_str(row.get("RECO_EVIDENCE", ""), ""),
         "reco_risk": _safe_str(row.get("RECO_RISK", ""), ""),
         "honest_prob_pct": safe_float(row.get("HONEST_PROB_PCT")),
+        # [v54] 그 승률이 무엇의 실측인지 — 라벨과 값이 같이 다녀야 한다.
+        "honest_prob_basis": _safe_str(row.get("HONEST_PROB_BASIS", ""), ""),
         "market_regime": _safe_str(row.get("MARKET_REGIME", ""), ""),
         "regime_reason": _safe_str(row.get("REGIME_REASON", ""), ""),
         # 원본 사유들 (Step 2D-2E 패널에서 직접 표시용)
@@ -1359,7 +1361,10 @@ def render_v2_scores(n: dict):
                 _prob_html = (
                     f'<span style="font-size:15px; font-weight:900; color:var(--green);">'
                     f'실측 승률 {honest_prob:.0f}%</span>'
-                    '<span style="font-size:10px; color:var(--text-dim);"> (이 점수 구간의 과거 성적)</span>'
+                    # [v54] 기준을 값과 함께 — '점수 구간'으로 고정 표기하면
+                    # 알파 십분위 승률에 잘못된 기준을 붙이게 된다.
+                    f'<span style="font-size:10px; color:var(--text-dim);"> '
+                    f'({h_escape(str(n.get("honest_prob_basis", "") or "기준 미상"))})</span>'
                 )
             _regime_html = ""
             if market_regime:
@@ -3565,6 +3570,38 @@ def render_v2_action_rail(n: dict):
     kelly_txt = (f"{qty:,}주 ({amount:.0f}만원)" if qty else "0주")
     rr_c = "var(--green)" if rr >= 1.3 else ("var(--orange)" if rr >= 1.0 else "var(--red)")
 
+    # [v54] 손익비는 확률 가중이 아니다 — 도달률을 같은 줄에 붙인다.
+    #   첫 실전 픽 024060은 손익비 5.06:1로 표시됐지만 TP1 도달률 12%
+    #   (v42 실측 캘리브레이션: 3.5~5×ATR 거리 → 7일 내 도달 5%, 2.5~3.5 → 12%).
+    #   두 결과 근사로 확률 가중하면 0.12×(+40.6%) + 0.88×(-8%) = -2.2%로 음수다.
+    #   게이트 통과 풀(1,495행·69일)에서 RR 자체의 예측 서열도 확인되지 않았다:
+    #   일별 IC 평균 -0.0097 (t=-0.27, p=0.79), 구간도 비단조
+    #   (3~5배 +0.69% > 5배 이상 -0.10%). 즉 큰 손익비가 좋은 종목이라는
+    #   근거가 없다 — 비율은 구조 설명이지 기대값이 아니라고 못박는다.
+    _p1 = float(n.get("tp1_prob", 0) or 0)
+    reach_html = ""
+    ev_html = ""
+    if _p1 > 0:
+        _pc = "var(--red)" if _p1 < 25 else ("var(--orange)" if _p1 < 45 else "var(--text-white)")
+        reach_html = (
+            f'<span style="color:var(--text-gray);" title="v42 실측 캘리브레이션 — '
+            f'진입가에서 TP1까지 거리(ATR 배수)별 7일 내 도달 비율">'
+            f'TP1 도달률 <b style="color:{_pc};">{_p1:.0f}%</b></span>'
+        )
+        if _p1 < 25 and tp1_gain and stop_pct:
+            _ev = (_p1 / 100.0) * tp1_gain + (1 - _p1 / 100.0) * max(stop_pct, -8.0)
+            if _ev < 0:
+                ev_html = (
+                    f'<div style="margin-top:8px;padding:7px 9px;border-radius:8px;'
+                    f'background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);'
+                    f'font-size:11px;color:#FCA5A5;line-height:1.5;">'
+                    f'⚠ 손익비 {rr:.2f}는 확률 가중이 아니다 — 도달률 {_p1:.0f}%로 '
+                    f'가중하면 기대값 {_ev:+.1f}%'
+                    f'<span style="color:var(--text-dim);"> '
+                    f'(도달 시 {tp1_gain:+.1f}% · 미도달 시 손절 {max(stop_pct, -8.0):+.1f}% '
+                    f'두 결과 근사)</span></div>'
+                )
+
     # [v53] 0주 사유를 화면에 붙인다 — v45의 '침묵의 0주 금지'를 완결.
     #   v45가 KELLY_ZERO_REASON·KELLY_NEED_WIN_RATE를 만들었으나 UI 배선이
     #   빠져 사용자는 '신규 부적합(0주)'만 보고 이유를 알 수 없었다.
@@ -3632,10 +3669,12 @@ def render_v2_action_rail(n: dict):
              margin-top:10px;padding-top:10px;border-top:1px solid rgba(148,163,184,0.12);
              font-size:11.5px;">
           <span style="color:var(--text-gray);">손익비 <b style="color:{rr_c};">{rr:.2f}</b></span>
+          {reach_html}
           <span style="color:var(--text-gray);">켈리 <b style="color:var(--text-white);">{kelly_txt}</b></span>
           <span style="color:var(--text-gray);">타임스톱 <b style="color:var(--text-white);">{time_stop}일</b></span>
           <span style="color:var(--text-gray);">다음 목표 <b style="color:var(--text-white);">{nxt_html}</b></span>
         </div>
+        {ev_html}
         {zero_html}
         {chase_html}
       </div>
@@ -3683,7 +3722,6 @@ def render_v2_decision_hero(n: dict, rank: int = 0, total: int = 0,
     prob_txt = f"{honest:.0f}%" if honest else "—"
     gap = n["entry_gap_pct"]
     stop_pct = n["stop_loss_pct"]
-    pos = n["position_pct"]
     amount = n["amount_man"]
 
     def _metric(lbl, val, sub="", color="var(--text-white)"):
@@ -3696,12 +3734,24 @@ def render_v2_decision_hero(n: dict, rank: int = 0, total: int = 0,
         )
 
     rr_color = "var(--green)" if rr >= 1.3 else ("var(--orange)" if rr >= 1.0 else "var(--red)")
+    # [v54] 승률·손익비 라벨 정직화.
+    #   ① 승률: 시장 탭(알파 십분위 39%)과 상세(점수구간 29%)가 서로 다른 값을
+    #      같은 '실측 승률' 라벨로 보여줬다. 이제 대표값은 알파 십분위이며
+    #      기준 문구를 HONEST_PROB_BASIS로 받아 그대로 적는다.
+    #   ② 손익비: 비율에 도달 확률이 안 들어간다. 도달률을 부라벨에 넣는다.
+    _basis = str(n.get("honest_prob_basis", "") or "").strip() or "기준 미상"
+    _hp1 = float(n.get("tp1_prob", 0) or 0)
+    _rr_sub = (f"TP1÷손절 · 도달률 {_hp1:.0f}%" if _hp1 > 0 else "TP1÷손절 (확률 가중 아님)")
     metrics = "".join([
-        _metric("🧠 실측 승률", prob_txt, "이 점수 구간 과거", "var(--green)" if (honest or 0) >= 40 else "var(--text-white)"),
-        _metric("손익비 RR", f"{rr:.2f}", "TP1 기대 ÷ 손절", rr_color),
+        _metric("🧠 실측 승률", prob_txt, _basis, "var(--green)" if (honest or 0) >= 40 else "var(--text-white)"),
+        _metric("손익비 RR", f"{rr:.2f}", _rr_sub, rr_color),
         _metric("진입갭", f"{gap:+.1f}%", "종가 대비", "var(--text-white)"),
         _metric("손절", f"{stop_pct:+.1f}%", "이탈 시 전량", "var(--red)"),
-        _metric("포지션", (f"{qty:,}주" if qty else f"{pos:.0f}%"),
+        # [v54] 0주일 때 POSITION_PCT를 '포지션 %'로 보여주면 안 된다.
+        #   POSITION_PCT는 진입 분할 계획(100=일괄 진입)이고 포트폴리오 비중이
+        #   아니다(trade_plan 계약: enter/split/hold와 짝). 024060은 켈리 0주인데
+        #   이 칸에 '100%'가 떠서 시장 탭의 '최대 2% 비중'과 정면으로 어긋났다.
+        _metric("포지션", (f"{qty:,}주" if qty else "0주"),
                 (f"{amount:.0f}만원" if amount else "신규 부적합"),
                 "var(--text-white)" if qty else "var(--text-dim)"),
     ])

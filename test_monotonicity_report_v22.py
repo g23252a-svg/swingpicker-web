@@ -8,6 +8,8 @@ import os
 import pandas as pd
 import pytest
 
+from services.recommendation_quality import POLICY_VERSION as _CUR_POLICY
+
 
 def _write_recommend(path: str, rows):
     """recommend_latest.csv fixture 생성"""
@@ -70,23 +72,67 @@ def test_happy_path_all_pass(tmp_path):
 
 
 # ════════════════════════════════════════════════════════════
-#  HARD FAIL — TOP_PICK이 ROUTE=WAIT (positive gate 누출)
+#  [v54] HARD 1 대상 교체 — TOP_PICK 형태 → 공식 매수 실행 가능성
+#
+#  구 게이트는 'TOP_PICK ⊆ {ATTACK, ARMED}'를 검사했다. 그 계약은 v32에서
+#  폐기됐다 — ROUTE는 진입 게이트가 아니고(ATTACK 알파 -2.9%p, p=0.0004)
+#  검증된 알파가 진입 SSOT다. 그래서 TOP_PICK에 WAIT가 섞이는 건 이제 정상인데
+#  게이트가 계속 '누출'로 판정해 20260805 배치에서 6건(WAIT 5·OVERHEAT 1)으로
+#  CI를 깨뜨렸다. 데이터 이상이 아니라 게이트가 낡은 것이었다.
+#
+#  지금 지켜야 할 불변조건은 v54가 확립한 '공식 매수는 실행 가능하다'다.
+#  8/5 실측: 024060이 PRODUCTION_BUY=1인데 ROUTE=WAIT라 켈리 0주였다.
 # ════════════════════════════════════════════════════════════
 
-def test_hard_fail_route_leak(tmp_path):
-    """TOP_PICK=1인데 ROUTE=WAIT → top_pick_route_positive FAIL"""
+def test_top_pick_wait_no_longer_hard_fails(tmp_path):
+    """TOP_PICK=1 · ROUTE=WAIT는 v32 이후 정상 — HARD로 막지 않는다."""
     from daily_briefing import generate_monotonicity_report
 
     _write_recommend(tmp_path / "recommend_latest.csv", [
         {"종목코드": "005930", "ROUTE": "WAIT", "TOP_PICK": 1,
-         "TP1_PCT": 12.0, "EST_WIN_RATE": 0.55},
+         "PRODUCTION_BUY": 0, "TP1_PCT": 12.0, "EST_WIN_RATE": 0.55},
+    ])
+
+    report = generate_monotonicity_report(str(tmp_path), "20260424")
+
+    fail_names = [g["gate"] for g in report["ci_hard"] if g["status"] == "FAIL"]
+    assert "production_buy_sizable" not in fail_names
+    assert "top_pick_route_positive" not in fail_names, "폐기된 계약이 남아 있다"
+    # 관측은 유지 — 추이 감시용 SOFT로 강등
+    soft = {g["gate"]: g["status"] for g in report["ci_soft"]}
+    assert soft.get("top_pick_route_positive_observed") == "WARN"
+
+
+def test_hard_fail_production_buy_not_sizable(tmp_path):
+    """PRODUCTION_BUY=1인데 사이징 0 강제 상태 → HARD FAIL (024060 케이스)."""
+    from daily_briefing import generate_monotonicity_report
+
+    _write_recommend(tmp_path / "recommend_latest.csv", [
+        {"종목코드": "024060", "ROUTE": "WAIT", "TOP_PICK": 1,
+         "PRODUCTION_BUY": 1, "TP1_PCT": 40.6, "EST_WIN_RATE": 0.29,
+         "QUALITY_POLICY_VERSION": _CUR_POLICY},
     ])
 
     report = generate_monotonicity_report(str(tmp_path), "20260424")
 
     assert report["ci_hard_all_pass"] is False
     fail_gates = [g for g in report["ci_hard"] if g["status"] == "FAIL"]
-    assert any(g["gate"] == "top_pick_route_positive" for g in fail_gates)
+    assert any(g["gate"] == "production_buy_sizable" for g in fail_gates)
+
+
+def test_production_buy_sizable_passes_for_active_route(tmp_path):
+    from daily_briefing import generate_monotonicity_report
+
+    _write_recommend(tmp_path / "recommend_latest.csv", [
+        {"종목코드": "005930", "ROUTE": "ATTACK", "TOP_PICK": 1,
+         "PRODUCTION_BUY": 1, "TP1_PCT": 12.0, "EST_WIN_RATE": 0.55,
+         "QUALITY_POLICY_VERSION": _CUR_POLICY},
+    ])
+
+    report = generate_monotonicity_report(str(tmp_path), "20260424")
+
+    pass_names = [g["gate"] for g in report["ci_hard"] if g["status"] == "PASS"]
+    assert "production_buy_sizable" in pass_names
 
 
 # ════════════════════════════════════════════════════════════
@@ -193,10 +239,12 @@ def test_zero_top_pick(tmp_path):
     report = generate_monotonicity_report(str(tmp_path), "20260424")
 
     assert report["top_pick_count"] == 0
-    # 0건이면 route/tp1 위반 자체가 불가능 → PASS
+    # 0건이면 위반 자체가 불가능 → PASS
+    # [v54] HARD 1의 이름·대상이 top_pick_route_positive → production_buy_sizable로
+    #       바뀌었다 (v32에서 폐기된 계약을 검사하고 있었다 — 위 블록 주석 참조).
     pass_gates = [g for g in report["ci_hard"] if g["status"] == "PASS"]
     gate_names = [g["gate"] for g in pass_gates]
-    assert "top_pick_route_positive" in gate_names
+    assert "production_buy_sizable" in gate_names
     assert "top_pick_tp1_positive" in gate_names
 
 

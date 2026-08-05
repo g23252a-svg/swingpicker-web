@@ -78,17 +78,36 @@ def test_low_buy_now_score_is_never_official():
     assert "즉시매수점수 60" in guarded.iloc[0]["QUALITY_GUARD_REASON"]
 
 
-def test_route_is_not_a_veto_under_alpha_gate_v32():
-    # [v32] ROUTE는 더 이상 진입 게이트가 아니다(ATTACK 알파 -2.9%p, p=0.0004).
-    # 검증된 알파가 진입 SSOT — 알파 게이트 활성 시 ROUTE=WAIT라도 알파 통과분은
-    # 공식 매수가 되고, ROUTE 사유로 탈락시키지 않는다.
+def test_route_is_not_an_evidence_veto_under_alpha_gate_v32():
+    """[v32] ROUTE는 진입 '근거'가 아니다 (ATTACK 알파 -2.9%p, p=0.0004).
+
+    검증된 알파가 진입 SSOT이므로 ROUTE=WAIT라도 근거 판정
+    (QUALITY_GUARD_PASS)은 통과하고, 탈락 사유에 모멘텀형 '경로 X'를 적지
+    않는다. 이것이 v32가 실측으로 확립한 계약이며 그대로 유지된다.
+
+    [v54] 단, '공식 매수'는 실행 가능해야 한다. 사이징 엔진
+    (kelly_calibrator._KELLY_INACTIVE_ROUTES)이 WAIT에서 켈리를 0주로 강제하므로
+    PRODUCTION_BUY는 0이 된다 — 근거 통과와 실행 가능성은 다른 판정이다.
+    v32가 제거한 것은 ROUTE 근거 거부권이고, v54가 넣은 것은 실행 가능성
+    정렬이다. 자세한 측정 기록은 test_v54_first_pick_contradictions.py 참조.
+    """
     guarded = apply_recommendation_quality_guard(
         pd.DataFrame([_row(ROUTE="WAIT", ALPHA_GATE_ACTIVE=1, ALPHA_ENTRY_OK=1,
                            ALPHA_SCORE=92, ALPHA_ENTRY_THRESHOLD=80,
                            MARKET_REGIME="NEUTRAL")])
     )
-    assert guarded.iloc[0]["PRODUCTION_BUY"] == 1
+    assert guarded.iloc[0]["QUALITY_GUARD_PASS"] == 1
     assert "경로" not in guarded.iloc[0]["QUALITY_GUARD_REASON"]
+    assert guarded.iloc[0]["PRODUCTION_BUY"] == 0
+
+    # 같은 행에서 상태만 실행 가능하게 바꾸면 공식 매수가 된다
+    # → 탈락시킨 것은 알파도 근거도 아니라 실행 가능성뿐임을 고정한다.
+    sizable = apply_recommendation_quality_guard(
+        pd.DataFrame([_row(ROUTE="ATTACK", ALPHA_GATE_ACTIVE=1, ALPHA_ENTRY_OK=1,
+                           ALPHA_SCORE=92, ALPHA_ENTRY_THRESHOLD=80,
+                           MARKET_REGIME="NEUTRAL")])
+    )
+    assert sizable.iloc[0]["PRODUCTION_BUY"] == 1
 
 
 def test_legacy_fallback_has_no_route_veto_v32():

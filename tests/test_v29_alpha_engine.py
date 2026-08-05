@@ -77,7 +77,7 @@ def test_entry_gate_alpha_floor():
 
 
 def test_evidence_shows_alpha_when_validated():
-    e, k, _ = build_evidence_row({
+    e, k, _, _b = build_evidence_row({
         "ALPHA_VALIDATED": 1, "ALPHA_SCORE": 92.0, "ALPHA_WIN_PROB": 0.41,
     })
     assert "AI 알파모델 예측 상위 8%" in e
@@ -85,14 +85,14 @@ def test_evidence_shows_alpha_when_validated():
 
 
 def test_evidence_flags_low_alpha_as_risk():
-    _, k, _ = build_evidence_row({
+    _, k, _, _b = build_evidence_row({
         "ALPHA_VALIDATED": 1, "ALPHA_SCORE": 15.0, "ALPHA_WIN_PROB": 0.25,
     })
     assert "하위 15%" in k and "픽 제외" in k
 
 
 def test_evidence_falls_back_to_honest_unused():
-    e, _, _ = build_evidence_row({"ALPHA_VALIDATED": 0, "AI_SCORE": 0, "ML_TRUSTED": 0})
+    e, _, _, _b = build_evidence_row({"ALPHA_VALIDATED": 0, "AI_SCORE": 0, "ML_TRUSTED": 0})
     assert "AI 예측 미사용" in e
 
 

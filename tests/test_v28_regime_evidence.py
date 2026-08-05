@@ -125,7 +125,7 @@ def test_missing_regime_column_passes():
 # ═══════════════════════════════════════════════════
 
 def test_evidence_prefers_realized_winrate():
-    e, k, p = build_evidence_row({
+    e, k, p, _b = build_evidence_row({
         "EST_WIN_RATE": 0.62, "EST_WIN_RATE_N": 120, "EST_WIN_RATE_MODE": "MATURE",
         "POC_GAP": 5.0, "RR_NOW_TP1": 2.1,
         "종가": 10000, "손절가": 9200, "추천매도가1": 11700,
@@ -139,7 +139,7 @@ def test_evidence_prefers_realized_winrate():
 
 
 def test_evidence_immature_winrate_is_flagged():
-    e, _, p = build_evidence_row({
+    e, _, p, _b = build_evidence_row({
         "EST_WIN_RATE": 0.7, "EST_WIN_RATE_N": 5, "EST_WIN_RATE_MODE": "FALLBACK",
     })
     assert "통계 미성숙" in e
@@ -147,18 +147,18 @@ def test_evidence_immature_winrate_is_flagged():
 
 
 def test_evidence_shows_extension_as_risk():
-    _, k, _ = build_evidence_row({"POC_GAP": 45.0, "RSI14": 75})
+    _, k, _, _b = build_evidence_row({"POC_GAP": 45.0, "RSI14": 75})
     assert "확장" in k
     assert "RSI 75" in k
 
 
 def test_evidence_discloses_ml_unused():
-    e, _, _ = build_evidence_row({"AI_SCORE": 0, "ML_TRUSTED": 0})
+    e, _, _, _b = build_evidence_row({"AI_SCORE": 0, "ML_TRUSTED": 0})
     assert "AI 예측 미사용" in e
 
 
 def test_evidence_flags_stale_price():
-    _, k, _ = build_evidence_row({"DATA_FRESHNESS_OK": "False"})
+    _, k, _, _b = build_evidence_row({"DATA_FRESHNESS_OK": "False"})
     assert "stale" in k
 
 

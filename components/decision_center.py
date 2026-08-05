@@ -17,7 +17,7 @@ from nicegui import ui
 
 logger = logging.getLogger("decision_center")
 
-from services.recommendation_quality import production_buy_mask
+from services.recommendation_quality import awaiting_execution_mask, production_buy_mask
 
 
 MARKET_BREADTH_FLOOR = 35.0
@@ -207,6 +207,7 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
             "next_check": "데이터 수집 완료 후 다시 확인",
             "buys": [],
             "watch": [],
+            "awaiting": [],
             "blockers": ["추천 데이터 없음"],
             "gates": [],
             "production_count": 0,
@@ -244,6 +245,11 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
 
     buys = [_stock_payload(row) for _, row in buys_df.iterrows()]
     watch = [_stock_payload(row) for _, row in watch_df.iterrows()]
+    # [v54] 실행 대기(근거 통과·상태 미달) 후보 — 공식 매수 0개인 날의 실제 사정
+    awaiting_df = work[awaiting_execution_mask(work)].sort_values(
+        _sort_cols, ascending=False
+    ).head(2)
+    awaiting = [_stock_payload(row) for _, row in awaiting_df.iterrows()]
     production_count = int(production.sum())
     watch_count = int(action.eq("WATCH").sum())
     ml_values = (
@@ -286,6 +292,18 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         blockers.append("하락장이라 신규 진입은 AI 알파 최상위 10%만 축소 검토")
     if macro_risk in DANGEROUS_MARKET_RISK:
         blockers.append(f"시장 위험 단계가 높음 ({macro_risk})")
+    # [v54] 실행 대기 후보가 있으면 그것이 오늘의 실제 1순위 차단자다.
+    #   기존 목록은 '가장 가까운 관찰 후보(watch[0])의 탈락 사유'를 차단자로
+    #   올렸다. 다른 종목의 사유라서, 실행 대기 후보가 있는 날에는
+    #   '즉시 매수 조건 미충족 · 손익비 부족 1.16'처럼 지금 막고 있는 것과
+    #   무관한 문장이 최상단에 왔다(20260805 실측). 실제 차단자를 앞에 둔다.
+    if awaiting and not buys:
+        _aw = awaiting[0]
+        blockers.insert(0, (
+            f"{_aw['name']} 상태 "
+            f"{str(_aw.get('route', '') or '').strip() or '대기'} — "
+            f"근거는 통과, 신규진입 상태가 아니라 사이징 0주"
+        ))
     for item in _reason_items(nearest_reason, limit=6):
         if item not in blockers:
             blockers.append(item)
@@ -311,6 +329,21 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
             if risk_off["active"]
             else "다음 데이터 갱신 후 시장과 최종 후보를 다시 확인"
         )
+        # [v54] '종목을 못 찾았다'와 '찾았지만 아직 살 상태가 아니다'는 다르다.
+        #   v54가 사이징 불가 상태를 공식 매수에서 제외한 대가로 0개인 날이
+        #   늘어난다. 그 날 근거까지 통과한 후보가 있으면 이름과 상태를 밝힌다.
+        if len(awaiting):
+            _a = awaiting[0]
+            _rt = str(_a.get("route", "") or "").strip() or "대기"
+            subtitle = (
+                f"공식 매수 0개 — {_a['name']}: 근거는 통과, 상태 {_rt}라 "
+                f"사이징이 0주입니다. 종목이 없는 게 아니라 진입 타이밍이 아닙니다."
+            )
+            action_detail = (
+                "지금 사면 엔진이 계산한 수량(0주)을 무시하는 주문이 됩니다. "
+                "상태가 진입 가능으로 바뀌면 자동으로 공식 매수로 올라옵니다."
+            )
+            next_check = f"{_a['name']} 상태 전환 확인 (현재 {_rt})"
         status = "CASH"
 
     breadth_value = (
@@ -374,6 +407,7 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         "next_check": next_check,
         "buys": buys,
         "watch": watch,
+        "awaiting": awaiting,       # [v54] 근거 통과·상태 미달로 0주인 후보
         "blockers": blockers,
         "gates": gates,
         "production_count": production_count,
