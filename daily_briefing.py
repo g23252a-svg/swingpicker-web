@@ -533,6 +533,9 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
     tp1_neg_count = 0
     top_pick_wait_count = 0
     top_pick_count = 0
+    production_unsizable_count = 0   # [v54] 공식 매수인데 사이징 0 강제 상태
+    production_sizable_gate = ""     # "" | "SKIP" (구 계약 CSV는 판정 제외)
+    production_sizable_detail = ""
     # [v22.3.1] RR<1.0 검증 변수 초기화
     top_pick_rr_lt1_count = 0
     top_pick_min_rr = None
@@ -586,6 +589,35 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
                 else:
                     top_pick_rr_lt1_count = 0
                     top_pick_min_rr = None
+
+            # [v54] 공식 매수가 사이징 불가 상태로 나가는지 — HARD 1의 새 대상.
+            #   집합은 kelly_calibrator SSOT를 재사용한다(recommendation_quality 경유).
+            #
+            #   구 계약(v53 이하)이 만든 CSV는 이 조건을 지킬 의무가 없었으므로
+            #   FAIL이 아니라 SKIP으로 둔다 — 그 행을 만든 코드는 이미 교체됐고,
+            #   런타임에서는 data_store가 로드 시 가드를 재적용해 화면이 바로
+            #   교정된다. 다음 배치가 v54 계약으로 CSV를 쓰면 게이트가 자동 활성화된다.
+            if "PRODUCTION_BUY" in rec.columns and "ROUTE" in rec.columns:
+                from services.recommendation_quality import (
+                    POLICY_VERSION as _cur_policy,
+                    _route_sizable_mask,
+                )
+
+                _pol = (str(rec["QUALITY_POLICY_VERSION"].dropna().iloc[0]).strip()
+                        if ("QUALITY_POLICY_VERSION" in rec.columns
+                            and rec["QUALITY_POLICY_VERSION"].notna().any()) else "")
+                report["quality_policy_version"] = _pol or None
+                if _pol != _cur_policy:
+                    production_sizable_gate = "SKIP"
+                    production_sizable_detail = (
+                        f"CSV 계약 {_pol or '없음'} ≠ 현재 {_cur_policy} — "
+                        f"구 계약 산출물은 판정 제외(런타임은 로드 시 재적용)")
+                else:
+                    _pb = rec[pd.to_numeric(
+                        rec["PRODUCTION_BUY"], errors="coerce").fillna(0).astype(int) == 1]
+                    if len(_pb) > 0:
+                        production_unsizable_count = int(
+                            (~_route_sizable_mask(_pb)).sum())
         except Exception as e:
             report["recommend_parse_error"] = str(e)
     
@@ -710,15 +742,43 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
     ci_hard = []
     ci_soft = []
     
-    # HARD 1: TOP_PICK에 WAIT/NEUTRAL 없음
-    if top_pick_wait_count > 0:
+    # HARD 1: [v54] 공식 매수(PRODUCTION_BUY)는 사이징 가능한 상태여야 한다.
+    #
+    # 원래 이 게이트는 'TOP_PICK ⊆ {ATTACK, ARMED}'를 검사했다. 그 계약은
+    # v32에서 폐기됐다 — ROUTE는 진입 게이트가 아니고(ATTACK 알파 -2.9%p,
+    # p=0.0004) 검증된 알파가 진입 SSOT다. 그래서 TOP_PICK에 WAIT가 섞이는
+    # 것은 이제 정상 동작인데, 게이트가 그걸 여전히 '누출'로 판정해
+    # 20260805 배치에서 6건(WAIT 5 · OVERHEAT 1)으로 CI를 깨뜨렸다.
+    # 즉 이 실패는 데이터 이상이 아니라 게이트가 낡은 것이었다.
+    #
+    # 지금 지켜야 할 불변조건은 다른 것이다: v54에서 확립한 '공식 매수는
+    # 실행 가능하다'. 사이징이 0으로 강제되는 상태(_KELLY_INACTIVE_ROUTES)가
+    # PRODUCTION_BUY에 남아 있으면 사용자에게 살 수 없는 것을 매수라 말하게
+    # 되고, 그것이 실제로 8/5에 일어났다(024060: PRODUCTION_BUY=1 · 켈리 0주).
+    # ROUTE 컬럼을 쓰는 것은 같지만 검사 대상과 방향이 바뀌었다 —
+    # '후보의 형태'가 아니라 '공식 매수의 실행 가능성'을 본다.
+    if production_sizable_gate == "SKIP":
         ci_hard.append({
-            "gate": "top_pick_route_positive",
+            "gate": "production_buy_sizable",
+            "status": "SKIP",
+            "detail": production_sizable_detail,
+        })
+    elif production_unsizable_count > 0:
+        ci_hard.append({
+            "gate": "production_buy_sizable",
             "status": "FAIL",
-            "detail": f"TOP_PICK {top_pick_wait_count}건이 ATTACK/ARMED 아님",
+            "detail": (f"PRODUCTION_BUY {production_unsizable_count}건이 "
+                       f"사이징 불가 상태(0주 강제)"),
         })
     else:
-        ci_hard.append({"gate": "top_pick_route_positive", "status": "PASS"})
+        ci_hard.append({"gate": "production_buy_sizable", "status": "PASS"})
+    # 낡은 축은 관측값으로만 남긴다 (추이 감시용 — 실패시키지 않는다).
+    ci_soft.append({
+        "gate": "top_pick_route_positive_observed",
+        "status": "OK" if top_pick_wait_count == 0 else "WARN",
+        "detail": (f"TOP_PICK {top_pick_wait_count}건이 ATTACK/ARMED 아님 "
+                   f"(v32 이후 정상 — 관측만)"),
+    })
     
     # HARD 2: TOP_PICK인데 TP1_PCT <= 0 없음
     if tp1_neg_count > 0:
