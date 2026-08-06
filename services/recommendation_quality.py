@@ -204,6 +204,13 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     # [v37] 저점추세 게이트 — 컬럼 없으면(구버전 CSV) 통과 취급.
     lt_ok = _flag(df, "ALPHA_LT_OK", True)
     ltp = _num_nan(df, "LOW_TREND_PCTL")   # [v46] 당일 분위(0~100) — 사유 문구용
+    # [v56] 알파 게이트가 직접 남긴 탈락 사유 (SSOT). 구 CSV엔 없으므로 폴백 유지.
+    gate_reason = (df["ALPHA_ENTRY_BLOCK_REASON"].fillna("").astype(str)
+                   if "ALPHA_ENTRY_BLOCK_REASON" in df.columns
+                   else pd.Series("", index=df.index, dtype="object"))
+    blocked_flag = (_flag(df, "NEW_ENTRY_BLOCKED")
+                    | _flag(df, "JULY_PROFIT_BLOCK_FLAG")
+                    | _flag(df, "PROFIT_RECOVERY_BLOCK_FLAG"))
     # [v54] 사이징 불가(ROUTE)로 탈락한 경우 '1종목 제한'이라 적으면 거짓 사유가 된다.
     sizable = _route_sizable_mask(df)
 
@@ -221,18 +228,29 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
                 row_reasons.append("당일 신규진입 1종목 제한")
         if not bool(top.iloc[i]):
             if alpha_gate_active:
-                _a, _t = ascore.iloc[i], athr.iloc[i]
-                if pd.notna(_a) and pd.notna(_t) and _a < _t:
-                    row_reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
-                elif not bool(lt_ok.iloc[i]):
-                    # [v46] 알파는 통과했지만 저점추세가 당일 하위권 — 실측 역신호.
-                    #   당일 하위30% 종목 엣지 -0.57%p·승률 26.9% (t=-2.19)
-                    _p = ltp.iloc[i]
-                    row_reasons.append(
-                        f"저점추세 당일 하위 {_p:.0f}% (알파 통과·자리 미달)"
-                        if pd.notna(_p) else "저점추세 하락 (알파 통과·자리 미달)")
+                # [v56] 게이트가 남긴 사유를 그대로 쓴다 — 재추론하면 거짓이 된다.
+                #   2026-08-06 실측: 알파 100.0점(문턱 85)인 흥구석유가 아래
+                #   폴백을 타 '진입 조건 미달' → 화면에서 'AI 알파 진입 기준 미달'로
+                #   번역됐다. 실제 차단자는 risk_off 전 종목 하드블록(278/278)이었다.
+                _gr = str(gate_reason.iloc[i] or "").strip()
+                if _gr:
+                    row_reasons.append(_gr)
                 else:
-                    row_reasons.append("진입 조건 미달")
+                    _a, _t = ascore.iloc[i], athr.iloc[i]
+                    if pd.notna(_a) and pd.notna(_t) and _a < _t:
+                        row_reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
+                    elif not bool(lt_ok.iloc[i]):
+                        # [v46] 알파는 통과했지만 저점추세가 당일 하위권 — 실측 역신호.
+                        #   당일 하위30% 종목 엣지 -0.57%p·승률 26.9% (t=-2.19)
+                        _p = ltp.iloc[i]
+                        row_reasons.append(
+                            f"저점추세 당일 하위 {_p:.0f}% (알파 통과·자리 미달)"
+                            if pd.notna(_p) else "저점추세 하락 (알파 통과·자리 미달)")
+                    elif bool(blocked_flag.iloc[i]):
+                        # 구 CSV(게이트 사유 컬럼 없음)에서도 최상위 차단자는 말한다.
+                        row_reasons.append("시장 전체 신규진입 차단 (폭락 방어)")
+                    else:
+                        row_reasons.append("진입 조건 미달 (알파·자리 외 사유)")
             else:
                 row_reasons.append("TOP_PICK 아님")
         elif not bool(eligible.iloc[i]):

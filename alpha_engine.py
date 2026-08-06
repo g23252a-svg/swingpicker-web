@@ -675,6 +675,46 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     out["ALPHA_GATE_ACTIVE"] = 1
     out["ALPHA_ENTRY_OK"] = entry_ok.astype(int)
 
+    # [v56] 게이트가 자기 판정을 설명한다 — 탈락 사유를 결정 순서대로 남긴다.
+    #
+    # 결함: 이 게이트는 4조건 AND인데 결과를 boolean 하나로만 내보냈다. 그래서
+    # 하류(recommendation_quality._reasons)가 사유를 재추론해야 했고, 어느 것도
+    # 특정하지 못하면 '진입 조건 미달'로 뭉갰다. 그 문구가 결정 센터에서
+    # 'AI 알파 진입 기준 미달'로 번역되어 **알파 100점 종목에 '알파 미달'이라는
+    # 거짓 사유**가 붙었다(2026-08-06 실측: 흥구석유 알파 100.0·문턱 85 통과,
+    # 파세코 98.2 통과 — 실제 차단자는 risk_off 전 종목 하드블록 278/278).
+    #
+    # 우선순위는 '무엇이 실제로 막고 있는가'를 따른다. 시장 전체 하드블록이
+    # 최상위다 — 그날은 어떤 종목도 통과할 수 없으므로 종목 사유를 먼저 적으면
+    # 사용자가 '이 종목만의 문제'로 오해한다.
+    # 실패한 조건을 전부 적되 결정적인 것부터 — 하나만 적으면 정보를 잃는다
+    # (예: 비에이치 090460은 전체 차단 + 저점추세 하위 12% 두 가지가 동시에 미달).
+    _alpha_short = (ascore.isna() | (ascore < thr)).fillna(False)
+    _lt_short = (~lt_ok).fillna(False)
+    _risk_short = (~risk_ok).fillna(False)
+    _blk = blocked.fillna(False) if hasattr(blocked, "fillna") else blocked
+    _ltp = pd.to_numeric(out["LOW_TREND_PCTL"], errors="coerce")
+
+    def _row_reason(i) -> str:
+        bits = []
+        if bool(_blk.iat[i]):
+            bits.append("시장 전체 신규진입 차단 (폭락 방어)")
+        if bool(_alpha_short.iat[i]):
+            _a, _t = ascore.iat[i], thr.iat[i]
+            bits.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)"
+                        if np.isfinite(_a) and np.isfinite(_t) else "알파 점수 없음")
+        if bool(_lt_short.iat[i]):
+            _p = _ltp.iat[i]
+            bits.append(f"저점추세 당일 하위 {_p:.0f}%" if np.isfinite(_p)
+                        else "저점추세 하락")
+        if bool(_risk_short.iat[i]):
+            bits.append("진입 자리·손익비 가드 미달")
+        return " · ".join(bits)
+
+    out["ALPHA_ENTRY_BLOCK_REASON"] = [
+        "" if bool(entry_ok.iat[i]) else _row_reason(i) for i in range(n)
+    ]
+
     # TOP_PICK 재정의 — 알파 게이트가 SSOT.
     out["TOP_PICK"] = entry_ok.astype(int)
     if "TOP_PICK_TYPE" not in out.columns:

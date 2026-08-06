@@ -81,8 +81,16 @@ def _humanize_reason(reason: Any) -> str:
             text = "최종 품질 점수 부족"
         elif part == "손실방어 차단":
             text = "폭락 방어(risk_off) 차단 — 시장 회복 시 자동 해제"
-        elif part == "진입 조건 미달":
-            text = "AI 알파 진입 기준 미달"
+        elif part.startswith("진입 조건 미달"):
+            # [v56] 'AI 알파 진입 기준 미달'로 번역하면 거짓이 된다 — 이 문구는
+            # 알파·자리를 통과했는데 다른 조건에서 막힌 경우의 폴백이다.
+            # 2026-08-06 실측: 알파 100.0점(문턱 85) 흥구석유가 이 경로로
+            # '알파 미달'로 표시됐다. 실제 차단자는 risk_off 전 종목 하드블록.
+            text = "진입 조건 미달 (알파 기준은 통과)"
+        elif part.startswith("시장 전체 신규진입 차단"):
+            text = "폭락 방어로 전 종목 신규진입 보류 — 이 종목만의 문제가 아님"
+        elif part == "진입 자리·손익비 가드 미달":
+            text = "진입 자리·손익비 가드 미달"
         else:
             # v32 알파 사유("알파 92점 (진입선 90점 미달)")는 이미 사람말 — 그대로 통과
             text = part
@@ -656,8 +664,20 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
         if summary["watch"]:
             with ui.row().classes("w-full items-end justify-between gap-3 flex-wrap mt-2"):
                 with ui.column().classes("gap-0"):
-                    ui.label("가장 가까운 관찰 후보").classes("text-lg font-bold text-white")
-                    ui.label("조건에 가까운 순서이며 매수 추천이 아닙니다.").classes("text-xs text-slate-500")
+                    # [v56] '조건에 가까운 순서'는 거짓이었다 — 실제 정렬키는
+                    # ALPHA_SCORE 내림차순이다(위 _sort_cols). 게다가 전 종목이
+                    # 차단된 날에는 '가까운' 것 자체가 없다(2026-08-06: 278/278 차단,
+                    # 1위 흥구석유 알파 100점이 문턱 85를 통과했는데도 픽 아님).
+                    _rs = summary.get("risk_off") or {}
+                    _blocked_now = bool((_rs.get("market") or {}).get("risk_off")) or \
+                        bool(_rs.get("active"))
+                    ui.label("AI 알파 상위 관찰 후보").classes("text-lg font-bold text-white")
+                    ui.label(
+                        "AI 알파 점수 순입니다. 오늘은 전 종목 신규진입이 보류돼 "
+                        "조건 근접도와 무관하며, 매수 추천이 아닙니다."
+                        if _blocked_now else
+                        "AI 알파 점수 순이며 매수 추천이 아닙니다."
+                    ).classes("text-xs text-slate-500")
                 ui.badge(f"전체 관찰 {summary['watch_count']}개", color="#475569")
             for rank, stock in enumerate(summary["watch"], 1):
                 _render_watch_card(stock, rank)
