@@ -5,7 +5,7 @@
 
 /* ═══════════════ 자료 ═══════════════ */
 
-const RUN_TIME = 360;                 // 6분
+const RUN_TIME = 382;                 // 저승사자가 나오는 시각
 const MAX_FOES = 260, MAX_PARTS = 300, MAX_TEXTS = 44;
 
 const FOES = {
@@ -27,9 +27,50 @@ const EVO = {
   hwasal: { need:'jipsin', nm:'백발백중', ic:'🎯', desc:'사방으로 여덟 발이 꿰뚫는다' },
   bell:   { need:'tugu',   nm:'풍경',   ic:'🎐', desc:'방울이 커지고 충격파를 남긴다' },
 };
+/* ── 막(幕)과 이야기 ─────────────────────────────
+   한 벌판에서 6분을 버티는 대신 세 마당을 지나가게 한다.
+   땅빛과 나오는 것이 바뀌면 같은 시간도 길게 느껴진다. */
+const ACTS = [
+  { t:0,   nm:'1막 · 마을 어귀', line:'등이 하나씩 꺼진다. 아직은 잡것들이다.',
+    ground:'#151129', dot1:'#191539', dot2:'#110e24', decal:'#22376a',
+    pool:['honbul','heosu','dokkae'] },
+  { t:125, nm:'2막 · 밤 산길',   line:'길이 사라지고 안개가 찼다. 뒤를 보지 마라.',
+    ground:'#101c1e', dot1:'#16282a', dot2:'#0b1416', decal:'#2c6a5a',
+    pool:['honbul','heosu','dokkae','haegol','yeou'] },
+  { t:265, nm:'3막 · 저승 문턱', line:'여기서부터는 산 자의 땅이 아니다.',
+    ground:'#1a0e1e', dot1:'#26142c', dot2:'#120a15', decal:'#6a2a55',
+    pool:['dokkae','haegol','yeou','geuseun'] },
+];
+
+const CHARS = [
+  { k:'musa',   nm:'무사', desc:'균형 잡힌 검객', arm:'bujeok',
+    hp:100, spd:108, dmg:1.00, ic:'🗡' },
+  { k:'munyeo', nm:'무녀', desc:'빠르지만 약하다', arm:'hwasal',
+    hp:82,  spd:126, dmg:1.12, ic:'🏹' },
+  { k:'yeoksa', nm:'역사', desc:'느리지만 단단하다', arm:'geom',
+    hp:140, spd:94,  dmg:1.15, ic:'🪨' },
+];
+let charKey = 'musa';
+const CH = () => CHARS.find(c => c.k === charKey) || CHARS[0];
+
+const STORY = {
+  intro: ['해가 지자 마을의 등이 하나씩 꺼졌다.',
+          '백 가지 귀신이 줄지어 산을 내려온다.',
+          '칼을 쥐고 그 앞에 선다.'],
+  win:   ['저승사자가 먹물처럼 흩어지고',
+          '동쪽 하늘이 희끗해졌다.',
+          '칼을 거두고 마을로 돌아간다.'],
+  lose:  ['이름이 명부에 올랐다.',
+          '백귀의 밤은 아직 끝나지 않았다.'],
+};
+
 const BOSSES = [
-  { spr:'gumiho', nm:'구미호',    hp:820,  spd:38, dmg:9,  xp:150, r:22, at:180, scale:5 },
-  { spr:'saja',   nm:'저승사자',  hp:1500, spd:34, dmg:11, xp:600, r:26, at:360, scale:6 },
+  { spr:'dalgyal', nm:'달걀귀신', hp:520,  spd:44, dmg:8,  xp:80,  r:20, at:108, scale:5,
+    line:'얼굴 없는 것이 웃었다.' },
+  { spr:'gumiho',  nm:'구미호',   hp:820,  spd:38, dmg:9,  xp:150, r:22, at:238, scale:5,
+    line:'꼬리 아홉이 달을 가렸다.' },
+  { spr:'saja',    nm:'저승사자', hp:1500, spd:34, dmg:11, xp:600, r:26, at:382, scale:6,
+    line:'명부를 든 자가 이름을 부른다.' },
 ];
 
 // 무기 — lv 1..5. 값은 레벨별 배열.
@@ -102,6 +143,9 @@ const P = {
 };
 
 let souls = 0, runSouls = 0;            // 넋 — 판을 넘겨 남는 재화
+let actIdx = -1;                        // 지금 몇 막인가
+let ult = 0;                            // 필살기 기력 (처치로 찬다)
+const ULT_MAX = 300;
 let waveIdx = 0, eliteT = 0;
 let banner = '', bannerT = 0;
 
@@ -193,19 +237,21 @@ function reset(){
   SND.startMusic(); SND.setIntensity(0);
 
   P.x = P.y = 0; P.vx = P.vy = 0; P.fx = 1; P.fy = 0;
-  P.maxHp = 100 + (metaLv.hp||0)*12; P.hp = P.maxHp;
-  P.spd = 108 * (1 + (metaLv.spd||0)*0.04);
+  P.maxHp = CH().hp + (metaLv.hp||0)*12; P.hp = P.maxHp;
+  P.spd = CH().spd * (1 + (metaLv.spd||0)*0.04);
   P.lv = 1; P.xp = 0; P.xpNext = 5;
   P.iframe = 0; P.dashCd = 0; P.dashT = 0; P.hurtT = 0;
-  P.dmgMul = 1 + (metaLv.dmg||0)*0.06;
+  P.dmgMul = CH().dmg * (1 + (metaLv.dmg||0)*0.06);
   P.cdMul = 1;
   P.pickR = 52 * (1 + (metaLv.pick||0)*0.12);
   P.regen = 0;
   critChance = 0.13 + (metaLv.luck||0)*0.03;
-  P.arms = { bujeok:1 };               // 부적 한 장으로 시작
+  P.arms = {}; P.arms[CH().arm] = 1;   // 고른 인물의 무기 한 자루로 시작
   P.pass = {}; P.evo = {};
   runSouls = 0; waveIdx = 0; eliteT = 55; banner = ''; bannerT = 0;
-  evoAnnounced = {};
+  evoAnnounced = {}; actIdx = -1; ult = 0; ground = null;
+  P.dashHit = new Set();
+  el('story').hidden = true;
   el('chest').hidden = true;
   cam.x = 0; cam.y = 0;
   for(const k in ARMS) armT[k] = 0;
@@ -260,9 +306,33 @@ function bindInput(){
   window.addEventListener('keydown', e => {
     keys[e.key] = true;
     if(e.key === ' ' || e.key === 'Shift'){ e.preventDefault(); dash(); }
+    if(e.key === 'f' || e.key === 'F'){ e.preventDefault(); fireUlt(); }
     if(/^[wasd]$/i.test(e.key) || e.key.startsWith('Arrow')) e.preventDefault();
   });
   window.addEventListener('keyup', e => { keys[e.key] = false; });
+}
+
+/* 필살기 — 이 게임에서 유일하게 '내가 직접' 때리는 순간 */
+function fireUlt(){
+  if(!running || paused || ult < ULT_MAX) return;
+  ult = 0;
+  const dmg = (45 + P.lv*7) * P.dmgMul;
+  slowmo(0.9, 0.28);
+  flashScreen = 1.0;
+  shake = 20;
+  hitStop = 0.14;
+  ring(P.x, P.y, 10, 620, 1.0, '#ffffff', 10);
+  ring(P.x, P.y, 10, 480, 0.8, '#ffd35c', 7);
+  burst(P.x, P.y, 60, '#fff3c4', 420, 0.9);
+  popText(P.x, P.y - 54, '백귀참', '#ffd35c', true);
+  for(let i=foes.length-1;i>=0;i--){
+    const f = foes[i];
+    const dx = f.x-P.x, dy = f.y-P.y;
+    if(dx*dx+dy*dy > 620*620) continue;
+    const d = Math.hypot(dx,dy) || 1;
+    hurtFoe(f, dmg * (f.boss ? 0.55 : 1), dx/d*420, dy/d*420);
+  }
+  sfx.win();
 }
 
 function dash(){
@@ -271,6 +341,7 @@ function dash(){
   const ux = dx || P.fx, uy = dy || P.fy;
   const l = Math.hypot(ux,uy) || 1;
   P.dashT = 0.16; P.dashCd = 2.4; P.iframe = Math.max(P.iframe, 0.32);
+  P.dashHit = new Set();
   P.vx = ux/l * 620; P.vy = uy/l * 620;
   burst(P.x, P.y, 14, '#8fd0ff', 170, 0.32);
   ring(P.x, P.y, 4, 52, 0.26, '#8fd0ff', 3);
@@ -286,6 +357,16 @@ function updatePlayer(dt){
     P.x += P.vx*dt; P.y += P.vy*dt;
     P.vx *= 0.86; P.vy *= 0.86;
     if(parts.length < MAX_PARTS) burst(P.x, P.y, 1, '#6fb6ff', 40, 0.25);
+    // 몸을 부딪쳐 지나가며 벤다 — 회피가 곧 공격이 된다
+    const dmg = (18 + P.lv*2.2) * P.dmgMul;
+    for(let i=foes.length-1;i>=0;i--){
+      const f = foes[i];
+      if(P.dashHit.has(f)) continue;
+      const ddx = f.x-P.x, ddy = f.y-P.y;
+      if(ddx*ddx + ddy*ddy > (f.r+22)*(f.r+22)) continue;
+      P.dashHit.add(f);
+      hurtFoe(f, dmg, ddx*3.2, ddy*3.2);
+    }
   } else {
     const sp = P.spd;
     P.x += dx*sp*dt; P.y += dy*sp*dt;
@@ -310,13 +391,14 @@ function spawnRate(){
   return r;
 }
 function foePool(){
+  const act = ACTS[Math.max(0, actIdx)];
   const out = [];
-  for(const k in FOES) if(time >= FOES[k].from) out.push(k);
-  return out;
+  for(const k of act.pool) if(time >= FOES[k].from) out.push(k);
+  return out.length ? out : ['honbul'];
 }
 /* 플레이어 화력은 무기·진화·보조가 곱해져 기하급수로 큰다.
    적을 선형으로 올리면 후반이 그냥 산책이 된다. */
-function hpCurve(t){ return Math.pow(1.40, t/60); }
+function hpCurve(t){ return Math.pow(1.43, t/60); }
 function dmgCurve(t){ return Math.pow(1.26, t/60); }
 
 function spawnFoe(key, ang, dist, opt){
@@ -363,7 +445,8 @@ function spawnBoss(b){
   shake = 14; flashScreen = 0.6; slowmo(0.5, 0.5);
   ring(f.x, f.y, 12, 200, 0.8, '#ff5d5d', 6);
   sfx.boss();
-  popText(P.x, P.y-40, b.nm + ' 등장', '#ff5d5d', true);
+  announce(b.nm);
+  popText(P.x, P.y-40, b.line || (b.nm + ' 등장'), '#ff5d5d', true);
 }
 
 const WAVES = [
@@ -376,6 +459,31 @@ const WAVES = [
 ];
 
 function announce(text){ banner = text; bannerT = 2.4; }
+
+/* 막이 바뀌면 땅빛과 나오는 것이 바뀌고, 짧은 이야기 판이 뜬다 */
+function enterAct(i){
+  actIdx = i;
+  const A = ACTS[i];
+  ground = null;                       // 다음 그리기에서 새 땅빛으로 굽는다
+  showStory(A.nm, [A.line], '계 속');
+  ring(P.x, P.y, 10, 300, 0.9, '#ffffff', 6);
+  flashScreen = 0.5;
+}
+
+let storyThen = null;
+function showStory(title, lines, btn, then){
+  paused = true;
+  storyThen = then || null;
+  el('storyTitle').textContent = title;
+  el('storyBody').innerHTML = lines.map(l => `<p>${l}</p>`).join('');
+  el('storyOk').textContent = btn || '계 속';
+  el('story').hidden = false;
+}
+function closeStory(){
+  el('story').hidden = true;
+  const f = storyThen; storyThen = null;
+  if(f) f(); else paused = false;
+}
 
 function spawnElite(){
   // 초반에는 혼불밖에 없다. 걸러서 비면 있는 것 중에 뽑는다.
@@ -395,6 +503,10 @@ function updateSpawns(dt){
     spawnBoss(BOSSES[nextBoss]); nextBoss++;
   }
   bannerT = Math.max(0, bannerT - dt);
+
+  for(let i=ACTS.length-1;i>=0;i--){
+    if(time >= ACTS[i].t && actIdx < i){ enterAct(i); break; }
+  }
 
   // 짜여진 사건들 — 밋밋하게 흘러가지 않도록 리듬을 준다
   while(waveIdx < WAVES.length && time >= WAVES[waveIdx].t){
@@ -456,6 +568,7 @@ function killFoe(f){
   foes.splice(i,1);
   kills++;
   combo++; comboT = 1.8;
+  if(ult < ULT_MAX) ult = Math.min(ULT_MAX, ult + (f.boss ? 60 : (f.elite ? 14 : 1)));
   popSprite(f.spr, f.scale, f.x, f.y, P.x < f.x);
   burst(f.x, f.y, f.boss?60:9, f.boss?'#ffd35c':'#ff8b5c', f.boss?300:130);
   if(f.boss){
@@ -1042,8 +1155,10 @@ function takeCard(o){
 }
 
 /* ═══════════════ 끝 ═══════════════ */
-function endRun(title, sub, cls){
+function endRun(title, sub, cls, lines){
   running = false; finished = true; paused = false;
+  SND.stopMusic();
+  if(lines) el('overStory').innerHTML = lines.map(l => `<p>${l}</p>`).join('');
   const score = Math.round(time*10) + kills*3 + P.lv*40;
   runSouls += Math.floor(kills/25);
   souls += runSouls;
@@ -1064,12 +1179,12 @@ function endRun(title, sub, cls){
 function gameOver(){
   burst(P.x, P.y, 54, '#ff6b6b', 240);
   ring(P.x, P.y, 6, 220, 0.8, '#ff5252', 6);
-  shake = 18; slowmo(1.2, 0.25); SND.stopMusic(); sfx.dead();
-  endRun('쓰러졌다', '백귀의 밤은 아직 끝나지 않았다.', 'bad');
+  shake = 18; slowmo(1.2, 0.25); sfx.dead();
+  endRun('쓰러졌다', '', 'bad', STORY.lose);
 }
 function victory(){
-  SND.stopMusic(); sfx.win();
-  endRun('밤을 넘겼다', '저승사자를 베고 동이 텄다.', 'good');
+  sfx.win();
+  endRun('밤을 넘겼다', '', 'good', STORY.win);
 }
 
 /* ═══════════════ HUD ═══════════════ */
@@ -1110,6 +1225,11 @@ function syncHud(){
 
   const sc = el('soulnow');
   if(sc.textContent !== String(runSouls)) sc.textContent = runSouls;
+
+  const ub = el('ult');
+  const k = ult / ULT_MAX;
+  ub.style.setProperty('--fill', k.toFixed(3));
+  ub.classList.toggle('ready', k >= 1);
 }
 
 /* ═══════════════ 그리기 ═══════════════ */
@@ -1125,12 +1245,13 @@ function makeVig(){
 }
 function makeGround(){
   // 타일에는 고운 결만 넣는다. 큰 무늬를 넣으면 반복이 눈에 보인다.
+  const A = ACTS[Math.max(0, actIdx)];
   const n = 128, c = document.createElement('canvas');
   c.width = c.height = n;
   const g = c.getContext('2d');
-  g.fillStyle = '#151129'; g.fillRect(0,0,n,n);
+  g.fillStyle = A.ground; g.fillRect(0,0,n,n);
   for(let i=0;i<900;i++){
-    g.fillStyle = Math.random()<0.5 ? '#191539' : '#110e24';
+    g.fillStyle = Math.random()<0.5 ? A.dot1 : A.dot2;
     g.fillRect(Math.floor(Math.random()*n), Math.floor(Math.random()*n), 2, 2);
   }
   ground = ctx.createPattern(c, 'repeat');
@@ -1155,8 +1276,9 @@ function drawDecals(){
       const px = cx*DECAL + hash2(cx+91, cy)*DECAL;
       const py = cy*DECAL + hash2(cx, cy+57)*DECAL;
       const kind = Math.floor(h*3);
+      const dc = ACTS[Math.max(0, actIdx)].decal;
       if(kind === 0){            // 풀포기
-        ctx.fillStyle = '#22376a';
+        ctx.fillStyle = dc;
         ctx.fillRect(px, py, 2, 7); ctx.fillRect(px+4, py+2, 2, 5); ctx.fillRect(px-4, py+3, 2, 4);
       } else if(kind === 1){     // 돌
         ctx.fillStyle = '#2a2350'; ctx.fillRect(px, py, 9, 6);
@@ -1391,7 +1513,7 @@ function draw(){
 }
 
 function drawPlayer(){
-  const s = sprite('musa', 3);
+  const s = sprite(charKey, 3);
   const bobY = Math.sin(P.bob)*1.6;
   ctx.save();
   ctx.translate(P.x, P.y + bobY);
@@ -1489,6 +1611,25 @@ function resize(){
   ctx.imageSmoothingEnabled = false;
 }
 
+/* ═══════════════ 인물 고르기 ═══════════════ */
+function renderChars(){
+  const box = el('chars');
+  box.innerHTML = '';
+  for(const c of CHARS){
+    const btn = document.createElement('button');
+    btn.className = 'chr' + (c.k === charKey ? ' on' : '');
+    btn.innerHTML =
+      `<span class="ci">${c.ic}</span><span class="cn">${c.nm}</span>` +
+      `<span class="cd">${c.desc}</span>`;
+    btn.addEventListener('click', () => {
+      charKey = c.k;
+      try{ localStorage.setItem('baekgwi.char', c.k); }catch(e){}
+      SND.init(); sfx.ui(); renderChars();
+    });
+    box.appendChild(btn);
+  }
+}
+
 /* ═══════════════ 상점 ═══════════════ */
 function renderShop(){
   el('soulbank').textContent = souls;
@@ -1521,6 +1662,7 @@ function boot(){
   resize();
   bindInput();
   loadMeta();
+  try{ const c = localStorage.getItem('baekgwi.char'); if(c && CHARS.some(x=>x.k===c)) charKey = c; }catch(e){}
   if(best) el('bestHint').textContent = '최고 ' + best.toLocaleString('ko-KR') + '점';
   renderShop();
 
@@ -1528,12 +1670,20 @@ function boot(){
   const begin = () => {
     SND.init(); SND.resume(); SND.setMuted(muted);
     el('title').hidden = true; el('over').hidden = true;
-    sfx.ui(); reset();
+    sfx.ui();
+    reset();
+    paused = true;                       // 서막을 먼저 보여 준다
+    showStory('백귀야행', STORY.intro, '나 선 다', () => {
+      paused = false; actIdx = -1;       // 곧바로 1막이 열린다
+    });
   };
   el('start').addEventListener('click', begin);
+  el('storyOk').addEventListener('click', () => { sfx.ui(); closeStory(); });
+  el('ult').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); fireUlt(); });
+  renderChars();
   el('again').addEventListener('click', () => {
     el('over').hidden = true; el('title').hidden = false;
-    renderShop();
+    renderShop(); renderChars();
     if(best) el('bestHint').textContent = '최고 ' + best.toLocaleString('ko-KR') + '점';
   });
   el('chestOk').addEventListener('click', () => {
@@ -1556,6 +1706,8 @@ window.__BG = { P, foes, drops, bullets, get time(){return time}, get kills(){re
   get bossAlive(){return bossAlive}, ARMS, PASSIVES, FOES, EVO, SPR,
   get souls(){return souls}, get runSouls(){return runSouls}, META,
   openChest, spawnElite, get waveIdx(){return waveIdx},
+  get ult(){return ult}, fireUlt, get actIdx(){return actIdx},
+  setChar(k){ charKey = k; }, CHARS, ACTS,
   setTurbo(n){ turbo = Math.max(1, n|0); },
   setStick(x,y){ stick.on = !!(x||y); stick.ox=0; stick.oy=0; stick.dx=x*STICK_R; stick.dy=y*STICK_R; },
   killAll(){ for(let i=foes.length-1;i>=0;i--) killFoe(foes[i]); },

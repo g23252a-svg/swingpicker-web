@@ -18,6 +18,58 @@ musa: { p:{ o:'#17131f', h:'#2b2140', s:'#f2c9a0', e:'#17131f',
 '..okk..kko..',
 '...oo..oo...']},
 
+/* ── 무녀 / 역사 (같은 뼈대, 다른 색) ─────────── */
+munyeo: { p:{ o:'#1a1218', h:'#241a22', s:'#f7d6b4', e:'#1a1218',
+              b:'#ece6ef', l:'#ffffff', t:'#c93a3a', k:'#7d2a2a' }, d:[
+'...oooooo...',
+'..ohhhhhho..',
+'..ohhhhhho..',
+'..osssssso..',
+'..osesseso..',
+'..osssssso..',
+'.ottbbbbtto.',
+'.obbllllbbo.',
+'.obbbbbbbbo.',
+'.ottbbbbtto.',
+'..okk..kko..',
+'...oo..oo...',
+]},
+
+yeoksa: { p:{ o:'#141a12', h:'#2a2016', s:'#d9a06a', e:'#141a12',
+              b:'#4a6b3a', l:'#6f9455', t:'#c9a24a', k:'#3a2e1c' }, d:[
+'...oooooo...',
+'..ohhhhhho..',
+'..ohhhhhho..',
+'..osssssso..',
+'..osesseso..',
+'..osssssso..',
+'.ottbbbbtto.',
+'.obbllllbbo.',
+'.obbbbbbbbo.',
+'.ottbbbbtto.',
+'..okk..kko..',
+'...oo..oo...',
+]},
+
+/* ── 달걀귀신 (1막 보스) 16x16 ────────────────── */
+dalgyal: { p:{ o:'#171a1c', w:'#f3f0e6', g:'#b9b3a4' }, d:[
+'......oooo......',
+'....oowwwwoo....',
+'...owwwwwwwwo...',
+'..owwwwwwwwwwo..',
+'..owwwwwwwwwwo..',
+'.owwwwwwwwwwwwo.',
+'.owwwwwwwwwwwwo.',
+'.owwwwwwwwwwwwo.',
+'.owwwwwwwwwwwwo.',
+'..owwwwwwwwwwo..',
+'..owwwwwwwwwwo..',
+'...owwwwwwwwo...',
+'...ogwwwwwwgo...',
+'....ogwwwwgo....',
+'.....og..go.....',
+'......o..o......']},
+
 /* ── 혼불 12x12 ─────────────────────────────── */
 honbul: { p:{ o:'#0b1a28', f:'#4fc9f5', g:'#c9f6ff', d:'#2477a8' }, d:[
 '.....gg.....',
