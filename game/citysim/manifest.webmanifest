@@ -1,0 +1,17 @@
+{
+  "name": "포켓시티 — 도시 건설 시뮬",
+  "short_name": "포켓시티",
+  "description": "스마트폰에서 즐기는 도시 건설 시뮬레이션. 설치 후 오프라인에서도 실행됩니다.",
+  "lang": "ko",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#10141c",
+  "theme_color": "#12161f",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

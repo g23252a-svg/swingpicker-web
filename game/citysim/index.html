@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#12161f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="포켓시티">
+<title>포켓시티 — 도시 건설 시뮬</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="map"></canvas>
+
+<!-- 상단 HUD -->
+<header id="hud">
+  <div class="hud-row">
+    <div class="stat" id="stat-money"><span class="k">자금</span><b>₩0</b></div>
+    <div class="stat" id="stat-pop"><span class="k">인구</span><b>0</b></div>
+    <div class="stat" id="stat-happy"><span class="k">행복</span><b>0%</b></div>
+    <button class="icon-btn" id="btn-menu" aria-label="메뉴">☰</button>
+  </div>
+  <div class="hud-row sub">
+    <div class="tier" id="tier">마을</div>
+    <div class="date" id="date">1년 1월</div>
+    <div class="meters">
+      <div class="meter" id="meter-power" title="전력"><i>⚡</i><span class="bar"><span></span></span></div>
+      <div class="meter" id="meter-water" title="수도"><i>💧</i><span class="bar"><span></span></span></div>
+    </div>
+    <div class="speed" id="speed">
+      <button data-speed="0" aria-label="일시정지">❙❙</button>
+      <button data-speed="1" class="on">▶</button>
+      <button data-speed="3">▶▶</button>
+    </div>
+  </div>
+  <div class="hud-row sub">
+    <div id="rci" class="rci">
+      <div class="rci-item"><span class="rci-bar" data-z="R"><i></i></span><em>주거</em></div>
+      <div class="rci-item"><span class="rci-bar" data-z="C"><i></i></span><em>상업</em></div>
+      <div class="rci-item"><span class="rci-bar" data-z="I"><i></i></span><em>공업</em></div>
+    </div>
+    <div id="overlay-switch">
+      <button data-ov="none" class="on">일반</button>
+      <button data-ov="power">전력</button>
+      <button data-ov="water">수도</button>
+      <button data-ov="pollution">오염</button>
+      <button data-ov="land">지가</button>
+    </div>
+  </div>
+</header>
+
+<!-- 선택 도구 표시 -->
+<div id="tool-tip" hidden><span id="tool-tip-text"></span><button id="tool-cancel">취소</button></div>
+
+<!-- 하단 건설 팔레트 -->
+<nav id="palette">
+  <div id="cats">
+    <button data-cat="zone" class="on">구역</button>
+    <button data-cat="road">도로</button>
+    <button data-cat="util">전력·수도</button>
+    <button data-cat="service">서비스</button>
+    <button data-cat="park">공원</button>
+    <button data-cat="tool">도구</button>
+  </div>
+  <div id="tools"></div>
+</nav>
+
+<!-- 토스트 -->
+<div id="toasts"></div>
+
+<!-- 모달 -->
+<div id="modal" hidden>
+  <div class="sheet">
+    <div class="sheet-head"><h2 id="modal-title">메뉴</h2><button id="modal-close">✕</button></div>
+    <div class="sheet-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="sim.js"></script>
+<script src="render.js"></script>
+<script src="ui.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
