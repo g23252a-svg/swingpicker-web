@@ -3591,15 +3591,27 @@ def render_v2_action_rail(n: dict):
         if _p1 < 25 and tp1_gain and stop_pct:
             _ev = (_p1 / 100.0) * tp1_gain + (1 - _p1 / 100.0) * max(stop_pct, -8.0)
             if _ev < 0:
+                # [v55] 문구 보정 — 이 경고가 '이 종목은 나쁘다'로 읽히면 실측과 어긋난다.
+                #   v55 실측(게이트 통과 풀): TP1까지 거리가 먼(>20%) 후보가 오히려
+                #   좋았다(가까운-먼 -3.49%p, t=-1.74, p=0.094 · IS -4.39 p=0.093).
+                #   랭킹에서 RR 상한을 낮추면 해로웠다(min(RR,2) -2.07%p, t=-1.82,
+                #   블록부트 양수 2%). 공식 픽은 드문 대박이 수익의 전부인 우측 꼬리
+                #   분포이고(중위 -2.70%, 상위 2건이 평균의 대부분), 먼 목표가 그
+                #   꼬리가 사는 자리다. 따라서 경고의 뜻은 '기대하지 마라'가 아니라
+                #   '한 방에 걸지 말고 분할·사이즈로 대응하라'다.
                 ev_html = (
                     f'<div style="margin-top:8px;padding:7px 9px;border-radius:8px;'
-                    f'background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);'
-                    f'font-size:11px;color:#FCA5A5;line-height:1.5;">'
-                    f'⚠ 손익비 {rr:.2f}는 확률 가중이 아니다 — 도달률 {_p1:.0f}%로 '
-                    f'가중하면 기대값 {_ev:+.1f}%'
+                    f'background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.30);'
+                    f'font-size:11px;color:#FCD34D;line-height:1.5;">'
+                    f'⚠ 손익비 {rr:.2f}는 확률 가중이 아닙니다 — 도달률 {_p1:.0f}% 기준 '
+                    f'두 결과 근사 기대값은 {_ev:+.1f}%'
                     f'<span style="color:var(--text-dim);"> '
-                    f'(도달 시 {tp1_gain:+.1f}% · 미도달 시 손절 {max(stop_pct, -8.0):+.1f}% '
-                    f'두 결과 근사)</span></div>'
+                    f'(도달 시 {tp1_gain:+.1f}% · 미도달 시 손절 {max(stop_pct, -8.0):+.1f}%)'
+                    f'</span><br><span style="color:var(--text-gray);">'
+                    f'다만 실측에서는 목표가가 먼 후보가 오히려 나았습니다'
+                    f'(가까운 후보 대비 +3.5%p, p=0.09) — 이런 픽은 드물게 크게 이기는 '
+                    f'구조입니다. 기대를 낮추라는 뜻이 아니라, 한 번에 크게 걸지 말고 '
+                    f'분할·비중으로 대응하라는 뜻입니다.</span></div>'
                 )
 
     # [v53] 0주 사유를 화면에 붙인다 — v45의 '침묵의 0주 금지'를 완결.

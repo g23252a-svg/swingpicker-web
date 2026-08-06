@@ -87,9 +87,20 @@ def test_reason_mentions_lt_when_alpha_passed_but_lt_failed():
     assert "저점추세 하락" in reasons.iloc[0]
 
 
-def test_reason_prefers_alpha_shortfall_over_lt():
-    # 알파 미달이 1차 사유 — LT 사유는 알파 통과자에게만.
+def test_reason_lists_alpha_shortfall_before_lt():
+    """알파 미달이 **먼저** 온다. LT 사유를 숨기지는 않는다.
+
+    [v55.1 갱신] v37은 'LT 사유는 알파 통과자에게만'으로 2차 사유를 숨겼다.
+    그 규칙이 낳은 실제 피해가 확인돼 순서 규칙으로 바꿨다 — 2026-08-06 배치에서
+    알파 100.0점(진입선 85) 흥구석유가 'AI 알파 진입 기준 미달'로 표시됐다.
+    사유를 하나만 남기는 설계 때문에 하류가 폴백을 타고, 그 폴백이 화면에서
+    알파 탓으로 번역된 것이다. 이제 게이트가 실패 조건을 **전부** 적고
+    결정적인 순서(시장 전체 차단 > 알파 > 저점추세 > 자리)로 나열한다.
+    숨기지 않아야 하는 이유: 비에이치 090460은 전체 차단 + 저점추세 하위 12%가
+    동시에 미달이었고, 사용자는 "왜 이 3개냐"고 물었다 — 전체 그림이 답이다.
+    """
     df = apply_alpha_entry_gate(_df([{"ALPHA_SCORE": 50.0, "Low_Trend_PCT": -5.0}]))
     reasons = _reasons(df, pd.Series([False], index=df.index))
-    assert "알파 50점" in reasons.iloc[0]
-    assert "저점추세" not in reasons.iloc[0]
+    r = reasons.iloc[0]
+    assert "알파 50점" in r
+    assert r.index("알파 50점") < r.index("저점추세"), f"알파가 먼저여야 한다: {r}"

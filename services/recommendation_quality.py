@@ -204,6 +204,13 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     # [v37] 저점추세 게이트 — 컬럼 없으면(구버전 CSV) 통과 취급.
     lt_ok = _flag(df, "ALPHA_LT_OK", True)
     ltp = _num_nan(df, "LOW_TREND_PCTL")   # [v46] 당일 분위(0~100) — 사유 문구용
+    # [v56] 알파 게이트가 직접 남긴 탈락 사유 (SSOT). 구 CSV엔 없으므로 폴백 유지.
+    gate_reason = (df["ALPHA_ENTRY_BLOCK_REASON"].fillna("").astype(str)
+                   if "ALPHA_ENTRY_BLOCK_REASON" in df.columns
+                   else pd.Series("", index=df.index, dtype="object"))
+    blocked_flag = (_flag(df, "NEW_ENTRY_BLOCKED")
+                    | _flag(df, "JULY_PROFIT_BLOCK_FLAG")
+                    | _flag(df, "PROFIT_RECOVERY_BLOCK_FLAG"))
     # [v54] 사이징 불가(ROUTE)로 탈락한 경우 '1종목 제한'이라 적으면 거짓 사유가 된다.
     sizable = _route_sizable_mask(df)
 
@@ -221,18 +228,29 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
                 row_reasons.append("당일 신규진입 1종목 제한")
         if not bool(top.iloc[i]):
             if alpha_gate_active:
-                _a, _t = ascore.iloc[i], athr.iloc[i]
-                if pd.notna(_a) and pd.notna(_t) and _a < _t:
-                    row_reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
-                elif not bool(lt_ok.iloc[i]):
-                    # [v46] 알파는 통과했지만 저점추세가 당일 하위권 — 실측 역신호.
-                    #   당일 하위30% 종목 엣지 -0.57%p·승률 26.9% (t=-2.19)
-                    _p = ltp.iloc[i]
-                    row_reasons.append(
-                        f"저점추세 당일 하위 {_p:.0f}% (알파 통과·자리 미달)"
-                        if pd.notna(_p) else "저점추세 하락 (알파 통과·자리 미달)")
+                # [v56] 게이트가 남긴 사유를 그대로 쓴다 — 재추론하면 거짓이 된다.
+                #   2026-08-06 실측: 알파 100.0점(문턱 85)인 흥구석유가 아래
+                #   폴백을 타 '진입 조건 미달' → 화면에서 'AI 알파 진입 기준 미달'로
+                #   번역됐다. 실제 차단자는 risk_off 전 종목 하드블록(278/278)이었다.
+                _gr = str(gate_reason.iloc[i] or "").strip()
+                if _gr:
+                    row_reasons.append(_gr)
                 else:
-                    row_reasons.append("진입 조건 미달")
+                    _a, _t = ascore.iloc[i], athr.iloc[i]
+                    if pd.notna(_a) and pd.notna(_t) and _a < _t:
+                        row_reasons.append(f"알파 {_a:.0f}점 (진입선 {_t:.0f}점 미달)")
+                    elif not bool(lt_ok.iloc[i]):
+                        # [v46] 알파는 통과했지만 저점추세가 당일 하위권 — 실측 역신호.
+                        #   당일 하위30% 종목 엣지 -0.57%p·승률 26.9% (t=-2.19)
+                        _p = ltp.iloc[i]
+                        row_reasons.append(
+                            f"저점추세 당일 하위 {_p:.0f}% (알파 통과·자리 미달)"
+                            if pd.notna(_p) else "저점추세 하락 (알파 통과·자리 미달)")
+                    elif bool(blocked_flag.iloc[i]):
+                        # 구 CSV(게이트 사유 컬럼 없음)에서도 최상위 차단자는 말한다.
+                        row_reasons.append("시장 전체 신규진입 차단 (폭락 방어)")
+                    else:
+                        row_reasons.append("진입 조건 미달 (알파·자리 외 사유)")
             else:
                 row_reasons.append("TOP_PICK 아님")
         elif not bool(eligible.iloc[i]):
@@ -432,6 +450,33 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
     # 비용은 정직하게 적는다: 같은 풀 기준 공식 매수가 나오는 날이 69일 중
     # 18일(26%)로 줄어든다. 나머지 날은 후보가 '관망 + 0주 사유'로 표시된다
     # (v53 배선) — 살 수 없는 것을 공식 매수로 적는 것보다 정직하다.
+    #
+    # ── [v55 재측정 — 거부권을 지지하는 근거는 없다. 그래도 제거하지 않는다.] ──
+    # v54는 느슨한 풀(알파 상위10% 고정)에서 측정했다. v55는 프로덕션 퍼널을
+    # 그대로 재현해(레짐별 알파 문턱 85/90 · LT분위>30 · v51 리스크게이트 ·
+    # 품질가드 RR>=1.30·POC·신선도·매크로) 다시 봤다:
+    #   거부권 없음 29일 픽 · 있음 15일 픽 · 거부권이 지운 14일(에피소드 3건)
+    #   공통일에는 두 계약의 픽이 사실상 같다(15일 페어드 +1.43%p, t=0.19, p=0.85)
+    #   → 거부권의 가치는 '지워버리는 날'에만 있는데, 그 날들은 손실이 아니었다:
+    #        지워진 14일 평균 +0.23% · 중위 -0.14% · 승률 42.9%
+    #        0 대비 단일표본 t=+0.15 p=0.88  ← 손실을 막아준 게 아니다
+    #   유지군의 우위(+6.20%)는 로또 2장이 전부다:
+    #        상위 2건 +78.6%/+52.0% · 중위 -2.70% · sd 25.18 · 왜도 2.10
+    #        최상위 1건 제거 → +1.03% · 2건 제거 → -2.89%
+    #        양쪽 최상위 1건씩 제외 후 비교 +1.03% vs -1.04% (t=+0.48, p=0.64)
+    #        중위 기준 Mann-Whitney p=0.63 (오히려 유지군 중위가 더 나쁨)
+    #   구조적 결함도 확인됐다 — 거부권은 사실상 '상승장에 매매 금지'다:
+    #        유지일 UP 20% vs 지워진일 UP 71% · 시장폭 46.1 vs 58.1 (t=-1.93, p=0.064)
+    #        풀 내 사이징 가능 비율: UP 2.8% · NEUTRAL 16.5% · DOWN 10.7%
+    #   다지평도 일관되지 않다(FWD20은 부호 반전 -5.30%p).
+    #
+    # 그런데도 제거하지 않는 이유: 제거가 더 낫다는 것도 증명되지 않았다
+    # (두 계약 모두 기대값이 0과 구별되지 않는다 — 기준 t=1.65 p=0.11 /
+    #  거부권 t=0.95 p=0.36). 하루 만에 반대 방향으로 뒤집을 근거가 아니고,
+    # 제거는 실제 자금이 들어가는 변경이다(켈리 0주 해제). 대신 조건을 못박는다:
+    #   재검증 조건 — 거부권이 지운 날 20에피소드(현재 3건) 이상 쌓이면
+    #   같은 검정을 다시 하고, 그때도 '지워진 날이 손실이 아님'이 유지되면 제거한다.
+    #   그 전에 이 주석의 수익 수치를 근거로 제거·유지를 주장하면 안 된다.
     route_sizable = _route_sizable_mask(out)
     production_candidates = top & eligible_before & evidence_pass & route_sizable
     # [v35] 하루 1종목 랭킹 — 알파 게이트 활성 시 검증 알파×손익비로 선정.

@@ -81,8 +81,16 @@ def _humanize_reason(reason: Any) -> str:
             text = "최종 품질 점수 부족"
         elif part == "손실방어 차단":
             text = "폭락 방어(risk_off) 차단 — 시장 회복 시 자동 해제"
-        elif part == "진입 조건 미달":
-            text = "AI 알파 진입 기준 미달"
+        elif part.startswith("진입 조건 미달"):
+            # [v56] 'AI 알파 진입 기준 미달'로 번역하면 거짓이 된다 — 이 문구는
+            # 알파·자리를 통과했는데 다른 조건에서 막힌 경우의 폴백이다.
+            # 2026-08-06 실측: 알파 100.0점(문턱 85) 흥구석유가 이 경로로
+            # '알파 미달'로 표시됐다. 실제 차단자는 risk_off 전 종목 하드블록.
+            text = "진입 조건 미달 (알파 기준은 통과)"
+        elif part.startswith("시장 전체 신규진입 차단"):
+            text = "폭락 방어로 전 종목 신규진입 보류 — 이 종목만의 문제가 아님"
+        elif part == "진입 자리·손익비 가드 미달":
+            text = "진입 자리·손익비 가드 미달"
         else:
             # v32 알파 사유("알파 92점 (진입선 90점 미달)")는 이미 사람말 — 그대로 통과
             text = part
@@ -269,6 +277,19 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     # [v34] 폭락 방어(risk_off) — 실제 최상위 차단자를 화면에 드러낸다.
     # 7/16 실사용: 시장폭 88% '통과' 표시인데 매수 0개 → 사용자가 이유를 알 수 없었음.
     risk_off = _risk_off_state(work)
+    # [v55] 차단 상태를 코스피 원본으로 한 번 더 계산해 수치로 붙인다.
+    #   _risk_off_state는 CSV의 NEW_ENTRY_BLOCKED/STOP_OVERRIDE_REASON에 의존하므로
+    #   컬럼이 없거나 오래된 CSV를 보고 있으면 '왜 없는지'를 말하지 못한다.
+    #   v55 실측(프로덕션 CSV): 최근 16영업일 중 15일이 전 종목 차단이었고
+    #   코스피는 20일선 대비 최대 -20.1%(7/29) 이탈했다. 즉 원인은 표시가 아니라
+    #   실제 폭락이었다 — 그 사실을 숫자로 보여준다.
+    try:
+        from services.entry_block_status import compute_entry_block_status
+
+        risk_off["market"] = compute_entry_block_status()
+    except Exception as exc:
+        logger.warning("[v55] 차단 상태 계산 실패 (표시 생략): %s", exc)
+        risk_off["market"] = None
     breadth_ready = market_breadth is None or market_breadth >= MARKET_BREADTH_FLOOR
     market_ready = (
         breadth_ready
@@ -281,8 +302,11 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     blockers: list[str] = []
     if risk_off["active"]:
         blockers.append(
-            "폭락 방어(risk_off) 작동 중 — 코스피가 하락 중인 20일선 아래라 전 종목 신규 진입 차단"
-            " (실측: 이 구간 반등 추격은 승률 17%)"
+            # [v55] '실측 승률 17%' 단정 철회 — v55 재측정이 확인하지 못했다
+            # (차단일 반사실 픽 +3.15%, Welch p=0.85 · 순열 p=0.60 · 깊은 폭락
+            #  구간은 선행수익 부재로 평가 불가). 규칙 대신 조건을 적는다.
+            "폭락 방어(risk_off) 작동 중 — 코스피가 하락하는 20일선 아래로 3% 이상 "
+            "이탈해 전 종목 신규 진입을 보류합니다 (안전 쪽 선택 · 수익 효과는 미검증)"
         )
     if market_breadth is not None and market_breadth < MARKET_BREADTH_FLOOR:
         blockers.append(
@@ -324,11 +348,18 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         subtitle = "공식 매수 종목이 0개입니다. 관찰 후보는 조건에 가까울 뿐 주문 대상이 아닙니다."
         action_label = "신규 주문을 넣지 말고 현금을 유지하세요"
         action_detail = "높은 점수나 관찰 표시는 매수 신호가 아닙니다. 공식 매수가 생길 때까지 기다리세요."
-        next_check = (
-            "코스피가 해제선(20일선 -3% 이내)을 회복하면 매수 후보가 자동으로 올라옵니다"
-            if risk_off["active"]
-            else "다음 데이터 갱신 후 시장과 최종 후보를 다시 확인"
-        )
+        # [v55] 차단 중이면 '얼마나 더 올라야 풀리는지'를 숫자로 — 막연한 대기 금지
+        _m = (risk_off.get("market") or {})
+        if _m.get("ok") and _m.get("risk_off"):
+            next_check = (
+                f"코스피가 20일선 대비 -3% 이내로 회복하면 자동 재개 "
+                f"(현재 {_m['deviation_pct']:+.1f}% · {_m['unlock_gap_pct']:.1f}%p 더 필요 · "
+                f"{_m['streak_days']}일 연속 차단)"
+            )
+        elif risk_off["active"]:
+            next_check = "코스피가 해제선(20일선 -3% 이내)을 회복하면 매수 후보가 자동으로 올라옵니다"
+        else:
+            next_check = "다음 데이터 갱신 후 시장과 최종 후보를 다시 확인"
         # [v54] '종목을 못 찾았다'와 '찾았지만 아직 살 상태가 아니다'는 다르다.
         #   v54가 사이징 불가 상태를 공식 매수에서 제외한 대가로 0개인 날이
         #   늘어난다. 그 날 근거까지 통과한 후보가 있으면 이름과 상태를 밝힌다.
@@ -562,15 +593,31 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
             # [v34] 폭락 방어(risk_off) 잠금 스트립 — '왜 안 사는지'의 최상위 이유를
             # 해제 조건·진행률과 함께 노출 (7/16 피드백: 차단자가 화면에 없었음)
             _ro = summary.get("risk_off") or {}
-            if _ro.get("active"):
+            _mkt = _ro.get("market") or {}
+            if _ro.get("active") or _mkt.get("risk_off"):
                 with ui.column().classes("w-full gap-1 rounded-xl p-3 mt-2").style(
                     "background:rgba(180,83,9,.10); border:1px solid rgba(245,158,11,.28);"
                 ):
+                    # [v55] 문구 정직화. 기존 문구는 '실측 승률 17%라 자동 차단'이라고
+                    # 단정했지만 v55 재측정은 그것을 확인하지 못했다 — 패널 내 차단일
+                    # 6일의 반사실 픽은 오히려 +3.15%(승률 66.7%)였고 허용일보다
+                    # 나빴다는 증거가 없다(Welch -0.72%p t=-0.20 p=0.85 · 순열 p=0.60).
+                    # 깊은 폭락 구간(-8~-20%)은 아직 선행수익이 없어 평가 불가이고,
+                    # v49 기록대로 이 축은 창 길이에 따라 부호가 뒤집힌 이력이 있다.
+                    # 규칙은 그대로 두되(안전 쪽), '검증됨'이라고 말하지 않는다.
                     ui.label(
-                        "🔒 폭락 방어(risk_off) 작동 중 — 폭락 후 반등 추격은 실측 승률 17%라 자동 차단합니다"
+                        "🔒 폭락 방어(risk_off) 작동 중 — 코스피가 하락하는 20일선 아래로 "
+                        "3% 이상 이탈한 구간에서는 전 종목 신규진입을 자동 보류합니다"
                     ).classes("text-xs md:text-sm font-bold text-amber-200")
+                    if _mkt.get("ok"):
+                        ui.label(_mkt.get("reason", "")).classes(
+                            "text-xs text-amber-100 font-semibold")
                     if _ro.get("line"):
                         ui.label(_ro["line"]).classes("text-xs text-slate-300")
+                    ui.label(
+                        "이 보류 규칙이 수익을 지킨다는 것은 아직 통계로 확립되지 않았습니다 "
+                        "— 안전 쪽 선택이며, 깊은 하락 구간의 성과는 표본이 쌓이면 재검증합니다"
+                    ).classes("text-[10px] text-slate-500")
                     if _ro.get("progress") is not None:
                         with ui.element("div").style(
                             "width:100%; height:8px; background:rgba(148,163,184,.15);"
@@ -617,8 +664,20 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
         if summary["watch"]:
             with ui.row().classes("w-full items-end justify-between gap-3 flex-wrap mt-2"):
                 with ui.column().classes("gap-0"):
-                    ui.label("가장 가까운 관찰 후보").classes("text-lg font-bold text-white")
-                    ui.label("조건에 가까운 순서이며 매수 추천이 아닙니다.").classes("text-xs text-slate-500")
+                    # [v56] '조건에 가까운 순서'는 거짓이었다 — 실제 정렬키는
+                    # ALPHA_SCORE 내림차순이다(위 _sort_cols). 게다가 전 종목이
+                    # 차단된 날에는 '가까운' 것 자체가 없다(2026-08-06: 278/278 차단,
+                    # 1위 흥구석유 알파 100점이 문턱 85를 통과했는데도 픽 아님).
+                    _rs = summary.get("risk_off") or {}
+                    _blocked_now = bool((_rs.get("market") or {}).get("risk_off")) or \
+                        bool(_rs.get("active"))
+                    ui.label("AI 알파 상위 관찰 후보").classes("text-lg font-bold text-white")
+                    ui.label(
+                        "AI 알파 점수 순입니다. 오늘은 전 종목 신규진입이 보류돼 "
+                        "조건 근접도와 무관하며, 매수 추천이 아닙니다."
+                        if _blocked_now else
+                        "AI 알파 점수 순이며 매수 추천이 아닙니다."
+                    ).classes("text-xs text-slate-500")
                 ui.badge(f"전체 관찰 {summary['watch_count']}개", color="#475569")
             for rank, stock in enumerate(summary["watch"], 1):
                 _render_watch_card(stock, rank)

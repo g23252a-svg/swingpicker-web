@@ -1774,6 +1774,25 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         df_out = finalize_sort(df_out)
         df_out["LDY_RANK"] = np.arange(1, len(df_out) + 1)
         log(f"🧱 [loss-defense v1] 최종 품질게이트 — official {_before_quality}->{_after_quality} · 현금보유 허용")
+        # [v55] #29 계측 — 차단 상태와 그날 픽 수량을 같은 줄에 남긴다.
+        #   '왜 추천이 없냐'를 배치 로그만 보고 답할 수 있어야 한다. 실제로 v55에서
+        #   원인 규명에 CSV를 직접 파야 했던 이유가 이 한 줄이 없었기 때문이다
+        #   (최근 16영업일 중 15일이 risk_off 전 종목 차단이었다).
+        try:
+            from services.entry_block_status import compute_entry_block_status
+
+            _blk = compute_entry_block_status(OUT_DIR)
+            _nb = int(pd.to_numeric(df_out.get("NEW_ENTRY_BLOCKED", 0),
+                                    errors="coerce").fillna(0).astype(bool).sum())
+            _tp = int(pd.to_numeric(df_out.get("TOP_PICK", 0),
+                                    errors="coerce").fillna(0).astype(int).sum())
+            log(f"🚧 [v55] 진입차단 계측 — risk_off={_blk.get('risk_off')} "
+                f"(이탈 {_blk.get('deviation_pct')}% · 해제까지 {_blk.get('unlock_gap_pct')}%p · "
+                f"연속 {_blk.get('streak_days')}일 · 60일 차단율 {_blk.get('block_rate_60d_pct')}%) "
+                f"· NEW_ENTRY_BLOCKED {_nb}/{len(df_out)} · TOP_PICK {_tp} "
+                f"· PRODUCTION_BUY {_after_quality}")
+        except Exception as _be:
+            logger.warning(f"⚠️ [v55] 진입차단 계측 실패 (무해): {_be}")
     except Exception as e:
         logger.error(f"❌ 최종 품질게이트 실패 — 안전상 신규매수 전부 차단: {e}", exc_info=True)
         df_out["PRODUCTION_BUY"] = 0

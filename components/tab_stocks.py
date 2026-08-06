@@ -4140,7 +4140,7 @@ def _render_hero_strip(df: pd.DataFrame, official_decision: dict | None) -> None
                 '<span style="font-size:10px; padding:2px 8px; border-radius:10px;'
                 ' background:rgba(245,158,11,0.15); color:#FCD34D; font-weight:700;"'
                 ' title="코스피가 하락 중인 20일선 아래 — 해제선(20일선 -3%) 회복 시 자동 재개.'
-                ' 실측: 이 구간 반등 추격 승률 17%">🔒 폭락방어 작동중 · 회복 시 자동재개</span>'
+                ' 코스피가 하락하는 20일선 아래 -3% 이상 이탈 구간 · 수익 효과는 미검증(v55)">🔒 폭락방어 작동중 · 회복 시 자동재개</span>'
             )
     except Exception as _roe:
         _logger.warning(f"[v34] risk_off 칩 판정 실패 (표시 생략): {_roe}")
