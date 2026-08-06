@@ -54,6 +54,13 @@ body{
 .spacer{ flex:1; }
 .kills{ font-size:.74rem; color:var(--dim); }
 .kills b{ font-family:var(--num); font-size:.95rem; color:var(--text); }
+.combo{
+  flex:0 0 auto; white-space:nowrap; line-height:1;
+  font-weight:900; letter-spacing:.02em; color:var(--gold);
+  text-shadow:0 2px 8px #000, 0 0 14px rgba(240,178,60,.5);
+  font-variant-numeric:tabular-nums;
+}
+.combo.hot{ color:#ff8a4c; text-shadow:0 2px 8px #000, 0 0 18px rgba(255,110,60,.7); }
 #mute{
   pointer-events:auto; appearance:none; border:none; background:none;
   font-size:1.05rem; padding:2px 4px; cursor:pointer; opacity:.75;
@@ -227,7 +234,7 @@ body{
     <div class="row">
       <div class="bar xp"><i id="xpfill" style="width:0%"></i></div>
     </div>
-    <div class="row"><div id="arms"></div></div>
+    <div class="row"><div id="arms"></div><span class="spacer"></span><span class="combo" id="combo" hidden></span></div>
   </header>
 
   <div id="bossbar" hidden>
@@ -256,7 +263,8 @@ body{
     <p class="hint">
       화면 아무 데나 <b>손가락을 대고 끌면</b> 그쪽으로 달립니다.<br>
       공격은 <b>자동</b>입니다. 오른쪽 아래 <b>회피</b>로 빠져나가세요.<br>
-      경험치 구슬을 모아 레벨을 올리고 무기를 늘립니다.
+      경험치 구슬을 모아 레벨을 올리고 무기를 늘립니다.<br>
+      <b>소리를 켜고</b> 하시면 훨씬 낫습니다.
     </p>
   </section>
 
@@ -276,6 +284,7 @@ body{
 </div>
 
 <script src="sprites.js"></script>
+<script src="audio.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

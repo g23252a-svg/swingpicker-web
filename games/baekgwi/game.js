@@ -105,30 +105,29 @@ function fmtTime(t){
 }
 
 /* ═══════════════ 소리 ═══════════════ */
-let AC = null, muted = false;
-function blip(freq, dur, type, vol){
-  if(muted) return;
-  try{
-    if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)();
-    if(AC.state === 'suspended') AC.resume();
-    const o = AC.createOscillator(), g = AC.createGain();
-    o.type = type||'square'; o.frequency.value = freq;
-    g.gain.setValueAtTime(vol||0.05, AC.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0007, AC.currentTime+dur);
-    o.connect(g); g.connect(AC.destination);
-    o.start(); o.stop(AC.currentTime+dur);
-  }catch(e){ muted = true; }
+let muted = false;
+const sfx = SND.sfx;
+
+/* ═══════════════ 손맛 ═══════════════ */
+let combo = 0, comboT = 0, gemStreak = 0, gemT = 0;
+let slowT = 0, slowScale = 1, hsCd = 0;
+const rings = [], pops = [];
+
+// 히트스톱은 몰아치면 끊겨 보인다. 최소 간격을 둔다.
+function freeze(amount){
+  if(hsCd > 0) return;
+  hitStop = Math.max(hitStop, amount);
+  hsCd = 0.14;
 }
-const sfx = {
-  hit:  () => blip(rnd(300,380), 0.05, 'square', 0.028),
-  kill: () => blip(rnd(150,200), 0.09, 'triangle', 0.04),
-  hurt: () => blip(90, 0.18, 'sawtooth', 0.07),
-  gem:  () => blip(rnd(700,900), 0.05, 'triangle', 0.03),
-  lvl:  () => { blip(660,0.10,'triangle',0.06); setTimeout(()=>blip(990,0.16,'triangle',0.06),90); },
-  boss: () => blip(70, 0.7, 'sawtooth', 0.09),
-  win:  () => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>blip(f,0.28,'triangle',0.06), i*130)); },
-  dash: () => blip(420, 0.09, 'sine', 0.035),
-};
+function slowmo(dur, scale){ slowT = Math.max(slowT, dur); slowScale = scale; }
+function ring(x, y, r0, r1, life, col, w){
+  if(rings.length > 40) rings.shift();
+  rings.push({ x, y, r0, r1, life, max:life, col, w });
+}
+function popSprite(sprName, scale, x, y, flip){
+  if(pops.length > 40) pops.shift();
+  pops.push({ spr:sprName, scale, x, y, flip, life:0.17, max:0.17 });
+}
 
 /* ═══════════════ 효과 ═══════════════ */
 function burst(x, y, n, col, spd, life){
@@ -149,6 +148,10 @@ function reset(){
   running = true; paused = false; finished = false;
   foes.length = bullets.length = parts.length = drops.length = texts.length = slashes.length = 0;
   bossAlive = null; nextBoss = 0; spawnAcc = 0; shake = 0; hitStop = 0; flashScreen = 0;
+  rings.length = 0; pops.length = 0;
+  combo = 0; comboT = 0; gemStreak = 0; gemT = 0;
+  slowT = 0; slowScale = 1; hsCd = 0;
+  SND.startMusic(); SND.setIntensity(0);
 
   P.x = P.y = 0; P.vx = P.vy = 0; P.fx = 1; P.fy = 0;
   P.maxHp = 100; P.hp = 100; P.spd = 108;
@@ -222,7 +225,8 @@ function dash(){
   const l = Math.hypot(ux,uy) || 1;
   P.dashT = 0.16; P.dashCd = 2.4; P.iframe = Math.max(P.iframe, 0.32);
   P.vx = ux/l * 620; P.vy = uy/l * 620;
-  burst(P.x, P.y, 12, '#8fd0ff', 150, 0.3);
+  burst(P.x, P.y, 14, '#8fd0ff', 170, 0.32);
+  ring(P.x, P.y, 4, 52, 0.26, '#8fd0ff', 3);
   sfx.dash();
 }
 
@@ -285,7 +289,9 @@ function spawnBoss(b){
   foes.push(f); bossAlive = f;
   el('bossbar').hidden = false;
   el('bossname').textContent = b.nm;
-  shake = 12; flashScreen = 0.5; sfx.boss();
+  shake = 14; flashScreen = 0.6; slowmo(0.5, 0.5);
+  ring(f.x, f.y, 12, 200, 0.8, '#ff5d5d', 6);
+  sfx.boss();
   popText(P.x, P.y-40, b.nm + ' 등장', '#ff5d5d', true);
 }
 
@@ -308,24 +314,53 @@ function updateSpawns(dt){
   }
 }
 
+const CRIT_CHANCE = 0.13, CRIT_MUL = 2.3;
+
 function hurtFoe(f, dmg, kx, ky){
-  f.hp -= dmg; f.flash = 0.12;
-  f.kx += kx||0; f.ky += ky||0;
-  popText(f.x, f.y - f.r - 6, String(Math.round(dmg)), '#fff3c4');
+  const crit = Math.random() < CRIT_CHANCE;
+  if(crit) dmg *= CRIT_MUL;
+  f.hp -= dmg; f.flash = crit ? 0.20 : 0.12;
+  const kb = crit ? 1.9 : 1;
+  f.kx += (kx||0)*kb; f.ky += (ky||0)*kb;
+  popText(f.x, f.y - f.r - 6, String(Math.round(dmg)), crit ? '#ffd35c' : '#fff3c4', crit);
   if(f.boss) el('bossfill').style.width = clamp(f.hp/f.maxHp*100,0,100) + '%';
+
+  if(crit){
+    ring(f.x, f.y, 3, 40, 0.24, '#ffd35c', 3.5);
+    burst(f.x, f.y, 7, '#ffe9a8', 200, 0.30);
+    shake = Math.max(shake, 5);
+    if(f.maxHp > 40 || f.hp <= 0) freeze(0.024);
+    sfx.crit();
+  } else {
+    burst(f.x, f.y, 2, '#ffd98a', 90, 0.18);
+  }
   if(f.hp <= 0) killFoe(f);
-  else sfx.hit();
+  else if(!crit) sfx.hit(combo);
 }
 function killFoe(f){
   const i = foes.indexOf(f);
   if(i < 0) return;
   foes.splice(i,1);
   kills++;
-  burst(f.x, f.y, f.boss?46:9, f.boss?'#ffd35c':'#ff8b5c', f.boss?260:130);
-  sfx.kill();
+  combo++; comboT = 1.8;
+  popSprite(f.spr, f.scale, f.x, f.y, P.x < f.x);
+  burst(f.x, f.y, f.boss?60:9, f.boss?'#ffd35c':'#ff8b5c', f.boss?300:130);
+  if(f.boss){
+    sfx.bigKill();
+  } else if(f.maxHp > 90){
+    ring(f.x, f.y, 4, 46, 0.28, '#ff9a5c', 3);
+    shake = Math.max(shake, 3.5);
+    freeze(0.035);
+    sfx.bigKill();
+  } else {
+    ring(f.x, f.y, 2, 22, 0.16, '#ffb07a', 2);
+    sfx.kill(combo);
+  }
   if(f.boss){
     bossAlive = null; el('bossbar').hidden = true;
-    shake = 16; flashScreen = 0.6; hitStop = 0.14;
+    shake = 22; flashScreen = 0.85; hitStop = 0.30; slowmo(1.1, 0.32);
+    ring(f.x, f.y, 10, 260, 0.9, '#ffd35c', 8);
+    ring(f.x, f.y, 10, 170, 0.6, '#ffffff', 4);
     for(let i2=0;i2<14;i2++) dropGem(f.x+rnd(-40,40), f.y+rnd(-40,40), 3);
     dropItem(f.x, f.y, 'heart'); dropItem(f.x+18, f.y, 'magnet');
     if(f.final){ victory(); return; }
@@ -372,9 +407,14 @@ function updateFoes(dt){
 
     // 접촉 피해
     if(d < f.r + 9 && P.iframe <= 0){
-      P.hp -= f.dmg; P.iframe = 0.42; P.hurtT = 0.3;
-      shake = Math.max(shake, 7); sfx.hurt();
-      popText(P.x, P.y-26, '-'+Math.round(f.dmg), '#ff6b6b');
+      P.hp -= f.dmg; P.iframe = 0.42; P.hurtT = 0.34;
+      shake = Math.max(shake, 6 + f.dmg*0.22);
+      freeze(0.055);
+      ring(P.x, P.y, 6, 44, 0.22, '#ff5252', 3);
+      combo = 0;
+      sfx.hurt();
+      popText(P.x, P.y-26, '-'+Math.round(f.dmg), '#ff6b6b', true);
+      if(P.hp/P.maxHp < 0.28) slowmo(0.3, 0.45);
       if(P.hp <= 0){ gameOver(); return; }
     }
     // 겹침 방지
@@ -457,6 +497,7 @@ function fireArm(key, lv){
   }
   else if(key === 'bujeok'){
     const n = A.cnt[lv-1];
+    ring(P.x, P.y, 3, 20, 0.14, '#ffe9a8', 2);
     for(let i=0;i<n;i++){
       const t = nearestFoe(P.x, P.y, 460);
       const a = t ? Math.atan2(t.y-P.y, t.x-P.x) + rnd(-0.25,0.25) : Math.random()*6.283;
@@ -471,6 +512,7 @@ function fireArm(key, lv){
       if(!cand.length) break;
       const f = cand[rint(0,cand.length-1)];
       bolts.push({ x:f.x, y:f.y, life:0.24 });
+      ring(f.x, f.y, 6, 64, 0.3, '#bfe3ff', 4);
       for(let j=foes.length-1;j>=0;j--){
         const g = foes[j];
         const dx = g.x-f.x, dy = g.y-f.y;
@@ -490,6 +532,7 @@ function fireArm(key, lv){
   }
   else if(key === 'hwasal'){
     const n = A.cnt[lv-1];
+    ring(P.x, P.y, 3, 24, 0.14, '#e8e2cf', 2);
     const t = nearestFoe(P.x, P.y, 700);
     const base = t ? Math.atan2(t.y-P.y, t.x-P.x) : Math.atan2(P.fy,P.fx);
     for(let i=0;i<n;i++){
@@ -521,9 +564,11 @@ function updateBullets(dt){
     if(b.foe){
       const dx = P.x-b.x, dy = P.y-b.y;
       if(dx*dx+dy*dy < (b.r+9)**2 && P.iframe <= 0){
-        P.hp -= b.dmg; P.iframe = 0.42; P.hurtT = 0.3;
-        shake = Math.max(shake,6); sfx.hurt();
-        popText(P.x, P.y-26, '-'+Math.round(b.dmg), '#ff6b6b');
+        P.hp -= b.dmg; P.iframe = 0.42; P.hurtT = 0.34;
+        shake = Math.max(shake, 6 + b.dmg*0.2);
+        freeze(0.05); combo = 0; sfx.hurt();
+        ring(P.x, P.y, 6, 40, 0.2, '#ff5252', 3);
+        popText(P.x, P.y-26, '-'+Math.round(b.dmg), '#ff6b6b', true);
         bullets.splice(i,1);
         if(P.hp <= 0){ gameOver(); return; }
       }
@@ -558,13 +603,20 @@ function updateDrops(dt){
     }
     if(dist < 14){
       drops.splice(i,1);
-      if(d.t === 'gem'){ gainXp([1,3,9][d.tier]); sfx.gem(); }
-      else if(d.t === 'heart'){
+      if(d.t === 'gem'){
+        gemStreak++; gemT = 0.5;
+        gainXp([1,3,9][d.tier]);
+        sfx.gem(gemStreak);
+      } else if(d.t === 'heart'){
         P.hp = Math.min(P.maxHp, P.hp + 28);
-        popText(P.x, P.y-30, '+28', '#7bffa0'); sfx.gem();
+        popText(P.x, P.y-30, '+28', '#7bffa0', true);
+        ring(P.x, P.y, 4, 40, 0.3, '#7bffa0', 3);
+        sfx.heal();
       } else if(d.t === 'magnet'){
         for(const o of drops) o.pull = 1;
-        popText(P.x, P.y-30, '전부 끌어당김', '#8fd0ff'); sfx.gem();
+        popText(P.x, P.y-30, '전부 끌어당김', '#8fd0ff', true);
+        ring(P.x, P.y, 8, 300, 0.5, '#8fd0ff', 4);
+        sfx.heal();
       }
     }
   }
@@ -576,6 +628,17 @@ function gainXp(n){
     P.xp -= P.xpNext; P.lv++;
     P.xpNext = P.lv < 12 ? 5 + P.lv*4 : Math.round(P.xpNext*1.16) + 6;
     offerCards();
+  }
+}
+
+function updateFx(dt){
+  for(let i=rings.length-1;i>=0;i--){
+    rings[i].life -= dt;
+    if(rings[i].life <= 0) rings.splice(i,1);
+  }
+  for(let i=pops.length-1;i>=0;i--){
+    pops[i].life -= dt;
+    if(pops[i].life <= 0) pops.splice(i,1);
   }
 }
 
@@ -609,7 +672,11 @@ function offerCards(){
   if(!pick.length){ P.hp = Math.min(P.maxHp, P.hp+30); return; }
 
   paused = true;
-  sfx.lvl();
+  flashScreen = 0.55;
+  ring(P.x, P.y, 8, 190, 0.6, '#ffd35c', 5);
+  burst(P.x, P.y, 26, '#ffe9a8', 240, 0.6);
+  shake = Math.max(shake, 6);
+  sfx.level();
   const box = el('cards');
   box.innerHTML = '';
   for(const o of pick){
@@ -666,12 +733,13 @@ function endRun(title, sub, cls){
   el('bossbar').hidden = true;
 }
 function gameOver(){
-  burst(P.x, P.y, 40, '#ff6b6b', 220);
-  shake = 14;
+  burst(P.x, P.y, 54, '#ff6b6b', 240);
+  ring(P.x, P.y, 6, 220, 0.8, '#ff5252', 6);
+  shake = 18; slowmo(1.2, 0.25); SND.stopMusic(); sfx.dead();
   endRun('쓰러졌다', '백귀의 밤은 아직 끝나지 않았다.', 'bad');
 }
 function victory(){
-  sfx.win();
+  SND.stopMusic(); sfx.win();
   endRun('밤을 넘겼다', '저승사자를 베고 동이 텄다.', 'good');
 }
 
@@ -683,6 +751,16 @@ function syncHud(){
   el('lv').textContent = P.lv;
   el('clock').textContent = fmtTime(time);
   el('dash').style.setProperty('--cd', (P.dashCd/2.4).toFixed(3));
+
+  const cb = el('combo');
+  if(combo >= 5){
+    cb.hidden = false;
+    cb.textContent = combo + ' 연속';
+    cb.style.fontSize = (0.82 + Math.min(combo,60)*0.012).toFixed(2) + 'rem';
+    cb.classList.toggle('hot', combo >= 25);
+  } else if(!cb.hidden) cb.hidden = true;
+
+  SND.setIntensity(bossAlive ? 2 : (time > 200 ? 1 : 0));
   el('kills').textContent = kills;
 
   const row = el('arms');
@@ -805,13 +883,15 @@ function draw(){
   for(const s of slashes){
     const k = s.life/s.max;
     ctx.save();
-    ctx.globalAlpha = k*0.85;
-    ctx.strokeStyle = '#dff0ff';
-    ctx.lineWidth = 7*k + 2;
+    ctx.globalAlpha = k*0.95;
+    ctx.strokeStyle = '#f2f9ff';
+    ctx.lineWidth = 11*k + 3;
+    ctx.shadowColor = '#9fd4ff'; ctx.shadowBlur = 12*k;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.rng*(1.06-0.16*k), s.a - s.arc/2, s.a + s.arc/2);
     ctx.stroke();
+    ctx.shadowBlur = 0;
     ctx.restore();
   }
 
@@ -833,6 +913,32 @@ function draw(){
     if(o === P) drawPlayer();
     else drawFoe(o);
   }
+
+  // 스러지는 몸 — 하얗게 부풀며 사라진다
+  for(const q of pops){
+    const k = 1 - q.life/q.max;
+    const sp = sprite(q.spr, q.scale);
+    ctx.save();
+    ctx.globalAlpha = (1-k)*0.85;
+    ctx.translate(q.x, q.y);
+    if(q.flip) ctx.scale(-1,1);
+    const sc = 1 + k*0.75;
+    ctx.scale(sc, sc);
+    ctx.drawImage(sp.lit, -sp.w/2, -sp.h/2);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+
+  // 충격파
+  for(const r of rings){
+    const k = 1 - r.life/r.max;
+    const rad = r.r0 + (r.r1 - r.r0) * (1 - (1-k)*(1-k));
+    ctx.globalAlpha = (r.life/r.max) * 0.85;
+    ctx.strokeStyle = r.col;
+    ctx.lineWidth = Math.max(0.6, r.w * (1 - k*0.75));
+    ctx.beginPath(); ctx.arc(r.x, r.y, rad, 0, 6.283); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 
   // 번개
   for(const b of bolts){
@@ -973,7 +1079,14 @@ function frame(t){
   let dt = Math.min(0.1, nowS - last);
   last = nowS;
 
+  SND.tick();
+  hsCd = Math.max(0, hsCd - dt);
+  if(slowT > 0){ slowT -= dt; dt *= slowScale; }
+  updateFx(dt);
+
   if(running && !paused){
+    comboT -= dt; if(comboT <= 0) combo = 0;
+    gemT -= dt;   if(gemT <= 0) gemStreak = 0;
     if(hitStop > 0){ hitStop -= dt; }
     else {
       acc += dt;
@@ -1017,15 +1130,17 @@ function boot(){
   try{ best = parseInt(localStorage.getItem('baekgwi.best')||'0',10)||0; }catch(e){}
   if(best) el('bestHint').textContent = '최고 ' + best.toLocaleString('ko-KR') + '점';
 
-  el('start').addEventListener('click', () => {
+  // 오디오는 사용자가 누른 다음에야 열 수 있다
+  const begin = () => {
+    SND.init(); SND.resume(); SND.setMuted(muted);
     el('title').hidden = true; el('over').hidden = true;
-    reset(); blip(520,0.12,'triangle',0.05);
-  });
-  el('again').addEventListener('click', () => {
-    el('over').hidden = true; reset(); blip(520,0.12,'triangle',0.05);
-  });
+    sfx.ui(); reset();
+  };
+  el('start').addEventListener('click', begin);
+  el('again').addEventListener('click', begin);
   el('mute').addEventListener('click', e => {
     muted = !muted;
+    SND.setMuted(muted);
     e.currentTarget.setAttribute('aria-pressed', String(!muted));
     e.currentTarget.textContent = muted ? '🔇' : '🔊';
   });

@@ -11,15 +11,18 @@ import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).parent
-TAG = '<script src="sprites.js"></script>\n<script src="game.js"></script>'
+TAG = ('<script src="sprites.js"></script>\n'
+       '<script src="audio.js"></script>\n'
+       '<script src="game.js"></script>')
 
 
 def build() -> str:
     html = (HERE / 'index.html').read_text(encoding='utf-8')
     if TAG not in html:
         raise SystemExit('index.html 안에서 스크립트 태그를 찾지 못했습니다.')
-    joined = '<script>\n{}\n{}\n</script>'.format(
+    joined = '<script>\n{}\n{}\n{}\n</script>'.format(
         (HERE / 'sprites.js').read_text(encoding='utf-8'),
+        (HERE / 'audio.js').read_text(encoding='utf-8'),
         (HERE / 'game.js').read_text(encoding='utf-8'),
     )
     return html.replace(TAG, joined)
