@@ -202,6 +202,26 @@ magnet: { p:{ o:'#231a05', r:'#e04a3a', s:'#d8d8e0' }, d:[
 '..osso..',
 '...oo...']},
 
+chest: { p:{ o:'#231405', g:'#f0b23c', y:'#ffe9a8', b:'#8a5a24', w:'#e8e2cf' }, d:[
+'.oooooo.',
+'ogyyyygo',
+'oggggggo',
+'oooooooo',
+'obbbbbbo',
+'obbowobo',
+'obbbbbbo',
+'.oooooo.']},
+
+soul: { p:{ o:'#0d1c33', f:'#8fd0ff', w:'#f2fbff' }, d:[
+'...oo...',
+'..offo..',
+'.offffo.',
+'offwwffo',
+'offwwffo',
+'.offffo.',
+'..offo..',
+'...oo...']},
+
 /* ── 무기 8x8 ───────────────────────────────── */
 bujeok: { p:{ o:'#3a2a0a', y:'#ffe9a8', r:'#d13a2a' }, d:[
 '.oooooo.',

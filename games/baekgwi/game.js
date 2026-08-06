@@ -9,12 +9,23 @@ const RUN_TIME = 360;                 // 6분
 const MAX_FOES = 260, MAX_PARTS = 300, MAX_TEXTS = 44;
 
 const FOES = {
-  honbul:  { spr:'honbul',  nm:'혼불',    hp:9,   spd:74, dmg:6,  xp:1, r:8,  from:0   },
-  heosu:   { spr:'heosu',   nm:'허수아비', hp:28, spd:58, dmg:9,  xp:2, r:10, from:12  },
-  dokkae:  { spr:'dokkae',  nm:'도깨비',  hp:48,  spd:66, dmg:12, xp:3, r:11, from:35  },
-  haegol:  { spr:'haegol',  nm:'해골',    hp:36,  spd:88, dmg:11, xp:3, r:10, from:70  },
-  yeou:    { spr:'yeou',    nm:'불여우',  hp:80,  spd:97, dmg:15, xp:6, r:11, from:110 },
-  geuseun: { spr:'geuseun', nm:'그슨대',  hp:190, spd:52, dmg:22, xp:14, r:15, from:160 },
+  honbul:  { spr:'honbul',  nm:'혼불',    hp:9,   spd:74, dmg:6,  xp:1, r:8,  from:0,   ai:'chase'  },
+  heosu:   { spr:'heosu',   nm:'허수아비', hp:28, spd:58, dmg:9,  xp:2, r:10, from:12,  ai:'chase'  },
+  dokkae:  { spr:'dokkae',  nm:'도깨비',  hp:48,  spd:62, dmg:12, xp:3, r:11, from:35,  ai:'charge' },
+  haegol:  { spr:'haegol',  nm:'해골',    hp:36,  spd:88, dmg:11, xp:3, r:10, from:70,  ai:'chase'  },
+  yeou:    { spr:'yeou',    nm:'불여우',  hp:80,  spd:90, dmg:15, xp:6, r:11, from:110, ai:'shoot'  },
+  geuseun: { spr:'geuseun', nm:'그슨대',  hp:190, spd:52, dmg:22, xp:14, r:15, from:160, ai:'split' },
+};
+
+/* 무기 5단 + 짝이 되는 보조 3단이면 진화한다.
+   숫자만 오르는 카드 대신 '무엇을 향해 키울까'를 만들어 주는 장치다. */
+const EVO = {
+  geom:   { need:'sutdol', nm:'월광참', ic:'🌙', desc:'사방을 한 번에 벤다. 피해 2.4배' },
+  bujeok: { need:'buchae', nm:'만다라', ic:'🌀', desc:'부적이 소용돌이로 퍼진다' },
+  byeorak:{ need:'jaseok', nm:'뇌신',   ic:'🌩', desc:'낙뢰가 세 번 튄다' },
+  bulti:  { need:'sansam', nm:'겁화',   ic:'☄', desc:'장막이 넓어지고 태워 죽이면 터진다' },
+  hwasal: { need:'jipsin', nm:'백발백중', ic:'🎯', desc:'사방으로 여덟 발이 꿰뚫는다' },
+  bell:   { need:'tugu',   nm:'풍경',   ic:'🎐', desc:'방울이 커지고 충격파를 남긴다' },
 };
 const BOSSES = [
   { spr:'gumiho', nm:'구미호',    hp:2600, spd:38, dmg:24, xp:150, r:22, at:180, scale:5 },
@@ -87,8 +98,12 @@ const P = {
   lv:1, xp:0, xpNext:5,
   iframe:0, dashCd:0, dashT:0, bob:0, hurtT:0,
   dmgMul:1, cdMul:1, pickR:52, regen:0,
-  arms:{}, pass:{},
+  arms:{}, pass:{}, evo:{},
 };
+
+let souls = 0, runSouls = 0;            // 넋 — 판을 넘겨 남는 재화
+let waveIdx = 0, eliteT = 0;
+let banner = '', bannerT = 0;
 
 const foes = [], bullets = [], parts = [], drops = [], texts = [], slashes = [];
 let bossAlive = null, nextBoss = 0, spawnAcc = 0;
@@ -142,6 +157,30 @@ function popText(x, y, txt, col, big){
   texts.push({ x:x+rnd(-9,9), y, txt, col, life:0.7, vy:-46, big:!!big });
 }
 
+/* ═══════════════ 넋 강화 — 판을 넘겨 남는 것 ═══════════════ */
+const META = {
+  hp:   { nm:'무쇠 몸',   ic:'🛡', desc:'최대 체력 +12',  cost:[8,14,22,34,50] },
+  dmg:  { nm:'날 세우기', ic:'⚔', desc:'모든 피해 +6%',  cost:[10,18,28,42,60] },
+  spd:  { nm:'가벼운 발', ic:'👣', desc:'이동 속도 +4%',  cost:[8,14,22,34,50] },
+  pick: { nm:'넋 부르기', ic:'🧲', desc:'획득 범위 +12%', cost:[10,18,28] },
+  luck: { nm:'복',        ic:'🍀', desc:'치명타 확률 +3%', cost:[14,24,38] },
+};
+let metaLv = {};
+
+function loadMeta(){
+  try{
+    const raw = JSON.parse(localStorage.getItem('baekgwi.meta') || '{}');
+    souls = raw.souls || 0;
+    metaLv = raw.lv || {};
+    best = raw.best || 0;
+  }catch(e){ souls = 0; metaLv = {}; }
+}
+function saveMeta(){
+  try{
+    localStorage.setItem('baekgwi.meta', JSON.stringify({ souls, lv:metaLv, best }));
+  }catch(e){}
+}
+
 /* ═══════════════ 시작 ═══════════════ */
 function reset(){
   time = 0; kills = 0;
@@ -154,12 +193,20 @@ function reset(){
   SND.startMusic(); SND.setIntensity(0);
 
   P.x = P.y = 0; P.vx = P.vy = 0; P.fx = 1; P.fy = 0;
-  P.maxHp = 100; P.hp = 100; P.spd = 108;
+  P.maxHp = 100 + (metaLv.hp||0)*12; P.hp = P.maxHp;
+  P.spd = 108 * (1 + (metaLv.spd||0)*0.04);
   P.lv = 1; P.xp = 0; P.xpNext = 5;
   P.iframe = 0; P.dashCd = 0; P.dashT = 0; P.hurtT = 0;
-  P.dmgMul = 1; P.cdMul = 1; P.pickR = 52; P.regen = 0;
+  P.dmgMul = 1 + (metaLv.dmg||0)*0.06;
+  P.cdMul = 1;
+  P.pickR = 52 * (1 + (metaLv.pick||0)*0.12);
+  P.regen = 0;
+  critChance = 0.13 + (metaLv.luck||0)*0.03;
   P.arms = { bujeok:1 };               // 부적 한 장으로 시작
-  P.pass = {};
+  P.pass = {}; P.evo = {};
+  runSouls = 0; waveIdx = 0; eliteT = 48; banner = ''; bannerT = 0;
+  evoAnnounced = {};
+  el('chest').hidden = true;
   cam.x = 0; cam.y = 0;
   for(const k in ARMS) armT[k] = 0;
   syncHud();
@@ -264,27 +311,42 @@ function foePool(){
   for(const k in FOES) if(time >= FOES[k].from) out.push(k);
   return out;
 }
-function spawnFoe(key, ang, dist){
+function spawnFoe(key, ang, dist, opt){
   if(foes.length >= MAX_FOES) return;
   const d = FOES[key];
   const mul = 1 + time/95;
+  opt = opt || {};
   const a = ang !== undefined ? ang : Math.random()*6.283;
   // 화면이 세로로 길어서 원으로 뿌리면 좌우가 너무 멀다. 화면 모양대로 타원에 놓는다.
   const m = dist || 1;
   const rx = (VW*0.60 + 46) * m, ry = (VH*0.58 + 46) * m;
-  foes.push({
-    k:key, spr:d.spr, x:cam.x + Math.cos(a)*rx, y:cam.y + Math.sin(a)*ry,
-    hp:d.hp*mul, maxHp:d.hp*mul, spd:d.spd*rnd(0.9,1.1), dmg:d.dmg*(1+time/240),
-    xp:d.xp, r:d.r, kx:0, ky:0, flash:0, bellCd:0, bob:Math.random()*6.283, boss:false, scale:3,
-    orbit:rnd(-0.85,0.85),
-  });
+  const elite = !!opt.elite;
+  const shrink = opt.shrink || 1;
+  const hp = d.hp * mul * (elite ? 6 : 1) * shrink;
+  const f = {
+    k:key, spr:d.spr,
+    x: opt.x !== undefined ? opt.x : cam.x + Math.cos(a)*rx,
+    y: opt.y !== undefined ? opt.y : cam.y + Math.sin(a)*ry,
+    hp, maxHp:hp,
+    spd: d.spd * rnd(0.9,1.1) * (elite ? 0.82 : 1),
+    dmg: d.dmg * (1+time/240) * (elite ? 1.7 : 1),
+    xp: d.xp * (elite ? 8 : 1) * shrink,
+    r: d.r * (elite ? 1.45 : 1) * (shrink < 1 ? 0.72 : 1),
+    kx:0, ky:0, flash:0, bellCd:0, bob:Math.random()*6.283, boss:false,
+    scale: elite ? 4 : (shrink < 1 ? 2 : 3),
+    orbit: rnd(-0.85,0.85),
+    ai: d.ai, act:0, dash:0, tele:0, elite, child: shrink < 1,
+  };
+  foes.push(f);
+  return f;
 }
 function spawnBoss(b){
   const a = Math.random()*6.283;
   const f = {
     k:'boss', spr:b.spr, x:cam.x+Math.cos(a)*(VW*0.55+40), y:cam.y+Math.sin(a)*(VH*0.5+40),
     hp:b.hp, maxHp:b.hp, spd:b.spd, dmg:b.dmg, xp:b.xp, r:b.r,
-    kx:0, ky:0, flash:0, bellCd:0, bob:0, orbit:0, boss:true, nm:b.nm, scale:b.scale, ring:2.5, final:b.at>=RUN_TIME,
+    kx:0, ky:0, flash:0, bellCd:0, bob:0, orbit:0, boss:true, nm:b.nm, scale:b.scale, ring:2.5,
+    ai:'chase', act:0, dash:0, tele:0, elite:false, child:false, final:b.at>=RUN_TIME,
   };
   foes.push(f); bossAlive = f;
   el('bossbar').hidden = false;
@@ -295,9 +357,50 @@ function spawnBoss(b){
   popText(P.x, P.y-40, b.nm + ' 등장', '#ff5d5d', true);
 }
 
+const WAVES = [
+  { t:45,  label:'혼불 무리',   key:'honbul',  n:16 },
+  { t:88,  label:'허수아비 떼', key:'heosu',   n:14 },
+  { t:130, label:'정예 출현',   elite:1 },
+  { t:225, label:'해골 돌격',   key:'haegol',  n:20 },
+  { t:262, label:'정예 둘',     elite:2 },
+  { t:310, label:'그슨대 무리', key:'geuseun', n:8 },
+];
+
+function announce(text){ banner = text; bannerT = 2.4; }
+
+function spawnElite(){
+  // 초반에는 혼불밖에 없다. 걸러서 비면 있는 것 중에 뽑는다.
+  let pool = foePool().filter(k => FOES[k].from > 0);
+  if(!pool.length) pool = foePool();
+  if(!pool.length) return;
+  const f = spawnFoe(pool[rint(0,pool.length-1)], undefined, undefined, { elite:true });
+  if(f){
+    ring(f.x, f.y, 8, 90, 0.6, '#f0b23c', 4);
+    announce('정예 ' + FOES[f.k].nm);
+    sfx.boss();
+  }
+}
+
 function updateSpawns(dt){
   if(nextBoss < BOSSES.length && time >= BOSSES[nextBoss].at && !bossAlive){
     spawnBoss(BOSSES[nextBoss]); nextBoss++;
+  }
+  bannerT = Math.max(0, bannerT - dt);
+
+  // 짜여진 사건들 — 밋밋하게 흘러가지 않도록 리듬을 준다
+  while(waveIdx < WAVES.length && time >= WAVES[waveIdx].t){
+    const w = WAVES[waveIdx++];
+    announce(w.label);
+    if(w.elite){ for(let i=0;i<w.elite;i++) spawnElite(); }
+    else {
+      const base = Math.random()*6.283;
+      for(let i=0;i<w.n;i++) spawnFoe(w.key, base + i/w.n*6.283, 0.92);
+    }
+  }
+  // 그 사이사이에도 정예가 하나씩
+  if(time > 62){
+    eliteT -= dt;
+    if(eliteT <= 0){ eliteT = 48; spawnElite(); }
   }
   spawnAcc += spawnRate()*dt;
   const pool = foePool();
@@ -314,10 +417,11 @@ function updateSpawns(dt){
   }
 }
 
-const CRIT_CHANCE = 0.13, CRIT_MUL = 2.3;
+let critChance = 0.13;
+const CRIT_MUL = 2.3;
 
 function hurtFoe(f, dmg, kx, ky){
-  const crit = Math.random() < CRIT_CHANCE;
+  const crit = Math.random() < critChance;
   if(crit) dmg *= CRIT_MUL;
   f.hp -= dmg; f.flash = crit ? 0.20 : 0.12;
   const kb = crit ? 1.9 : 1;
@@ -362,16 +466,41 @@ function killFoe(f){
     ring(f.x, f.y, 10, 260, 0.9, '#ffd35c', 8);
     ring(f.x, f.y, 10, 170, 0.6, '#ffffff', 4);
     for(let i2=0;i2<14;i2++) dropGem(f.x+rnd(-40,40), f.y+rnd(-40,40), 3);
+    for(let i2=0;i2<12;i2++) dropItem(f.x+rnd(-50,50), f.y+rnd(-50,50), 'soul');
     dropItem(f.x, f.y, 'heart'); dropItem(f.x+18, f.y, 'magnet');
+    dropItem(f.x-22, f.y, 'chest');
     if(f.final){ victory(); return; }
+  } else if(f.elite){
+    ring(f.x, f.y, 8, 140, 0.6, '#f0b23c', 5);
+    shake = Math.max(shake, 9); flashScreen = 0.35; freeze(0.06);
+    dropItem(f.x, f.y, 'chest');
+    for(let n=0;n<3;n++) dropItem(f.x+rnd(-24,24), f.y+rnd(-24,24), 'soul');
+    for(let n=0;n<5;n++) dropGem(f.x+rnd(-30,30), f.y+rnd(-30,30), 2);
   } else {
+    if(f.ai === 'split' && !f.child){
+      for(let n=0;n<2;n++)
+        spawnFoe(f.k, 0, 1, { x:f.x+rnd(-16,16), y:f.y+rnd(-16,16), shrink:0.42 });
+    }
     dropGem(f.x, f.y, f.xp>=6 ? 2 : (f.xp>=3 ? 1 : 0));
     if(Math.random() < 0.012) dropItem(f.x, f.y, 'heart');
     if(Math.random() < 0.006) dropItem(f.x, f.y, 'magnet');
+    if(Math.random() < 0.008) dropItem(f.x, f.y, 'soul');
   }
   gainXp(f.xp);
 }
-function dropGem(x,y,tier){ drops.push({ x, y, t:'gem', tier:clamp(tier|0,0,2), vx:rnd(-40,40), vy:rnd(-40,40), pull:0 }); }
+const MAX_DROPS = 210;
+function trimDrops(){
+  // 안 주운 구슬이 쌓이면 프레임을 갉아먹는다. 오래된 것부터 걷어낸다.
+  while(drops.length > MAX_DROPS){
+    const i = drops.findIndex(d => d.t === 'gem' && !d.pull);
+    if(i < 0) break;
+    drops.splice(i, 1);
+  }
+}
+function dropGem(x,y,tier){
+  drops.push({ x, y, t:'gem', tier:clamp(tier|0,0,2), vx:rnd(-40,40), vy:rnd(-40,40), pull:0 });
+  trimDrops();
+}
 function dropItem(x,y,kind){ drops.push({ x, y, t:kind, vx:rnd(-30,30), vy:rnd(-30,30), pull:0 }); }
 
 function updateFoes(dt){
@@ -385,10 +514,43 @@ function updateFoes(dt){
     f.bob += dt*7;
     const dx = P.x - f.x, dy = P.y - f.y;
     const d = Math.hypot(dx,dy) || 1;
-    // 멀리 있을수록 크게 휘어 들어오고, 가까워지면 곧장 달려든다
-    const ang = Math.atan2(dy,dx) + f.orbit * clamp(d/260, 0, 1);
-    f.x += Math.cos(ang)*f.spd*dt + f.kx*dt;
-    f.y += Math.sin(ang)*f.spd*dt + f.ky*dt;
+    let speed = f.spd, hold = false;
+
+    if(f.ai === 'charge'){
+      // 도깨비: 잠깐 몸을 웅크렸다가 튀어나온다
+      f.act -= dt;
+      if(f.dash > 0){
+        f.dash -= dt; speed = f.spd * 3.4;
+        if(parts.length < MAX_PARTS && Math.random() < 0.5)
+          burst(f.x, f.y, 1, '#ff8b5c', 40, 0.22);
+      } else if(f.tele > 0){
+        f.tele -= dt; hold = true; f.flash = Math.max(f.flash, 0.06);
+        if(f.tele <= 0){ f.dash = 0.42; f.act = 2.6; sfx.hit(0); }
+      } else if(d < 230 && f.act <= 0){
+        f.tele = 0.45;
+        ring(f.x, f.y, 3, 30, 0.45, '#ff8b5c', 2);
+      }
+    } else if(f.ai === 'shoot'){
+      // 불여우: 사거리 안에서는 멈춰 서서 불덩이를 뱉는다
+      f.act -= dt;
+      if(d < 250){
+        hold = d < 190;
+        if(f.act <= 0){
+          f.act = 1.9;
+          const a2 = Math.atan2(dy,dx);
+          bullets.push({ foe:true, x:f.x, y:f.y, vx:Math.cos(a2)*180, vy:Math.sin(a2)*180,
+            dmg:f.dmg*0.55, life:2.6, r:6, col:'#ff9a3c' });
+          burst(f.x, f.y, 4, '#ffb85c', 90, 0.25);
+        }
+      }
+    }
+
+    if(!hold){
+      const ang = Math.atan2(dy,dx) + f.orbit * clamp(d/260, 0, 1);
+      f.x += Math.cos(ang)*speed*dt;
+      f.y += Math.sin(ang)*speed*dt;
+    }
+    f.x += f.kx*dt; f.y += f.ky*dt;
     f.kx *= 0.86; f.ky *= 0.86;
 
     // 보스는 가끔 탄막을 뿌린다
@@ -454,9 +616,9 @@ function updateArms(dt){
   }
   // 방울: 궤도 위에서 접촉 판정
   if(P.arms.bell){
-    const lv = P.arms.bell, A = ARMS.bell;
-    const n = A.cnt[lv-1], rad = A.rad[lv-1];
-    bellAng += dt*3.1;
+    const lv = P.arms.bell, A = ARMS.bell, E = P.evo.bell;
+    const n = A.cnt[lv-1] + (E ? 3 : 0), rad = A.rad[lv-1] * (E ? 1.3 : 1);
+    bellAng += dt*(E ? 4.2 : 3.1);
     for(let i=0;i<n;i++){
       const a = bellAng + i/n*6.283;
       const bx = P.x + Math.cos(a)*rad, by = P.y + Math.sin(a)*rad;
@@ -465,8 +627,9 @@ function updateArms(dt){
         if(f.bellCd > 0) continue;
         const dx = f.x-bx, dy = f.y-by;
         if(dx*dx+dy*dy < (f.r+9)**2){
-          f.bellCd = 0.45;
-          hurtFoe(f, armDmg('bell',lv), (f.x-P.x)*1.2, (f.y-P.y)*1.2);
+          f.bellCd = E ? 0.3 : 0.45;
+          hurtFoe(f, armDmg('bell',lv)*(E?2:1), (f.x-P.x)*1.2, (f.y-P.y)*1.2);
+          if(E) ring(bx, by, 3, 40, 0.22, '#f5c542', 2.5);
         }
       }
     }
@@ -475,12 +638,24 @@ function updateArms(dt){
 }
 let bellAng = 0;
 
+function explode(x, y, dmg, rad){
+  ring(x, y, 6, rad, 0.3, '#ff9a3c', 4);
+  burst(x, y, 10, '#ffb85c', 200, 0.35);
+  for(let i=foes.length-1;i>=0;i--){
+    const g = foes[i];
+    const dx = g.x-x, dy = g.y-y;
+    if(dx*dx+dy*dy < rad*rad) hurtFoe(g, dmg, dx*1.4, dy*1.4);
+  }
+}
+
 function fireArm(key, lv){
   const A = ARMS[key];
+  const E = P.evo[key];
   if(key === 'geom'){
-    const rng = A.rng[lv-1], arc = A.arc[lv-1];
+    const rng = A.rng[lv-1] * (E ? 1.5 : 1), arc = E ? 6.29 : A.arc[lv-1];
     const t = nearestFoe(P.x, P.y, rng*1.7);
     const base = t ? Math.atan2(t.y-P.y, t.x-P.x) : Math.atan2(P.fy, P.fx);
+    const mul = E ? 2.4 : 1;
     slashes.push({ x:P.x, y:P.y, a:base, arc, rng, life:0.18, max:0.18 });
     for(let i=foes.length-1;i>=0;i--){
       const f = foes[i];
@@ -491,18 +666,23 @@ function fireArm(key, lv){
       while(da > Math.PI) da -= 6.283;
       while(da < -Math.PI) da += 6.283;
       if(Math.abs(da) > arc/2) continue;
-      hurtFoe(f, armDmg('geom',lv), dx/d*180, dy/d*180);
+      hurtFoe(f, armDmg('geom',lv)*mul, dx/d*(E?300:180), dy/d*(E?300:180));
     }
-    shake = Math.max(shake, 1.6);
+    shake = Math.max(shake, E ? 3.5 : 1.6);
   }
   else if(key === 'bujeok'){
-    const n = A.cnt[lv-1];
-    ring(P.x, P.y, 3, 20, 0.14, '#ffe9a8', 2);
+    const n = E ? A.cnt[lv-1] + 5 : A.cnt[lv-1];
+    ring(P.x, P.y, 3, E ? 40 : 20, 0.16, '#ffe9a8', 2);
     for(let i=0;i<n;i++){
-      const t = nearestFoe(P.x, P.y, 460);
-      const a = t ? Math.atan2(t.y-P.y, t.x-P.x) + rnd(-0.25,0.25) : Math.random()*6.283;
-      bullets.push({ x:P.x, y:P.y, vx:Math.cos(a)*210, vy:Math.sin(a)*210,
-        dmg:armDmg('bujeok',lv), life:2.6, r:7, spr:'bujeok', home:1, spin:0 });
+      let a;
+      if(E) a = i/n*6.283 + time*2.2;                  // 만다라 — 소용돌이로 퍼진다
+      else {
+        const t = nearestFoe(P.x, P.y, 460);
+        a = t ? Math.atan2(t.y-P.y, t.x-P.x) + rnd(-0.25,0.25) : Math.random()*6.283;
+      }
+      bullets.push({ x:P.x, y:P.y, vx:Math.cos(a)*(E?260:210), vy:Math.sin(a)*(E?260:210),
+        dmg:armDmg('bujeok',lv)*(E?1.8:1), life:E?3.2:2.6, r:7, spr:'bujeok', home:1, spin:0,
+        pierce: E?2:0, hitSet: E?new Set():null });
     }
   }
   else if(key === 'byeorak'){
@@ -511,34 +691,55 @@ function fireArm(key, lv){
       const cand = foes.filter(f => Math.abs(f.x-cam.x) < VW*0.6 && Math.abs(f.y-cam.y) < VH*0.6);
       if(!cand.length) break;
       const f = cand[rint(0,cand.length-1)];
-      bolts.push({ x:f.x, y:f.y, life:0.24 });
-      ring(f.x, f.y, 6, 64, 0.3, '#bfe3ff', 4);
-      for(let j=foes.length-1;j>=0;j--){
-        const g = foes[j];
-        const dx = g.x-f.x, dy = g.y-f.y;
-        if(dx*dx+dy*dy < 42*42) hurtFoe(g, armDmg('byeorak',lv), dx*2, dy*2);
+      // 뇌신이면 가장 가까운 적으로 세 번 튄다
+      let src = f, hops = E ? 3 : 1;
+      const struck = new Set();
+      while(hops-- > 0 && src){
+        struck.add(src);
+        bolts.push({ x:src.x, y:src.y, life:0.24 });
+        ring(src.x, src.y, 6, 64, 0.3, '#bfe3ff', 4);
+        const rad = E ? 56 : 42;
+        for(let j=foes.length-1;j>=0;j--){
+          const g = foes[j];
+          const dx = g.x-src.x, dy = g.y-src.y;
+          if(dx*dx+dy*dy < rad*rad) hurtFoe(g, armDmg('byeorak',lv)*(E?1.5:1), dx*2, dy*2);
+        }
+        burst(src.x, src.y, 12, '#bfe3ff', 170, 0.35);
+        if(!hops) break;
+        let best = null, bd = 200*200;
+        for(const g of foes){
+          if(struck.has(g)) continue;
+          const dx = g.x-src.x, dy = g.y-src.y, dd = dx*dx+dy*dy;
+          if(dd < bd){ bd = dd; best = g; }
+        }
+        src = best;
       }
-      burst(f.x, f.y, 12, '#bfe3ff', 170, 0.35);
     }
     shake = Math.max(shake, 3);
   }
   else if(key === 'bulti'){
-    const rad = A.rad[lv-1];
+    const rad = A.rad[lv-1] * (E ? 1.5 : 1);
+    const dm = armDmg('bulti',lv) * (E ? 1.8 : 1);
     for(let i=foes.length-1;i>=0;i--){
       const f = foes[i];
       const dx = f.x-P.x, dy = f.y-P.y;
-      if(dx*dx+dy*dy < (rad+f.r)**2) hurtFoe(f, armDmg('bulti',lv), dx*0.6, dy*0.6);
+      if(dx*dx+dy*dy >= (rad+f.r)**2) continue;
+      const alive = f.hp > 0;
+      hurtFoe(f, dm, dx*0.6, dy*0.6);
+      // 겁화 — 태워 죽이면 터진다
+      if(E && alive && f.hp <= 0) explode(f.x, f.y, dm*1.4, 74);
     }
   }
   else if(key === 'hwasal'){
-    const n = A.cnt[lv-1];
-    ring(P.x, P.y, 3, 24, 0.14, '#e8e2cf', 2);
+    const n = E ? 8 : A.cnt[lv-1];
+    ring(P.x, P.y, 3, E ? 44 : 24, 0.15, '#e8e2cf', 2);
     const t = nearestFoe(P.x, P.y, 700);
     const base = t ? Math.atan2(t.y-P.y, t.x-P.x) : Math.atan2(P.fy,P.fx);
     for(let i=0;i<n;i++){
-      const a = base + (i - (n-1)/2)*0.18;
+      const a = E ? base + i/n*6.283 : base + (i - (n-1)/2)*0.18;
       bullets.push({ x:P.x, y:P.y, vx:Math.cos(a)*430, vy:Math.sin(a)*430,
-        dmg:armDmg('hwasal',lv), life:1.4, r:6, spr:'hwasal', pierce:99, hitSet:new Set(), ang:a });
+        dmg:armDmg('hwasal',lv)*(E?1.7:1), life:E?1.9:1.4, r:6, spr:'hwasal',
+        pierce:99, hitSet:new Set(), ang:a });
     }
   }
 }
@@ -617,6 +818,13 @@ function updateDrops(dt){
         popText(P.x, P.y-30, '전부 끌어당김', '#8fd0ff', true);
         ring(P.x, P.y, 8, 300, 0.5, '#8fd0ff', 4);
         sfx.heal();
+      } else if(d.t === 'soul'){
+        runSouls++; gemStreak++; gemT = 0.5;
+        popText(P.x, P.y-30, '넋 +1', '#8fd0ff');
+        sfx.gem(gemStreak);
+      } else if(d.t === 'chest'){
+        openChest();
+        return;
       }
     }
   }
@@ -658,14 +866,25 @@ function updateParts(dt){
 }
 
 /* ═══════════════ 레벨업 카드 ═══════════════ */
-function offerCards(){
+const EVO_ARM = 4, EVO_PASS = 2;      // 6분 안에 실제로 닿아야 보상이 된다
+function evoReady(k){
+  return P.arms[k] >= EVO_ARM && !P.evo[k] && (P.pass[EVO[k].need]||0) >= EVO_PASS;
+}
+
+function buildOptions(){
   const opts = [];
   for(const k in P.arms) if(P.arms[k] < 5) opts.push({ kind:'arm', k });
   if(Object.keys(P.arms).length < 6)
     for(const k in ARMS) if(!P.arms[k]) opts.push({ kind:'new', k });
   for(const k in PASSIVES) if((P.pass[k]||0) < 5) opts.push({ kind:'pass', k });
+  return opts;
+}
 
+function offerCards(){
+  const opts = buildOptions();
   const pick = [];
+  // 진화가 준비됐으면 무조건 한 장 띄운다 — 이게 이 게임의 보상이다
+  for(const k in P.arms) if(evoReady(k)){ pick.push({ kind:'evo', k }); break; }
   while(pick.length < 3 && opts.length){
     pick.push(opts.splice(rint(0,opts.length-1),1)[0]);
   }
@@ -679,25 +898,89 @@ function offerCards(){
   sfx.level();
   const box = el('cards');
   box.innerHTML = '';
-  for(const o of pick){
-    const src = o.kind === 'pass' ? PASSIVES[o.k] : ARMS[o.k];
-    const lv = o.kind === 'arm' ? P.arms[o.k]+1 : (o.kind === 'pass' ? (P.pass[o.k]||0)+1 : 1);
-    const card = document.createElement('button');
-    card.className = 'card' + (o.kind === 'new' ? ' fresh' : '');
-    card.innerHTML =
-      `<span class="ci">${src.ic}</span>` +
-      `<span class="cn">${src.nm}</span>` +
-      `<span class="cl">${o.kind==='new' ? '새 무기' : 'Lv '+lv}</span>` +
-      `<span class="cd">${src.desc}</span>`;
-    card.addEventListener('click', () => takeCard(o));
-    box.appendChild(card);
-  }
+  for(const o of pick) box.appendChild(makeCard(o, () => takeCard(o)));
   el('levelup').hidden = false;
   el('lvnum').textContent = P.lv;
 }
 
-function takeCard(o){
-  if(o.kind === 'arm') P.arms[o.k]++;
+function cardInfo(o){
+  if(o.kind === 'evo'){
+    const e = EVO[o.k];
+    return { ic:e.ic, nm:e.nm, tag:'진화', desc:e.desc, cls:' evo' };
+  }
+  if(o.kind === 'pass'){
+    const q = PASSIVES[o.k];
+    let hint = '';
+    for(const w2 in EVO) if(EVO[w2].need === o.k && P.arms[w2] && !P.evo[w2])
+      hint = ` · <i>${ARMS[w2].nm}</i> 진화 재료`;
+    return { ic:q.ic, nm:q.nm, tag:'Lv '+((P.pass[o.k]||0)+1), desc:q.desc + hint, cls:'' };
+  }
+  const w = ARMS[o.k], e = EVO[o.k];
+  const need = `<i>${PASSIVES[e.need].nm} ${EVO_PASS}단</i>과 ${EVO_ARM}단이면 진화`;
+  if(o.kind === 'new')
+    return { ic:w.ic, nm:w.nm, tag:'새 무기', desc:`${w.desc} · ${need}`, cls:' fresh' };
+  const lv = P.arms[o.k]+1;
+  const tail = P.evo[o.k] ? '' : ` · ${need}`;
+  return { ic:w.ic, nm:w.nm, tag:'Lv '+lv, desc:w.desc + tail, cls:'' };
+}
+function makeCard(o, onPick){
+  const c = cardInfo(o);
+  const card = document.createElement('button');
+  card.className = 'card' + c.cls;
+  card.innerHTML =
+    `<span class="ci">${c.ic}</span>` +
+    `<span class="cn">${c.nm}</span>` +
+    `<span class="cl">${c.tag}</span>` +
+    `<span class="cd">${c.desc}</span>`;
+  if(onPick) card.addEventListener('click', onPick);
+  else card.disabled = true;
+  return card;
+}
+
+/* 정예를 잡으면 나오는 상자 — 고르는 게 아니라 한꺼번에 받는다 */
+function openChest(){
+  paused = true;
+  const opts = buildOptions();
+  const got = [];
+  for(let i=0;i<3 && opts.length;i++){
+    const o = opts.splice(rint(0,opts.length-1),1)[0];
+    got.push(cardInfo(o));
+    applyPick(o);
+  }
+  if(!got.length){ P.hp = Math.min(P.maxHp, P.hp + 40); paused = false; return; }
+  const box = el('chestList');
+  box.innerHTML = '';
+  for(const c of got){
+    const row = document.createElement('div');
+    row.className = 'loot';
+    row.innerHTML = `<span class="ci">${c.ic}</span><span class="cn">${c.nm}</span>` +
+                    `<span class="cl">${c.tag}</span>`;
+    box.appendChild(row);
+  }
+  el('chest').hidden = false;
+  flashScreen = 0.7;
+  ring(P.x, P.y, 8, 220, 0.7, '#f0b23c', 6);
+  sfx.level();
+  syncHud();
+}
+
+let evoAnnounced = {};
+function checkEvoHint(){
+  for(const k in P.arms){
+    if(evoReady(k) && !evoAnnounced[k]){
+      evoAnnounced[k] = 1;
+      announce(EVO[k].nm + ' 준비');
+      ring(P.x, P.y, 8, 150, 0.7, '#ffd35c', 5);
+    }
+  }
+}
+
+function applyPick(o){
+  if(o.kind === 'evo'){
+    P.evo[o.k] = true;
+    popText(P.x, P.y-40, EVO[o.k].nm, '#ffd35c', true);
+  }
+  else if(o.kind === 'arm') P.arms[o.k]++;
   else if(o.kind === 'new'){ P.arms[o.k] = 1; armT[o.k] = 0; }
   else {
     P.pass[o.k] = (P.pass[o.k]||0) + 1;
@@ -708,8 +991,19 @@ function takeCard(o){
     if(o.k === 'jaseok') P.pickR *= 1.35;
     if(o.k === 'sansam') P.regen += 0.7;
   }
+}
+
+function takeCard(o){
+  applyPick(o);
+  if(o.kind === 'evo'){
+    flashScreen = 0.9; shake = 12; slowmo(0.7, 0.4);
+    ring(P.x, P.y, 10, 260, 0.9, '#ffd35c', 8);
+    burst(P.x, P.y, 40, '#ffe9a8', 300, 0.8);
+    sfx.win();
+  }
   el('levelup').hidden = true;
   paused = false;
+  checkEvoHint();
   syncHud();
 }
 
@@ -717,10 +1011,11 @@ function takeCard(o){
 function endRun(title, sub, cls){
   running = false; finished = true; paused = false;
   const score = Math.round(time*10) + kills*3 + P.lv*40;
-  try{
-    best = Math.max(best, score, parseInt(localStorage.getItem('baekgwi.best')||'0',10)||0);
-    localStorage.setItem('baekgwi.best', String(best));
-  }catch(e){ best = Math.max(best, score); }
+  runSouls += Math.floor(kills/25);
+  souls += runSouls;
+  best = Math.max(best, score);
+  saveMeta();
+  el('rSoul').textContent = '+' + runSouls;
   el('overTitle').textContent = title;
   el('overTitle').className = cls;
   el('overSub').textContent = sub;
@@ -765,9 +1060,22 @@ function syncHud(){
 
   const row = el('arms');
   let html = '';
-  for(const k in P.arms) html += `<span class="pip">${ARMS[k].ic}<b>${P.arms[k]}</b></span>`;
+  for(const k in P.arms){
+    if(P.evo[k]) html += `<span class="pip evo">${EVO[k].ic}<b>★</b></span>`;
+    else html += `<span class="pip${evoReady(k)?' ready':''}">${ARMS[k].ic}<b>${P.arms[k]}</b></span>`;
+  }
   for(const k in P.pass) html += `<span class="pip dim">${PASSIVES[k].ic}<b>${P.pass[k]}</b></span>`;
   if(row.innerHTML !== html) row.innerHTML = html;
+
+  const bn = el('banner');
+  if(bannerT > 0){
+    if(bn.textContent !== banner) bn.textContent = banner;
+    bn.hidden = false;
+    bn.style.opacity = Math.min(1, bannerT/0.5).toFixed(2);
+  } else if(!bn.hidden) bn.hidden = true;
+
+  const sc = el('soulnow');
+  if(sc.textContent !== String(runSouls)) sc.textContent = runSouls;
 }
 
 /* ═══════════════ 그리기 ═══════════════ */
@@ -868,7 +1176,15 @@ function draw(){
 
   // 습득물
   for(const d of drops){
-    const s = d.t === 'gem' ? sprite(['gem1','gem2','gem3'][d.tier], 2) : sprite(d.t, 2);
+    const s = d.t === 'gem' ? sprite(['gem1','gem2','gem3'][d.tier], 2)
+            : sprite(d.t, d.t === 'chest' ? 4 : (d.t === 'soul' ? 3 : 2));
+    if(d.t === 'chest' || d.t === 'soul'){
+      ctx.save();
+      ctx.globalAlpha = 0.35 + Math.sin(time*5 + d.x)*0.15;
+      ctx.fillStyle = d.t === 'chest' ? '#f0b23c' : '#8fd0ff';
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.t === 'chest' ? 22 : 13, 0, 6.283); ctx.fill();
+      ctx.restore();
+    }
     ctx.drawImage(s.img, Math.round(d.x-s.w/2), Math.round(d.y-s.h/2));
   }
 
@@ -897,8 +1213,9 @@ function draw(){
 
   // 방울
   if(P.arms.bell){
-    const lv = P.arms.bell, n = ARMS.bell.cnt[lv-1], rad = ARMS.bell.rad[lv-1];
-    const s = sprite('bell', 2);
+    const lv = P.arms.bell, E = P.evo.bell;
+    const n = ARMS.bell.cnt[lv-1] + (E ? 3 : 0), rad = ARMS.bell.rad[lv-1] * (E ? 1.3 : 1);
+    const s = sprite('bell', E ? 3 : 2);
     for(let i=0;i<n;i++){
       const a = bellAng + i/n*6.283;
       ctx.drawImage(s.img, Math.round(P.x+Math.cos(a)*rad-s.w/2), Math.round(P.y+Math.sin(a)*rad-s.h/2));
@@ -1054,6 +1371,21 @@ function drawFoe(f){
   const s = sprite(f.spr, f.scale);
   const bobY = Math.sin(f.bob)*(f.boss?2.5:1.8);
   const sq = f.flash > 0 ? 1.18 : 1;
+  if(f.elite){
+    ctx.save();
+    ctx.globalAlpha = 0.55 + Math.sin(time*6)*0.18;
+    ctx.strokeStyle = '#f0b23c'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.ellipse(f.x, f.y + f.r*0.8, f.r*1.15, f.r*0.45, 0, 0, 6.283); ctx.stroke();
+    ctx.restore();
+  }
+  if(f.tele > 0){
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    ctx.strokeStyle = '#ff8b5c'; ctx.lineWidth = 2;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(P.x, P.y); ctx.stroke();
+    ctx.restore();
+  }
   ctx.save();
   ctx.translate(f.x, f.y + bobY);
   if(P.x < f.x) ctx.scale(-1,1);
@@ -1123,12 +1455,40 @@ function resize(){
   ctx.imageSmoothingEnabled = false;
 }
 
+/* ═══════════════ 상점 ═══════════════ */
+function renderShop(){
+  el('soulbank').textContent = souls;
+  const box = el('shop');
+  box.innerHTML = '';
+  for(const k in META){
+    const m = META[k], lv = metaLv[k] || 0;
+    const maxed = lv >= m.cost.length;
+    const cost = maxed ? 0 : m.cost[lv];
+    const btn = document.createElement('button');
+    btn.className = 'buy' + (maxed ? ' maxed' : (souls >= cost ? '' : ' poor'));
+    btn.disabled = maxed || souls < cost;
+    btn.innerHTML =
+      `<span class="bi">${m.ic}</span>` +
+      `<span class="bn">${m.nm} <i>${lv}/${m.cost.length}</i></span>` +
+      `<span class="bd">${m.desc}</span>` +
+      `<span class="bc">${maxed ? '완성' : cost + ' 넋'}</span>`;
+    btn.addEventListener('click', () => {
+      if(souls < cost) return;
+      souls -= cost; metaLv[k] = lv + 1; saveMeta();
+      SND.init(); sfx.heal();
+      renderShop();
+    });
+    box.appendChild(btn);
+  }
+}
+
 /* ═══════════════ 시작 배선 ═══════════════ */
 function boot(){
   resize();
   bindInput();
-  try{ best = parseInt(localStorage.getItem('baekgwi.best')||'0',10)||0; }catch(e){}
+  loadMeta();
   if(best) el('bestHint').textContent = '최고 ' + best.toLocaleString('ko-KR') + '점';
+  renderShop();
 
   // 오디오는 사용자가 누른 다음에야 열 수 있다
   const begin = () => {
@@ -1137,7 +1497,14 @@ function boot(){
     sfx.ui(); reset();
   };
   el('start').addEventListener('click', begin);
-  el('again').addEventListener('click', begin);
+  el('again').addEventListener('click', () => {
+    el('over').hidden = true; el('title').hidden = false;
+    renderShop();
+    if(best) el('bestHint').textContent = '최고 ' + best.toLocaleString('ko-KR') + '점';
+  });
+  el('chestOk').addEventListener('click', () => {
+    el('chest').hidden = true; paused = false;
+  });
   el('mute').addEventListener('click', e => {
     muted = !muted;
     SND.setMuted(muted);
@@ -1152,7 +1519,9 @@ function boot(){
 
 window.__BG = { P, foes, drops, bullets, get time(){return time}, get kills(){return kills},
   get running(){return running}, get paused(){return paused}, reset, takeCard, dash,
-  get bossAlive(){return bossAlive}, ARMS, PASSIVES, FOES, SPR,
+  get bossAlive(){return bossAlive}, ARMS, PASSIVES, FOES, EVO, SPR,
+  get souls(){return souls}, get runSouls(){return runSouls}, META,
+  openChest, spawnElite, get waveIdx(){return waveIdx},
   setStick(x,y){ stick.on = !!(x||y); stick.ox=0; stick.oy=0; stick.dx=x*STICK_R; stick.dy=y*STICK_R; },
   killAll(){ for(let i=foes.length-1;i>=0;i--) killFoe(foes[i]); },
   warp(t){ time = t; } };

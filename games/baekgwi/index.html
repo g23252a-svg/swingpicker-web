@@ -89,6 +89,11 @@ body{
 .pip b{ font-family:var(--num); font-size:.66rem; color:var(--gold); }
 .pip.dim{ opacity:.72; }
 .pip.dim b{ color:var(--green); }
+.pip.ready{ border-color:rgba(255,211,92,.8); box-shadow:0 0 10px rgba(240,178,60,.5); }
+.pip.evo{ border-color:#ffd35c; background:rgba(90,64,20,.9); }
+.pip.evo b{ color:#ffd35c; }
+.kills.soul b{ color:#8fd0ff; }
+.stats dd.soulv{ color:#8fd0ff; }
 
 /* ── 보스 막대 ─────────────────────────── */
 #bossbar{
@@ -176,6 +181,12 @@ body{
   font-family:var(--font);
 }
 .card.fresh{ border-left-color:var(--gold); }
+.card.evo{
+  border-left-color:#ffd35c; border-color:rgba(255,211,92,.55);
+  background:linear-gradient(180deg,rgba(84,60,24,.95),rgba(40,28,14,.95));
+  box-shadow:0 0 22px rgba(240,178,60,.28);
+}
+.card.evo .cl{ background:#ffd35c; }
 .card:active{ transform:translateY(2px); background:linear-gradient(180deg,rgba(60,47,102,.95),rgba(34,26,60,.95)); }
 .card:focus-visible{ outline:2px solid var(--gold); outline-offset:2px; }
 .ci{ grid-row:1/3; font-size:1.9rem; text-align:center; }
@@ -186,6 +197,61 @@ body{
 }
 .card.fresh .cl{ background:var(--gold); }
 .cd{ grid-column:2/4; font-size:.75rem; color:var(--dim); }
+.cd i{ font-style:normal; color:var(--gold); font-weight:700; }
+
+/* ── 알림띠 ────────────────────────────── */
+#banner{
+  position:absolute; left:50%; transform:translateX(-50%);
+  top:calc(env(safe-area-inset-top) + 30%);
+  font-size:1.35rem; font-weight:900; letter-spacing:.16em; text-indent:.16em;
+  color:#ffd8a8; text-shadow:0 0 18px rgba(255,140,60,.8), 0 3px 10px #000;
+  pointer-events:none; white-space:nowrap;
+}
+
+/* ── 상자 ──────────────────────────────── */
+#chestList{ display:flex; flex-direction:column; gap:8px; width:min(100%,360px); }
+.loot{
+  display:grid; grid-template-columns:44px 1fr auto; align-items:center; gap:10px;
+  background:linear-gradient(180deg,rgba(62,48,24,.95),rgba(34,26,14,.95));
+  border:1px solid rgba(240,178,60,.4); border-radius:10px; padding:9px 12px;
+}
+.loot .ci{ font-size:1.6rem; text-align:center; }
+.loot .cn{ font-weight:800; font-size:.98rem; }
+.loot .cl{
+  font-size:.66rem; font-weight:700; color:#2a1a02;
+  background:var(--gold); border-radius:999px; padding:2px 9px;
+}
+
+/* ── 넋 상점 ───────────────────────────── */
+.shopbox{ width:min(100%,380px); margin-top:1.2rem; text-align:left; }
+.shopbox summary{
+  cursor:pointer; list-style:none; text-align:center;
+  font-size:.8rem; font-weight:700; color:var(--dim);
+  padding:.5rem; border:1px solid var(--line); border-radius:8px;
+}
+.shopbox summary::-webkit-details-marker{ display:none; }
+.shopbox summary b{ color:#8fd0ff; font-family:var(--num); }
+#shop{ display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.buy{
+  appearance:none; cursor:pointer; text-align:left; font-family:var(--font);
+  display:grid; grid-template-columns:34px 1fr auto; grid-template-rows:auto auto;
+  column-gap:9px; align-items:center;
+  background:rgba(30,24,52,.9); color:var(--text);
+  border:1px solid var(--line); border-radius:9px; padding:8px 11px;
+}
+.buy .bi{ grid-row:1/3; font-size:1.35rem; text-align:center; }
+.buy .bn{ font-size:.86rem; font-weight:700; }
+.buy .bn i{ font-style:normal; color:var(--dim); font-size:.7rem; }
+.buy .bd{ grid-column:2/4; font-size:.7rem; color:var(--dim); }
+.buy .bc{
+  grid-column:3; grid-row:1/3; align-self:center;
+  font-size:.74rem; font-weight:700; color:#8fd0ff; font-family:var(--num);
+  white-space:nowrap;
+}
+.buy.poor{ opacity:.45; cursor:default; }
+.buy.maxed{ opacity:.6; cursor:default; border-color:rgba(240,178,60,.4); }
+.buy.maxed .bc{ color:var(--gold); }
+.buy:not(:disabled):active{ transform:translateY(2px); background:rgba(48,38,80,.95); }
 
 /* ── 결과 ──────────────────────────────── */
 #overTitle{
@@ -226,6 +292,7 @@ body{
       <span class="clock" id="clock">0:00</span>
       <span class="spacer"></span>
       <span class="kills">처치 <b id="kills">0</b></span>
+      <span class="kills soul">넋 <b id="soulnow">0</b></span>
       <button id="mute" aria-pressed="true" aria-label="소리 켜기/끄기">🔊</button>
     </div>
     <div class="row">
@@ -236,6 +303,8 @@ body{
     </div>
     <div class="row"><div id="arms"></div><span class="spacer"></span><span class="combo" id="combo" hidden></span></div>
   </header>
+
+  <div id="banner" hidden>혼불 무리</div>
 
   <div id="bossbar" hidden>
     <span id="bossname">구미호</span>
@@ -251,6 +320,14 @@ body{
     <div id="cards"></div>
   </section>
 
+  <!-- 상자 -->
+  <section class="veil" id="chest" hidden>
+    <p class="lvtitle" style="color:var(--gold)">보물 상자</p>
+    <p class="lvsub">정예를 벤 값이다</p>
+    <div id="chestList"></div>
+    <button class="big" id="chestOk" style="margin-top:1.3rem">계 속</button>
+  </section>
+
   <!-- 시작 -->
   <section class="veil" id="title">
     <h1 class="brand">백귀야행</h1>
@@ -260,10 +337,15 @@ body{
     </p>
     <p id="bestHint"></p>
     <button class="big" id="start">시 작</button>
+    <details class="shopbox">
+      <summary>넋 강화 <b id="soulbank">0</b></summary>
+      <div id="shop"></div>
+    </details>
     <p class="hint">
       화면 아무 데나 <b>손가락을 대고 끌면</b> 그쪽으로 달립니다.<br>
       공격은 <b>자동</b>입니다. 오른쪽 아래 <b>회피</b>로 빠져나가세요.<br>
-      경험치 구슬을 모아 레벨을 올리고 무기를 늘립니다.<br>
+      무기 <b>4단</b> + 짝이 되는 보조 <b>2단</b>이면 <b>진화</b>합니다.<br>
+      금빛 <b>정예</b>를 잡으면 보물 상자가 떨어집니다.<br>
       <b>소리를 켜고</b> 하시면 훨씬 낫습니다.
     </p>
   </section>
@@ -278,8 +360,9 @@ body{
       <div><dt>레벨</dt><dd id="rLv">1</dd></div>
       <div><dt>점수</dt><dd id="rScore">0</dd></div>
       <div><dt>최고</dt><dd class="hi" id="rBest">0</dd></div>
+      <div><dt>얻은 넋</dt><dd class="soulv" id="rSoul">0</dd></div>
     </dl>
-    <button class="big" id="again">다 시</button>
+    <button class="big" id="again">계 속</button>
   </section>
 </div>
 
