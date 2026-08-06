@@ -5442,5 +5442,30 @@
     "alerted_events": [
       "049720_20260727_STOP_HIT_20260803"
     ]
+  },
+  {
+    "code": "008930",
+    "name": "한미사이언스",
+    "entry_ymd": "20260803",
+    "entry_px": 36050.0,
+    "qty": 0,
+    "stop_px": 33150.0,
+    "stop_px_initial": 33150.0,
+    "take_px1": 40300.0,
+    "take_px2": 43450.0,
+    "trailing_high": 43900.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260806",
+    "last_close_px": 43800.0,
+    "unrealized_pnl_pct": 21.5,
+    "realized_pnl_pct": 21.5,
+    "close_ymd": "20260806",
+    "close_px": 43800.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "008930_20260803_TP1_HIT_20260805",
+      "008930_20260803_TP1_HIT_20260806",
+      "008930_20260803_TP2_HIT_20260806"
+    ]
   }
 ]

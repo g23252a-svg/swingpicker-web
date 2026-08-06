@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-08-05T22:13:39",
+  "generated_at": "2026-08-06T22:09:17",
   "version": "v3.9.2",
   "engine_version": "v3.9.2",
   "horizon_bdays": 10,
   "trade_cost_pct": 0.22,
-  "days_covered": 115,
-  "ohlc_coverage_note": "OHLC parquet 종목수: 1717 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
+  "days_covered": 116,
+  "ohlc_coverage_note": "OHLC parquet 종목수: 1721 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
   "methodology": {
     "horizon_days": 10,
     "fill_window_days": 3,
@@ -17,7 +17,7 @@
     "selection_mode": "top1_first_then_top3_fallback",
     "date_range": [
       "2026-02-26",
-      "2026-08-05"
+      "2026-08-06"
     ],
     "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
   },
@@ -239,16 +239,16 @@
       },
       "C_orange": {
         "description": "STRUCT<90 AND VWAP_GAP>15",
-        "shadow_ev": -2.71,
-        "delta_ev": -4.52,
+        "shadow_ev": -2.78,
+        "delta_ev": -4.59,
         "shadow_tp1_rate": 0.2459,
         "delta_tp1_rate": -0.1089,
-        "shadow_stop_rate": 0.5656,
-        "delta_stop_rate": 0.1462,
+        "shadow_stop_rate": 0.5738,
+        "delta_stop_rate": 0.1544,
         "shadow_fill_rate": 0.8531,
         "delta_fill_rate": 0.0153,
-        "shadow_non_win_avg_ret": -10.08,
-        "delta_non_win_avg_ret": -3.03,
+        "shadow_non_win_avg_ret": -10.18,
+        "delta_non_win_avg_ret": -3.13,
         "changed_pick_rate": 0.8182,
         "n_shadow_filled": 122,
         "single_backtest_ok": false
@@ -2254,6 +2254,11 @@
     },
     {
       "date": "20260805",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260806",
       "n_picked": 0,
       "codes": []
     }
