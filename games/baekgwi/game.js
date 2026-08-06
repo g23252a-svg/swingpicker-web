@@ -387,7 +387,8 @@ function foeCap(){ return Math.min(MAX_FOES, 150 + Math.floor(time*0.5)); }
 function spawnRate(){
   const t = time;
   let r = 1.3 + t*0.030 + (t>180 ? (t-180)*0.055 : 0);
-  if(t > RUN_TIME) r *= 2.2;         // 저승사자가 나온 뒤엔 산책이 불가능해야 한다
+  // 최종보스전은 물량전이 아니라 결투여야 한다. 잡것을 오히려 줄인다.
+  if(bossAlive && bossAlive.final) r *= 0.5;
   return r;
 }
 function foePool(){
@@ -455,7 +456,9 @@ const WAVES = [
   { t:152, label:'정예 출현',   elite:1 },
   { t:225, label:'해골 돌격',   key:'haegol',  n:20 },
   { t:262, label:'정예 둘',     elite:2 },
-  { t:310, label:'그슨대 무리', key:'geuseun', n:8 },
+  { t:300, label:'그슨대 무리', key:'geuseun', n:8 },
+  { t:330, label:'정예 셋',     elite:3 },
+  { t:352, label:'해골 파도',   key:'haegol',  n:24 },
 ];
 
 function announce(text){ banner = text; bannerT = 2.4; }
@@ -610,17 +613,32 @@ function killFoe(f){
   }
   gainXp(f.xp);
 }
-const MAX_DROPS = 210;
+const MAX_DROPS = 240;
+const GEM_XP = [1, 3, 9];
+
+/* 구슬을 지우면 경험치가 통째로 증발한다. 레벨업이 멈추고 곧 할 일이 없어진다.
+   그래서 지우지 않고, 멀리 있는 둘을 하나로 합쳐 굵게 만든다. 총량은 그대로다. */
 function trimDrops(){
-  // 안 주운 구슬이 쌓이면 프레임을 갉아먹는다. 오래된 것부터 걷어낸다.
-  while(drops.length > MAX_DROPS){
-    const i = drops.findIndex(d => d.t === 'gem' && !d.pull);
-    if(i < 0) break;
-    drops.splice(i, 1);
+  let guard = 0;
+  while(drops.length > MAX_DROPS && guard++ < 80){
+    let a = -1, b = -1, da = -1, db = -1;
+    for(let i=0;i<drops.length;i++){
+      const d = drops[i];
+      if(d.t !== 'gem' || d.pull) continue;
+      const dd = (d.x-P.x)*(d.x-P.x) + (d.y-P.y)*(d.y-P.y);
+      if(dd > da){ db = da; b = a; da = dd; a = i; }
+      else if(dd > db){ db = dd; b = i; }
+    }
+    if(a < 0 || b < 0) break;
+    const keep = Math.min(a,b), gone = Math.max(a,b);
+    drops[keep].xp += drops[gone].xp;
+    drops.splice(gone, 1);
   }
 }
-function dropGem(x,y,tier){
-  drops.push({ x, y, t:'gem', tier:clamp(tier|0,0,2), vx:rnd(-40,40), vy:rnd(-40,40), pull:0 });
+function gemTier(xp){ return xp >= 9 ? 2 : (xp >= 3 ? 1 : 0); }
+function dropGem(x, y, tier){
+  drops.push({ x, y, t:'gem', xp:GEM_XP[clamp(tier|0,0,2)],
+    vx:rnd(-40,40), vy:rnd(-40,40), pull:0 });
   trimDrops();
 }
 function dropItem(x,y,kind){ drops.push({ x, y, t:kind, vx:rnd(-30,30), vy:rnd(-30,30), pull:0 }); }
@@ -680,7 +698,8 @@ function updateFoes(dt){
       // 최종보스는 오래 끌수록 사나워진다. 버티기로는 못 이긴다.
       if(f.final){
         f.rage += dt;
-        if(f.rage > 10){ f.rage = 0; f.dmg *= 1.10; f.spd *= 1.04; f.ring = Math.min(f.ring, 0.6); }
+        if(f.rage > 14){ f.rage = 0; f.enr = (f.enr||0) + 1;
+          if(f.enr <= 6){ f.dmg *= 1.07; f.ring = Math.min(f.ring, 1.0); } }
       }
       f.ring -= dt;
       if(f.ring <= 0){
@@ -924,6 +943,12 @@ function updateDrops(dt){
     d.vx *= 0.90; d.vy *= 0.90;
     const dx = P.x-d.x, dy = P.y-d.y;
     const dist = Math.hypot(dx,dy);
+    // 구슬은 언제나 주인을 향해 흘러온다. 안 그러면 도망치는 사이 제 경험치를
+    // 뒤에 버리게 되고, 레벨업이 멎어 할 일이 없어진다.
+    if(d.t === 'gem' && dist > P.pickR){
+      const pull = Math.min(340, 130 + Math.max(0, dist - 240) * 0.7);
+      d.x += dx/dist*pull*dt; d.y += dy/dist*pull*dt;
+    }
     if(dist < P.pickR || d.pull){
       d.pull = 1;
       const s = 260 + (P.pickR - dist)*3;
@@ -933,7 +958,7 @@ function updateDrops(dt){
       drops.splice(i,1);
       if(d.t === 'gem'){
         gemStreak++; gemT = 0.5;
-        gainXp([1,3,9][d.tier]);
+        gainXp(d.xp);
         sfx.gem(gemStreak);
       } else if(d.t === 'heart'){
         P.hp = Math.min(P.maxHp, P.hp + 28);
@@ -961,7 +986,7 @@ function gainXp(n){
   P.xp += n;
   while(P.xp >= P.xpNext){
     P.xp -= P.xpNext; P.lv++;
-    P.xpNext = P.lv < 10 ? 5 + P.lv*4 : Math.round(P.xpNext*1.20) + 8;
+    P.xpNext = P.lv < 10 ? 5 + P.lv*4 : Math.round(P.xpNext*1.155) + 8;
     offerCards();
   }
 }
@@ -1332,7 +1357,7 @@ function draw(){
 
   // 습득물
   for(const d of drops){
-    const s = d.t === 'gem' ? sprite(['gem1','gem2','gem3'][d.tier], 2)
+    const s = d.t === 'gem' ? sprite(['gem1','gem2','gem3'][gemTier(d.xp)], 2)
             : sprite(d.t, d.t === 'chest' ? 4 : (d.t === 'soul' ? 3 : 2));
     if(d.t === 'chest' || d.t === 'soul'){
       ctx.save();
