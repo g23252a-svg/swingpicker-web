@@ -341,20 +341,34 @@ def test_action_rail_shows_tp1_reach_probability():
 
 def test_action_rail_warns_when_probability_weighted_ev_is_negative():
     html = _rail()
-    assert "확률 가중이 아니다" in html
+    assert "확률 가중이 아닙니다" in html
     assert "기대값" in html
+
+
+def test_ev_warning_does_not_read_as_bad_stock():
+    """[v55] 경고가 '이 종목은 나쁘다'로 읽히면 실측과 어긋난다.
+
+    v55 실측: TP1까지 먼(>20%) 후보가 오히려 좋았고(가까운-먼 -3.49%p,
+    t=-1.74, p=0.094), 랭킹에서 RR 상한을 낮추면 해로웠다(min(RR,2)
+    -2.07%p, 블록부트 양수 2%). 공식 픽은 드문 대박이 수익의 전부인
+    우측 꼬리 분포이므로 먼 목표가 곧 꼬리가 사는 자리다.
+    경고의 뜻은 '기대를 낮춰라'가 아니라 '한 번에 크게 걸지 말라'다.
+    """
+    html = _rail()
+    assert "목표가가 먼 후보가 오히려 나았습니다" in html
+    assert "분할·비중으로 대응" in html
 
 
 def test_no_ev_warning_when_reach_probability_is_healthy():
     html = _rail(TP1_PROB=46)
     assert "TP1 도달률" in html
-    assert "확률 가중이 아니다" not in html
+    assert "확률 가중이 아닙니다" not in html
 
 
 def test_no_ev_warning_when_weighted_ev_is_positive():
     """도달률이 낮아도 근사 기대값이 양수면 경고하지 않는다."""
     html = _rail(TP1_PROB=24, 추천매도가1=15000, 손절가=9800)
-    assert "확률 가중이 아니다" not in html
+    assert "확률 가중이 아닙니다" not in html
 
 
 def test_reach_probability_absent_is_not_faked():
