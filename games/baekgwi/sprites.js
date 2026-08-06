@@ -274,6 +274,28 @@ soul: { p:{ o:'#0d1c33', f:'#8fd0ff', w:'#f2fbff' }, d:[
 '..offo..',
 '...oo...']},
 
+/* ── 적 탄환 8x8 (오른쪽이 진행 방향) ──────────
+   둥근 구슬처럼 그리면 주우러 가게 된다. 꼬리 달린 불덩이로 그린다. */
+bulssi: { p:{ o:'#3a0c02', r:'#c9340f', y:'#ff9a2e', w:'#fff0c4' }, d:[
+'.....oo.',
+'...oryyo',
+'..orywwo',
+'oorywwwo',
+'oorywwwo',
+'..orywwo',
+'...oryyo',
+'.....oo.']},
+
+sajabolt: { p:{ o:'#050308', m:'#4b2f6e', k:'#2a1840', e:'#ff3b30' }, d:[
+'....oo..',
+'..oommo.',
+'.omkkmmo',
+'omkkeemo',
+'omkkeemo',
+'.omkkmmo',
+'..oommo.',
+'....oo..']},
+
 /* ── 무기 8x8 ───────────────────────────────── */
 bujeok: { p:{ o:'#3a2a0a', y:'#ffe9a8', r:'#d13a2a' }, d:[
 '.oooooo.',

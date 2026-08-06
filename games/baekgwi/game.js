@@ -679,7 +679,7 @@ function updateFoes(dt){
           f.act = 1.9;
           const a2 = Math.atan2(dy,dx);
           bullets.push({ foe:true, x:f.x, y:f.y, vx:Math.cos(a2)*180, vy:Math.sin(a2)*180,
-            dmg:f.dmg*0.55, life:2.6, r:6, col:'#ff9a3c' });
+            dmg:f.dmg*0.55, life:2.6, r:7, spr:'bulssi', glow:'#ff7a2e' });
           burst(f.x, f.y, 4, '#ffb85c', 90, 0.25);
         }
       }
@@ -708,7 +708,7 @@ function updateFoes(dt){
         for(let k=0;k<n;k++){
           const a = k/n*6.283 + Math.random()*0.2;
           bullets.push({ foe:true, x:f.x, y:f.y, vx:Math.cos(a)*118, vy:Math.sin(a)*118,
-            dmg:f.dmg*0.6, life:3.4, r:6, col:'#ff6a5c' });
+            dmg:f.dmg*0.6, life:3.4, r:7, spr:'sajabolt', glow:'#ff4a3c' });
         }
       }
     }
@@ -906,6 +906,9 @@ function updateBullets(dt){
       b.spin += dt*9;
     }
     b.x += b.vx*dt; b.y += b.vy*dt;
+    if(b.foe && parts.length < MAX_PARTS && Math.random() < 0.6){
+      burst(b.x, b.y, 1, b.glow, 22, 0.26);
+    }
     if(b.life <= 0){ bullets.splice(i,1); continue; }
 
     if(b.foe){
@@ -1458,10 +1461,20 @@ function draw(){
   // 탄
   for(const b of bullets){
     if(b.foe){
-      ctx.fillStyle = b.col;
-      ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,6.283); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.beginPath(); ctx.arc(b.x-1,b.y-1,b.r*0.4,0,6.283); ctx.fill();
+      const s = sprite(b.spr, 3);
+      const a = Math.atan2(b.vy, b.vx);
+      const puls = 1 + Math.sin(time*22 + b.x*0.05)*0.10;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      // 위험하다는 걸 먼저 알리는 붉은 무리
+      ctx.globalAlpha = 0.34;
+      ctx.fillStyle = b.glow;
+      ctx.beginPath(); ctx.arc(0, 0, b.r*2.4*puls, 0, 6.283); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.rotate(a);
+      ctx.scale(puls, puls);
+      ctx.drawImage(s.img, -s.w/2, -s.h/2);
+      ctx.restore();
       continue;
     }
     const s = sprite(b.spr, 2);
