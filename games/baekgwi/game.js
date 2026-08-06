@@ -28,8 +28,8 @@ const EVO = {
   bell:   { need:'tugu',   nm:'풍경',   ic:'🎐', desc:'방울이 커지고 충격파를 남긴다' },
 };
 const BOSSES = [
-  { spr:'gumiho', nm:'구미호',    hp:2600, spd:38, dmg:24, xp:150, r:22, at:180, scale:5 },
-  { spr:'saja',   nm:'저승사자',  hp:7800, spd:33, dmg:32, xp:600, r:26, at:360, scale:6 },
+  { spr:'gumiho', nm:'구미호',    hp:820,  spd:38, dmg:9,  xp:150, r:22, at:180, scale:5 },
+  { spr:'saja',   nm:'저승사자',  hp:1500, spd:34, dmg:11, xp:600, r:26, at:360, scale:6 },
 ];
 
 // 무기 — lv 1..5. 값은 레벨별 배열.
@@ -53,7 +53,7 @@ const PASSIVES = {
   sutdol:{ nm:'숫돌', ic:'🪨', desc:'모든 피해 +15%' },
   buchae:{ nm:'부채', ic:'🪭', desc:'공격 속도 +12%' },
   jaseok:{ nm:'자석', ic:'🧲', desc:'획득 범위 +35%' },
-  sansam:{ nm:'산삼', ic:'🌿', desc:'초당 체력 회복 +0.7' },
+  sansam:{ nm:'산삼', ic:'🌿', desc:'초당 체력 회복 +0.45' },
 };
 
 /* ═══════════════ 스프라이트 굽기 ═══════════════ */
@@ -204,7 +204,7 @@ function reset(){
   critChance = 0.13 + (metaLv.luck||0)*0.03;
   P.arms = { bujeok:1 };               // 부적 한 장으로 시작
   P.pass = {}; P.evo = {};
-  runSouls = 0; waveIdx = 0; eliteT = 48; banner = ''; bannerT = 0;
+  runSouls = 0; waveIdx = 0; eliteT = 55; banner = ''; bannerT = 0;
   evoAnnounced = {};
   el('chest').hidden = true;
   cam.x = 0; cam.y = 0;
@@ -302,19 +302,27 @@ function updatePlayer(dt){
   cam.y += (leadY - cam.y) * Math.min(1, dt*7);
 }
 
+function foeCap(){ return Math.min(MAX_FOES, 150 + Math.floor(time*0.5)); }
 function spawnRate(){
   const t = time;
-  return 1.2 + t*0.028 + (t>200 ? (t-200)*0.05 : 0);   // 초당 마리
+  let r = 1.3 + t*0.030 + (t>180 ? (t-180)*0.055 : 0);
+  if(t > RUN_TIME) r *= 2.2;         // 저승사자가 나온 뒤엔 산책이 불가능해야 한다
+  return r;
 }
 function foePool(){
   const out = [];
   for(const k in FOES) if(time >= FOES[k].from) out.push(k);
   return out;
 }
+/* 플레이어 화력은 무기·진화·보조가 곱해져 기하급수로 큰다.
+   적을 선형으로 올리면 후반이 그냥 산책이 된다. */
+function hpCurve(t){ return Math.pow(1.40, t/60); }
+function dmgCurve(t){ return Math.pow(1.26, t/60); }
+
 function spawnFoe(key, ang, dist, opt){
-  if(foes.length >= MAX_FOES) return;
+  if(foes.length >= foeCap()) return;
   const d = FOES[key];
-  const mul = 1 + time/95;
+  const mul = hpCurve(time);
   opt = opt || {};
   const a = ang !== undefined ? ang : Math.random()*6.283;
   // 화면이 세로로 길어서 원으로 뿌리면 좌우가 너무 멀다. 화면 모양대로 타원에 놓는다.
@@ -322,14 +330,14 @@ function spawnFoe(key, ang, dist, opt){
   const rx = (VW*0.60 + 46) * m, ry = (VH*0.58 + 46) * m;
   const elite = !!opt.elite;
   const shrink = opt.shrink || 1;
-  const hp = d.hp * mul * (elite ? 6 : 1) * shrink;
+  const hp = d.hp * mul * (elite ? 4.5 : 1) * shrink;
   const f = {
     k:key, spr:d.spr,
     x: opt.x !== undefined ? opt.x : cam.x + Math.cos(a)*rx,
     y: opt.y !== undefined ? opt.y : cam.y + Math.sin(a)*ry,
     hp, maxHp:hp,
-    spd: d.spd * rnd(0.9,1.1) * (elite ? 0.82 : 1),
-    dmg: d.dmg * (1+time/240) * (elite ? 1.7 : 1),
+    spd: d.spd * rnd(0.9,1.1) * (elite ? 0.82 : 1) * (1 + time/900),
+    dmg: d.dmg * dmgCurve(time) * (elite ? 1.7 : 1),
     xp: d.xp * (elite ? 8 : 1) * shrink,
     r: d.r * (elite ? 1.45 : 1) * (shrink < 1 ? 0.72 : 1),
     kx:0, ky:0, flash:0, bellCd:0, bob:Math.random()*6.283, boss:false,
@@ -344,7 +352,8 @@ function spawnBoss(b){
   const a = Math.random()*6.283;
   const f = {
     k:'boss', spr:b.spr, x:cam.x+Math.cos(a)*(VW*0.55+40), y:cam.y+Math.sin(a)*(VH*0.5+40),
-    hp:b.hp, maxHp:b.hp, spd:b.spd, dmg:b.dmg, xp:b.xp, r:b.r,
+    hp:b.hp*hpCurve(b.at), maxHp:b.hp*hpCurve(b.at),
+    spd:b.spd, dmg:b.dmg*dmgCurve(b.at), xp:b.xp, r:b.r, rage:0,
     kx:0, ky:0, flash:0, bellCd:0, bob:0, orbit:0, boss:true, nm:b.nm, scale:b.scale, ring:2.5,
     ai:'chase', act:0, dash:0, tele:0, elite:false, child:false, final:b.at>=RUN_TIME,
   };
@@ -360,7 +369,7 @@ function spawnBoss(b){
 const WAVES = [
   { t:45,  label:'혼불 무리',   key:'honbul',  n:16 },
   { t:88,  label:'허수아비 떼', key:'heosu',   n:14 },
-  { t:130, label:'정예 출현',   elite:1 },
+  { t:152, label:'정예 출현',   elite:1 },
   { t:225, label:'해골 돌격',   key:'haegol',  n:20 },
   { t:262, label:'정예 둘',     elite:2 },
   { t:310, label:'그슨대 무리', key:'geuseun', n:8 },
@@ -400,7 +409,7 @@ function updateSpawns(dt){
   // 그 사이사이에도 정예가 하나씩
   if(time > 62){
     eliteT -= dt;
-    if(eliteT <= 0){ eliteT = 48; spawnElite(); }
+    if(eliteT <= 0){ eliteT = 55; spawnElite(); }
   }
   spawnAcc += spawnRate()*dt;
   const pool = foePool();
@@ -555,6 +564,11 @@ function updateFoes(dt){
 
     // 보스는 가끔 탄막을 뿌린다
     if(f.boss){
+      // 최종보스는 오래 끌수록 사나워진다. 버티기로는 못 이긴다.
+      if(f.final){
+        f.rage += dt;
+        if(f.rage > 10){ f.rage = 0; f.dmg *= 1.10; f.spd *= 1.04; f.ring = Math.min(f.ring, 0.6); }
+      }
       f.ring -= dt;
       if(f.ring <= 0){
         f.ring = 3.4;
@@ -834,7 +848,7 @@ function gainXp(n){
   P.xp += n;
   while(P.xp >= P.xpNext){
     P.xp -= P.xpNext; P.lv++;
-    P.xpNext = P.lv < 12 ? 5 + P.lv*4 : Math.round(P.xpNext*1.16) + 6;
+    P.xpNext = P.lv < 10 ? 5 + P.lv*4 : Math.round(P.xpNext*1.20) + 8;
     offerCards();
   }
 }
@@ -871,13 +885,35 @@ function evoReady(k){
   return P.arms[k] >= EVO_ARM && !P.evo[k] && (P.pass[EVO[k].need]||0) >= EVO_PASS;
 }
 
+/* 카드는 균등 추첨이 아니다. 키우던 것과 그 진화 재료가 더 자주 나온다.
+   안 그러면 '부채가 끝까지 안 떠서' 무너지는 판이 절반이 된다. */
 function buildOptions(){
   const opts = [];
-  for(const k in P.arms) if(P.arms[k] < 5) opts.push({ kind:'arm', k });
-  if(Object.keys(P.arms).length < 6)
-    for(const k in ARMS) if(!P.arms[k]) opts.push({ kind:'new', k });
-  for(const k in PASSIVES) if((P.pass[k]||0) < 5) opts.push({ kind:'pass', k });
+  const owned = Object.keys(P.arms).length;
+  const wanted = {};                       // 내 무기의 진화 재료
+  for(const k in P.arms) if(!P.evo[k]) wanted[EVO[k].need] = 1;
+
+  for(const k in P.arms) if(P.arms[k] < 5)
+    opts.push({ kind:'arm', k, w: P.arms[k] < EVO_ARM ? 3.2 : 1.2 });
+  if(owned < 6)
+    for(const k in ARMS) if(!P.arms[k])
+      opts.push({ kind:'new', k, w: owned < 3 ? 1.8 : 0.7 });
+  for(const k in PASSIVES) if((P.pass[k]||0) < 5)
+    opts.push({ kind:'pass', k,
+      w: (wanted[k] && (P.pass[k]||0) < EVO_PASS) ? 3.2 : 1 });
   return opts;
+}
+
+/* 가중치대로 하나 뽑아 목록에서 빼낸다 */
+function drawOption(opts){
+  let total = 0;
+  for(const o of opts) total += o.w;
+  let r = Math.random() * total;
+  for(let i=0;i<opts.length;i++){
+    r -= opts[i].w;
+    if(r <= 0) return opts.splice(i,1)[0];
+  }
+  return opts.pop();
 }
 
 function offerCards(){
@@ -885,9 +921,7 @@ function offerCards(){
   const pick = [];
   // 진화가 준비됐으면 무조건 한 장 띄운다 — 이게 이 게임의 보상이다
   for(const k in P.arms) if(evoReady(k)){ pick.push({ kind:'evo', k }); break; }
-  while(pick.length < 3 && opts.length){
-    pick.push(opts.splice(rint(0,opts.length-1),1)[0]);
-  }
+  while(pick.length < 3 && opts.length) pick.push(drawOption(opts));
   if(!pick.length){ P.hp = Math.min(P.maxHp, P.hp+30); return; }
 
   paused = true;
@@ -943,7 +977,7 @@ function openChest(){
   const opts = buildOptions();
   const got = [];
   for(let i=0;i<3 && opts.length;i++){
-    const o = opts.splice(rint(0,opts.length-1),1)[0];
+    const o = drawOption(opts);
     got.push(cardInfo(o));
     applyPick(o);
   }
@@ -989,7 +1023,7 @@ function applyPick(o){
     if(o.k === 'sutdol') P.dmgMul *= 1.15;
     if(o.k === 'buchae') P.cdMul *= 0.88;
     if(o.k === 'jaseok') P.pickR *= 1.35;
-    if(o.k === 'sansam') P.regen += 0.7;
+    if(o.k === 'sansam') P.regen += 0.45;
   }
 }
 
@@ -1402,7 +1436,7 @@ function drawFoe(f){
 }
 
 /* ═══════════════ 루프 ═══════════════ */
-let last = 0, acc = 0;
+let last = 0, acc = 0, turbo = 1;
 const STEP = 1/60;
 
 function frame(t){
@@ -1421,9 +1455,9 @@ function frame(t){
     gemT -= dt;   if(gemT <= 0) gemStreak = 0;
     if(hitStop > 0){ hitStop -= dt; }
     else {
-      acc += dt;
+      acc += dt * turbo;
       let guard = 0;
-      while(acc >= STEP && guard++ < 5){
+      while(acc >= STEP && guard++ < 8*turbo){
         acc -= STEP;
         time += STEP;
         updatePlayer(STEP);
@@ -1522,6 +1556,7 @@ window.__BG = { P, foes, drops, bullets, get time(){return time}, get kills(){re
   get bossAlive(){return bossAlive}, ARMS, PASSIVES, FOES, EVO, SPR,
   get souls(){return souls}, get runSouls(){return runSouls}, META,
   openChest, spawnElite, get waveIdx(){return waveIdx},
+  setTurbo(n){ turbo = Math.max(1, n|0); },
   setStick(x,y){ stick.on = !!(x||y); stick.ox=0; stick.oy=0; stick.dx=x*STICK_R; stick.dy=y*STICK_R; },
   killAll(){ for(let i=foes.length-1;i>=0;i--) killFoe(foes[i]); },
   warp(t){ time = t; } };
