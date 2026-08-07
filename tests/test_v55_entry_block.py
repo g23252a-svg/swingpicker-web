@@ -144,11 +144,28 @@ def test_batch_logs_block_and_pick_counts():
 
 # ── ⑤ 청산 규율 문구 정직화 ──
 
-def test_exit_plan_declares_tp_advice_unverified():
+def test_exit_plan_states_the_measured_tradeoff():
+    """[v57] '미검증'이 아니라 트레이드오프로 적는다 — 양쪽 다 실측이다.
+
+    v55는 기대값 기준으로 '미검증'이라 적었다. v57에서 목표를 승률로 바꿔
+    같은 트레이드 쌍 McNemar 검정을 하니 확립됐다:
+      top-3 n=87  41.4%→65.5% 뒤집힘 +21/-0 p<0.0001 (IS 36→58 · OOS 61→94)
+      top-5 n=144 44.4%→67.4% 뒤집힘 +33/-0 p<0.0001
+    대가도 같은 표본에서 측정됐다: 평균 +1.26%→+0.55%, 복리 +33.8%→+14.2%.
+    화면은 어느 쪽도 대신 고르지 않고 둘 다 말한다.
+    """
     src = (ROOT / "exit_plan.py").read_text(encoding="utf-8")
-    assert "익절 권고는 미검증" in src
-    assert "t=-1.76" in src, "v55 실측 근거 미기록"
-    assert "목표가(TP1~TP3)까지 보유하는 선택과 충돌" in src
+    assert "t=-1.76" in src, "v55 기대값 실측 근거 미기록"
+    assert "McNemar" in src, "v57 승률 검정 근거 미기록"
+    assert "p<0.0001" in src
+    # [v57] 문구가 '충돌 경고'에서 '트레이드오프 수치 제시'로 바뀌었다 —
+    #       두 선택지를 함께 언급하는지만 검사한다(구체 문구는 v57 테스트가 고정).
+    assert "목표가(TP1~TP3)까지 보유" in src
+    # 화면 문구: 승률 개선과 기대값 보존을 수치로 함께 말해야 한다
+    # [v57] 파라미터 재조정(+3%·1/4)으로 '기대값 감소' 서술이 '89% 보존'으로 바뀌었다.
+    assert "이길 확률을 41%→60%로 올리고" in src
+    assert "기대수익은 89% 지켰습니다" in src
+    assert "익절 권고는 미검증" not in src, "승률 근거가 확립된 뒤에도 미검증이라 적고 있다"
 
 
 def test_rr_warning_no_longer_reads_as_bad_stock():

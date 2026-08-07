@@ -148,4 +148,7 @@ def test_no_picks_says_blocked_not_missing(tmp_path):
 def test_reliability_definitions_are_recorded():
     src = (ROOT / "services" / "pick_reliability.py").read_text(encoding="utf-8")
     assert "중위 **-2.70%**" in src, "우측 꼬리 실측 근거 미기록"
-    assert "t=-1.76" in src or "-2.10%p" in src
+    # [v57] 근거가 '기대값 미검증'에서 '승률·기대값 트레이드오프 격자탐색'으로
+    #       교체됐다. 어느 쪽이든 청산 규율의 실측 근거가 남아 있어야 한다.
+    assert ("p_BH=0.0001" in src or "t=-1.76" in src or "-2.10%p" in src), \
+        "청산 규율 실측 근거 미기록"
