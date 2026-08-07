@@ -6,7 +6,10 @@
 /* ═══════════════ 자료 ═══════════════ */
 
 const RUN_TIME = 382;                 // 저승사자가 나오는 시각
-const MAX_FOES = 260, MAX_PARTS = 300, MAX_TEXTS = 44;
+/* 카메라를 당겨 캐릭터를 크게 본다. 멀리서 구경하면 타격이 안 느껴진다.
+   당긴 만큼 세계에서 보이는 넓이는 줄어드므로 소환·정리도 이 값을 쓴다. */
+const ZOOM = 1.5;
+const MAX_FOES = 430, MAX_PARTS = 150, MAX_TEXTS = 12;
 
 const FOES = {
   honbul:  { spr:'honbul',  nm:'혼불',    hp:9,   spd:74, dmg:6,  xp:1, r:8,  from:0,   ai:'chase'  },
@@ -76,17 +79,17 @@ const BOSSES = [
 // 무기 — lv 1..5. 값은 레벨별 배열.
 const ARMS = {
   geom: { nm:'검기', ic:'⚔', desc:'앞쪽을 부채꼴로 벤다',
-    cd:[0.80,0.70,0.62,0.55,0.48], dmg:[16,23,31,41,53], arc:[2.1,2.3,2.5,2.7,3.0], rng:[76,84,92,100,110] },
+    cd:[0.80,0.70,0.62,0.55,0.48], dmg:[16,23,31,41,53], arc:[2.2,2.5,2.8,3.1,3.4], rng:[92,106,120,134,150] },
   bujeok:{ nm:'부적', ic:'📜', desc:'적을 쫓아가는 부적',
     cd:[0.90,0.80,0.70,0.62,0.54], dmg:[14,20,27,36,47], cnt:[2,2,3,3,4] },
   byeorak:{ nm:'벼락', ic:'⚡', desc:'하늘에서 내리꽂힌다',
     cd:[2.40,2.10,1.85,1.60,1.35], dmg:[34,46,60,78,100], cnt:[1,2,2,3,4] },
   bulti:{ nm:'불티', ic:'🔥', desc:'몸을 두른 불꽃이 태운다',
-    cd:[0.45,0.42,0.39,0.36,0.32], dmg:[7,10,13,17,22], rad:[52,60,68,78,90] },
+    cd:[0.45,0.42,0.39,0.36,0.32], dmg:[7,10,13,17,22], rad:[64,76,88,102,118] },
   hwasal:{ nm:'화살', ic:'🏹', desc:'적을 꿰뚫고 지나간다',
     cd:[1.40,1.22,1.06,0.90,0.75], dmg:[20,27,35,45,58], cnt:[1,2,2,3,3] },
   bell: { nm:'방울', ic:'🔔', desc:'몸 주위를 도는 방울',
-    cd:[0.30,0.30,0.30,0.30,0.30], dmg:[11,15,20,26,34], cnt:[2,2,3,3,4], rad:[54,58,62,66,72] },
+    cd:[0.30,0.30,0.30,0.30,0.30], dmg:[11,15,20,26,34], cnt:[2,3,3,4,5], rad:[66,74,82,90,100] },
 };
 const PASSIVES = {
   jipsin:{ nm:'짚신', ic:'👣', desc:'이동 속도 +12%' },
@@ -127,6 +130,7 @@ function sprite(name, scale){
 const cv = document.getElementById('game');
 const ctx = cv.getContext('2d', { alpha:false });
 let VW = 0, VH = 0, dpr = 1;
+const vw = () => VW / ZOOM, vh = () => VH / ZOOM;
 
 let running = false, paused = false, finished = false;
 let time = 0, kills = 0, best = 0;
@@ -150,6 +154,7 @@ let waveIdx = 0, eliteT = 0;
 let banner = '', bannerT = 0;
 
 const foes = [], bullets = [], parts = [], drops = [], texts = [], slashes = [];
+const near = [];   // 이번 프레임 화면 근처의 적. 무기 판정은 여기서만 한다.
 let bossAlive = null, nextBoss = 0, spawnAcc = 0;
 
 /* ═══════════════ 잡동사니 ═══════════════ */
@@ -169,6 +174,7 @@ const sfx = SND.sfx;
 
 /* ═══════════════ 손맛 ═══════════════ */
 let combo = 0, comboT = 0, gemStreak = 0, gemT = 0;
+let burstAt = -9, burstN = 0;
 let slowT = 0, slowScale = 1, hsCd = 0;
 const rings = [], pops = [];
 
@@ -180,11 +186,11 @@ function freeze(amount){
 }
 function slowmo(dur, scale){ slowT = Math.max(slowT, dur); slowScale = scale; }
 function ring(x, y, r0, r1, life, col, w){
-  if(rings.length > 40) rings.shift();
+  if(rings.length > 22) rings.shift();
   rings.push({ x, y, r0, r1, life, max:life, col, w });
 }
 function popSprite(sprName, scale, x, y, flip){
-  if(pops.length > 40) pops.shift();
+  if(pops.length > 16) pops.shift();
   pops.push({ spr:sprName, scale, x, y, flip, life:0.17, max:0.17 });
 }
 
@@ -193,7 +199,7 @@ function burst(x, y, n, col, spd, life){
   for(let i=0;i<n && parts.length<MAX_PARTS;i++){
     const a = Math.random()*6.283, s = rnd(spd*0.4, spd);
     parts.push({ x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s,
-      life:life||rnd(0.25,0.5), max:life||0.45, col, r:rnd(1.6,3.4) });
+      life:life||rnd(0.25,0.5), max:life||0.45, col, r:rnd(2.4,4.8) });
   }
 }
 function popText(x, y, txt, col, big){
@@ -255,7 +261,7 @@ function reset(){
   el('chest').hidden = true;
   cam.x = 0; cam.y = 0;
   for(const k in ARMS) armT[k] = 0;
-  syncHud();
+  syncHud(true);
 }
 
 const armT = {};                        // 무기별 쿨타임 잔여
@@ -321,14 +327,14 @@ function fireUlt(){
   flashScreen = 1.0;
   shake = 20;
   hitStop = 0.14;
-  ring(P.x, P.y, 10, 620, 1.0, '#ffffff', 10);
-  ring(P.x, P.y, 10, 480, 0.8, '#ffd35c', 7);
+  ring(P.x, P.y, 10, 760, 1.0, '#ffffff', 14);
+  ring(P.x, P.y, 10, 560, 0.8, '#ffd35c', 9);
   burst(P.x, P.y, 60, '#fff3c4', 420, 0.9);
   popText(P.x, P.y - 54, '백귀참', '#ffd35c', true);
   for(let i=foes.length-1;i>=0;i--){
     const f = foes[i];
     const dx = f.x-P.x, dy = f.y-P.y;
-    if(dx*dx+dy*dy > 620*620) continue;
+    if(dx*dx+dy*dy > 720*720) continue;
     const d = Math.hypot(dx,dy) || 1;
     hurtFoe(f, dmg * (f.boss ? 0.55 : 1), dx/d*420, dy/d*420);
   }
@@ -359,9 +365,9 @@ function updatePlayer(dt){
     if(parts.length < MAX_PARTS) burst(P.x, P.y, 1, '#6fb6ff', 40, 0.25);
     // 몸을 부딪쳐 지나가며 벤다 — 회피가 곧 공격이 된다
     const dmg = (18 + P.lv*2.2) * P.dmgMul;
-    for(let i=foes.length-1;i>=0;i--){
-      const f = foes[i];
-      if(P.dashHit.has(f)) continue;
+    for(let i=near.length-1;i>=0;i--){
+      const f = near[i];
+      if(f.hp <= 0 || P.dashHit.has(f)) continue;
       const ddx = f.x-P.x, ddy = f.y-P.y;
       if(ddx*ddx + ddy*ddy > (f.r+22)*(f.r+22)) continue;
       P.dashHit.add(f);
@@ -383,10 +389,10 @@ function updatePlayer(dt){
   cam.y += (leadY - cam.y) * Math.min(1, dt*7);
 }
 
-function foeCap(){ return Math.min(MAX_FOES, 150 + Math.floor(time*0.5)); }
+function foeCap(){ return Math.min(MAX_FOES, 90 + Math.floor(time*0.62)); }
 function spawnRate(){
   const t = time;
-  let r = 1.3 + t*0.030 + (t>180 ? (t-180)*0.055 : 0);
+  let r = 3.4 + t*0.10 + (t>180 ? (t-180)*0.16 : 0);
   // 최종보스전은 물량전이 아니라 결투여야 한다. 잡것을 오히려 줄인다.
   if(bossAlive && bossAlive.final) r *= 0.5;
   return r;
@@ -399,8 +405,8 @@ function foePool(){
 }
 /* 플레이어 화력은 무기·진화·보조가 곱해져 기하급수로 큰다.
    적을 선형으로 올리면 후반이 그냥 산책이 된다. */
-function hpCurve(t){ return Math.pow(1.43, t/60); }
-function dmgCurve(t){ return Math.pow(1.26, t/60); }
+function hpCurve(t){ return 0.62 * Math.pow(1.43, t/60); }
+function dmgCurve(t){ return Math.pow(1.20, t/60); }
 
 function spawnFoe(key, ang, dist, opt){
   if(foes.length >= foeCap()) return;
@@ -410,7 +416,7 @@ function spawnFoe(key, ang, dist, opt){
   const a = ang !== undefined ? ang : Math.random()*6.283;
   // 화면이 세로로 길어서 원으로 뿌리면 좌우가 너무 멀다. 화면 모양대로 타원에 놓는다.
   const m = dist || 1;
-  const rx = (VW*0.60 + 46) * m, ry = (VH*0.58 + 46) * m;
+  const rx = (vw()*0.62 + 40) * m, ry = (vh()*0.60 + 40) * m;
   const elite = !!opt.elite;
   const shrink = opt.shrink || 1;
   const hp = d.hp * mul * (elite ? 4.5 : 1) * shrink;
@@ -434,7 +440,7 @@ function spawnFoe(key, ang, dist, opt){
 function spawnBoss(b){
   const a = Math.random()*6.283;
   const f = {
-    k:'boss', spr:b.spr, x:cam.x+Math.cos(a)*(VW*0.55+40), y:cam.y+Math.sin(a)*(VH*0.5+40),
+    k:'boss', spr:b.spr, x:cam.x+Math.cos(a)*(vw()*0.55+40), y:cam.y+Math.sin(a)*(vh()*0.5+40),
     hp:b.hp*hpCurve(b.at), maxHp:b.hp*hpCurve(b.at),
     spd:b.spd, dmg:b.dmg*dmgCurve(b.at), xp:b.xp, r:b.r, rage:0,
     kx:0, ky:0, flash:0, bellCd:0, bob:0, orbit:0, boss:true, nm:b.nm, scale:b.scale, ring:2.5,
@@ -530,10 +536,11 @@ function updateSpawns(dt){
   const pool = foePool();
   while(spawnAcc >= 1){
     // 가끔 한쪽에서 무리로 몰려온다 (등장 예산에서 인원수만큼 뺀다)
-    if(spawnAcc >= 5 && Math.random() < 0.16){
-      spawnAcc -= 5;
+    if(spawnAcc >= 9 && Math.random() < 0.30){
+      spawnAcc -= 9;
       const a = Math.random()*6.283;
-      for(let i=0;i<5;i++) spawnFoe(pool[rint(0,pool.length-1)], a + rnd(-0.30,0.30));
+      const k = pool[rint(0,pool.length-1)];
+      for(let i=0;i<9;i++) spawnFoe(k, a + rnd(-0.34,0.34));
     } else {
       spawnAcc -= 1;
       spawnFoe(pool[rint(0,pool.length-1)]);
@@ -550,8 +557,11 @@ function hurtFoe(f, dmg, kx, ky){
   f.hp -= dmg; f.flash = crit ? 0.20 : 0.12;
   const kb = crit ? 1.9 : 1;
   f.kx += (kx||0)*kb; f.ky += (ky||0)*kb;
-  popText(f.x, f.y - f.r - 6, String(Math.round(dmg)), crit ? '#ffd35c' : '#fff3c4', crit);
-  if(f.boss) el('bossfill').style.width = clamp(f.hp/f.maxHp*100,0,100) + '%';
+  // 초당 수십 대를 때리는 판에서 숫자를 다 띄우면 읽히지도 않고 비싸다.
+  // 치명타와 굵은 한 방만 보여 준다.
+  if(crit || dmg >= f.maxHp*0.5 || Math.random() < 0.12)
+    popText(f.x, f.y - f.r - 6, String(Math.round(dmg)), crit ? '#ffd35c' : '#fff3c4', crit);
+  if(f.boss) putStyle('bossfill', 'width', clamp(f.hp/f.maxHp*100,0,100).toFixed(1) + '%');
 
   if(crit){
     ring(f.x, f.y, 3, 40, 0.24, '#ffd35c', 3.5);
@@ -572,8 +582,19 @@ function killFoe(f){
   kills++;
   combo++; comboT = 1.8;
   if(ult < ULT_MAX) ult = Math.min(ULT_MAX, ult + (f.boss ? 60 : (f.elite ? 14 : 1)));
-  popSprite(f.spr, f.scale, f.x, f.y, P.x < f.x);
-  burst(f.x, f.y, f.boss?60:9, f.boss?'#ffd35c':'#ff8b5c', f.boss?300:130);
+  const notable = f.boss || f.elite || f.maxHp > 60;
+  // 한 순간에 여럿이 스러지면 그만큼 크게 터뜨린다
+  if(now() - burstAt < 0.09){ burstN++; } else { burstN = 1; }
+  burstAt = now();
+  if(burstN === 6 || burstN === 14 || burstN === 26){
+    ring(P.x, P.y, 10, 90 + burstN*7, 0.32, '#ffd35c', 3);
+    shake = Math.max(shake, 2 + burstN*0.2);
+    popText(f.x, f.y - 26, burstN + ' 처치', '#ffd35c', true);
+  }
+  // 초당 아흔 마리가 죽는 판이다. 잡것에게까지 시체·충격파를 붙이면
+  // 연출이 아니라 부하가 된다. 값나가는 처치에만 몰아준다.
+  if(notable) popSprite(f.spr, f.scale, f.x, f.y, P.x < f.x);
+  burst(f.x, f.y, f.boss?60:(notable?9:4), f.boss?'#ffd35c':'#ff8b5c', f.boss?300:130);
   if(f.boss){
     sfx.bigKill();
   } else if(f.maxHp > 90){
@@ -582,7 +603,7 @@ function killFoe(f){
     freeze(0.035);
     sfx.bigKill();
   } else {
-    ring(f.x, f.y, 2, 22, 0.16, '#ffb07a', 2);
+    if(notable) ring(f.x, f.y, 2, 22, 0.16, '#ffb07a', 2);
     sfx.kill(combo);
   }
   if(f.boss){
@@ -613,8 +634,8 @@ function killFoe(f){
   }
   gainXp(f.xp);
 }
-const MAX_DROPS = 240;
-const GEM_XP = [1, 3, 9];
+const MAX_DROPS = 90;
+const GEM_XP = [1, 2, 5];   // 처치가 세 배로 늘어난 만큼 한 알의 값은 낮춘다
 
 /* 구슬을 지우면 경험치가 통째로 증발한다. 레벨업이 멈추고 곧 할 일이 없어진다.
    그래서 지우지 않고, 멀리 있는 둘을 하나로 합쳐 굵게 만든다. 총량은 그대로다. */
@@ -644,7 +665,7 @@ function dropGem(x, y, tier){
 function dropItem(x,y,kind){ drops.push({ x, y, t:kind, vx:rnd(-30,30), vy:rnd(-30,30), pull:0 }); }
 
 function updateFoes(dt){
-  const cull = Math.max(VW, VH) * 1.5;
+  const cull = Math.max(vw(), vh()) * 1.6;
   for(let i=foes.length-1;i>=0;i--){
     const f = foes[i];
     if(!f.boss && (f.x-cam.x)**2 + (f.y-cam.y)**2 > cull*cull){
@@ -715,7 +736,7 @@ function updateFoes(dt){
 
     // 접촉 피해
     if(d < f.r + 9 && P.iframe <= 0){
-      P.hp -= f.dmg; P.iframe = 0.42; P.hurtT = 0.34;
+      P.hp -= f.dmg; P.iframe = 0.50; P.hurtT = 0.34;
       shake = Math.max(shake, 6 + f.dmg*0.22);
       freeze(0.055);
       ring(P.x, P.y, 6, 44, 0.22, '#ff5252', 3);
@@ -725,16 +746,27 @@ function updateFoes(dt){
       if(P.hp/P.maxHp < 0.28) slowmo(0.3, 0.45);
       if(P.hp <= 0){ gameOver(); return; }
     }
-    // 겹침 방지
+  }
+
+  // 겹침 밀어내기는 눈에 보이는 것들끼리만 한다. 430마리 전수 비교는 프레임을
+  // 무너뜨리고, 화면 밖에서 겹치는 건 어차피 보이지 않는다.
+  near.length = 0;
+  const nx0 = vw()*0.75, ny0 = vh()*0.75;
+  for(let i=0;i<foes.length;i++){
+    const f = foes[i];
+    if(Math.abs(f.x-cam.x) < nx0 && Math.abs(f.y-cam.y) < ny0) near.push(f);
+  }
+  for(let i=near.length-1;i>=0;i--){
+    const f = near[i];
     for(let j=i-1;j>=0;j--){
-      const o = foes[j];
-      const ox = o.x-f.x, oy = o.y-f.y;
+      const o = near[j];
+      const ax = o.x-f.x, ay = o.y-f.y;
       const rr = f.r + o.r;
-      const dd = ox*ox + oy*oy;
+      const dd = ax*ax + ay*ay;
       if(dd > 0.01 && dd < rr*rr){
         const dl = Math.sqrt(dd), push = (rr-dl)*0.5;
-        const nx = ox/dl*push, ny = oy/dl*push;
-        o.x += nx; o.y += ny; f.x -= nx; f.y -= ny;
+        const px = ax/dl*push, py = ay/dl*push;
+        o.x += px; o.y += py; f.x -= px; f.y -= py;
       }
     }
   }
@@ -743,7 +775,8 @@ function updateFoes(dt){
 /* ── 무기 ── */
 function nearestFoe(x, y, maxD){
   let best = null, bd = (maxD||1e9)**2;
-  for(const f of foes){
+  for(const f of near){
+    if(f.hp <= 0) continue;
     const dx = f.x-x, dy = f.y-y, d = dx*dx+dy*dy;
     if(d < bd){ bd = d; best = f; }
   }
@@ -768,9 +801,9 @@ function updateArms(dt){
     for(let i=0;i<n;i++){
       const a = bellAng + i/n*6.283;
       const bx = P.x + Math.cos(a)*rad, by = P.y + Math.sin(a)*rad;
-      for(let j=foes.length-1;j>=0;j--){
-        const f = foes[j];
-        if(f.bellCd > 0) continue;
+      for(let j=near.length-1;j>=0;j--){
+        const f = near[j];
+        if(f.hp <= 0 || f.bellCd > 0) continue;
         const dx = f.x-bx, dy = f.y-by;
         if(dx*dx+dy*dy < (f.r+9)**2){
           f.bellCd = E ? 0.3 : 0.45;
@@ -780,15 +813,16 @@ function updateArms(dt){
       }
     }
   }
-  for(const f of foes) if(f.bellCd > 0) f.bellCd -= dt;
+  for(let i=near.length-1;i>=0;i--) if(near[i].bellCd > 0) near[i].bellCd -= dt;
 }
 let bellAng = 0;
 
 function explode(x, y, dmg, rad){
   ring(x, y, 6, rad, 0.3, '#ff9a3c', 4);
   burst(x, y, 10, '#ffb85c', 200, 0.35);
-  for(let i=foes.length-1;i>=0;i--){
-    const g = foes[i];
+  for(let i=near.length-1;i>=0;i--){
+    const g = near[i];
+    if(g.hp <= 0) continue;
     const dx = g.x-x, dy = g.y-y;
     if(dx*dx+dy*dy < rad*rad) hurtFoe(g, dmg, dx*1.4, dy*1.4);
   }
@@ -803,8 +837,9 @@ function fireArm(key, lv){
     const base = t ? Math.atan2(t.y-P.y, t.x-P.x) : Math.atan2(P.fy, P.fx);
     const mul = E ? 2.4 : 1;
     slashes.push({ x:P.x, y:P.y, a:base, arc, rng, life:0.18, max:0.18 });
-    for(let i=foes.length-1;i>=0;i--){
-      const f = foes[i];
+    for(let i=near.length-1;i>=0;i--){
+      const f = near[i];
+      if(f.hp <= 0) continue;
       const dx = f.x-P.x, dy = f.y-P.y;
       const d = Math.hypot(dx,dy);
       if(d > rng + f.r) continue;
@@ -834,7 +869,7 @@ function fireArm(key, lv){
   else if(key === 'byeorak'){
     const n = A.cnt[lv-1];
     for(let i=0;i<n;i++){
-      const cand = foes.filter(f => Math.abs(f.x-cam.x) < VW*0.6 && Math.abs(f.y-cam.y) < VH*0.6);
+      const cand = foes.filter(f => Math.abs(f.x-cam.x) < vw()*0.6 && Math.abs(f.y-cam.y) < vh()*0.6);
       if(!cand.length) break;
       const f = cand[rint(0,cand.length-1)];
       // 뇌신이면 가장 가까운 적으로 세 번 튄다
@@ -845,8 +880,9 @@ function fireArm(key, lv){
         bolts.push({ x:src.x, y:src.y, life:0.24 });
         ring(src.x, src.y, 6, 64, 0.3, '#bfe3ff', 4);
         const rad = E ? 56 : 42;
-        for(let j=foes.length-1;j>=0;j--){
-          const g = foes[j];
+        for(let j=near.length-1;j>=0;j--){
+          const g = near[j];
+          if(g.hp <= 0) continue;
           const dx = g.x-src.x, dy = g.y-src.y;
           if(dx*dx+dy*dy < rad*rad) hurtFoe(g, armDmg('byeorak',lv)*(E?1.5:1), dx*2, dy*2);
         }
@@ -866,8 +902,9 @@ function fireArm(key, lv){
   else if(key === 'bulti'){
     const rad = A.rad[lv-1] * (E ? 1.5 : 1);
     const dm = armDmg('bulti',lv) * (E ? 1.8 : 1);
-    for(let i=foes.length-1;i>=0;i--){
-      const f = foes[i];
+    for(let i=near.length-1;i>=0;i--){
+      const f = near[i];
+      if(f.hp <= 0) continue;
       const dx = f.x-P.x, dy = f.y-P.y;
       if(dx*dx+dy*dy >= (rad+f.r)**2) continue;
       const alive = f.hp > 0;
@@ -914,7 +951,7 @@ function updateBullets(dt){
     if(b.foe){
       const dx = P.x-b.x, dy = P.y-b.y;
       if(dx*dx+dy*dy < (b.r+9)**2 && P.iframe <= 0){
-        P.hp -= b.dmg; P.iframe = 0.42; P.hurtT = 0.34;
+        P.hp -= b.dmg; P.iframe = 0.50; P.hurtT = 0.34;
         shake = Math.max(shake, 6 + b.dmg*0.2);
         freeze(0.05); combo = 0; sfx.hurt();
         ring(P.x, P.y, 6, 40, 0.2, '#ff5252', 3);
@@ -924,7 +961,8 @@ function updateBullets(dt){
       }
       continue;
     }
-    for(const f of foes){
+    for(const f of near){
+      if(f.hp <= 0) continue;
       if(b.hitSet && b.hitSet.has(f)) continue;
       const dx = f.x-b.x, dy = f.y-b.y;
       if(dx*dx+dy*dy > (f.r+b.r)**2) continue;
@@ -1179,7 +1217,7 @@ function takeCard(o){
   el('levelup').hidden = true;
   paused = false;
   checkEvoHint();
-  syncHud();
+  syncHud(true);
 }
 
 /* ═══════════════ 끝 ═══════════════ */
@@ -1216,52 +1254,75 @@ function victory(){
 }
 
 /* ═══════════════ HUD ═══════════════ */
-function syncHud(){
-  el('hpfill').style.width = clamp(P.hp/P.maxHp*100,0,100) + '%';
-  el('hptext').textContent = Math.max(0,Math.ceil(P.hp)) + ' / ' + Math.round(P.maxHp);
-  el('xpfill').style.width = clamp(P.xp/P.xpNext*100,0,100) + '%';
-  el('lv').textContent = P.lv;
-  el('clock').textContent = fmtTime(time);
-  el('dash').style.setProperty('--cd', (P.dashCd/2.4).toFixed(3));
+/* 매 프레임 DOM을 건드리면 스타일 재계산이 프레임을 잡아먹는다.
+   값이 바뀔 때만, 그리고 초당 20번만 쓴다. */
+const hud = {};
+let hudT = 0;
+function put(id, v){
+  if(hud[id] === v) return;
+  hud[id] = v;
+  el(id).textContent = v;
+}
+function putStyle(id, prop, v){
+  const k = id + prop;
+  if(hud[k] === v) return;
+  hud[k] = v;
+  el(id).style.setProperty(prop, v);
+}
 
-  const cb = el('combo');
-  if(combo >= 5){
-    cb.hidden = false;
-    cb.textContent = combo + ' 연속';
-    cb.style.fontSize = (0.82 + Math.min(combo,60)*0.012).toFixed(2) + 'rem';
-    cb.classList.toggle('hot', combo >= 25);
-  } else if(!cb.hidden) cb.hidden = true;
+function syncHud(force){
+  if(!force){
+    hudT -= 1;
+    if(hudT > 0) return;
+  }
+  hudT = 3;
 
-  SND.setIntensity(bossAlive ? 2 : (time > 200 ? 1 : 0));
-  el('kills').textContent = kills;
+  putStyle('hpfill', 'width', clamp(P.hp/P.maxHp*100,0,100).toFixed(1) + '%');
+  put('hptext', Math.max(0,Math.ceil(P.hp)) + ' / ' + Math.round(P.maxHp));
+  putStyle('xpfill', 'width', clamp(P.xp/P.xpNext*100,0,100).toFixed(1) + '%');
+  put('lv', P.lv);
+  put('clock', fmtTime(time));
+  put('kills', kills);
+  put('soulnow', runSouls);
+  putStyle('dash', '--cd', (P.dashCd/2.4).toFixed(2));
+  putStyle('ult', '--fill', (ult/ULT_MAX).toFixed(2));
 
-  const row = el('arms');
+  const ready = ult >= ULT_MAX;
+  if(hud.ultReady !== ready){ hud.ultReady = ready; el('ult').classList.toggle('ready', ready); }
+
   let html = '';
   for(const k in P.arms){
     if(P.evo[k]) html += `<span class="pip evo">${EVO[k].ic}<b>★</b></span>`;
     else html += `<span class="pip${evoReady(k)?' ready':''}">${ARMS[k].ic}<b>${P.arms[k]}</b></span>`;
   }
   for(const k in P.pass) html += `<span class="pip dim">${PASSIVES[k].ic}<b>${P.pass[k]}</b></span>`;
-  if(row.innerHTML !== html) row.innerHTML = html;
+  if(hud.arms !== html){ hud.arms = html; el('arms').innerHTML = html; }
 
   const bn = el('banner');
-  if(bannerT > 0){
-    if(bn.textContent !== banner) bn.textContent = banner;
-    bn.hidden = false;
-    bn.style.opacity = Math.min(1, bannerT/0.5).toFixed(2);
-  } else if(!bn.hidden) bn.hidden = true;
+  const showB = bannerT > 0;
+  if(hud.bannerOn !== showB){ hud.bannerOn = showB; bn.hidden = !showB; }
+  if(showB){
+    if(hud.bannerTxt !== banner){ hud.bannerTxt = banner; bn.textContent = banner; }
+    putStyle('banner', 'opacity', Math.min(1, bannerT/0.5).toFixed(2));
+  }
 
-  const sc = el('soulnow');
-  if(sc.textContent !== String(runSouls)) sc.textContent = runSouls;
+  const cb = el('combo');
+  const showC = combo >= 5;
+  if(hud.comboOn !== showC){ hud.comboOn = showC; cb.hidden = !showC; }
+  if(showC){
+    put('combo', combo + ' 연속');
+    putStyle('combo', 'font-size', (0.82 + Math.min(combo,60)*0.012).toFixed(2) + 'rem');
+    const hot = combo >= 25;
+    if(hud.comboHot !== hot){ hud.comboHot = hot; cb.classList.toggle('hot', hot); }
+  }
 
-  const ub = el('ult');
-  const k = ult / ULT_MAX;
-  ub.style.setProperty('--fill', k.toFixed(3));
-  ub.classList.toggle('ready', k >= 1);
+  SND.setIntensity(bossAlive ? 2 : (time > 200 ? 1 : 0));
 }
 
 /* ═══════════════ 그리기 ═══════════════ */
 let ground = null, vig = null;
+const order = [];
+const byY = (a,b) => a.y - b.y;
 function makeVig(){
   vig = document.createElement('canvas');
   vig.width = 64; vig.height = 64;
@@ -1293,10 +1354,10 @@ function hash2(x, y){
 }
 const DECAL = 104;
 function drawDecals(){
-  const x0 = Math.floor((cam.x - VW/2) / DECAL) - 1;
-  const x1 = Math.floor((cam.x + VW/2) / DECAL) + 1;
-  const y0 = Math.floor((cam.y - VH/2) / DECAL) - 1;
-  const y1 = Math.floor((cam.y + VH/2) / DECAL) + 1;
+  const x0 = Math.floor((cam.x - vw()/2) / DECAL) - 1;
+  const x1 = Math.floor((cam.x + vw()/2) / DECAL) + 1;
+  const y0 = Math.floor((cam.y - vh()/2) / DECAL) - 1;
+  const y1 = Math.floor((cam.y + vh()/2) / DECAL) + 1;
   for(let cy=y0; cy<=y1; cy++){
     for(let cx=x0; cx<=x1; cx++){
       const h = hash2(cx, cy);
@@ -1320,23 +1381,24 @@ function drawDecals(){
 }
 
 function draw(){
-  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.setTransform(dpr*ZOOM,0,0,dpr*ZOOM,0,0);
   if(!ground){ makeGround(); vig = null; }
 
   let sx = 0, sy = 0;
   if(shake > 0.1){ sx = rnd(-shake,shake); sy = rnd(-shake,shake); shake *= 0.86; } else shake = 0;
 
-  const ox = Math.round(VW/2 - cam.x + sx), oy = Math.round(VH/2 - cam.y + sy);
+  const W = vw(), H = vh();
+  const ox = Math.round(W/2 - cam.x + sx), oy = Math.round(H/2 - cam.y + sy);
 
   // 바닥
   ctx.save();
   ctx.translate(ox % 128, oy % 128);
   ctx.fillStyle = ground;
-  ctx.fillRect(-128, -128, VW+256, VH+256);
+  ctx.fillRect(-128, -128, W+256, H+256);
   ctx.restore();
   // 가장자리를 눌러 화면 중앙으로 시선을 모은다
   if(!vig) makeVig();
-  ctx.drawImage(vig, 0, 0, VW, VH);
+  ctx.drawImage(vig, 0, 0, W, H);
 
   ctx.save();
   ctx.translate(ox, oy);
@@ -1350,12 +1412,23 @@ function draw(){
   if(P.arms.bulti){
     const rad = ARMS.bulti.rad[P.arms.bulti-1];
     const pulse = 1 + Math.sin(time*7)*0.04;
-    const grd = ctx.createRadialGradient(P.x,P.y,rad*0.35,P.x,P.y,rad*pulse);
-    grd.addColorStop(0,'rgba(255,140,40,0.02)');
-    grd.addColorStop(0.75,'rgba(255,120,30,0.16)');
-    grd.addColorStop(1,'rgba(255,80,20,0)');
+    const grd = ctx.createRadialGradient(P.x,P.y,rad*0.30,P.x,P.y,rad*pulse);
+    grd.addColorStop(0,'rgba(255,150,50,0.04)');
+    grd.addColorStop(0.62,'rgba(255,120,30,0.26)');
+    grd.addColorStop(0.92,'rgba(255,80,20,0.34)');
+    grd.addColorStop(1,'rgba(255,60,10,0)');
     ctx.fillStyle = grd;
     ctx.beginPath(); ctx.arc(P.x,P.y,rad*pulse,0,6.283); ctx.fill();
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = '#ff9a3c'; ctx.lineWidth = 2.5;
+    ctx.setLineDash([9, 7]); ctx.lineDashOffset = -time*70;
+    ctx.beginPath(); ctx.arc(P.x,P.y,rad*pulse,0,6.283); ctx.stroke();
+    ctx.restore();
+    if(parts.length < MAX_PARTS && Math.random() < 0.5){
+      const a2 = Math.random()*6.283;
+      burst(P.x+Math.cos(a2)*rad, P.y+Math.sin(a2)*rad, 1, '#ff9a3c', 30, 0.4);
+    }
   }
 
   // 습득물
@@ -1372,26 +1445,33 @@ function draw(){
     ctx.drawImage(s.img, Math.round(d.x-s.w/2), Math.round(d.y-s.h/2));
   }
 
-  // 그림자
+  // 그림자 — 하나의 경로로 묶어 한 번에 칠한다 (개별 fill은 마리 수만큼 비싸다)
   ctx.fillStyle = 'rgba(0,0,0,0.30)';
-  for(const f of foes){
-    ctx.beginPath(); ctx.ellipse(f.x, f.y+f.r*0.75, f.r*0.8, f.r*0.32, 0,0,6.283); ctx.fill();
+  ctx.beginPath();
+  for(let i=0;i<near.length;i++){
+    const f = near[i];
+    ctx.moveTo(f.x + f.r*0.8, f.y + f.r*0.75);
+    ctx.ellipse(f.x, f.y+f.r*0.75, f.r*0.8, f.r*0.32, 0, 0, 6.283);
   }
-  ctx.beginPath(); ctx.ellipse(P.x, P.y+10, 9, 3.6, 0,0,6.283); ctx.fill();
+  ctx.moveTo(P.x+9, P.y+10);
+  ctx.ellipse(P.x, P.y+10, 9, 3.6, 0, 0, 6.283);
+  ctx.fill();
 
   // 검기 자국
   for(const s of slashes){
     const k = s.life/s.max;
     ctx.save();
+    // shadowBlur는 캔버스에서 가장 비싼 연산이다. 넓고 옅은 획을 한 번 더 긋는 편이 싸다.
+    const rr = s.rng*(1.06-0.16*k);
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = k*0.28;
+    ctx.strokeStyle = '#9fd4ff';
+    ctx.lineWidth = 34*k + 10;
+    ctx.beginPath(); ctx.arc(s.x, s.y, rr, s.a - s.arc/2, s.a + s.arc/2); ctx.stroke();
     ctx.globalAlpha = k*0.95;
     ctx.strokeStyle = '#f2f9ff';
-    ctx.lineWidth = 11*k + 3;
-    ctx.shadowColor = '#9fd4ff'; ctx.shadowBlur = 12*k;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.rng*(1.06-0.16*k), s.a - s.arc/2, s.a + s.arc/2);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    ctx.lineWidth = 18*k + 4;
+    ctx.beginPath(); ctx.arc(s.x, s.y, rr, s.a - s.arc/2, s.a + s.arc/2); ctx.stroke();
     ctx.restore();
   }
 
@@ -1407,9 +1487,10 @@ function draw(){
   }
 
   // 적 + 나 (y 순 정렬)
-  const order = foes.slice();
+  order.length = 0;
+  for(let i=0;i<near.length;i++) order.push(near[i]);
   order.push(P);
-  order.sort((a,b) => a.y - b.y);
+  order.sort(byY);
   for(const o of order){
     if(o === P) drawPlayer();
     else drawFoe(o);
@@ -1446,7 +1527,7 @@ function draw(){
     const k = b.life/0.24;
     ctx.save();
     ctx.globalAlpha = k;
-    ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 4;
+    ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 7;
     ctx.beginPath();
     let yy = b.y - 220, xx = b.x + rnd(-14,14);
     ctx.moveTo(xx, yy);
@@ -1454,7 +1535,7 @@ function draw(){
     ctx.stroke();
     ctx.globalAlpha = k*0.5;
     ctx.fillStyle = '#bfe3ff';
-    ctx.beginPath(); ctx.arc(b.x, b.y, 40*(1-k)+14, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(b.x, b.y, 62*(1-k)+18, 0, 6.283); ctx.fill();
     ctx.restore();
   }
 
@@ -1505,6 +1586,8 @@ function draw(){
   }
   ctx.globalAlpha = 1;
   ctx.restore();
+
+  ctx.setTransform(dpr,0,0,dpr,0,0);        // 여기서부터 화면 좌표
 
   // 화면 밖 보스 방향 표시
   if(bossAlive){
@@ -1565,6 +1648,18 @@ function drawFoe(f){
   const s = sprite(f.spr, f.scale);
   const bobY = Math.sin(f.bob)*(f.boss?2.5:1.8);
   const sq = f.flash > 0 ? 1.18 : 1;
+  // 흔한 경우(안 뒤집고 안 맞은 잡것)는 변환 없이 바로 찍는다
+  if(sq === 1 && !f.elite && f.tele <= 0 && P.x >= f.x){
+    ctx.drawImage(s.img, Math.round(f.x - s.w/2), Math.round(f.y + bobY - s.h/2 - f.r*0.3));
+    if(f.hp < f.maxHp && (f.elite || f.maxHp > 60)){
+      const w = f.r*1.7;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(f.x-w/2, f.y-f.r-9, w, 3.4);
+      ctx.fillStyle = '#ff5d5d';
+      ctx.fillRect(f.x-w/2, f.y-f.r-9, w*clamp(f.hp/f.maxHp,0,1), 3.4);
+    }
+    return;
+  }
   if(f.elite){
     ctx.save();
     ctx.globalAlpha = 0.55 + Math.sin(time*6)*0.18;
@@ -1586,7 +1681,8 @@ function drawFoe(f){
   ctx.scale(sq, 2-sq);
   ctx.drawImage(f.flash>0 ? s.lit : s.img, -s.w/2, -s.h/2 - f.r*0.3);
   ctx.restore();
-  if(!f.boss && f.hp < f.maxHp){
+  // 한 방에 죽는 잡것에게까지 체력바를 그리면 fillRect가 마리 수의 두 배로 늘어난다
+  if(!f.boss && f.hp < f.maxHp && (f.elite || f.maxHp > 60)){
     const w = f.r*1.7;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(f.x-w/2, f.y-f.r-9, w, 3.4);
