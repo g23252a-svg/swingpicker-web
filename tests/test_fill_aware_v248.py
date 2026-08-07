@@ -18,13 +18,31 @@ import pandas as pd
 import pytest
 
 # collector의 무거운 의존성(torch) 스텁 — 테스트 환경 한정
+#
+# [v55.4] 이 스텁이 세션 전역으로 새어나가 다른 테스트를 망가뜨렸다.
+#   FEATURE_COLS = [] 인 가짜 ml_engine이 sys.modules에 남으면,
+#   뒤에 도는 test_policy_consistency의 계약 테스트가
+#   `from ml_engine import FEATURE_COLS`에서 ImportError를 못 보므로
+#   스킵하지 않고 빈 목록과 비교해 실패한다
+#   (tests/ + 루트 테스트를 한 프로세스로 돌릴 때만 재현 — 2026-08 실측).
+#   → ① 스텁임을 표시해 하류가 진짜로 착각하지 않게 하고
+#     ② 모듈 테스트가 끝나면 원상복구한다(teardown_module).
+_STUB_INSTALLED = False
 try:  # pragma: no cover
     import ml_engine  # noqa
 except Exception:  # pragma: no cover
     _m = types.ModuleType("ml_engine")
     _m.FEATURE_COLS = []
+    _m.__is_test_stub__ = True          # feature_contract.is_stub_ml_engine가 본다
     _m.__getattr__ = lambda n: (lambda *a, **k: None)
     sys.modules["ml_engine"] = _m
+    _STUB_INSTALLED = True
+
+
+def teardown_module(module):  # pragma: no cover - 테스트 격리용
+    """심어둔 스텁을 제거해 세션 전역 오염을 막는다."""
+    if _STUB_INSTALLED and getattr(sys.modules.get("ml_engine"), "__is_test_stub__", False):
+        del sys.modules["ml_engine"]
 
 import collector  # noqa: E402
 from scripts.backfill_fill_status import fill_check_row  # noqa: E402

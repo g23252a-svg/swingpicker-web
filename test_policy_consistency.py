@@ -301,13 +301,31 @@ class TestFeatureContract:
     """ML feature schema 일관성."""
 
     def test_contract_matches_ml_engine(self):
-        """feature_contract.py와 ml_engine.py FEATURE_COLS 동일."""
-        from feature_contract import FEATURE_CONTRACT
+        """feature_contract.py와 ml_engine.py FEATURE_COLS 동일 (정적 — 항상 실행).
+
+        [v55.4] 구현이 `from ml_engine import FEATURE_COLS`였고 ml_engine은
+        최상단에서 torch를 import한다. CI에는 torch가 없으므로 이 테스트는
+        **항상 스킵**됐다 — 계약이 한 번도 검증되지 않았다.
+        게다가 스킵 가드가 조용해서 가짜 모듈까지 통과시켰다:
+        tests/test_fill_aware_v248.py가 심는 `FEATURE_COLS = []` 스텁이
+        세션에 남으면 ImportError가 안 나므로 빈 목록과 비교해 실패한다.
+        → 소스를 AST로 정적 판독해 import 없이 항상 비교한다.
+        """
+        from feature_contract import FEATURE_CONTRACT, read_ml_engine_feature_cols
+
+        assert list(FEATURE_CONTRACT.columns) == read_ml_engine_feature_cols()
+
+    def test_contract_matches_runtime_ml_engine_when_available(self):
+        """torch가 있는 환경에서는 런타임 값까지 대조한다 (스텁은 제외)."""
+        from feature_contract import FEATURE_CONTRACT, is_stub_ml_engine
+
         try:
-            from ml_engine import FEATURE_COLS
-            assert list(FEATURE_CONTRACT.columns) == FEATURE_COLS
-        except ImportError:
-            pytest.skip("ml_engine import requires torch")
+            import ml_engine
+        except Exception as e:
+            pytest.skip(f"ml_engine import 불가 ({type(e).__name__}) — 정적 검사로 갈음")
+        if is_stub_ml_engine(ml_engine):
+            pytest.skip("ml_engine이 테스트 스텁 — 정적 검사로 갈음")
+        assert list(FEATURE_CONTRACT.columns) == list(ml_engine.FEATURE_COLS)
 
     def test_schema_hash_deterministic(self):
         from feature_contract import FEATURE_CONTRACT
@@ -447,13 +465,13 @@ class TestMLStatus:
         assert FEATURE_CONTRACT.schema_version == "v20.8"
 
     def test_feature_contract_column_names(self):
-        """Contract 컬럼이 ml_engine FEATURE_COLS와 일치."""
-        from feature_contract import FEATURE_CONTRACT
-        try:
-            from ml_engine import FEATURE_COLS
-            assert list(FEATURE_CONTRACT.columns) == FEATURE_COLS
-        except ImportError:
-            pytest.skip("ml_engine requires torch")
+        """Contract 컬럼이 ml_engine FEATURE_COLS와 일치 (정적 — 항상 실행).
+
+        [v55.4] 위 TestFeatureContract와 같은 이유로 스킵 가드를 제거했다.
+        """
+        from feature_contract import FEATURE_CONTRACT, read_ml_engine_feature_cols
+
+        assert list(FEATURE_CONTRACT.columns) == read_ml_engine_feature_cols()
 
     def test_feature_contract_validate_order(self):
         """컬럼 순서 불일치 감지."""

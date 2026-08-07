@@ -5,12 +5,20 @@ test_ml_engine.py — ml_engine v19+ 핵심 방어 로직 단위테스트
 import os, sys, json, tempfile, unittest
 import numpy as np
 import pandas as pd
-import torch
 from unittest.mock import patch
 from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ml_engine
+
+# [v55.4] 파일 전체가 `import torch`로 막혀 있어, torch 없는 CI에서는 이 파일의
+#   테스트가 **하나도** 돌지 않았다. 실제로 torch가 필요한 건 모델을 만들거나
+#   저장하는 3개 클래스뿐이다 — 나머지(메타 버전 검증·피처 엔지니어링)는
+#   torch 없이 돌려야 한다. 그래서 필요 여부를 클래스 단위로 명시한다.
+TORCH_AVAILABLE = ml_engine.TORCH_AVAILABLE
+_needs_torch = unittest.skipUnless(TORCH_AVAILABLE, "torch 미설치 — 모델 생성/저장 불가")
+if TORCH_AVAILABLE:
+    import torch
 
 def _make_sample_df():
     return pd.DataFrame({"종목코드": ["005930","000660","035720"],
@@ -38,6 +46,9 @@ class _Base(unittest.TestCase):
         ml_engine._loaded_scaler = None
         ml_engine._loaded_xgb_model = None
 
+@unittest.skipUnless(TORCH_AVAILABLE,
+    "torch 미설치 시 apply_ml_score가 TORCH_MISSING으로 조기 반환 — "
+    "이 테스트의 대상(모델 파일 부재 폴백) 경로에 도달할 수 없다")
 class TestNoModel(_Base):
     def test_no_model_returns_zero(self):
         with patch.object(ml_engine,'MODEL_PATH','/x/m.pth'), \
@@ -46,6 +57,7 @@ class TestNoModel(_Base):
             r = ml_engine.apply_ml_score(_make_sample_df(), _make_ohlcv_map())
         self.assertTrue((r["ML_SCORE"]==0).all())
 
+@_needs_torch
 class TestNoScaler(_Base):
     def test_no_scaler_returns_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,6 +68,7 @@ class TestNoScaler(_Base):
                 r = ml_engine.apply_ml_score(_make_sample_df(), _make_ohlcv_map())
         self.assertTrue((r["ML_SCORE"]==0).all())
 
+@_needs_torch
 class TestDimMismatch(_Base):
     def test_dimension_mismatch_returns_zero(self):
         s6 = StandardScaler(); s6.fit(np.random.randn(100,6))
@@ -87,6 +100,7 @@ class TestFeatureVersion(_Base):
         self.assertIsInstance(r, dict)
         self.assertFalse(r["match"])
 
+@_needs_torch
 class TestNormalInference(_Base):
     def test_valid_scores(self):
         n = len(ml_engine.FEATURE_COLS)

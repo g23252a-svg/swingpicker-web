@@ -118,6 +118,102 @@ class FeatureContract:
 FEATURE_CONTRACT = FeatureContract()
 
 
+# ══════════════════════════════════════════════════════════════════
+#  [v55.4] ml_engine.FEATURE_COLS 정적 판독 — torch 없이도 계약을 검사한다
+# ══════════════════════════════════════════════════════════════════
+#
+# 이 계약을 검사하던 두 곳이 **정작 CI에서는 아무것도 검사하지 않고 있었다**:
+#   · check_contract_gate.check_feature_contract() — `except ImportError`로
+#     경고만 내고 통과 (CI에 torch가 없으므로 항상 이 경로)
+#   · test_policy_consistency의 계약 테스트 2개 — `pytest.skip`으로 항상 스킵
+# ml_engine.py는 최상단에서 `import torch`를 하므로, 계약 하나 읽으려고
+# 수백 MB 의존성을 요구하는 구조였다. 그 결과 "동기화 하드 게이트"가
+# 사실상 데드코드였다.
+#
+# 게다가 스킵 가드가 조용해서 **가짜 모듈까지 통과시켰다**:
+#   tests/test_fill_aware_v248.py가 torch 부재 시 `FEATURE_COLS = []`인
+#   스텁 ml_engine을 sys.modules에 심고 제거하지 않는다. 그 뒤에 도는 계약
+#   테스트는 ImportError를 못 보므로 스킵하지 않고, 빈 목록과 비교해 실패한다.
+#   (2026-08 실측: tests/ + 루트 테스트를 한 프로세스로 돌릴 때만 재현)
+#
+# 해법: 소스를 AST로 파싱해 리터럴만 읽는다. import 부작용이 없으므로
+# torch 유무·스텁 유무와 무관하게 항상 같은 답을 준다.
+_ML_ENGINE_FILENAME = "ml_engine.py"
+
+
+def read_ml_engine_feature_cols(path: Optional[str] = None) -> List[str]:
+    """ml_engine.py의 FEATURE_COLS를 정적으로 읽는다 (import 없음).
+
+    Raises:
+        FileNotFoundError: ml_engine.py를 찾을 수 없을 때.
+        ValueError: FEATURE_COLS가 없거나 문자열 리스트 리터럴이 아닐 때.
+                    (동적 생성으로 바뀌었다면 이 계약 검사를 다시 설계해야 하므로
+                     조용히 넘기지 않고 실패시킨다.)
+    """
+    import ast
+    import os
+
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            _ML_ENGINE_FILENAME)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{_ML_ENGINE_FILENAME} 없음: {path}")
+    tree = ast.parse(open(path, "r", encoding="utf-8").read(), filename=path)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not (isinstance(target, ast.Name) and target.id == "FEATURE_COLS"):
+                continue
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError) as e:
+                raise ValueError(
+                    f"FEATURE_COLS가 정적 리터럴이 아니다 ({e}) — "
+                    f"계약 검사 방식을 다시 설계해야 한다") from e
+            if not isinstance(value, (list, tuple)) or not value:
+                raise ValueError(f"FEATURE_COLS가 비었거나 리스트가 아니다: {value!r}")
+            if not all(isinstance(v, str) for v in value):
+                raise ValueError("FEATURE_COLS에 문자열 아닌 원소가 있다")
+            return list(value)
+    raise ValueError(f"{_ML_ENGINE_FILENAME}에 FEATURE_COLS 정의가 없다")
+
+
+def is_stub_ml_engine(module) -> bool:
+    """테스트 스텁 ml_engine인지 판별 — 진짜 모듈로 착각하면 안 된다."""
+    if module is None:
+        return True
+    if getattr(module, "__is_test_stub__", False):
+        return True
+    src = getattr(module, "__file__", None)
+    if not src or not str(src).endswith(_ML_ENGINE_FILENAME):
+        return True
+    cols = getattr(module, "FEATURE_COLS", None)
+    return not cols          # 빈 목록/없음 → 스텁으로 취급
+
+
+def feature_contract_sync_errors(path: Optional[str] = None) -> List[str]:
+    """계약 ↔ ml_engine 동기화 검사 (정적). 오류 목록을 돌려준다."""
+    try:
+        ml_cols = read_ml_engine_feature_cols(path)
+    except (FileNotFoundError, ValueError) as e:
+        return [f"FEATURE_COLS 정적 판독 실패: {e}"]
+    contract_cols = list(FEATURE_CONTRACT.columns)
+    if contract_cols == ml_cols:
+        return []
+    only_c = [c for c in contract_cols if c not in ml_cols]
+    only_m = [c for c in ml_cols if c not in contract_cols]
+    detail = [f"FEATURE_COLS 불일치 (개수 contract {len(contract_cols)} / "
+              f"ml_engine {len(ml_cols)})"]
+    if only_c:
+        detail.append(f"  contract에만: {only_c}")
+    if only_m:
+        detail.append(f"  ml_engine에만: {only_m}")
+    if not only_c and not only_m:
+        detail.append("  원소는 같고 순서가 다르다 — 모델 입력 순서가 어긋난다")
+    return ["\n".join(detail)]
+
+
 def validate_features(df, context: str = "inference") -> Tuple[bool, List[str]]:
     """편의 함수: DataFrame의 feature 컬럼 검증."""
     return FEATURE_CONTRACT.validate(list(df.columns), context=context)
