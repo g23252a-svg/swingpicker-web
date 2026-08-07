@@ -5467,5 +5467,60 @@
       "008930_20260803_TP1_HIT_20260806",
       "008930_20260803_TP2_HIT_20260806"
     ]
+  },
+  {
+    "code": "282330",
+    "name": "BGF리테일",
+    "entry_ymd": "20260722",
+    "entry_px": 116500.0,
+    "qty": 0,
+    "stop_px": 112700.0,
+    "stop_px_initial": 112700.0,
+    "take_px1": 130600.0,
+    "take_px2": 146000.0,
+    "trailing_high": 156000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260807",
+    "last_close_px": 153100.0,
+    "unrealized_pnl_pct": 31.42,
+    "realized_pnl_pct": 31.42,
+    "close_ymd": "20260807",
+    "close_px": 153100.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "282330_20260722_TP1_HIT_20260806",
+      "282330_20260722_TP1_HIT_20260807",
+      "282330_20260722_TP2_HIT_20260807"
+    ]
+  },
+  {
+    "code": "316140",
+    "name": "우리금융지주",
+    "entry_ymd": "20260722",
+    "entry_px": 30650.0,
+    "qty": 0,
+    "stop_px": 29000.0,
+    "stop_px_initial": 29000.0,
+    "take_px1": 32900.0,
+    "take_px2": 33650.0,
+    "trailing_high": 34850.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260807",
+    "last_close_px": 34800.0,
+    "unrealized_pnl_pct": 13.54,
+    "realized_pnl_pct": 13.54,
+    "close_ymd": "20260807",
+    "close_px": 34800.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "316140_20260722_TP1_HIT_20260727",
+      "316140_20260722_TP1_HIT_20260731",
+      "316140_20260722_TP1_HIT_20260803",
+      "316140_20260722_TP1_HIT_20260804",
+      "316140_20260722_TP1_HIT_20260805",
+      "316140_20260722_TP1_HIT_20260806",
+      "316140_20260722_TP1_HIT_20260807",
+      "316140_20260722_TP2_HIT_20260807"
+    ]
   }
 ]
