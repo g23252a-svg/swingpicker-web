@@ -33,6 +33,25 @@ FEATURE_FILES = ["ml_engine.py"]
 _THIRD_PARTY_DEPS = {"pandas", "numpy"}
 
 
+def _ensure_import_path():
+    """프로젝트 루트를 import 경로에 넣는다 — **영구 오염 없이**.
+
+    [v56] 종전엔 각 게이트가 `sys.path.insert(0, PROJECT_ROOT)`를 그냥 실행했다.
+    PROJECT_ROOT가 테스트에서 임시 트리로 바뀌면(게이트 생존성 테스트) 그 임시
+    경로가 sys.path에 영구히 남아, 뒤에 도는 테스트의 `import ml_engine`이
+    임시 트리의 합성 모듈을 집어왔다. 실행 순서에 따라 통과/실패가 갈리는
+    v55.4와 동일한 유형의 오염이다.
+      → 이미 있으면 넣지 않고, 없으면 넣되 임시 트리는 남기지 않는다.
+    """
+    root = PROJECT_ROOT
+    if root in sys.path:
+        return
+    if not os.path.exists(os.path.join(root, "feature_contract.py")):
+        # 실제 프로젝트 루트가 아니다(테스트용 임시 트리) — sys.path를 건드리지 않는다
+        return
+    sys.path.insert(0, root)
+
+
 def _missing_third_party(e: Exception):
     """ModuleNotFoundError가 서드파티 의존성 부재라면 모듈명, 아니면 None."""
     if isinstance(e, ModuleNotFoundError) and getattr(e, "name", None) in _THIRD_PARTY_DEPS:
@@ -67,7 +86,7 @@ def check_feature_contract():
     """
     errors = []
     try:
-        sys.path.insert(0, PROJECT_ROOT)
+        _ensure_import_path()
         from feature_contract import (
             FEATURE_CONTRACT, feature_contract_sync_errors, is_stub_ml_engine,
         )
@@ -77,7 +96,11 @@ def check_feature_contract():
         return errors
 
     # ① 정적 대조 — 항상 실행된다 (torch 불필요)
-    errors.extend(feature_contract_sync_errors())
+    # [v56] 경로를 PROJECT_ROOT 기준으로 넘긴다. 종전엔 feature_contract 모듈이
+    #   자기 디렉터리에서 ml_engine.py를 찾아서, 다른 게이트들과 달리 이 게이트만
+    #   PROJECT_ROOT를 무시했다 — 게이트 생존성 테스트가 대상을 바꿔치기할 수 없었다.
+    errors.extend(feature_contract_sync_errors(
+        os.path.join(PROJECT_ROOT, "ml_engine.py")))
     if not errors:
         print(f"  ✅ 정적 대조 통과 (feature {len(FEATURE_CONTRACT.columns)}개)")
 
@@ -113,7 +136,13 @@ def check_stale_versions():
             fpath = os.path.join(root, fname)
             rel = os.path.relpath(fpath, PROJECT_ROOT)
             # 이 스크립트 자체와 test 파일은 제외
+            # [v56] 주석은 "test 파일은 제외"라고 적혀 있었지만 코드는 그렇게 하지
+            #   않았다. 테스트는 탐지 로직을 검증하려고 구버전 문자열을 일부러
+            #   써야 하므로(게이트 생존성 테스트) 실제로 제외한다.
+            #   check_duplicate_feature_defs가 이미 쓰는 것과 같은 정책.
             if "check_contract_gate" in fname:
+                continue
+            if fname.startswith("test_") or rel.startswith("tests" + os.sep):
                 continue
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
@@ -199,18 +228,163 @@ def check_json_meta_versions():
     return errors
 
 
+# ══════════════════════════════════════════════════════════════════
+#  [v56] 트리 전체 정적 인덱스 — "게이트 대상 소실"을 막는 공용 기반
+# ══════════════════════════════════════════════════════════════════
+#
+# v56 감사에서 드러난 실패 유형: 게이트가 **존재하지 않는 대상**을 검사하고
+# 있었다. check_alpha_schema_integrity는 components/tab_backtest.py의
+# _calc_kospi_alpha를 봤지만, 그 함수는 components/backtest_verdict.py로
+# 옮겨졌다(tab_backtest에는 import만 남았다). 게이트는 "함수가 없으면
+# 미사용 환경"이라며 조용히 통과했고, 그래서 v3.9.15d 회귀를 다시 막지
+# 못하는 상태로 남아 있었다.
+#
+# 교훈: 대상이 사라진 게이트는 통과가 아니라 **실패**여야 한다.
+# 이름이 바뀌거나 파일이 옮겨진 것은 게이트를 갱신할 사유이고, 그 사실을
+# 조용히 넘기면 게이트는 죽은 채로 green을 보고한다.
+_EXCLUDE_DIRS = {".git", "__pycache__", "data", ".venv", "venv", "env",
+                 "node_modules", ".pytest_cache", ".mypy_cache", "static"}
+_EXCLUDE_PREFIXES = ("backup_", "legacy_")
+
+_TREE_CACHE = {}
+
+
+def iter_py_trees(root=None):
+    """트리의 모든 .py를 (상대경로, AST)로 돌려준다 (파싱 결과 캐시)."""
+    root = root or PROJECT_ROOT
+    if root in _TREE_CACHE:
+        return _TREE_CACHE[root]
+    out = []
+    for cur, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs
+                   if d not in _EXCLUDE_DIRS and not d.startswith(_EXCLUDE_PREFIXES)]
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            fpath = os.path.join(cur, fname)
+            rel = os.path.relpath(fpath, root)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=fpath)
+            except (SyntaxError, UnicodeDecodeError, OSError):
+                # 구문 오류는 별도 게이트(py_compile)가 잡는다 — 여기선 건너뛴다
+                continue
+            out.append((rel, tree))
+    _TREE_CACHE[root] = out
+    return out
+
+
+def find_function_defs(func_name, root=None, skip_tests=True):
+    """트리 전체에서 func_name 정의를 찾는다 → [(상대경로, FunctionDef), ...]."""
+    found = []
+    for rel, tree in iter_py_trees(root):
+        base = os.path.basename(rel)
+        if skip_tests and (base.startswith("test_") or rel.startswith("tests" + os.sep)):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+                found.append((rel, node))
+    return found
+
+
+def module_toplevel_names(rel_path, root=None):
+    """모듈 최상단에서 정의/할당되는 이름 집합 (import 없이 정적으로)."""
+    root = root or PROJECT_ROOT
+    fpath = os.path.join(root, rel_path)
+    if not os.path.exists(fpath):
+        return None
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=fpath)
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return None
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
+
+
+# 각 게이트가 실제로 검사하는 대상. (게이트 라벨, 파일 or None=트리탐색, 필요한 심볼)
+# 대상이 사라지면 hard fail — 게이트를 갱신하거나 명시적으로 제거해야 한다.
+GATE_TARGETS = [
+    ("1 Feature Contract",     "ml_engine.py",                 ["FEATURE_COLS"]),
+    ("1 Feature Contract",     "feature_contract.py",          ["FEATURE_CONTRACT"]),
+    ("3 Policy SSOT",          "validation.py",                []),
+    ("3 Policy SSOT",          "stop_logic.py",                []),
+    ("3 Policy SSOT",          "trade_plan.py",                []),
+    ("6 Alpha 스키마",          None,                           ["_calc_kospi_alpha"]),
+    ("9 Anomaly 임계값",        "services/backtest_policy.py",  ["ANOMALY_SHARPE_MAX",
+                                                                "detect_anomaly_flags",
+                                                                "tp_saturation_threshold"]),
+    ("10 Guard 계약",          "guard_system.py",              ["GUARD_CONTRACT_COLS",
+                                                                "apply_guard_system"]),
+    ("11 Momentum 계약",       "momentum_lane.py",             ["MOMENTUM_LANE_COLS",
+                                                                "apply_momentum_lane",
+                                                                "compute_market_risk_off"]),
+    ("12 StopOverride 계약",   "stop_override.py",             ["STOP_OVERRIDE_COLS",
+                                                                "apply_stop_override"]),
+    ("13 DataIntegrity 계약",  "data_integrity.py",            ["DATA_INTEGRITY_COLS",
+                                                                "apply_data_integrity",
+                                                                "audit_ohlcv_window"]),
+]
+
+
+def check_gate_targets():
+    """[v56] 게이트가 검사한다고 선언한 대상이 실제로 존재하는지.
+
+    이 검사가 없으면 게이트는 대상이 옮겨진 뒤에도 '✅ OK'를 보고한다
+    (v56 감사에서 실제로 1건 발견 — check_alpha_schema_integrity).
+    전부 정적 판독이므로 서드파티 의존성 없이 항상 실행된다.
+    """
+    errors = []
+    for label, rel, symbols in GATE_TARGETS:
+        if rel is None:
+            # 트리 전체에서 심볼(함수) 탐색
+            for sym in symbols:
+                if not find_function_defs(sym):
+                    errors.append(
+                        f"[{label}] 게이트 대상 소실: {sym}() 정의를 트리에서 찾지 못했다 "
+                        f"— 함수가 삭제/개명됐다면 게이트를 갱신하거나 명시적으로 제거해야 한다"
+                    )
+            continue
+        names = module_toplevel_names(rel)
+        if names is None:
+            errors.append(f"[{label}] 게이트 대상 파일 소실: {rel}")
+            continue
+        for sym in symbols:
+            if sym not in names:
+                errors.append(
+                    f"[{label}] 게이트 대상 심볼 소실: {rel}에 {sym} 없음 "
+                    f"— 개명/이동됐다면 게이트를 갱신해야 한다"
+                )
+    return errors
+
+
 def check_alpha_schema_integrity():
-    """[v3.9.15e + 4] components/tab_backtest.py의 _calc_kospi_alpha가
-    trades_df 컬럼명을 정합하게 쓰는지 정적 검사.
+    """[v3.9.15e + 4] _calc_kospi_alpha가 trades_df 컬럼명을 정합하게 쓰는지 정적 검사.
 
     v3.9.15d 사례: trades_df에 "date"/"net_pct" 컬럼이 없는데 그걸 lookup
     → real 경로 영원히 작동 0%. 누군가 다시 옛 컬럼명으로 되돌리면 즉시 차단.
 
     [v3.9.15e + 5] AST 기반으로 승격 (이전 라인 단위 문자열 매칭 → AST 노드).
     이전 방식 한계: `row.get("date")` 같은 변수 alias나 dict subscript 우회는
-    못 잡음. AST 기반은 _calc_kospi_alpha 본문 안의 모든 Constant 노드 중
-    값이 "date" 또는 "net_pct"인 것을 잡아냄. 이 두 문자열이 함수 안에
-    string literal로 등장할 합법적 이유가 거의 없으므로 false positive 최소.
+    못 잡음. AST 기반은 함수 본문 안의 모든 Constant 노드 중 값이 "date" 또는
+    "net_pct"인 것을 잡아냄. 이 두 문자열이 함수 안에 string literal로 등장할
+    합법적 이유가 거의 없으므로 false positive 최소.
+
+    [v56] **이 게이트는 죽어 있었다.** components/tab_backtest.py만 봤는데
+    _calc_kospi_alpha는 components/backtest_verdict.py로 옮겨진 상태였고
+    (tab_backtest에는 import만 남음), 게이트는 "함수 없음 = 미사용 환경"이라며
+    조용히 통과했다. 2026-08 mutation 감사에서 확인: 금지 리터럴을 주입해도
+    0건 검출. → 파일을 고정하지 않고 **트리 전체에서 정의를 찾고**, 하나도
+    없으면 통과가 아니라 실패로 바꿨다.
 
     검출 케이스 (전부 fail):
       · `"date" in trades.columns`             [v3.9.15d 원래 버그]
@@ -221,44 +395,27 @@ def check_alpha_schema_integrity():
       · `pd.to_datetime(t["net_pct"])`         [중첩 호출]
     """
     errors = []
-    fpath = os.path.join(PROJECT_ROOT, "components", "tab_backtest.py")
-    if not os.path.exists(fpath):
-        return errors
-
     FORBIDDEN_LITERALS = {"date", "net_pct"}
 
-    try:
-        with open(fpath, "r", encoding="utf-8") as f:
-            source = f.read()
-        tree = ast.parse(source, filename=fpath)
-    except SyntaxError as e:
-        return [f"components/tab_backtest.py 구문 오류 — gate 검사 불가: {e}"]
-    except Exception as e:
-        print(f"  ⚠️ tab_backtest.py 파싱 스킵: {e}")
-        return errors
+    defs = find_function_defs("_calc_kospi_alpha")
+    if not defs:
+        return [
+            "게이트 대상 소실: _calc_kospi_alpha() 정의를 트리 어디에서도 찾지 못했다 "
+            "— 삭제/개명됐다면 이 게이트를 갱신하거나 명시적으로 제거해야 한다 "
+            "(조용한 통과 금지: v3.9.15d 회귀 차단이 사라진다)"
+        ]
 
-    # _calc_kospi_alpha 함수 노드 찾기
-    target_func = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "_calc_kospi_alpha":
-            target_func = node
-            break
-
-    if target_func is None:
-        # 함수 자체가 없으면 알파 기능 미사용 환경 (스킵)
-        return errors
-
-    # 함수 본문 내의 모든 Constant 노드 순회
-    for sub_node in ast.walk(target_func):
-        if isinstance(sub_node, ast.Constant) and isinstance(sub_node.value, str):
-            if sub_node.value in FORBIDDEN_LITERALS:
-                lineno = getattr(sub_node, "lineno", "?")
-                errors.append(
-                    f"components/tab_backtest.py:{lineno} — "
-                    f'_calc_kospi_alpha 내부에 금지 string literal "{sub_node.value}" 발견 '
-                    f"(trades_df 실제 컬럼: rec_date / net_ret). "
-                    f"v3.9.15d 회귀 의심."
-                )
+    for rel, func_node in defs:
+        for sub_node in ast.walk(func_node):
+            if isinstance(sub_node, ast.Constant) and isinstance(sub_node.value, str):
+                if sub_node.value in FORBIDDEN_LITERALS:
+                    lineno = getattr(sub_node, "lineno", "?")
+                    errors.append(
+                        f"{rel}:{lineno} — "
+                        f'_calc_kospi_alpha 내부에 금지 string literal "{sub_node.value}" 발견 '
+                        f"(trades_df 실제 컬럼: rec_date / net_ret). "
+                        f"v3.9.15d 회귀 의심."
+                    )
 
     return errors
 
@@ -428,7 +585,7 @@ def check_guard_v23_contract():
     """[v23.0] guard_system 산출 컬럼 계약 + GuardConfig SSOT 연동 + ELITE_LABEL 게이트."""
     errors = []
     try:
-        sys.path.insert(0, PROJECT_ROOT)
+        _ensure_import_path()
         import pandas as pd
         from guard_system import apply_guard_system, GUARD_CONTRACT_COLS
         from collector_config import DEFAULT_CONFIG
@@ -483,7 +640,7 @@ def check_momentum_lane_contract():
     """[v23.1] momentum_lane 산출 컬럼 계약 + MomentumLaneConfig SSOT + 시장국면 게이트."""
     errors = []
     try:
-        sys.path.insert(0, PROJECT_ROOT)
+        _ensure_import_path()
         import pandas as pd
         from momentum_lane import apply_momentum_lane, MOMENTUM_LANE_COLS
         from collector_config import DEFAULT_CONFIG
@@ -548,7 +705,7 @@ def check_stop_override_contract():
     """[v23.2] stop_override 산출 컬럼 계약 + StopOverrideConfig SSOT + 베어 게이트."""
     errors = []
     try:
-        sys.path.insert(0, PROJECT_ROOT)
+        _ensure_import_path()
         import pandas as pd
         from stop_override import apply_stop_override, STOP_OVERRIDE_COLS
         from collector_config import DEFAULT_CONFIG
@@ -616,7 +773,7 @@ def check_data_integrity_contract():
     """[v24.1] data_integrity 산출 컬럼 계약 + DataIntegrityConfig SSOT + 모멘텀 제외 + 공식 산식 보존."""
     errors = []
     try:
-        sys.path.insert(0, PROJECT_ROOT)
+        _ensure_import_path()
         import numpy as np
         import pandas as pd
         from data_integrity import (
@@ -710,6 +867,15 @@ def main():
     errs = check_feature_contract()
     all_errors.extend(errs)
     print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK'}")
+
+    # [v56] 다른 모든 게이트보다 먼저 — "게이트가 검사하는 대상이 아직 있는가".
+    # 대상이 옮겨지거나 개명되면 게이트는 조용히 통과한다(실제 1건 발생).
+    print("\n1b. [GATE_TARGETS] 게이트 대상 존재 확인...")
+    errs = check_gate_targets()
+    all_errors.extend(errs)
+    print(f"   {'❌ ' + str(len(errs)) + '건' if errs else '✅ OK (' + str(len(GATE_TARGETS)) + '개 대상 확인)'}")
+    for e in errs[:5]:
+        print(f"      {e}")
 
     print("\n2. 구버전 문자열 잔존...")
     errs = check_stale_versions()

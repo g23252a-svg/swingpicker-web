@@ -534,6 +534,7 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
     top_pick_wait_count = 0
     top_pick_count = 0
     production_unsizable_count = 0   # [v54] 공식 매수인데 사이징 0 강제 상태
+    production_buy_count = 0         # [v56] 이 게이트의 '검사 대상 수' (0이면 공허한 PASS)
     production_sizable_gate = ""     # "" | "SKIP" (구 계약 CSV는 판정 제외)
     production_sizable_detail = ""
     # [v22.3.1] RR<1.0 검증 변수 초기화
@@ -615,6 +616,7 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
                 else:
                     _pb = rec[pd.to_numeric(
                         rec["PRODUCTION_BUY"], errors="coerce").fillna(0).astype(int) == 1]
+                    production_buy_count = len(_pb)
                     if len(_pb) > 0:
                         production_unsizable_count = int(
                             (~_route_sizable_mask(_pb)).sum())
@@ -757,11 +759,19 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
     # 되고, 그것이 실제로 8/5에 일어났다(024060: PRODUCTION_BUY=1 · 켈리 0주).
     # ROUTE 컬럼을 쓰는 것은 같지만 검사 대상과 방향이 바뀌었다 —
     # '후보의 형태'가 아니라 '공식 매수의 실행 가능성'을 본다.
+    #
+    # [v56] subject_n(검사 대상 수)을 함께 기록한다.
+    #   TOP_PICK/PRODUCTION_BUY가 0건인 날(폭락 차단 등)에는 이 게이트들이
+    #   '검사할 대상이 없어서' PASS한다. 종전 리포트는 그것을 검증된 PASS와
+    #   구분하지 않아 "HARD=PASS ✅"가 실제보다 강한 보증으로 읽혔다.
+    #   판정(ci_hard_all_pass)은 바꾸지 않는다 — 대상 0건을 FAIL로 만들면
+    #   정상적인 무픽 구간에 CI가 막힌다. 대신 **정직하게 표시**한다.
     if production_sizable_gate == "SKIP":
         ci_hard.append({
             "gate": "production_buy_sizable",
             "status": "SKIP",
             "detail": production_sizable_detail,
+            "subject_n": production_buy_count,
         })
     elif production_unsizable_count > 0:
         ci_hard.append({
@@ -769,9 +779,11 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             "status": "FAIL",
             "detail": (f"PRODUCTION_BUY {production_unsizable_count}건이 "
                        f"사이징 불가 상태(0주 강제)"),
+            "subject_n": production_buy_count,
         })
     else:
-        ci_hard.append({"gate": "production_buy_sizable", "status": "PASS"})
+        ci_hard.append({"gate": "production_buy_sizable", "status": "PASS",
+                        "subject_n": production_buy_count})
     # 낡은 축은 관측값으로만 남긴다 (추이 감시용 — 실패시키지 않는다).
     ci_soft.append({
         "gate": "top_pick_route_positive_observed",
@@ -786,9 +798,11 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             "gate": "top_pick_tp1_positive",
             "status": "FAIL",
             "detail": f"TOP_PICK {tp1_neg_count}건이 TP1_PCT <= 0",
+            "subject_n": top_pick_count,
         })
     else:
-        ci_hard.append({"gate": "top_pick_tp1_positive", "status": "PASS"})
+        ci_hard.append({"gate": "top_pick_tp1_positive", "status": "PASS",
+                        "subject_n": top_pick_count})
 
     # [v22.3.1] HARD 2.5: TOP_PICK RR_NOW_TP1 >= 1.0
     # scoring_engine v22.3 hard_gate와 일관성. 운영 리포트 차원에서 다시 한번 차단.
@@ -799,6 +813,7 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             "detail": f"TOP_PICK {top_pick_rr_lt1_count}건이 RR_NOW_TP1 < 1.0 "
                       f"(min={top_pick_min_rr:.2f})" if top_pick_min_rr is not None
                       else f"TOP_PICK {top_pick_rr_lt1_count}건이 RR_NOW_TP1 < 1.0",
+            "subject_n": top_pick_count,
         })
     else:
         _detail = f"min_rr={top_pick_min_rr:.2f}" if top_pick_min_rr is not None else "TOP_PICK 0건"
@@ -806,6 +821,7 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             "gate": "top_pick_rr_now_tp1_1",
             "status": "PASS",
             "detail": _detail,
+            "subject_n": top_pick_count,
         })
     
     # HARD 3: 선언-실현 갭 15%p 이하 — [v22.3.2-A] TOP_PICK 전용
@@ -822,10 +838,12 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
 
     if gap_top_pick is None:
         ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
-                        "detail": "TOP_PICK 매칭 sufficient bin 없음"})
+                        "detail": "TOP_PICK 매칭 sufficient bin 없음",
+                        "subject_n": 0})
     elif gap_top_pick_n < MIN_N_FOR_HARD_GAP:
         ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "SKIP",
-                        "detail": f"TOP_PICK matched n={gap_top_pick_n} < {MIN_N_FOR_HARD_GAP}"})
+                        "detail": f"TOP_PICK matched n={gap_top_pick_n} < {MIN_N_FOR_HARD_GAP}",
+                        "subject_n": int(gap_top_pick_n)})
         if abs(gap_top_pick) > 0.15:
             ci_soft.append({
                 "gate": "declared_vs_realized_gap_top_pick_small_n",
@@ -837,10 +855,12 @@ def generate_monotonicity_report(out_dir: str, asof_ymd: str) -> dict:
             "gate": "declared_vs_realized_gap_15pp",
             "status": "FAIL",
             "detail": f"gap_top_pick={gap_top_pick:.1%} > 15%p (n={gap_top_pick_n})",
+            "subject_n": int(gap_top_pick_n),
         })
     else:
         ci_hard.append({"gate": "declared_vs_realized_gap_15pp", "status": "PASS",
-                        "detail": f"gap_top_pick={gap_top_pick:.1%} (n={gap_top_pick_n})"})
+                        "detail": f"gap_top_pick={gap_top_pick:.1%} (n={gap_top_pick_n})",
+                        "subject_n": int(gap_top_pick_n)})
 
     # SOFT (신규) — active gap은 모니터링 신호로 분리
     gap_active = report.get("declared_vs_realized_gap_active")

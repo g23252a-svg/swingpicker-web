@@ -65,77 +65,36 @@ jobs:
           echo "asof_ymd=$YMD" >> $GITHUB_OUTPUT
           mkdir -p data
 
-          # daily_briefing 자체 실행 실패는 다음 step에서 분기 처리
-          # (pull_request라면 통과, push/schedule이라면 fail)
-          # 단, 실패 정보를 보존하기 위해 ::warning::으로 출력
-          python daily_briefing.py data $YMD || \
+          # [v56] 종전엔 실패를 `|| echo ::warning::`로 삼켰다. 리포트 파일은
+          #   git에 커밋돼 있으므로, 생성이 실패해도 체크아웃된 **과거 리포트**가
+          #   남아 다음 step이 그것을 검증하고 통과했다(날짜 비교 없음).
+          #   → PR에서는 여전히 경고로 넘기되(작업자가 collector를 못 돌림),
+          #     push/schedule에서는 생성 실패를 그대로 실패로 만든다.
+          #     추가로 다음 step이 asof_ymd를 기대 날짜와 대조한다.
+          if python daily_briefing.py data $YMD; then
+            echo "briefing_ok=1" >> $GITHUB_OUTPUT
+          else
+            echo "briefing_ok=0" >> $GITHUB_OUTPUT
             echo "::warning::daily_briefing 실행 실패 (collector 미실행 가능성)"
+            if [ "${{ github.event_name }}" != "pull_request" ] && \
+               [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+              echo "::error::push/schedule에서는 리포트 생성 실패를 통과시키지 않습니다."
+              exit 1
+            fi
+          fi
 
+      # [v56] 인라인 python → scripts/check_monotonicity_gate.py 로 이관.
+      #   YAML 안의 코드는 테스트할 수 없어서 '스테일 리포트 수용' 구멍이
+      #   오래 남아 있었다. 이제 tests/test_v56_gate_liveness.py가 검증한다.
       - name: 🛡️ CI HARD Gate 검증
         env:
           PYTHONUTF8: "1"
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
-          python <<'PYEOF'
-          import json, sys, os
-
-          path = "data/monotonicity_report_latest.json"
-          event = os.environ.get("GITHUB_EVENT_NAME", "")
-
-          if not os.path.exists(path):
-              # [v22.2] 이벤트별 정책 분리
-              if event in ("pull_request", "workflow_dispatch"):
-                  print(f"⏭️  monotonicity_report 없음 — SKIP (event={event})")
-                  print("   PR 작업자는 보통 collector를 못 돌리므로 통과시킴.")
-                  sys.exit(0)
-              else:
-                  # push to main / schedule 에서는 무조건 있어야 함
-                  print(f"❌ monotonicity_report 없음 (event={event})")
-                  print("   main push 또는 schedule 실행에서는 collector가 돌고")
-                  print("   data/monotonicity_report_latest.json이 생성되어야 합니다.")
-                  print("   daily_briefing.py가 실패했거나 collector가 안 돈 상태입니다.")
-                  sys.exit(1)
-
-          with open(path, "r", encoding="utf-8") as f:
-              r = json.load(f)
-
-          print("=" * 60)
-          print(f"📊 monotonicity_report ({r.get('asof_ymd')})")
-          print(f"   event={event}")
-          print("=" * 60)
-
-          print(f"  TOP_PICK count: {r.get('top_pick_count', 0)}")
-          print(f"  declared_wr_top_pick: {r.get('declared_wr_top_pick')}")
-          print(f"  declared_wr_active:   {r.get('declared_wr_active')}")
-          print(f"  realized_wr:          {r.get('realized_wr')}")
-          print(f"  gap (top_pick):       {r.get('declared_vs_realized_gap_top_pick')}")
-          print(f"  gap (active):         {r.get('declared_vs_realized_gap_active')}")
-          print(f"  avg_ret_excess_pct:   {r.get('avg_ret_excess_pct')}")
-          print(f"  market_map_coverage:  {r.get('market_map_coverage')}")
-          print(f"  stable_7day_avg:      {r.get('top_pick_stable_7day_avg')}")
-          print()
-
-          print("🛡️ HARD Gates:")
-          for g in r.get("ci_hard", []):
-              icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️"}.get(g["status"], "❓")
-              print(f"  {icon} {g['gate']}: {g['status']} ({g.get('detail', '')})")
-
-          print("\n💡 SOFT Gates:")
-          for g in r.get("ci_soft", []):
-              icon = {"OK": "✅", "WARN": "⚠️"}.get(g["status"], "❓")
-              print(f"  {icon} {g['gate']}: {g['status']} ({g.get('detail', '')})")
-
-          hard_pass = r.get("ci_hard_all_pass", False)
-          soft_warn = r.get("ci_soft_any_warn", False)
-
-          print("\n" + "=" * 60)
-          print(f"최종: HARD={'PASS ✅' if hard_pass else 'FAIL ❌'}, "
-                f"SOFT={'WARN ⚠️' if soft_warn else 'OK ✅'}")
-          print("=" * 60)
-
-          if not hard_pass:
-              sys.exit(1)
-          PYEOF
+          python scripts/check_monotonicity_gate.py \
+            --report data/monotonicity_report_latest.json \
+            --event "${{ github.event_name }}" \
+            --expect-ymd "${{ steps.monobuild.outputs.asof_ymd }}"
 
       - name: 📤 monotonicity_report 아티팩트 업로드
         if: always()

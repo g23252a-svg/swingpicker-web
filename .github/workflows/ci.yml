@@ -168,6 +168,15 @@ jobs:
       - name: 🔒 ML feature 계약 게이트 (torch 없이도 실제 대조)
         run: python -m pytest tests/test_v55_4_contract_gate.py -v --tb=short
 
+      # ─── [v56] 전체 스위트 (Hard Fail) ───
+      # v56 감사에서 드러난 가장 큰 구멍: 저장소에 테스트 파일이 142개 있는데
+      #   CI는 그중 8개만 돌리고 있었다. v44~v55에서 만든 회귀 차단 테스트
+      #   (test_v54_*, test_v55_*, test_v57_* 등 1500여 건)가 CI에서 한 번도
+      #   실행되지 않았다 — 로컬에서 돌렸기 때문에 통과한 것이었다.
+      #   개별 step으로 명시한 위 테스트들은 실패 위치를 빨리 보기 위해 남긴다.
+      - name: 🧪 전체 테스트 스위트 (tests/ + 루트)
+        run: python -m pytest tests/ test_*.py -q --tb=short -p no:randomly
+
       - name: 📊 테스트 결과 요약
         if: always()
         run: echo "✅ CI 완료 — $(date +'%Y-%m-%d %H:%M KST')"
