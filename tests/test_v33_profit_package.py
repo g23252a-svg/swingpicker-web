@@ -23,16 +23,33 @@ from backtest_validation import _v33_alpha_sort_key
 # 1. 빠른 부분익절 (FAST_TP)
 # ═══════════════════════════════════════════════════
 
-def test_fast_tp_price_is_entry_plus_2pct():
+def test_fast_tp_price_follows_the_adopted_trigger():
+    """[v55.3 갱신] 트리거가 +2% → +3%로 바뀌었다 (값 하드코딩 대신 상수 참조).
+
+    v33의 +2%·절반은 **전체 추천 풀**(n=526) 근거였다. v55.3은 같은 규칙을
+    **공식 매수 픽**에만 적용해 격자탐색(트리거 2~6% × 익절비율 25/33/50% ×
+    본전스톱 = 30조합, BH-FDR 보정)했고, '승률과 기대값 둘 다'를 목표로 하면
+    +3%·1/4이 최적이었다:
+        기준(보유)      승률 41.4% · 평균 +1.26% · MDD -33.5%
+        +2%·절반(구값)  승률 65.5% · 평균 +0.55%(43%로 반감)
+        +3%·1/4(채택)   승률 59.8% · 평균 +1.12%(89% 보존) · MDD -16.5%
+                        p_BH=0.0001 · ΔIS +15.9 / ΔOOS +27.8
+                        top-5(n=144) 재현: 승률 +16.7%p · 평균 88% 보존
+    공식 픽은 우측 꼬리 분포라 익절 비율이 크면 유일한 수익원을 잘라낸다.
+    이 테스트는 이제 특정 숫자가 아니라 **상수와 가격의 정합**을 고정한다 —
+    파라미터는 근거가 갱신되면 바뀔 수 있고, 어긋나는 것만 막으면 된다.
+    """
     out = add_exit_plan_columns(pd.DataFrame([dict(추천매수가=10000.0, ROUTE="WAIT")]))
-    assert out.iloc[0]["FAST_TP_PRICE"] == 10200.0
-    assert FAST_TP_PCT == 2.0 and FAST_TP_DAY == 2
+    assert out.iloc[0]["FAST_TP_PRICE"] == round(10000.0 * (1 + FAST_TP_PCT / 100.0))
+    assert FAST_TP_PCT == 3.0 and FAST_TP_DAY == 2
 
 
 def test_fast_tp_in_note():
+    """[v55.3] '절반 익절' → '25% 익절' (꼬리 보존이 변경의 요점)."""
     out = add_exit_plan_columns(pd.DataFrame([dict(추천매수가=10000.0, ROUTE="WAIT")]))
     note = out.iloc[0]["EXIT_PLAN_NOTE"]
-    assert "절반 익절" in note and "D+2" in note
+    assert "25% 익절" in note and "D+2" in note
+    assert "절반 익절" not in note
 
 
 def test_fast_tp_nan_for_invalid_entry():
