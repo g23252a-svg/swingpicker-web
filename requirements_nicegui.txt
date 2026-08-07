@@ -16,6 +16,13 @@ plotly>=5.20.0,<6.0.0
 # --- [Data Science & ML] ---
 pandas>=2.2.0
 numpy>=1.26.0
+# [v56] parquet 엔진 — 어느 requirements에도 선언돼 있지 않았다.
+#   alpha_engine / pipeline_data / services.pick_reliability / components.tab_stocks 등
+#   10개 모듈이 ohlcv_cache_*.parquet를 읽고 쓴다. pandas 3.x는 pyarrow를 필수
+#   의존성으로 끌어오지만 pandas 2.x는 아니다 — 즉 pandas 2.x로 해석되는 환경에서는
+#   생존편향 제거(v50)용 패널 합집합이 폴백/실패한다.
+#   v56에서 CI가 전체 스위트를 돌리기 시작하자 29건 실패로 드러났다(원인 1개).
+pyarrow>=15.0.0
 scikit-learn>=1.4.0
 xgboost>=2.0.0
 torch>=2.2.0
