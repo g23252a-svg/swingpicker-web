@@ -22,11 +22,61 @@ import os, joblib, glob, re, pickle, threading, json
 import logging
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+# ── [v55.4] torch를 선택 의존성으로 격리 ──────────────────────────────
+# 종전엔 최상단에서 무조건 `import torch`를 했다. 그 결과 torch가 없는 환경
+# (CI)에서는 모듈 전체가 import 불가였고, 두 가지 부작용이 있었다:
+#   ① 순수 numpy 함수(evaluate_model_reliability 등) 테스트가 collection
+#      에러로 아예 돌지 않았다 — 신뢰도 게이트가 CI에서 무검증 상태.
+#   ② collector를 쓰는 테스트는 가짜 ml_engine 스텁을 sys.modules에 심어야
+#      했고, 그 스텁(FEATURE_COLS=[])이 다른 테스트를 오염시켰다.
+# torch가 실제로 필요한 건 학습/추론 경로뿐이고, 클래스 정의에 필요한 것은
+# 기반 클래스 nn.Module / Dataset 두 개뿐이다(나머지 torch 호출은 전부
+# 메서드 본문 안).
+#   → torch가 있으면 종전과 100% 동일하게 동작한다.
+#   → 없으면 모듈은 import되지만, torch를 건드리는 순간 RuntimeError로 크게
+#     실패한다(조용한 열화 금지). 진입점 3곳(load_model/train_model/
+#     apply_ml_score)은 TORCH_AVAILABLE을 먼저 보고 정직한 상태를 남긴다.
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    import torch.nn.functional as F
+    from torch.utils.data import Dataset, DataLoader
+    TORCH_AVAILABLE = True
+    TORCH_IMPORT_ERROR = ""
+except ImportError as _torch_err:  # pragma: no cover - torch 있는 환경이 정상
+    TORCH_AVAILABLE = False
+    TORCH_IMPORT_ERROR = str(_torch_err)
+
+    class _TorchMissing:
+        """torch 부재 시 대체물 — 건드리면 즉시 시끄럽게 실패한다."""
+
+        def __init__(self, name: str):
+            self._name = name
+
+        def __getattr__(self, attr: str):
+            raise RuntimeError(
+                f"torch 미설치로 {self._name}.{attr} 사용 불가 "
+                f"({TORCH_IMPORT_ERROR}) — 학습/추론 경로는 torch가 필요하다"
+            )
+
+        def __call__(self, *a, **k):
+            raise RuntimeError(f"torch 미설치로 {self._name} 호출 불가")
+
+    class _MissingModuleBase:
+        """nn.Module 자리 — 클래스 '정의'만 통과시키고, 인스턴스화는 본문의
+        nn.Linear 등에서 RuntimeError로 막힌다."""
+
+    class _MissingNN(_TorchMissing):
+        Module = _MissingModuleBase
+
+    torch = _TorchMissing("torch")
+    nn = _MissingNN("torch.nn")
+    optim = _TorchMissing("torch.optim")
+    F = _TorchMissing("torch.nn.functional")
+    Dataset = _MissingModuleBase
+    DataLoader = _TorchMissing("DataLoader")
+
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss, roc_auc_score
 from datetime import datetime
@@ -757,6 +807,13 @@ def load_model() -> None:
     global _loaded_seq_length, _loaded_use_rolling_zscore
     global _loaded_model_reliable, _loaded_model_validation
 
+    if not TORCH_AVAILABLE:  # pragma: no cover - torch 있는 환경이 정상
+        logger.warning(
+            f"⚠️ [ML] torch 미설치 — 모델 로드 생략 ({TORCH_IMPORT_ERROR}). "
+            f"ML 축은 TORCH_MISSING 상태로 기록된다"
+        )
+        return
+
     with _model_lock:
         if _loaded_lstm_model is not None and _loaded_scaler is not None:
             return
@@ -1155,6 +1212,12 @@ def train_model(force: bool = False) -> bool:
     - [Fix 4] Dynamic Ensemble 가중치 산출 및 저장
     - [Fix 5] Rolling Z-score 스케일링 (build_master_dataset 내)
     """
+    if not TORCH_AVAILABLE:  # pragma: no cover - torch 있는 환경이 정상
+        logger.error(
+            f"🚨 [ML] torch 미설치 — 학습 불가 ({TORCH_IMPORT_ERROR})"
+        )
+        return False
+
     if is_trained_today(force):
         logger.info("✅ [SKIP] 오늘 이미 v19.0 모델 학습이 완료되었습니다.")
         return
@@ -1529,6 +1592,15 @@ def apply_ml_score(current_df: pd.DataFrame, full_ohlcv_map: dict) -> pd.DataFra
         current_df = attach_v23_phase1_signals(current_df, full_ohlcv_map)
     except Exception as e:
         logger.warning(f"⚠️ [v23] signal attach 실패 (무해): {e}")
+
+    # [v55.4] torch 부재는 "모델 파일 없음"과 다른 사고다 — 사유를 정직하게 남긴다.
+    if not TORCH_AVAILABLE:  # pragma: no cover - torch 있는 환경이 정상
+        logger.warning(
+            f"⚠️ [ML] torch 미설치 — ML_SCORE=0 ({TORCH_IMPORT_ERROR})"
+        )
+        current_df["ML_SCORE"] = 0.0
+        current_df["ML_STATUS"] = "TORCH_MISSING"
+        return current_df
 
     if _loaded_lstm_model is None or _loaded_scaler is None:
         load_model()

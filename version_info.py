@@ -15,6 +15,23 @@ logger = logging.getLogger("version_info")
 # ----------------- 1. 진실의 원천 (CHANGELOG) -----------------
 CHANGELOG: List[Dict[str, Any]] = [
     {
+        "version": "55.4.0",
+        "date": "2026-08-07",
+        "type": "patch",
+        "title": "v55.4 — 검사하지 않던 검사: ML feature 계약 하드 게이트 복구",
+        "items": [
+            "🚨 **하드 게이트가 데드코드였다:** `feature_contract` ↔ `ml_engine.FEATURE_COLS` 동기화는 '어긋나면 배포 중단'으로 선언돼 있었지만, 구현이 `from ml_engine import FEATURE_COLS`였고 `ml_engine`은 최상단에서 `import torch`를 한다. CI에는 torch가 없으므로 **매 실행이 `except ImportError` 경로로 빠져 '⚠️ skipped'만 찍고 통과**했다. 같은 이유로 `test_policy_consistency`의 계약 테스트 2개도 항상 `pytest.skip`이었다 — 즉 **이 계약은 한 번도 검사된 적이 없다**.",
+            "🔬 **먼저 실제 불일치가 있는지 확인했다 — 없었다.** 두 목록은 16개 모두 동일(AST 판독으로 대조). 결함은 '값이 틀렸다'가 아니라 '틀렸어도 못 잡는다'였다.",
+            "🕳️ **조용한 스킵이 가짜 모듈까지 통과시켰다:** `tests/test_fill_aware_v248.py`가 torch 부재 시 `FEATURE_COLS = []`인 스텁 `ml_engine`을 `sys.modules`에 심고 제거하지 않았다. 그 뒤 계약 테스트는 ImportError를 못 보므로 스킵하지 않고 **빈 목록과 비교해 실패**한다(`tests/` + 루트 테스트를 한 프로세스로 돌릴 때만 재현 — 2026-08 실측). 스텁에 `__is_test_stub__` 표시 + `teardown_module` 원복으로 격리했다.",
+            "🔧 **정적 판독으로 전환:** `feature_contract.read_ml_engine_feature_cols()`가 소스를 AST로 파싱해 리터럴만 읽는다(import 부작용 0). torch 유무·스텁 유무와 무관하게 항상 같은 답을 준다. `feature_contract_sync_errors()`는 개수·원소·**순서**(모델 입력 순서가 어긋나는 케이스) 차이를 모두 오류로 돌려주고, FEATURE_COLS가 동적 생성으로 바뀌면 조용히 통과하지 않고 **실패**한다 — 그래야 '검사하지 않는 검사'로 되돌아가지 않는다.",
+            "🧰 **torch를 선택 의존성으로 격리:** `ml_engine`이 실제로 torch를 필요로 하는 건 학습/추론 경로뿐이고, 클래스 정의에 필요한 것은 기반 클래스 `nn.Module`/`Dataset` 둘뿐이었다. torch가 있으면 **종전과 100% 동일**하게 동작하고, 없으면 모듈은 import되지만 torch를 건드리는 순간 `RuntimeError`로 크게 실패한다(조용한 열화 금지). 덕분에 CI에서 **순수 numpy 축(`evaluate_model_reliability` 등)이 실제로 검증**되기 시작했다 — 종전엔 collection 에러로 아예 돌지 않았다.",
+            "📋 **원인을 뭉개지 않는다:** torch 부재 시 `ML_STATUS='TORCH_MISSING'`(종전에는 `MODEL_NOT_FOUND`로 흘러 '모델 파일이 없다'고 거짓 보고). `run_health`는 `FAILED:TORCH_MISSING`으로 표시하고, 점수 반영은 종전대로 0이다.",
+            "🐼 **pandas 3.x 대응 2건:** 문자열 컬럼/인덱스가 `object`가 아닌 `StringDtype`로 추론된다. `collector.py`의 FDR 종목코드-인덱스 폴백이 `dtype == object` 검사로 **조용히 죽던 것**을 숫자 여부 검사로 교체했고, 같은 가정을 쓰던 데이터 정합성 테스트도 '숫자로 굳지 않는다'는 원래 의도로 다시 적었다.",
+            "🧪 **신규 테스트 21개(`tests/test_v55_4_contract_gate.py`):** 정적 판독 정확성, 누락·추가·**순서만 다른** 불일치 검출, 판독 불가 시 실패(파일 없음/동적 생성/빈 목록/비문자열), 스텁이 `sys.modules`에 있어도 정적 대조 무오염, fill_aware 스텁 원복, torch 없이 import·신뢰도 게이트 실행·torch 경로 시끄러운 실패·`TORCH_MISSING` 정직 보고, 게이트 스크립트가 실제로 대조하는지. 기존 계약 테스트 2개는 **삭제 대신 스킵 제거**(항상 실행)로 고치고, 런타임 대조는 별도 테스트로 분리했다.",
+        ],
+        "schema_min": 5,
+    },
+    {
         "version": "55.3.0",
         "date": "2026-08-07",
         "type": "minor",

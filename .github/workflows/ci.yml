@@ -157,14 +157,16 @@ jobs:
             exit 1
           fi
 
-      # ─── 환경 의존 테스트 (조건부 — 명시적 스킵) ───
-      - name: 🧪 ML 엔진 테스트 (torch 있는 경우만)
-        run: |
-          if python -c "import torch" 2>/dev/null; then
-            python -m pytest test_ml_engine.py -v --tb=short
-          else
-            echo "::notice::torch 미설치 환경 — ML 테스트 건너뜀 (의도된 환경 차이)"
-          fi
+      # ─── ML 엔진 테스트 ───
+      # [v55.4] 종전엔 파일 전체를 torch 유무로 건너뛰었다 — torch 없는 CI에서는
+      #   메타 버전 검증·피처 엔지니어링 테스트까지 0건 실행이었다.
+      #   이제 ml_engine이 torch 없이 import되고, torch가 실제로 필요한 클래스만
+      #   skipUnless로 표시되므로 항상 돌린다(스킵은 리포트에 남는다).
+      - name: 🧪 ML 엔진 테스트
+        run: python -m pytest test_ml_engine.py tests/test_ml_reliability.py -v --tb=short
+
+      - name: 🔒 ML feature 계약 게이트 (torch 없이도 실제 대조)
+        run: python -m pytest tests/test_v55_4_contract_gate.py -v --tb=short
 
       - name: 📊 테스트 결과 요약
         if: always()

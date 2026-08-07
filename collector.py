@@ -1783,7 +1783,9 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
                     break
 
             # 일부 FDR 버전은 종목코드가 index에 들어감
-            if code_col is None and df_fdr.index.dtype == object:
+            # [v55.4] pandas 3.x는 문자열 index를 object가 아닌 StringDtype로
+            #   추론한다 — `dtype == object`로 검사하면 이 폴백이 조용히 죽는다.
+            if code_col is None and not pd.api.types.is_numeric_dtype(df_fdr.index):
                 sample_idx = str(df_fdr.index[0]).strip()
                 if sample_idx.isdigit() and len(sample_idx) == 6:
                     df_fdr = df_fdr.reset_index()

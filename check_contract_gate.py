@@ -54,22 +54,50 @@ POLICY_LITERALS = {
 
 
 def check_feature_contract():
-    """Feature Contract과 ml_engine FEATURE_COLS 동기화 검증."""
+    """Feature Contract과 ml_engine FEATURE_COLS 동기화 검증.
+
+    [v55.4] 이 게이트는 정작 CI에서 아무것도 검사하지 않고 있었다.
+    구현이 `from ml_engine import FEATURE_COLS`였고 ml_engine은 최상단에서
+    torch를 import한다. CI에는 torch가 없으므로 매번 `except ImportError`로
+    빠져 '⚠️ skipped'만 찍고 통과했다 — 하드 게이트가 사실상 데드코드였다.
+
+    이제 소스를 AST로 정적 판독해(feature_contract.read_ml_engine_feature_cols)
+    torch 유무와 무관하게 항상 실제로 비교한다. torch가 있는 환경에서는
+    런타임 값까지 추가로 대조하되, 테스트 스텁은 진짜로 착각하지 않는다.
+    """
     errors = []
     try:
         sys.path.insert(0, PROJECT_ROOT)
-        from feature_contract import FEATURE_CONTRACT
-        from ml_engine import FEATURE_COLS
-
-        if list(FEATURE_CONTRACT.columns) != FEATURE_COLS:
-            errors.append(
-                f"FEATURE_COLS mismatch!\n"
-                f"  contract: {list(FEATURE_CONTRACT.columns)}\n"
-                f"  ml_engine: {FEATURE_COLS}"
-            )
+        from feature_contract import (
+            FEATURE_CONTRACT, feature_contract_sync_errors, is_stub_ml_engine,
+        )
     except ImportError as e:
-        # feature_contract 없는 환경은 경고만
-        print(f"  ⚠️ Feature contract import skipped: {e}")
+        # feature_contract 자체가 없는 환경 — 이건 경고로 남긴다(계약의 원천이 없음)
+        print(f"  ⚠️ feature_contract import 실패: {e}")
+        return errors
+
+    # ① 정적 대조 — 항상 실행된다 (torch 불필요)
+    errors.extend(feature_contract_sync_errors())
+    if not errors:
+        print(f"  ✅ 정적 대조 통과 (feature {len(FEATURE_CONTRACT.columns)}개)")
+
+    # ② 런타임 대조 — torch가 있을 때만 추가 검증
+    try:
+        import ml_engine
+    except Exception as e:
+        print(f"  ℹ️ ml_engine 런타임 대조 생략 (import 불가: {type(e).__name__}) "
+              f"— 정적 대조는 위에서 완료")
+        return errors
+    if is_stub_ml_engine(ml_engine):
+        print("  ℹ️ ml_engine이 테스트 스텁 — 런타임 대조 생략(정적 대조로 갈음)")
+        return errors
+    runtime_cols = list(getattr(ml_engine, "FEATURE_COLS", []))
+    if runtime_cols != list(FEATURE_CONTRACT.columns):
+        errors.append(
+            f"런타임 FEATURE_COLS가 계약과 다르다\n"
+            f"  contract: {list(FEATURE_CONTRACT.columns)}\n"
+            f"  ml_engine: {runtime_cols}"
+        )
     return errors
 
 

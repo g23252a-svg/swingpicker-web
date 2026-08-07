@@ -105,7 +105,13 @@ class TestHarness:
         """캐시 재로딩 시 rec_ymd가 int로 굳어 매칭 0건 되던 회귀 방지."""
         build_asof_panel(data_dir)                      # 1차: 생성+저장
         panel2 = build_asof_panel(data_dir)             # 2차: CSV 재사용
-        assert panel2["rec_ymd"].dtype == object
+        # [v55.4] pandas 3.x는 CSV의 문자열 컬럼을 object 대신 StringDtype로
+        #   추론한다. 이 테스트가 막는 회귀는 "rec_ymd가 int로 굳는 것"이므로
+        #   object/StringDtype을 가리지 않고 '숫자가 아님'만 못 박는다.
+        assert not pd.api.types.is_numeric_dtype(panel2["rec_ymd"]), (
+            f"rec_ymd가 숫자로 굳었다(dtype={panel2['rec_ymd'].dtype}) — "
+            f"forward 매칭이 0건이 된다"
+        )
         trades = build_trades(data_dir, panel2, [1])
         assert len(trades) == 3, "재로딩 패널로 forward 매칭 실패"
 
