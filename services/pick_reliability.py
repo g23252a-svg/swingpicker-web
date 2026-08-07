@@ -24,11 +24,16 @@
 
   두 청산 규칙을 함께 낸다. 화면이 두 가지를 동시에 지시하고 있기 때문이다:
     hold  : 진입 t+1 시가 · -8% 장중 스톱 · t+5 종가 청산   (목표가까지 보유)
-    disc  : exit_plan 표시 규율 — 2일내 +2% 절반익절 · +5% 본전스톱 ·
+    disc  : exit_plan 표시 규율 — 2일내 +3% 1/4익절 · +5% 본전스톱 ·
             +10% 1차익절 · -7% 손절                        (화면 권고 규율)
-  v55 실측에서 disc는 승률을 올리고 기대값을 낮췄다(top-1 -2.10%p t=-1.76
-  p=0.089 · top-3 -1.11%p p=0.345 · 부트 CI 0 포함 · IS/OOS 부호 엇갈림).
-  어느 쪽도 통계적으로 확립되지 않았으므로 둘 다 보여주고 판단은 맡긴다.
+  [v57] 이 규율의 파라미터는 '승률과 기대값 둘 다'를 목표로 재조정됐다.
+  격자탐색(트리거 2~6% × 익절비율 25/33/50% × BE 유무 = 30조합, BH-FDR 보정):
+    +2%·절반(구값) 승률 41.4%→65.5% 이지만 평균 +1.26%→+0.55% (기준의 43%)
+    +3%·1/4(채택)  승률 41.4%→**59.8%** · 평균 **+1.12%(89% 보존)** ·
+                   MDD -33.5%→-16.5% · p_BH=0.0001 · ΔIS +15.9 / ΔOOS +27.8
+                   top-5(n=144) 재현: 승률 +16.7%p · 평균 88% 보존
+  즉 승률 +18%p를 얻고 기대값은 11%만 내놓는다. 두 규칙을 계속 함께 내보내
+  '보유 vs 규율'의 트레이드오프를 사용자가 직접 볼 수 있게 한다.
 
 ■ 이 숫자를 어떻게 쓰면 안 되는가
   표본이 얇다(수십 일). '중위가 음수니 이 전략은 손해'도, '평균 +6%니 좋다'도
@@ -54,8 +59,13 @@ _HL_COLS = ["시가", "고가", "저가", "종가"]
 HOLD_DAYS = 5
 STOP_PCT_HOLD = -0.08      # 실현수익 정의(연구 기준과 동일)
 STOP_PCT_DISC = -0.07      # exit_plan 표시 권고
-FAST_TP_PCT = 0.02         # 2일 내 절반익절
+# [v57] exit_plan의 권고값과 같아야 한다 — 화면이 지시하는 것을 그대로 측정한다.
+#   격자탐색 결과 +3% 트리거·1/4 익절이 승률(+18%p)과 기대값(89% 보존)을 함께
+#   잡는 지점이었다(top-3 n=87 p_BH=0.0001 · top-5 n=144 재현).
+#   테스트(test_v57_balanced_exit.py)가 exit_plan과의 동일성을 고정한다.
+FAST_TP_PCT = 0.03
 FAST_TP_DAYS = 2
+FAST_TP_FRACTION = 0.25
 BE_TRIGGER_PCT = 0.05      # 본전스톱 전환
 TP_QUICK_PCT = 0.10        # 1차 익절
 MIN_DAYS = 8               # 이보다 적으면 통계로 내보내지 않는다
@@ -139,8 +149,8 @@ def _simulate(fut: pd.DataFrame, rule: str) -> Optional[float]:
             return realized + weight * (stop / entry - 1)
         if rule == "disc":
             if (not half_done) and i < FAST_TP_DAYS and hi >= entry * (1 + FAST_TP_PCT):
-                realized += 0.5 * FAST_TP_PCT
-                weight, half_done = 0.5, True
+                realized += FAST_TP_FRACTION * FAST_TP_PCT
+                weight, half_done = 1.0 - FAST_TP_FRACTION, True
                 stop = max(stop, entry)
             if hi >= entry * (1 + BE_TRIGGER_PCT):
                 stop = max(stop, entry)
@@ -255,7 +265,8 @@ def compute_pick_reliability(data_dir: str = "data", max_days: int = 200) -> dic
         "disc": _stats(df["disc"].tolist()),
         "definition": {
             "hold": f"진입 t+1 시가 · {STOP_PCT_HOLD*100:.0f}% 장중 스톱 · t+{HOLD_DAYS} 종가",
-            "disc": (f"exit_plan 표시 규율 — {FAST_TP_DAYS}일내 +{FAST_TP_PCT*100:.0f}% 절반익절 · "
+            "disc": (f"exit_plan 표시 규율 — {FAST_TP_DAYS}일내 "
+                     f"+{FAST_TP_PCT*100:.0f}% {FAST_TP_FRACTION:.0%}익절 · "
                      f"+{BE_TRIGGER_PCT*100:.0f}% 본전스톱 · +{TP_QUICK_PCT*100:.0f}% 1차익절 · "
                      f"{STOP_PCT_DISC*100:.0f}% 손절"),
         },
