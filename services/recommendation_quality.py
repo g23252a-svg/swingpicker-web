@@ -26,7 +26,7 @@ logger = logging.getLogger("recommendation_quality")
 # QUALITY_POLICY_VERSION으로 어느 계약이 그 행을 만들었는지 감사할 수 있고,
 # daily_briefing의 production_buy_sizable 게이트가 구 계약 산출물을 오판하지
 # 않도록(SKIP) 구분하는 데도 쓰인다.
-POLICY_VERSION = "alpha_gate_v54"
+POLICY_VERSION = "alpha_gate_v57"
 # [v32] ROUTE는 더 이상 진입 게이트가 아니다(ATTACK 알파 -2.9%p, p=0.0004 실측).
 # 검증된 알파(ALPHA_GATE_ACTIVE)가 진입 SSOT. ACTIVE_ROUTES는 레거시 폴백
 # (알파 미검증일)에서만 참조되며, ROUTE 거부권 자체는 evidence_pass에서 제거됨.
@@ -100,12 +100,33 @@ def _inactive_routes() -> frozenset:
     return _KELLY_INACTIVE_ROUTES_FALLBACK
 
 
+def _alpha_exempt_routes() -> frozenset:
+    """[v57] 알파 진입 통과 시 사이징 0 강제를 면제하는 ROUTE (SSOT: kelly_calibrator)."""
+    try:  # 순환 import 회피 — 함수 내부에서만 참조
+        from kelly_calibrator import _ALPHA_EXEMPT_INACTIVE_ROUTES
+
+        return frozenset(str(r).strip().upper() for r in _ALPHA_EXEMPT_INACTIVE_ROUTES)
+    except Exception as e:
+        logger.warning(f"_ALPHA_EXEMPT_INACTIVE_ROUTES 참조 실패 ({e}) → 폴백 사용")
+        return frozenset({"WAIT"})
+
+
 def _route_sizable_mask(df: pd.DataFrame) -> pd.Series:
-    """ROUTE가 신규 사이징을 허용하는가 (컬럼·값 없으면 통과 — 레거시 호환)."""
+    """ROUTE가 신규 사이징을 허용하는가 (컬럼·값 없으면 통과 — 레거시 호환).
+
+    [v57] 알파 진입을 통과한 관망(WAIT)은 사이징이 막히지 않는다.
+    kelly_calibrator.kelly_route_zero_mask와 **같은 규칙**이어야 한다 —
+    어긋나면 v54가 없앤 '공식 매수인데 0주'가 되살아난다.
+    근거·측정치는 kelly_calibrator의 _ALPHA_EXEMPT_INACTIVE_ROUTES 주석에 있다.
+    """
     if "ROUTE" not in df.columns:
         return pd.Series(True, index=df.index, dtype=bool)
     route = _text(df, "ROUTE", "")
-    return route.eq("") | ~route.isin(_inactive_routes())
+    sizable = route.eq("") | ~route.isin(_inactive_routes())
+    exempt = _alpha_exempt_routes()
+    if exempt and "ALPHA_ENTRY_OK" in df.columns:
+        sizable = sizable | (_flag(df, "ALPHA_ENTRY_OK") & route.isin(exempt))
+    return sizable
 
 
 def _alpha_gate_on(df: pd.DataFrame) -> bool:
@@ -214,10 +235,24 @@ def _reasons(df: pd.DataFrame, production: pd.Series) -> pd.Series:
     # [v54] 사이징 불가(ROUTE)로 탈락한 경우 '1종목 제한'이라 적으면 거짓 사유가 된다.
     sizable = _route_sizable_mask(df)
 
+    # [v57] 관망(WAIT) 상태인데 공식 매수인 경우가 생긴다 — 화면의 ROUTE 배지는
+    #   여전히 '⏸️ 관망'을 띄우므로, 설명 없이 두면 v54가 고친 모순
+    #   ('매수'와 '관망'을 같은 종목에 동시 표시)으로 되읽힌다. 차이는 이렇다:
+    #   v54의 모순은 **살 수 없는 것**(켈리 0주)을 매수라 부른 것이고,
+    #   지금은 **살 수 있다**(사이징 유효) — 상태 라벨과 진입 판단의 출처가 다를 뿐이다.
+    #   그래서 사유 줄에 출처를 적는다.
+    exempt_routes = _alpha_exempt_routes()
+    alpha_entry = _flag(df, "ALPHA_ENTRY_OK")
+
     result: list[str] = []
     for i in range(len(df)):
         if bool(production.iloc[i]):
-            result.append("엄격 매수 기준 통과")
+            if (route.iloc[i] in exempt_routes) and bool(alpha_entry.iloc[i]):
+                result.append(
+                    f"엄격 매수 기준 통과 (상태는 {route.iloc[i]}이지만 "
+                    f"진입 판단은 검증 알파가 기준 — v32)")
+            else:
+                result.append("엄격 매수 기준 통과")
             continue
         row_reasons: list[str] = []
         if bool(top.iloc[i]) and bool(eligible.iloc[i]) and bool(evidence.iloc[i]):

@@ -85,11 +85,19 @@ def test_route_is_not_an_evidence_veto_under_alpha_gate_v32():
     (QUALITY_GUARD_PASS)은 통과하고, 탈락 사유에 모멘텀형 '경로 X'를 적지
     않는다. 이것이 v32가 실측으로 확립한 계약이며 그대로 유지된다.
 
-    [v54] 단, '공식 매수'는 실행 가능해야 한다. 사이징 엔진
-    (kelly_calibrator._KELLY_INACTIVE_ROUTES)이 WAIT에서 켈리를 0주로 강제하므로
-    PRODUCTION_BUY는 0이 된다 — 근거 통과와 실행 가능성은 다른 판정이다.
-    v32가 제거한 것은 ROUTE 근거 거부권이고, v54가 넣은 것은 실행 가능성
-    정렬이다. 자세한 측정 기록은 test_v54_first_pick_contradictions.py 참조.
+    [v54] 단, '공식 매수'는 실행 가능해야 한다 — 사이징이 0주로 강제되는 상태를
+    매수라 부르지 않는다. v32가 제거한 것은 ROUTE 근거 거부권이고, v54가 넣은
+    것은 실행 가능성 정렬이다.
+
+    [v57] 그런데 v54의 '실행 가능성'이 WAIT에서 걸린 이유는 위험 계산이 아니라
+    켈리의 표시 관례였고, 그것이 v32가 없앤 ROUTE 진입 거부권을 뒷문으로
+    복원했다(픽 가능일 29→15일 반감 · 워크포워드 76일). 측정 결과 '사이징 가능'은
+    수익을 예측하지 못했고(Welch p=0.296 · 각 상위2 제거 후 차이 0.16%p) WAIT
+    면제 쪽이 중위·승률·이상치제거·OOS에서 모두 같거나 나았다.
+    → 알파 진입을 통과한 WAIT는 이제 실행 가능하다(PRODUCTION_BUY=1).
+    v54 불변식('사이징 불가는 공식 매수가 아니다')은 CARRY 등에서 그대로 유효하다.
+    측정 기록: tests/test_v57_route_exempt.py · kelly_calibrator의
+    _ALPHA_EXEMPT_INACTIVE_ROUTES 주석.
     """
     guarded = apply_recommendation_quality_guard(
         pd.DataFrame([_row(ROUTE="WAIT", ALPHA_GATE_ACTIVE=1, ALPHA_ENTRY_OK=1,
@@ -98,10 +106,18 @@ def test_route_is_not_an_evidence_veto_under_alpha_gate_v32():
     )
     assert guarded.iloc[0]["QUALITY_GUARD_PASS"] == 1
     assert "경로" not in guarded.iloc[0]["QUALITY_GUARD_REASON"]
-    assert guarded.iloc[0]["PRODUCTION_BUY"] == 0
+    # [v57] 알파 진입 통과 → 관망 상태여도 공식 매수다
+    assert guarded.iloc[0]["PRODUCTION_BUY"] == 1
 
-    # 같은 행에서 상태만 실행 가능하게 바꾸면 공식 매수가 된다
-    # → 탈락시킨 것은 알파도 근거도 아니라 실행 가능성뿐임을 고정한다.
+    # 실행 가능성 요건 자체는 살아 있다 — 보유 중(CARRY)은 여전히 아니다.
+    carry = apply_recommendation_quality_guard(
+        pd.DataFrame([_row(ROUTE="CARRY", ALPHA_GATE_ACTIVE=1, ALPHA_ENTRY_OK=1,
+                           ALPHA_SCORE=92, ALPHA_ENTRY_THRESHOLD=80,
+                           MARKET_REGIME="NEUTRAL")])
+    )
+    assert carry.iloc[0]["QUALITY_GUARD_PASS"] == 1, "근거는 통과"
+    assert carry.iloc[0]["PRODUCTION_BUY"] == 0, "실행 가능성에서 탈락"
+
     sizable = apply_recommendation_quality_guard(
         pd.DataFrame([_row(ROUTE="ATTACK", ALPHA_GATE_ACTIVE=1, ALPHA_ENTRY_OK=1,
                            ALPHA_SCORE=92, ALPHA_ENTRY_THRESHOLD=80,
