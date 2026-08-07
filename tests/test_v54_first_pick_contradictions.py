@@ -32,6 +32,18 @@ v45~v53 패치 후 처음으로 실제 공식 매수가 나왔고, 그 한 종�
       않고 라벨만 실행 가능성에 맞춘다. 되돌리기도 한 줄.
       비용: 같은 풀에서 공식 매수가 나오는 날 69일 중 18일(26%).
 
+    [v57 후속 — 결정 변경] 위 '비용'을 v55 워크포워드 패널(76일)에서 다시 재니
+    반감이었다: 품질 가드 통과일 29일 → 사이징 요건 적용 후 15일. 그리고 (B)의
+    수익 우위가 재현 불가능한 꼬리였다 — 현행 15일 평균 +6.20%인데 중위 -2.70%,
+    상위 2건 제거 시 -2.89%, OOS 4일 -1.22%(IS +8.89%에서 부호 역전).
+    WAIT만 면제하면 29일 · 평균 +2.89% · 중위 +1.70% · 승률 58.6% ·
+    상위2제거 +1.35% · t=+1.89 p=0.069 · 부트CI95 [+0.1,+5.9] · IS/OOS 부호 일치.
+    종목 단위로 '사이징 가능'은 수익을 예측하지 못했다(Welch p=0.296 ·
+    각 상위2 제거 후 차이 0.16%p). → (A)로 전환하되 **WAIT에만** 적용한다.
+    CARRY(보유 중·승률 26.7%)·EXIT_WARNING·BLOCKED·OVERHEAT·NEUTRAL은 그대로다.
+    아래 테스트에서 '사이징 불가' 사례는 WAIT → CARRY로 바꿨다(삭제 아님) —
+    v54가 세운 불변식(사이징 불가는 공식 매수가 아니다)은 그대로 유효하다.
+
 ■ ② 승률이 화면마다 달랐다 — 둘 다 '실측 승률'
     ALPHA_WIN_PROB 0.389 (시장 탭 39%) : 검증 알파 십분위 OOS 승률.
       정의 = 진입 t+1 시가 → t+6 종가 > 0 비율.
@@ -122,21 +134,41 @@ def test_active_route_still_becomes_production_buy():
     assert int(out.iloc[0]["PRODUCTION_BUY"]) == 1
 
 
-def test_wait_route_is_not_production_buy():
-    """024060 케이스 — 사이징이 0으로 강제되는 상태는 공식 매수가 아니다."""
+def test_unsizable_route_is_not_production_buy():
+    """사이징이 0으로 강제되는 상태는 공식 매수가 아니다 (v54 불변식).
+
+    [v57] 사례를 WAIT → CARRY로 바꿨다. WAIT는 알파 진입 통과 시 면제되지만
+    (근거: kelly_calibrator._ALPHA_EXEMPT_INACTIVE_ROUTES), CARRY는 '이미 보유
+    중'이라 신규진입 대상이 아니고 실측도 나빴다(승률 26.7% · 중위 -3.13%).
+    즉 불변식 자체는 살아 있고 대상만 바뀌었다."""
     out = rq.apply_recommendation_quality_guard(
-        pd.DataFrame([_guard_row(ROUTE="WAIT")]))
+        pd.DataFrame([_guard_row(ROUTE="CARRY")]))
     assert int(out.iloc[0]["PRODUCTION_BUY"]) == 0
     assert int(out.iloc[0]["BUY_NOW_ELIGIBLE"]) == 0
     assert int(out.iloc[0]["QUALITY_GUARD_PASS"]) == 1, "근거 자체는 통과여야 한다"
 
 
-def test_wait_route_reason_names_the_state_not_daily_cap():
-    """'당일 1종목 제한'이라 적으면 거짓 사유다 — 제한 때문이 아니다."""
+def test_wait_route_with_alpha_entry_is_production_buy():
+    """[v57] 024060 케이스의 결말 — 알파 진입을 통과한 관망은 공식 매수다."""
     out = rq.apply_recommendation_quality_guard(
         pd.DataFrame([_guard_row(ROUTE="WAIT")]))
+    assert int(out.iloc[0]["PRODUCTION_BUY"]) == 1
+
+
+def test_wait_route_without_alpha_entry_stays_unsizable():
+    """면제는 알파 진입 통과에만 붙는다 — ROUTE만으로 열리면 v32 이전으로 되돌아간다."""
+    out = rq.apply_recommendation_quality_guard(
+        pd.DataFrame([_guard_row(ROUTE="WAIT", ALPHA_ENTRY_OK=0)]))
+    assert int(out.iloc[0]["PRODUCTION_BUY"]) == 0
+
+
+def test_unsizable_route_reason_names_the_state_not_daily_cap():
+    """'당일 1종목 제한'이라 적으면 거짓 사유다 — 제한 때문이 아니다.
+    [v57] 사례 WAIT → CARRY (WAIT는 면제되어 더 이상 이 경로가 아니다)."""
+    out = rq.apply_recommendation_quality_guard(
+        pd.DataFrame([_guard_row(ROUTE="CARRY")]))
     reason = str(out.iloc[0]["QUALITY_GUARD_REASON"])
-    assert "WAIT" in reason and "신규진입 상태 아님" in reason
+    assert "CARRY" in reason and "신규진입 상태 아님" in reason
     assert "1종목 제한" not in reason
 
 
@@ -153,9 +185,10 @@ def test_daily_cap_reason_survives_for_sizable_runner_up():
 
 
 def test_inactive_route_does_not_steal_the_daily_pick():
-    """WAIT 1등이 슬롯을 먹어 실행 가능한 2등이 탈락하면 안 된다."""
+    """사이징 불가 1등이 슬롯을 먹어 실행 가능한 2등이 탈락하면 안 된다.
+    [v57] 1등을 WAIT → CARRY로 (WAIT는 이제 실행 가능하므로 슬롯을 가져도 정상)."""
     df = pd.DataFrame([
-        _guard_row(종목코드="024060", ROUTE="WAIT", ALPHA_SCORE=100.0),
+        _guard_row(종목코드="024060", ROUTE="CARRY", ALPHA_SCORE=100.0),
         _guard_row(종목코드="000002", ROUTE="ATTACK", ALPHA_SCORE=90.0),
     ])
     out = rq.apply_recommendation_quality_guard(df).set_index("종목코드")
@@ -169,8 +202,9 @@ def test_inactive_route_does_not_steal_the_daily_pick():
 #   실제로는 종목은 찾았고 타이밍 상태가 아닌 것이다.
 
 def test_awaiting_mask_finds_evidence_passing_but_unsizable():
+    """[v57] 사례 WAIT → CARRY. '근거는 되는데 상태가 아니다'는 여전히 존재한다."""
     out = rq.apply_recommendation_quality_guard(
-        pd.DataFrame([_guard_row(ROUTE="WAIT")]))
+        pd.DataFrame([_guard_row(ROUTE="CARRY")]))
     assert bool(rq.awaiting_execution_mask(out).iloc[0])
 
 
@@ -183,7 +217,7 @@ def test_awaiting_mask_excludes_the_official_pick():
 def test_awaiting_mask_excludes_evidence_failures():
     """근거 자체가 미달인 종목을 '상태만 문제'라고 하면 거짓말이다."""
     out = rq.apply_recommendation_quality_guard(
-        pd.DataFrame([_guard_row(ROUTE="WAIT", RR_NOW_TP1=0.4)]))
+        pd.DataFrame([_guard_row(ROUTE="CARRY", RR_NOW_TP1=0.4)]))
     assert int(out.iloc[0]["QUALITY_GUARD_PASS"]) == 0
     assert not bool(rq.awaiting_execution_mask(out).iloc[0])
 
@@ -196,12 +230,12 @@ def test_decision_summary_names_the_waiting_candidate():
     from components.decision_center import build_decision_summary
 
     df = rq.apply_recommendation_quality_guard(
-        pd.DataFrame([_guard_row(ROUTE="WAIT")]))
+        pd.DataFrame([_guard_row(ROUTE="CARRY")]))   # [v57] WAIT는 면제됨
     s = build_decision_summary(df)
     assert s["status"] == "CASH"
     assert s["production_count"] == 0
     assert len(s["awaiting"]) == 1
-    assert "흥구석유" in s["subtitle"] and "WAIT" in s["subtitle"]
+    assert "흥구석유" in s["subtitle"] and "CARRY" in s["subtitle"]
     assert "종목이 없는 게 아니라" in s["subtitle"]
     assert "통과한 종목이 없음" not in " ".join(s["blockers"]), "거짓 차단자"
     # 실제 차단자가 목록 1순위여야 한다 (다른 종목 사유가 위에 오면 안 됨)

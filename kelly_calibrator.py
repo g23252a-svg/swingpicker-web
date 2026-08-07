@@ -1183,6 +1183,69 @@ def apply_kelly_calibrated(
 _KELLY_INACTIVE_ROUTES = frozenset(
     {"WAIT", "OVERHEAT", "EXIT_WARNING", "CARRY", "BLOCKED", "NEUTRAL"})
 
+# ══════════════════════════════════════════════════════════════════
+#  [v57] 알파 진입을 통과한 관망(WAIT)은 사이징을 막지 않는다
+# ══════════════════════════════════════════════════════════════════
+#
+# ■ 무엇이 문제였나
+#   위 0원 강제는 위험 계산에서 나온 수량이 아니다 — 아래 주석이 스스로
+#   "표시 관례 유지"라고 적는다. 그런데 v54가 그 0원 상태를 PRODUCTION_BUY
+#   조건으로 승격시키면서, v32가 근거를 대고 제거한 **ROUTE 진입 거부권이
+#   사이징 레이어를 통해 복원**됐다. v32 결론은 "ROUTE는 진입 게이트가 아니다
+#   (ATTACK 알파 -2.9%p, p=0.0004) · 검증된 알파가 진입 SSOT"였다.
+#
+# ■ 비용 실측 (v55 워크포워드 패널 76일 · 실현: t+1 시가 진입 · -8% 스톱 · t+5 종가)
+#   품질 가드까지 통과한 후보 429종목의 ROUTE 분포에서 WAIT가 65.3%(280종목).
+#   그래서 이 요건은 **픽 가능일을 29일 → 15일로 반감**시켰다(52% 잔존).
+#
+# ■ 수익 근거 — 평균은 현행이 좋지만 그 평균이 재현 불가능하다
+#   현행(ARMED/ATTACK만): 15일 평균 +6.20%인데 중위 **-2.70%**,
+#     상위 2건 제거 시 **-2.89%**, OOS 4일 **-1.22%** (IS +8.89%에서 부호 역전)
+#   WAIT 면제:            29일 평균 +2.89% · 중위 **+1.70%** · 승률 **58.6%**
+#     상위 2건 제거 **+1.35%** · t=+1.89 p=0.069 · 부트CI95 **[+0.1, +5.9]**
+#     IS +2.14% / OOS +3.15% (부호 일치, 중위도 둘 다 양수)
+#   종목 단위로 '사이징 가능 여부'는 수익을 예측하지 못했다
+#     (Welch p=0.296 · Mann-Whitney p=0.598 · 각 상위2 제거 후 차이 0.16%p).
+#
+# ■ 정직하게 남길 것
+#   · 공통일 페어드는 무의미하다(15일 Δ-2.37%p, t=-0.32, p=0.756). 즉 개선의
+#     원천은 "같은 날 더 좋은 종목"이 아니라 **"더 많은 날 진입한다"**는 것이다.
+#   · p=0.069는 관례적 0.05를 넘지 않는다. 표본이 얇다(29일 · OOS 6일).
+#   · 채택 이유는 '평균이 오른다'가 아니라 **중위·승률·이상치제거·OOS 네 지표가
+#     모두 같거나 낫고 빈도가 2배**라는 것이다. 평균은 오히려 낮아진다.
+#
+# ■ 왜 WAIT만인가 (최소 변경)
+#   WAIT는 '관망'이며 청산·보유·차단 상태가 아니다 — 신규진입을 막을 상태적
+#   근거가 없다. 나머지는 그대로 둔다:
+#     CARRY    이미 보유 중(신규진입 대상 아님) · 실측도 나쁘다(승률 26.7% · 중위 -3.13%)
+#     EXIT_WARNING / BLOCKED  청산·차단 상태
+#     OVERHEAT 과열 추격 위험 — 모멘텀 레인이 이미 별도 취급
+#     NEUTRAL  풀 성적은 좋았다(승률 68.6% · 상위2제거 +0.80%). 그러나 하루 1픽
+#              성적이 WAIT 단독보다 나아지지 않아(중위 +0.57% vs +1.70%)
+#              **추가 근거 없음 → 변경하지 않는다**
+#
+# ■ v54의 요지는 유지된다
+#   "살 수 없는 것을 매수라 부르지 말자"는 그대로다. 바뀐 것은 살 수 없게
+#   만들던 이유(관망 상태라는 표시 관례)이며, 수량이 0이면 여전히 제외된다.
+_ALPHA_EXEMPT_INACTIVE_ROUTES = frozenset({"WAIT"})
+
+
+def kelly_route_zero_mask(df) -> "pd.Series":
+    """ROUTE 때문에 사이징 0이 강제되는 행 (알파 면제 반영).
+
+    services.recommendation_quality가 PRODUCTION_BUY 판정에 같은 규칙을 쓰도록
+    이 함수를 SSOT로 노출한다 — 두 곳이 어긋나면 '매수인데 0주'가 되살아난다.
+    """
+    if df is None or len(df) == 0 or "ROUTE" not in df.columns:
+        return pd.Series(False, index=getattr(df, "index", None), dtype=bool)
+    route = df["ROUTE"].astype(str).str.strip().str.upper()
+    zero = route.isin(_KELLY_INACTIVE_ROUTES)
+    if "ALPHA_ENTRY_OK" in df.columns:
+        alpha_ok = (pd.to_numeric(df["ALPHA_ENTRY_OK"], errors="coerce")
+                    .fillna(0).astype(int).eq(1))
+        zero &= ~(alpha_ok & route.isin(_ALPHA_EXEMPT_INACTIVE_ROUTES))
+    return zero
+
 
 def resize_kelly_with_alpha(
     df: pd.DataFrame,
@@ -1219,7 +1282,8 @@ def resize_kelly_with_alpha(
     )
 
     if "ROUTE" in out.columns:
-        _inactive = out["ROUTE"].astype(str).str.upper().str.strip().isin(_KELLY_INACTIVE_ROUTES)
+        # [v57] 알파 진입 통과 + WAIT는 면제 — 근거는 위 _ALPHA_EXEMPT_INACTIVE_ROUTES 주석
+        _inactive = kelly_route_zero_mask(out)
         if _inactive.any():
             for col in ["켈리_수량", "켈리_금액(원)", "추천수량", "추천금액(만원)",
                         "KELLY_FRACTION"]:
