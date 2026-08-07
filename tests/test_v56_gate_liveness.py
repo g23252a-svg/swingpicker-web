@@ -48,9 +48,11 @@ def fake_root(tmp_path, monkeypatch):
     게이트 쪽은 _ensure_import_path로 고쳤고, 여기서도 이중으로 되돌린다.
     """
     monkeypatch.setattr(gate, "PROJECT_ROOT", str(tmp_path))
-    gate._TREE_CACHE.clear()
+    # [v56] 캐시는 root별 키다 — 가짜 트리 항목만 버린다. 전체를 비우면 실제
+    #   저장소 트리(288 파일)를 테스트마다 다시 파싱해 스위트가 느려진다.
+    gate._TREE_CACHE.pop(str(tmp_path), None)
     yield tmp_path
-    gate._TREE_CACHE.clear()
+    gate._TREE_CACHE.pop(str(tmp_path), None)
     tmp = str(tmp_path)
     sys.path[:] = [p for p in sys.path if p != tmp]
     for name, mod in list(sys.modules.items()):
@@ -164,7 +166,7 @@ class TestAlphaSchemaGateWasDead:
         """대상 함수가 사라지면 통과가 아니라 실패여야 한다."""
         _clean_tree(fake_root)
         (fake_root / "components/backtest_verdict.py").unlink()
-        gate._TREE_CACHE.clear()
+        gate._TREE_CACHE.pop(str(fake_root), None)
         errs = gate.check_alpha_schema_integrity()
         assert errs, "대상이 사라졌는데 조용히 통과했다"
         assert "소실" in errs[0]
@@ -188,7 +190,7 @@ class TestGateTargets:
     def test_missing_file_detected(self, fake_root):
         _clean_tree(fake_root)
         (fake_root / "validation.py").unlink()
-        gate._TREE_CACHE.clear()
+        gate._TREE_CACHE.pop(str(fake_root), None)
         errs = gate.check_gate_targets()
         assert any("validation.py" in e for e in errs)
 
@@ -202,7 +204,7 @@ class TestGateTargets:
             ("11 Momentum 계약", "momentum_lane.py",
              ["MOMENTUM_LANE_COLS", "apply_momentum_lane", "compute_market_risk_off"]),
         ])
-        gate._TREE_CACHE.clear()
+        gate._TREE_CACHE.pop(str(fake_root), None)
         errs = gate.check_gate_targets()
         assert errs and "compute_market_risk_off" in errs[0]
 
@@ -248,6 +250,39 @@ class TestBehaviorGatesActuallyRun:
         out = capsys.readouterr().out
         assert "건너뜀" not in out, f"{fn_name}가 스킵 경로로 빠졌다: {out.strip()}"
         assert errs == [], f"{fn_name} 위반: {errs}"
+
+
+# ══════════════════════════════════════════════════════════════
+#  4b. 런타임 의존성 — 선언되지 않은 필수 의존성
+# ══════════════════════════════════════════════════════════════
+class TestRuntimeDeps:
+    """[v56] CI가 전체 스위트를 돌리기 시작한 첫 실행에서 29건이 깨졌고,
+    원인은 하나였다 — **parquet 엔진(pyarrow)이 어느 requirements에도 없었다.**
+    pandas 3.x는 pyarrow를 필수로 끌어오지만 2.x는 아니다. 즉 pandas 2.x로
+    해석되는 환경에서는 v50 생존편향 제거용 패널 합집합이 조용히 폴백/실패한다.
+    29개의 혼란스러운 ImportError 대신 한 줄로 원인을 말하게 한다."""
+
+    def test_parquet_engine_available(self, tmp_path):
+        import pandas as pd
+        p = tmp_path / "t.parquet"
+        try:
+            pd.DataFrame({"a": [1, 2]}).to_parquet(p)
+            back = pd.read_parquet(p)
+        except ImportError as e:
+            pytest.fail(
+                f"parquet 엔진 없음 — ohlcv_cache_*.parquet를 쓰는 경로"
+                f"(alpha_engine·pipeline_data·pick_reliability 등)가 동작하지 않는다. "
+                f"requirements에 pyarrow가 있는지 확인: {e}"
+            )
+        assert list(back["a"]) == [1, 2]
+
+    @pytest.mark.parametrize("req", ["requirements.txt", "requirements_nicegui.txt"])
+    def test_pyarrow_declared(self, req):
+        text = (ROOT / req).read_text(encoding="utf-8")
+        lines = [l.strip() for l in text.splitlines()
+                 if l.strip() and not l.strip().startswith("#")]
+        assert any(l.split(">=")[0].split("==")[0].strip() == "pyarrow" for l in lines), \
+            f"{req}에 pyarrow 선언이 없다 — 새 배포가 parquet 없이 해석될 수 있다"
 
 
 # ══════════════════════════════════════════════════════════════
