@@ -2024,6 +2024,22 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 + (f" · ⚠️ 역주행 {_warn_n}축" if _warn_n else " · 이상 없음"))
     except Exception as e:
         log(f"⚠️ 축 IC 감사 스킵: {e}")
+    # [v58] 알파 실전 성적 야간 누적 — 진입 SSOT도 매일 자기 성적을 남긴다.
+    # v28이 룰 기반 축을 감사하게 만든 것과 같은 이유다. 이게 없어서
+    # 2026-08-10에 "최근 구간은 아직 측정 불가"라고만 답할 수 있었다
+    # (데이터는 있었고 누적된 성적표가 없었다).
+    try:
+        from services.alpha_live_report import save_alpha_live_report, alpha_live_line
+        _alr = save_alpha_live_report(OUT_DIR, trade_ymd)
+        _line = alpha_live_line(_alr)
+        if _line:
+            log(f"🎯 [v58] {_line}")
+        elif not _alr.get("ok"):
+            log(f"🎯 [v58] 알파 실전 성적: {_alr.get('reason', '집계 불가')}")
+        for _w in (_alr.get("warnings") or []):
+            log(f"🚨 [v58] {_w}")
+    except Exception as e:
+        log(f"⚠️ 알파 실전 성적 리포트 스킵: {e}")
     # [v21.3] 조합 최적화
     try:
         from combo_optimizer import run_combo_optimization
