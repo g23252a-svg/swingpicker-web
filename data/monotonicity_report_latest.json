@@ -1,13 +1,13 @@
 {
-  "asof_ymd": "20260810",
-  "generated_at": "2026-08-10T21:07:58.107146",
+  "asof_ymd": "20260811",
+  "generated_at": "2026-08-11T21:05:44.260343",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
   "quality_policy_version": "alpha_gate_v57",
-  "declared_wr_active": null,
-  "declared_wr_top_pick": null,
+  "declared_wr_active": 0.3823,
+  "declared_wr_top_pick": 0.3838,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
@@ -71,21 +71,23 @@
     "monotone_avg_ret_excess": false
   },
   "realized_wr": 0.3193,
-  "realized_wr_top_pick": null,
-  "realized_wr_top_pick_n": 0,
-  "realized_wr_active": null,
-  "realized_wr_active_n": 0,
-  "declared_vs_realized_gap_active": null,
-  "declared_vs_realized_gap_top_pick": null,
-  "declared_vs_realized_gap": null,
+  "realized_wr_top_pick_fallback": "overall_no_elite_score",
+  "realized_wr_active_fallback": "overall_no_elite_score",
+  "realized_wr_top_pick": 0.3193,
+  "realized_wr_top_pick_n": 41,
+  "realized_wr_active": 0.3193,
+  "realized_wr_active_n": 41,
+  "declared_vs_realized_gap_active": 0.063,
+  "declared_vs_realized_gap_top_pick": 0.0645,
+  "declared_vs_realized_gap": 0.0645,
   "avg_ret_excess_pct": -5.4504,
   "top_pick_funnel": {
-    "trade_ymd": "20260810",
-    "total": 364,
+    "trade_ymd": "20260811",
+    "total": 360,
     "aggressive_funnel": {
-      "total": 364,
+      "total": 360,
       "route_active": 0,
-      "hard_gate": 122,
+      "hard_gate": 114,
       "elite_75": 0,
       "struct_80": 0,
       "timing_70": 0,
@@ -93,9 +95,9 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 364,
+      "total": 360,
       "route_active": 0,
-      "hard_gate": 122,
+      "hard_gate": 114,
       "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
@@ -112,36 +114,36 @@
     {
       "gate": "production_buy_sizable",
       "status": "PASS",
-      "subject_n": 0
+      "subject_n": 1
     },
     {
       "gate": "top_pick_tp1_positive",
       "status": "PASS",
-      "subject_n": 0
+      "subject_n": 12
     },
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "TOP_PICK 0건",
-      "subject_n": 0
+      "detail": "min_rr=1.10",
+      "subject_n": 12
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
-      "status": "SKIP",
-      "detail": "TOP_PICK 매칭 sufficient bin 없음",
-      "subject_n": 0
+      "status": "PASS",
+      "detail": "gap_top_pick=6.5% (n=41)",
+      "subject_n": 41
     }
   ],
   "ci_soft": [
     {
       "gate": "top_pick_route_positive_observed",
-      "status": "OK",
-      "detail": "TOP_PICK 0건이 ATTACK/ARMED 아님 (v32 이후 정상 — 관측만)"
+      "status": "WARN",
+      "detail": "TOP_PICK 6건이 ATTACK/ARMED 아님 (v32 이후 정상 — 관측만)"
     },
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "OK",
-      "detail": "active 매칭 sufficient bin 없음"
+      "detail": "gap_active=6.3% (n=41)"
     },
     {
       "gate": "wilson_monotonicity",
@@ -165,7 +167,7 @@
   ],
   "ci_hard_all_pass": true,
   "ci_soft_any_warn": true,
-  "top_pick_count": 0,
+  "top_pick_count": 12,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": null
+  "top_pick_min_rr": 1.1
 }

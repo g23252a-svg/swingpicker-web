@@ -1,5 +1,5 @@
 {
- "trained_ymd": "20260810",
+ "trained_ymd": "20260811",
  "n_features": 100,
  "features": [
   "거래대금(억원)",
@@ -106,11 +106,11 @@
  "ok": true,
  "validated": true,
  "oos_days": 61,
- "oos_rows": 22022,
- "mean_ic": 0.2098,
- "ic_t": 6.92,
- "auc": 0.5912,
- "q5q1_spread_pct": 5.106,
+ "oos_rows": 22026,
+ "mean_ic": 0.2177,
+ "ic_t": 7.55,
+ "auc": 0.5966,
+ "q5q1_spread_pct": 5.244,
  "gate": {
   "min_ic_t": 2.0,
   "min_auc": 0.52,
@@ -120,62 +120,62 @@
   {
    "decile": 0,
    "n": 2172,
-   "win_rate": 0.2716,
-   "avg_fwd_pct": -6.982
+   "win_rate": 0.2634,
+   "avg_fwd_pct": -7.375
   },
   {
    "decile": 1,
    "n": 2199,
-   "win_rate": 0.2633,
-   "avg_fwd_pct": -6.18
+   "win_rate": 0.2674,
+   "avg_fwd_pct": -6.134
   },
   {
    "decile": 2,
-   "n": 2205,
-   "win_rate": 0.2558,
-   "avg_fwd_pct": -5.911
+   "n": 2206,
+   "win_rate": 0.2575,
+   "avg_fwd_pct": -5.942
   },
   {
    "decile": 3,
-   "n": 2202,
-   "win_rate": 0.2961,
-   "avg_fwd_pct": -5.151
+   "n": 2201,
+   "win_rate": 0.2958,
+   "avg_fwd_pct": -5.105
   },
   {
    "decile": 4,
-   "n": 2188,
-   "win_rate": 0.2966,
-   "avg_fwd_pct": -4.673
+   "n": 2189,
+   "win_rate": 0.2947,
+   "avg_fwd_pct": -4.943
   },
   {
    "decile": 5,
-   "n": 2211,
-   "win_rate": 0.3094,
-   "avg_fwd_pct": -4.259
+   "n": 2213,
+   "win_rate": 0.3104,
+   "avg_fwd_pct": -4.002
   },
   {
    "decile": 6,
    "n": 2204,
-   "win_rate": 0.3321,
-   "avg_fwd_pct": -3.084
+   "win_rate": 0.3367,
+   "avg_fwd_pct": -2.878
   },
   {
    "decile": 7,
    "n": 2203,
-   "win_rate": 0.3572,
-   "avg_fwd_pct": -2.602
+   "win_rate": 0.3636,
+   "avg_fwd_pct": -2.408
   },
   {
    "decile": 8,
-   "n": 2201,
-   "win_rate": 0.3925,
-   "avg_fwd_pct": -1.621
+   "n": 2202,
+   "win_rate": 0.3756,
+   "avg_fwd_pct": -1.789
   },
   {
    "decile": 9,
    "n": 2237,
-   "win_rate": 0.4077,
-   "avg_fwd_pct": -1.31
+   "win_rate": 0.4171,
+   "avg_fwd_pct": -1.231
   }
  ],
  "model_saved": true

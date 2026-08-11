@@ -6,57 +6,57 @@
  "axes": {
   "STRUCT_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0586,
-   "t_stat": -2.85,
+   "mean_ic": -0.059,
+   "t_stat": -2.91,
    "orientation": 1,
    "pct_positive": 0.365,
    "verdict": "역주행"
   },
   "TIMING_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0334,
-   "t_stat": -1.64,
+   "mean_ic": -0.0365,
+   "t_stat": -1.78,
    "orientation": 1,
-   "pct_positive": 0.442,
+   "pct_positive": 0.404,
    "verdict": "무신호"
   },
   "AI_SCORE": {
-   "n_days": 37,
-   "mean_ic": -0.1023,
-   "t_stat": -4.47,
+   "n_days": 36,
+   "mean_ic": -0.1087,
+   "t_stat": -4.67,
    "orientation": 1,
-   "pct_positive": 0.189,
+   "pct_positive": 0.167,
    "verdict": "역주행"
   },
   "FINAL_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0741,
-   "t_stat": -3.29,
+   "mean_ic": -0.0769,
+   "t_stat": -3.42,
    "orientation": 1,
-   "pct_positive": 0.365,
+   "pct_positive": 0.327,
    "verdict": "역주행"
   },
   "ELITE_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0775,
-   "t_stat": -4.14,
+   "mean_ic": -0.0817,
+   "t_stat": -4.44,
    "orientation": 1,
-   "pct_positive": 0.288,
+   "pct_positive": 0.25,
    "verdict": "역주행"
   },
   "POC_GAP": {
    "n_days": 52,
-   "mean_ic": -0.093,
-   "t_stat": -4.05,
+   "mean_ic": -0.1024,
+   "t_stat": -4.44,
    "orientation": -1,
-   "pct_positive": 0.346,
+   "pct_positive": 0.308,
    "verdict": "유효"
   }
  },
  "warnings": [
-  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0586 (t=-2.9, 52일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: AI_SCORE IC -0.1023 (t=-4.5, 37일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: FINAL_SCORE IC -0.0741 (t=-3.3, 52일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: ELITE_SCORE IC -0.0775 (t=-4.1, 52일) — 점수가 높을수록 수익률 낮음"
+  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0590 (t=-2.9, 52일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: AI_SCORE IC -0.1087 (t=-4.7, 36일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: FINAL_SCORE IC -0.0769 (t=-3.4, 52일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: ELITE_SCORE IC -0.0817 (t=-4.4, 52일) — 점수가 높을수록 수익률 낮음"
  ]
 }

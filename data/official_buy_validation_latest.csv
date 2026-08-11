@@ -89,3 +89,15 @@
 20260805,000100,유한양행,True,False,True,False,AVOID,0.0,63.5,63.5,38.3,ATTACK,1.07,0.0,-1.75,8.14,GREEN,recommend_20260805.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260805,068270,셀트리온,True,False,True,False,AVOID,0.0,49.0,49.0,32.5,ATTACK,1.03,0.0,7.02,-1.59,GREEN,recommend_20260805.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260805,088980,맥쿼리인프라,True,False,True,False,AVOID,0.0,20.2,20.2,16.3,ARMED,1.06,0.0,-6.27,-12.16,GREEN,recommend_20260805.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,458870,씨어스,True,True,False,True,BUY,90.0,13.4,13.4,11.3,WAIT,4.63,0.0,-19.89,-25.12,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,NOT_HOLDOUT,PENDING
+20260811,004310,현대약품,True,False,True,False,BUY,85.0,53.0,53.0,29.8,ATTACK,3.98,0.0,-14.24,-25.09,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,100090,SK오션플랜트,True,False,True,False,BUY,90.0,33.2,33.2,22.6,ARMED,2.65,0.0,-15.36,-49.24,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,322000,HD현대에너지솔루션,True,False,True,False,BUY,90.0,2.8,2.8,2.5,WAIT,4.52,0.0,-23.73,-11.66,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,024060,흥구석유,True,False,True,False,BUY,90.0,2.2,2.2,1.5,WAIT,4.23,0.0,-12.46,-47.96,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,001040,CJ,True,False,True,False,BUY,70.0,36.4,36.4,25.6,ARMED,1.1,0.0,-16.71,-24.49,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,399720,가온칩스,True,False,True,False,BUY,100.0,24.0,24.0,17.3,ARMED,2.05,0.0,-5.17,-1.9,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,003280,흥아해운,True,False,True,False,BUY,90.0,3.4,3.4,3.0,WAIT,2.93,0.0,-17.29,-38.63,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,348340,뉴로메카,True,False,True,False,BUY,100.0,28.6,28.6,20.3,ARMED,1.69,0.0,-29.07,-51.44,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,006800,미래에셋증권,True,False,True,False,BUY,100.0,10.5,10.5,9.0,WAIT,2.44,0.0,-27.12,-50.25,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,005380,현대차,True,False,True,False,BUY,80.0,20.3,20.3,14.9,ARMED,1.12,0.0,-29.45,-25.21,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260811,034230,파라다이스,True,False,True,False,BUY,80.0,10.5,10.5,9.0,WAIT,1.59,0.0,-23.56,-35.39,GREEN,recommend_20260811.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY

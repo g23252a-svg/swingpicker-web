@@ -5522,5 +5522,30 @@
       "316140_20260722_TP1_HIT_20260807",
       "316140_20260722_TP2_HIT_20260807"
     ]
+  },
+  {
+    "code": "089860",
+    "name": "롯데렌탈",
+    "entry_ymd": "20260729",
+    "entry_px": 37000.0,
+    "qty": 0,
+    "stop_px": 34000.0,
+    "stop_px_initial": 34000.0,
+    "take_px1": 41400.0,
+    "take_px2": 44200.0,
+    "trailing_high": 46600.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260811",
+    "last_close_px": 45000.0,
+    "unrealized_pnl_pct": 21.62,
+    "realized_pnl_pct": 21.62,
+    "close_ymd": "20260811",
+    "close_px": 45000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "089860_20260729_TP1_HIT_20260810",
+      "089860_20260729_TP1_HIT_20260811",
+      "089860_20260729_TP2_HIT_20260811"
+    ]
   }
 ]
