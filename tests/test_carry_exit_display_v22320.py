@@ -28,15 +28,40 @@ for _m in ("nicegui",):
         _mod.run = _Dummy()
         sys.modules[_m] = _mod
 
+# [v59] 이 스텁이 세션 전역으로 새어나가 다른 테스트를 망가뜨렸다.
+#   빈 plotly 모듈이 sys.modules에 남으면, 뒤에 도는 테스트가 실제 plotly를
+#   부분적으로 다시 import하게 되어 **같은 클래스가 두 벌 생긴다**. 그러면
+#   px.treemap이 기본 template을 검증할 때
+#     ValueError: Invalid value of type 'plotly.graph_objs.layout._template.Template'
+#   로 죽는다(2026-08 실측: tests/test_v59_sector_gap.py 9건 실패,
+#   단독 실행은 전부 통과 — 실행 순서에만 의존했다).
+#
+#   teardown_module로는 늦다: pytest는 **수집 단계에서 모든 테스트 모듈을
+#   import**하므로, 이 모듈의 테스트가 끝나기 훨씬 전에 다른 모듈이 이미 스텁을
+#   집어간다. 그래서 필요한 import를 감싸고 **끝나는 즉시 원복**한다.
+#   (v55.4의 ml_engine 스텁 오염과 같은 유형 · 그때는 대상이 하나였어서
+#    teardown으로 충분했다.)
+_STUB_NAMES = ("plotly", "plotly.express", "plotly.graph_objects")
+_installed: list[str] = []
 if "plotly" not in sys.modules:
-    _pl = types.ModuleType("plotly")
-    _ple = types.ModuleType("plotly.express")
-    _plg = types.ModuleType("plotly.graph_objects")
-    sys.modules["plotly"] = _pl
-    sys.modules["plotly.express"] = _ple
-    sys.modules["plotly.graph_objects"] = _plg
+    for _name in _STUB_NAMES:
+        _mod = types.ModuleType(_name)
+        _mod.__is_test_stub__ = True
+        sys.modules[_name] = _mod
+        _installed.append(_name)
+try:
+    from components.tab_portfolio_v2 import _classify_holding  # noqa: E402
+finally:
+    for _name in _installed:
+        if getattr(sys.modules.get(_name), "__is_test_stub__", False):
+            del sys.modules[_name]
 
-from components.tab_portfolio_v2 import _classify_holding  # noqa: E402
+
+def teardown_module(module):  # pragma: no cover - 이중 안전장치
+    """혹시 남았으면 여기서도 제거한다."""
+    for _name in _STUB_NAMES:
+        if getattr(sys.modules.get(_name), "__is_test_stub__", False):
+            del sys.modules[_name]
 
 
 def test_dead_exit_signal_classified_as_review():

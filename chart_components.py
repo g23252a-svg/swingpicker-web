@@ -16,11 +16,14 @@ Streamlit 의존 함수를 분리 표기합니다.
         add_volume_profile,
     )
 """
+import logging
 import math
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+
+logger = logging.getLogger("chart_components")
 
 
 # ═══════════════════════════════════════════════════
@@ -276,9 +279,46 @@ def plot_sector_treemap(df_map: pd.DataFrame) -> go.Figure:
         return go.Figure()
 
     sector_key = "업종_대분류" if "업종_대분류" in df_map.columns else "업종"
-    if sector_key not in df_map.columns:
+    if sector_key not in df_map.columns or "종목명" not in df_map.columns:
         return go.Figure()
 
+    # [v59] 계층 컬럼에 결측이 있으면 plotly가 트리를 못 만들고 예외를 던진다:
+    #   ValueError('None entries cannot have not-None children', <해당 행>)
+    #   → 시장 탭 전체가 '❌ 로딩 실패'로 죽었다(2026-08-10 실측: 326종목 중
+    #     30종목(9.2%)이 업종_대분류 결측, 녹십자 등).
+    # 데이터 공백이 화면을 죽이면 안 된다. 표시에서는 '미분류'로 묶는다.
+    #   주의: 이것은 **표시 전용**이다. 엔진의 섹터 축(SECTOR_RS/RANK,
+    #   kelly의 SECTOR_MOM_FACTOR)에서는 결측을 가짜 섹터로 묶지 않는다 —
+    #   서로 무관한 종목을 한 섹터로 취급하면 v41이 검증한 '강섹터×고알파'
+    #   상호작용이 오염된다(v59에서 kelly 쪽을 그렇게 고쳤다).
+    df_map = df_map.copy()
+    _sec = df_map[sector_key].astype("object")
+    _blank = _sec.isna() | _sec.map(
+        lambda v: str(v).strip() in ("", "nan", "None", "-"))
+    df_map[sector_key] = _sec.where(~_blank, "미분류").astype(str)
+    df_map["종목명"] = df_map["종목명"].astype("object").where(
+        df_map["종목명"].notna(), "(이름없음)").astype(str)
+    # 값·색 결측은 트리맵 면적/색 계산을 깨뜨린다 — 0으로 채우고 양수만 남긴다.
+    for _c, _d in (("거래대금(억원)", 0.0), ("LDY_SCORE", 0.0)):
+        if _c in df_map.columns:
+            df_map[_c] = pd.to_numeric(df_map[_c], errors="coerce").fillna(_d)
+    if "거래대금(억원)" in df_map.columns:
+        df_map = df_map[df_map["거래대금(억원)"] > 0]
+    if df_map.empty:
+        return go.Figure()
+
+    # [v59] plotly가 이중 로드된 환경(테스트 스텁 잔존 등)에서는 px가 기본
+    #   template을 검증하다 ValueError로 죽는다. 차트 하나 때문에 탭 전체가
+    #   '로딩 실패'가 되는 것이 이 패치가 없애려는 것 자체이므로, 여기서도
+    #   최후 방어로 감싼다 — 실패하면 빈 Figure를 돌려주고 로그만 남긴다.
+    try:
+        return _build_sector_treemap(df_map, sector_key)
+    except Exception as e:      # pragma: no cover - 환경 의존 경로
+        logger.warning(f"[v59] 섹터 트리맵 생성 실패 (빈 차트로 대체): {e}")
+        return go.Figure()
+
+
+def _build_sector_treemap(df_map: pd.DataFrame, sector_key: str) -> go.Figure:
     fig = px.treemap(
         df_map,
         path=[sector_key, "종목명"],

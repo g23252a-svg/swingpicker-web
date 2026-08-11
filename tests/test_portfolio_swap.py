@@ -92,8 +92,12 @@ def fake_env(tmp_path, monkeypatch):
         if (
             mod.startswith("services")
             or mod.startswith("components")
-            or mod == "nicegui"
-            or mod.startswith("nicegui.")
+            # [v59] nicegui(서드파티)는 지우지 않는다 — raw del 하면 monkeypatch가
+            #   뒤이은 setitem을 "원래 없었음"으로 기록해 teardown에서 원복 대신
+            #   삭제를 하고, 진짜 nicegui가 세션에서 영구히 사라진다. 그러면 뒤에
+            #   도는 테스트가 가짜 nicegui를 영구 설치하는 등 오염이 번진다.
+            #   아래 _setup_nicegui_mock의 setitem만으로 격리 목적은 달성된다.
+            #   tests/conftest.py가 이 규칙을 하드 게이트로 지킨다.
         ):
             del sys.modules[mod]
     _setup_nicegui_mock(monkeypatch)

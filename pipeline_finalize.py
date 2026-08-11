@@ -1747,6 +1747,29 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 log(f"🧠 [v32] 알파 전면 진입 게이트 적용 — 레짐 {_reg} · TOP_PICK {_tp_before}→{_tp_after} (ROUTE 거부권 제거)")
             else:
                 log("🧠 [v32] 알파 미검증 → 레거시 폴백 게이트 (ROUTE 거부권 없이)")
+            # [v59] 업종 결측 복구 — **켈리 사이징보다 먼저** 돌아야 한다.
+            #   2026-08-07 배치 실측: 326종목 중 30종목(9.2%)이 업종_대분류
+            #   결측이었고, 그 행들은 섹터/뉴스/전략 단계 이후에 합류해 18개
+            #   컬럼(LDY_SCORE·NEWS_SCORE 등 포함)을 못 받은 상태였다.
+            #   결과 ① 시장 탭 plotly 트리맵이 계층을 못 만들어 '로딩 실패'
+            #        ② 켈리 섹터 모멘텀이 결측을 '?' 한 덩어리로 묶어 무관한
+            #           30종목에 같은 배수를 줬다(→ 켈리_수량 오염)
+            #   여기서 업종(상세)으로부터 같은 분류기로 복구하고, 복구 못 한
+            #   행은 결측으로 남긴다(가짜 섹터 금지). 결측 사실은 로그로 남긴다 —
+            #   조용히 채우면 '행이 늦게 합류하는' 근본 원인이 또 숨는다.
+            try:
+                from services.sector_repair import (
+                    repair_sector, sector_repair_line, is_alarming)
+                df_out, _srep = repair_sector(df_out)
+                _sline = sector_repair_line(_srep)
+                if _sline:
+                    log(f"{'🚨' if is_alarming(_srep) else '🏷️'} [v59] {_sline}")
+                    if is_alarming(_srep):
+                        log("🚨 [v59] 업종 결측은 그 행이 섹터/뉴스/전략 단계 뒤에 "
+                            "합류했다는 신호다 — LDY_SCORE·NEWS_SCORE 등도 비어 있다")
+            except Exception as _se:
+                log(f"⚠️ [v59] 업종 결측 복구 스킵: {_se}")
+
             # [v33.1] 켈리 사이징 배선 — collector 단계 켈리는 알파 주입 전에
             # 돌아 ALPHA_WIN_PROB를 못 봤다(7/19 첫 배치 실측: KELLY_P_SOURCE
             # 전부 레거시). 알파 게이트 직후 재계산해 사이징 축을 알파로 통일.
