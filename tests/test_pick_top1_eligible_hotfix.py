@@ -21,18 +21,23 @@ import numpy as np
 
 
 @pytest.fixture
-def pick_module():
+def pick_module(monkeypatch):
     """tab_stocks의 pick_top1/pick_top3 함수만 import.
 
     nicegui UI 의존성 우회 위해 핵심 함수만 따로 로드.
     """
     # nicegui 모킹 (run/ui/app/observables 등 모두)
+    # [v59] 예전에는 raw sys.modules 대입이어서 가짜 nicegui가 **세션 끝까지
+    #   남았다**. 앞선 테스트가 실제 nicegui를 지우고 간 경우 이 픽스처가 가짜를
+    #   영구 설치해 뒤에 도는 테스트가 엉뚱하게 깨졌다. monkeypatch.setitem으로
+    #   바꿔 teardown에서 원복되게 한다(tests/conftest.py 참고).
     if "nicegui" not in sys.modules:
         nicegui_mock = type(sys)("nicegui")
         for attr in ("ui", "app", "run", "Tailwind", "observables", "events"):
             setattr(nicegui_mock, attr, type(sys)(f"nicegui.{attr}"))
-            sys.modules[f"nicegui.{attr}"] = getattr(nicegui_mock, attr)
-        sys.modules["nicegui"] = nicegui_mock
+            monkeypatch.setitem(sys.modules, f"nicegui.{attr}",
+                                getattr(nicegui_mock, attr))
+        monkeypatch.setitem(sys.modules, "nicegui", nicegui_mock)
 
     for mod in list(sys.modules.keys()):
         if mod == "components.tab_stocks":

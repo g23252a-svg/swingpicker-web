@@ -119,10 +119,19 @@ def fake_env(tmp_path, monkeypatch):
             "benchmarks" in mod
             or mod.startswith("services")
             or mod.startswith("components")
-            or mod == "nicegui"
-            or mod.startswith("nicegui.")
-            or mod == "plotly"
-            or mod.startswith("plotly.")
+            # [v59] nicegui/plotly 는 **지우지 않는다**.
+            #   서드파티를 sys.modules에서 raw del 하면, 그것을 이미 import해 둔
+            #   모듈(chart_components 등)이 옛 클래스 객체를 계속 들고 남는다.
+            #   이후 누가 다시 import하면 클래스가 새로 만들어져 **같은 클래스가
+            #   두 벌** 존재하고, 옛 검증기가 새 인스턴스를 거부한다:
+            #     Invalid value of type '...layout._template.Template'
+            #   실행 순서에만 의존하므로 단독 실행은 통과하고 스위트에서만 터진다.
+            #   (게다가 지운 뒤 monkeypatch.setitem을 하면 monkeypatch가 "원래
+            #    없었음"으로 기록해 teardown에서 원복이 아니라 **삭제**를 한다 —
+            #    진짜 plotly가 세션에서 영구히 사라진다.)
+            #   아래 _setup_*_mock의 monkeypatch.setitem만으로 이 파일의 격리
+            #   목적은 달성되고, setitem은 teardown에서 정상 원복된다.
+            #   tests/conftest.py가 이 규칙을 하드 게이트로 지킨다.
         ):
             del sys.modules[mod]
 

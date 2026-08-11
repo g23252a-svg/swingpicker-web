@@ -450,7 +450,45 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         "market_regime": market_regime,
         "risk_off": risk_off,       # [v34] 폭락 방어 잠금 상태(+해제 진행률)
         "alpha_gate": alpha_on,     # [v34] 알파 전면 게이트 배치 여부
+        "track_record": _track_record_lines(),   # [v58.1] 자기 성적 (관측 · 약속 아님)
     }
+
+
+# ══════════════════════════════════════════════════════════════════
+#  [v58.1] 성적 기록 노출 — 만들어놓고 아무도 못 보던 것
+# ══════════════════════════════════════════════════════════════════
+#
+# v55가 픽 실현 분포(pick_reliability)를, v58이 알파 실전 성적
+# (alpha_live_report)을 매일 산출하게 만들었는데, **둘 다 화면에서 한 번도
+# 호출되지 않았다** — JSON을 직접 열어야 볼 수 있었다. v53이 고친 것과 같은
+# 유형(엔진은 바뀌었고 화면은 모른다)이다.
+#
+# 표시 원칙 (v55~v58에서 확립한 정직성 규율)
+#   · 표본 n을 항상 같이 낸다. n이 얇다는 사실을 숨기면 숫자가 약속처럼 읽힌다.
+#   · 리포트가 없거나 ok=False면 **아무것도 그리지 않는다**. 빈 자리를 낙관적
+#     문구로 채우지 않는다.
+#   · '과거 관측'이라고 명시한다. 이 숫자는 미래 수익의 약속이 아니다.
+def _track_record_lines(data_dir: str = "data") -> list[str]:
+    """알파 실전 성적 + 픽 실현 분포를 한 줄씩. 없으면 빈 리스트."""
+    lines: list[str] = []
+    try:
+        from services.alpha_live_report import load_alpha_live_report, alpha_live_line
+
+        _r = load_alpha_live_report(data_dir)
+        _l = alpha_live_line(_r)
+        if _l:
+            lines.append(_l)
+    except Exception as e:  # 리포트 부재/파손이 화면을 깨뜨리면 안 된다
+        logger.warning(f"[v58.1] 알파 실전 성적 라인 생략: {e}")
+    try:
+        from services.pick_reliability import load_pick_reliability, reliability_line
+
+        _l2 = reliability_line(load_pick_reliability(data_dir))
+        if _l2:
+            lines.append(_l2)
+    except Exception as e:
+        logger.warning(f"[v58.1] 픽 신뢰도 라인 생략: {e}")
+    return lines
 
 
 def _money(value: float) -> str:
@@ -685,6 +723,16 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                 ui.label(
                     f"상위 {len(summary['watch'])}개만 표시했습니다. 나머지 {summary['watch_count'] - len(summary['watch'])}개는 종목 탭에서 확인하세요."
                 ).classes("text-xs text-slate-500")
+
+        # [v58.1] 이 엔진의 지난 성적 — 매일 산출하면서 화면에 없던 것.
+        #   숫자를 자랑하려는 자리가 아니다. 표본이 얇고 최근 구간이 5년 만의
+        #   폭락이었다는 사실까지 같이 보여야 사용자가 픽을 과대평가하지 않는다.
+        if summary.get("track_record"):
+            with ui.column().classes("w-full gap-1 mt-2"):
+                ui.label("이 엔진의 지난 성적 (과거 관측 · 미래 약속 아님)").classes(
+                    "text-xs font-bold text-slate-400")
+                for _line in summary["track_record"]:
+                    ui.label(_line).classes("text-xs text-slate-400 leading-relaxed")
 
         with ui.row().classes("sp-rule-row w-full gap-2 mt-2"):
             for text in [

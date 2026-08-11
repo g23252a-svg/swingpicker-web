@@ -1370,11 +1370,33 @@ def apply_alpha_proportional_sizing(df: pd.DataFrame) -> pd.DataFrame:
     secmom_factor = pd.Series(1.0, index=mult.index)
     if "업종_대분류" in out.columns and "ret_5d_%" in out.columns:
         _ret5 = pd.to_numeric(out["ret_5d_%"], errors="coerce")
-        _sec = out["업종_대분류"].astype(str).fillna("?")
-        _sec_mean = _ret5.groupby(_sec).transform("mean")
+        # [v59] 종전 `astype(str).fillna("?")`는 **업종이 결측인 종목 전부를
+        #   '?'라는 가짜 섹터 하나로 묶었다.** 2026-08-07 배치 실측: 326종목 중
+        #   30종목(9.2%)이 업종_대분류 결측이었고, 그 30개는 서로 아무 관계가
+        #   없는데도 공통 섹터 평균 수익률을 공유해 같은 SECTOR_MOM_FACTOR를
+        #   받았다. 이 배수는 ALPHA_SIZE_MULT → 켈리_수량으로 이어지므로
+        #   **실제 주문 수량이 오염된다.**
+        #   v41이 검증한 것은 '강섹터 × 고알파' 상호작용이다. 섹터를 모르는
+        #   종목에 섹터 배수를 주는 것은 그 검증 범위 밖이다.
+        #   → 결측은 그룹에 넣지 않고 **중립(1.0)**으로 둔다.
+        _sec_raw = out["업종_대분류"]
+        _sec = _sec_raw.astype("object").where(_sec_raw.notna(), None)
+        _sec = _sec.map(lambda v: None if v is None or str(v).strip() in
+                        ("", "nan", "None", "?", "미분류") else str(v).strip())
+        _known = _sec.notna()
+        _sec_mean = pd.Series(np.nan, index=out.index, dtype="float64")
+        if bool(_known.any()):
+            _sec_mean.loc[_known] = (
+                _ret5.loc[_known].groupby(_sec.loc[_known]).transform("mean"))
         _rank = _sec_mean.rank(pct=True)
+        # 결측 섹터 → rank NaN → 0.5(중립)로 채워 배수 1.0이 된다.
         secmom_factor = (_SECMOM_LO + (_SECMOM_HI - _SECMOM_LO)
                          * _rank.fillna(0.5)).reindex(mult.index).fillna(1.0)
+        _n_unknown = int((~_known).sum())
+        if _n_unknown:
+            _logger.warning(
+                f"[v59] 업종 결측 {_n_unknown}종목 — 섹터 모멘텀 배수 중립(1.0) 적용 "
+                f"(가짜 섹터로 묶지 않음)")
         out["SECTOR_MOM_FACTOR"] = 1.0
         out.loc[bet, "SECTOR_MOM_FACTOR"] = secmom_factor
 
