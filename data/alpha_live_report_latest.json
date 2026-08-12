@@ -1,177 +1,177 @@
 {
  "ok": true,
  "alpha_live_from": "20260714",
- "asof": "20260806",
- "n_days": 17,
- "files_scanned": 119,
+ "asof": "20260807",
+ "n_days": 18,
+ "files_scanned": 120,
  "files_skipped": 0,
  "stop_pct": -0.08,
  "definition": "진입 t+1 시가 · -8% 장중 스톱 · t+h 종가",
  "horizons": {
   "h3": {
-   "n_days": 17,
-   "ic_mean": 0.0964,
-   "ic_median": 0.1298,
-   "ic_positive_days": 15,
+   "n_days": 18,
+   "ic_mean": 0.0942,
+   "ic_median": 0.126,
+   "ic_positive_days": 16,
    "ic_t": {
-    "n": 17,
-    "t": 1.666,
-    "p": 0.1152
+    "n": 18,
+    "t": 1.726,
+    "p": 0.1024
    },
    "universe": {
-    "n": 17,
-    "mean_pct": 0.386,
-    "median_pct": 0.156,
-    "win_rate": 0.5294,
-    "cum_pct": 6.57
+    "n": 18,
+    "mean_pct": 0.612,
+    "median_pct": 0.253,
+    "win_rate": 0.5556,
+    "cum_pct": 11.01
    },
    "top1": {
-    "n": 17,
-    "mean_pct": -1.778,
-    "median_pct": -0.3,
-    "win_rate": 0.4118,
-    "cum_pct": -30.22,
-    "excess_mean_pct": -2.164,
+    "n": 18,
+    "mean_pct": -1.491,
+    "median_pct": -0.15,
+    "win_rate": 0.4444,
+    "cum_pct": -26.84,
+    "excess_mean_pct": -2.103,
     "excess_t": {
-     "n": 17,
-     "t": -1.659,
-     "p": 0.1166
+     "n": 18,
+     "t": -1.708,
+     "p": 0.1058
     },
-    "stop_rate": 0.3529
+    "stop_rate": 0.3333
    },
    "top3": {
-    "n": 17,
-    "mean_pct": -0.47,
-    "median_pct": -0.06,
-    "win_rate": 0.4706,
-    "cum_pct": -7.99,
-    "excess_mean_pct": -0.856,
+    "n": 18,
+    "mean_pct": 0.224,
+    "median_pct": 0.278,
+    "win_rate": 0.5,
+    "cum_pct": 4.02,
+    "excess_mean_pct": -0.388,
     "excess_t": {
-     "n": 17,
-     "t": -0.692,
-     "p": 0.4987
+     "n": 18,
+     "t": -0.309,
+     "p": 0.761
     },
-    "stop_rate": 0.2941
+    "stop_rate": 0.2778
    },
    "top5": {
-    "n": 17,
-    "mean_pct": 0.078,
-    "median_pct": 0.895,
-    "win_rate": 0.5294,
-    "cum_pct": 1.33,
-    "excess_mean_pct": -0.308,
+    "n": 18,
+    "mean_pct": 0.659,
+    "median_pct": 1.195,
+    "win_rate": 0.5556,
+    "cum_pct": 11.86,
+    "excess_mean_pct": 0.047,
     "excess_t": {
-     "n": 17,
-     "t": -0.329,
-     "p": 0.7466
+     "n": 18,
+     "t": 0.05,
+     "p": 0.961
     },
-    "stop_rate": 0.2471
+    "stop_rate": 0.2333
    },
    "top10": {
-    "n": 17,
-    "mean_pct": -0.354,
-    "median_pct": 0.169,
-    "win_rate": 0.5294,
-    "cum_pct": -6.02,
-    "excess_mean_pct": -0.741,
+    "n": 18,
+    "mean_pct": 0.115,
+    "median_pct": 0.379,
+    "win_rate": 0.5556,
+    "cum_pct": 2.08,
+    "excess_mean_pct": -0.496,
     "excess_t": {
-     "n": 17,
-     "t": -0.862,
-     "p": 0.4016
+     "n": 18,
+     "t": -0.587,
+     "p": 0.5652
     },
-    "stop_rate": 0.2882
+    "stop_rate": 0.2778
    },
    "by_risk_off": {
-    "n_days": 15,
-    "ic_mean": 0.0966,
+    "n_days": 16,
+    "ic_mean": 0.0941,
     "top1": {
-     "n": 15,
-     "mean_pct": -1.435,
-     "median_pct": 0.0,
-     "win_rate": 0.4667,
-     "cum_pct": -21.53
+     "n": 16,
+     "mean_pct": -1.134,
+     "median_pct": 0.404,
+     "win_rate": 0.5,
+     "cum_pct": -18.15
     },
     "universe": {
-     "n": 15,
-     "mean_pct": 0.361,
-     "median_pct": 0.156,
-     "win_rate": 0.5333,
-     "cum_pct": 5.41
+     "n": 16,
+     "mean_pct": 0.616,
+     "median_pct": 0.253,
+     "win_rate": 0.5625,
+     "cum_pct": 9.86
     }
    }
   },
   "h5": {
-   "n_days": 15,
-   "ic_mean": 0.106,
-   "ic_median": 0.1197,
-   "ic_positive_days": 12,
+   "n_days": 16,
+   "ic_mean": 0.0999,
+   "ic_median": 0.1147,
+   "ic_positive_days": 13,
    "ic_t": {
-    "n": 15,
-    "t": 2.191,
-    "p": 0.0458
+    "n": 16,
+    "t": 2.189,
+    "p": 0.0448
    },
    "universe": {
-    "n": 15,
-    "mean_pct": -0.024,
-    "median_pct": -3.884,
-    "win_rate": 0.3333,
-    "cum_pct": -0.37
+    "n": 16,
+    "mean_pct": 0.192,
+    "median_pct": -3.656,
+    "win_rate": 0.375,
+    "cum_pct": 3.07
    },
    "top1": {
-    "n": 15,
-    "mean_pct": -2.455,
-    "median_pct": -0.3,
-    "win_rate": 0.4667,
-    "cum_pct": -36.82,
-    "excess_mean_pct": -2.43,
+    "n": 16,
+    "mean_pct": -2.388,
+    "median_pct": -0.846,
+    "win_rate": 0.4375,
+    "cum_pct": -38.21,
+    "excess_mean_pct": -2.58,
     "excess_t": {
-     "n": 15,
-     "t": -1.769,
-     "p": 0.0987
+     "n": 16,
+     "t": -1.994,
+     "p": 0.0647
     },
-    "stop_rate": 0.4
+    "stop_rate": 0.375
    },
    "top3": {
-    "n": 15,
-    "mean_pct": -1.847,
-    "median_pct": -3.072,
-    "win_rate": 0.3333,
-    "cum_pct": -27.71,
-    "excess_mean_pct": -1.823,
+    "n": 16,
+    "mean_pct": -1.617,
+    "median_pct": -2.147,
+    "win_rate": 0.375,
+    "cum_pct": -25.87,
+    "excess_mean_pct": -1.809,
     "excess_t": {
-     "n": 15,
-     "t": -1.642,
-     "p": 0.1228
+     "n": 16,
+     "t": -1.742,
+     "p": 0.1019
     },
-    "stop_rate": 0.4
+    "stop_rate": 0.375
    },
    "top5": {
-    "n": 15,
-    "mean_pct": -0.249,
-    "median_pct": -1.901,
-    "win_rate": 0.4,
-    "cum_pct": -3.74,
-    "excess_mean_pct": -0.225,
+    "n": 16,
+    "mean_pct": 0.006,
+    "median_pct": -1.191,
+    "win_rate": 0.4375,
+    "cum_pct": 0.09,
+    "excess_mean_pct": -0.186,
     "excess_t": {
-     "n": 15,
-     "t": -0.251,
-     "p": 0.8054
+     "n": 16,
+     "t": -0.222,
+     "p": 0.8273
     },
-    "stop_rate": 0.3333
+    "stop_rate": 0.3125
    },
    "top10": {
-    "n": 15,
-    "mean_pct": -0.959,
-    "median_pct": -1.975,
-    "win_rate": 0.3333,
-    "cum_pct": -14.38,
-    "excess_mean_pct": -0.934,
+    "n": 16,
+    "mean_pct": -0.557,
+    "median_pct": -1.54,
+    "win_rate": 0.375,
+    "cum_pct": -8.91,
+    "excess_mean_pct": -0.749,
     "excess_t": {
-     "n": 15,
-     "t": -1.172,
-     "p": 0.2608
+     "n": 16,
+     "t": -0.974,
+     "p": 0.3453
     },
-    "stop_rate": 0.38
+    "stop_rate": 0.3562
    },
    "by_risk_off": {
     "n_days": 14,
@@ -830,6 +830,24 @@
     "top10_excess_pct": 3.378,
     "top10_stop_rate": 0.0,
     "top1_name": "한국전력"
+   },
+   "h5": {
+    "n_scored": 323,
+    "ic": 0.0091,
+    "universe_pct": 3.436,
+    "top1_pct": -1.391,
+    "top1_excess_pct": -4.827,
+    "top1_stop_rate": 0.0,
+    "top3_pct": 1.835,
+    "top3_excess_pct": -1.601,
+    "top3_stop_rate": 0.0,
+    "top5_pct": 3.83,
+    "top5_excess_pct": 0.394,
+    "top5_stop_rate": 0.0,
+    "top10_pct": 5.47,
+    "top10_excess_pct": 2.034,
+    "top10_stop_rate": 0.0,
+    "top1_name": "한국전력"
    }
   },
   {
@@ -853,6 +871,29 @@
     "top10_excess_pct": 2.806,
     "top10_stop_rate": 0.2,
     "top1_name": "흥구석유"
+   }
+  },
+  {
+   "ymd": "20260807",
+   "pool": 326,
+   "risk_off": true,
+   "h3": {
+    "n_scored": 326,
+    "ic": 0.0577,
+    "universe_pct": 4.448,
+    "top1_pct": 3.382,
+    "top1_excess_pct": -1.067,
+    "top1_stop_rate": 0.0,
+    "top3_pct": 12.013,
+    "top3_excess_pct": 7.565,
+    "top3_stop_rate": 0.0,
+    "top5_pct": 10.534,
+    "top5_excess_pct": 6.086,
+    "top5_stop_rate": 0.0,
+    "top10_pct": 8.102,
+    "top10_excess_pct": 3.654,
+    "top10_stop_rate": 0.1,
+    "top1_name": "중앙첨단소재"
    }
   }
  ],

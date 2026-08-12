@@ -1,7 +1,24 @@
 {
-  "trade_date": "20260811",
-  "generated_at": "2026-08-11 21:06:31",
-  "decision": "CASH",
-  "count": 0,
-  "stocks": []
+  "trade_date": "20260812",
+  "generated_at": "2026-08-12 21:10:39",
+  "count": 1,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "000250",
+      "name": "삼천당제약",
+      "route": "ATTACK",
+      "score": 40.8,
+      "close": 186200,
+      "entry": 186200,
+      "stop": 171300,
+      "target1": 218500,
+      "target2": 254000,
+      "est_win_rate": 0.408,
+      "rr": 2.2,
+      "sector": "바이오·의약품",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/000250"
+    }
+  ]
 }
