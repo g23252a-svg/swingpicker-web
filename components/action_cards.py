@@ -28,6 +28,8 @@ from typing import Optional
 
 import pandas as pd
 
+
+from services import position_risk as _PR   # [v61] 리스크 표기 SSOT
 from services.recommendation_quality import production_buy_mask
 
 logger = logging.getLogger(__name__)
@@ -202,6 +204,21 @@ _ROUTE_CLASS = {"OVERHEAT": "sp-r-over", "ATTACK": "sp-r-atk", "ARMED": "sp-r-ar
 
 
 # ── 카드 1장 HTML ────────────────────────────────────────────────
+def _risk_html(row) -> str:
+    """[v61] 손절 시 잃는 **금액**을 카드에 표기.
+
+    2026-08-13 실손실 조사에서 드러난 공백이다. 수량(29주)·금액(76만원)은
+    화면에 있었는데 **잃을 금액(5.9만원)이 없었다.** 포지션 크기를 정할 때
+    기준이 되는 단 하나의 숫자가 빠져 있어, 실현 손실이 의도의 3.9배가 됐다.
+    (기존 MAX_LOSS 표기는 '시총 캡'이라 88% 배치에서 실제 손절폭보다 작았다.)
+    """
+    line = _PR.risk_line(row)
+    if not line:
+        return ""
+    return (f"<div class='sp-risk' title=\"{_PR.LOSS_TOOLTIP}\">"
+            f"🧮 {line}</div>")
+
+
 def _card_html(row, lane: str = "official") -> str:
     name = str(row.get("종목명", "—"))
     code = str(row.get("종목코드", "")).zfill(6) if str(row.get("종목코드", "")).strip() else ""
@@ -291,6 +308,7 @@ def _card_html(row, lane: str = "official") -> str:
   </div>
   <div class="sp-sub">{sub}</div>
   {_ladder_html(row)}
+  {_risk_html(row)}
   {_targets_html(row)}
   {stats}
   {srp_html}
@@ -313,6 +331,7 @@ _CSS = """<style>
   padding:15px 15px 13px;overflow:hidden}
 .sp-pms-card{border-color:rgba(139,92,246,.28);background:linear-gradient(180deg,rgba(139,92,246,.05),var(--sp-card))}
 .sp-ledge{position:absolute;left:0;top:0;bottom:0;width:3px}
+.sp-risk{margin:8px 0 2px;font-size:12px;font-weight:700;color:var(--sp-t2);font-family:var(--sp-mono);background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.22);border-radius:8px;padding:6px 9px}
 .sp-edge-buy{background:var(--sp-buy)}.sp-edge-wait{background:var(--sp-wait)}
 .sp-edge-avoid{background:var(--sp-avoid)}.sp-edge-pms{background:var(--sp-pms)}
 .sp-chead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
