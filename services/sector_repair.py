@@ -72,6 +72,16 @@ def blank_mask(df: pd.DataFrame, column: str) -> pd.Series:
     return (na | txt.fillna(True)).astype(bool)
 
 
+def _restore_dtype(out: pd.DataFrame, column: str, orig_dtype) -> None:
+    """복구 대입 후 원래 dtype으로 되돌린다 (조용한 dtype 열화 방지)."""
+    if str(orig_dtype) == "object":
+        return
+    try:
+        out[column] = out[column].astype(orig_dtype)
+    except Exception as e:
+        logger.warning(f"[v60] {column} dtype 복원 실패 ({orig_dtype}): {e}")
+
+
 def repair_sector(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """업종_대분류 결측을 업종(상세)에서 재분류해 복구. (df, 리포트) 반환.
 
@@ -132,16 +142,24 @@ def repair_sector(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             if v is not None and str(v).strip().lower() not in _BLANKS:
                 fixed[i] = str(v).strip()
         if fixed:
+            # [v60] dtype 계약 유지 — object로 대입한 뒤 **원래 dtype으로 되돌린다**.
+            #   v59에서는 되돌리지 않아 pandas 3의 str dtype이 조용히 object가 됐다
+            #   (v55.4에서 같은 유형의 dtype 계약 사고를 이미 겪었다).
+            _orig = out[SECTOR_COL].dtype
             out[SECTOR_COL] = out[SECTOR_COL].astype("object")
             for i, v in fixed.items():
                 out.at[i, SECTOR_COL] = v
             report["repaired"] = len(fixed)
             # 업종_상세도 같이 비어 있으면 원본 업종으로 채운다(표시 일관성).
             if SECTOR_DETAIL_COL in out.columns:
+                _orig_d = out[SECTOR_DETAIL_COL].dtype
                 dmiss = blank_mask(out, SECTOR_DETAIL_COL)
+                out[SECTOR_DETAIL_COL] = out[SECTOR_DETAIL_COL].astype("object")
                 for i in fixed:
                     if bool(dmiss.get(i, False)):
                         out.at[i, SECTOR_DETAIL_COL] = str(raws.get(i, "") or "")
+                _restore_dtype(out, SECTOR_DETAIL_COL, _orig_d)
+            _restore_dtype(out, SECTOR_COL, _orig)
 
     after = blank_mask(out, SECTOR_COL)
     report["still_missing"] = int(after.sum())
