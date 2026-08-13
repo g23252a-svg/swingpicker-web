@@ -52,6 +52,7 @@ from html import escape as h_escape
 from typing import Optional, Dict, Any
 from nicegui import ui
 from shared_utils import safe_float
+from services import position_risk as _PR   # [v61] 리스크 표기 SSOT
 
 
 # ═══════════════════════════════════════════════════
@@ -375,6 +376,13 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "stop_pct": stop_pct,
         "stop_loss_pct": stop_loss_pct,
         "max_loss_pct": max_loss_pct,
+        # [v61] 화면에 없던 숫자 — 손절 시 실제로 잃는 금액/비율.
+        #   기존 MAX_LOSS는 "시총 기반 캡"이라 88% 배치에서 실제 손절폭보다
+        #   작았고(중위 5.0% vs 9.5%), 그것을 "손절 발동 시 잃을 자본 비중"
+        #   이라고 표기해 리스크를 과소 표기했다.
+        "stop_loss_won": _PR.stop_loss_won(row),
+        "stop_loss_pct_calc": _PR.stop_loss_pct(row),
+        "cap_binds": _PR.cap_binds(row),
         "tp1_pct": tp1_pct,
         "tp1_gain_pct": tp1_gain_pct,
         "tp2_gain_pct": tp2_gain_pct,
@@ -1537,6 +1545,16 @@ def render_v2_price_plan(n: dict):
     entry_gap = n["entry_gap_pct"]
     stop_loss = n["stop_loss_pct"]
     max_loss = n["max_loss_pct"]
+    # [v61] 손절 시 손실 — 원화 우선, 계산 불가하면 비율만, 그것도 없으면 "—".
+    _sl_won = n.get("stop_loss_won")
+    _sl_pct = n.get("stop_loss_pct_calc")
+    if _sl_won is not None and _sl_pct is not None:
+        _risk_loss_txt = f"-{_sl_won:,.0f}원 (-{_sl_pct:.1f}%)"
+    elif _sl_pct is not None:
+        _risk_loss_txt = f"-{_sl_pct:.1f}% <span class=\"pct-small\">(수량 미정)</span>"
+    else:
+        _risk_loss_txt = "—"
+    _cap_note = "" if n.get("cap_binds") else ' <span class="pct-small">(미구속)</span>'
     tp1_gain = n["tp1_gain_pct"]
     tp2_gain = n["tp2_gain_pct"]
     tp3_gain = n["tp3_gain_pct"]
@@ -1652,15 +1670,19 @@ def render_v2_price_plan(n: dict):
           <span class="val">{rr_mult:.1f}</span>
         </div>
         <div class="panel-row">
-          <span class="lbl" title="포지션당 최대 손실율. 손절 발동 시 잃을 자본 비중">MAX_LOSS</span>
-          <span class="val red">{_fmt_pct(max_loss)}</span>
+          <span class="lbl" title="{h_escape(_PR.LOSS_TOOLTIP)}">{h_escape(_PR.LOSS_LABEL)}</span>
+          <span class="val red">{_risk_loss_txt}</span>
+        </div>
+        <div class="panel-row">
+          <span class="lbl" title="{h_escape(_PR.CAP_TOOLTIP)}">{h_escape(_PR.CAP_LABEL)}</span>
+          <span class="val">{_fmt_pct(max_loss)}{_cap_note}</span>
         </div>
         <div class="panel-row">
           <span class="lbl" title="이 일수 안에 TP1 미돌파 시 시간 손절 (TIME_STOP) 발동">TIME_STOP</span>
           <span class="val">{time_stop}일</span>
         </div>
         <div class="panel-row">
-          <span class="lbl" title="추천 보유 포지션 비중. 100% = 풀포지션, 0% = 신규매수 부적합">POSITION</span>
+          <span class="lbl" title="진입 분할 계획. 100% = 일괄 진입, 50% = 절반씩 분할. 포트폴리오 비중이 아니다(그건 RECOMMENDED_WEIGHT_PCT)">POSITION(진입분할)</span>
           <span class="val">{_fmt_pct(position, 0)}</span>
         </div>
         <div class="panel-row">
