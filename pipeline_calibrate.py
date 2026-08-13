@@ -597,6 +597,44 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
         log(f"⚠️ 캐리오버 처리 실패: {e}")
         import traceback; logger.warning(traceback.format_exc())
 
+    # ──── [v60] 캐리 행 보강 복원 ────
+    # CARRY 행은 방금 위에서 concat으로 합류했다. 그런데 이 행들에 컬럼을 부여하는
+    # 단계는 **이미 지나갔다** — Stage 3(run_scoring: 업종·섹터·수급·시총기준일 +
+    # LDY/TOTAL/RANK_SCORE·벤치_60d_* 대입)과 Stage 4(enrich_news). 위쪽 457행의
+    # `df_out["LDY_SCORE"] = df_out["DISPLAY_SCORE"]` 같은 대입도 캐리 합류 **전**에
+    # 딱 한 번 돌기 때문에 캐리 행은 구조적으로 받을 수 없다.
+    #
+    # 실측(2026-08-07 배치): 업종 결측 30종목은 **100% 캐리 행**이었고, 그 행들은
+    # LDY_SCORE·TOTAL_SCORE·RANK_SCORE·SECTOR_* 등 26개 컬럼이 비어 있었다.
+    # 녹십자는 08/05 FRESH(LDY_SCORE=39.8) → 08/06 CARRY_REFRESHED(∅)로 죽었고,
+    # 지아이텍은 05/15부터 2개월 반째 같은 구멍을 legacy 복사로 전파하고 있었다.
+    # 화면에서는 트리맵이 `color="LDY_SCORE"`로 칠하므로 **보유 종목이 점수 0으로**
+    # 보였다.
+    #
+    # 그래서 합류 직후 여기서 되살린다. 추정이 아니라 결정적 재계산이다
+    # (LDY/TOTAL/RANK_SCORE는 DISPLAY_SCORE의 별칭 — 최근 10일 FRESH 2,750행
+    #  전수 검증에서 반례 0건). 돌리지 않은 단계(뉴스·전략)는 **채우지 않고**
+    # 사유를 남긴다.
+    try:
+        from services.carry_backfill import (backfill_carry_rows,
+                                             carry_backfill_line, is_alarming)
+        df_out, _bf_rep = backfill_carry_rows(
+            df_out,
+            bench_map=getattr(ctx, "bench_map", None),
+            mcap_ymd=getattr(ctx, "mcap_ymd", None),
+            individual_net_map=(getattr(ctx, "inv_maps", None) or {}).get("ant"),
+        )
+        _bf_line = carry_backfill_line(_bf_rep)
+        if _bf_line:
+            log(f"{'🚨' if is_alarming(_bf_rep) else '🧩'} [v60] {_bf_line}")
+        if is_alarming(_bf_rep):
+            log("   🚨 [v60] 캐리 경로가 또 다른 컬럼을 놓치고 있다 — "
+                "Stage 3/4 이후 신설된 컬럼이 캐리 행에 배선됐는지 확인 필요")
+        ctx.breadth["CARRY_BACKFILL"] = _bf_rep
+    except Exception as e:
+        log(f"⚠️ [v60] 캐리 보강 복원 실패: {e}")
+        import traceback; logger.warning(traceback.format_exc())
+
     # ──── 재동기화 ────
     # [v22] IS_NOW_ENTRY는 pipeline_finalize.finalize_sort에서 adaptive로 재계산됨.
     # 여기선 IS_ACTIVE/IS_WATCH만 설정 (ROUTE 의미 보존).
