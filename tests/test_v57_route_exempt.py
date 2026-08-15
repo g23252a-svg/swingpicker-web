@@ -166,5 +166,12 @@ def test_real_pick_20260805_is_reproduced():
 
 
 def test_policy_version_bumped():
-    """계약이 바뀌면 버전도 바뀌어야 한다 — 구 CSV 판정 구분에 쓰인다."""
-    assert rq.POLICY_VERSION == "alpha_gate_v57"
+    """계약이 바뀌면 버전도 바뀌어야 한다 — 구 CSV 판정 구분에 쓰인다.
+
+    [v62] 알파 진입 게이트에 급등 추격 브레이크(ALPHA_SURGE_OK)가 AND로
+    추가되어 진입 계약이 바뀌었다. 그래서 v57 → v62로 올렸다.
+    기대값을 갱신하는 것이 이 테스트의 목적이다(검사를 지우는 것이 아니다).
+    """
+    assert rq.POLICY_VERSION == "alpha_gate_v62"
+    assert rq.POLICY_VERSION != "alpha_gate_v57", \
+        "계약이 바뀌었는데 버전이 그대로다"

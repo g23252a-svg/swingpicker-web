@@ -26,7 +26,7 @@ logger = logging.getLogger("recommendation_quality")
 # QUALITY_POLICY_VERSION으로 어느 계약이 그 행을 만들었는지 감사할 수 있고,
 # daily_briefing의 production_buy_sizable 게이트가 구 계약 산출물을 오판하지
 # 않도록(SKIP) 구분하는 데도 쓰인다.
-POLICY_VERSION = "alpha_gate_v57"
+POLICY_VERSION = "alpha_gate_v62"   # [v62] 진입일 급등 추격 브레이크 추가
 # [v32] ROUTE는 더 이상 진입 게이트가 아니다(ATTACK 알파 -2.9%p, p=0.0004 실측).
 # 검증된 알파(ALPHA_GATE_ACTIVE)가 진입 SSOT. ACTIVE_ROUTES는 레거시 폴백
 # (알파 미검증일)에서만 참조되며, ROUTE 거부권 자체는 evidence_pass에서 제거됨.
