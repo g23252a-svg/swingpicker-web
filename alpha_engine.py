@@ -113,6 +113,28 @@ ALPHA_GATE_DEFAULT_THRESHOLD = 85.0
 # 474회 단일피처 탐색에서 BH-FDR·OOS를 동시 통과한 2개 중 하나가
 # 'Low_Trend_PCT 하위30%'였다(독립 교차확인).
 _LT_PCTL_FLOOR = 0.30          # 당일 하위 30% 제외
+# [v62] 진입일 급등 추격 차단 — 실측 검증 통과한 첫 구조 브레이크.
+#   알파 상위(당일 분위≥85) 1,015행·21일 패널, 실현수익(진입 t+1 시가·-8% 장중
+#   손절·t+5 종가) 기준. 진입일 등락률 구간별(겹치지 않음) 5일 실현수익:
+#     ret_1d < 0%   554행  +2.01%  승률 56.9%
+#     0~3%          301행  +1.17%  승률 52.8%
+#     3~5%           71행  +0.80%  승률 53.5%
+#     5~7%           41행  -1.51%  승률 46.3%   ← 여기서 부호가 꺾인다
+#     ≥7%            48행  -1.26%  승률 37.5%   (중위 -2.16%)
+#   → 용량-반응이 단조롭고 +5%에서 부호 전환. 그래서 문턱은 +5%.
+#   차단군 vs 잔여군 일별 paired t (5일): 차 -2.99%p  t=-3.24  p=0.0071
+#     BH-FDR 보정 q=0.046 (임계 4종 × 호라이즌 3종 = 12개 가족)
+#     블록 부트스트랩 CI95 [-4.19%, -1.43%] — 0 배제
+#     이상치 강건: 중위 -3.06% · 10% 절사 -2.99% · 상위2일 제외 -2.15%
+#     IS/OOS 부호 일치: IS -4.21%(t=-4.93) / OOS -2.23%(t=-1.62)
+#     10일 호라이즌도 동방향 -3.23%(t=-3.19, q=0.046)
+#   대리변수 아님: 이격도<10 통제 후 -1.89%(t=-1.96), RSI<70 통제 후
+#     -2.38%(t=-3.02) — 과열 축과 별개로 남는다.
+#   기존 방어가 못 잡던 공백: NO_CHASE_FLAG는 VWAP -35%/POC +80%/5일 +25% 같은
+#     극단값에서만 물리고, CRASH_CHASE_WARN은 반대 방향(이격 -15% 폭락 추격)이다.
+#   픽 빈도 영향(90일 실측): TOP_PICK 117건 중 7건(6.0%) 제거 ·
+#     PRODUCTION_BUY 4건 중 0건 · **픽이 0이 되는 날 0일** (v57 교훈 반영).
+_SURGE_CHASE_PCT = 5.0         # 진입일 등락률 이 이상이면 추격으로 본다
 _LT_PCTL_MIN_SAMPLE = 30       # 분위 안정화 최소 표본 — 미달 시 구 절대규칙 폴백
 
 # ═══════════════════════════════════════════════════════════════
@@ -588,6 +610,7 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     검증 통과(ALPHA_VALIDATED==1)일 때만 작동한다:
       TOP_PICK = 리스크가드(ENTRY_RISK_GATE_OK) AND 알파백분위 ≥ 레짐문턱
                  AND 저점추세 당일 분위 > 30% (결측은 통과)          [v46]
+                 AND 진입일 등락률 < +5% (급등 추격 차단, 결측은 통과)  [v62]
     · ROUTE는 건드리지 않는다(타이밍 배지로만 존치).
     · ENTRY_RISK_GATE_OK가 없으면(레거시) close>stop 등 기본 가드만 재구성.
     · 미검증이면 TOP_PICK을 그대로 두고 ALPHA_GATE_ACTIVE=0 (레거시 폴백).
@@ -595,6 +618,7 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     주입 컬럼:
       ALPHA_GATE_ACTIVE, ALPHA_ENTRY_THRESHOLD, ALPHA_ENTRY_OK, ALPHA_LT_OK,
       LOW_TREND_PCTL, ALPHA_LT_RULE                                  [v46]
+      SURGE_CHASE_FLAG, ALPHA_SURGE_OK, ALPHA_SURGE_RULE             [v62]
     """
     out = df.copy()
     n = len(out)
@@ -671,7 +695,22 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     # 결측은 통과 처리 — 데이터 이슈가 전면 차단으로 번지지 않게.
     out["ALPHA_LT_OK"] = lt_ok.astype(int)
 
-    entry_ok = risk_ok & ascore.notna() & (ascore >= thr) & (~blocked) & lt_ok
+    # [v62] 진입일 급등 추격 차단. 결측은 통과 처리 — 데이터 이슈가 전면 차단으로
+    #   번지지 않게 한다(ALPHA_LT_OK와 같은 원칙).
+    if "ret_1d_%" in out.columns:
+        _r1 = pd.to_numeric(out["ret_1d_%"], errors="coerce")
+    elif "등락률" in out.columns:
+        _r1 = pd.to_numeric(out["등락률"], errors="coerce")
+    else:
+        _r1 = pd.Series(np.nan, index=out.index)
+    surge = (_r1 >= _SURGE_CHASE_PCT).fillna(False)
+    surge_ok = ~surge
+    out["SURGE_CHASE_FLAG"] = surge.astype(int)
+    out["ALPHA_SURGE_OK"] = surge_ok.astype(int)
+    out["ALPHA_SURGE_RULE"] = f"ret_1d<+{_SURGE_CHASE_PCT:.0f}%"
+
+    entry_ok = (risk_ok & ascore.notna() & (ascore >= thr) & (~blocked)
+                & lt_ok & surge_ok)
     out["ALPHA_GATE_ACTIVE"] = 1
     out["ALPHA_ENTRY_OK"] = entry_ok.astype(int)
 
@@ -692,6 +731,7 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     _alpha_short = (ascore.isna() | (ascore < thr)).fillna(False)
     _lt_short = (~lt_ok).fillna(False)
     _risk_short = (~risk_ok).fillna(False)
+    _surge_short = surge.fillna(False) if hasattr(surge, "fillna") else surge
     _blk = blocked.fillna(False) if hasattr(blocked, "fillna") else blocked
     _ltp = pd.to_numeric(out["LOW_TREND_PCTL"], errors="coerce")
 
@@ -709,6 +749,12 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
                         else "저점추세 하락")
         if bool(_risk_short.iat[i]):
             bits.append("진입 자리·손익비 가드 미달")
+        if bool(_surge_short.iat[i]):
+            _v = _r1.iat[i]
+            bits.append(
+                f"진입일 +{_v:.1f}% 급등 — 추격 진입 실측 손실"
+                f"(5일 -3.0%p·승률 46%, 검증 q=0.046)"
+                if np.isfinite(_v) else "진입일 급등 추격")
         return " · ".join(bits)
 
     out["ALPHA_ENTRY_BLOCK_REASON"] = [
