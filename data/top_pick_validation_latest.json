@@ -1,22 +1,22 @@
 {
-  "trade_ymd": "20260814",
-  "top_pick_count": 11,
+  "trade_ymd": "20260817",
+  "top_pick_count": 12,
   "top_pick_by_type": {
-    "ALPHA": 11
+    "ALPHA": 12
   },
-  "avg_elite": 29.5,
-  "avg_rr": 1.89,
+  "avg_elite": 29.0,
+  "avg_rr": 1.91,
   "min_rr": 1.1,
   "rr_lt_1_count": 0,
-  "avg_balance": 16.7,
-  "avg_win_rate": 0.414,
+  "avg_balance": 19.6,
+  "avg_win_rate": 0.452,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 12404,
+  "est_win_rate_n": 12527,
   "routes": {
     "ATTACK": 7,
     "CARRY": 3,
-    "WAIT": 1
+    "WAIT": 2
   },
   "picks": [
     {
@@ -29,10 +29,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 28.2,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.432,
+      "EST_WIN_RATE": 0.472,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "033160",
@@ -44,10 +44,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 22.5,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.418,
+      "EST_WIN_RATE": 0.455,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "033790",
@@ -59,10 +59,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 10.7,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.39,
+      "EST_WIN_RATE": 0.42,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "178320",
@@ -74,10 +74,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 15.6,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.4,
+      "EST_WIN_RATE": 0.432,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "452280",
@@ -89,10 +89,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 21.6,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.424,
+      "EST_WIN_RATE": 0.462,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "397030",
@@ -104,10 +104,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 12.5,
       "ROUTE": "CARRY",
-      "EST_WIN_RATE": 0.42,
+      "EST_WIN_RATE": 0.457,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "001740",
@@ -119,10 +119,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 11.3,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.393,
+      "EST_WIN_RATE": 0.423,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "000250",
@@ -134,10 +134,25 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 15.6,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.432,
+      "EST_WIN_RATE": 0.472,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
+    },
+    {
+      "종목코드": "014680",
+      "종목명": "한솔케미칼",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 23.4,
+      "RR_NOW_TP1": 2.14,
+      "BALANCE_SCORE": 50.8,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 17.2,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.472,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "105840",
@@ -149,10 +164,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 9.8,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.426,
+      "EST_WIN_RATE": 0.465,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "230240",
@@ -164,10 +179,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 10.8,
       "ROUTE": "CARRY",
-      "EST_WIN_RATE": 0.409,
+      "EST_WIN_RATE": 0.444,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     },
     {
       "종목코드": "046970",
@@ -179,10 +194,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 8.9,
       "ROUTE": "CARRY",
-      "EST_WIN_RATE": 0.415,
+      "EST_WIN_RATE": 0.451,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 12404
+      "EST_WIN_RATE_N": 12527
     }
   ]
 }
