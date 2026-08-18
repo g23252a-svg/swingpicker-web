@@ -1,13 +1,13 @@
 {
-  "asof_ymd": "20260817",
-  "generated_at": "2026-08-17T20:42:57.510050",
+  "asof_ymd": "20260818",
+  "generated_at": "2026-08-18T20:48:10.150453",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
   "quality_policy_version": "alpha_gate_v62",
-  "declared_wr_active": 0.4553,
-  "declared_wr_top_pick": 0.4521,
+  "declared_wr_active": 0.4433,
+  "declared_wr_top_pick": 0.4435,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
@@ -77,17 +77,17 @@
   "realized_wr_top_pick_n": 41,
   "realized_wr_active": 0.3193,
   "realized_wr_active_n": 41,
-  "declared_vs_realized_gap_active": 0.136,
-  "declared_vs_realized_gap_top_pick": 0.1328,
-  "declared_vs_realized_gap": 0.1328,
+  "declared_vs_realized_gap_active": 0.124,
+  "declared_vs_realized_gap_top_pick": 0.1242,
+  "declared_vs_realized_gap": 0.1242,
   "avg_ret_excess_pct": -5.4504,
   "top_pick_funnel": {
-    "trade_ymd": "20260817",
-    "total": 392,
+    "trade_ymd": "20260818",
+    "total": 411,
     "aggressive_funnel": {
-      "total": 392,
-      "route_active": 35,
-      "hard_gate": 109,
+      "total": 411,
+      "route_active": 25,
+      "hard_gate": 210,
       "elite_75": 0,
       "struct_80": 0,
       "timing_70": 0,
@@ -95,9 +95,9 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 392,
-      "route_active": 35,
-      "hard_gate": 109,
+      "total": 411,
+      "route_active": 25,
+      "hard_gate": 210,
       "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
@@ -119,18 +119,18 @@
     {
       "gate": "top_pick_tp1_positive",
       "status": "PASS",
-      "subject_n": 12
+      "subject_n": 19
     },
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "min_rr=1.10",
-      "subject_n": 12
+      "detail": "min_rr=1.18",
+      "subject_n": 19
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
       "status": "PASS",
-      "detail": "gap_top_pick=13.3% (n=41)",
+      "detail": "gap_top_pick=12.4% (n=41)",
       "subject_n": 41
     }
   ],
@@ -143,7 +143,7 @@
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "OK",
-      "detail": "gap_active=13.6% (n=41)"
+      "detail": "gap_active=12.4% (n=41)"
     },
     {
       "gate": "wilson_monotonicity",
@@ -167,7 +167,7 @@
   ],
   "ci_hard_all_pass": true,
   "ci_soft_any_warn": true,
-  "top_pick_count": 12,
+  "top_pick_count": 19,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": 1.1
+  "top_pick_min_rr": 1.18
 }

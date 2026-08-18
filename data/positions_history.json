@@ -5643,5 +5643,30 @@
       "396300_20260730_TP1_HIT_20260814",
       "396300_20260730_TP2_HIT_20260814"
     ]
+  },
+  {
+    "code": "458870",
+    "name": "씨어스",
+    "entry_ymd": "20260811",
+    "entry_px": 25250.0,
+    "qty": 0,
+    "stop_px": 23200.0,
+    "stop_px_initial": 23200.0,
+    "take_px1": 34750.0,
+    "take_px2": 42850.0,
+    "trailing_high": 25800.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260818",
+    "last_close_px": 22450.0,
+    "unrealized_pnl_pct": -11.09,
+    "realized_pnl_pct": -11.09,
+    "close_ymd": "20260818",
+    "close_px": 22450.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "458870_20260811_WARN_DRAWDOWN_20260814",
+      "458870_20260811_WARN_DRAWDOWN_20260817",
+      "458870_20260811_STOP_HIT_20260818"
+    ]
   }
 ]
