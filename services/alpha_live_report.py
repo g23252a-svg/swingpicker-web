@@ -220,6 +220,26 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
                 hd[f"top{k}_stop_rate"] = round(
                     float(np.isclose(head["_ret"], stop).mean()), 4)
             hd["top1_name"] = str(sub["종목명"].iloc[0]) if "종목명" in sub.columns else ""
+            # [v63] 엔진이 실제로 고르는 규칙(퍼널 통과 + 알파×RR)으로도 계산
+            gk = _gate_rank_key(rec.loc[ok])
+            if gk is not None and gk.notna().any():
+                gsub = (rec.loc[ok].assign(_ret=rets[ok], _k=gk)
+                        .dropna(subset=["_k"]).sort_values("_k", ascending=False))
+                hd["gated_pool"] = int(len(gsub))
+                for k in TOP_NS:
+                    ghead = gsub.head(k)
+                    if len(ghead) == 0:
+                        continue
+                    hd[f"gated_top{k}_pct"] = round(
+                        100 * float(ghead["_ret"].mean()), 3)
+                    hd[f"gated_top{k}_excess_pct"] = round(
+                        100 * float(ghead["_ret"].mean() - sub["_ret"].mean()), 3)
+                    hd[f"gated_top{k}_stop_rate"] = round(
+                        float(np.isclose(ghead["_ret"], stop).mean()), 4)
+                if "종목명" in gsub.columns:
+                    hd["gated_top1_name"] = str(gsub["종목명"].iloc[0])
+            else:
+                hd["gated_pool"] = 0
             row_out[f"h{h}"] = hd
         if any_h:
             per_day.append(row_out)
@@ -266,6 +286,18 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
             blk[f"top{k}"]["excess_t"] = _tstat(ex)
             blk[f"top{k}"]["stop_rate"] = round(
                 float(np.mean([r[hh][f"top{k}_stop_rate"] for r in rows])), 4)
+            # [v63] 엔진이 실제로 고르는 규칙 기준 — 재구성된 날만 집계한다
+            grows = [r for r in rows if r[hh].get(f"gated_top{k}_pct") is not None]
+            if len(grows) >= 3:
+                blk[f"gated_top{k}"] = _agg(
+                    [r[hh][f"gated_top{k}_pct"] / 100 for r in grows])
+                gex = [r[hh][f"gated_top{k}_excess_pct"] / 100 for r in grows]
+                blk[f"gated_top{k}"]["excess_mean_pct"] = round(
+                    100 * float(np.mean(gex)), 3)
+                blk[f"gated_top{k}"]["excess_t"] = _tstat(gex)
+                blk[f"gated_top{k}"]["stop_rate"] = round(float(np.mean(
+                    [r[hh][f"gated_top{k}_stop_rate"] for r in grows])), 4)
+                blk[f"gated_top{k}"]["n_days"] = len(grows)
         # 레짐 분리 — 같은 엔진이 국면별로 정반대일 수 있다
         for lab, sel in (("risk_off", True), ("normal", False)):
             sub = [r for r in rows if bool(r["risk_off"]) is sel]
@@ -344,6 +376,70 @@ def load_alpha_live_report(data_dir: str = "data") -> Optional[dict]:
         return None
 
 
+# [v63] 화면에 뜨는 "1위"가 **엔진이 추천하지 않는 종목**이었다.
+#   기존 top1은 전체 풀을 ALPHA_SCORE만으로 정렬한 1등이다. 그런데 실제 픽은
+#   알파 문턱 통과 + 저점추세 당일 분위>30 + 리스크가드 + (v62)진입일 급등 제외를
+#   거친 뒤 **알파 × 손익비**로 고른다(recommendation_quality의 rank_key).
+#   그 차이가 크다 — v58.1이 이 줄을 결정 센터의 "이 엔진의 지난 성적"으로
+#   띄우는데, 2026-08-17 시점 h5 기준 raw 1위는 -1.84%(유니버스 +0.75%)였고
+#   같은 기간 퍼널 재구성 1위는 +3.01%였다. 즉 **엔진 성적을 실제보다 나쁘게**
+#   표기하고 있었다(v61에서 고친 '표기가 사실과 다름'과 같은 유형, 방향만 반대).
+#   그래서 두 축을 나란히 낸다: IC는 모델 진단이므로 전체 풀 기준을 유지하고,
+#   상위N 수익은 **엔진이 실제로 고르는 규칙**으로도 계산한다.
+_LT_PCTL_FLOOR_PCT = 30.0      # alpha_engine._LT_PCTL_FLOOR 와 같은 값
+_SURGE_PCT = 5.0               # alpha_engine._SURGE_CHASE_PCT 와 같은 값
+
+
+def _num_col(rec: pd.DataFrame, name: str) -> Optional[pd.Series]:
+    """컬럼이 있을 때만 숫자 Series를 준다.
+
+    pd.to_numeric(None)은 **스칼라 NaN**을 돌려주므로 컬럼 부재를 그대로
+    넘기면 뒤에서 Series 메서드가 터진다(실제로 이 함수 첫 구현이 그랬다).
+    """
+    if name not in rec.columns:
+        return None
+    v = pd.to_numeric(rec[name], errors="coerce")
+    return v if v.notna().any() else None
+
+
+def _gate_rank_key(rec: pd.DataFrame) -> Optional[pd.Series]:
+    """엔진 퍼널을 통과한 행에 대해 알파×손익비 랭킹 키. 재구성 불가면 None.
+
+    문턱·바닥값은 alpha_engine과 같은 값을 쓴다. 어긋나면 이 리포트가 엔진과
+    다른 것을 측정하게 된다 — 그게 바로 v63에서 고친 결함이다.
+    """
+    a = _num_col(rec, "ALPHA_SCORE")
+    if a is None:
+        return None
+    ok = a.notna()
+    thr = _num_col(rec, "ALPHA_ENTRY_THRESHOLD")
+    if thr is not None:
+        ok &= a >= thr
+    # 저점추세 당일 분위 (컬럼이 있으면 그대로, 없으면 원값으로 분위 계산)
+    ltp = _num_col(rec, "LOW_TREND_PCTL")
+    if ltp is None:
+        lt = _num_col(rec, "Low_Trend_PCT")
+        ltp = lt.rank(pct=True) * 100 if lt is not None else None
+    if ltp is not None:
+        ok &= ltp.isna() | (ltp > _LT_PCTL_FLOOR_PCT)
+    # v62 급등 추격 제외 (구 배치엔 SURGE 컬럼이 없으므로 ret_1d로 재구성)
+    r1 = _num_col(rec, "ret_1d_%")
+    if r1 is None:
+        r1 = _num_col(rec, "등락률")   # Series에 `or`를 쓰면 진리값이 모호해진다
+    if r1 is not None:
+        ok &= r1.isna() | (r1 < _SURGE_PCT)
+    # 리스크 가드
+    if "ENTRY_RISK_GATE_OK" in rec.columns:
+        ok &= rec["ENTRY_RISK_GATE_OK"].astype(str).str.lower().isin(
+            ["true", "1", "1.0"])
+    if int(ok.sum()) == 0:
+        return None
+    rr = _num_col(rec, "RR_NOW_TP1")
+    rr = (rr.fillna(0.0).clip(0.0, 3.0) if rr is not None
+          else pd.Series(1.0, index=rec.index))
+    return (a * rr).where(ok)
+
+
 def alpha_live_line(report: Optional[dict], h: int = 5) -> str:
     """배치 로그·화면용 한 줄 요약 (없으면 빈 문자열)."""
     if not report or not report.get("ok"):
@@ -352,10 +448,23 @@ def alpha_live_line(report: Optional[dict], h: int = 5) -> str:
     if not blk:
         return ""
     ic_t = (blk.get("ic_t") or {}).get("t")
+    # [v63] 헤드라인은 **엔진이 실제로 고르는 규칙**(퍼널+알파×RR) 기준으로 낸다.
+    #   예전에는 전체 풀을 알파 점수만으로 정렬한 1등을 "1위"라고 적었는데,
+    #   그건 엔진이 추천하지 않는 종목이다(v63 주석 참고). 재구성이 안 되는
+    #   구 배치만 있으면 raw 기준으로 표기하되 그 사실을 밝힌다.
+    g1 = blk.get("gated_top1")
     t1 = blk.get("top1") or {}
-    return (f"알파 실전 {blk['n_days']}일(h={h}): IC {blk.get('ic_mean'):+.3f}"
+    head = (f"알파 실전 {blk['n_days']}일(h={h}): IC {blk.get('ic_mean'):+.3f}"
             + (f" t={ic_t:+.2f}" if ic_t is not None else "")
-            + f" · 양수일 {blk.get('ic_positive_days')}/{blk['n_days']}"
-            + f" · 1위 {t1.get('mean_pct', 0):+.2f}%"
+            + f" · 양수일 {blk.get('ic_positive_days')}/{blk['n_days']}")
+    if g1:
+        return (head
+                + f" · 엔진 1위 {g1.get('mean_pct', 0):+.2f}%"
+                + f"(초과 {g1.get('excess_mean_pct', 0):+.2f}%p"
+                + f" · 스톱체결 {100*g1.get('stop_rate', 0):.0f}%"
+                + f" · {g1.get('n_days', 0)}일)")
+    return (head
+            + f" · 알파점수 단독 1위 {t1.get('mean_pct', 0):+.2f}%"
             + f"(초과 {t1.get('excess_mean_pct', 0):+.2f}%p"
-            + f" · 스톱체결 {100*t1.get('stop_rate', 0):.0f}%)")
+            + f" · 스톱체결 {100*t1.get('stop_rate', 0):.0f}%)"
+            + " · 엔진 픽 기준 재구성 불가(구 배치)")

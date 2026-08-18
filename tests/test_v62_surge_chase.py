@@ -230,16 +230,24 @@ class TestRealBatch:
 class TestFunnelLabelContradiction:
     FIN = ROOT / "pipeline_finalize.py"
 
+    # [v63] 재계산 위치를 옮겼다. v62는 **알파 게이트 직후**에 뒀는데, 그 뒤에
+    #   품질게이트가 '당일 신규진입 1종목 제한'으로 PRODUCTION_BUY를 잘라내므로
+    #   라벨이 반대 방향으로 낡았다(8/17 배치 10건: OFFICIAL_BUY인데 미매수).
+    #   그래서 v63에서 품질게이트 뒤로 옮겼다. 이 테스트의 의도(재계산이
+    #   배선돼 있고 계약 컬럼을 보호한다)는 유지하고 기대 위치만 갱신한다.
+    #   순서 자체의 강한 검증은 tests/test_v63_label_and_track_record.py에 있다.
+    MARKER = "[v63] 공식 퍼널 라벨 재계산"
+
     def test_reannotation_runs_after_alpha_gate(self):
         src = self.FIN.read_text(encoding="utf-8")
         i_gate = src.find("df_out = _alpha_gate(df_out)")
-        i_re = src.find("[v62] 공식 퍼널 라벨 재계산")
+        i_re = src.find(self.MARKER)
         assert i_gate > 0 and i_re > 0, "배선 누락"
         assert i_gate < i_re, "재계산이 알파 게이트보다 먼저다 — 낡은 값이 그대로 남는다"
 
     def test_reannotation_protects_contract_columns(self):
         src = self.FIN.read_text(encoding="utf-8")
-        blk = src[src.find("[v62] 공식 퍼널 라벨 재계산"):][:2600]
+        blk = src[src.find(self.MARKER):][:3000]
         assert "원복" in blk and "BUY_NOW_ELIGIBLE" in blk, \
             "계약 컬럼 보호 규약이 없다"
 

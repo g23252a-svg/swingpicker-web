@@ -313,6 +313,9 @@ class TestFreshCarryColumnContract:
     #   충전율이 2.5~14.7%로, 캐리 행이 비어 있는 것은 조건 미충족이지 누락이
     #   아니다. 그것까지 잡으면 게이트가 매일 거짓 경보를 낸다.
     UNCONDITIONAL_MIN_FILL = 0.90
+    # 캐리 충전율이 FRESH의 이 비율 미만이면 위반. 실제 구멍(0.27배)은 잡고
+    # 조건부 컬럼의 소폭 차이(0.88~0.98배)는 통과시키는 지점.
+    CARRY_FILL_RATIO_FLOOR = 0.70
 
     @classmethod
     def _violations(cls, frame, carry) -> set:
@@ -326,10 +329,18 @@ class TestFreshCarryColumnContract:
         fresh = ~carry
         bad = set()
         for col in frame.columns:
-            if frame.loc[fresh, col].notna().mean() < cls.UNCONDITIONAL_MIN_FILL:
+            ff = float(frame.loc[fresh, col].notna().mean())
+            if ff < cls.UNCONDITIONAL_MIN_FILL:
                 continue                       # 조건부 컬럼 — 계약 대상 아님
-            if frame.loc[carry, col].notna().mean() >= cls.UNCONDITIONAL_MIN_FILL:
-                continue                       # 캐리도 채워져 있으면 OK
+            cf = float(frame.loc[carry, col].notna().mean())
+            # [v63] **상대 기준**으로 본다. 절대 90% 선으로 자르면 FRESH 충전율이
+            #   90% 근처인 조건부 컬럼에서 오탐이 난다 — 2026-08-17 배치 실측:
+            #   SCORE_REASON_TOP1(FRESH 91.9% / CARRY 81.2%) · 추천매도가3와
+            #   TP3_METHOD(91.0% / 89.6%)가 걸렸는데 이들은 FRESH 자체가 ~91%인
+            #   조건부 컬럼이고 캐리 특이 누락이 아니다.
+            #   실제 구멍은 규모가 다르다(v60: FRESH 100% / CARRY 26.8% = 0.27배).
+            if cf >= ff * cls.CARRY_FILL_RATIO_FLOOR:
+                continue
             bad.add(col)
         return bad - set(cb.INTENTIONALLY_BLANK)
 
@@ -366,6 +377,24 @@ class TestFreshCarryColumnContract:
         for expected in ("LDY_SCORE", "TOTAL_SCORE", "RANK_SCORE"):
             assert expected in undeclared, \
                 f"{expected} 구멍을 게이트가 놓친다"
+
+    def test_borderline_conditional_columns_not_flagged(self):
+        """[v63] FRESH 충전율이 90% 근처인 조건부 컬럼을 오탐하지 않는다.
+
+        절대 기준(CARRY<90%)일 때 2026-08-17 배치에서 SCORE_REASON_TOP1·
+        추천매도가3·TP3_METHOD 3개가 거짓 위반으로 잡혔다. 상대 기준으로
+        바꿔 해소했고, 이 테스트가 되살아남을 막는다.
+        """
+        frame = pd.DataFrame({
+            "ROW_BUILD_MODE": ["FRESH"] * 100 + ["CARRY_LEGACY"] * 100,
+            # FRESH 91% / CARRY 89% — 조건부 컬럼의 정상적 편차
+            "cond": ([1.0] * 91 + [np.nan] * 9) + ([1.0] * 89 + [np.nan] * 11),
+            # FRESH 100% / CARRY 27% — 진짜 구멍
+            "hole": ([1.0] * 100) + ([1.0] * 27 + [np.nan] * 73),
+        })
+        bad = self._violations(frame, cb.carry_mask(frame))
+        assert "cond" not in bad, "조건부 컬럼을 오탐한다"
+        assert "hole" in bad, "진짜 구멍을 놓친다"
 
     def test_conditional_reason_columns_are_not_flagged(self):
         """조건부 사유 컬럼이 거짓 경보를 내지 않는지 (오탐 회귀 가드).
