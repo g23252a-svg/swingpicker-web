@@ -1748,50 +1748,6 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             else:
                 log("🧠 [v32] 알파 미검증 → 레거시 폴백 게이트 (ROUTE 거부권 없이)")
 
-            # [v62] 공식 퍼널 라벨 재계산 — 알파 게이트가 방금 TOP_PICK을
-            #   재정의했으므로, 그 전에 계산된 퍼널 단계/사유는 낡은 값이다.
-            #
-            #   실측(2026-08-11 씨어스 458870 · 2026-08-13 큐리옥스 445680):
-            #     TOP_PICK=1 · PRODUCTION_BUY=1 인 행에
-            #     OFFICIAL_FUNNEL_STAGE = "ENTRY_READY_BUT_NOT_TOP_PICK"
-            #     OFFICIAL_BLOCK_REASON_1 = "TOP_PICK=0"
-            #     OFFICIAL_BLOCK_REASON_2 = "진입조건은 양호하나 공식 Top Pick 아님"
-            #   즉 **같은 행이 픽이면서 동시에 '픽 아님'**이라고 말했다. 퍼널
-            #   주석은 1569행(알파 게이트보다 훨씬 앞)에서 한 번만 돌기 때문이다.
-            #   v54에서 잡은 '첫 실전 픽의 모순'과 같은 유형 — 라벨이 결정보다
-            #   먼저 굳어 버린 것이다.
-            #
-            #   재계산은 표시 컬럼만 갱신한다. TOP_PICK·BUY_NOW_* 계약 컬럼이
-            #   바뀌면 원복하고 에러 로그를 남긴다(기존 1569행 호출과 동일 규약).
-            try:
-                _fn_cols = [c for c in ["TOP_PICK", "BUY_NOW_ELIGIBLE",
-                                        "BUY_NOW_PASS", "BUY_NOW_GRADE"]
-                            if c in df_out.columns]
-                _fn_before = df_out[_fn_cols].copy() if _fn_cols else None
-                _stale = 0
-                if "OFFICIAL_BLOCK_REASON_1" in df_out.columns:
-                    _tp_now = pd.to_numeric(df_out.get("TOP_PICK", 0),
-                                            errors="coerce").fillna(0).astype(int)
-                    _stale = int((( _tp_now == 1)
-                                 & df_out["OFFICIAL_BLOCK_REASON_1"]
-                                   .astype(str).str.contains("TOP_PICK=0")).sum())
-                df_out = add_official_buy_funnel_columns(
-                    df_out,
-                    macro_risk=ctx.macro_risk,
-                    market_breadth=ctx.breadth.get("ALL", np.nan),
-                    macro_msg=getattr(ctx, "macro_msg", ""),
-                )
-                if _fn_before is not None:
-                    for _c in _fn_cols:
-                        if not df_out[_c].equals(_fn_before[_c]):
-                            logger.error(
-                                "[v62] 퍼널 재계산 중 %s 변경 감지 — 원복", _c)
-                            df_out[_c] = _fn_before[_c]
-                if _stale:
-                    log(f"🧭 [v62] 공식 퍼널 라벨 재계산 — 픽인데 'TOP_PICK=0'이라던 "
-                        f"모순 {_stale}건 해소")
-            except Exception as _fe:
-                logger.warning(f"⚠️ [v62] 퍼널 라벨 재계산 실패 (표시만 영향): {_fe}")
             # [v59] 업종 결측 복구 — **켈리 사이징보다 먼저** 돌아야 한다.
             #   2026-08-07 배치 실측: 326종목 중 30종목(9.2%)이 업종_대분류
             #   결측이었고, 그 행들은 섹터/뉴스/전략 단계 이후에 합류해 18개
@@ -1833,6 +1789,54 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                                & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
         df_out = apply_recommendation_quality_guard(df_out)
         _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
+
+        # [v63] 공식 퍼널 라벨 재계산 — **품질게이트 뒤**가 맞는 자리다.
+        #   v62에서 알파 게이트 직후에 뒀는데, 그 뒤에 품질게이트가 '당일 신규진입
+        #   1종목 제한'으로 PRODUCTION_BUY를 잘라내므로 라벨이 다시 낡았다.
+        #   v62는 한쪽 모순을 고치고 반대쪽을 열었다 — 2026-08-17 배치 실측:
+        #     OFFICIAL_FUNNEL_STAGE="OFFICIAL_BUY"  ← 공식 매수라고 말하는데
+        #     PRODUCTION_BUY=0 · ACTION_DECISION=WATCH
+        #     OFFICIAL_BLOCK_REASON_2="TOP_PICK + BUY_NOW_ELIGIBLE"
+        #       ← 근거로 든 BUY_NOW_ELIGIBLE이 정작 0이다
+        #   같은 행이 '공식 매수'이면서 '매수 아님'이라고 말했다. 10건/1일.
+        #   (v62 이전에는 반대 방향으로 낡아 'TOP_PICK=0'이라고 했다 — 11건.)
+        #   품질게이트가 PRODUCTION_BUY·BUY_NOW_ELIGIBLE을 바꾸는 마지막 단계이므로
+        #   라벨은 그 뒤에 굳어야 한다. 표시 컬럼만 갱신하고, 계약 컬럼이 바뀌면
+        #   원복 + 에러 로그를 남긴다.
+        try:
+            _fn_cols = [c for c in ["TOP_PICK", "BUY_NOW_ELIGIBLE",
+                                    "BUY_NOW_PASS", "BUY_NOW_GRADE",
+                                    "PRODUCTION_BUY"]
+                        if c in df_out.columns]
+            _fn_before = df_out[_fn_cols].copy() if _fn_cols else None
+            _stale = 0
+            if "OFFICIAL_FUNNEL_STAGE" in df_out.columns:
+                _pb_now = pd.to_numeric(df_out.get("PRODUCTION_BUY", 0),
+                                        errors="coerce").fillna(0).astype(int)
+                _tp_now = pd.to_numeric(df_out.get("TOP_PICK", 0),
+                                        errors="coerce").fillna(0).astype(int)
+                _stale = int(
+                    ((df_out["OFFICIAL_FUNNEL_STAGE"].astype(str) == "OFFICIAL_BUY")
+                     & (_pb_now == 0)).sum())
+                _stale += int(((_tp_now == 1)
+                               & df_out.get("OFFICIAL_BLOCK_REASON_1",
+                                            pd.Series("", index=df_out.index))
+                                 .astype(str).str.contains("TOP_PICK=0")).sum())
+            df_out = add_official_buy_funnel_columns(
+                df_out,
+                macro_risk=ctx.macro_risk,
+                market_breadth=ctx.breadth.get("ALL", np.nan),
+                macro_msg=getattr(ctx, "macro_msg", ""),
+            )
+            if _fn_before is not None:
+                for _c in _fn_cols:
+                    if not df_out[_c].equals(_fn_before[_c]):
+                        logger.error("[v63] 퍼널 재계산 중 %s 변경 감지 — 원복", _c)
+                        df_out[_c] = _fn_before[_c]
+            if _stale:
+                log(f"🧭 [v63] 공식 퍼널 라벨 재계산 — 결정과 어긋난 라벨 {_stale}건 해소")
+        except Exception as _fe:
+            logger.warning(f"⚠️ [v63] 퍼널 라벨 재계산 실패 (표시만 영향): {_fe}")
         # [v28] "왜 이 종목인가" 근거 문장 — 실측 수치 기반, 리스크 병기
         try:
             from services.reco_evidence import add_evidence_columns
