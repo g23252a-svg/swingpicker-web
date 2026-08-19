@@ -63,24 +63,51 @@ class TestRiskTotal:
         buys = [{"stop_loss_won": 65000.0, "position_won": 806250.0}]
         watch = [{"stop_loss_won": 130810.0, "position_won": 1627400.0},
                  {"stop_loss_won": 89180.0, "position_won": 1114750.0}]
-        rt = DC._risk_total(buys, watch)
+        rt = DC._risk_total(buys, watch, None)
         assert rt["official_risk_won"] == 65000.0
         assert rt["watch_risk_won"] == pytest.approx(219990.0)
         assert rt["total_risk_won"] == pytest.approx(284990.0)
 
     def test_line_states_the_multiple(self):
         rt = DC._risk_total([{"stop_loss_won": 65000.0}],
-                            [{"stop_loss_won": 195000.0}])
+                            [{"stop_loss_won": 195000.0}], None)
         assert "-65,000원" in rt["line"]
         assert "4.0배" in rt["line"], f"배수를 알려주지 않는다: {rt['line']}"
 
     def test_caveat_says_stops_are_correlated(self):
-        rt = DC._risk_total([{"stop_loss_won": 1.0}], [])
+        rt = DC._risk_total([{"stop_loss_won": 1.0}], [], None)
         assert "동시에" in rt["caveat"]
         assert "-8%" in rt["caveat"], "동반 손절 실측 근거가 없다"
 
+    def test_concentration_is_disclosed(self):
+        """오늘 후보가 같은 성격인지 사실대로 적는다.
+
+        2026-08-17 실측: TOP_PICK 12개 중 9개 KOSDAQ, 시총 중위 5,486억
+        (유니버스 16,121억의 1/3) — 소형주 모멘텀 한 묶음이다.
+        5종목을 사면 분산이 아니라 **같은 베팅의 5배**다.
+        """
+        s = DC.build_decision_summary(_batch())
+        con = s["risk_total"]["concentration"]
+        assert con["n"] >= 2
+        assert "함께" in con["line"], f"동반 이동 경고가 없다: {con}"
+        assert "KOSDAQ" in con["line"] or "시총" in con["line"]
+
+    def test_concentration_quiet_when_diversified(self):
+        """구성이 흩어져 있으면 조용하다 — 없는 경고를 만들지 않는다."""
+        work = pd.DataFrame({
+            "TOP_PICK": [1, 1, 1, 1],
+            "시장": ["KOSPI", "KOSDAQ", "KOSPI", "KOSDAQ"],
+            "업종_대분류": ["A", "B", "C", "D"],
+            "시가총액(억원)": [20000.0, 21000.0, 19000.0, 22000.0],
+        })
+        assert DC._concentration(work)["line"] == ""
+
+    def test_concentration_needs_two_picks(self):
+        work = pd.DataFrame({"TOP_PICK": [1], "시장": ["KOSDAQ"]})
+        assert DC._concentration(work)["n"] == 0
+
     def test_quiet_when_nothing_sized(self):
-        rt = DC._risk_total([], [])
+        rt = DC._risk_total([], [], None)
         assert rt["line"] == ""
         assert rt["total_risk_won"] == 0.0
 

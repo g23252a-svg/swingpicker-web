@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 from nicegui import ui
@@ -229,7 +229,54 @@ def _stock_payload(row: pd.Series) -> dict[str, Any]:
     }
 
 
-def _risk_total(buys: list[dict], watch: list[dict]) -> dict[str, Any]:
+def _concentration(work: pd.DataFrame) -> dict[str, Any]:
+    """오늘 후보들이 **같은 베팅인지**를 사실대로 적는다.
+
+    2026-08-17 배치 실측: TOP_PICK 12개 중 **9개가 KOSDAQ**이고 시가총액 중위가
+    5,486억으로 유니버스 중위(16,121억)의 **1/3**이었다. 즉 소형주 모멘텀
+    한 묶음이다. 여기서 5종목을 사면 분산이 아니라 **같은 베팅의 5배**가 된다.
+    실제로 8/14~8/19에 5종목이 함께 손절됐다.
+
+    수익을 예측하지 않는다 — 목록의 구성을 그대로 보여줄 뿐이다.
+    """
+    out = {"n": 0, "line": ""}
+    if work is None or len(work) == 0:
+        return out
+    try:
+        pick = work[pd.to_numeric(work.get("TOP_PICK", 0),
+                                  errors="coerce").fillna(0) == 1]
+    except Exception:
+        return out
+    if len(pick) < 2:
+        return out
+    out["n"] = int(len(pick))
+    bits: list[str] = []
+    if "시장" in pick.columns:
+        vc = pick["시장"].astype(str).value_counts()
+        # 3종목 이상이면서 60% 이상일 때만 — 4개 중 2개(50%)를 집중이라 부르면
+        # 경고가 흔해져 의미를 잃는다
+        if len(vc) and int(vc.iloc[0]) >= 3 and int(vc.iloc[0]) / len(pick) >= 0.6:
+            bits.append(f"{vc.index[0]} {int(vc.iloc[0])}/{len(pick)}")
+    mcap = pd.to_numeric(pick.get("시가총액(억원)"), errors="coerce")
+    uni = pd.to_numeric(work.get("시가총액(억원)"), errors="coerce")
+    if mcap is not None and mcap.notna().any() and uni is not None and uni.notna().any():
+        pm, um = float(mcap.median()), float(uni.median())
+        out["mcap_median"], out["universe_mcap_median"] = pm, um
+        if um > 0 and pm < um * 0.6:
+            bits.append(f"시총 중위 {pm:,.0f}억(유니버스 {um:,.0f}억의 "
+                        f"{pm/um:.1f}배)")
+    if "업종_대분류" in pick.columns:
+        vc = pick["업종_대분류"].astype(str).value_counts()
+        if len(vc) and int(vc.iloc[0]) >= 3 and int(vc.iloc[0]) / len(pick) >= 0.4:
+            bits.append(f"업종 '{vc.index[0]}' {int(vc.iloc[0])}/{len(pick)}")
+    if bits:
+        out["line"] = ("오늘 후보 " + " · ".join(bits)
+                       + " — 성격이 비슷해 시장이 밀리면 **함께** 움직인다")
+    return out
+
+
+def _risk_total(buys: list[dict], watch: list[dict],
+                work: Optional[pd.DataFrame] = None) -> dict[str, Any]:
     """오늘 화면에 뜬 후보들의 **합계** 리스크.
 
     엔진은 하루 1종목만 사이징하지만 화면에는 관찰 후보가 함께 뜬다. 둘을
@@ -254,6 +301,7 @@ def _risk_total(buys: list[dict], watch: list[dict]) -> dict[str, Any]:
         "caveat": ("손절은 시장 하락일에 **동시에** 터진다 — 상위N 실측에서 최악일이 "
                    "종목 수와 무관하게 -8%로 같았다. 여러 종목으로 나눠도 꼬리 "
                    "위험은 줄지 않는다."),
+        "concentration": _concentration(work),
     }
     if official_risk > 0:
         out["line"] = (f"공식 매수만 사면 손절 시 -{official_risk:,.0f}원")
@@ -529,7 +577,7 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         #   게다가 손절은 **동시에 터진다** — 상위N 포트폴리오 실측에서 최악일이
         #   N=1,2,3,5,8 전부 -8.00%로 같았다(동반 손절). 즉 여러 종목으로 나눠도
         #   꼬리 위험이 줄지 않으므로, 합계를 그대로 보여주는 것이 정직하다.
-        "risk_total": _risk_total(buys, watch),
+        "risk_total": _risk_total(buys, watch, work),
         "awaiting": awaiting,       # [v54] 근거 통과·상태 미달로 0주인 후보
         "blockers": blockers,
         "gates": gates,
