@@ -189,7 +189,15 @@ class TestTrackRecordMeasuresTheEngine:
                            "stop_rate": 0.28, "n_days": 18},
         }}}
         line = alpha_live_line(rep, 5)
-        assert "엔진 1위 +3.58%" in line, f"엔진 픽 기준이 헤드라인이 아니다: {line}"
+        # [v65] v63이 고정한 것은 "알파 단독 1위를 성적으로 적지 않는다"였고,
+        #   그건 그대로 유지된다. 다만 v65에서 라벨이 바뀌었다 — 이 축은
+        #   픽이 없던 날에도 후보 1위를 사므로 '엔진 1위'가 아니라
+        #   '후보 풀 상단'이다(공식 성적은 official 블록). 기대값을 그
+        #   사실에 맞춰 갱신한다(검사를 지우는 것이 아니다).
+        assert "+3.58%" in line, f"재구성 축 수치가 빠졌다: {line}"
+        assert "후보 풀 상단" in line, f"재구성 축이 라벨되지 않았다: {line}"
+        assert "엔진 1위" not in line, \
+            "픽 없는 날을 포함한 축을 다시 '엔진 1위'로 부르고 있다"
         assert "-1.84" not in line, "알파 단독 1위를 성적으로 표기한다"
 
     def test_line_is_explicit_when_gate_cannot_be_rebuilt(self):

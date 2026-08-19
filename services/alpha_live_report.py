@@ -29,6 +29,39 @@
   표본이 얇다(도입 후 영업일 기준 수십 일). 그래서 리포트는 항상 n을 함께
   담고, 판정을 내리지 않는다. 경고는 **IC가 유의하게 음수일 때만** 낸다 —
   수익 평균이 음수인 것은 폭락 구간에서 정상일 수 있기 때문이다.
+
+■ [v65] 이 리포트가 스스로 틀리고 있던 두 가지
+  v63은 "성적표가 엔진이 고르지 않는 종목을 재고 있다"를 고쳤다. 그런데
+  고친 뒤의 성적표를 검산하니 **여전히 실제 픽의 성적이 아니었다.**
+
+  ① 픽이 없던 날에도 픽을 만들어 냈다
+     gated_topN은 재구성한 후보 풀(중위 20종목)의 상단을 매일 산다. 그래서
+     2026-07-14~08-12 21개 측정일 **전부**에서 성적이 생겼다. 그런데 같은
+     구간에서 배치가 실제로 기록한 공식 매수(PRODUCTION_BUY)는 **3일**뿐이다.
+     겹치는 3일 중 종목까지 같은 날은 2일이었다(08-05 흥구석유 ○ ·
+     08-11 씨어스 ○ · 08-12 클로봇 vs 삼천당제약 ✗).
+     즉 h5 기준 "엔진 1위 +3.58%(초과 +2.84%p)"의 18/21일은 **살 수 없었던
+     날**의 수익이다. 재구성은 레짐 임계·리스크 게이트·품질 가드·ROUTE
+     사이징을 전부 재현하지 못한다 — 재현하려는 시도 자체가 틀린 방향이었다.
+     → **기록된 결정을 읽는다.** PRODUCTION_BUY는 그날 배치가 남긴 결정
+       그 자체이므로 재구성할 대상이 아니다. 픽이 0건인 날은 0건으로 센다.
+
+  ② 휴장일 스냅샷을 세션으로 셌다
+     price_snapshot_YYYYMMDD.csv는 휴장일에도 생성되며 직전 세션 가격을
+     그대로 복사한다. 전수 점검에서 **9일**이 직전 세션과 종가 100% 동일했다
+     (20260416·0430·0501·0505·0525·0602·0603·**0717**·**0817**;
+     0817은 공통 2,872종목 시가·저가·종가 전부 동일).
+     이 유령 세션은 세 가지를 동시에 망가뜨린다:
+       · t+1 진입가가 **추천일 당일 가격**이 된다(0817 진입가 = 0814 가격)
+       · t+h 지평이 실제보다 한 세션 짧아진다
+       · 같은 날이 일별 평균에 두 번 들어가 분산을 낮추고 |t|를 부풀린다
+     → 직전 세션과 사실상 동일한 스냅샷은 세션 목록에서 제외한다. 그 날의
+       배치 스냅샷도 측정일에서 제외한다(직전일 픽의 복사이므로 중복 계상).
+
+  이 두 수정 후에도 gated_topN은 **남겨 둔다** — 후보 풀 상단이 어떻게
+  움직이는지는 별개로 쓸모가 있다. 대신 블록 안에 "공식 매수 발생 여부를
+  재현하지 않는다"와 픽이 없던 날 수를 함께 적어, 다시는 공식 성적으로
+  읽히지 않게 한다.
 """
 from __future__ import annotations
 
@@ -52,6 +85,17 @@ IC_WARN_T = -2.0                    # IC가 유의하게 음수면 경고 (역�
 IC_WARN_MIN_DAYS = 5                # t검정이 불가할 때 '일관성' 경로의 최소 표본
 
 CACHE_NAME = "alpha_live_report_latest.json"
+
+# [v65] 유령 세션 판정 — 직전 세션과 종가가 사실상 전부 동일한 스냅샷.
+#   휴장일에도 스냅샷이 생성되며 직전 세션을 그대로 복사한다(전수 9일 발견).
+#   비율을 1.0이 아니라 0.99로 둔 것은 상장/폐지로 공통 종목이 미세하게
+#   달라질 수 있기 때문이다. 실측 9일은 모두 **정확히 100%**였다.
+DUP_SESSION_MIN_CODES = 50
+DUP_SESSION_SAME_RATIO = 0.99
+
+# [v65] 공식 성적 집계에 필요한 최소 픽 발생일. 이보다 적으면 통계를 내지 않고
+#   "표본 없음"으로 남긴다 — 1~2일 성적을 평균이라 부르지 않기 위해서다.
+OFFICIAL_MIN_PICK_DAYS = 3
 
 
 def _stop_pct() -> float:
@@ -81,6 +125,51 @@ def _load_snapshots(data_dir: str) -> tuple[dict, list]:
         t["종목코드"] = t["종목코드"].astype(str).str.zfill(6)
         px[ymd] = t.set_index("종목코드")
     return px, sorted(px)
+
+
+def _drop_phantom_sessions(px: dict, days: list) -> tuple[list, list]:
+    """[v65] 직전 세션과 종가가 사실상 동일한 스냅샷은 세션이 아니다.
+
+    휴장일에도 price_snapshot이 생성되고 직전 세션 가격을 그대로 복사한다.
+    이 유령 세션을 세션으로 세면 t+1 진입가가 추천일 당일 가격이 되고, t+h
+    지평이 한 세션 짧아지고, 같은 날이 일별 평균에 두 번 들어간다.
+
+    반환: (실제 세션 목록, 제외된 날짜 목록)
+    """
+    real, dropped, prev = [], [], None
+    for ymd in days:
+        t = px.get(ymd)
+        if t is None or "종가" not in t.columns:
+            continue
+        cur = pd.to_numeric(t["종가"], errors="coerce").dropna()
+        if prev is not None and len(cur) and len(prev):
+            common = cur.index.intersection(prev.index)
+            if len(common) >= DUP_SESSION_MIN_CODES:
+                same = float((cur.loc[common] == prev.loc[common]).mean())
+                if same >= DUP_SESSION_SAME_RATIO:
+                    dropped.append(ymd)
+                    continue          # prev는 갱신하지 않는다 (복사본이므로)
+        real.append(ymd)
+        prev = cur
+    return real, dropped
+
+
+def _official_mask(rec: pd.DataFrame) -> Optional[pd.Series]:
+    """[v65] 그날 배치가 **기록한** 공식 매수 결정. 재구성하지 않는다.
+
+    PRODUCTION_BUY는 배치가 남긴 결정 그 자체다. 이 컬럼이 없는 구 배치는
+    '픽 0건'이 아니라 **판정 불가**다 — 0건으로 세면 없는 성적을 있다고
+    말하게 된다. 그래서 None을 돌려주고 호출부가 집계에서 뺀다.
+    (recommendation_quality.production_buy_mask는 컬럼이 없을 때 TOP_PICK
+     조합으로 폴백하는데, 그 폴백은 재구성이므로 여기서는 쓰지 않는다.)
+    """
+    if rec is None or "PRODUCTION_BUY" not in rec.columns:
+        return None
+    v = pd.to_numeric(rec["PRODUCTION_BUY"], errors="coerce")
+    if v.notna().any():
+        return (v.fillna(0) > 0)
+    txt = rec["PRODUCTION_BUY"].astype(str).str.strip().str.lower()
+    return txt.isin(["true", "y", "yes"])
 
 
 def _realized(px: dict, days: list, code: str, ymd: str, h: int,
@@ -169,7 +258,10 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
     from scipy import stats
 
     stop = _stop_pct()
-    px, days = _load_snapshots(data_dir)
+    px, all_days = _load_snapshots(data_dir)
+    # [v65] 휴장 복사본을 세션으로 세면 진입가·지평·일별 표본이 모두 어긋난다
+    days, phantom = _drop_phantom_sessions(px, all_days)
+    phantom_set = set(phantom)
     if len(days) < 5:
         return {"ok": False, "reason": "가격 스냅샷 부족"}
     ro_map = _risk_off_map(data_dir)
@@ -179,6 +271,10 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
     for f in files:
         ymd = os.path.basename(f)[-12:-4]
         if not ymd.isdigit() or ymd < ALPHA_LIVE_FROM:
+            continue
+        if ymd in phantom_set:
+            # [v65] 휴장일 배치는 직전 세션 가격으로 돌아간 복사본이다.
+            #   측정일로 세면 같은 픽이 두 번 집계된다(2026-08-17 = 08-14).
             continue
         try:
             rec = pd.read_csv(f, encoding="utf-8-sig", dtype={"종목코드": str},
@@ -197,8 +293,15 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
         if len(rec) < MIN_ROWS_PER_DAY:
             continue
 
+        # [v65] 그날 배치가 기록한 공식 매수 결정 (재구성 아님)
+        off = _official_mask(rec)
         row_out = {"ymd": ymd, "pool": int(len(rec)),
-                   "risk_off": bool(ro_map.get(ymd, False))}
+                   "risk_off": bool(ro_map.get(ymd, False)),
+                   "official_recorded": off is not None,
+                   "official_n": (0 if off is None else int(off.sum()))}
+        if off is not None and off.any() and "종목명" in rec.columns:
+            row_out["official_names"] = [
+                str(x) for x in rec.loc[off, "종목명"].astype(str).tolist()]
         any_h = False
         for h in HORIZONS:
             rets = np.array([_realized(px, days, c, ymd, h, stop)
@@ -220,6 +323,17 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
                 hd[f"top{k}_stop_rate"] = round(
                     float(np.isclose(head["_ret"], stop).mean()), 4)
             hd["top1_name"] = str(sub["종목명"].iloc[0]) if "종목명" in sub.columns else ""
+            # [v65] 공식 매수(기록된 결정)의 실현수익. 픽이 없던 날은 없는 대로 둔다.
+            if off is not None:
+                osel = off.reindex(rec.index, fill_value=False).loc[ok]
+                ohead = sub.loc[osel.reindex(sub.index, fill_value=False)]
+                hd["official_n_scored"] = int(len(ohead))
+                if len(ohead):
+                    hd["official_pct"] = round(100 * float(ohead["_ret"].mean()), 3)
+                    hd["official_excess_pct"] = round(
+                        100 * float(ohead["_ret"].mean() - sub["_ret"].mean()), 3)
+                    hd["official_stop_rate"] = round(
+                        float(np.isclose(ohead["_ret"], stop).mean()), 4)
             # [v63] 엔진이 실제로 고르는 규칙(퍼널 통과 + 알파×RR)으로도 계산
             gk = _gate_rank_key(rec.loc[ok])
             if gk is not None and gk.notna().any():
@@ -259,6 +373,14 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
         "stop_pct": stop,
         "definition": f"진입 t+1 시가 · {stop:.0%} 장중 스톱 · t+h 종가",
         "horizons": {},
+        "sessions": {
+            "snapshots": len(all_days),
+            "real": len(days),
+            "phantom_dropped": len(phantom),
+            "phantom_days": phantom[-12:],
+            "rule": (f"직전 세션과 종가 {DUP_SESSION_SAME_RATIO:.0%} 이상 동일 "
+                     f"(공통 {DUP_SESSION_MIN_CODES}종목 이상)이면 휴장 복사본"),
+        },
         "per_day": per_day[-40:],
         "caveat": ("표본이 얇다(도입 후 수십 영업일). IC를 1차 지표로 보고, "
                    "수익 평균은 스톱 체결률·레짐과 함께 읽을 것. "
@@ -298,6 +420,54 @@ def compute_alpha_live_report(data_dir: str = "data") -> dict:
                 blk[f"gated_top{k}"]["stop_rate"] = round(float(np.mean(
                     [r[hh][f"gated_top{k}_stop_rate"] for r in grows])), 4)
                 blk[f"gated_top{k}"]["n_days"] = len(grows)
+                # [v65] 이 축이 공식 성적으로 읽히지 않게 블록 안에 못을 박는다.
+                #   재구성은 '픽이 있었는지'를 재현하지 못하고 매일 후보 1위를
+                #   산다. 그 사실을 수치로 함께 남긴다.
+                _withpick = sum(1 for r in grows if int(r.get("official_n", 0)) > 0)
+                blk[f"gated_top{k}"]["axis"] = "후보 풀 상단(재구성)"
+                blk[f"gated_top{k}"]["is_reconstruction"] = True
+                blk[f"gated_top{k}"]["pick_days_covered"] = _withpick
+                blk[f"gated_top{k}"]["no_pick_days_counted"] = len(grows) - _withpick
+                blk[f"gated_top{k}"]["caveat"] = (
+                    "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 "
+                    f"{len(grows) - _withpick}일도 후보 1위를 산 것으로 계산했다. "
+                    "공식 성적은 official 블록을 볼 것.")
+        # [v65] 기록된 공식 매수 성적 — 이 리포트의 유일한 '실제 성적'
+        rec_rows = [r for r in rows if r.get("official_recorded")]
+        pick_rows = [r for r in rec_rows if r[hh].get("official_pct") is not None]
+        nopick = [r for r in rec_rows if int(r.get("official_n", 0)) == 0]
+        ob = {
+            "axis": "공식 매수(기록된 결정)",
+            "is_reconstruction": False,
+            "days_recorded": len(rec_rows),
+            "days_unrecorded": len(rows) - len(rec_rows),
+            "pick_days": len(pick_rows),
+            "no_pick_days": len(nopick),
+        }
+        # [v65] '픽이 있었던 날'과 '픽 성적을 잴 수 있는 날'은 다르다.
+        #   선행수익이 아직 확정 안 된 픽을 0%로도, 없었던 것으로도 세지 않는다.
+        declared = [r for r in rec_rows if int(r.get("official_n", 0)) > 0]
+        ob["pick_days_declared"] = len(declared)
+        ob["days_pick_unmeasured"] = len(declared) - len(pick_rows)
+        if rec_rows:
+            ob["pick_day_rate"] = round(len(declared) / len(rec_rows), 4)
+            ob["measured_pick_day_rate"] = round(len(pick_rows) / len(rec_rows), 4)
+        if len(pick_rows) >= OFFICIAL_MIN_PICK_DAYS:
+            ob["on_pick_days"] = _agg([r[hh]["official_pct"] / 100 for r in pick_rows])
+            oex = [r[hh]["official_excess_pct"] / 100 for r in pick_rows]
+            ob["on_pick_days"]["excess_mean_pct"] = round(100 * float(np.mean(oex)), 3)
+            ob["on_pick_days"]["excess_t"] = _tstat(oex)
+            ob["on_pick_days"]["stop_rate"] = round(float(np.mean(
+                [r[hh].get("official_stop_rate", 0.0) for r in pick_rows])), 4)
+            # 픽이 없던 날은 현금(0%) — 실제 계좌가 겪은 것은 이쪽이다
+            cash = ([r[hh]["official_pct"] / 100 for r in pick_rows]
+                    + [0.0] * len(nopick))
+            ob["all_days_cash"] = _agg(cash)
+            ob["all_days_cash"]["note"] = "픽 없는 날은 0%(현금)로 계산"
+        else:
+            ob["reason"] = (f"픽 발생일 {len(pick_rows)}일 — "
+                            f"{OFFICIAL_MIN_PICK_DAYS}일 미만이라 통계를 내지 않는다")
+        blk["official"] = ob
         # 레짐 분리 — 같은 엔진이 국면별로 정반대일 수 있다
         for lab, sel in (("risk_off", True), ("normal", False)):
             sub = [r for r in rows if bool(r["risk_off"]) is sel]
@@ -457,14 +627,40 @@ def alpha_live_line(report: Optional[dict], h: int = 5) -> str:
     head = (f"알파 실전 {blk['n_days']}일(h={h}): IC {blk.get('ic_mean'):+.3f}"
             + (f" t={ic_t:+.2f}" if ic_t is not None else "")
             + f" · 양수일 {blk.get('ic_positive_days')}/{blk['n_days']}")
-    if g1:
+
+    # [v65] 헤드라인은 **기록된 공식 매수**를 먼저 말한다.
+    #   v63은 재구성한 후보 풀 상단을 "엔진 1위"라고 적었는데, 그 축은 픽이
+    #   없던 날에도 성적을 만든다(21일 중 18일). 실제 성적이 아니면 실제
+    #   성적처럼 적지 않는다 — v61·v63과 같은 원칙이다.
+    ob = blk.get("official") or {}
+    op = ob.get("on_pick_days")
+    if op:
+        line = (head
+                + f" · 공식픽 {ob.get('pick_days', 0)}건"
+                + f"/{ob.get('days_recorded', 0)}일"
+                + f" {op.get('mean_pct', 0):+.2f}%"
+                + f"(초과 {op.get('excess_mean_pct', 0):+.2f}%p"
+                + f" · 스톱체결 {100*op.get('stop_rate', 0):.0f}%)")
+        cash = ob.get("all_days_cash") or {}
+        if cash.get("n"):
+            line += f" · 현금포함 {cash.get('mean_pct', 0):+.2f}%/일"
+        return line
+    if ob.get("days_recorded"):
+        # 픽 표본이 아직 얇다 — 없는 성적을 있다고 적지 않는다
         return (head
-                + f" · 엔진 1위 {g1.get('mean_pct', 0):+.2f}%"
+                + f" · 공식픽 {ob.get('pick_days', 0)}건"
+                + f"/{ob.get('days_recorded', 0)}일 — 성적 표본 부족")
+    if g1:
+        # 스톱체결률은 v58부터 이 줄의 고정 항목이다 — IC가 양수인데 수익이
+        # 음수였던 경로가 스톱이었기 때문이다. 축 이름이 바뀌어도 유지한다.
+        return (head
+                + f" · 후보 풀 상단 {g1.get('mean_pct', 0):+.2f}%"
                 + f"(초과 {g1.get('excess_mean_pct', 0):+.2f}%p"
                 + f" · 스톱체결 {100*g1.get('stop_rate', 0):.0f}%"
-                + f" · {g1.get('n_days', 0)}일)")
+                + f" · {g1.get('n_days', 0)}일"
+                + f" · 픽 없던 날 {g1.get('no_pick_days_counted', 0)}일 포함)")
     return (head
             + f" · 알파점수 단독 1위 {t1.get('mean_pct', 0):+.2f}%"
             + f"(초과 {t1.get('excess_mean_pct', 0):+.2f}%p"
             + f" · 스톱체결 {100*t1.get('stop_rate', 0):.0f}%)"
-            + " · 엔진 픽 기준 재구성 불가(구 배치)")
+            + " · 엔진 픽 재구성 불가 · 공식 매수 기록 없음(구 배치)")
