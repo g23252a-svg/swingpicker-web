@@ -32,6 +32,9 @@ def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
         return default
 
 
+from services import position_risk as _PR   # [v64] 원화 리스크 SSOT
+
+
 def _humanize_reason(reason: Any) -> str:
     """Translate engine-oriented rejection text into a user-facing reason."""
     raw = str(reason or "").strip()
@@ -43,6 +46,20 @@ def _humanize_reason(reason: Any) -> str:
     for part in parts:
         if part == "TOP_PICK 아님":
             text = "최종 선별 단계 미통과"
+        # [v64] '조건 미충족'으로 뭉개던 세 상황을 분리한다.
+        #   2026-08-17 배치 실측: 관찰 후보 상단 3종목은 **모든 조건을 통과**했고
+        #   (ALPHA_ENTRY_OK=1 · TOP_PICK=1) 하루 1종목 제한에서 순위가 밀린 것
+        #   이거나 이미 보유 중이었다. 그런데 화면은 전부 "즉시 매수 조건 미충족"
+        #   이라고 적었다 — 조건을 못 채운 것으로 읽혀 사실과 다르다.
+        #   (사용자가 이 목록을 보고 5종목을 함께 매수한 배경이다.)
+        elif part.startswith("당일 신규진입") and "제한" in part:
+            text = "조건은 통과했으나 당일 신규진입 1종목 제한에서 순위 밀림"
+        elif part.startswith("상태 CARRY"):
+            text = "이미 보유 중인 종목 — 신규 매수 대상이 아님(0주)"
+        elif "필요 승률" in part:
+            # 원문 끝에 이미 '— 켈리 기준 미달'이 붙어 있어 그대로 감싸면 중복된다
+            text = part.split(" — 켈리 기준 미달")[0].strip()
+            text = f"켈리 기준 미달 — {text}"
         elif part == "즉시매수 기준 미달":
             text = "즉시 매수 조건 미충족"
         elif part.startswith("진입등급 "):
@@ -201,7 +218,51 @@ def _stock_payload(row: pd.Series) -> dict[str, Any]:
         "raw_reason": raw_reason,
         "route": str(row.get("ROUTE", "")),
         "decision": str(row.get("ACTION_DECISION", "CASH")),
+        # [v64] 이 탭에 없던 숫자 — 손절 시 실제로 잃는 금액.
+        #   v61에서 카드·상세에는 넣었는데 정작 사용자가 제일 많이 보는
+        #   '오늘' 탭(이 모듈)에는 빠져 있었다(position_risk 참조 0건).
+        #   그래서 화면엔 "-8.1% vs 진입"만 있고 원화 기준이 없었다.
+        "qty": _PR.quantity(row) or 0.0,
+        "position_won": _PR.position_won(row) or 0.0,
+        "stop_loss_won": _PR.stop_loss_won(row) or 0.0,
+        "risk_line": _PR.risk_line(row),
     }
+
+
+def _risk_total(buys: list[dict], watch: list[dict]) -> dict[str, Any]:
+    """오늘 화면에 뜬 후보들의 **합계** 리스크.
+
+    엔진은 하루 1종목만 사이징하지만 화면에는 관찰 후보가 함께 뜬다. 둘을
+    합쳐 사면 리스크가 합산되는데 그 숫자가 어디에도 없었다(v64에서 추가).
+    손절이 동반 발생한다는 실측(상위N 최악일이 N과 무관하게 -8.00%)이 있으므로
+    '분산되니 괜찮다'로 읽히지 않게 합계를 그대로 낸다.
+    """
+    def _sum(items, key):
+        return float(sum(float(i.get(key) or 0.0) for i in items))
+    official_risk = _sum(buys, "stop_loss_won")
+    watch_risk = _sum(watch, "stop_loss_won")
+    total = official_risk + watch_risk
+    out = {
+        "official_count": len(buys),
+        "watch_count": len(watch),
+        "official_risk_won": official_risk,
+        "watch_risk_won": watch_risk,
+        "total_risk_won": total,
+        "official_position_won": _sum(buys, "position_won"),
+        "total_position_won": _sum(buys, "position_won") + _sum(watch, "position_won"),
+        "line": "",
+        "caveat": ("손절은 시장 하락일에 **동시에** 터진다 — 상위N 실측에서 최악일이 "
+                   "종목 수와 무관하게 -8%로 같았다. 여러 종목으로 나눠도 꼬리 "
+                   "위험은 줄지 않는다."),
+    }
+    if official_risk > 0:
+        out["line"] = (f"공식 매수만 사면 손절 시 -{official_risk:,.0f}원")
+        if watch_risk > 0:
+            out["line"] += (f" · 관찰 후보까지 전부 사면 "
+                            f"-{total:,.0f}원({total/official_risk:.1f}배)")
+    elif total > 0:
+        out["line"] = f"화면의 후보 전부를 사면 손절 시 -{total:,.0f}원"
+    return out
 
 
 def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
@@ -244,10 +305,31 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         work.get("ALPHA_SCORE", pd.Series(float("nan"), index=work.index)),
         errors="coerce",
     ).fillna(-1)
-    _sort_cols = ["_alpha", "_quality"] if alpha_on else ["_quality"]
+    # [v64] 정렬을 **엔진이 실제로 고르는 키(알파 × 손익비)**로 바꾼다.
+    #   기존 정렬은 알파 점수 단독이었다. 그런데 v63에서 실측한 결과 알파 점수
+    #   단독 1위는 h5 **-1.85%**이고 엔진 픽(알파×RR) 1위는 **+3.58%**였다
+    #   (유니버스 +0.75%). 즉 알파 점수순 정렬은 실제 성과와 **반대 방향**이다.
+    #   실제 사례(2026-08-17 배치): 공식 매수 로킷헬스케어는 알파 93.9인데
+    #   관찰 후보 상단에 에치에프알 98.7·한선엔지니어링 98.5·SK네트웍스 97.4가
+    #   떴다. "매수 아님"이라 적어도 **순서가 더 좋아 보이는 인상**을 준다.
+    #   랭킹 키는 recommendation_quality의 production 선정과 같은 정의를 쓴다
+    #   (v35 실측: 품질점수 랭킹 -1.29%/일 → 알파×손익비 +2.07%/일).
+    work["_rr"] = pd.to_numeric(
+        work.get("RR_NOW_TP1", pd.Series(0.0, index=work.index)),
+        errors="coerce").fillna(0.0).clip(0.0, 3.0)
+    work["_engine_key"] = work["_alpha"].clip(lower=0) * work["_rr"]
+    _sort_cols = (["_engine_key", "_alpha", "_quality"] if alpha_on
+                  else ["_quality"])
 
     buys_df = work[production].sort_values(_sort_cols, ascending=False).head(3)
-    watch_df = work[(~production) & action.eq("WATCH")].sort_values(
+    # [v64] 엔진이 0주로 산정한 종목은 관찰 후보에서 내린다.
+    #   2026-08-17 배치에서 두산퓨얼셀(v62 급등 차단)·에치에프알(이미 보유·CARRY)이
+    #   켈리 0주인데 후보 목록 상단에 떠 있었다 — 살 수 없는 것을 후보로 보여주면
+    #   v54가 없앤 '공식 매수인데 0주' 모순이 목록 쪽으로 되살아난다.
+    _qty = pd.to_numeric(
+        work.get("켈리_수량", work.get("추천수량", pd.Series(0.0, index=work.index))),
+        errors="coerce").fillna(0.0)
+    watch_df = work[(~production) & action.eq("WATCH") & (_qty > 0)].sort_values(
         _sort_cols, ascending=False
     ).head(3)
 
@@ -438,6 +520,16 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         "next_check": next_check,
         "buys": buys,
         "watch": watch,
+        # [v64] 합계 리스크 — 이 화면에 없어서 손실이 의도를 넘었다.
+        #   실제 사례(2026-08-14~18): 사용자가 공식 매수 + 관찰 후보를 합쳐
+        #   5종목을 샀다. 엔진은 **하루 1종목**만 사이징한다 —
+        #     공식 매수(로킷헬스케어) 단독 의도 손실  88,400원
+        #     5종목 전부 엔진 수량대로 샀을 때        207,340원
+        #   그런데 어느 화면에도 이 합계가 없었다. 종목별 -8%만 보였다.
+        #   게다가 손절은 **동시에 터진다** — 상위N 포트폴리오 실측에서 최악일이
+        #   N=1,2,3,5,8 전부 -8.00%로 같았다(동반 손절). 즉 여러 종목으로 나눠도
+        #   꼬리 위험이 줄지 않으므로, 합계를 그대로 보여주는 것이 정직하다.
+        "risk_total": _risk_total(buys, watch),
         "awaiting": awaiting,       # [v54] 근거 통과·상태 미달로 0주인 후보
         "blockers": blockers,
         "gates": gates,

@@ -79,6 +79,9 @@ def test_market_readiness_and_watch_count_are_explained():
             "ACTION_DECISION": "WATCH",
             "QUALITY_GUARD_SCORE": 73,
             "QUALITY_GUARD_REASON": "TOP_PICK 아님 · 경로 WAIT · 상단여력 부족 · 시장폭 28% (내부 약세)",
+            # [v64] 관찰 후보는 **켈리 0주 종목을 제외**한다(살 수 없는 후보 금지).
+            #   수량이 없으면 목록이 비어 차단 사유 번역을 검증할 수 없다.
+            "켈리_수량": 10.0, "추천매수가": 10000.0, "손절가": 9200.0,
             "MARKET_BREADTH": 27.6,
             "MACRO_RISK": "CAUTION",
             "MARKET_REGIME": "NEUTRAL",
@@ -89,6 +92,7 @@ def test_market_readiness_and_watch_count_are_explained():
             "PRODUCTION_BUY": 0,
             "ACTION_DECISION": "WATCH",
             "QUALITY_GUARD_SCORE": 70,
+            "켈리_수량": 10.0, "추천매수가": 10000.0, "손절가": 9200.0,
             "MARKET_BREADTH": 27.6,
             "MACRO_RISK": "CAUTION",
             "MARKET_REGIME": "NEUTRAL",
