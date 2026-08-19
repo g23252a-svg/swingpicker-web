@@ -211,6 +211,12 @@ def compute_pick_reliability(data_dir: str = "data", max_days: int = 200) -> dic
         return {"ok": False, "reason": "OHLCV 캐시 없음"}
     by_code = {c: g.sort_values("Date").reset_index(drop=True)
                for c, g in hl.groupby("종목코드")}
+    # [v65] 휴장일 배치는 직전 세션 가격으로 돌아간 복사본이다. 그 스냅샷의
+    #   픽은 직전 영업일 픽과 같은 종목이므로, 측정일로 세면 같은 픽이 두 번
+    #   집계된다(전수 7일: 20260302·0501·0505·0525·0603·0717·0817).
+    #   OHLCV 캐시의 날짜 집합이 실제 세션 달력이므로 그것으로 판별한다.
+    sessions = set(pd.to_datetime(hl["Date"]).dt.strftime("%Y%m%d"))
+    non_session = []
 
     files = sorted(glob.glob(os.path.join(data_dir, "recommend_2*.csv")))[-max_days:]
     rows, skipped = [], 0
@@ -219,6 +225,9 @@ def compute_pick_reliability(data_dir: str = "data", max_days: int = 200) -> dic
         try:
             asof = pd.to_datetime(ymd, format="%Y%m%d")
         except ValueError:
+            continue
+        if ymd not in sessions:
+            non_session.append(ymd)
             continue
         try:
             rec = pd.read_csv(f, encoding="utf-8-sig", dtype={"종목코드": str},
@@ -259,7 +268,9 @@ def compute_pick_reliability(data_dir: str = "data", max_days: int = 200) -> dic
         # 그 기간에는 공식 매수가 나올 수 없었으므로 표본도 없다. 화면이
         # '통계 없음'이 아니라 '차단되어 표본이 없다'고 말해야 한다.
         return {"ok": False, "reason": "기간 내 재현된 공식 매수 픽 없음",
-                "files_scanned": len(files), "policy_version": POLICY_VERSION,
+                "files_scanned": len(files),
+                "non_session_days_skipped": len(non_session),
+                "policy_version": POLICY_VERSION,
                 "block_note": "risk_off 등 하드블록으로 픽이 없었던 기간일 수 있음"}
     df = pd.DataFrame(rows)
     mature = df[df["hold"].notna()]
@@ -270,6 +281,7 @@ def compute_pick_reliability(data_dir: str = "data", max_days: int = 200) -> dic
         "files_scanned": len(files),
         "files_skipped": skipped,
         "pick_days": int(df["date"].nunique()),
+        "non_session_days_skipped": len(non_session),
         "matured_picks": int(len(mature)),
         "horizon_days": HOLD_DAYS,
         "hold": _stats(df["hold"].tolist()),

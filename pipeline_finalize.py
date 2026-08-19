@@ -2137,6 +2137,20 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             log(f"🎯 [v58] 알파 실전 성적: {_alr.get('reason', '집계 불가')}")
         for _w in (_alr.get("warnings") or []):
             log(f"🚨 [v58] {_w}")
+        # [v65] 배포 확인용 — 유령 세션(휴장 복사본) 제거와 공식 픽 표본을
+        #   로그에 남긴다. 이 두 줄이 없으면 성적표가 무엇을 셌는지 사후에
+        #   알 수 없다(v63 리포트가 픽 없는 날 18/21일을 세고 있었던 이유).
+        _s = _alr.get("sessions") or {}
+        if _s.get("phantom_dropped"):
+            log(f"🧾 [v65] 휴장 스냅샷 {_s['phantom_dropped']}일 제외 "
+                f"(세션 {_s.get('real')}/{_s.get('snapshots')}) "
+                f"— 최근: {', '.join(_s.get('phantom_days', [])[-3:])}")
+        _ob = ((_alr.get("horizons") or {}).get("h5") or {}).get("official") or {}
+        if _ob:
+            log(f"🧾 [v65] 공식 매수 표본: 픽 {_ob.get('pick_days_declared', 0)}건"
+                f"/{_ob.get('days_recorded', 0)}일"
+                f" · 측정가능 {_ob.get('pick_days', 0)}건"
+                f" · 미확정 {_ob.get('days_pick_unmeasured', 0)}건")
     except Exception as e:
         log(f"⚠️ 알파 실전 성적 리포트 스킵: {e}")
     # [v21.3] 조합 최적화
