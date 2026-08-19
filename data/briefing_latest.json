@@ -1,7 +1,24 @@
 {
-  "trade_date": "20260818",
-  "generated_at": "2026-08-18 20:49:11",
-  "decision": "CASH",
-  "count": 0,
-  "stocks": []
+  "trade_date": "20260819",
+  "generated_at": "2026-08-19 20:43:58",
+  "count": 1,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "027360",
+      "name": "아주IB투자",
+      "route": "ATTACK",
+      "score": 40.4,
+      "close": 3585,
+      "entry": 3585,
+      "stop": 3295,
+      "target1": 4710,
+      "target2": 17690,
+      "est_win_rate": 0.48,
+      "rr": 3.9,
+      "sector": "금융",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/027360"
+    }
+  ]
 }

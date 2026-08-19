@@ -5668,5 +5668,78 @@
       "458870_20260811_WARN_DRAWDOWN_20260817",
       "458870_20260811_STOP_HIT_20260818"
     ]
+  },
+  {
+    "code": "413630",
+    "name": "씨피시스템",
+    "entry_ymd": "20260807",
+    "entry_px": 3830.0,
+    "qty": 0,
+    "stop_px": 3520.0,
+    "stop_px_initial": 3520.0,
+    "take_px1": 5100.0,
+    "take_px2": 5290.0,
+    "trailing_high": 4325.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260819",
+    "last_close_px": 3390.0,
+    "unrealized_pnl_pct": -11.49,
+    "realized_pnl_pct": -11.49,
+    "close_ymd": "20260819",
+    "close_px": 3390.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "413630_20260807_WARN_DRAWDOWN_20260818",
+      "413630_20260807_STOP_HIT_20260819"
+    ]
+  },
+  {
+    "code": "009540",
+    "name": "HD한국조선해양",
+    "entry_ymd": "20260810",
+    "entry_px": 404000.0,
+    "qty": 0,
+    "stop_px": 371500.0,
+    "stop_px_initial": 371500.0,
+    "take_px1": 453500.0,
+    "take_px2": 488000.0,
+    "trailing_high": 412500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260819",
+    "last_close_px": 367000.0,
+    "unrealized_pnl_pct": -9.16,
+    "realized_pnl_pct": -9.16,
+    "close_ymd": "20260819",
+    "close_px": 367000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "009540_20260810_WARN_DRAWDOWN_20260812",
+      "009540_20260810_WARN_DRAWDOWN_20260813",
+      "009540_20260810_WARN_DRAWDOWN_20260818",
+      "009540_20260810_STOP_HIT_20260819"
+    ]
+  },
+  {
+    "code": "490470",
+    "name": "세미파이브",
+    "entry_ymd": "20260818",
+    "entry_px": 16100.0,
+    "qty": 0,
+    "stop_px": 15370.0,
+    "stop_px_initial": 15370.0,
+    "take_px1": 19490.0,
+    "take_px2": 44950.0,
+    "trailing_high": 18500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260819",
+    "last_close_px": 15000.0,
+    "unrealized_pnl_pct": -6.83,
+    "realized_pnl_pct": -6.83,
+    "close_ymd": "20260819",
+    "close_px": 15000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "490470_20260818_STOP_HIT_20260819"
+    ]
   }
 ]
