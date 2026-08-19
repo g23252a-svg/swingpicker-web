@@ -32,6 +32,10 @@ def _row(**overrides):
         "NEW_ENTRY_BLOCKED": False, "STOP_OVERRIDE_REASON": "",
         "추천매수가": 10000.0, "종가": 10000.0, "손절가": 9500.0,
         "추천매도가1": 11000.0, "RR_NOW_TP1": 2.0,
+        # [v64] 관찰 후보에서 **켈리 0주 종목을 제외**하도록 바뀌었다
+        #   (살 수 없는 것을 후보로 보여주지 않기 위해). 그래서 픽스처에도
+        #   실제 수량을 준다 — 없으면 목록이 통째로 비어 테스트 의도가 사라진다.
+        "켈리_수량": 10.0,
     }
     row.update(overrides)
     return row
@@ -97,6 +101,9 @@ def test_watch_sorted_by_alpha_when_gate_active():
         _row(종목명="알파높음", ALPHA_SCORE=99.0, QUALITY_GUARD_SCORE=50.0),
     ])
     s = build_decision_summary(df)
+    # [v64] 정렬 키가 알파 단독 → **알파 × 손익비**로 바뀌었다(v63 실측:
+    #   알파 단독 1위 -1.85% vs 엔진 픽 1위 +3.58%). 두 행의 RR이 같으므로
+    #   "품질점수보다 알파가 우선"이라는 이 테스트의 의도는 그대로 성립한다.
     assert s["watch"][0]["name"] == "알파높음"     # 품질점수보다 알파 우선
     assert s["watch"][0]["alpha"] == 99.0
     assert abs(s["watch"][0]["alpha_win_prob"] - 0.41) < 1e-9

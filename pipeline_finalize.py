@@ -1790,6 +1790,33 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         df_out = apply_recommendation_quality_guard(df_out)
         _after_quality = int(pd.to_numeric(df_out.get("PRODUCTION_BUY", 0), errors="coerce").fillna(0).astype(int).sum())
 
+        # [v64] 세션 신선도 — 기준일이 실제 가격일과 다르면 **사실대로 적는다**.
+        #   2026-08-17(광복절 대체공휴일) 배치가 8/14 가격으로 `기준일=20260817`,
+        #   `RUN_STATUS=OK`를 찍고 TOP_PICK 12건·공식매수 1건을 냈다. 392종목
+        #   종가가 8/14와 100% 동일했고 OHLCV에 8/17 거래일 자체가 없었다.
+        #   원인은 collector.find_latest_valid_date의 4단계 폴백(IP차단 대비
+        #   '최근 평일 강제 진행')이 공휴일에도 같은 경로를 타는 것이다.
+        #   이력 전수: 배치 124일 중 비거래일 7일.
+        #   실제 진입 왜곡은 이번엔 작았다(8/18 갭 중위 -0.05% · 손절터치 0/12)
+        #   → 그래서 **픽을 죽이지 않고 표시만 정직하게** 한다(v45·v51·v61 원칙).
+        try:
+            from services.session_freshness import (annotate as _sf_annotate,
+                                                    assess as _sf_assess,
+                                                    is_alarming as _sf_alarm,
+                                                    line as _sf_line)
+            _sf_rep = _sf_assess(ctx.trade_ymd, OUT_DIR)
+            df_out = _sf_annotate(df_out, _sf_rep)
+            _sfl = _sf_line(_sf_rep)
+            if _sfl:
+                log(f"{'🚨' if _sf_alarm(_sf_rep) else '📅'} [v64] {_sfl}")
+            if _sf_alarm(_sf_rep):
+                log("   🚨 [v64] 이 배치의 가격·시장폭은 전 거래일 값이다 — "
+                    "'익일 지정가'가 가격 기준일의 익일이 아니다")
+            ctx.breadth["SESSION_STALE"] = bool(_sf_rep.get("stale"))
+            ctx.breadth["PRICE_ASOF"] = _sf_rep.get("price_asof")
+        except Exception as _se:
+            logger.warning(f"⚠️ [v64] 세션 신선도 판정 실패 (표시만 영향): {_se}")
+
         # [v63] 공식 퍼널 라벨 재계산 — **품질게이트 뒤**가 맞는 자리다.
         #   v62에서 알파 게이트 직후에 뒀는데, 그 뒤에 품질게이트가 '당일 신규진입
         #   1종목 제한'으로 PRODUCTION_BUY를 잘라내므로 라벨이 다시 낡았다.
