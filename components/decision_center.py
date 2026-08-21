@@ -226,6 +226,12 @@ def _stock_payload(row: pd.Series) -> dict[str, Any]:
         "position_won": _PR.position_won(row) or 0.0,
         "stop_loss_won": _PR.stop_loss_won(row) or 0.0,
         "risk_line": _PR.risk_line(row),
+        # [v66] 손절가는 추천매수가에 고정되고 실제 체결가로 재기준되지 않는다.
+        #   갭다운이 나면 계획한 손절폭이 산술적으로 줄어든다(8/19 실측:
+        #   갭 중위 -3.84% → 실효 손절폭 -8.03%에서 -4.18%로). 경고는 흔한
+        #   갭에도 얇아지는 종목만, 시나리오 숫자는 전 종목에 사실로 표시한다.
+        "gap_table": _PR.gap_table_line(row),
+        "gap_warn": _PR.gap_risk_line(row),
     }
 
 
@@ -642,6 +648,53 @@ def _move_from_entry(entry: float, price: float) -> str:
     return f"{move:+.1f}% vs 진입"
 
 
+# ══════════════════════════════════════════════════════════════════
+#  [v66] v64가 만들어 놓고 화면에 붙이지 못한 것 + 갭 민감도
+# ══════════════════════════════════════════════════════════════════
+#
+# v64는 `risk_line`(종목별 원화 리스크) · `risk_total`(합계) · `concentration`
+# (후보 집중도)을 전부 계산해서 summary에 담았는데, **렌더 코드가 없었다.**
+# 테스트도 데이터 계층 함수만 검사해서 이 사실을 잡지 못했다 — v58.1이
+# 고쳤던 것과 정확히 같은 실패 방식(만들어놓고 화면이 모른다)이다.
+# 그래서 v64의 changelog가 약속한 화면이 실제로는 존재하지 않았다.
+#
+# v66에서 셋을 모두 붙이고, 아래 렌더러를 소스 수준으로 고정하는 테스트를
+# 함께 둔다(test_v66_*). 계산만 하고 안 그리면 실패한다.
+def _render_risk_lines(stock: dict[str, Any]) -> None:
+    """종목 카드 하단의 리스크 3줄. 없는 줄은 그리지 않는다."""
+    line = stock.get("risk_line") or ""
+    gap_tbl = stock.get("gap_table") or ""
+    gap_warn = stock.get("gap_warn") or ""
+    if not (line or gap_tbl or gap_warn):
+        return
+    with ui.column().classes("w-full gap-0 mt-2"):
+        if line:
+            ui.label(line).classes("text-xs font-bold text-rose-200")
+        if gap_warn:
+            ui.label(gap_warn).classes("text-[11px] text-amber-200 leading-relaxed")
+        elif gap_tbl:
+            ui.label(gap_tbl).classes("text-[11px] text-slate-500")
+
+
+def _render_risk_total(summary: dict[str, Any]) -> None:
+    """오늘 후보 전체를 사면 얼마를 잃는가 + 후보들이 같은 베팅인가."""
+    rt = summary.get("risk_total") or {}
+    con = rt.get("concentration") or {}
+    if not (rt.get("line") or con.get("line")):
+        return
+    with ui.column().classes("w-full gap-1 rounded-xl p-3 mt-2").style(
+        "background:rgba(190,18,60,.08); border:1px solid rgba(244,63,94,.25);"
+    ):
+        ui.label("오늘 다 사면 얼마를 잃는가").classes(
+            "text-xs font-bold text-rose-200")
+        if rt.get("line"):
+            ui.label(rt["line"]).classes("text-sm font-bold text-rose-100")
+        if con.get("line"):
+            ui.label(con["line"]).classes("text-xs text-amber-100 leading-relaxed")
+        if rt.get("caveat"):
+            ui.label(rt["caveat"]).classes("text-[10px] text-slate-500 leading-relaxed")
+
+
 def _render_buy_card(stock: dict[str, Any]) -> None:
     with ui.card().classes("sp-buy-card w-full p-5 rounded-2xl"):
         with ui.row().classes("w-full items-start justify-between gap-3"):
@@ -667,6 +720,7 @@ def _render_buy_card(stock: dict[str, Any]) -> None:
                     ui.label(label).classes("text-[11px] text-slate-400")
                     ui.label(value).classes(f"text-base font-bold {css}")
                     ui.label(detail or "—").classes("text-[10px] text-slate-500")
+        _render_risk_lines(stock)
         ui.button(
             "근거와 차트 보기",
             on_click=lambda code=stock["code"]: ui.navigate.to(f"/stock/{code}"),
@@ -703,6 +757,7 @@ def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
             ui.label(stock["reason"] or "최종 기준 미달").classes(
                 "text-sm text-slate-300 leading-relaxed"
             )
+            _render_risk_lines(stock)
         ui.button(
             "근거 보기",
             on_click=lambda code=stock["code"]: ui.navigate.to(f"/stock/{code}"),
@@ -863,6 +918,8 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                 ui.label(
                     f"상위 {len(summary['watch'])}개만 표시했습니다. 나머지 {summary['watch_count'] - len(summary['watch'])}개는 종목 탭에서 확인하세요."
                 ).classes("text-xs text-slate-500")
+
+        _render_risk_total(summary)
 
         # [v58.1] 이 엔진의 지난 성적 — 매일 산출하면서 화면에 없던 것.
         #   숫자를 자랑하려는 자리가 아니다. 표본이 얇고 최근 구간이 5년 만의
