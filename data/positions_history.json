@@ -5741,5 +5741,171 @@
     "alerted_events": [
       "490470_20260818_STOP_HIT_20260819"
     ]
+  },
+  {
+    "code": "298020",
+    "name": "효성티앤씨",
+    "entry_ymd": "20260806",
+    "entry_px": 340500.0,
+    "qty": 0,
+    "stop_px": 313000.0,
+    "stop_px_initial": 313000.0,
+    "take_px1": 392500.0,
+    "take_px2": 477500.0,
+    "trailing_high": 350000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260821",
+    "last_close_px": 312000.0,
+    "unrealized_pnl_pct": -8.37,
+    "realized_pnl_pct": -8.37,
+    "close_ymd": "20260821",
+    "close_px": 312000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "298020_20260806_WARN_DRAWDOWN_20260812",
+      "298020_20260806_WARN_DRAWDOWN_20260813",
+      "298020_20260806_WARN_DRAWDOWN_20260818",
+      "298020_20260806_WARN_DRAWDOWN_20260819",
+      "298020_20260806_WARN_DRAWDOWN_20260820",
+      "298020_20260806_STOP_HIT_20260821"
+    ]
+  },
+  {
+    "code": "437730",
+    "name": "삼현",
+    "entry_ymd": "20260806",
+    "entry_px": 37300.0,
+    "qty": 0,
+    "stop_px": 34300.0,
+    "stop_px_initial": 34300.0,
+    "take_px1": 42950.0,
+    "take_px2": 47100.0,
+    "trailing_high": 40600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260821",
+    "last_close_px": 33150.0,
+    "unrealized_pnl_pct": -11.13,
+    "realized_pnl_pct": -11.13,
+    "close_ymd": "20260821",
+    "close_px": 33150.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "437730_20260806_STOP_HIT_20260821"
+    ]
+  },
+  {
+    "code": "000250",
+    "name": "삼천당제약",
+    "entry_ymd": "20260812",
+    "entry_px": 186200.0,
+    "qty": 0,
+    "stop_px": 171300.0,
+    "stop_px_initial": 171300.0,
+    "take_px1": 218500.0,
+    "take_px2": 254000.0,
+    "trailing_high": 203000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260821",
+    "last_close_px": 168700.0,
+    "unrealized_pnl_pct": -9.4,
+    "realized_pnl_pct": -9.4,
+    "close_ymd": "20260821",
+    "close_px": 168700.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "000250_20260812_STOP_HIT_20260821"
+    ]
+  },
+  {
+    "code": "329180",
+    "name": "HD현대중공업",
+    "entry_ymd": "20260818",
+    "entry_px": 489500.0,
+    "qty": 0,
+    "stop_px": 453500.0,
+    "stop_px_initial": 453500.0,
+    "take_px1": 542000.0,
+    "take_px2": 686000.0,
+    "trailing_high": 507000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260821",
+    "last_close_px": 453000.0,
+    "unrealized_pnl_pct": -7.46,
+    "realized_pnl_pct": -7.46,
+    "close_ymd": "20260821",
+    "close_px": 453000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "329180_20260818_STOP_HIT_20260821"
+    ]
+  },
+  {
+    "code": "007810",
+    "name": "코리아써키트",
+    "entry_ymd": "20260819",
+    "entry_px": 60700.0,
+    "qty": 0,
+    "stop_px": 55800.0,
+    "stop_px_initial": 55800.0,
+    "take_px1": 73200.0,
+    "take_px2": 148300.0,
+    "trailing_high": 67600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260821",
+    "last_close_px": 54600.0,
+    "unrealized_pnl_pct": -10.05,
+    "realized_pnl_pct": -10.05,
+    "close_ymd": "20260821",
+    "close_px": 54600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "007810_20260819_STOP_HIT_20260821"
+    ]
+  },
+  {
+    "code": "330860",
+    "name": "네패스아크",
+    "entry_ymd": "20260820",
+    "entry_px": 27250.0,
+    "qty": 0,
+    "stop_px": 25050.0,
+    "stop_px_initial": 25050.0,
+    "take_px1": 34600.0,
+    "take_px2": 37850.0,
+    "trailing_high": 28750.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260821",
+    "last_close_px": 25000.0,
+    "unrealized_pnl_pct": -8.26,
+    "realized_pnl_pct": -8.26,
+    "close_ymd": "20260821",
+    "close_px": 25000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "330860_20260820_STOP_HIT_20260821"
+    ]
+  },
+  {
+    "code": "006260",
+    "name": "LS",
+    "entry_ymd": "20260820",
+    "entry_px": 313500.0,
+    "qty": 0,
+    "stop_px": 295000.0,
+    "stop_px_initial": 295000.0,
+    "take_px1": 359000.0,
+    "take_px2": 372000.0,
+    "trailing_high": 336500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260821",
+    "last_close_px": 293500.0,
+    "unrealized_pnl_pct": -6.38,
+    "realized_pnl_pct": -6.38,
+    "close_ymd": "20260821",
+    "close_px": 293500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "006260_20260820_STOP_HIT_20260821"
+    ]
   }
 ]

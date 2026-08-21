@@ -6,58 +6,58 @@
  "axes": {
   "STRUCT_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0631,
-   "t_stat": -3.05,
+   "mean_ic": -0.0611,
+   "t_stat": -2.93,
    "orientation": 1,
    "pct_positive": 0.327,
    "verdict": "역주행"
   },
   "TIMING_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0636,
-   "t_stat": -2.98,
+   "mean_ic": -0.0588,
+   "t_stat": -2.74,
    "orientation": 1,
-   "pct_positive": 0.327,
+   "pct_positive": 0.346,
    "verdict": "역주행"
   },
   "AI_SCORE": {
-   "n_days": 30,
-   "mean_ic": -0.1041,
-   "t_stat": -3.83,
+   "n_days": 29,
+   "mean_ic": -0.1049,
+   "t_stat": -3.77,
    "orientation": 1,
-   "pct_positive": 0.2,
+   "pct_positive": 0.172,
    "verdict": "역주행"
   },
   "FINAL_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0887,
-   "t_stat": -3.84,
+   "mean_ic": -0.0851,
+   "t_stat": -3.69,
    "orientation": 1,
-   "pct_positive": 0.327,
+   "pct_positive": 0.346,
    "verdict": "역주행"
   },
   "ELITE_SCORE": {
    "n_days": 52,
-   "mean_ic": -0.0746,
-   "t_stat": -3.98,
+   "mean_ic": -0.0711,
+   "t_stat": -3.81,
    "orientation": 1,
    "pct_positive": 0.288,
    "verdict": "역주행"
   },
   "POC_GAP": {
    "n_days": 52,
-   "mean_ic": -0.0976,
-   "t_stat": -4.09,
+   "mean_ic": -0.0905,
+   "t_stat": -3.76,
    "orientation": -1,
    "pct_positive": 0.385,
    "verdict": "유효"
   }
  },
  "warnings": [
-  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0631 (t=-3.1, 52일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: TIMING_SCORE IC -0.0636 (t=-3.0, 52일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: AI_SCORE IC -0.1041 (t=-3.8, 30일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: FINAL_SCORE IC -0.0887 (t=-3.8, 52일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: ELITE_SCORE IC -0.0746 (t=-4.0, 52일) — 점수가 높을수록 수익률 낮음"
+  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0611 (t=-2.9, 52일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: TIMING_SCORE IC -0.0588 (t=-2.7, 52일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: AI_SCORE IC -0.1049 (t=-3.8, 29일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: FINAL_SCORE IC -0.0851 (t=-3.7, 52일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: ELITE_SCORE IC -0.0711 (t=-3.8, 52일) — 점수가 높을수록 수익률 낮음"
  ]
 }

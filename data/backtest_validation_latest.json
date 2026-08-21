@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-08-20T20:46:03",
+  "generated_at": "2026-08-21T20:49:54",
   "version": "v3.9.2",
   "engine_version": "v3.9.2",
   "horizon_bdays": 10,
   "trade_cost_pct": 0.22,
-  "days_covered": 126,
-  "ohlc_coverage_note": "OHLC parquet 종목수: 1738 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
+  "days_covered": 127,
+  "ohlc_coverage_note": "OHLC parquet 종목수: 1740 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
   "methodology": {
     "horizon_days": 10,
     "fill_window_days": 3,
@@ -17,7 +17,7 @@
     "selection_mode": "top1_first_then_top3_fallback",
     "date_range": [
       "2026-02-26",
-      "2026-08-20"
+      "2026-08-21"
     ],
     "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
   },
@@ -2309,6 +2309,11 @@
     },
     {
       "date": "20260820",
+      "n_picked": 0,
+      "codes": []
+    },
+    {
+      "date": "20260821",
       "n_picked": 0,
       "codes": []
     }
