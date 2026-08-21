@@ -20,6 +20,48 @@ market_regime.py — [v28] 시장 레짐 판정 (상승/중립/하락)
   DOWN    : 시장폭 < 35 (지수 위치 무관 — 내부 붕괴 우선)
   NEUTRAL : 그 외
   UNKNOWN : 지수/시장폭 데이터 부족 → 보수적으로 NEUTRAL 취급
+
+═══════════════════════════════════════════════════
+[v66] 이 모듈이 화면에 거짓을 적고 있었다 — 문구를 사실에 맞춘다
+═══════════════════════════════════════════════════
+■ 무엇이 있었나 (2026-08-18·08-19 배치 실측)
+    MARKET_REGIME      = DOWN
+    REGIME_ALLOW_ENTRY = 0
+    REGIME_REASON      = "... 신규 진입 차단 (실측: 이 구간 진입은 손실 우세)"
+    REGIME_SIZE_MULT   = 0.3
+  그런데 **같은 배치가 공식 매수 1건 + 사이징된 후보 28건**을 냈다.
+  다음 날(8/19) 코스피는 -5.80% 폭락했고 사용자는 이 목록을 보고 매수했다.
+
+■ 왜 그렇게 됐나 — 선언만 있고 집행이 없다
+  1) `REGIME_ALLOW_ENTRY`는 이 파일에서 **쓰기만** 하고 읽는 코드가 0건이다.
+  2) `regime_ok`(DOWN 거부) 검사는 recommendation_quality에 있지만 **레거시
+     (비알파) 경로에만** 있다. v32가 알파 경로에서 의도적으로 뺐고 그 사유를
+     주석에 남겼다. 알파 엔진이 켜진 지금 이 거부권은 **죽은 게이트**다.
+  3) `REGIME_SIZE_MULT`는 `RECOMMENDED_WEIGHT_PCT`(표시용 %) 하나에만 곱한다.
+     사용자가 실제로 보고 사는 `켈리_수량`은 이 배수를 보지 않는다.
+     실측: 8/18(배수 0.3) 공식픽 실제 투입 **95.0만원** vs
+           8/20(배수 1.0) 공식픽 실제 투입 **81.0만원** — 배수가 큰 날이 더 작다.
+  전수: 진입 차단 선언 9일 중 사이징 후보가 나온 날 4일, 그중 8/18·8/19가
+  28건·24건으로 압도적이다(나머지 7일은 0~3건).
+
+■ 문구의 근거 자체도 틀렸다
+  "실측: 이 구간 진입은 손실 우세"를 현재 데이터로 재측정하면 반대다.
+  게이트 통과 상위5의 5일 실현수익(일별 평균 · 유니버스 대비 초과):
+    DOWN     6일  +4.15%  초과 +2.29%p (t=+0.99, p=0.37) 승률 67%
+    NEUTRAL 14일  +1.23%  초과 -0.63%p (t=-0.74, p=0.48) 승률 57%
+    UP       1일  (표본 부족)
+  둘 다 유의하지 않지만 **부호가 문구와 반대**다. v32의 판단(DOWN 하드블록
+  제거)은 이 표본에서 뒤집히지 않는다. 한계: 이 표본은 8/12까지이고 이번
+  8/18~19 사건의 선행수익이 아직 확정되지 않았다 — 확정되면 재측정한다.
+  UP 문구의 "+5.1%/건"도 v28(2026-02~07) 값이고 현재 표본으로는 재현 불가다.
+
+■ v66이 하는 일 / 하지 않는 일
+  하는 일: 문구를 실제 동작에 맞춘다. 집행되지 않는 거부권을 '차단'이라 적지
+    않고, 검증되지 않은 수익 수치를 근거로 인용하지 않는다. 죽은 컬럼은
+    사실대로 표시하고(`REGIME_VETO_ENFORCED=0`) 재발 방지 테스트를 둔다.
+  하지 않는 일: **자금 흐름을 바꾸지 않는다.** DOWN 하드블록을 되살리지도,
+    배수를 켈리 수량에 연결하지도 않는다 — 둘 다 검정을 통과해야 하는 별건이고,
+    현재 측정은 오히려 복원을 지지하지 않는다.
 """
 import logging
 import os
@@ -68,6 +110,30 @@ REGIME_SIZE_MULT = {
 # 판정 임계 (v28 검증값)
 BREADTH_UP_MIN = 50.0
 BREADTH_DOWN_MAX = 35.0
+
+# ── [v66] 집행 범위를 상수로 못 박는다 ──────────────────────────────
+# 레짐 거부권이 실제로 진입을 막는가. 현행 알파 경로에서는 **아니다**
+# (v32가 recommendation_quality의 알파 분기에서 regime_ok를 제외했다).
+# 되살리려면 이 값을 True로 바꾸는 것만으로는 안 되고 실제 배선이 필요하다
+# — 그래서 test_v66_*가 이 상수와 배선의 일치를 검사한다.
+VETO_ENFORCED = False
+
+# REGIME_SIZE_MULT가 실제로 곱해지는 대상. 켈리 수량(사용자가 사는 수량)은
+# 이 배수를 보지 않는다 — 표시용 비중에만 걸린다.
+MULT_APPLIES_TO = "RECOMMENDED_WEIGHT_PCT"
+
+_DOWN_TAIL_ENFORCED = "신규 진입 차단."
+_DOWN_TAIL_NOT_ENFORCED = (
+    "신규 진입은 **차단되지 않는다** — 알파 문턱이 90점으로 오를 뿐이다. "
+    "표시 비중은 30%로 줄지만 추천 수량에는 반영되지 않는다. "
+    "(하락 레짐 진입이 손실 우세라는 근거는 현재 표본에서 확인되지 않았다: "
+    "DOWN 6일 게이트 상위5 +4.15%, 유니버스 대비 +2.29%p, p=0.37)"
+)
+_MULT_TAIL = (
+    f"레짐 배수는 {MULT_APPLIES_TO}(표시용 비중)에만 적용되고 추천 수량은 "
+    "바꾸지 않는다. 배수는 수익 근거가 아니라 낙폭 축소 근거로만 유지된다"
+    "(v52 순열검정 p=0.872)."
+)
 
 _KOSPI_CSV = "kospi_daily.csv"
 
@@ -132,7 +198,12 @@ def compute_market_regime(
         return {
             "regime": regime,
             "size_mult": REGIME_SIZE_MULT[regime],
+            # [v66] 이 값은 **집행되지 않는다**. 알파 경로(현행)에서 v32가
+            #   레짐 거부권을 뺐기 때문이다. 값을 True로 바꾸면 '차단 안 함'을
+            #   말하게 되어 역시 부정확하므로, 판정 자체는 그대로 두고
+            #   veto_enforced로 집행 여부를 분리해 함께 내보낸다.
             "allow_new_entry": regime != REGIME_DOWN,
+            "veto_enforced": VETO_ENFORCED,
             "reason": reason,
             "kospi_close": close,
             "kospi_ma20": ma20,
@@ -142,14 +213,16 @@ def compute_market_regime(
 
     # 데이터 부족 → UNKNOWN (보수적: 사이즈 절반)
     if breadth is None and (close is None or ma20 is None):
-        return _pack(REGIME_UNKNOWN, "지수/시장폭 데이터 부족 — 보수 운용 (사이즈 50%)")
+        return _pack(REGIME_UNKNOWN,
+                     "지수/시장폭 데이터 부족 — 레짐 판정 불가. " + _MULT_TAIL)
 
     # 내부 붕괴 우선 — 지수가 어디 있든 시장폭 붕괴면 DOWN
     if breadth is not None and breadth < BREADTH_DOWN_MAX:
         return _pack(
             REGIME_DOWN,
             f"하락 레짐 — 시장폭 {breadth:.0f}% (<{BREADTH_DOWN_MAX:.0f}%), "
-            "상승 종목이 소수인 내부 약세장. 신규 진입 차단 (실측: 이 구간 진입은 손실 우세)",
+            "상승 종목이 소수인 내부 약세장. "
+            + (_DOWN_TAIL_ENFORCED if VETO_ENFORCED else _DOWN_TAIL_NOT_ENFORCED),
         )
 
     up_trend = (
@@ -159,8 +232,8 @@ def compute_market_regime(
     if up_trend and breadth is not None and breadth >= BREADTH_UP_MIN:
         return _pack(
             REGIME_UP,
-            f"상승 레짐 — KOSPI 20일선·5일선 위 + 시장폭 {breadth:.0f}% "
-            f"(실측: 이 레짐 게이트 통과 픽 평균 +5.1%/건)",
+            f"상승 레짐 — KOSPI 20일선·5일선 위 + 시장폭 {breadth:.0f}%. "
+            + _MULT_TAIL,
         )
 
     parts = []
@@ -170,15 +243,23 @@ def compute_market_regime(
         parts.append(f"시장폭 {breadth:.0f}%")
     return _pack(
         REGIME_NEUTRAL,
-        "중립 레짐 — " + ", ".join(parts) +
-        " (실측: 본전 구간 → 진입 허용하되 사이즈 50%)",
+        "중립 레짐 — " + ", ".join(parts) + ". " + _MULT_TAIL,
     )
 
 
 def inject_regime_columns(df: pd.DataFrame, regime_info: dict) -> pd.DataFrame:
-    """recommend DataFrame에 레짐 컬럼 주입."""
+    """recommend DataFrame에 레짐 컬럼 주입.
+
+    [v66] REGIME_VETO_ENFORCED / REGIME_MULT_APPLIES_TO를 함께 낸다.
+    앞의 둘(ALLOW_ENTRY · SIZE_MULT)만 있으면 화면·소비자가 그 값이 실제로
+    집행된다고 읽는다 — 실제로는 둘 다 자금에 걸려 있지 않다. 집행 범위를
+    데이터로 함께 내보내야 계약 검사가 가능하다.
+    """
     df["MARKET_REGIME"] = regime_info.get("regime", REGIME_UNKNOWN)
     df["REGIME_REASON"] = regime_info.get("reason", "")
     df["REGIME_SIZE_MULT"] = regime_info.get("size_mult", 0.5)
     df["REGIME_ALLOW_ENTRY"] = int(bool(regime_info.get("allow_new_entry", True)))
+    df["REGIME_VETO_ENFORCED"] = int(bool(regime_info.get(
+        "veto_enforced", VETO_ENFORCED)))
+    df["REGIME_MULT_APPLIES_TO"] = MULT_APPLIES_TO
     return df

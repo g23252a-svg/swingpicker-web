@@ -393,6 +393,10 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
     poc_ok = poc_gap.isna() | (poc_gap <= POC_GAP_MAX)
     breadth_ok = breadth.isna() | (breadth >= BREADTH_MIN)
     # [v28] regime gate — DOWN blocks new entries; missing column passes.
+    # [v66] 이 마스크는 **레거시(비알파) 분기에서만** 쓰인다. 알파 게이트가
+    #   켜져 있으면(현행) v32 결정에 따라 적용되지 않는다 — 아래 alpha 분기 참조.
+    #   market_regime.VETO_ENFORCED가 이 사실의 SSOT이고, test_v66이 둘의
+    #   일치를 검사한다(선언과 배선이 어긋나면 실패).
     regime = _text(out, "MARKET_REGIME", "")
     regime_ok = ~regime.eq("DOWN")
     # [v28] regime sizing — NEUTRAL/UNKNOWN halve the recommended weight.
@@ -550,7 +554,17 @@ def apply_recommendation_quality_guard(df: pd.DataFrame) -> pd.DataFrame:
     out["ACTION_DECISION"] = np.select(
         [production, watch], ["BUY", "WATCH"], default="CASH"
     )
-    # [v28] 레짐 사이징: UP=100%, NEUTRAL/UNKNOWN=50%, DOWN=0 (진입 자체 차단됨)
+    # [v28] 레짐 사이징: UP=100%, NEUTRAL/UNKNOWN=50%, DOWN=30%
+    #
+    # [v66 정정] 이 주석은 "DOWN=0 (진입 자체 차단됨)"이라고 적혀 있었는데
+    #   둘 다 사실이 아니다. v32가 DOWN 배수를 0.0→0.3으로 올렸고, 같은 v32가
+    #   알파 경로에서 regime_ok(DOWN 거부권)를 제외했다 — 즉 **DOWN에서도
+    #   진입한다**. 2026-08-18·19 배치가 DOWN인데 공식 매수 1건 + 사이징 후보
+    #   28건을 낸 것이 그 결과다.
+    #   또 하나: regime_mult는 여기 RECOMMENDED_WEIGHT_PCT(표시용 %)에만
+    #   곱해지고 켈리_수량에는 걸리지 않는다. 실측으로 8/18(배수 0.3) 공식픽
+    #   실제 투입 95.0만원 > 8/20(배수 1.0) 81.0만원 — 배수가 작은 날이 더 컸다.
+    #   화면이 이 값을 '최대 N% 비중'으로 보여주므로 오해를 만든다.
     out["RECOMMENDED_WEIGHT_PCT"] = np.where(
         production,
         np.where(score >= 85, 5.0, 3.0) * regime_mult,
