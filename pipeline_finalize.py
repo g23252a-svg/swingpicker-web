@@ -2123,6 +2123,23 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 + (f" · ⚠️ 역주행 {_warn_n}축" if _warn_n else " · 이상 없음"))
     except Exception as e:
         log(f"⚠️ 축 IC 감사 스킵: {e}")
+    # [v67] 보유 청산 규율 — 진입가 고정 손절선 기준으로 보유 상태를 기록한다.
+    #   2026-08-24 전수: CARRY 58종목 중 55종목이 진입가 기준 -7% 손절선을 이미
+    #   관통했고 평균 -30.4%였다(고정 손절 준수 시 -6.7%, 종목당 +23.8%p,
+    #   페어드 t=9.33 p<1e-6). 이루온은 진입 다음날 관통 후 101일째였다.
+    #   결정 컬럼은 건드리지 않는다 — 표시·경보 전용이다.
+    try:
+        from services.holding_exit import annotate as _he_annotate, summary as _he_sum
+        df_out = _he_annotate(df_out)
+        _hs = _he_sum(df_out)
+        if _hs.get("n"):
+            log(f"📌 [v67] 보유 {_hs['n']}종목 · 조치필요 {_hs['actionable']}건 "
+                f"· 상태 {_hs['counts']}")
+            if _hs.get("line"):
+                log(f"⛔ [v67] {_hs['line']}")
+    except Exception as e:
+        log(f"⚠️ 보유 청산 규율 주석 스킵: {e}")
+
     # [v58] 알파 실전 성적 야간 누적 — 진입 SSOT도 매일 자기 성적을 남긴다.
     # v28이 룰 기반 축을 감사하게 만든 것과 같은 이유다. 이게 없어서
     # 2026-08-10에 "최근 구간은 아직 측정 불가"라고만 답할 수 있었다

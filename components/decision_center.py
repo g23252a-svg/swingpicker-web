@@ -32,6 +32,7 @@ def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
         return default
 
 
+from services import holding_exit as _HE
 from services import position_risk as _PR   # [v64] 원화 리스크 SSOT
 
 
@@ -584,6 +585,12 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         #   N=1,2,3,5,8 전부 -8.00%로 같았다(동반 손절). 즉 여러 종목으로 나눠도
         #   꼬리 위험이 줄지 않으므로, 합계를 그대로 보여주는 것이 정직하다.
         "risk_total": _risk_total(buys, watch, work),
+        # [v67] 보유 정리 — 청산 규율이 화면에 없어서 수익이 반납됐다.
+        #   2026-08-24 실측: CARRY 58종목 중 55종목이 진입가 기준 -7% 손절선을
+        #   이미 관통했고(평균 -30.4%), 고정 손절을 지켰다면 평균 -6.7%였다
+        #   (종목당 +23.8%p · 페어드 t=9.33 p<1e-6). 이루온은 진입 다음날
+        #   손절선을 뚫고 101일째 보유 중이었다.
+        "holdings": _HE.summary(df),
         "awaiting": awaiting,       # [v54] 근거 통과·상태 미달로 0주인 후보
         "blockers": blockers,
         "gates": gates,
@@ -674,6 +681,34 @@ def _render_risk_lines(stock: dict[str, Any]) -> None:
             ui.label(gap_warn).classes("text-[11px] text-amber-200 leading-relaxed")
         elif gap_tbl:
             ui.label(gap_tbl).classes("text-[11px] text-slate-500")
+
+
+def _render_holdings(summary: dict[str, Any], limit: int = 12) -> None:
+    """오늘 정리해야 할 보유 종목. 조치할 것이 없으면 그리지 않는다.
+
+    [v67] 이 블록이 없어서 사용자는 '무엇을 사는가'만 보고 '무엇을 파는가'는
+    보지 못했다. 8월에 +100만원까지 갔던 수익이 +30만원으로 줄어든 경로가
+    여기다 — 검증된 청산 규율(v57)이 종목 상세 페이지에만 있었다.
+    """
+    h = summary.get("holdings") or {}
+    if not h.get("actionable") or not h.get("lines"):
+        return
+    with ui.column().classes("w-full gap-1 rounded-xl p-3 mt-2").style(
+        "background:rgba(180,83,9,.12); border:1px solid rgba(245,158,11,.35);"
+    ):
+        ui.label("오늘 정리할 보유 종목").classes("text-sm font-bold text-amber-200")
+        if h.get("line"):
+            ui.label(h["line"]).classes("text-sm font-bold text-amber-100")
+        for line in h["lines"][:limit]:
+            ui.label(line).classes("text-xs text-slate-200 leading-relaxed")
+        if len(h["lines"]) > limit:
+            ui.label(f"…외 {len(h['lines']) - limit}종목은 포트폴리오 탭에서 확인하세요"
+                     ).classes("text-[11px] text-slate-500")
+        ui.label(
+            "손절·익절선은 **진입가에 고정**해 계산합니다. 실측(v57): 이 규율은 "
+            "이길 확률을 41%→60%로 올리고 낙폭을 절반(-33.5%→-16.5%)으로 줄이면서 "
+            "기대수익은 89% 지켰습니다. 평균수익 자체가 오른다는 근거는 아닙니다."
+        ).classes("text-[10px] text-slate-500 leading-relaxed")
 
 
 def _render_risk_total(summary: dict[str, Any]) -> None:
@@ -863,6 +898,9 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                         ui.label(
                             "해제 진행률 — 코스피가 20일선 -3% 이내로 회복하면 매수 후보가 자동 재개됩니다"
                         ).classes("text-[10px] text-slate-500")
+
+        # [v67] 파는 것이 사는 것보다 급하다 — 매수 게이트보다 위에 둔다.
+        _render_holdings(summary)
 
         ui.label("매수 가능 여부").classes("text-lg font-bold text-white mt-1")
         with ui.grid(columns=3).classes("sp-gate-grid w-full gap-2"):
