@@ -5907,5 +5907,54 @@
     "alerted_events": [
       "006260_20260820_STOP_HIT_20260821"
     ]
+  },
+  {
+    "code": "003230",
+    "name": "삼양식품",
+    "entry_ymd": "20260810",
+    "entry_px": 1288000.0,
+    "qty": 0,
+    "stop_px": 1184000.0,
+    "stop_px_initial": 1184000.0,
+    "take_px1": 1445000.0,
+    "take_px2": 1484000.0,
+    "trailing_high": 1536000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260826",
+    "last_close_px": 1507000.0,
+    "unrealized_pnl_pct": 17.0,
+    "realized_pnl_pct": 17.0,
+    "close_ymd": "20260826",
+    "close_px": 1507000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "003230_20260810_WARN_DRAWDOWN_20260812",
+      "003230_20260810_WARN_DRAWDOWN_20260813",
+      "003230_20260810_TP1_HIT_20260826",
+      "003230_20260810_TP2_HIT_20260826"
+    ]
+  },
+  {
+    "code": "012330",
+    "name": "현대모비스",
+    "entry_ymd": "20260821",
+    "entry_px": 496000.0,
+    "qty": 0,
+    "stop_px": 470500.0,
+    "stop_px_initial": 470500.0,
+    "take_px1": 556000.0,
+    "take_px2": 822000.0,
+    "trailing_high": 506000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260826",
+    "last_close_px": 464000.0,
+    "unrealized_pnl_pct": -6.45,
+    "realized_pnl_pct": -6.45,
+    "close_ymd": "20260826",
+    "close_px": 464000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "012330_20260821_STOP_HIT_20260826"
+    ]
   }
 ]
