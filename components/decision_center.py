@@ -33,6 +33,7 @@ def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
 
 
 from services import holding_exit as _HE
+from services import winrate_truth as _WT
 from services import position_risk as _PR   # [v64] 원화 리스크 SSOT
 
 
@@ -591,6 +592,11 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         #   (종목당 +23.8%p · 페어드 t=9.33 p<1e-6). 이루온은 진입 다음날
         #   손절선을 뚫고 101일째 보유 중이었다.
         "holdings": _HE.summary(df),
+        # [v68] 화면·켈리가 쓰는 선언 승률이 같은 점수 구간 실측보다 얼마나
+        #   높은가. 08-24 실측: 선언 45% vs 실측 19%(n=32) — 28/28종목이
+        #   과신 방지 캡을 초과했다. 캡은 전날 표를 읽고, 픽이 사는 구간에
+        #   표본이 없어 몇 주간 조용히 미적용이었다.
+        "winrate_truth": _winrate_truth(df),
         "awaiting": awaiting,       # [v54] 근거 통과·상태 미달로 0주인 후보
         "blockers": blockers,
         "gates": gates,
@@ -681,6 +687,42 @@ def _render_risk_lines(stock: dict[str, Any]) -> None:
             ui.label(gap_warn).classes("text-[11px] text-amber-200 leading-relaxed")
         elif gap_tbl:
             ui.label(gap_tbl).classes("text-[11px] text-slate-500")
+
+
+def _winrate_truth(df: pd.DataFrame) -> dict[str, Any]:
+    """선언 승률과 같은 점수 구간 실측의 격차. 실패해도 화면을 깨지 않는다."""
+    try:
+        table = _WT.load_table("data")
+        if not table:
+            return {}
+        mask = pd.to_numeric(df.get("TOP_PICK"), errors="coerce").fillna(0) > 0
+        out = _WT.summary(df, table, mask=mask)
+        out["divergence"] = _WT.table_divergence("data")
+        return out
+    except Exception as e:
+        logger.warning(f"[v68] 선언 승률 검증 라인 생략: {e}")
+        return {}
+
+
+def _render_winrate_truth(summary: dict[str, Any]) -> None:
+    """'승률 45%'가 실측 19%일 때 그 사실을 같은 화면에서 말한다."""
+    w = summary.get("winrate_truth") or {}
+    if not w.get("line"):
+        return
+    with ui.column().classes("w-full gap-1 rounded-xl p-3 mt-2").style(
+        "background:rgba(37,99,235,.10); border:1px solid rgba(96,165,250,.30);"
+    ):
+        ui.label("이 화면의 승률 숫자에 대하여").classes(
+            "text-xs font-bold text-blue-200")
+        ui.label(w["line"]).classes("text-sm font-bold text-blue-100 leading-relaxed")
+        _dv = w.get("divergence") or {}
+        if _dv.get("diverged") and _dv.get("line"):
+            ui.label(_dv["line"]).classes("text-[11px] text-amber-200 leading-relaxed")
+        ui.label(
+            "선언 승률은 표시용이 아니라 **추천 수량(켈리)의 입력**입니다. "
+            "과대 표기는 포지션을 그만큼 크게 만듭니다. 수량은 이 패치에서 "
+            "바꾸지 않았습니다 — 실측 근거를 더 쌓은 뒤 별도로 판단합니다."
+        ).classes("text-[10px] text-slate-500 leading-relaxed")
 
 
 def _render_holdings(summary: dict[str, Any], limit: int = 12) -> None:
@@ -901,6 +943,7 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
 
         # [v67] 파는 것이 사는 것보다 급하다 — 매수 게이트보다 위에 둔다.
         _render_holdings(summary)
+        _render_winrate_truth(summary)
 
         ui.label("매수 가능 여부").classes("text-lg font-bold text-white mt-1")
         with ui.grid(columns=3).classes("sp-gate-grid w-full gap-2"):
