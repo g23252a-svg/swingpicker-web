@@ -610,6 +610,18 @@ def _gate_rank_key(rec: pd.DataFrame) -> Optional[pd.Series]:
     return (a * rr).where(ok)
 
 
+def funnel_rank_key(rec: pd.DataFrame) -> Optional[pd.Series]:
+    """[v70] 퍼널 통과 행의 랭킹 키 — 화면과 리포트가 **같은 목록**을 쓰게 하는 공개 창구.
+
+    v63이 이 재구성을 리포트용으로 만들었는데, 화면('오늘' 탭)은 전혀 다른
+    조건(`ACTION_DECISION=WATCH` + `켈리_수량>0`)으로 목록을 뽑고 있었다.
+    두 집합의 겹침이 32종목 중 17종목(53%)뿐이었고, 성적이 크게 갈렸다
+    (실측 11일 공통: 퍼널 상위2 vs 화면 상위2 = +3.02%p 차이).
+    같은 함수를 쓰게 해서 그 괴리를 없앤다.
+    """
+    return _gate_rank_key(rec)
+
+
 def alpha_live_line(report: Optional[dict], h: int = 5) -> str:
     """배치 로그·화면용 한 줄 요약 (없으면 빈 문자열)."""
     if not report or not report.get("ok"):
