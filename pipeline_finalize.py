@@ -2123,6 +2123,21 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 + (f" · ⚠️ 역주행 {_warn_n}축" if _warn_n else " · 이상 없음"))
     except Exception as e:
         log(f"⚠️ 축 IC 감사 스킵: {e}")
+    # [v69] 후보 목록을 어디서 끊을지 매일 다시 잰다. 사이징된 후보를 전부
+    #   사면 알파 시대 24일 일평균 -1.99%였고, 우위는 상단에 몰려 있다.
+    #   깊이는 상수로 박지 않는다 — 데이터가 바뀌면 깊이도 바뀌어야 한다.
+    try:
+        from services import candidate_depth as _cd
+        _cdr = _cd.save(OUT_DIR, trade_ymd)
+        if _cdr.get("ok"):
+            log(f"📏 [v69] 후보 깊이: 상위 {_cdr['depth']}종목"
+                f"(이상치 강건 {_cdr['robust_depth']}) · 실측 {_cdr['n_days']}일")
+        else:
+            log(f"📏 [v69] 후보 깊이 측정 불가 ({_cdr.get('reason')}) "
+                f"→ 폴백 {_cd.FALLBACK_DEPTH}종목")
+    except Exception as e:
+        log(f"⚠️ 후보 깊이 측정 스킵: {e}")
+
     # [v68] 선언 승률 vs 같은 점수 구간 실측 — 과신 방지 캡이 8월 내내
     #   조용히 미적용이었다. 원인 둘: (1) 픽이 사는 ELITE_SCORE [0,50) 구간의
     #   winrate_table 표본이 n_raw=2(폴백 p_win=0.5)라 신뢰 bin이 없었고,

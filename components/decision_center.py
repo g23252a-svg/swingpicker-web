@@ -32,6 +32,7 @@ def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
         return default
 
 
+from services import candidate_depth as _CD
 from services import holding_exit as _HE
 from services import winrate_truth as _WT
 from services import position_risk as _PR   # [v64] 원화 리스크 SSOT
@@ -385,9 +386,25 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     _qty = pd.to_numeric(
         work.get("켈리_수량", work.get("추천수량", pd.Series(0.0, index=work.index))),
         errors="coerce").fillna(0.0)
+    # [v69] 관찰 후보 깊이를 실측으로 정한다. 종전엔 `.head(3)`이 하드코딩돼
+    #   있었고 그 3에는 근거가 없었다. 알파 시대 24일 실측에서 우위는 상단에
+    #   몰려 있고 깊이 들어갈수록 유니버스보다 못해진다:
+    #     N=1 초과 +2.05%p(상위2제거 +0.70) · N=2 +1.45%p(+0.64)
+    #     N=3 +0.41%p(**-0.22**) · N=6 +0.01%p(-0.67) · N=7 -0.26%p
+    #   그래서 **이상치를 빼도 우위가 남는 깊이**(robust_depth)까지만 낸다.
+    #   상수가 아니라 매일 다시 재며, 왜 그 깊이인지 화면에 적는다.
+    _depth_report = _CD.load("data")
+    _watch_depth = _CD.effective_depth(_depth_report)
+    _robust = pd.to_numeric(
+        pd.Series([(_depth_report or {}).get("robust_depth")]), errors="coerce"
+    ).iloc[0]
+    if pd.notna(_robust):
+        _watch_depth = max(_CD.MIN_DEPTH, min(_watch_depth, int(_robust)))
+    else:
+        logger.warning("[v69] robust_depth 없음 — depth 그대로 사용")
     watch_df = work[(~production) & action.eq("WATCH") & (_qty > 0)].sort_values(
         _sort_cols, ascending=False
-    ).head(3)
+    ).head(_watch_depth)
 
     buys = [_stock_payload(row) for _, row in buys_df.iterrows()]
     watch = [_stock_payload(row) for _, row in watch_df.iterrows()]
@@ -576,6 +593,8 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         "next_check": next_check,
         "buys": buys,
         "watch": watch,
+        "watch_depth": int(_watch_depth),
+        "watch_depth_line": _CD.depth_line(_depth_report),
         # [v64] 합계 리스크 — 이 화면에 없어서 손실이 의도를 넘었다.
         #   실제 사례(2026-08-14~18): 사용자가 공식 매수 + 관찰 후보를 합쳐
         #   5종목을 샀다. 엔진은 **하루 1종목**만 사이징한다 —
@@ -992,12 +1011,18 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                         if _blocked_now else
                         "AI 알파 점수 순이며 매수 추천이 아닙니다."
                     ).classes("text-xs text-slate-500")
+                    # [v69] 왜 이만큼만 보여주는지 — 근거 없이 자르지 않는다
+                    if summary.get("watch_depth_line"):
+                        ui.label(summary["watch_depth_line"]).classes(
+                            "text-[11px] text-amber-200 leading-relaxed")
                 ui.badge(f"전체 관찰 {summary['watch_count']}개", color="#475569")
             for rank, stock in enumerate(summary["watch"], 1):
                 _render_watch_card(stock, rank)
             if summary["watch_count"] > len(summary["watch"]):
                 ui.label(
-                    f"상위 {len(summary['watch'])}개만 표시했습니다. 나머지 {summary['watch_count'] - len(summary['watch'])}개는 종목 탭에서 확인하세요."
+                    f"상위 {len(summary['watch'])}개만 표시했습니다. "
+                    f"나머지 {summary['watch_count'] - len(summary['watch'])}개는 "
+                    "종목 탭에 있지만, 그 깊이에서는 실측 초과수익이 0 이하였습니다."
                 ).classes("text-xs text-slate-500")
 
         _render_risk_total(summary)
