@@ -225,6 +225,8 @@ def _stock_payload(row: pd.Series) -> dict[str, Any]:
         #   v61에서 카드·상세에는 넣었는데 정작 사용자가 제일 많이 보는
         #   '오늘' 탭(이 모듈)에는 빠져 있었다(position_risk 참조 0건).
         #   그래서 화면엔 "-8.1% vs 진입"만 있고 원화 기준이 없었다.
+        # [v70] 살 수 있는지를 목록에서 빼는 대신 **배지로 말한다**
+        "sizable": bool((_PR.quantity(row) or 0.0) > 0),
         "qty": _PR.quantity(row) or 0.0,
         "position_won": _PR.position_won(row) or 0.0,
         "stop_loss_won": _PR.stop_loss_won(row) or 0.0,
@@ -393,6 +395,27 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     #     N=3 +0.41%p(**-0.22**) · N=6 +0.01%p(-0.67) · N=7 -0.26%p
     #   그래서 **이상치를 빼도 우위가 남는 깊이**(robust_depth)까지만 낸다.
     #   상수가 아니라 매일 다시 재며, 왜 그 깊이인지 화면에 적는다.
+    # [v70] 관찰 후보 모집단을 **퍼널 통과군**으로 바꾼다.
+    #   종전 조건(`ACTION_DECISION=WATCH` + `켈리_수량>0`)은 퍼널 통과군 중
+    #   **성적이 나쁜 쪽**을 골라내고 있었다(알파 시대 24일 실측):
+    #     퍼널 통과 전체 395건  승률 50.4% · 평균 +0.47%
+    #       └ 켈리 수량>0  45건  승률 **26.7%** · 평균 **-3.46%**  ← 화면이 보여준 것
+    #       └ 켈리 수량=0 350건  승률 **53.4%** · 평균 **+0.97%**  ← 화면이 버린 것
+    #   같은 날 페어드로 퍼널 상위2 − 현행 상위2 = **+3.02%p**
+    #     (t=1.73 · p=0.115 · IS +3.81/OOS +2.37 부호일치 · 상위2제거 +1.20 생존)
+    #   유의하지 않다(11일). 그래도 바꾸는 이유는 ⑴ 방향이 IS/OOS 모두 같고
+    #   이상치 제거에도 남으며 ⑵ 기전이 설명된다(켈리 f>0은 선언 승률이 높은
+    #   행을 고르는데 그 선언값이 과대다 — v68) ⑶ 이 목록은 '매수 아님'으로
+    #   표시되는 **표시 전용**이라 되돌리기 쉽다.
+    #   v64가 넣었던 `수량>0` 조건의 취지(살 수 없는 것을 살 수 있는 것처럼
+    #   보이게 하지 않기)는 **배지로 유지**한다 — 빼는 대신 표시한다.
+    _funnel_key = None
+    try:
+        from services.alpha_live_report import funnel_rank_key as _frk
+        _funnel_key = _frk(work)
+    except Exception as e:
+        logger.warning(f"[v70] 퍼널 랭킹 키 산출 실패 — 종전 조건 사용: {e}")
+
     _depth_report = _CD.load("data")
     _watch_depth = _CD.effective_depth(_depth_report)
     _robust = pd.to_numeric(
@@ -402,9 +425,15 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         _watch_depth = max(_CD.MIN_DEPTH, min(_watch_depth, int(_robust)))
     else:
         logger.warning("[v69] robust_depth 없음 — depth 그대로 사용")
-    watch_df = work[(~production) & action.eq("WATCH") & (_qty > 0)].sort_values(
-        _sort_cols, ascending=False
-    ).head(_watch_depth)
+    if _funnel_key is not None and _funnel_key.notna().any():
+        watch_df = (work.assign(_fk=_funnel_key)
+                    .loc[lambda x: (~production) & x["_fk"].notna()]
+                    .sort_values("_fk", ascending=False)
+                    .head(_watch_depth))
+    else:
+        watch_df = work[(~production) & action.eq("WATCH") & (_qty > 0)].sort_values(
+            _sort_cols, ascending=False
+        ).head(_watch_depth)
 
     buys = [_stock_payload(row) for _, row in buys_df.iterrows()]
     watch = [_stock_payload(row) for _, row in watch_df.iterrows()]
@@ -594,6 +623,13 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         "buys": buys,
         "watch": watch,
         "watch_depth": int(_watch_depth),
+        "watch_pool_line": (
+            "목록 기준을 **퍼널 통과 순위**로 바꿨습니다(v70). 종전 기준"
+            "(관망+수량>0)은 같은 퍼널 안에서 성적이 나쁜 쪽을 골라내고 "
+            "있었습니다 — 실측 24일: 퍼널 통과 전체 승률 50.4% vs 종전 기준 "
+            "26.7%. 같은 날 비교로 +3.02%p(t=1.73 · p=0.115 · 11일)로 "
+            "**통계적으로 검증된 것은 아닙니다.**"
+            if _funnel_key is not None and _funnel_key.notna().any() else ""),
         "watch_depth_line": _CD.depth_line(_depth_report),
         # [v64] 합계 리스크 — 이 화면에 없어서 손실이 의도를 넘었다.
         #   실제 사례(2026-08-14~18): 사용자가 공식 매수 + 관찰 후보를 합쳐
@@ -849,6 +885,11 @@ def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
                 ui.badge("매수 아님", color="#B45309").classes("font-bold")
                 ui.label(f"{rank}. {stock['name']}").classes("font-bold text-slate-100")
                 ui.label(stock["code"]).classes("text-xs text-slate-500")
+                # [v70] v64가 목록에서 빼던 '0주' 종목을 다시 보여주되,
+                #   살 수 없다는 사실은 배지로 분명히 말한다.
+                if not stock.get("sizable", True):
+                    ui.badge("0주 · 사이징 불가", color="#475569").classes(
+                        "text-[10px]")
             _alpha_chip(stock)
             ui.label(stock["reason"] or "최종 기준 미달").classes(
                 "text-sm text-slate-300 leading-relaxed"
@@ -1011,6 +1052,10 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                         if _blocked_now else
                         "AI 알파 점수 순이며 매수 추천이 아닙니다."
                     ).classes("text-xs text-slate-500")
+                    # [v70] 목록 모집단을 바꾼 근거를 화면에 남긴다
+                    if summary.get("watch_pool_line"):
+                        ui.label(summary["watch_pool_line"]).classes(
+                            "text-[11px] text-emerald-200 leading-relaxed")
                     # [v69] 왜 이만큼만 보여주는지 — 근거 없이 자르지 않는다
                     if summary.get("watch_depth_line"):
                         ui.label(summary["watch_depth_line"]).classes(
