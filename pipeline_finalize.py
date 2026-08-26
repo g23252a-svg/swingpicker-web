@@ -2123,6 +2123,33 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 + (f" · ⚠️ 역주행 {_warn_n}축" if _warn_n else " · 이상 없음"))
     except Exception as e:
         log(f"⚠️ 축 IC 감사 스킵: {e}")
+    # [v68] 선언 승률 vs 같은 점수 구간 실측 — 과신 방지 캡이 8월 내내
+    #   조용히 미적용이었다. 원인 둘: (1) 픽이 사는 ELITE_SCORE [0,50) 구간의
+    #   winrate_table 표본이 n_raw=2(폴백 p_win=0.5)라 신뢰 bin이 없었고,
+    #   (2) compute_est_win_rate(pipeline_calibrate)가 auto_calibrate
+    #   (이 파일 아래)보다 먼저 돌아 캡이 늘 전날 표를 읽는다.
+    #   실측: 08-24 선언 45% vs 같은 구간 실측 19%(n=32) — 28/28종목 캡 초과.
+    #   여기서는 **진단만** 한다 — EST_WIN_RATE·켈리 수량을 바꾸지 않는다.
+    try:
+        from services import winrate_truth as _wt
+        _wtab = _wt.load_table(OUT_DIR, trade_ymd)
+        if _wtab:
+            df_out = _wt.annotate(df_out, _wtab)
+            _tpm = pd.to_numeric(df_out.get("TOP_PICK"), errors="coerce").fillna(0) > 0
+            _ws = _wt.summary(df_out, _wtab, mask=_tpm)
+            if _ws.get("n"):
+                log(f"🎲 [v68] 선언 승률 검증: {_ws['status_counts']}")
+                if _ws.get("line"):
+                    log(f"⚠️ [v68] {_ws['line']}")
+            # 고장 ③ — 캡이 읽는 표와 리포트가 읽는 표가 어긋나면 알린다
+            _wd = _wt.table_divergence(OUT_DIR)
+            if _wd.get("diverged"):
+                log(f"🚨 [v68] {_wd['line']}")
+        else:
+            log("⚠️ [v68] winrate_table 없음 — 선언 승률 검증 생략")
+    except Exception as e:
+        log(f"⚠️ 선언 승률 검증 스킵: {e}")
+
     # [v67] 보유 청산 규율 — 진입가 고정 손절선 기준으로 보유 상태를 기록한다.
     #   2026-08-24 전수: CARRY 58종목 중 55종목이 진입가 기준 -7% 손절선을 이미
     #   관통했고 평균 -30.4%였다(고정 손절 준수 시 -6.7%, 종목당 +23.8%p,
