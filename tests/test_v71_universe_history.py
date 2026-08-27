@@ -452,3 +452,101 @@ def test_not_wired_into_nightly_batch():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = open(os.path.join(root, "pipeline_finalize.py"), encoding="utf-8").read()
     assert "backfill_universe_ohlcv" not in src
+
+
+# ══════════════════════════════════════════════════════════════════
+#  data/ 오염 가드 (conftest) — 2026-08-27 실사고 회귀
+# ══════════════════════════════════════════════════════════════════
+class TestDataDirtyGuard:
+    """`git status`에 data/ohlcv_union_hl.parquet이 수정된 채 남았던 사고.
+
+    내용은 HEAD와 완전히 동일했다 — 데이터는 그대로인데 바이트만 다시 쓰였다.
+    범인은 v65의 실데이터 회귀 테스트가 진짜 data/를 넘긴 것이었고,
+    pick_reliability는 설계상 <data_dir>/ohlcv_union_hl.parquet에 캐싱한다.
+    """
+
+    @staticmethod
+    def _conftest_src():
+        return open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "conftest.py"),
+                    encoding="utf-8").read()
+
+    def test_guard_helper_is_not_a_second_hook(self):
+        """같은 이름의 pytest 훅을 한 모듈에 두 번 정의하면 앞엣것이 사라진다.
+
+        처음 판본이 pytest_runtest_teardown을 두 번 정의해 모듈 누출 가드를
+        통째로 덮어썼다. 최상위 함수 이름에 중복이 없어야 한다.
+        """
+        import ast
+        from collections import Counter
+        tree = ast.parse(self._conftest_src())
+        names = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
+        dup = [k for k, v in Counter(names).items() if v > 1]
+        assert dup == [], f"conftest 최상위 함수 중복 정의: {dup}"
+
+    def test_module_leak_guard_still_present(self):
+        """data/ 가드를 붙이면서 기존 모듈 누출 가드를 죽이지 않았는가."""
+        src = self._conftest_src()
+        assert "테스트 격리 위반" in src
+        assert "_check_data_dirty(item)" in src
+
+    def test_scan_detects_size_change(self, tmp_path, monkeypatch):
+        import conftest as ct
+        monkeypatch.setattr(ct, "_DATA_DIR", tmp_path)
+        f = tmp_path / "x.parquet"
+        f.write_bytes(b"a")
+        before = ct._scan_data()
+        f.write_bytes(b"bb")
+        assert ct._scan_data() != before
+
+    def test_scan_detects_same_size_rewrite(self, tmp_path, monkeypatch):
+        """실제 사고가 이 모양이었다 — 내용은 같고 바이트만 다시 쓰였다.
+
+        크기만 보는 가드는 이걸 통과시킨다. mtime 을 함께 봐야 한다.
+        """
+        import time
+        import conftest as ct
+        monkeypatch.setattr(ct, "_DATA_DIR", tmp_path)
+        f = tmp_path / "x.parquet"
+        f.write_bytes(b"aaaa")
+        before = ct._scan_data()
+        time.sleep(0.01)
+        f.write_bytes(b"bbbb")                      # 같은 크기, 다른 내용
+        after = ct._scan_data()
+        assert after[f.name][1] == before[f.name][1], "크기는 같아야 하는 시나리오"
+        assert after != before, "같은 크기 재작성을 놓쳤다 — mtime 을 봐야 한다"
+
+    def test_scan_ignores_symlinks(self, tmp_path, monkeypatch):
+        """미러의 심링크가 원본으로 오인되면 안 된다."""
+        import conftest as ct
+        real = tmp_path / "real"; real.mkdir()
+        (real / "a.parquet").write_bytes(b"a")
+        mirror = tmp_path / "mirror"; mirror.mkdir()
+        (mirror / "a.parquet").symlink_to(real / "a.parquet")
+        monkeypatch.setattr(ct, "_DATA_DIR", mirror)
+        assert ct._scan_data() == {}
+
+    def test_mirror_reads_pass_through(self, real_data_mirror):
+        d = real_data_mirror("krx_codes_*.csv")
+        got = sorted(os.listdir(d))
+        assert got and all(n.startswith("krx_codes_") for n in got)
+        assert os.path.islink(os.path.join(d, got[0]))
+
+    def test_mirror_write_lands_in_tmp_not_repo(self, real_data_mirror):
+        d = real_data_mirror("krx_codes_*.csv")
+        out = os.path.join(d, "ohlcv_union_hl.parquet")
+        pd.DataFrame({"a": [1]}).to_parquet(out)
+        assert os.path.exists(out)
+        repo_data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        assert os.path.dirname(os.path.abspath(out)) != os.path.abspath(repo_data)
+
+    def test_mirror_is_empty_without_patterns(self, real_data_mirror):
+        assert os.listdir(real_data_mirror()) == []
+
+    def test_v65_holiday_test_uses_mirror(self):
+        """회귀 방지 — 이 테스트가 다시 진짜 data/ 를 넘기면 실패한다."""
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "test_v65_official_track_record.py"), encoding="utf-8").read()
+        i = src.index("def test_real_data_skips_known_holidays")
+        body = src[i:i + 800]
+        assert "real_data_mirror(" in body
+        assert "compute_pick_reliability(str(DATA))" not in body

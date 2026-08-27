@@ -79,6 +79,59 @@ python scripts/backfill_universe_ohlcv.py --start 2025-02-01 --limit 200
   종가 0·NaN 행 미제거 / 실패를 ok로 기록(재개 불능).
 - `scripts/check_silent_exceptions.py` 신규 0건.
 
+## 곁가지로 잡은 것 — 테스트가 저장소의 `data/`를 더럽힌다
+
+작업 중 `git status`에 `data/ohlcv_union_hl.parquet`이 수정된 채 남았다.
+내용은 HEAD와 **완전히 동일**했다(`equals()` True) — 데이터는 그대로인데
+파일 바이트만 다시 쓰인 것이다.
+
+범인은 v65·v69에서 내가 쓴 실데이터 회귀 테스트 3건이었다:
+
+| 테스트 | 경로 |
+|---|---|
+| `test_v65…::test_real_data_skips_known_holidays` | `pr.compute_pick_reliability(str(DATA))` |
+| `test_v69…::test_report_carries_its_own_caveat` | `CD.measure(str(DATA))` → `_panel` → `_build_hl_union` |
+| `test_v69…::TestRealMeasurement::rep` | 같음 |
+
+`pick_reliability._build_hl_union(data_dir)`는 **설계상** 합집합을
+`<data_dir>/ohlcv_union_hl.parquet`에 캐싱한다. 프로덕션에서는 옳다.
+테스트가 진짜 `data/`를 넘겼기 때문에 캐시가 저장소에 떨어졌다.
+
+### 처방
+
+1. `tests/conftest.py::build_data_mirror` — 실데이터를 **심링크로 미러링**한
+   디렉터리. 읽기는 그대로 통과하고 새 산출물은 tmp에 떨어진다.
+   픽스처가 아니라 평범한 함수인 것은 의도다 — `CD.measure`가 14초라
+   클래스 스코프로 한 번만 돌려야 하는 곳이 있고, 세션 공유 미러를 하나 두면
+   A가 쓴 캐시를 B가 읽어 순서 의존이 생긴다.
+2. 테스트 하나가 끝날 때마다 `data/`의 (이름, mtime, 크기) 서명을 비교해
+   **더럽힌 테스트를 그 자리에서 지목**한다. 오버헤드 14초/6분(4%).
+   끄려면 `SWINGPICKER_SKIP_DATA_GUARD=1`.
+
+크기만 보는 가드로는 이번 사고(내용 동일·바이트 재작성)를 놓친다 —
+mtime을 함께 본다. 변이 검정으로 고정했다.
+
+### 만들면서 틀린 것 (기록)
+
+처음에 `pytest_runtest_teardown`을 **한 모듈에 두 번 정의**했다. 파이썬은
+뒤엣것으로 덮어쓰므로 기존 모듈 누출 가드(v59)가 통째로 사라졌을 것이다.
+헬퍼 함수로 강등하고 기존 훅 안에서 부르게 고쳤으며, 최상위 함수 중복 정의를
+금지하는 테스트를 붙였다.
+
+### 아직 안 고친 것 — `ml_engine`
+
+`ml_engine`은 `data_dir` 파라미터 없이 경로를 **하드코딩**한다:
+
+```python
+FEATURE_CACHE_SCHEMA_PATH = "data/feature_cache_schema.json"   # ml_engine.py:101
+```
+
+cwd가 저장소면 그대로 덮는다. 미러 픽스처로는 막을 수 없다.
+이 세션 앞부분에서 `feature_cache_schema.json`이 n_stocks 672→595로 덮였는데
+그때는 트리거를 못 찾았다 — **메커니즘은 이제 확정**됐다(하드코딩 상대경로 + cwd).
+프로덕션 모듈 변경이라 이번 PR 범위 밖으로 둔다. 다만 새 가드가 재발 시
+범인을 지목한다.
+
 ## 다음
 
 1. 배치 환경에서 백필 실행 → `소멸종목 시세 보유 0/46`을 46/46으로.

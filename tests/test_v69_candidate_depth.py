@@ -193,8 +193,10 @@ class TestExplains:
         assert 'summary["watch_depth_line"]' in DC_SRC
         assert '"watch_depth_line": _CD.depth_line(' in DC_SRC
 
-    def test_report_carries_its_own_caveat(self):
-        rep = CD.measure(str(DATA))
+    def test_report_carries_its_own_caveat(self, real_data_mirror):
+        # [v71] 진짜 data/ 금지 — CD.measure → _panel → _build_hl_union 이
+        # <data_dir>/ohlcv_union_hl.parquet 에 캐시를 쓴다.
+        rep = CD.measure(real_data_mirror("ohlcv_cache_*.parquet", "recommend_*.csv"))
         if not rep.get("ok"):
             pytest.skip("측정 불가")
         assert "검증되지 않았다" in rep["caveat"]
@@ -208,8 +210,13 @@ class TestExplains:
                     reason="실데이터 없음")
 class TestRealMeasurement:
     @pytest.fixture(scope="class")
-    def rep(self):
-        return CD.measure(str(DATA))
+    def rep(self, tmp_path_factory):
+        # [v71] 클래스 스코프라 함수 스코프 real_data_mirror 를 못 쓴다.
+        # CD.measure 가 14초라 테스트마다 돌릴 수도 없다 → 미러를 직접 만든다.
+        from conftest import build_data_mirror
+        d = build_data_mirror(tmp_path_factory.mktemp("v69_mirror"),
+                              "ohlcv_cache_*.parquet", "recommend_*.csv")
+        return CD.measure(d)
 
     def test_measured(self, rep):
         assert rep["ok"] is True

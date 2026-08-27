@@ -44,9 +44,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+from pathlib import Path
 
 import pytest
+
+_ROOT = Path(__file__).resolve().parent.parent
 
 _log = logging.getLogger("tests.isolation_guard")
 
@@ -96,6 +100,7 @@ def pytest_runtest_teardown(item, nextitem):
 
     monkeypatch가 정상 원복하는 경우를 누출로 오판하지 않기 위해 순서가 중요하다.
     """
+    _check_data_dirty(item)
     if not _snapshot:
         return
     drifted = [k for k, v in _snapshot.items() if sys.modules.get(k) is not v]
@@ -121,8 +126,137 @@ def pytest_runtest_teardown(item, nextitem):
     )
 
 
+def _check_data_dirty(item) -> None:
+    """[v71] data/ 를 건드린 테스트를 그 자리에서 지목한다.
+
+    별도 훅으로 두지 않는다 — 같은 이름의 pytest 훅을 한 모듈에 두 번 정의하면
+    뒤엣것이 앞엣것을 덮어써서 모듈 누출 가드가 통째로 사라진다.
+    """
+    if not _DATA_GUARD_ON or _DATA_DIR is None:
+        return
+    global _data_sig
+    now = _scan_data()
+    if not _data_sig:
+        _data_sig = now
+        return
+    changed = sorted(k for k in set(_data_sig) | set(now)
+                     if _data_sig.get(k) != now.get(k))
+    if not changed:
+        return
+    _data_sig = now                       # 뒤 테스트가 같은 걸로 또 죽지 않게
+    _data_dirty.append((item.nodeid, changed))
+    shown = ", ".join(changed[:5])
+    more = "" if len(changed) <= 5 else f" (외 {len(changed) - 5}개)"
+    raise RuntimeError(
+        f"[data/ 오염] 이 테스트가 저장소의 data/ 파일 {len(changed)}개를 "
+        f"바꿨다: {shown}{more}\n"
+        "  → 프로덕션 코드는 data_dir 에 캐시를 쓴다. 테스트가 진짜 data/ 를 "
+        "넘기면 그 캐시가 저장소에 떨어진다.\n"
+        "  → real_data_mirror 픽스처를 써라: "
+        "d = real_data_mirror(\"ohlcv_cache_*.parquet\", ...)\n"
+        "  → 자세한 내용은 tests/conftest.py 참고."
+    )
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     if _leaks:
         terminalreporter.write_line(
             f"[테스트 격리] 서드파티 모듈 누출 {len(_leaks)}건 — "
             + ", ".join(_leaks[:5]), red=True)
+    if _data_dirty:
+        terminalreporter.write_line(
+            f"[data/ 오염] {len(_data_dirty)}건 — "
+            + ", ".join(n for n, _ in _data_dirty[:5]), red=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  [v71] 테스트가 저장소의 data/ 를 건드리는 것을 막는다
+# ══════════════════════════════════════════════════════════════════
+"""■ 무엇이 있었나 (2026-08-27 실측)
+
+  `git status` 에 `data/ohlcv_union_hl.parquet` 이 수정된 채로 남았다.
+  내용은 HEAD와 **완전히 동일**했다(`equals()` True) — 데이터는 그대로인데
+  파일 바이트만 다시 쓰인 것이다.
+
+  범인은 v65에서 내가 쓴 실데이터 회귀 테스트였다:
+
+      def test_real_data_skips_known_holidays(self):
+          res = pr.compute_pick_reliability(str(DATA))   # ← 진짜 data/
+
+  `pick_reliability._build_hl_union(data_dir)` 는 설계상 합집합을
+  `<data_dir>/ohlcv_union_hl.parquet` 에 캐싱한다. 프로덕션에서는 옳은 동작이다.
+  테스트가 진짜 `data/` 를 넘겼기 때문에 캐시가 저장소에 떨어졌다.
+
+■ 왜 그냥 커밋하면 안 되나
+
+  내용이 같은 바이너리를 커밋하면 diff 소음만 남고, "테스트가 저장소를
+  더럽힌다"는 사실이 묻힌다. 언젠가 내용까지 바뀌는 사고가 나도 알아채지
+  못한다. 실제로 이 세션 앞부분에서 `data/feature_cache_schema.json` 이
+  n_stocks 672→595 로 덮여 있었고 그때는 범인을 못 찾았다.
+
+■ 처방
+
+  1. `real_data_mirror` — 실데이터를 심링크로 미러링한 임시 디렉터리.
+     읽기는 그대로 되고, 새로 만들어지는 산출물은 tmp 에 떨어진다.
+  2. 아래 훅 — 테스트 하나가 끝날 때마다 data/ 의 (이름, mtime, 크기)
+     서명을 비교해 **더럽힌 테스트를 그 자리에서 지목**한다.
+     심링크를 따라가 원본을 덮는 경우까지 잡힌다.
+     끄려면 SWINGPICKER_SKIP_DATA_GUARD=1.
+"""
+
+_DATA_DIR = _ROOT / "data" if (_ROOT / "data").is_dir() else None
+_data_sig: dict = {}
+_data_dirty: list = []
+_DATA_GUARD_ON = os.environ.get("SWINGPICKER_SKIP_DATA_GUARD", "") != "1"
+
+
+def _scan_data() -> dict:
+    if _DATA_DIR is None:
+        return {}
+    out = {}
+    try:
+        with os.scandir(_DATA_DIR) as it:
+            for e in it:
+                if not e.is_file(follow_symlinks=False):
+                    continue
+                st = e.stat()
+                out[e.name] = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return {}
+    return out
+
+
+def build_data_mirror(dest, *patterns: str) -> str:
+    """실데이터를 심링크로 미러링한 디렉터리를 dest 에 만든다.
+
+    픽스처가 아니라 평범한 함수인 것은 의도다 — 클래스/모듈 스코프가 필요한
+    테스트(예: 14초짜리 CD.measure 를 클래스당 한 번만 돌리는 곳)가
+    tmp_path_factory 로 자기 스코프의 디렉터리를 잡아 쓸 수 있어야 한다.
+    세션 공유 미러를 하나 두면 A가 쓴 캐시를 B가 읽어 순서 의존이 생긴다.
+
+    패턴을 명시하게 한 것도 의도다 — 테스트가 무엇을 읽는지 드러난다.
+    """
+    d = Path(dest)
+    d.mkdir(parents=True, exist_ok=True)
+    if _DATA_DIR is None:
+        return str(d)
+    for pat in patterns:
+        for src in sorted(_DATA_DIR.glob(pat)):
+            dst = d / src.name
+            if not dst.exists():
+                dst.symlink_to(src)
+    return str(d)
+
+
+@pytest.fixture
+def real_data_mirror(tmp_path):
+    """함수 스코프용 래퍼.
+
+    사용:
+        def test_x(real_data_mirror):
+            d = real_data_mirror("ohlcv_cache_*.parquet", "recommend_*.csv")
+            res = pr.compute_pick_reliability(d)
+    """
+    def _mk(*patterns: str) -> str:
+        return build_data_mirror(tmp_path / "data_mirror", *patterns)
+    return _mk
