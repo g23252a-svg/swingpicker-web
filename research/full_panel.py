@@ -180,6 +180,7 @@ def _realized(px: pd.DataFrame, last_session: pd.Timestamp) -> pd.DataFrame:  # 
         for H in HORIZONS:
             a = np.full(n, np.nan)
             b = np.full(n, np.nan)
+            ns = np.full(n, np.nan)
             dflag = np.zeros(n, bool)
             for t in range(n):
                 e = t + 1
@@ -201,17 +202,22 @@ def _realized(px: pd.DataFrame, last_session: pd.Timestamp) -> pd.DataFrame:  # 
                 while ex > e and hal[ex]:
                     ex -= 1
                 truncated = (e + H) > (n - 1)
+                raw = (cl[ex] - entry) / entry
+                if not truncated or gone:
+                    ns[t] = raw                            # 손절 없는 판본
                 if hit:
                     a[t] = b[t] = STOP_PCT
                 elif not truncated:
-                    a[t] = b[t] = (cl[ex] - entry) / entry
+                    a[t] = b[t] = raw
                 elif gone:
                     dflag[t] = True
-                    a[t] = (cl[ex] - entry) / entry        # 마지막 체결가 청산
+                    a[t] = raw                             # 마지막 체결가 청산
                     b[t] = -1.0                            # 상장폐지 -100%
+                    ns[t] = -1.0
                 # truncated & not gone = 관측 구간 끝 → 측정 불가(NaN)
             acc.setdefault(f"fwd{H}", []).append(pd.Series(a, index=idx))
             acc.setdefault(f"fwd{H}_del100", []).append(pd.Series(b, index=idx))
+            acc.setdefault(f"fwd{H}_nostop", []).append(pd.Series(ns, index=idx))
             acc.setdefault(f"fwd{H}_delisted", []).append(pd.Series(dflag, index=idx))
     for k, parts in acc.items():
         px[k] = pd.concat(parts)
