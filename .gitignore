@@ -61,3 +61,4 @@ data/alpha_model.joblib
 # [v72] 연구 하네스 캐시 — 재생성 가능
 research/_panel_cache.parquet
 research/_pool_cache.parquet
+research/_full_panel_cache.parquet
