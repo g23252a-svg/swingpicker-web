@@ -105,12 +105,19 @@ def _derive_features(px: pd.DataFrame) -> pd.DataFrame:
         lo = g["저가"].transform(lambda s, n=n: s.rolling(n).min())
         out[f"pos_{n}d"] = np.where(hi > lo, (c - lo) / (hi - lo), np.nan)
         out[f"from_hi{n}"] = (c / hi - 1) * 100
-    out["tv20"] = g.apply(lambda d: (d["종가"] * d["거래량"]).rolling(20).mean()
-                          ).reset_index(0, drop=True)
-    out["tv60"] = g.apply(lambda d: (d["종가"] * d["거래량"]).rolling(60).median()
-                          ).reset_index(0, drop=True)
-    out["tv_ratio"] = out["tv"] / out["tv20"]
+    # ── 거래대금은 **전부 억원 단위**로 통일한다 ──────────────
+    # 처음 판본은 tv/tv20/tv60 을 원 단위로 두고 tv_eok 만 억으로 뒀다.
+    # 그 결과 내가 `tv60 >= 50` 을 "50억"으로 읽었는데 실제로는 **50원**이라
+    # 유니버스 583종목 중 569개가 통과했고, 거래대금 0~14억짜리 종목이
+    # '상시 유동' 표본에 섞여 들어갔다. 단위를 섞어 두면 반드시 이 사고가 난다.
     out["tv_eok"] = out["tv"] / 1e8
+    out["tv20_eok"] = g.apply(
+        lambda d: (d["종가"] * d["거래량"] / 1e8).rolling(20).mean()
+    ).reset_index(0, drop=True)
+    out["tv60_eok"] = g.apply(
+        lambda d: (d["종가"] * d["거래량"] / 1e8).rolling(60).median()
+    ).reset_index(0, drop=True)
+    out["tv_ratio"] = out["tv_eok"] / out["tv20_eok"]
     out["vol_ratio"] = v / g["거래량"].transform(lambda s: s.rolling(20).mean())
     # RSI14
     d = g["종가"].diff()
@@ -126,11 +133,12 @@ def _derive_features(px: pd.DataFrame) -> pd.DataFrame:
         lambda s: s.groupby((s != s.shift()).cumsum()).cumcount() + 1) * sgn
     out = out.drop(columns=["_s"])
     # 52주 대비 / 아모 (Amihud 비유동성)
-    out["amihud"] = (r1.abs() * 1e10 / out["tv"].replace(0, np.nan))
+    out["amihud"] = (r1.abs() / out["tv_eok"].replace(0, np.nan))
     out["amihud20"] = g.apply(
-        lambda x: (x["종가"].pct_change().abs() * 1e10
-                   / (x["종가"] * x["거래량"]).replace(0, np.nan)).rolling(20).mean()
+        lambda x: (x["종가"].pct_change().abs()
+                   / (x["종가"] * x["거래량"] / 1e8).replace(0, np.nan)).rolling(20).mean()
     ).reset_index(0, drop=True)
+    out = out.drop(columns=["tv"])          # 원 단위 컬럼은 아예 없앤다
     return out
 
 
