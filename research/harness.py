@@ -420,3 +420,43 @@ def xs_z(s: pd.Series, panel: pd.DataFrame) -> pd.Series:
     v = pd.to_numeric(s, errors="coerce")
     g = v.groupby(panel["Date"].values)
     return (v - g.transform("mean")) / (g.transform("std") + 1e-9)
+
+
+# ══════════════════════════════════════════════════════════════
+#  겹치는 보유창 보정 (v72.3)
+# ══════════════════════════════════════════════════════════════
+"""■ 무엇이 있었나
+
+`fwd20`(20일 보유) 신호 HZ3 이 일별 페어드 t검정에서 p=0.0002, 순열 0.0002,
+분기 3/4 로 프로토콜 전항목 PASS 를 받았다. 그런데 20일 보유는 **매일의 관측이
+19일치를 공유**한다 — 64개 일별 관측 안에 독립 정보는 3개 남짓이다.
+자기상관을 반영한 Newey-West HAC 로 다시 재니 **p=0.11** 로 유의성이 사라졌다.
+블록 부트스트랩도 block=3 은 5일 보유에나 맞고, 20일 보유에는 block=20 이 필요하다.
+
+`assess()` 의 t검정과 기본 block=3 은 **5일 보유를 가정한 것**이다.
+호라이즌이 5일이 아니면 반드시 `hac_test()` 와 `block_ci(block=H)` 를 함께 보라.
+"""
+
+
+def hac_test(x: Sequence[float], horizon: int) -> dict:
+    """Newey-West HAC t검정 — 보유창 horizon 일이면 자기상관이 horizon-1 일까지 남는다."""
+    a = np.asarray(list(x), float)
+    a = a[np.isfinite(a)]
+    n = len(a)
+    if n < 5:
+        return dict(mean=np.nan, t=np.nan, p=1.0, se=np.nan, n=n)
+    m = a.mean()
+    e = a - m
+    s = float(e @ e) / n
+    for k in range(1, min(int(horizon), n - 1)):
+        s += 2.0 * (1.0 - k / horizon) * float(e[k:] @ e[:-k]) / n
+    se = np.sqrt(max(s, 1e-18) / n)
+    t = m / se
+    return dict(mean=float(m), t=float(t),
+                p=float(2 * (1 - stats.norm.cdf(abs(t)))), se=float(se), n=n)
+
+
+def horizon_of(ret_col: str) -> int:
+    """'fwd10_nostop' → 10. 블록 크기·HAC 랙을 고르는 데 쓴다."""
+    m = re.search(r"fwd(\d+)", str(ret_col))
+    return int(m.group(1)) if m else HOLD_DAYS

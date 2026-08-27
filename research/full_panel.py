@@ -26,6 +26,25 @@
     맞지 않는다. ohlcv_cache 와 교차검증해서 잡았다.
 남는 것 약 100일. 나머지 날은 ohlcv_cache 와 종가가 95%+ 일치한다.
 
+## 이력 확장 (v72.1)
+
+`price_snapshot` 은 2026-02-26부터라 107세션뿐이다. 그 상태로는 60일·120일 창
+피처가 **결측 93.1%** 라 아예 못 쓴다 — 병렬 탐색 11개 렌즈가 수렴한 가설이
+전부 그 창에 있는데도.
+
+`data/ohlcv_union_hl.parquet` 가 이 문제를 푼다. 각 `ohlcv_cache_YYYYMMDD.parquet`
+는 그날 상위600 종목의 **전체 이력**(2024-08~)을 담고 있고, 그 합집합이
+**1,747종목 × 491세션**이다. 실측 결과 종목별 공백 0%, 팬텀 0일, 적격
+1,263종목을 **100%** 덮는다.
+
+두 소스를 이렇게 쓴다:
+  - 2026-02-26 **이전**: `union_hl` — 피처 워밍업 전용
+  - 2026-02-26 **이후**: `price_snapshot` — 생존편향 없는 완전 유니버스
+
+`survivorship_clean` 컬럼이 그 경계를 표시한다. 이전 구간은 '상위600에 한 번이라도
+든 종목'만 있으므로 **생존편향이 있다** — 신호 탐색·안정성 확인에는 쓰되,
+최종 판정은 `survivorship_clean` 구간에서 한다.
+
 ## 거래정지 처리 (실측 5.51%)
 
 `시가=고가=저가=0, 종가만 존재`인 행이 **18,687건(5.51%)** 있다 — 거래정지 종목이다
@@ -50,6 +69,7 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import re
 from typing import Dict, Optional, Set
@@ -60,6 +80,8 @@ import pandas as pd
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 CACHE = os.path.join(ROOT, "research", "_full_panel_cache.parquet")
+
+logger = logging.getLogger("full_panel")
 
 HORIZONS = (1, 3, 5, 10, 20)
 STOP_PCT = -0.08
@@ -124,6 +146,36 @@ def load_snapshots(data_dir: str = DATA) -> Dict[str, pd.DataFrame]:
         prev = cur
     out["_dropped"] = dropped  # type: ignore[assignment]
     return out
+
+
+UNION_HL = "ohlcv_union_hl.parquet"
+#: 거래량 이력. price_snapshot 에는 거래량이 없고 union_hl 은 OHLC만 담았다.
+#: ohlcv_cache_*.parquet 합집합에서 뽑아 둔다 (scripts 없이 research 캐시로).
+VOLUME_HISTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "_volume_history.parquet")
+#: price_snapshot 이 시작되는 날. 이전은 union_hl(워밍업), 이후는 price_snapshot.
+CLEAN_FROM = pd.Timestamp("2026-02-26")
+
+
+def load_history(data_dir: str = DATA) -> pd.DataFrame:
+    """CLEAN_FROM 이전의 가격 이력 — 피처 워밍업 전용."""
+    p = os.path.join(data_dir, UNION_HL)
+    if not os.path.exists(p):
+        logger.warning("[v72.1] %s 없음 — 워밍업 이력 없이 진행한다 "
+                       "(60일·120일 창 피처가 대부분 결측이 된다)", UNION_HL)
+        return pd.DataFrame()
+    u = pd.read_parquet(p)
+    u["Date"] = pd.to_datetime(u["Date"])
+    u["종목코드"] = u["종목코드"].astype(str).str.zfill(6)
+    u = u[u["Date"] < CLEAN_FROM].copy()
+    for c in ("시가", "고가", "저가", "종가"):
+        u[c] = pd.to_numeric(u[c], errors="coerce")
+    u = u.dropna(subset=["종가"])
+    u = u[u["종가"] > 0]
+    u["halted"] = ~((u["시가"] > 0) & (u["고가"] > 0) & (u["저가"] > 0))
+    u["시장"] = pd.NA
+    u["종목명"] = pd.NA
+    return u
 
 
 def _derive(px: pd.DataFrame) -> pd.DataFrame:
@@ -236,7 +288,17 @@ def build(force: bool = False) -> pd.DataFrame:
         parts.append(d)
     px = pd.concat(parts, ignore_index=True)
     px = px[~px["시장"].astype(str).isin(EXCLUDE_MARKETS)]
-    px = px.sort_values(["종목코드", "Date"]).reset_index(drop=True)
+    px["survivorship_clean"] = True
+    hist = load_history()
+    if not hist.empty:
+        # 워밍업 구간은 CLEAN_FROM 이후에도 등장하는 종목만 — 그래야 이어붙는다
+        hist = hist[hist["종목코드"].isin(set(px["종목코드"]))]
+        hist["survivorship_clean"] = False
+        px = pd.concat([hist, px], ignore_index=True)
+        logger.info("[v72.1] 워밍업 이력 %d행 · %d종목 연결",
+                    len(hist), hist["종목코드"].nunique())
+    px = px.sort_values(["종목코드", "Date"]).drop_duplicates(
+        subset=["종목코드", "Date"], keep="last").reset_index(drop=True)
     # 정지일의 OHL(0)이 파생 피처를 오염시키지 않게 결측 처리한다.
     # 종가는 남긴다 — 정지 중에도 마지막 체결가는 유효한 정보다.
     for c in ("시가", "고가", "저가"):
@@ -252,14 +314,41 @@ def build(force: bool = False) -> pd.DataFrame:
             continue
         d = pd.read_csv(f, usecols=["종목코드"], dtype={"종목코드": str})
         inpool[pd.Timestamp(m.group(1))] = set(d["종목코드"].str.zfill(6))
+    # ── 거래량 피처 (있는 종목만) ──────────────────────────
+    if os.path.exists(VOLUME_HISTORY):
+        v = pd.read_parquet(VOLUME_HISTORY)
+        v["Date"] = pd.to_datetime(v["Date"])
+        v["종목코드"] = v["종목코드"].astype(str).str.zfill(6)
+        px = px.merge(v[["종목코드", "Date", "거래량", "tv_eok"]],
+                      on=["종목코드", "Date"], how="left")
+        gv = px.groupby("종목코드", sort=False)
+        px["tv20_eok"] = gv["tv_eok"].transform(lambda s: s.rolling(20, min_periods=10).mean())
+        px["tv60_eok"] = gv["tv_eok"].transform(lambda s: s.rolling(60, min_periods=30).median())
+        px["tv_ratio"] = px["tv_eok"] / px["tv20_eok"]
+        px["vol_ratio"] = px["거래량"] / gv["거래량"].transform(
+            lambda s: s.rolling(20, min_periods=10).mean())
+        px["amihud20"] = gv.apply(
+            lambda g: (g["종가"].pct_change().abs()
+                       / g["tv_eok"].replace(0, np.nan)).rolling(20, min_periods=10).mean()
+        ).reset_index(0, drop=True)
+        px["has_volume"] = px["tv_eok"].notna()
+        logger.info("[v72.2] 거래량 병합 — 보유 %d종목 / %d",
+                    int(px.loc[px["has_volume"], "종목코드"].nunique()),
+                    px["종목코드"].nunique())
+    else:
+        logger.warning("[v72.2] %s 없음 — 유동성 피처 없이 진행", VOLUME_HISTORY)
+        px["has_volume"] = False
     px["inpool"] = [c in inpool.get(d, set()) for c, d in zip(px["종목코드"], px["Date"])]
     px["in_universe"] = px["Date"].isin(inpool.keys())
     # 소멸 여부
     lastd = px.groupby("종목코드")["Date"].transform("max")
     px["delisted"] = lastd < last_session
-    days = sorted(px["Date"].unique())
-    cut = days[int(len(days) * IS_FRAC)]
-    px["seg"] = np.where(px["Date"] < cut, "IS", "OOS")
+    # seg 는 **분석 구간(생존편향 없는 쪽)** 안에서만 나눈다.
+    # 워밍업 구간을 IS 에 섞으면 생존편향이 검정으로 새어든다.
+    clean_days = sorted(px.loc[px["survivorship_clean"], "Date"].unique())
+    cut = clean_days[int(len(clean_days) * IS_FRAC)]
+    px["seg"] = np.where(~px["survivorship_clean"], "WARMUP",
+                         np.where(px["Date"] < cut, "IS", "OOS"))
     px.attrs["dropped"] = dropped
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     px.to_parquet(CACHE, index=False)
@@ -272,7 +361,12 @@ def load(force: bool = False) -> pd.DataFrame:
 
 def summary(px: Optional[pd.DataFrame] = None) -> str:
     px = load() if px is None else px
-    nd = int(px.loc[px["delisted"], "종목코드"].nunique())
-    return (f"[v72] 생존편향 없는 패널 {len(px):,}행 · {px['종목코드'].nunique():,}종목 · "
-            f"{px['Date'].nunique()}일 ({px['Date'].min().date()}~{px['Date'].max().date()}) · "
-            f"기간 중 소멸 {nd}종목 · 후보풀 편입률 {px['inpool'].mean()*100:.1f}%")
+    c = px[px["survivorship_clean"]]
+    nd = int(c.loc[c["delisted"], "종목코드"].nunique())
+    w = px[~px["survivorship_clean"]]
+    return (f"[v72.1] 패널 {len(px):,}행 · {px['종목코드'].nunique():,}종목 · "
+            f"{px['Date'].nunique()}세션 ({px['Date'].min().date()}~{px['Date'].max().date()})\n"
+            f"        분석구간(생존편향 없음) {len(c):,}행 · {c['Date'].nunique()}일 · "
+            f"소멸 {nd}종목 · 편입률 {c['inpool'].mean()*100:.1f}%\n"
+            f"        워밍업구간 {len(w):,}행 · {w['Date'].nunique()}일 · "
+            f"{w['종목코드'].nunique():,}종목 (생존편향 있음 — 피처 계산 전용)")

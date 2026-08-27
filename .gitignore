@@ -62,3 +62,4 @@ data/alpha_model.joblib
 research/_panel_cache.parquet
 research/_pool_cache.parquet
 research/_full_panel_cache.parquet
+research/_volume_history.parquet
