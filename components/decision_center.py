@@ -35,7 +35,8 @@ def _number(row: pd.Series, key: str, default: float = 0.0) -> float:
 from services import candidate_depth as _CD
 from services import holding_exit as _HE
 from services import winrate_truth as _WT
-from services import position_risk as _PR   # [v64] 원화 리스크 SSOT
+from services import position_risk as _PR
+from services import pick_history as _PH   # [v74] 재추천 이력 SSOT
 
 
 def _humanize_reason(reason: Any) -> str:
@@ -237,6 +238,17 @@ def _stock_payload(row: pd.Series) -> dict[str, Any]:
         #   갭에도 얇아지는 종목만, 시나리오 숫자는 전 종목에 사실로 표시한다.
         "gap_table": _PR.gap_table_line(row),
         "gap_warn": _PR.gap_risk_line(row),
+        # [v74] 사용자 신고: "오늘탭에 뜬 추천종목이 2일전과 똑같은데?"
+        #   맞았다. 알파 엔진 도입 후 공식픽 13건 중 아주IB투자가 3회,
+        #   로킷헬스케어 2회 — 상위 3종목이 46%다. 재추천 쿨다운은 이미
+        #   검정해서 기각됐으므로(일평균 페어드 p=0.86) **막지 않고 보인다.**
+        #   세 번째로 같은 종목을 사기 전에 앞의 두 번이 어떻게 끝났는지는
+        #   알아야 한다 — 측정 가능한 공식픽 7건 중 6건이 -8% 손절이었다.
+        # `pd.to_numeric(None)` 은 스칼라 NaN 을 돌려주고 `NaN or 1` 에서
+        #   NaN 이 참이라 int(NaN) 이 터진다 — 컬럼이 없는 배치(구 CSV·테스트
+        #   픽스처)에서 화면 전체가 죽는다. notna 로 명시적으로 거른다.
+        "pick_nth": _pick_nth(row),
+        "pick_prior": str(row.get(_PH.COL_PRIOR) or ""),
     }
 
 
@@ -728,6 +740,23 @@ def _move_from_entry(entry: float, price: float) -> str:
 #
 # v66에서 셋을 모두 붙이고, 아래 렌더러를 소스 수준으로 고정하는 테스트를
 # 함께 둔다(test_v66_*). 계산만 하고 안 그리면 실패한다.
+def _pick_nth(row: pd.Series) -> int:
+    """이번이 몇 번째 추천인가. 이력이 없으면 1."""
+    v = pd.to_numeric(pd.Series([row.get(_PH.COL_NTH)]), errors="coerce").iloc[0]
+    return int(v) if pd.notna(v) and v >= 1 else 1
+
+
+def _render_repeat_line(stock: dict[str, Any]) -> None:
+    """[v74] 이 종목이 몇 번째 추천이고 앞선 추천이 어떻게 끝났는지."""
+    line = stock.get("pick_prior") or ""
+    if not line:
+        return
+    bad = "전부 손절" in line
+    ui.label(line).classes(
+        "text-[11px] font-bold leading-relaxed mt-2 "
+        + ("text-rose-200" if bad else "text-amber-200"))
+
+
 def _render_risk_lines(stock: dict[str, Any]) -> None:
     """종목 카드 하단의 리스크 3줄. 없는 줄은 그리지 않는다."""
     line = stock.get("risk_line") or ""
@@ -852,6 +881,7 @@ def _render_buy_card(stock: dict[str, Any]) -> None:
                     ui.label(label).classes("text-[11px] text-slate-400")
                     ui.label(value).classes(f"text-base font-bold {css}")
                     ui.label(detail or "—").classes("text-[10px] text-slate-500")
+        _render_repeat_line(stock)
         _render_risk_lines(stock)
         ui.button(
             "근거와 차트 보기",
@@ -894,6 +924,7 @@ def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
             ui.label(stock["reason"] or "최종 기준 미달").classes(
                 "text-sm text-slate-300 leading-relaxed"
             )
+            _render_repeat_line(stock)
             _render_risk_lines(stock)
         ui.button(
             "근거 보기",

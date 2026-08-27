@@ -77,9 +77,19 @@ def _rail_html(row):
 
 def test_action_rail_renders_core_only():
     html = _rail_html(_row())
-    # 손절·TP1·현재·진입·RR·켈리·타임스톱·다음목표 한 카드에.
-    for token in ["손절", "TP1", "현재", "진입", "손익비", "켈리", "타임스톱", "다음 목표"]:
+    # 손절·종가·진입·RR·켈리·타임스톱·다음목표 한 카드에.
+    # [v74] "현재" → "MM/DD 종가"로 바뀌었다. 배치는 장 마감 후 돌고 사용자는
+    #   다음 날 보는데 화면이 배치 종가를 "현재"라고 불렀다. 실제 신고:
+    #   8/28 04:12에 "현재 3,360"이 떴는데 그건 8/26 종가였고 8/27 종가는
+    #   3,480이었다(3.5% 차이). 라벨이 거짓말이었으므로 기대값을 바꾼다.
+    for token in ["손절", "TP1", "종가", "진입", "손익비", "켈리", "타임스톱", "다음 목표"]:
         assert token in html, token
+
+
+def test_action_rail_never_calls_batch_close_current():
+    """[v74] 배치 종가를 '현재'라고 부르지 않는다 — 회귀 방지."""
+    html = _rail_html(_row())
+    assert "현재 " not in html, "배치 종가에 '현재' 라벨이 다시 붙었다"
 
 
 def test_action_rail_marks_current_between_stop_and_tp1():

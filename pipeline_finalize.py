@@ -2156,6 +2156,26 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         log(f"⚠️ [v73] 조용한 각성 레인 스킵 (현행 산출에 영향 없음): {e}")
 
+    # [v74] 사용자 신고: "오늘탭에 뜬 추천종목이 2일전과 똑같은데?"
+    #   맞았다. 알파 엔진 도입 후 공식픽 13건 중 아주IB투자 3회(8/19·8/24·8/26),
+    #   로킷헬스케어 2회 — 상위 3종목이 46%다. 배치는 정상이고(종가·켈리 수량은
+    #   매일 다시 계산된다) 같은 종목이 계속 이기는 것이다. 원인은 편입 게이트가
+    #   '거래대금 상위 600에 든 날'을 요구하는데 반복적으로 거래가 터지는 종목이
+    #   계속 그 조건에 걸리기 때문이고, 그날이 바로 그 종목의 나쁜 날이다.
+    #   재추천 쿨다운은 이미 기각됐으므로(일평균 페어드 p=0.86) **막지 않고 보인다.**
+    #   측정 가능한 공식픽 7건 중 6건이 -8% 손절이었다.
+    try:
+        from services import pick_history as _PH
+        _hist = _PH.build(OUT_DIR, trade_ymd)
+        if _hist:
+            df_out = _PH.annotate(df_out, _hist)
+            _rep = int((pd.to_numeric(df_out.get(_PH.COL_NTH), errors="coerce")
+                        .fillna(1) > 1).sum())
+            log(f"🔁 [v74] 재추천 이력: 오늘 목록 중 {_rep}종목이 재등장 "
+                f"(이력 보유 {len(_hist)}종목)")
+    except Exception as e:
+        log(f"⚠️ [v74] 재추천 이력 스킵 (현행 산출에 영향 없음): {e}")
+
     # [v68] 선언 승률 vs 같은 점수 구간 실측 — 과신 방지 캡이 8월 내내
     #   조용히 미적용이었다. 원인 둘: (1) 픽이 사는 ELITE_SCORE [0,50) 구간의
     #   winrate_table 표본이 n_raw=2(폴백 p_win=0.5)라 신뢰 bin이 없었고,

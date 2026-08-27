@@ -5,6 +5,13 @@ on:
   schedule:
     # 평일 20:05 KST (UTC 11:05) — KRX API 야간 차단 회피
     - cron: "5 11 * * 1-5"
+    # [v75] 안전망 — 평일 22:40 KST (UTC 13:40).
+    #   2026-08-27(목) 정시 실행이 **아예 생성되지 않았다**. 실패가 아니라
+    #   스케줄 자체가 안 떴다(run #672 08-26 → #673 08-27 수동 dispatch).
+    #   GitHub Actions의 cron은 best-effort라 부하가 몰리면 조용히 드롭된다.
+    #   그 결과 8/28 새벽까지 화면이 8/26 배치를 띄웠고, 아무도 몰랐다.
+    #   이 실행은 오늘 산출물이 이미 있으면 스스로 건너뛴다(아래 guard).
+    - cron: "40 13 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -41,12 +48,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      # [v75] 안전망 실행이 정시 실행과 겹쳐 두 번 도는 것을 막는다.
+      #   오늘자 recommend_YYYYMMDD.csv 가 이미 있으면 나머지 스텝을 건너뛴다.
+      #   수동 dispatch 는 항상 돈다 — 사람이 일부러 부른 것이므로.
+      - name: Skip if today's CSV already exists
+        id: guard
+        run: |
+          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "manual dispatch — 강제 실행"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ -f "data/recommend_${TODAY}.csv" ]; then
+            echo "data/recommend_${TODAY}.csv 이미 있음 — 건너뜀"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "오늘(${TODAY}) 산출물 없음 — 실행"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install Dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: |
           python -V
           python -m pip install --upgrade pip
@@ -54,6 +81,7 @@ jobs:
           python -c "import pykrx, pandas; print('pykrx', pykrx.__version__); print('pandas', pandas.__version__)"
 
       - name: Debug Secrets (길이만 확인 — 값 노출 없음)
+        if: steps.guard.outputs.skip != 'true'
         run: |
           echo "TG_TOKEN        length: ${#TG_TOKEN}"
           echo "TG_ID           length: ${#TG_ID}"
@@ -69,6 +97,7 @@ jobs:
           echo "MASTER_ADMIN_PW length: ${#MASTER_ADMIN_PW}"
 
       - name: Run Collector
+        if: steps.guard.outputs.skip != 'true'
         run: |
           echo ">>> Collector 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python collector.py
@@ -79,6 +108,7 @@ jobs:
       # │  (매일 같은 통계가 Tab 2에 표시됨 — 'wf capital 0/5', '실집행 5건' 고착)
       # └─ Collector 직후 자동 실행 → 어제 장 마감까지 반영된 최신 통계로 갱신
       - name: Run Backtest Validation
+        if: steps.guard.outputs.skip != 'true'
         run: |
           echo ">>> Backtest validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python backtest_validation.py || {
@@ -88,6 +118,7 @@ jobs:
           echo ">>> Backtest validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run Official Buy Validation
+        if: steps.guard.outputs.skip != 'true'
         run: |
           echo ">>> Official buy validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python scripts/official_buy_validation.py --data-dir data --out-dir data || {
@@ -97,6 +128,7 @@ jobs:
           echo ">>> Official buy validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run No-Buy Breaker Backtest
+        if: steps.guard.outputs.skip != 'true'
         run: |
           echo ">>> No-buy breaker backtest 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python scripts/no_buy_breaker_backtest_v3926.py --data-dir data --out-dir data || {
@@ -106,6 +138,7 @@ jobs:
           echo ">>> No-buy breaker backtest 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run Historical RR Alpha Pick
+        if: steps.guard.outputs.skip != 'true'
         run: |
           echo ">>> Historical RR Alpha Pick 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python scripts/find_best_historical_alpha_combo_v22322.py --data-dir data --out-dir data || {
@@ -115,6 +148,7 @@ jobs:
           echo ">>> Historical RR Alpha Pick 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Show outputs
+        if: steps.guard.outputs.skip != 'true'
         run: |
           ls -alh data || true
           head -n 5 data/recommend_latest.csv || true
@@ -124,6 +158,7 @@ jobs:
           test -f data/no_buy_breaker_rules_latest.csv && head -n 10 data/no_buy_breaker_rules_latest.csv || true
 
       - name: Commit & Push CSV
+        if: steps.guard.outputs.skip != 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
