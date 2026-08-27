@@ -2138,6 +2138,24 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         log(f"⚠️ 후보 깊이 측정 스킵: {e}")
 
+    # [v73] 조용한 각성 레인 — **검증 중인 병렬 레인**.
+    #   거래대금 순위와 5일 수익은 역방향이고(IC IS +0.108 / OOS +0.181,
+    #   HAC p<0.0001, OOS 양수일 100%), 그 효과는 현행 1~600 안에서는
+    #   작동하지 않는다(IS -0.010 p=0.57). 601~1200 구간에서만 산다.
+    #   그 구간에서 거래량이 20일 평균의 1.5배 이상 붙은 상위 5종목은
+    #   생존편향 없는 105일에서 비용차감 후 +2.97%(HAC p=0.0143, 분기 3/4,
+    #   drop-top2 +2.12%)였다. 세 구간(워밍업 368일/IS 64일/OOS 41일) 전부 양수.
+    #   그래도 엔진의 뿌리(top_n=600)를 뒤집지 않는다 — PRODUCTION_BUY·켈리
+    #   수량·추천 목록 무변경. 기록만 남기고 실전 표본이 쌓이면 비교한다.
+    try:
+        from services import quiet_breakout as _qb
+        _qbr = _qb.run_batch(trade_ymd, ctx.start_s, ctx.end_s,
+                             ohlcv_map=ctx.ohlcv_map, name_map=ctx.name_map,
+                             data_dir=OUT_DIR)
+        log(f"🔇 {_qb.line(_qbr)}")
+    except Exception as e:
+        log(f"⚠️ [v73] 조용한 각성 레인 스킵 (현행 산출에 영향 없음): {e}")
+
     # [v68] 선언 승률 vs 같은 점수 구간 실측 — 과신 방지 캡이 8월 내내
     #   조용히 미적용이었다. 원인 둘: (1) 픽이 사는 ELITE_SCORE [0,50) 구간의
     #   winrate_table 표본이 n_raw=2(폴백 p_win=0.5)라 신뢰 bin이 없었고,
