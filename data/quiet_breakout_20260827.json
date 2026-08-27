@@ -99,7 +99,7 @@
  },
  "caveat": "검증 중인 병렬 레인이다. PRODUCTION_BUY·사이징과 무관하며 주문을 내지 않는다. 절대수익 근거는 105일 p=0.0089(N=5)로 강하지 않고 양수일이 53%다 — 실전 20일 이상 쌓인 뒤 판단한다.",
  "trade_ymd": "20260827",
- "fetched": 589,
+ "fetched": 0,
  "fetch_failed": 0,
  "still_missing": 0
 }
