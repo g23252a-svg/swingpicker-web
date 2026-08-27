@@ -410,8 +410,12 @@ class TestPickReliabilitySessions:
 
     @pytest.mark.skipif(not (DATA / "recommend_20260817.csv").exists(),
                         reason="실데이터 없음")
-    def test_real_data_skips_known_holidays(self):
-        res = pr.compute_pick_reliability(str(DATA))
+    def test_real_data_skips_known_holidays(self, real_data_mirror):
+        # [v71] 진짜 data/ 를 넘기면 안 된다 — pick_reliability 는 설계상
+        # <data_dir>/ohlcv_union_hl.parquet 에 합집합을 캐싱하므로
+        # 그 캐시가 저장소에 떨어진다. 심링크 미러로 읽기만 통과시킨다.
+        d = real_data_mirror("ohlcv_cache_*.parquet", "recommend_*.csv")
+        res = pr.compute_pick_reliability(d)
         assert res.get("non_session_days_skipped", 0) >= 1, res
 
 
