@@ -57,3 +57,7 @@ diagnose_expired_users.py
 
 # [v29] 알파모델 바이너리 (메타 JSON은 커밋, 모델은 야간 재학습 산출물)
 data/alpha_model.joblib
+
+# [v72] 연구 하네스 캐시 — 재생성 가능
+research/_panel_cache.parquet
+research/_pool_cache.parquet
