@@ -366,6 +366,11 @@ def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "plan_reason": plan_reason,
 
         # [Step 2B] 가격 플랜
+        # [v74] `close` 는 **배치 기준일의 종가**다. 화면이 이걸 "현재"라고
+        #   부르면 거짓말이 된다 — 배치는 장 마감 후 도니까 사용자가 보는 시점의
+        #   현재가와 다르다(실제 신고: 8/27 오후에 "현재 3,360"이 떴는데
+        #   그건 8/26 종가였다). 날짜를 같이 들고 다니게 한다.
+        "as_of": _safe_str(row.get("기준일", ""), ""),
         "close": close,
         "entry": entry,
         "stop": stop,
@@ -3570,6 +3575,11 @@ def render_v2_action_rail(n: dict):
     상세 가격표·차트는 아래 접이식으로 이동(사용자: '차트 안 보여줘도 됨').
     """
     close = n["close"]; entry = n["entry"]; stop = n["stop"]
+    # [v74] 배치 종가를 "현재"라고 쓰지 않는다. 배치는 장 마감 후 돌고
+    #   사용자는 다음 날 본다 — 그 사이 가격은 이미 달라져 있다.
+    _ao = str(n.get("as_of") or "").strip()
+    _as_of_label = (f"{_ao[4:6]}/{_ao[6:8]} 종가"
+                    if len(_ao) == 8 and _ao.isdigit() else "배치 종가")
     tp1, tp2, tp3 = n["tp1"], n["tp2"], n["tp3"]
     rr = n["rr_now_tp1"]
     qty = int(n["qty"]) if n["qty"] else 0
@@ -3677,7 +3687,7 @@ def render_v2_action_rail(n: dict):
     <div class="sd-v2" style="width:100%;margin-bottom:12px;">
       <div style="background:var(--bg-card);border:1px solid rgba(148,163,184,0.18);
            border-radius:12px;padding:14px 16px;">
-        <!-- 위치 바: 손절 ── 현재 ── TP1 -->
+        <!-- 위치 바: 손절 ── 배치 종가 ── TP1 -->
         <div style="display:flex;justify-content:space-between;font-size:10.5px;
              font-weight:700;margin-bottom:6px;">
           <span style="color:var(--red);">손절 {_won(stop)} <span style="opacity:.8;">({stop_pct:+.1f}%)</span></span>
@@ -3688,7 +3698,7 @@ def render_v2_action_rail(n: dict):
           <!-- 진입 틱 -->
           <div style="position:absolute;left:{ent_pos:.1f}%;top:-3px;width:2px;height:18px;
                background:#60A5FA;transform:translateX(-1px);"></div>
-          <!-- 현재 마커 -->
+          <!-- 배치 종가 마커 -->
           <div style="position:absolute;left:{cur_pos:.1f}%;top:50%;
                width:14px;height:14px;border-radius:50%;background:#fff;
                border:3px solid #F59E0B;transform:translate(-50%,-50%);
@@ -3696,7 +3706,7 @@ def render_v2_action_rail(n: dict):
         </div>
         <div style="text-align:center;font-size:11px;color:var(--text-white);
              font-weight:800;margin-top:6px;">
-          현재 {_won(close)} <span style="color:#60A5FA;font-weight:600;">· 진입 {_won(entry)}</span>
+          {_as_of_label} {_won(close)} <span style="color:#60A5FA;font-weight:600;">· 진입 {_won(entry)}</span>
         </div>
         <!-- 수치 한 줄 -->
         <div style="display:flex;flex-wrap:wrap;gap:10px 18px;justify-content:center;

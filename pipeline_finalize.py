@@ -1785,6 +1785,23 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 logger.warning(f"⚠️ 켈리 알파 재계산 실패 (기존 사이징 유지): {_ke}")
         except Exception as _ae:
             logger.warning(f"⚠️ 알파 학습/점수/게이트 실패 (미사용 처리): {_ae}")
+        # [v76] 포트폴리오 예산 — 켈리는 종목별 분율만 낸다. 합계를 보는 사람이
+        #   없었다. 실측 121일: 하루 배분 합계 최대 183.8%, 5일 보유 중첩 노출
+        #   중위 133%·최대 721.6%. 현금 계좌로는 집행 불가능한 수량을 찍고 있었다.
+        #   실현손익 66일 환산 MDD -173.1%(=파산) → 예산 적용 시 -52.6%.
+        #   이 레이어는 **줄이기만** 한다 — 추천 목록·PRODUCTION_BUY·순위 무변경,
+        #   어떤 행도 원래 분율보다 커지지 않는다. 원값은 *_RAW에 보존.
+        try:
+            from services import portfolio_budget as _PB
+            df_out, _pb_info = _PB.apply(df_out, OUT_DIR, trade_ymd)
+            _pb_line = _PB.line(_pb_info)
+            if _pb_line:
+                log(f"🧮 [v76] {_pb_line}")
+            if _pb_info.get("scale", 1.0) < 1.0:
+                log(f"🧮 [v76] {_PB.stop_worst_line()}")
+        except Exception as _pbe:
+            logger.warning(f"⚠️ [v76] 포트폴리오 예산 스킵 (현행 사이징 유지): {_pbe}")
+
         _before_quality = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
                                & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
         df_out = apply_recommendation_quality_guard(df_out)
@@ -2155,6 +2172,26 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         log(f"🔇 {_qb.line(_qbr)}")
     except Exception as e:
         log(f"⚠️ [v73] 조용한 각성 레인 스킵 (현행 산출에 영향 없음): {e}")
+
+    # [v74] 사용자 신고: "오늘탭에 뜬 추천종목이 2일전과 똑같은데?"
+    #   맞았다. 알파 엔진 도입 후 공식픽 13건 중 아주IB투자 3회(8/19·8/24·8/26),
+    #   로킷헬스케어 2회 — 상위 3종목이 46%다. 배치는 정상이고(종가·켈리 수량은
+    #   매일 다시 계산된다) 같은 종목이 계속 이기는 것이다. 원인은 편입 게이트가
+    #   '거래대금 상위 600에 든 날'을 요구하는데 반복적으로 거래가 터지는 종목이
+    #   계속 그 조건에 걸리기 때문이고, 그날이 바로 그 종목의 나쁜 날이다.
+    #   재추천 쿨다운은 이미 기각됐으므로(일평균 페어드 p=0.86) **막지 않고 보인다.**
+    #   측정 가능한 공식픽 7건 중 6건이 -8% 손절이었다.
+    try:
+        from services import pick_history as _PH
+        _hist = _PH.build(OUT_DIR, trade_ymd)
+        if _hist:
+            df_out = _PH.annotate(df_out, _hist)
+            _rep = int((pd.to_numeric(df_out.get(_PH.COL_NTH), errors="coerce")
+                        .fillna(1) > 1).sum())
+            log(f"🔁 [v74] 재추천 이력: 오늘 목록 중 {_rep}종목이 재등장 "
+                f"(이력 보유 {len(_hist)}종목)")
+    except Exception as e:
+        log(f"⚠️ [v74] 재추천 이력 스킵 (현행 산출에 영향 없음): {e}")
 
     # [v68] 선언 승률 vs 같은 점수 구간 실측 — 과신 방지 캡이 8월 내내
     #   조용히 미적용이었다. 원인 둘: (1) 픽이 사는 ELITE_SCORE [0,50) 구간의
