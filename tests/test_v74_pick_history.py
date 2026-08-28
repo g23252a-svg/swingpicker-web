@@ -320,3 +320,27 @@ def test_as_of_label_logic(ymd, expect):
     label = (f"{_ao[4:6]}/{_ao[6:8]} 종가"
              if len(_ao) == 8 and _ao.isdigit() else "배치 종가")
     assert label == expect
+
+
+class TestPipelineWiring:
+    """v74.1 — 주석이 CSV 저장보다 먼저 와야 한다.
+
+    첫 배선은 저장 뒤에 있어서 컬럼을 붙이고 그대로 버렸다. 8/28 첫 실배치
+    실측: 로그는 '5종목 재등장'인데 recommend CSV에 PICK_* 컬럼이 없었다.
+    화면은 CSV를 읽으므로 기능 전체가 죽어 있었다. annotate 단위 테스트
+    31개는 이 순서를 볼 수 없다 — 그래서 소스 순서를 직접 고정한다.
+    """
+
+    def test_annotate_runs_before_csv_save(self):
+        src = open("pipeline_finalize.py", encoding="utf-8").read()
+        i_annotate = src.index("_PH.annotate(df_out")
+        i_save = src.index("# ── CSV 저장 (분석 시점 불변 원본) ──")
+        assert i_annotate < i_save, (
+            "v74 annotate가 recommend CSV 저장 뒤에 있다 — "
+            "컬럼이 CSV에 실리지 않아 화면에서 죽는다 (8/28 실배치 재발)")
+
+    def test_budget_also_before_csv_save(self):
+        """v76 예산 컬럼도 같은 함정에 빠지지 않는지 함께 고정한다."""
+        src = open("pipeline_finalize.py", encoding="utf-8").read()
+        assert src.index("_PB.apply(df_out") < src.index(
+            "# ── CSV 저장 (분석 시점 불변 원본) ──")
