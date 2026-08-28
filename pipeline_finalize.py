@@ -1785,6 +1785,23 @@ def finalize_outputs(ctx: PipelineContext) -> None:
                 logger.warning(f"⚠️ 켈리 알파 재계산 실패 (기존 사이징 유지): {_ke}")
         except Exception as _ae:
             logger.warning(f"⚠️ 알파 학습/점수/게이트 실패 (미사용 처리): {_ae}")
+        # [v76] 포트폴리오 예산 — 켈리는 종목별 분율만 낸다. 합계를 보는 사람이
+        #   없었다. 실측 121일: 하루 배분 합계 최대 183.8%, 5일 보유 중첩 노출
+        #   중위 133%·최대 721.6%. 현금 계좌로는 집행 불가능한 수량을 찍고 있었다.
+        #   실현손익 66일 환산 MDD -173.1%(=파산) → 예산 적용 시 -52.6%.
+        #   이 레이어는 **줄이기만** 한다 — 추천 목록·PRODUCTION_BUY·순위 무변경,
+        #   어떤 행도 원래 분율보다 커지지 않는다. 원값은 *_RAW에 보존.
+        try:
+            from services import portfolio_budget as _PB
+            df_out, _pb_info = _PB.apply(df_out, OUT_DIR, trade_ymd)
+            _pb_line = _PB.line(_pb_info)
+            if _pb_line:
+                log(f"🧮 [v76] {_pb_line}")
+            if _pb_info.get("scale", 1.0) < 1.0:
+                log(f"🧮 [v76] {_PB.stop_worst_line()}")
+        except Exception as _pbe:
+            logger.warning(f"⚠️ [v76] 포트폴리오 예산 스킵 (현행 사이징 유지): {_pbe}")
+
         _before_quality = int(((pd.to_numeric(df_out.get("TOP_PICK", 0), errors="coerce").fillna(0).astype(int) == 1)
                                & (pd.to_numeric(df_out.get("BUY_NOW_ELIGIBLE", 0), errors="coerce").fillna(0).astype(int) == 1)).sum())
         df_out = apply_recommendation_quality_guard(df_out)
