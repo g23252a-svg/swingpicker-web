@@ -17,22 +17,22 @@
       "STRUCT_SCORE": 54.7,
       "ENTRY_RISK_LEVEL": "GREEN",
       "ROUTE": "WAIT",
-      "MARKET_BREADTH": 58.4
+      "MARKET_BREADTH": 57.3
     },
     {
       "종목코드": "090430",
       "종목명": "아모레퍼시픽",
-      "HISTORICAL_ALPHA_SCORE": 60.9,
-      "TIMING_SCORE": 96.9,
+      "HISTORICAL_ALPHA_SCORE": 59.6,
+      "TIMING_SCORE": 92.9,
       "외인순매수": 14759,
       "RR_NOW_TP1": 0.64,
-      "FINAL_SCORE": 92.6,
+      "FINAL_SCORE": 90.6,
       "VWAP_GAP": 22.7,
       "POC_GAP": 15.08,
       "STRUCT_SCORE": 88.2,
       "ENTRY_RISK_LEVEL": "ORANGE",
       "ROUTE": "WAIT",
-      "MARKET_BREADTH": 58.4
+      "MARKET_BREADTH": 57.3
     },
     {
       "종목코드": "010950",
@@ -47,7 +47,7 @@
       "STRUCT_SCORE": 90.4,
       "ENTRY_RISK_LEVEL": "GREEN",
       "ROUTE": "WAIT",
-      "MARKET_BREADTH": 58.4
+      "MARKET_BREADTH": 57.3
     }
   ],
   "rule_pass_count": 8,
@@ -88,7 +88,7 @@
       "STRUCT_SCORE": 66.1,
       "ENTRY_RISK_LEVEL": "GREEN",
       "ROUTE": "OVERHEAT",
-      "MARKET_BREADTH": 58.4,
+      "MARKET_BREADTH": 57.3,
       "HISTORICAL_ALPHA_RULE_ID": "FALLBACK_T55_FRG_POC90",
       "HISTORICAL_ALPHA_RULE_DESC": "TIMING>=55 + 외인순매수>0 + POC<=90 + 위험가드",
       "HISTORICAL_ALPHA_WIN_RATE": null,

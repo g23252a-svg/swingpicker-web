@@ -1,23 +1,22 @@
 {
   "trade_ymd": "20260828",
-  "top_pick_count": 31,
+  "top_pick_count": 30,
   "top_pick_by_type": {
-    "ALPHA": 31
+    "ALPHA": 30
   },
-  "avg_elite": 20.6,
-  "avg_rr": 2.36,
+  "avg_elite": 19.8,
+  "avg_rr": 2.3,
   "min_rr": 1.0,
   "rr_lt_1_count": 0,
-  "avg_balance": 38.5,
+  "avg_balance": 39.7,
   "avg_win_rate": 0.427,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 13643,
+  "est_win_rate_n": 13761,
   "routes": {
-    "WAIT": 15,
-    "ATTACK": 11,
-    "ARMED": 4,
-    "CARRY": 1
+    "WAIT": 16,
+    "ATTACK": 10,
+    "ARMED": 4
   },
   "picks": [
     {
@@ -33,22 +32,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
-    },
-    {
-      "종목코드": "085620",
-      "종목명": "미래에셋생명",
-      "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 45.9,
-      "RR_NOW_TP1": 4.11,
-      "BALANCE_SCORE": 0.0,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 33.6,
-      "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.43,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "005930",
@@ -63,7 +47,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "475150",
@@ -78,7 +62,7 @@
       "EST_WIN_RATE": 0.43,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "066570",
@@ -93,13 +77,13 @@
       "EST_WIN_RATE": 0.428,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "440110",
       "종목명": "파두",
       "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 28.5,
+      "ELITE_SCORE": 30.0,
       "RR_NOW_TP1": 2.35,
       "BALANCE_SCORE": 0.0,
       "ENTRY_GAP_PCT": 0.0,
@@ -108,7 +92,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "064400",
@@ -123,7 +107,7 @@
       "EST_WIN_RATE": 0.43,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "006800",
@@ -138,7 +122,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "319400",
@@ -153,7 +137,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "277810",
@@ -168,7 +152,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "402340",
@@ -183,7 +167,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "272210",
@@ -198,7 +182,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "454910",
@@ -213,7 +197,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "267250",
@@ -228,7 +212,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "347850",
@@ -243,7 +227,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "058610",
@@ -258,7 +242,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "068270",
@@ -273,13 +257,13 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "073240",
       "종목명": "금호타이어",
       "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 24.4,
+      "ELITE_SCORE": 22.9,
       "RR_NOW_TP1": 2.13,
       "BALANCE_SCORE": 34.0,
       "ENTRY_GAP_PCT": 1.5,
@@ -288,7 +272,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "098460",
@@ -303,7 +287,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "307950",
@@ -318,7 +302,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "005380",
@@ -333,7 +317,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "207940",
@@ -348,7 +332,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "079550",
@@ -363,7 +347,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "028300",
@@ -378,7 +362,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "034220",
@@ -393,7 +377,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "000250",
@@ -408,7 +392,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "064350",
@@ -423,7 +407,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "027360",
@@ -434,11 +418,11 @@
       "BALANCE_SCORE": 76.1,
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 39.3,
-      "ROUTE": "CARRY",
+      "ROUTE": "WAIT",
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "012450",
@@ -453,7 +437,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "017670",
@@ -468,13 +452,13 @@
       "EST_WIN_RATE": 0.429,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     },
     {
       "종목코드": "000660",
       "종목명": "SK하이닉스",
       "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 28.7,
+      "ELITE_SCORE": 30.1,
       "RR_NOW_TP1": 1.05,
       "BALANCE_SCORE": 0.0,
       "ENTRY_GAP_PCT": 0.0,
@@ -483,7 +467,7 @@
       "EST_WIN_RATE": 0.427,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13643
+      "EST_WIN_RATE_N": 13761
     }
   ]
 }
