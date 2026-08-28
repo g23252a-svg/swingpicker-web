@@ -37,6 +37,7 @@
   6. **결정 컬럼·수량은 바뀌지 않는다** — 표시 깊이만 정한다.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -222,12 +223,38 @@ class TestRealMeasurement:
         assert rep["ok"] is True
         assert rep["n_days"] >= CD.MIN_DAYS
 
-    def test_edge_collapses_by_rank3(self, rep):
-        """N=3에서 상위2 제거가 음수로 꺾인다 — 이 전제가 자르는 근거다."""
-        cur = {c["n"]: c for c in rep["curve"]}
-        assert cur[1]["excess_drop_top2"] > 0
-        assert cur[3]["excess_drop_top2"] < 0, \
-            f"N=3 상위2제거 {cur[3]['excess_drop_top2']} — 전제가 바뀌었다"
+    # ── [v74.1] 부호 전제는 고정 데이터로 잰다 ──────────────────────
+    #   원래 이 테스트는 rolling 실데이터에서 cur[1] > 0을 박아뒀고, 8/28
+    #   배치가 들어오자 -0.452로 뒤집혀 무관한 PR의 CI를 떨어뜨렸다(#127).
+    #   경보로서는 설계대로 작동한 것이다 — 전제가 실제로 바뀌었다:
+    #   27일 실측에서 **어느 N도 상위2 제거를 버티지 못한다**(N=1 -0.452,
+    #   N=2 -0.178, N=3 -0.859). '상위 1~2위엔 견고한 엣지'는 24일짜리
+    #   전제였고 죽었다. 화면은 robust_depth가 바닥(MIN_DEPTH)으로 떨어져
+    #   자동으로 보수화된다 — 코드 수정은 필요 없었다.
+    #   0 근처 부호는 데이터가 하루 늘 때마다 또 뒤집힐 수 있으므로,
+    #   부호 전제는 PREMISE_ASOF 시점으로 고정해 결정적으로 만들고
+    #   살아있는 경보는 유의성 테스트(아래)에 맡긴다.
+    PREMISE_ASOF = "20260828"
+
+    @pytest.fixture(scope="class")
+    def rep_pinned(self, tmp_path_factory):
+        import glob as _g, re as _re
+        from conftest import build_data_mirror
+        d = build_data_mirror(tmp_path_factory.mktemp("v69_pin"),
+                              "ohlcv_cache_*.parquet", "recommend_*.csv")
+        for f in _g.glob(os.path.join(d, "*.*")):
+            m = _re.search(r"(\d{8})", os.path.basename(f))
+            if m and m.group(1) > self.PREMISE_ASOF:
+                os.remove(f)          # 심링크 제거 — 원본 무손상
+        return CD.measure(d)
+
+    def test_edge_collapses_by_rank3(self, rep_pinned):
+        """[8/28 고정] 어느 깊이도 상위2 제거를 버티지 못한다 — 그래서 자른다."""
+        cur = {c["n"]: c for c in rep_pinned["curve"]}
+        assert cur[1]["excess_drop_top2"] < 0, "1위마저 상위2 의존 — 8/28 실측"
+        assert cur[3]["excess_drop_top2"] < 0
+        assert rep_pinned["robust_depth"] == CD.MIN_DEPTH, \
+            "견고한 깊이가 바닥이 아니게 됐다 — 전제 기록을 갱신하라"
 
     def test_deep_ranks_are_not_better_than_universe(self, rep):
         cur = {c["n"]: c for c in rep["curve"]}
