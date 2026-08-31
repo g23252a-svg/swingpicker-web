@@ -2197,6 +2197,31 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         log(f"⚠️ [v73] 조용한 각성 레인 스킵 (현행 산출에 영향 없음): {e}")
 
+    # [v79] 수급 전종목 수집 — 기존 KIS 랭킹 수급은 하루 30종목뿐이라
+    #   1,200종목 유니버스의 횡단면 특징으로 못 쓴다. pykrx 전종목 순매수를
+    #   하루 4호출로 받아 억 단위로 확정 저장한다. 실패해도 배치 무영향.
+    try:
+        from services import investor_flow_full as _IFF
+        _iff_p = _IFF.collect(OUT_DIR, trade_ymd)
+        log(f"🌊 [v79] {_IFF.line(_iff_p, trade_ymd)}")
+    except Exception as e:
+        log(f"⚠️ [v79] 수급 전종목 스킵 (현행 산출에 영향 없음): {e}")
+
+    # [v78] 승자 프로파일 루프 — 5일 창이 막 닫힌 코호트의 승자/패자 특징
+    #   차이를 매일 한 줄씩 기록하고, **앞으로 쌓인 증거로만** 검정한다
+    #   (특징 12개 선등록 v1-20260831 · 승격 문턱 선등록: ≥40일 · HAC p<0.05 ·
+    #   BH-FDR q=0.05 · 부호안정 → 그림자 레인 20일 → 사용자 승인).
+    #   과거 데이터를 뒤지는 방식은 129개 신호 전멸로 이미 닫았다 —
+    #   이 루프는 그 반대 방향이다. 기록·검정 전용, 현행 산출 무변경.
+    try:
+        from services import winner_profile as _WP
+        _wp = _WP.run_batch(OUT_DIR, trade_ymd)
+        _wpl = _WP.line(_wp)
+        if _wpl:
+            log(f"🧬 [v78] {_wpl}")
+    except Exception as e:
+        log(f"⚠️ [v78] 승자 프로파일 스킵 (현행 산출에 영향 없음): {e}")
+
 
     # [v68] 선언 승률 vs 같은 점수 구간 실측 — 과신 방지 캡이 8월 내내
     #   조용히 미적용이었다. 원인 둘: (1) 픽이 사는 ELITE_SCORE [0,50) 구간의
