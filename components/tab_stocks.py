@@ -1642,6 +1642,41 @@ def _resolve_member_summary_action(
         "bg_class": "bg-yellow-900/10 border-yellow-500/30",
     }
 
+def _sort_by_engine_axis(fdf: pd.DataFrame) -> pd.DataFrame:
+    """[v77] '🧠 알파순' 정렬 — 오늘탭·공식픽 선정과 같은 축.
+
+    1차 키: funnel_rank_key(알파×손익비, 퍼널 미통과는 NaN → 뒤로)
+    2차 키: ALPHA_SCORE. 키가 전부 결측(legacy CSV)이면 알파 단독 →
+    ELITE_RANK_SCORE → DISPLAY_SCORE 순 폴백.
+    """
+    _alpha_col = pd.to_numeric(
+        fdf.get("ALPHA_SCORE", pd.Series(dtype=float)), errors="coerce")
+    _ek = None
+    try:
+        from services.alpha_live_report import funnel_rank_key as _frk
+        _ek = _frk(fdf)
+    except Exception:
+        _ek = None
+    if _ek is not None and pd.to_numeric(_ek, errors="coerce").notna().any():
+        # NaN(퍼널 미통과)은 -inf로 명시해 뒤로 보낸다. na_position="last"는
+        # NaN 그룹 안에서 2차 키(알파) 정렬을 보장하지 않으므로 쓰지 않는다.
+        return fdf.assign(
+            _engine_sort=pd.to_numeric(_ek, errors="coerce").fillna(float("-inf")),
+            _alpha_sort=_alpha_col.fillna(float("-inf")),
+        ).sort_values(
+            ["_engine_sort", "_alpha_sort"], ascending=False,
+        ).drop(columns=["_engine_sort", "_alpha_sort"])
+    if _alpha_col.notna().any():
+        return fdf.assign(_alpha_sort=_alpha_col).sort_values(
+            "_alpha_sort", ascending=False, na_position="last"
+        ).drop(columns=["_alpha_sort"])
+    if "ELITE_RANK_SCORE" in fdf.columns:
+        return fdf.sort_values("ELITE_RANK_SCORE", ascending=False)
+    if "DISPLAY_SCORE" in fdf.columns:
+        return fdf.sort_values("DISPLAY_SCORE", ascending=False)
+    return fdf
+
+
 def _render_member_summary(capital_top1: dict, signal_top1: dict,
                             daily_top1: dict, confidence: dict,
                             pre_entry_risk: dict = None,
@@ -4927,19 +4962,9 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
                 fdf = fdf[lvl.isin(["RED", "ORANGE"])]
         # [v3.7] 정렬 로직 확장
         if sort_mode.value == "🧠 알파순":
-            # [v31.2] 검증 통과 알파 점수 내림차순. 컬럼 없거나 전부 결측
-            # (legacy CSV·알파 미검증일)이면 랭크순으로 자동 폴백.
-            _alpha_col = pd.to_numeric(
-                fdf.get("ALPHA_SCORE", pd.Series(dtype=float)), errors="coerce"
-            )
-            if _alpha_col.notna().any():
-                fdf = fdf.assign(_alpha_sort=_alpha_col).sort_values(
-                    "_alpha_sort", ascending=False, na_position="last"
-                ).drop(columns=["_alpha_sort"])
-            elif "ELITE_RANK_SCORE" in fdf.columns:
-                fdf = fdf.sort_values("ELITE_RANK_SCORE", ascending=False)
-            elif "DISPLAY_SCORE" in fdf.columns:
-                fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
+            # [v77] 오늘탭·공식픽 선정과 같은 축(알파×손익비) — 8/28 실측에서
+            #   오늘탭 2위 현대차 vs 종목탭 2위 삼성전자로 갈렸던 것의 수정.
+            fdf = _sort_by_engine_axis(fdf)
         elif sort_mode.value == "🔢 점수순" and "DISPLAY_SCORE" in fdf.columns:
             fdf = fdf.sort_values("DISPLAY_SCORE", ascending=False)
         elif sort_mode.value == "🧱 S·T최저순":
