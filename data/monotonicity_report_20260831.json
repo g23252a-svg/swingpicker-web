@@ -1,0 +1,171 @@
+{
+  "asof_ymd": "20260831",
+  "generated_at": "2026-08-31T22:43:52.468924",
+  "market_map_coverage": 1.0,
+  "market_unknown_count": 0,
+  "market_unknown_samples": [],
+  "benchmark_mapping_warning": null,
+  "quality_policy_version": "alpha_gate_v62",
+  "declared_wr_active": 0.4327,
+  "declared_wr_top_pick": 0.4321,
+  "elite_monotonicity": {
+    "valid": true,
+    "bins": [
+      {
+        "score_lo": 0,
+        "score_hi": 50.0,
+        "n_raw": 101,
+        "p_win": 0.3425,
+        "p_win_lcb": 0.2609,
+        "avg_ret_net_pct": -4.3786,
+        "avg_ret_excess_pct": -4.005
+      },
+      {
+        "score_lo": 50,
+        "score_hi": 60.0,
+        "n_raw": 0,
+        "p_win": null,
+        "p_win_lcb": null,
+        "avg_ret_net_pct": null,
+        "avg_ret_excess_pct": null
+      },
+      {
+        "score_lo": 60,
+        "score_hi": 70.0,
+        "n_raw": 16,
+        "p_win": 0.7778,
+        "p_win_lcb": 0.505,
+        "avg_ret_net_pct": 5.0449,
+        "avg_ret_excess_pct": -0.0688
+      },
+      {
+        "score_lo": 70,
+        "score_hi": 80.0,
+        "n_raw": 41,
+        "p_win": 0.3257,
+        "p_win_lcb": 0.1956,
+        "avg_ret_net_pct": -4.3862,
+        "avg_ret_excess_pct": -7.1252
+      },
+      {
+        "score_lo": 80,
+        "score_hi": 90.0,
+        "n_raw": 9,
+        "p_win": 0.3636,
+        "p_win_lcb": 0.1206,
+        "avg_ret_net_pct": -6.2069,
+        "avg_ret_excess_pct": -7.388
+      },
+      {
+        "score_lo": 90,
+        "score_hi": 100.01,
+        "n_raw": 0,
+        "p_win": null,
+        "p_win_lcb": null,
+        "avg_ret_net_pct": null,
+        "avg_ret_excess_pct": null
+      }
+    ],
+    "monotone_p_win_lcb": false,
+    "monotone_avg_ret": false,
+    "monotone_avg_ret_excess": false
+  },
+  "realized_wr": 0.3376,
+  "realized_wr_top_pick": 0.3425,
+  "realized_wr_top_pick_n": 101,
+  "realized_wr_active": 0.3425,
+  "realized_wr_active_n": 101,
+  "declared_vs_realized_gap_active": 0.0902,
+  "declared_vs_realized_gap_top_pick": 0.0896,
+  "declared_vs_realized_gap": 0.0896,
+  "avg_ret_excess_pct": -4.5762,
+  "top_pick_funnel": {
+    "trade_ymd": "20260831",
+    "total": 368,
+    "aggressive_funnel": {
+      "total": 368,
+      "route_active": 0,
+      "hard_gate": 197,
+      "elite_75": 0,
+      "struct_80": 0,
+      "timing_70": 0,
+      "tp1_15": 0,
+      "final": 0
+    },
+    "stable_funnel": {
+      "total": 368,
+      "route_active": 0,
+      "hard_gate": 197,
+      "elite_70": 0,
+      "tp1_7_15": 0,
+      "balance_70": 0,
+      "wr_55": 0,
+      "mature": 0,
+      "final": 0
+    },
+    "top_pick_count": 0,
+    "aggressive_count": 0,
+    "stable_count": 0
+  },
+  "top_pick_stable_7day_avg": 0.0,
+  "ci_hard": [
+    {
+      "gate": "production_buy_sizable",
+      "status": "PASS",
+      "subject_n": 1
+    },
+    {
+      "gate": "top_pick_tp1_positive",
+      "status": "PASS",
+      "subject_n": 25
+    },
+    {
+      "gate": "top_pick_rr_now_tp1_1",
+      "status": "PASS",
+      "detail": "min_rr=1.00",
+      "subject_n": 25
+    },
+    {
+      "gate": "declared_vs_realized_gap_15pp",
+      "status": "PASS",
+      "detail": "gap_top_pick=9.0% (n=101)",
+      "subject_n": 101
+    }
+  ],
+  "ci_soft": [
+    {
+      "gate": "top_pick_route_positive_observed",
+      "status": "WARN",
+      "detail": "TOP_PICK 18건이 ATTACK/ARMED 아님 (v32 이후 정상 — 관측만)"
+    },
+    {
+      "gate": "declared_vs_realized_gap_active",
+      "status": "OK",
+      "detail": "gap_active=9.0% (n=101)"
+    },
+    {
+      "gate": "wilson_monotonicity",
+      "status": "WARN",
+      "detail": "ELITE_SCORE bin별 p_win LCB 단조성 깨짐"
+    },
+    {
+      "gate": "avg_ret_excess_positive",
+      "status": "WARN",
+      "detail": "avg_ret_excess=-4.58%"
+    },
+    {
+      "gate": "market_map_coverage_95",
+      "status": "OK"
+    },
+    {
+      "gate": "stable_7day_avg_1",
+      "status": "WARN",
+      "detail": "평균 0.0개"
+    }
+  ],
+  "ci_hard_all_pass": true,
+  "ci_soft_any_warn": true,
+  "top_pick_count": 25,
+  "top_pick_rr_lt1_count": 0,
+  "top_pick_min_rr": 1.0
+}
