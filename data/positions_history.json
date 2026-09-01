@@ -6053,5 +6053,30 @@
       "100090_20260811_WARN_DRAWDOWN_20260824",
       "100090_20260811_STOP_HIT_20260901"
     ]
+  },
+  {
+    "code": "067290",
+    "name": "JW신약",
+    "entry_ymd": "20260731",
+    "entry_px": 1858.0,
+    "qty": 0,
+    "stop_px": 1709.0,
+    "stop_px_initial": 1709.0,
+    "take_px1": 2345.0,
+    "take_px2": 2495.0,
+    "trailing_high": 2990.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260901",
+    "last_close_px": 2990.0,
+    "unrealized_pnl_pct": 60.93,
+    "realized_pnl_pct": 60.93,
+    "close_ymd": "20260901",
+    "close_px": 2990.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "067290_20260731_CORPORATE_ACTION_20260901",
+      "067290_20260731_TP1_HIT_20260901",
+      "067290_20260731_TP2_HIT_20260901"
+    ]
   }
 ]

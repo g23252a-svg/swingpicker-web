@@ -527,29 +527,6 @@
     ]
   },
   {
-    "code": "067290",
-    "name": "JW신약",
-    "entry_ymd": "20260731",
-    "entry_px": 1858.0,
-    "qty": 0,
-    "stop_px": 1709.0,
-    "stop_px_initial": 1709.0,
-    "take_px1": 2345.0,
-    "take_px2": 2495.0,
-    "trailing_high": 2535.0,
-    "status": "OPEN",
-    "last_check_ymd": "20260901",
-    "last_close_px": 2990.0,
-    "unrealized_pnl_pct": 23.79,
-    "realized_pnl_pct": 0.0,
-    "close_ymd": "",
-    "close_px": 0.0,
-    "close_reason": "",
-    "alerted_events": [
-      "067290_20260731_CORPORATE_ACTION_20260901"
-    ]
-  },
-  {
     "code": "356680",
     "name": "엑스게이트",
     "entry_ymd": "20260804",
