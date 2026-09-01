@@ -1,0 +1,123 @@
+{
+ "registry": "v1-20260831",
+ "trade_ymd": "20260901",
+ "logged_ymd": "20260824",
+ "added": true,
+ "days_total": 1,
+ "protocol": {
+  "min_days": 40,
+  "fdr_q": 0.05,
+  "stage2": "그림자 레인 20거래일",
+  "stage3": "사용자 승인"
+ },
+ "features": [
+  {
+   "feature": "flow_frg_str",
+   "days": 0,
+   "ic_mean": NaN,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "flow_inst_str",
+   "days": 0,
+   "ic_mean": NaN,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "hi60_gap",
+   "days": 1,
+   "ic_mean": -0.054161735372615004,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "ma20_gap",
+   "days": 1,
+   "ic_mean": 0.026751765332644152,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "ret_1d",
+   "days": 1,
+   "ic_mean": 0.00552533620318542,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "ret_20d",
+   "days": 1,
+   "ic_mean": -0.07381704255700544,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "ret_5d",
+   "days": 1,
+   "ic_mean": 0.02967262778115162,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "rsi14",
+   "days": 1,
+   "ic_mean": -0.06959288140050236,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "tv_eok",
+   "days": 1,
+   "ic_mean": -0.17681805539693662,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "tv_rank_pctl",
+   "days": 1,
+   "ic_mean": -0.17681805539693662,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "vol_ratio",
+   "days": 1,
+   "ic_mean": -0.034677751783987756,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "volat_20d",
+   "days": 1,
+   "ic_mean": -0.07607052746583857,
+   "t": NaN,
+   "p": NaN,
+   "sign_stable": false,
+   "stage1": false
+  }
+ ]
+}

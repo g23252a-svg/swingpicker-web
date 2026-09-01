@@ -5992,5 +5992,66 @@
       "294870_20260729_TP1_HIT_20260831",
       "294870_20260729_TP2_HIT_20260831"
     ]
+  },
+  {
+    "code": "005830",
+    "name": "DB손해보험",
+    "entry_ymd": "20260728",
+    "entry_px": 159000.0,
+    "qty": 0,
+    "stop_px": 149900.0,
+    "stop_px_initial": 149900.0,
+    "take_px1": 172400.0,
+    "take_px2": 189100.0,
+    "trailing_high": 196400.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260901",
+    "last_close_px": 192600.0,
+    "unrealized_pnl_pct": 21.13,
+    "realized_pnl_pct": 21.13,
+    "close_ymd": "20260901",
+    "close_px": 192600.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "005830_20260728_TP1_HIT_20260814",
+      "005830_20260728_TP1_HIT_20260817",
+      "005830_20260728_TP1_HIT_20260818",
+      "005830_20260728_TP1_HIT_20260819",
+      "005830_20260728_TP1_HIT_20260820",
+      "005830_20260728_TP1_HIT_20260821",
+      "005830_20260728_TP1_HIT_20260824",
+      "005830_20260728_TP1_HIT_20260825",
+      "005830_20260728_TP1_HIT_20260826",
+      "005830_20260728_TP1_HIT_20260827",
+      "005830_20260728_TP1_HIT_20260828",
+      "005830_20260728_TP1_HIT_20260831",
+      "005830_20260728_TP1_HIT_20260901",
+      "005830_20260728_TP2_HIT_20260901"
+    ]
+  },
+  {
+    "code": "100090",
+    "name": "SK오션플랜트",
+    "entry_ymd": "20260811",
+    "entry_px": 13980.0,
+    "qty": 0,
+    "stop_px": 12860.0,
+    "stop_px_initial": 12860.0,
+    "take_px1": 16950.0,
+    "take_px2": 20850.0,
+    "trailing_high": 15100.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260901",
+    "last_close_px": 12450.0,
+    "unrealized_pnl_pct": -10.94,
+    "realized_pnl_pct": -10.94,
+    "close_ymd": "20260901",
+    "close_px": 12450.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "100090_20260811_WARN_DRAWDOWN_20260821",
+      "100090_20260811_WARN_DRAWDOWN_20260824",
+      "100090_20260811_STOP_HIT_20260901"
+    ]
   }
 ]

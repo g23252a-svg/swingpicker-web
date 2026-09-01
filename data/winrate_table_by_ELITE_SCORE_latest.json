@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "v20.8",
-    "as_of_ymd": "20260831",
+    "as_of_ymd": "20260901",
     "horizon_bdays": 5,
     "entry_rule": "next_open",
     "exit_rule": "horizon_close",
@@ -11,13 +11,13 @@
     "kelly_fraction_mult": 0.25,
     "kelly_cap": 0.1,
     "corporate_action_threshold_pct": 30.0,
-    "n_trades": 177,
+    "n_trades": 205,
     "feature_schema_version": "v20.8",
     "feature_schema_hash": "a3a49ec92a61",
     "feature_n_cols": 16,
     "entry_universe_rule": "top_pick_or_active_route",
     "entry_rule_used_counts": {
-      "top_pick_only": 177
+      "top_pick_only": 205
     },
     "entry_rule_all_ratio": 0.0,
     "entry_rule_trustworthy": true,
@@ -28,17 +28,17 @@
     {
       "score_lo": 0,
       "score_hi": 50.0,
-      "p_win": 0.3569,
-      "n_raw": 111,
-      "n_effective": 107.9,
-      "avg_ret_net_pct": -3.6944,
-      "avg_win_ret": 4.5086,
-      "avg_loss_ret": 8.1376,
-      "b_ratio": 0.554,
+      "p_win": 0.4087,
+      "n_raw": 139,
+      "n_effective": 133.4,
+      "avg_ret_net_pct": -2.4561,
+      "avg_win_ret": 5.3015,
+      "avg_loss_ret": 7.6901,
+      "b_ratio": 0.6894,
       "sufficient": true,
-      "benchmark_avg_pct": -0.1608,
-      "avg_ret_excess_pct": -3.5336,
-      "p_win_excess": 0.3371
+      "benchmark_avg_pct": -0.0309,
+      "avg_ret_excess_pct": -2.4253,
+      "p_win_excess": 0.393
     },
     {
       "score_lo": 50,
@@ -60,7 +60,7 @@
       "score_hi": 70.0,
       "p_win": 0.7778,
       "n_raw": 16,
-      "n_effective": 5.9,
+      "n_effective": 5.7,
       "avg_ret_net_pct": 5.0449,
       "avg_win_ret": 6.9513,
       "avg_loss_ret": 3.2164,
@@ -68,14 +68,14 @@
       "sufficient": false,
       "benchmark_avg_pct": 5.1138,
       "avg_ret_excess_pct": -0.0688,
-      "p_win_excess": 0.4075
+      "p_win_excess": 0.4081
     },
     {
       "score_lo": 70,
       "score_hi": 80.0,
-      "p_win": 0.3259,
+      "p_win": 0.3263,
       "n_raw": 41,
-      "n_effective": 17.8,
+      "n_effective": 17.4,
       "avg_ret_net_pct": -4.3862,
       "avg_win_ret": 6.018,
       "avg_loss_ret": 9.2167,
@@ -83,14 +83,14 @@
       "sufficient": true,
       "benchmark_avg_pct": 2.739,
       "avg_ret_excess_pct": -7.1252,
-      "p_win_excess": 0.2702
+      "p_win_excess": 0.2708
     },
     {
       "score_lo": 80,
       "score_hi": 90.0,
       "p_win": 0.3636,
       "n_raw": 9,
-      "n_effective": 3.8,
+      "n_effective": 3.7,
       "avg_ret_net_pct": -6.2069,
       "avg_win_ret": 6.3788,
       "avg_loss_ret": 12.4997,
@@ -98,7 +98,7 @@
       "sufficient": false,
       "benchmark_avg_pct": 1.1811,
       "avg_ret_excess_pct": -7.388,
-      "p_win_excess": 0.307
+      "p_win_excess": 0.3085
     },
     {
       "score_lo": 90,
