@@ -12,7 +12,7 @@
   "avg_win_rate": 0.458,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 13998,
+  "est_win_rate_n": 14000,
   "routes": {
     "WAIT": 10,
     "ATTACK": 5,
@@ -32,7 +32,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "066570",
@@ -47,7 +47,7 @@
       "EST_WIN_RATE": 0.446,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "005930",
@@ -62,7 +62,7 @@
       "EST_WIN_RATE": 0.457,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "322000",
@@ -77,7 +77,7 @@
       "EST_WIN_RATE": 0.459,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "005935",
@@ -92,7 +92,7 @@
       "EST_WIN_RATE": 0.458,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "005380",
@@ -107,7 +107,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "347850",
@@ -122,7 +122,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "034220",
@@ -137,7 +137,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "042700",
@@ -152,7 +152,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "272210",
@@ -167,7 +167,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "047810",
@@ -182,7 +182,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "009830",
@@ -197,7 +197,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "012450",
@@ -212,7 +212,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "454910",
@@ -227,7 +227,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "079550",
@@ -242,7 +242,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "000250",
@@ -257,7 +257,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "006800",
@@ -272,7 +272,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "443060",
@@ -287,7 +287,7 @@
       "EST_WIN_RATE": 0.46,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     },
     {
       "종목코드": "450080",
@@ -302,7 +302,7 @@
       "EST_WIN_RATE": 0.45,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 13998
+      "EST_WIN_RATE_N": 14000
     }
   ]
 }
