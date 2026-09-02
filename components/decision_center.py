@@ -932,6 +932,83 @@ def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
         ).props("flat dense no-caps").classes("self-end text-xs text-slate-300 mt-1")
 
 
+# ── [v80] 검증 루프를 화면에 — 레인·승자 프로파일·예산·손절 실체 ─────────────
+def _validation_payload(df: pd.DataFrame, data_dir: str = "data") -> dict[str, Any]:
+    """검증 중인 것들의 현재 상태. 전부 표시 전용이며 하나가 깨져도 나머지는 산다."""
+    out: dict[str, Any] = {"lane_line": "", "lane_picks": [], "lane_verdict": "",
+                           "winner_line": "", "budget_line": "", "stop_lines": []}
+    try:
+        from services import quiet_breakout as _qb
+        from services import quiet_lane_track as _qt
+        rep = _qb.load(data_dir)
+        out["lane_picks"] = [
+            {"name": str(p.get("종목명", "")), "rank": int(p.get("거래대금순위", 0) or 0),
+             "vol_ratio": float(p.get("vol_ratio", 0) or 0)}
+            for p in (rep.get("picks") or [])[:5]] if rep and rep.get("ok") else []
+        tr = _qt.load(data_dir)
+        out["lane_line"] = _qt.line(tr) or _qb.line(rep)
+        out["lane_verdict"] = str((tr or {}).get("verdict", ""))
+    except Exception as e:
+        logger.warning(f"[v80] 레인 상태 생략: {e}")
+    try:
+        from services import winner_profile as _wp
+        import json as _json, os as _os
+        _p = _os.path.join(data_dir, _wp.SUMMARY_NAME)
+        if _os.path.exists(_p):
+            with open(_p, encoding="utf-8") as f:
+                out["winner_line"] = _wp.line(_json.load(f))
+    except Exception as e:
+        logger.warning(f"[v80] 승자 프로파일 상태 생략: {e}")
+    try:
+        from services import portfolio_budget as _pb
+        if _pb.COL_SCALE in df.columns and len(df):
+            used = pd.to_numeric(df[_pb.COL_USED], errors="coerce").iloc[0]
+            room = pd.to_numeric(df[_pb.COL_ROOM], errors="coerce").iloc[0]
+            f = pd.to_numeric(df.get("KELLY_FRACTION"), errors="coerce").fillna(0)
+            n = int((pd.to_numeric(df.get("켈리_수량"), errors="coerce").fillna(0) > 0).sum())
+            out["budget_line"] = (f"예산 — 보유 중 {used:.0f}% · 오늘 배정 {room:.0f}% · "
+                                  f"신규 {f.sum() * 100:.1f}%를 {n}종목에 (계좌 초과 배분 금지)")
+        out["stop_lines"].append(_pb.stop_worst_line())
+    except Exception as e:
+        logger.warning(f"[v80] 예산 상태 생략: {e}")
+    try:
+        from services import pick_history as _ph
+        _l = _ph.stop_reality_line(df)
+        if _l:
+            out["stop_lines"].append(_l)
+    except Exception as e:
+        logger.warning(f"[v80] 손절 실체 생략: {e}")
+    return out
+
+
+def _render_validation_loops(payload: dict[str, Any]) -> None:
+    """'검증 중' 섹션 — 주문과 무관함을 제목에 박는다."""
+    if not any([payload.get("lane_line"), payload.get("winner_line"),
+                payload.get("budget_line"), payload.get("stop_lines")]):
+        return
+    with ui.card().classes("sp-watch-card w-full p-4 rounded-2xl mt-2"):
+        ui.label("검증 중인 것들 (표시 전용 · 주문에 반영되지 않음)").classes(
+            "text-xs font-bold tracking-wider text-slate-400 uppercase")
+        if payload.get("lane_line"):
+            ui.label("🔇 " + payload["lane_line"]).classes(
+                "text-xs md:text-sm text-sky-200 font-semibold leading-relaxed mt-2")
+            if payload.get("lane_picks"):
+                ui.label("오늘 레인 5종목 (거래대금 601~1200위 · 거래량 각성): "
+                         + " · ".join(f"{p['name']}({p['rank']}위, ×{p['vol_ratio']:.1f})"
+                                      for p in payload["lane_picks"])).classes(
+                    "text-[11px] text-slate-300 leading-relaxed")
+            if payload.get("lane_verdict"):
+                ui.label(payload["lane_verdict"]).classes("text-[11px] text-slate-500")
+        if payload.get("winner_line"):
+            ui.label("🧬 " + payload["winner_line"]).classes(
+                "text-xs text-violet-200 leading-relaxed mt-2")
+        if payload.get("budget_line"):
+            ui.label("🧮 " + payload["budget_line"]).classes(
+                "text-xs text-emerald-200 leading-relaxed mt-2")
+        for _l in payload.get("stop_lines") or []:
+            ui.label("⚠ " + _l).classes("text-[11px] text-rose-200 leading-relaxed mt-1")
+
+
 def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
     del auth  # reserved for future entitlement-specific detail rows
     summary = build_decision_summary(df)
@@ -1112,6 +1189,13 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
                     "text-xs font-bold text-slate-400")
                 for _line in summary["track_record"]:
                     ui.label(_line).classes("text-xs text-slate-400 leading-relaxed")
+
+        # [v80] 검증 루프 상태 — v73 레인·v78 승자 프로파일·v76 예산·손절 실체.
+        #   사장님이 20일 판정을 내리려면 화면에서 매일 봐야 한다.
+        try:
+            _render_validation_loops(_validation_payload(df))
+        except Exception as _ve:
+            logger.warning(f"[v80] 검증 루프 섹션 생략: {_ve}")
 
         with ui.row().classes("sp-rule-row w-full gap-2 mt-2"):
             for text in [

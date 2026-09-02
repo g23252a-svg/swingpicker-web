@@ -2197,6 +2197,15 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         log(f"⚠️ [v73] 조용한 각성 레인 스킵 (현행 산출에 영향 없음): {e}")
 
+    # [v80] v73 레인 실전 성적 누적 — 발견 이후 표본만이 오염되지 않은 증거다.
+    #   매일 레인 픽에 SSOT 실현수익을 붙여 요약 json으로 저장한다(화면이 읽는다).
+    try:
+        from services import quiet_lane_track as _QT
+        _qt = _QT.run_batch(OUT_DIR)
+        log(f"📈 [v80] {_QT.line(_qt)}")
+    except Exception as e:
+        log(f"⚠️ [v80] 레인 성적 추적 스킵 (현행 산출에 영향 없음): {e}")
+
     # [v79] 수급 전종목 수집 — 기존 KIS 랭킹 수급은 하루 30종목뿐이라
     #   1,200종목 유니버스의 횡단면 특징으로 못 쓴다. pykrx 전종목 순매수를
     #   하루 4호출로 받아 억 단위로 확정 저장한다. 실패해도 배치 무영향.

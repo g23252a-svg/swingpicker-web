@@ -212,14 +212,34 @@ def build(rank_table: pd.DataFrame,
     )
 
 
-def save(data_dir: str, ymd: str, report: dict) -> None:
+def save(data_dir: str, ymd: str, report: dict) -> bool:
+    """레인 결과 저장. **성공본(ok=True)을 실패본으로 덮지 않는다.**
+
+    [v80] 2026-08-29(토) 새벽 지연 발화한 cron이 8/28 산출물을 다시 만들며
+    KRX 야간차단 폴백(359종목 표)으로 레인을 돌려 ok=False를 냈고, 그것이
+    #675의 정상 결과(71후보·5픽)를 덮었다 — 실전 검증 1일차가 사라졌다.
+    git 이력(d3f2df39)에서 복구했다. 같은 날짜에 이미 ok=True가 있으면
+    실패본은 버린다. 반환값: 실제로 썼는지.
+    """
     try:
         os.makedirs(data_dir, exist_ok=True)
+        day_p = os.path.join(data_dir, f"quiet_breakout_{ymd}.json")
+        if not report.get("ok") and os.path.exists(day_p):
+            try:
+                with open(day_p, encoding="utf-8") as f:
+                    if json.load(f).get("ok"):
+                        logger.warning("[v73] %s 성공본이 있어 실패본을 버린다: %s",
+                                       ymd, report.get("reason"))
+                        return False
+            except Exception:
+                pass          # 기존 파일이 깨졌으면 덮어도 잃을 게 없다
         for n in (f"quiet_breakout_{ymd}.json", CACHE_NAME):
             with open(os.path.join(data_dir, n), "w", encoding="utf-8") as f:
                 json.dump(report, f, ensure_ascii=False, indent=1)
+        return True
     except OSError as e:
         logger.warning("[v73] 레인 저장 실패 (계속): %s", e)
+        return False
 
 
 def load(data_dir: str, ymd: Optional[str] = None) -> Optional[dict]:
