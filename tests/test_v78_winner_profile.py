@@ -187,7 +187,7 @@ class TestWiring:
     def test_finalize_calls_both(self):
         src = open("pipeline_finalize.py", encoding="utf-8").read()
         assert "_WP.run_batch(OUT_DIR, trade_ymd)" in src
-        assert "_IFF.collect(OUT_DIR, trade_ymd)" in src
+        assert "_IFF.collect_recent(OUT_DIR, _iff_days)" in src   # v79.1 따라잡기
 
     def test_flow_runs_before_winner_profile(self):
         """수급을 먼저 수집해야 같은 배치에서 특징으로 쓸 수 있다."""
@@ -257,3 +257,44 @@ class TestPromotionAxes:
         measured = day[day["n"] >= W.MIN_COHORT]          # flow 특징(n=0)은 제외
         assert len(measured) > 0
         assert (measured["win_rate"] == 1.0).all(), "SSOT 함수를 우회해 수익을 직접 계산했다"
+
+
+class TestFlowCatchup:
+    def test_collect_recent_fills_only_missing(self, tmp_path, monkeypatch):
+        """당일이 비어도 최근 세션 중 빠진 날을 채운다 (9/1 실측 대응)."""
+        d = str(tmp_path)
+        df = pd.DataFrame({"종목코드": ["000001"], "frg_eok": [1.0], "inst_eok": [2.0]})
+        F.save_day(d, "20260828", df)                      # 이미 있음
+        calls = []
+        def fake(ymd):
+            calls.append(ymd)
+            return None if ymd == "20260901" else df       # 당일만 비었다
+        monkeypatch.setattr(F, "fetch_day", fake)
+        out = F.collect_recent(d, ["20260826", "20260827", "20260828", "20260831", "20260901"])
+        assert "20260828" not in calls, "있는 날은 네트워크를 부르면 안 된다"
+        assert out["20260901"] is None and out["20260831"] and out["20260827"]
+        assert set(F.have_days(d)) == {"20260826", "20260827", "20260828", "20260831"}
+
+    def test_line_reports_catchup(self, tmp_path):
+        d = str(tmp_path)
+        df = pd.DataFrame({"종목코드": ["000001"], "frg_eok": [1.0], "inst_eok": [2.0]})
+        p = F.save_day(d, "20260831", df)
+        s = F.line(None, "20260901", {"20260831": p, "20260901": None}, d)
+        assert "당일 응답 없음" in s and "따라잡기 1일" in s
+
+    def test_prefers_by_ticker_api(self, monkeypatch):
+        """정식 이름(_by_ticker)을 우선 쓴다."""
+        import types
+        seen = {}
+        def by_ticker(f, t, m, i):
+            seen["fn"] = "by_ticker"
+            return pd.DataFrame({"순매수거래대금": [1e8]}, index=pd.Index(["000001"], name="티커"))
+        fake = types.SimpleNamespace(
+            get_market_net_purchases_of_equities_by_ticker=by_ticker,
+            get_market_net_purchases_of_equities=lambda *a: (_ for _ in ()).throw(AssertionError("구 이름")))
+        import sys
+        monkeypatch.setitem(sys.modules, "pykrx", types.SimpleNamespace(stock=fake))
+        monkeypatch.setitem(sys.modules, "pykrx.stock", fake)
+        out = F.fetch_day("20260901")
+        assert seen["fn"] == "by_ticker" and out is not None
+        assert out["frg_eok"].iloc[0] == pytest.approx(1.0), "원→억 변환"

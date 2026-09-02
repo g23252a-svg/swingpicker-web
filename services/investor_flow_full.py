@@ -52,11 +52,17 @@ def fetch_day(ymd: str) -> Optional[pd.DataFrame]:
     except Exception as e:
         logger.warning("[v79] pykrx 임포트 실패: %s", e)
         return None
+    # 1.0.51: 둘 다 있고 시그니처가 같다. _by_ticker가 정식 이름이다.
+    _fn = getattr(_krx, "get_market_net_purchases_of_equities_by_ticker", None) \
+        or getattr(_krx, "get_market_net_purchases_of_equities", None)
+    if _fn is None:
+        logger.warning("[v79] pykrx에 순매수 함수가 없다")
+        return None
     frames = []
     for market in MARKETS:
         for inv, col in INVESTORS.items():
             try:
-                d = _krx.get_market_net_purchases_of_equities(ymd, ymd, market, inv)
+                d = _fn(ymd, ymd, market, inv)
             except Exception as e:
                 logger.warning("[v79] %s %s %s 조회 실패: %s", ymd, market, inv, e)
                 return None          # 부분 데이터는 저장하지 않는다 — 반쪽 수급은 편향
@@ -94,6 +100,19 @@ def collect(data_dir: str, ymd: str) -> Optional[str]:
     return save_day(data_dir, ymd, df)
 
 
+#: 야간 배치에서 따라잡을 최근 세션 수. 9/1 21:40 KST 실측: 당일 응답이 비었다
+#: (KRX 집계 지연 또는 야간 차단). 다음 날 배치가 빠진 날을 채운다.
+CATCHUP_SESSIONS = 5
+
+
+def collect_recent(data_dir: str, sessions: List[str], n: int = CATCHUP_SESSIONS) -> dict:
+    """최근 n개 세션 중 없는 날을 채운다. 반환: {ymd: 경로 or None}."""
+    out = {}
+    for y in sorted(sessions)[-n:]:
+        out[y] = collect(data_dir, y)
+    return out
+
+
 def have_days(data_dir: str) -> List[str]:
     out = []
     for f in sorted(glob.glob(os.path.join(data_dir, "flow_full_2*.parquet"))):
@@ -103,11 +122,16 @@ def have_days(data_dir: str) -> List[str]:
     return out
 
 
-def line(path: Optional[str], ymd: str) -> str:
+def line(path: Optional[str], ymd: str, recent: Optional[dict] = None,
+         data_dir: Optional[str] = None) -> str:
+    dd = data_dir or (os.path.dirname(path) if path else None)
+    total = len(have_days(dd)) if dd else 0
+    filled = [y for y, p in (recent or {}).items() if p and y != ymd]
+    tail = f" (누적 {total}일" + (f", 따라잡기 {len(filled)}일" if filled else "") + ")"
     if not path:
-        return f"수급 전종목 {ymd} — 수집 실패(다음 배치에 재시도)"
+        return f"수급 전종목 {ymd} — 당일 응답 없음, 다음 배치에 따라잡기" + tail
     try:
         n = len(pd.read_parquet(path))
     except Exception:
         n = -1
-    return f"수급 전종목 {ymd} — {n:,}종목 저장 (누적 {len(have_days(os.path.dirname(path)))}일)"
+    return f"수급 전종목 {ymd} — {n:,}종목 저장" + tail

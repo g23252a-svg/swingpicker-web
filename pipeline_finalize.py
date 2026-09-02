@@ -2211,8 +2211,21 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     #   하루 4호출로 받아 억 단위로 확정 저장한다. 실패해도 배치 무영향.
     try:
         from services import investor_flow_full as _IFF
-        _iff_p = _IFF.collect(OUT_DIR, trade_ymd)
-        log(f"🌊 [v79] {_IFF.line(_iff_p, trade_ymd)}")
+        # 당일 + 최근 5세션 따라잡기 — 9/1 실측: 당일 응답이 비었다(집계 지연/야간 차단).
+        _iff_days = sorted({str(x) for x in (ctx.sessions if hasattr(ctx, "sessions") else [])}
+                           | {str(trade_ymd)})
+        try:
+            import glob as _g
+            _c = [f for f in sorted(_g.glob(os.path.join(OUT_DIR, "ohlcv_cache_2*.parquet")))
+                  if "latest" not in f]
+            if _c:
+                _iff_days = sorted(set(pd.to_datetime(
+                    pd.read_parquet(_c[-1]).reset_index()["Date"]).dt.strftime("%Y%m%d")) | {str(trade_ymd)})
+        except Exception:
+            pass
+        _iff_recent = _IFF.collect_recent(OUT_DIR, _iff_days)
+        _iff_p = _iff_recent.get(str(trade_ymd))
+        log(f"🌊 [v79] {_IFF.line(_iff_p, trade_ymd, _iff_recent, OUT_DIR)}")
     except Exception as e:
         log(f"⚠️ [v79] 수급 전종목 스킵 (현행 산출에 영향 없음): {e}")
 
