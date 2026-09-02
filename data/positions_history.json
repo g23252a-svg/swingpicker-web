@@ -6078,5 +6078,147 @@
       "067290_20260731_TP1_HIT_20260901",
       "067290_20260731_TP2_HIT_20260901"
     ]
+  },
+  {
+    "code": "178320",
+    "name": "서진시스템",
+    "entry_ymd": "20260813",
+    "entry_px": 36950.0,
+    "qty": 0,
+    "stop_px": 33950.0,
+    "stop_px_initial": 33950.0,
+    "take_px1": 42700.0,
+    "take_px2": 44850.0,
+    "trailing_high": 41700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260902",
+    "last_close_px": 33400.0,
+    "unrealized_pnl_pct": -9.61,
+    "realized_pnl_pct": -9.61,
+    "close_ymd": "20260902",
+    "close_px": 33400.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "178320_20260813_STOP_HIT_20260902"
+    ]
+  },
+  {
+    "code": "462350",
+    "name": "이노스페이스",
+    "entry_ymd": "20260820",
+    "entry_px": 6280.0,
+    "qty": 0,
+    "stop_px": 5770.0,
+    "stop_px_initial": 5770.0,
+    "take_px1": 7800.0,
+    "take_px2": 8990.0,
+    "trailing_high": 6760.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260902",
+    "last_close_px": 5590.0,
+    "unrealized_pnl_pct": -10.99,
+    "realized_pnl_pct": -10.99,
+    "close_ymd": "20260902",
+    "close_px": 5590.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "462350_20260820_WARN_DRAWDOWN_20260821",
+      "462350_20260820_WARN_DRAWDOWN_20260824",
+      "462350_20260820_WARN_DRAWDOWN_20260901",
+      "462350_20260820_STOP_HIT_20260902"
+    ]
+  },
+  {
+    "code": "402340",
+    "name": "SK스퀘어",
+    "entry_ymd": "20260824",
+    "entry_px": 1076000.0,
+    "qty": 0,
+    "stop_px": 989000.0,
+    "stop_px_initial": 989000.0,
+    "take_px1": 1265000.0,
+    "take_px2": 2189000.0,
+    "trailing_high": 1145000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260902",
+    "last_close_px": 982000.0,
+    "unrealized_pnl_pct": -8.74,
+    "realized_pnl_pct": -8.74,
+    "close_ymd": "20260902",
+    "close_px": 982000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "402340_20260824_STOP_HIT_20260902"
+    ]
+  },
+  {
+    "code": "085620",
+    "name": "미래에셋생명",
+    "entry_ymd": "20260828",
+    "entry_px": 23200.0,
+    "qty": 0,
+    "stop_px": 21300.0,
+    "stop_px_initial": 21300.0,
+    "take_px1": 31000.0,
+    "take_px2": 37300.0,
+    "trailing_high": 26250.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260902",
+    "last_close_px": 20450.0,
+    "unrealized_pnl_pct": -11.85,
+    "realized_pnl_pct": -11.85,
+    "close_ymd": "20260902",
+    "close_px": 20450.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "085620_20260828_WARN_DRAWDOWN_20260831",
+      "085620_20260828_STOP_HIT_20260902"
+    ]
+  },
+  {
+    "code": "347850",
+    "name": "디앤디파마텍",
+    "entry_ymd": "20260831",
+    "entry_px": 53500.0,
+    "qty": 0,
+    "stop_px": 49950.0,
+    "stop_px_initial": 49950.0,
+    "take_px1": 66500.0,
+    "take_px2": 89500.0,
+    "trailing_high": 54500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260902",
+    "last_close_px": 49050.0,
+    "unrealized_pnl_pct": -8.32,
+    "realized_pnl_pct": -8.32,
+    "close_ymd": "20260902",
+    "close_px": 49050.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "347850_20260831_STOP_HIT_20260902"
+    ]
+  },
+  {
+    "code": "064350",
+    "name": "현대로템",
+    "entry_ymd": "20260901",
+    "entry_px": 130300.0,
+    "qty": 0,
+    "stop_px": 124100.0,
+    "stop_px_initial": 124100.0,
+    "take_px1": 152400.0,
+    "take_px2": 240000.0,
+    "trailing_high": 137100.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260902",
+    "last_close_px": 122900.0,
+    "unrealized_pnl_pct": -5.68,
+    "realized_pnl_pct": -5.68,
+    "close_ymd": "20260902",
+    "close_px": 122900.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "064350_20260901_STOP_HIT_20260902"
+    ]
   }
 ]

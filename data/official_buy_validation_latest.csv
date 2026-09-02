@@ -360,3 +360,12 @@
 20260901,006800,미래에셋증권,True,False,True,False,BUY,90.0,19.1,19.1,12.5,ARMED,2.2,0.0,-17.41,-51.09,GREEN,recommend_20260901.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260901,443060,HD현대마린솔루션,True,False,True,False,BUY,100.0,28.6,28.6,16.5,WAIT,1.79,0.0,-5.07,-11.57,GREEN,recommend_20260901.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260901,450080,에코프로머티,True,False,True,False,AVOID,0.0,60.8,60.8,38.3,ATTACK,1.08,0.0,-8.68,-48.45,GREEN,recommend_20260901.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,006800,미래에셋증권,True,True,False,True,BUY,70.0,9.8,9.8,8.4,ARMED,5.05,0.0,-21.26,-53.61,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,NOT_HOLDOUT,PENDING
+20260902,011200,HMM,True,False,True,False,BUY,90.0,8.9,8.9,7.1,ARMED,2.83,0.0,0.59,-1.77,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,086280,현대글로비스,True,False,True,False,BUY,70.0,20.0,20.0,16.2,ARMED,2.83,0.0,-2.32,-15.15,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,028670,팬오션,True,False,True,False,BUY,90.0,14.6,14.6,11.0,WAIT,4.08,0.0,0.8,7.91,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,079550,LIG디펜스앤에어로스페이스,True,False,True,False,BUY,90.0,0.0,0.0,0.0,WAIT,3.52,0.0,-16.43,-10.6,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,005935,삼성전자우,True,False,True,False,BUY,100.0,30.8,30.8,16.5,WAIT,1.73,0.0,-4.24,-1.16,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,011790,SKC,True,False,True,False,BUY,80.0,5.8,5.8,4.9,WAIT,1.4,0.0,-21.78,-32.12,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,097950,CJ제일제당,True,False,True,False,BUY,90.0,2.4,2.4,2.2,WAIT,1.47,0.0,-4.07,-2.92,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260902,272210,한화시스템,True,False,True,False,BUY,70.0,10.8,10.8,9.2,WAIT,6.39,0.0,-12.85,-49.98,GREEN,recommend_20260902.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
