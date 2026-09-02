@@ -2221,8 +2221,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             if _c:
                 _iff_days = sorted(set(pd.to_datetime(
                     pd.read_parquet(_c[-1]).reset_index()["Date"]).dt.strftime("%Y%m%d")) | {str(trade_ymd)})
-        except Exception:
-            pass
+        except Exception as _se:
+            logger.warning(f"[v79] 세션 달력 로드 실패 — 당일만 수집: {_se}")
         _iff_recent = _IFF.collect_recent(OUT_DIR, _iff_days)
         _iff_p = _iff_recent.get(str(trade_ymd))
         log(f"🌊 [v79] {_IFF.line(_iff_p, trade_ymd, _iff_recent, OUT_DIR)}")

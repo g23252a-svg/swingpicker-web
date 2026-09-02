@@ -231,8 +231,8 @@ def save(data_dir: str, ymd: str, report: dict) -> bool:
                         logger.warning("[v73] %s 성공본이 있어 실패본을 버린다: %s",
                                        ymd, report.get("reason"))
                         return False
-            except Exception:
-                pass          # 기존 파일이 깨졌으면 덮어도 잃을 게 없다
+            except Exception as e:      # 기존 파일이 깨졌으면 덮어도 잃을 게 없다
+                logger.warning("[v73] %s 기존 레인 파일 판독 불가 — 덮어쓴다: %s", ymd, e)
         for n in (f"quiet_breakout_{ymd}.json", CACHE_NAME):
             with open(os.path.join(data_dir, n), "w", encoding="utf-8") as f:
                 json.dump(report, f, ensure_ascii=False, indent=1)
