@@ -49,8 +49,14 @@ class TestLaneTrack:
         d = str(tmp_path); days = _mk(d, trend=0.0)
         _lane_json(d, days[10], ["000001"])
         s = QT.build(d)
-        raw = s["daily"][0]["ret_pct"] + QT.COST_PCT
-        assert s["avg_ret_pct_after_cost"] == pytest.approx(raw - QT.COST_PCT)
+        # daily 항목은 소수 3자리로 반올림돼 있다 — 평균은 원값이므로 1e-3 허용.
+        assert s["avg_ret_pct_after_cost"] == pytest.approx(s["daily"][0]["ret_pct"], abs=1e-3)
+        # 비용을 안 뺐다면 SSOT 원수익(%)과 같아야 하는데, 뺐으니 정확히 COST_PCT만큼 낮다.
+        from services.pick_history import _realized
+        px = pd.read_parquet(os.path.join(d, "ohlcv_cache_20260901.parquet")).reset_index()
+        g = px[px["종목코드"] == "000001"].reset_index(drop=True)
+        raw_pct = _realized(g, days[10]) * 100
+        assert s["avg_ret_pct_after_cost"] == pytest.approx(raw_pct - QT.COST_PCT, abs=1e-9)
         assert s["cost_pct"] == 0.51
 
     def test_pre_live_files_ignored(self, tmp_path):
