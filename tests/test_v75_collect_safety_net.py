@@ -47,15 +47,19 @@ def _on(wf):
     return wf.get("on") or wf.get(True)
 
 
+PRIMARY_CRON = "23 11 * * 1-5"   # [v80] 11:05 → 11:23 — 정각 근처 혼잡 슬롯 회피
+
+
 def test_primary_schedule_unchanged(wf):
+    """정시 cron이 존재하고 평일 11시대(UTC)여야 한다 — 분은 v80에서 옮겼다."""
     crons = [c["cron"] for c in _on(wf)["schedule"]]
-    assert "5 11 * * 1-5" in crons, "정시(20:05 KST)를 없애면 안 된다"
+    assert PRIMARY_CRON in crons, "정시(20:23 KST)를 없애면 안 된다"
 
 
 def test_safety_net_schedule_exists(wf):
     crons = [c["cron"] for c in _on(wf)["schedule"]]
     assert len(crons) >= 2, "안전망 스케줄이 없다"
-    extra = [c for c in crons if c != "5 11 * * 1-5"]
+    extra = [c for c in crons if c != PRIMARY_CRON]
     assert extra, "안전망 cron 없음"
     m = re.fullmatch(r"(\d+) (\d+) \* \* 1-5", extra[0])
     assert m, f"안전망 cron 형식이 예상과 다름: {extra[0]}"
@@ -76,7 +80,7 @@ def test_guard_step_exists_right_after_checkout(wf):
 
 def test_guard_skips_when_today_csv_exists(src):
     i = src.index("id: guard")
-    blk = src[i:i + 900]
+    blk = src[i:i + 2600]     # [v80] 지연 발화 스킵 분기 둘이 늘어 창을 넓혔다
     assert 'TZ=Asia/Seoul date +%Y%m%d' in blk, "거래일은 KST 기준이어야 한다"
     assert 'data/recommend_${TODAY}.csv' in blk
     assert 'skip=true' in blk and 'skip=false' in blk
@@ -85,7 +89,7 @@ def test_guard_skips_when_today_csv_exists(src):
 
 def test_manual_dispatch_bypasses_guard(src):
     i = src.index("id: guard")
-    blk = src[i:i + 900]
+    blk = src[i:i + 2600]     # [v80] 지연 발화 스킵 분기 둘이 늘어 창을 넓혔다
     assert "github.event_name" in blk and "workflow_dispatch" in blk, (
         "사람이 일부러 부른 실행은 건너뛰면 안 된다")
 

@@ -3,8 +3,11 @@ name: Auto Collect and Push CSV
 
 on:
   schedule:
-    # 평일 20:05 KST (UTC 11:05) — KRX API 야간 차단 회피
-    - cron: "5 11 * * 1-5"
+    # 평일 20:23 KST (UTC 11:23) — KRX API 야간 차단 회피.
+    #   [v80] 11:05 → 11:23. 정각 근처는 GitHub이 피하라고 권하는 혼잡 슬롯이고
+    #   실측으로도 이 슬롯은 늘 26~48분 밀리다 8/27부터 4영업일 연속 드롭됐다.
+    #   분 이동은 보장이 아니다 — 보장은 21:07 KST 외부 감시자(Routine)가 한다.
+    - cron: "23 11 * * 1-5"
     # [v75] 안전망 — 평일 22:40 KST (UTC 13:40).
     #   2026-08-27(목) 정시 실행이 **아예 생성되지 않았다**. 실패가 아니라
     #   스케줄 자체가 안 떴다(run #672 08-26 → #673 08-27 수동 dispatch).
@@ -58,6 +61,19 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "manual dispatch — 강제 실행"
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "$(TZ=Asia/Seoul date +%H)" -lt 16 ]; then
+            # [v80] cron은 20:23·22:40 KST에만 걸려 있다. 장 마감 전(16시 이전)에
+            #   온 schedule 이벤트는 전날 cron의 지연 발화다 — 9/2 00:26·02:25 KST
+            #   두 번이 9/1 산출물을 재수집했다. 얻는 게 없다.
+            echo "장 마감 전 KST 지연 발화 — 건너뜀"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$(TZ=Asia/Seoul date +%u)" -ge 6 ]; then
+            # [v80] 주말에 온 schedule 이벤트 = 금요일 cron의 지연 발화다.
+            #   2026-08-29(토) 06:33·08:27 KST 두 번 돌아 8/28 산출물을
+            #   KRX 야간차단 폴백 데이터로 덮었다(레인 1일차 소실). 장이 없는
+            #   날 재수집은 얻는 게 없고 잃을 것만 있다.
+            echo "주말(KST) 지연 발화 — 건너뜀"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           elif [ -f "data/recommend_${TODAY}.csv" ]; then
             echo "data/recommend_${TODAY}.csv 이미 있음 — 건너뜀"
             echo "skip=true" >> "$GITHUB_OUTPUT"

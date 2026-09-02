@@ -2197,13 +2197,35 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         log(f"⚠️ [v73] 조용한 각성 레인 스킵 (현행 산출에 영향 없음): {e}")
 
+    # [v80] v73 레인 실전 성적 누적 — 발견 이후 표본만이 오염되지 않은 증거다.
+    #   매일 레인 픽에 SSOT 실현수익을 붙여 요약 json으로 저장한다(화면이 읽는다).
+    try:
+        from services import quiet_lane_track as _QT
+        _qt = _QT.run_batch(OUT_DIR)
+        log(f"📈 [v80] {_QT.line(_qt)}")
+    except Exception as e:
+        log(f"⚠️ [v80] 레인 성적 추적 스킵 (현행 산출에 영향 없음): {e}")
+
     # [v79] 수급 전종목 수집 — 기존 KIS 랭킹 수급은 하루 30종목뿐이라
     #   1,200종목 유니버스의 횡단면 특징으로 못 쓴다. pykrx 전종목 순매수를
     #   하루 4호출로 받아 억 단위로 확정 저장한다. 실패해도 배치 무영향.
     try:
         from services import investor_flow_full as _IFF
-        _iff_p = _IFF.collect(OUT_DIR, trade_ymd)
-        log(f"🌊 [v79] {_IFF.line(_iff_p, trade_ymd)}")
+        # 당일 + 최근 5세션 따라잡기 — 9/1 실측: 당일 응답이 비었다(집계 지연/야간 차단).
+        _iff_days = sorted({str(x) for x in (ctx.sessions if hasattr(ctx, "sessions") else [])}
+                           | {str(trade_ymd)})
+        try:
+            import glob as _g
+            _c = [f for f in sorted(_g.glob(os.path.join(OUT_DIR, "ohlcv_cache_2*.parquet")))
+                  if "latest" not in f]
+            if _c:
+                _iff_days = sorted(set(pd.to_datetime(
+                    pd.read_parquet(_c[-1]).reset_index()["Date"]).dt.strftime("%Y%m%d")) | {str(trade_ymd)})
+        except Exception as _se:
+            logger.warning(f"[v79] 세션 달력 로드 실패 — 당일만 수집: {_se}")
+        _iff_recent = _IFF.collect_recent(OUT_DIR, _iff_days)
+        _iff_p = _iff_recent.get(str(trade_ymd))
+        log(f"🌊 [v79] {_IFF.line(_iff_p, trade_ymd, _iff_recent, OUT_DIR)}")
     except Exception as e:
         log(f"⚠️ [v79] 수급 전종목 스킵 (현행 산출에 영향 없음): {e}")
 
