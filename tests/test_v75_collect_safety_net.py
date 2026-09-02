@@ -80,7 +80,7 @@ def test_guard_step_exists_right_after_checkout(wf):
 
 def test_guard_skips_when_today_csv_exists(src):
     i = src.index("id: guard")
-    blk = src[i:i + 1800]     # [v80] 주말 스킵 분기가 늘어나 창을 넓혔다
+    blk = src[i:i + 2600]     # [v80] 지연 발화 스킵 분기 둘이 늘어 창을 넓혔다
     assert 'TZ=Asia/Seoul date +%Y%m%d' in blk, "거래일은 KST 기준이어야 한다"
     assert 'data/recommend_${TODAY}.csv' in blk
     assert 'skip=true' in blk and 'skip=false' in blk
@@ -89,7 +89,7 @@ def test_guard_skips_when_today_csv_exists(src):
 
 def test_manual_dispatch_bypasses_guard(src):
     i = src.index("id: guard")
-    blk = src[i:i + 1800]     # [v80] 주말 스킵 분기가 늘어나 창을 넓혔다
+    blk = src[i:i + 2600]     # [v80] 지연 발화 스킵 분기 둘이 늘어 창을 넓혔다
     assert "github.event_name" in blk and "workflow_dispatch" in blk, (
         "사람이 일부러 부른 실행은 건너뛰면 안 된다")
 

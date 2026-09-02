@@ -115,6 +115,13 @@ class TestWorkflow:
     def _wf(self):
         return open(".github/workflows/auto_collect.yml", encoding="utf-8").read()
 
+    def test_pre_close_delayed_fire_skipped(self):
+        """장 마감 전(16시 KST 이전) schedule 이벤트는 전날 cron의 지연 발화 — 스킵."""
+        src = self._wf()
+        i_hour = src.index('date +%H)" -lt 16')
+        i_csv = src.index('-f "data/recommend_${TODAY}.csv"')
+        assert src.index('"workflow_dispatch" ]') < i_hour < i_csv
+
     def test_weekend_schedule_skipped_before_csv_check(self):
         src = self._wf()
         i_weekend = src.index('date +%u)" -ge 6')

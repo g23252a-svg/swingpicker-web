@@ -61,6 +61,12 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "manual dispatch — 강제 실행"
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "$(TZ=Asia/Seoul date +%H)" -lt 16 ]; then
+            # [v80] cron은 20:23·22:40 KST에만 걸려 있다. 장 마감 전(16시 이전)에
+            #   온 schedule 이벤트는 전날 cron의 지연 발화다 — 9/2 00:26·02:25 KST
+            #   두 번이 9/1 산출물을 재수집했다. 얻는 게 없다.
+            echo "장 마감 전 KST 지연 발화 — 건너뜀"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           elif [ "$(TZ=Asia/Seoul date +%u)" -ge 6 ]; then
             # [v80] 주말에 온 schedule 이벤트 = 금요일 cron의 지연 발화다.
             #   2026-08-29(토) 06:33·08:27 KST 두 번 돌아 8/28 산출물을
