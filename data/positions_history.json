@@ -6220,5 +6220,40 @@
     "alerted_events": [
       "064350_20260901_STOP_HIT_20260902"
     ]
+  },
+  {
+    "code": "483650",
+    "name": "달바글로벌",
+    "entry_ymd": "20260702",
+    "entry_px": 227000.0,
+    "qty": 0,
+    "stop_px": 192900.0,
+    "stop_px_initial": 192900.0,
+    "take_px1": 258500.0,
+    "take_px2": 299500.0,
+    "trailing_high": 283000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260903",
+    "last_close_px": 190500.0,
+    "unrealized_pnl_pct": -16.08,
+    "realized_pnl_pct": -16.08,
+    "close_ymd": "20260903",
+    "close_px": 190500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "483650_20260702_WARN_DRAWDOWN_20260709",
+      "483650_20260702_WARN_DRAWDOWN_20260710",
+      "483650_20260702_WARN_DRAWDOWN_20260713",
+      "483650_20260702_WARN_DRAWDOWN_20260714",
+      "483650_20260702_WARN_DRAWDOWN_20260715",
+      "483650_20260702_WARN_DRAWDOWN_20260716",
+      "483650_20260702_WARN_DRAWDOWN_20260717",
+      "483650_20260702_TP1_HIT_20260727",
+      "483650_20260702_TP1_HIT_20260729",
+      "483650_20260702_TP1_HIT_20260812",
+      "483650_20260702_WARN_DRAWDOWN_20260901",
+      "483650_20260702_WARN_DRAWDOWN_20260902",
+      "483650_20260702_STOP_HIT_20260903"
+    ]
   }
 ]

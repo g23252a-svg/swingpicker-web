@@ -1,0 +1,20 @@
+{
+ "live_from": "20260828",
+ "target_days": 20,
+ "days_total": 5,
+ "days_measured": 0,
+ "picks_total": 25,
+ "picks_measured": 0,
+ "avg_ret_pct_after_cost": null,
+ "win_rate": null,
+ "stop_rate": null,
+ "positive_days": 0,
+ "daily": [],
+ "backtest_ref": {
+  "ret_pct": 3.05,
+  "hac_p": 0.0117,
+  "days": 103
+ },
+ "cost_pct": 0.51,
+ "verdict": "판정 전 — 20 거래일 후 사용자 판정"
+}

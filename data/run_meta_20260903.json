@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20260903",
+  "macro_risk": "NORMAL",
+  "macro_msg": "매크로 정상",
+  "market_breadth": 49.7,
+  "pass_ebs": 4,
+  "rec_limit": 5,
+  "n_stocks": 358,
+  "run_status": "OK",
+  "confidence_score": 100.0,
+  "max_allowed_route": "ATTACK",
+  "scoring_axes": "STRUCT+TIMING+SECTOR",
+  "w_struct": 0.5,
+  "w_timing": 0.5,
+  "w_ai": 0.0
+}
