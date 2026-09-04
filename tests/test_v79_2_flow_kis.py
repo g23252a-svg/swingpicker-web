@@ -27,9 +27,10 @@ class _Sess:
         return _Resp(self.status, body)
 
 
-def _rows(days, frg_won, inst_won):
+def _rows(days, frg_mw, inst_mw):
+    """KIS *_ntby_tr_pbmn 은 백만원 (실측 확정)."""
     return [{"stck_bsop_date": d, "stck_clpr": "10000",
-             "frgn_ntby_tr_pbmn": str(frg_won), "orgn_ntby_tr_pbmn": str(inst_won)}
+             "frgn_ntby_tr_pbmn": str(frg_mw), "orgn_ntby_tr_pbmn": str(inst_mw)}
             for d in days]
 
 
@@ -39,11 +40,17 @@ def _out(days, frg_won, inst_won):
 
 
 class TestParse:
-    def test_won_to_eok(self):
-        rows, note = K.parse_rows(_rows(["20260903"], 250_000_000, -1_000_000))
-        assert rows[0]["frg_eok"] == pytest.approx(2.5)
-        assert rows[0]["inst_eok"] == pytest.approx(-0.01)
-        assert "원" in note and "1e8" in note
+    def test_million_won_to_eok(self):
+        """실측: SK하이닉스 -381,452(백만원) = -3,815억. 원으로 가정하면 -0.004억이 된다."""
+        rows, note = K.parse_rows(_rows(["20260903"], -381_452, 22_861))
+        assert rows[0]["frg_eok"] == pytest.approx(-3814.52)
+        assert rows[0]["inst_eok"] == pytest.approx(228.61)
+        assert "백만원" in note and "/100" in note
+
+    def test_samsung_scale_is_hundreds_of_eok(self):
+        """단위 회귀 가드 — 삼성전자급 순매수가 수십~수천억 범위에 들어야 한다."""
+        rows, _ = K.parse_rows(_rows(["20260903"], 22_861, -208_748))
+        assert 10 < abs(rows[0]["frg_eok"]) < 100_000
 
     def test_qty_fallback_is_labelled(self):
         rows, note = K.parse_rows([{"stck_bsop_date": "20260903", "stck_clpr": "20000",
@@ -59,7 +66,7 @@ class TestParse:
 class TestCollect:
     def test_writes_one_file_per_day_all_tickers(self, tmp_path):
         days = ["20260901", "20260902", "20260903"]
-        sess = _Sess({"000001": _out(days, 1e8, 2e8), "000002": _out(days, -3e8, 0)})
+        sess = _Sess({"000001": _out(days, 100, 200), "000002": _out(days, -300, 0)})
         s = K.collect_universe(sess, "tok", "k", "s", ["000001", "000002"], str(tmp_path), sleep_sec=0)
         assert s["ok"] == 2 and s["days_written"] == days
         d = pd.read_parquet(tmp_path / "flow_full_20260902.parquet")
@@ -73,7 +80,7 @@ class TestCollect:
         assert sess.calls == [("000001", K.TR_ID)]
 
     def test_partial_failure_keeps_going(self, tmp_path):
-        sess = _Sess({"000001": _out(["20260903"], 1e8, 0)})      # 000002는 500
+        sess = _Sess({"000001": _out(["20260903"], 100, 0)})      # 000002는 500
         s = K.collect_universe(sess, "tok", "k", "s", ["000002", "000001"], str(tmp_path), sleep_sec=0)
         assert s["ok"] == 1 and s["fail"] == 1
         assert os.path.exists(tmp_path / "flow_full_20260903.parquet")
@@ -93,9 +100,9 @@ class TestCollect:
 
     def test_overwrites_with_latest(self, tmp_path):
         """당일 잠정치는 다음 실행의 확정치로 덮인다."""
-        sess1 = _Sess({"000001": _out(["20260903"], 1e8, 0)})
+        sess1 = _Sess({"000001": _out(["20260903"], 100, 0)})
         K.collect_universe(sess1, "tok", "k", "s", ["000001"], str(tmp_path), sleep_sec=0)
-        sess2 = _Sess({"000001": _out(["20260903"], 5e8, 0)})
+        sess2 = _Sess({"000001": _out(["20260903"], 500, 0)})
         K.collect_universe(sess2, "tok", "k", "s", ["000001"], str(tmp_path), sleep_sec=0)
         d = pd.read_parquet(tmp_path / "flow_full_20260903.parquet")
         assert d["frg_eok"].iloc[0] == pytest.approx(5.0)
@@ -115,7 +122,7 @@ class TestUniverse:
 class TestWinnerProfileIntegration:
     def test_flow_file_is_readable_by_winner_profile(self, tmp_path):
         from services import winner_profile as W
-        sess = _Sess({"000001": _out(["20260903"], 2e8, -1e8)})
+        sess = _Sess({"000001": _out(["20260903"], 200, -100)})
         K.collect_universe(sess, "tok", "k", "s", ["000001"], str(tmp_path), sleep_sec=0)
         f = W._load_flow(str(tmp_path), "20260903")
         assert f is not None and f.iloc[0]["frg_eok"] == pytest.approx(2.0)
