@@ -21,11 +21,17 @@ data/flow_full_{ymd}.parquet — 종목코드 · frg_eok · inst_eok (억 원, v
 당일 행은 잠정치일 수 있고 다음 날 확정치로 덮인다. 승자 프로파일은 신호일
 (≥6세션 전)만 읽으므로 항상 확정치를 본다.
 
-## 단위
+## 단위 — 실측으로 확정 (2026-09-04 첫 실전)
 
-KIS 순매수거래대금(*_ntby_tr_pbmn)은 **원**. 저장 시 /1e8 → 억. 대금 필드가
-없으면 순매수량 × 종가로 근사하고 unit_note에 적는다(v72 교훈: 단위를
-추측하지 말고 출처가 선언하게 한다).
+KIS 순매수거래대금(*_ntby_tr_pbmn)은 **백만원**이다. 첫 실전에서 원으로 가정해
+/1e8 했더니 삼성전자 외인이 0.0002억으로 저장됐다. 원시값을 되돌려 보니
+SK하이닉스 -381,452 · 삼성전자 +22,861 — 같은 KIS 계열인 랭킹 API 캐시
+(flow_{ymd}.json, 백만원)와 같은 자릿수였다(-445,284 · +4,750). 백만원이면
+하이닉스 -3,815억·삼성전자 +229억으로 실제 규모와 맞고, 원이나 천원이면
+말이 안 된다. 그래서 /100 → 억. v72의 교훈 그대로 — 단위는 추측이 아니라
+교차검증으로 확정하고 unit_note에 적는다.
+
+대금 필드가 없으면 순매수량 × 종가(원)로 근사하고 그건 /1e8 이다.
 """
 from __future__ import annotations
 
@@ -48,6 +54,8 @@ SLEEP_SEC = 0.085
 ABORT_AFTER_CONSECUTIVE_FAIL = 20
 FILE_FMT = "flow_full_{ymd}.parquet"
 _WON_PER_EOK = 1e8
+#: *_ntby_tr_pbmn 은 백만원 — 실측 교차검증으로 확정 (모듈 docstring).
+_MILLION_WON_PER_EOK = 100.0
 
 
 def universe_codes(data_dir: str) -> List[str]:
@@ -75,14 +83,14 @@ def _num(v) -> float:
 
 def parse_rows(output: list) -> Tuple[List[dict], str]:
     """KIS output → [{ymd, frg_eok, inst_eok}], unit_note."""
-    rows, note = [], "tr_pbmn(원)/1e8"
+    rows, note = [], "tr_pbmn(백만원)/100"
     for r in output or []:
         ymd = str(r.get("stck_bsop_date", "")).replace("-", "")
         if len(ymd) != 8:
             continue
         if "frgn_ntby_tr_pbmn" in r or "orgn_ntby_tr_pbmn" in r:
-            frg = _num(r.get("frgn_ntby_tr_pbmn")) / _WON_PER_EOK
-            inst = _num(r.get("orgn_ntby_tr_pbmn")) / _WON_PER_EOK
+            frg = _num(r.get("frgn_ntby_tr_pbmn")) / _MILLION_WON_PER_EOK
+            inst = _num(r.get("orgn_ntby_tr_pbmn")) / _MILLION_WON_PER_EOK
         else:                                   # 대금 필드가 없으면 수량×종가 근사
             px = _num(r.get("stck_clpr"))
             frg = _num(r.get("frgn_ntby_qty")) * px / _WON_PER_EOK
