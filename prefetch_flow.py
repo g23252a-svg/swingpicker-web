@@ -65,13 +65,14 @@ def _kis_fetch_investor(token, app_key, app_secret, investor_code):
         log.warning(f"KIS fetch 실패 investor={investor_code}: {e}")
         return None
 
-def fetch_flow(ymd):
+def fetch_flow(ymd, token=None):
     app_key = os.environ.get("KIS_APP_KEY","")
     app_secret = os.environ.get("KIS_APP_SECRET","")
     if not app_key or not app_secret:
         log.warning("KIS_APP_KEY/KIS_APP_SECRET 미설정")
         return {},{},{},"FETCH_FAIL"
-    token = _kis_get_token(app_key, app_secret)
+    # [v79.2] 토큰은 분당 1회 발급 제한 — 호출자가 넘기면 재발급하지 않는다.
+    token = token or _kis_get_token(app_key, app_secret)
     if not token:
         return {},{},{},"FETCH_FAIL"
     log.info(f"KIS 수급 선수집 시작 (기준일: {ymd})")
@@ -127,10 +128,31 @@ def load_cache(ymd):
     c["stale"]=stale
     return c
 
+def _collect_full_universe(token):
+    """[v79.2] 전종목 투자자별 순매수(KIS 종목별 API, 30일치) — 실패해도 본 흐름 무영향."""
+    try:
+        import requests
+        from services import investor_flow_kis as _K
+        app_key = os.environ.get("KIS_APP_KEY",""); app_secret = os.environ.get("KIS_APP_SECRET","")
+        codes = _K.universe_codes(OUT_DIR)
+        if not codes:
+            log.warning("[v79.2] 유니버스 코드 없음 — OHLCV 캐시 부재"); return
+        with requests.Session() as sess:
+            s = _K.collect_universe(sess, token, app_key, app_secret, codes, OUT_DIR)
+        log.info("[v79.2] " + _K.line(s))
+    except Exception as e:
+        log.warning(f"[v79.2] 전종목 수급 수집 스킵: {e}")
+
+
 if __name__=="__main__":
     ymd = sys.argv[1] if len(sys.argv)>1 else _last_weekday(datetime.now())
-    frg,inst,ant,status = fetch_flow(ymd)
+    _tok = None
+    if os.environ.get("KIS_APP_KEY") and os.environ.get("KIS_APP_SECRET"):
+        _tok = _kis_get_token(os.environ["KIS_APP_KEY"], os.environ["KIS_APP_SECRET"])
+    frg,inst,ant,status = fetch_flow(ymd, token=_tok)
     save_cache(frg,inst,ant,ymd,status)
     print(f"\n결과: {status}")
     print(f"외인 {len(frg)}건 / 기관 {len(inst)}건 / 개인 {len(ant)}건")
+    if _tok:
+        _collect_full_universe(_tok)
     sys.exit(1 if status=="FETCH_FAIL" else 0)
