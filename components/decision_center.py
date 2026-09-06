@@ -18,6 +18,7 @@ from nicegui import ui
 logger = logging.getLogger("decision_center")
 
 from services.recommendation_quality import awaiting_execution_mask, production_buy_mask
+from services.snapshot_integrity import freshness_summary
 
 
 MARKET_BREADTH_FLOOR = 35.0
@@ -1044,6 +1045,17 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
     )
 
     with ui.column().classes("sp-decision-shell w-full gap-4 pb-8"):
+        freshness = freshness_summary(df)
+        with ui.row().classes("w-full items-center flex-wrap gap-2 text-xs text-slate-400"):
+            ui.label(f"추천 기준일 {freshness['batch_date']}")
+            ui.label(f"가격 기준일 {freshness['price_date']}")
+            if freshness["stale"]:
+                ui.badge("이전 거래일 가격 포함", color="amber")
+            elif freshness["unknown"]:
+                ui.badge("가격 기준일 확인 필요", color="grey")
+        if freshness["stale"]:
+            ui.label("표시 가격은 추천 기준일보다 이전 데이터입니다. 주문 전 최신 가격을 확인하세요.").classes(
+                "w-full rounded-xl p-3 bg-amber-950 text-amber-200 text-sm")
         cash = summary["status"] != "BUY"
         with ui.card().classes("sp-decision-hero w-full p-6 md:p-8 rounded-3xl"):
             with ui.row().classes("w-full items-start justify-between gap-4 flex-wrap"):
@@ -1218,4 +1230,3 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
         ui.label("성과를 보장하지 않습니다. 오늘 탭의 공식 결정과 가격 규칙을 함께 지켜야 검증 결과와 실제 운용의 차이를 줄일 수 있습니다.").classes(
             "text-xs text-slate-600 mt-1"
         )
-

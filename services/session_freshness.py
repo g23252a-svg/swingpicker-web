@@ -42,6 +42,8 @@ from typing import Optional
 
 import pandas as pd
 
+from services.snapshot_integrity import normalize_ymd
+
 logger = logging.getLogger("session_freshness")
 
 STALE_COL = "SESSION_STALE"
@@ -49,6 +51,19 @@ ASOF_COL = "PRICE_ASOF"
 LAG_COL = "PRICE_LAG_SESSIONS"
 RUN_STATUS_COL = "RUN_STATUS"
 STALE_STATUS = "STALE_SESSION"
+
+
+def _cache_days(path: str, asof_ymd: Optional[str] = None) -> list[str]:
+    """Check row dates too: a dated filename can still contain future bars."""
+    data = pd.read_parquet(path, columns=["종목코드"])
+    if isinstance(data.index, pd.RangeIndex):
+        return []
+    days = {normalize_ymd(value) for value in data.index.unique()}
+    days.discard("")
+    if asof_ymd:
+        bound = normalize_ymd(asof_ymd)
+        days = {day for day in days if bound and day <= bound}
+    return sorted(days)
 
 
 def latest_price_ymd(data_dir: str = "data",
@@ -62,22 +77,19 @@ def latest_price_ymd(data_dir: str = "data",
     """
     files = sorted(glob.glob(os.path.join(data_dir, "ohlcv_cache_2*.parquet")))
     if asof_ymd:
-        ymd = str(asof_ymd)[:8]
+        ymd = normalize_ymd(asof_ymd)
         files = [p for p in files
                  if os.path.basename(p)[12:20] <= ymd]
     if not files:
         return None
     for path in reversed(files[-3:]):        # 최신 몇 개만 보면 충분
         try:
-            d = pd.read_parquet(path, columns=["종목코드"])
+            days = _cache_days(path, asof_ymd)
         except Exception as e:
             logger.warning(f"[v64] OHLCV 캐시 읽기 실패 {path}: {e}")
             continue
-        idx = pd.to_datetime(getattr(d, "index", None), errors="coerce")
-        idx = idx[idx.notna()] if idx is not None else None
-        if idx is None or len(idx) == 0:
-            continue
-        return str(idx.max().strftime("%Y%m%d"))
+        if days:
+            return days[-1]
     return None
 
 
@@ -87,17 +99,14 @@ def trading_days(data_dir: str = "data", limit: int = 5,
     files = sorted(glob.glob(os.path.join(data_dir, "ohlcv_cache_2*.parquet")))
     if asof_ymd:
         files = [p for p in files
-                 if os.path.basename(p)[12:20] <= str(asof_ymd)[:8]]
+                 if os.path.basename(p)[12:20] <= normalize_ymd(asof_ymd)]
     days: set = set()
     for path in reversed(files[-limit:]):
         try:
-            d = pd.read_parquet(path, columns=["종목코드"])
+            cache_days = _cache_days(path, asof_ymd)
         except Exception:
             continue
-        idx = pd.to_datetime(getattr(d, "index", None), errors="coerce")
-        if idx is None:
-            continue
-        days |= {str(x.strftime("%Y%m%d")) for x in idx[idx.notna()]}
+        days.update(cache_days)
     return sorted(days)
 
 
@@ -106,8 +115,9 @@ def assess(trade_ymd: str, data_dir: str = "data") -> dict:
     rep = {"ok": False, "stale": False, "trade_ymd": str(trade_ymd or ""),
            "price_asof": None, "lag_sessions": 0, "is_trading_day": None,
            "note": ""}
+    trade_ymd = normalize_ymd(trade_ymd)
     if not trade_ymd:
-        rep["note"] = "기준일 없음"
+        rep["note"] = "기준일 없음 또는 날짜 형식 오류"
         return rep
     asof = latest_price_ymd(data_dir, asof_ymd=trade_ymd)
     if not asof:
@@ -116,7 +126,7 @@ def assess(trade_ymd: str, data_dir: str = "data") -> dict:
     rep["ok"] = True
     rep["price_asof"] = asof
     days = trading_days(data_dir, asof_ymd=trade_ymd)
-    ymd = str(trade_ymd)[:8]
+    ymd = normalize_ymd(trade_ymd)
     rep["is_trading_day"] = (ymd in days) if days else None
     if asof < ymd:
         rep["stale"] = True

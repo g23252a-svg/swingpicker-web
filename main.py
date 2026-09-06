@@ -269,6 +269,10 @@ async def index():
                 ).props("flat color=gray")
         return  # 핵심 탭 렌더링 차단
 
+    if not store.last_refresh["ok"]:
+        ui.label(store.last_refresh["message"]).classes(
+            "w-full rounded-xl p-3 bg-amber-950 text-amber-200 text-sm")
+
     # ─── Hero Banner ───
     with ui.row().classes("w-full items-center justify-between px-4 py-3 rounded-xl mb-2 "
                           "bg-gradient-to-r from-[#1a1a2e] via-[#16213e] to-[#0f3460]"):
@@ -434,9 +438,9 @@ async def index():
 
 
 async def _do_refresh():
-    await run_sync(store.refresh)
+    result = await run_sync(store.refresh, force_remote=True)
     try:
-        ui.notify("🔄 데이터 새로고침 완료!", type="positive")
+        ui.notify(result["message"], type="positive" if result["ok"] else "warning")
         await ui.run_javascript("setTimeout(()=>location.reload(),500)")
     except RuntimeError:
         pass  # 페이지 이탈 시 슬롯 삭제됨 — 무시 가능

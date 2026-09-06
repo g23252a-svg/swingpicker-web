@@ -170,8 +170,9 @@ def test_policy_version_bumped():
 
     [v62] 알파 진입 게이트에 급등 추격 브레이크(ALPHA_SURGE_OK)가 AND로
     추가되어 진입 계약이 바뀌었다. 그래서 v57 → v62로 올렸다.
+    입력 검증 계약 추가로 input_integrity_v1 식별자를 붙였다.
     기대값을 갱신하는 것이 이 테스트의 목적이다(검사를 지우는 것이 아니다).
     """
-    assert rq.POLICY_VERSION == "alpha_gate_v62"
+    assert rq.POLICY_VERSION == "alpha_gate_v62_input_integrity_v1"
     assert rq.POLICY_VERSION != "alpha_gate_v57", \
         "계약이 바뀌었는데 버전이 그대로다"
