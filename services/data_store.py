@@ -8,11 +8,14 @@ import io
 import os
 import logging
 import threading
+import tempfile
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
 import requests
+
+from services.snapshot_integrity import snapshot_date, validate_snapshot
 
 try:
     import FinanceDataReader as fdr
@@ -125,6 +128,8 @@ def _ensure_krx_map():
 class DataStore:
     def __init__(self):
         self._lock = threading.Lock()
+        self._refresh_lock = threading.Lock()
+        self.last_refresh = {"ok": False, "source": "none", "message": "아직 불러오지 않았습니다"}
         self._scored = pd.DataFrame()
         self.data_ts = ""
         self.loaded = False
@@ -138,42 +143,56 @@ class DataStore:
     @scored.setter
     def scored(self, value):
         with self._lock:
-            self._scored = value
+            self._scored = value.copy()
 
-    def refresh(self):
-        df = None
+    def refresh(self, force_remote=False):
+        """Serialize refreshes; publish only a fully validated snapshot."""
+        with self._refresh_lock:
+            return self._refresh(force_remote=force_remote)
 
-        # 1) 로컬 파일 시도
+    def _refresh(self, force_remote=False):
+        candidates = []
+        errors = []
+        remote_failed = False
         if os.path.exists(RECOMMEND_PATH):
             try:
-                df = pd.read_csv(RECOMMEND_PATH, dtype={"종목코드": str, "종목명": str})
-                _logger.info(f"📂 로컬 CSV 로드: {RECOMMEND_PATH}")
-            except Exception as e:
-                _logger.warning(f"로컬 CSV 읽기 실패: {e}")
+                local = validate_snapshot(pd.read_csv(
+                    RECOMMEND_PATH, dtype={"종목코드": str, "종목명": str}))
+                candidates.append((local, "local"))
+            except Exception as exc:
+                errors.append(f"로컬 데이터 검증 실패: {exc}")
 
-        # 2) 로컬 실패 → GitHub raw URL 폴백
-        if df is None or df.empty:
-            url = REMOTE_CSV_URL.strip()
-            if url:
-                try:
-                    _logger.info(f"🌐 원격 CSV 다운로드 시도: {url}")
-                    r = requests.get(url, timeout=30,
-                                     headers={"Cache-Control": "no-cache"})
-                    r.raise_for_status()
-                    df = pd.read_csv(io.BytesIO(r.content),
-                                     encoding="utf-8-sig",
-                                     dtype={"종목코드": str, "종목명": str})
-                    os.makedirs(DATA_DIR, exist_ok=True)
-                    with open(RECOMMEND_PATH, "wb") as f:
-                        f.write(r.content)
-                    _logger.info(f"✅ 원격 CSV 다운로드 성공 → 로컬 캐싱 완료 ({len(df)}건)")
-                except Exception as e:
-                    _logger.warning(f"원격 CSV 다운로드 실패: {e}")
+        # A manual refresh really checks the remote source, even with a local cache.
+        if force_remote or not candidates:
+            try:
+                if not REMOTE_CSV_URL.strip():
+                    raise ValueError("원격 데이터 주소가 없습니다")
+                response = requests.get(REMOTE_CSV_URL.strip(), timeout=30,
+                                        headers={"Cache-Control": "no-cache"})
+                response.raise_for_status()
+                remote = validate_snapshot(pd.read_csv(
+                    io.BytesIO(response.content), encoding="utf-8-sig",
+                    dtype={"종목코드": str, "종목명": str}))
+                candidates.append((remote, "remote"))
+            except Exception as exc:
+                remote_failed = True
+                errors.append(f"원격 데이터 확인 실패: {exc}")
 
-        if df is None or df.empty:
-            _logger.warning("❌ 로컬/원격 모두 데이터 로드 실패")
-            return
+        with self._lock:
+            if self.loaded:
+                candidates.append((self._scored.copy(), "memory"))
+        if not candidates:
+            result = {"ok": False, "source": "none",
+                      "message": "데이터를 불러오지 못했습니다", "errors": errors}
+            with self._lock:
+                self.last_refresh = result
+            return result
 
+        # Never roll back to an older (or undated) remote snapshot.
+        priority = {"memory": 0, "local": 1, "remote": 2}
+        df, source = max(candidates, key=lambda item: (
+            snapshot_date(item[0]), priority[item[1]]))
+        raw_df = df.copy()
         try:
             num_cols = [
                 "FINAL_SCORE", "DISPLAY_SCORE", "STRUCT_SCORE",
@@ -312,6 +331,7 @@ class DataStore:
                 for alias in ["DISPLAY_SCORE", "TOTAL_SCORE", "LDY_SCORE", "RANK_SCORE"]:
                     df[alias] = df[primary]
 
+            quality_failed = False
             # 배포 직후에도 새 production 계약을 즉시 적용한다. collector가
             # 다음 CSV를 만들기 전까지 기존 recommend_latest를 읽더라도 첫
             # 화면과 알림에서 연구 후보가 공식 매수로 승격되지 않는다.
@@ -319,6 +339,8 @@ class DataStore:
                 from services.recommendation_quality import apply_recommendation_quality_guard
                 df = apply_recommendation_quality_guard(df)
             except Exception as exc:
+                quality_failed = True
+                errors.append("추천 품질 검증 실패")
                 _logger.exception("최종 품질게이트 적용 실패 — 신규매수 안전 차단: %s", exc)
                 df["PRODUCTION_BUY"] = 0
                 df["BUY_NOW_ELIGIBLE"] = 0
@@ -326,13 +348,50 @@ class DataStore:
                 df["RECOMMENDED_WEIGHT_PCT"] = 0.0
                 df["QUALITY_GUARD_REASON"] = "품질게이트 실행 실패"
 
-            ts_col = next((c for c in ["trade_date", "DATA_DATE"] if c in df.columns), None)
-            self.data_ts = str(df[ts_col].iloc[0]) if ts_col else now_kst().strftime("%Y-%m-%d")
-            self.scored = df
-            self.loaded = True
-            _logger.info(f"✅ 데이터 로드: {len(df)}종목, 기준일 {self.data_ts}")
-        except Exception as e:
-            _logger.exception(f"데이터 로드 실패: {e}")
+            data_ts = snapshot_date(df) or "확인 불가"
+            if source == "remote":
+                # Replace in one operation; a failed write never truncates the cache.
+                temp_path = None
+                try:
+                    os.makedirs(DATA_DIR, exist_ok=True)
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", encoding="utf-8-sig", newline="",
+                        dir=DATA_DIR, suffix=".tmp", delete=False,
+                    ) as handle:
+                        temp_path = handle.name
+                        raw_df.to_csv(handle, index=False)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temp_path, RECOMMEND_PATH)
+                except OSError as exc:
+                    errors.append(f"로컬 캐시 저장 실패: {exc}")
+                    _logger.warning("캐시 저장 실패: %s", exc)
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        os.unlink(temp_path)
+            message = ("추천 품질 검증에 실패해 신규매수를 보류합니다"
+                       if quality_failed else
+                       "최신 데이터 확인에 실패해 기존 데이터를 표시합니다"
+                       if remote_failed else
+                       "원격 데이터를 확인했습니다" if source == "remote" else
+                       "기존의 최신 데이터를 유지합니다")
+            result = {"ok": not remote_failed and not quality_failed, "source": source,
+                      "message": message, "data_date": data_ts, "errors": errors}
+            with self._lock:
+                self._scored = df.copy()
+                self.data_ts = data_ts
+                self.loaded = True
+                self.last_refresh = result
+            _logger.info("데이터 로드: %s종목, 기준일 %s (%s)", len(df), data_ts, source)
+            return result
+        except Exception as exc:
+            _logger.exception("데이터 처리 실패: %s", exc)
+            result = {"ok": False, "source": "memory" if self.loaded else "none",
+                      "message": "데이터 처리 실패 — 이전 데이터를 유지합니다",
+                      "errors": errors + [str(exc)]}
+            with self._lock:
+                self.last_refresh = result
+            return result
 
 
 # 싱글턴 인스턴스
