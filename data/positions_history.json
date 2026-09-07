@@ -6255,5 +6255,61 @@
       "483650_20260702_WARN_DRAWDOWN_20260902",
       "483650_20260702_STOP_HIT_20260903"
     ]
+  },
+  {
+    "code": "180640",
+    "name": "한진칼",
+    "entry_ymd": "20260805",
+    "entry_px": 122500.0,
+    "qty": 0,
+    "stop_px": 112700.0,
+    "stop_px_initial": 112700.0,
+    "take_px1": 140200.0,
+    "take_px2": 143700.0,
+    "trailing_high": 149300.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260907",
+    "last_close_px": 148900.0,
+    "unrealized_pnl_pct": 21.55,
+    "realized_pnl_pct": 21.55,
+    "close_ymd": "20260907",
+    "close_px": 148900.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "180640_20260805_WARN_DRAWDOWN_20260819",
+      "180640_20260805_WARN_DRAWDOWN_20260820",
+      "180640_20260805_TP1_HIT_20260907",
+      "180640_20260805_TP2_HIT_20260907"
+    ]
+  },
+  {
+    "code": "000500",
+    "name": "가온전선",
+    "entry_ymd": "20260821",
+    "entry_px": 158200.0,
+    "qty": 0,
+    "stop_px": 145500.0,
+    "stop_px_initial": 145500.0,
+    "take_px1": 191800.0,
+    "take_px2": 214000.0,
+    "trailing_high": 248000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260907",
+    "last_close_px": 234500.0,
+    "unrealized_pnl_pct": 48.23,
+    "realized_pnl_pct": 48.23,
+    "close_ymd": "20260907",
+    "close_px": 234500.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "000500_20260821_TP1_HIT_20260827",
+      "000500_20260821_TP1_HIT_20260828",
+      "000500_20260821_TP1_HIT_20260831",
+      "000500_20260821_TP1_HIT_20260901",
+      "000500_20260821_TP1_HIT_20260902",
+      "000500_20260821_TP1_HIT_20260903",
+      "000500_20260821_TP1_HIT_20260907",
+      "000500_20260821_TP2_HIT_20260907"
+    ]
   }
 ]

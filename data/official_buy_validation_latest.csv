@@ -396,3 +396,17 @@
 20260903,036570,NC,True,False,True,False,BUY,90.0,0.3,0.3,0.3,WAIT,1.61,0.0,-10.88,-18.37,GREEN,recommend_20260903.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260903,039490,키움증권,True,False,True,False,BUY,90.0,8.2,8.2,7.1,WAIT,2.11,0.0,-14.49,-34.96,GREEN,recommend_20260903.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20260903,000815,삼성화재우,True,False,True,False,AVOID,0.0,84.6,84.6,50.6,ATTACK,1.08,0.0,8.24,17.79,GREEN,recommend_20260903.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,001430,세아베스틸지주,True,True,False,True,BUY,70.0,20.8,20.8,16.3,WAIT,2.76,0.0,3.39,-44.85,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,NOT_HOLDOUT,PENDING
+20260907,090430,아모레퍼시픽,True,False,True,False,BUY,100.0,69.2,69.2,39.4,ATTACK,1.89,0.0,12.27,8.68,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,001260,삼성에피스홀딩스,True,False,True,False,BUY,90.0,3.9,3.9,2.3,WAIT,2.0,0.0,-8.75,-5.06,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,017960,한국카본,True,False,True,False,BUY,90.0,0.0,0.0,0.0,CARRY,2.5,0.0,-11.07,-2.27,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,033780,KT&G,True,False,True,False,BUY,90.0,10.0,10.0,8.6,ARMED,1.97,0.0,-4.22,-5.22,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,018880,한온시스템,True,False,True,False,BUY,90.0,9.6,9.6,8.3,WAIT,1.37,0.0,-16.21,-32.84,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,097950,CJ제일제당,True,False,True,False,BUY,90.0,0.0,0.0,0.0,WAIT,2.12,0.0,-3.72,-2.9,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,036460,한국가스공사,True,False,True,False,BUY,90.0,12.2,12.2,10.3,WAIT,1.71,0.0,1.42,-5.79,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,068270,셀트리온,True,False,True,False,BUY,90.0,8.5,8.5,7.3,WAIT,1.38,0.0,2.07,-0.83,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,042660,한화오션,True,False,True,False,BUY,90.0,6.7,6.7,5.8,WAIT,1.73,0.0,-10.47,-30.0,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,039490,키움증권,True,False,True,False,BUY,90.0,0.0,0.0,0.0,WAIT,1.49,0.0,-12.68,-34.16,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,450080,에코프로머티,True,False,True,False,BUY,90.0,1.6,1.6,1.5,WAIT,1.41,0.0,-8.0,-49.69,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,005830,DB손해보험,True,False,True,False,AVOID,0.0,71.4,71.4,41.1,ATTACK,1.01,0.0,18.04,18.81,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20260907,000815,삼성화재우,True,False,True,False,AVOID,0.0,70.4,70.4,40.8,CARRY,1.02,0.0,3.55,12.59,GREEN,recommend_20260907.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY

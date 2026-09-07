@@ -1,196 +1,196 @@
 {
  "ok": true,
  "alpha_live_from": "20260714",
- "asof": "20260831",
- "n_days": 31,
+ "asof": "20260901",
+ "n_days": 32,
  "files_scanned": 120,
  "files_skipped": 0,
  "stop_pct": -0.08,
  "definition": "진입 t+1 시가 · -8% 장중 스톱 · t+h 종가",
  "horizons": {
   "h3": {
-   "n_days": 31,
-   "ic_mean": 0.0483,
-   "ic_median": 0.0577,
-   "ic_positive_days": 22,
+   "n_days": 32,
+   "ic_mean": 0.0512,
+   "ic_median": 0.0632,
+   "ic_positive_days": 23,
    "ic_t": {
-    "n": 31,
-    "t": 1.39,
-    "p": 0.1747
+    "n": 32,
+    "t": 1.516,
+    "p": 0.1397
    },
    "universe": {
-    "n": 31,
-    "mean_pct": 0.078,
-    "median_pct": -0.595,
-    "win_rate": 0.4516,
-    "cum_pct": 2.43
+    "n": 32,
+    "mean_pct": 0.139,
+    "median_pct": -0.584,
+    "win_rate": 0.4688,
+    "cum_pct": 4.45
    },
    "top1": {
-    "n": 31,
-    "mean_pct": -2.264,
-    "median_pct": -0.92,
-    "win_rate": 0.3871,
-    "cum_pct": -70.19,
-    "excess_mean_pct": -2.343,
+    "n": 32,
+    "mean_pct": -2.39,
+    "median_pct": -1.869,
+    "win_rate": 0.375,
+    "cum_pct": -76.49,
+    "excess_mean_pct": -2.53,
     "excess_t": {
-     "n": 31,
-     "t": -2.685,
-     "p": 0.0117
+     "n": 32,
+     "t": -2.924,
+     "p": 0.0064
     },
-    "stop_rate": 0.3871
+    "stop_rate": 0.375
    },
    "gated_top1": {
-    "n": 31,
-    "mean_pct": -1.148,
-    "median_pct": -4.465,
-    "win_rate": 0.4194,
+    "n": 32,
+    "mean_pct": -1.113,
+    "median_pct": -3.46,
+    "win_rate": 0.4062,
     "cum_pct": -35.6,
-    "excess_mean_pct": -1.227,
+    "excess_mean_pct": -1.252,
     "excess_t": {
-     "n": 31,
-     "t": -1.231,
-     "p": 0.2279
+     "n": 32,
+     "t": -1.297,
+     "p": 0.2042
     },
-    "stop_rate": 0.4516,
-    "n_days": 31,
+    "stop_rate": 0.4375,
+    "n_days": 32,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 14,
+    "pick_days_covered": 15,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "top3": {
-    "n": 31,
-    "mean_pct": -1.333,
-    "median_pct": -1.618,
-    "win_rate": 0.3548,
-    "cum_pct": -41.33,
-    "excess_mean_pct": -1.412,
+    "n": 32,
+    "mean_pct": -1.33,
+    "median_pct": -1.607,
+    "win_rate": 0.3438,
+    "cum_pct": -42.55,
+    "excess_mean_pct": -1.469,
     "excess_t": {
-     "n": 31,
-     "t": -1.716,
-     "p": 0.0965
+     "n": 32,
+     "t": -1.839,
+     "p": 0.0755
     },
-    "stop_rate": 0.3763
+    "stop_rate": 0.3646
    },
    "gated_top3": {
-    "n": 31,
-    "mean_pct": -0.396,
-    "median_pct": -1.197,
-    "win_rate": 0.4516,
-    "cum_pct": -12.28,
-    "excess_mean_pct": -0.475,
+    "n": 32,
+    "mean_pct": -0.372,
+    "median_pct": -0.894,
+    "win_rate": 0.4688,
+    "cum_pct": -11.9,
+    "excess_mean_pct": -0.511,
     "excess_t": {
-     "n": 31,
-     "t": -0.621,
-     "p": 0.5394
+     "n": 32,
+     "t": -0.69,
+     "p": 0.4956
     },
-    "stop_rate": 0.3656,
-    "n_days": 31,
+    "stop_rate": 0.3542,
+    "n_days": 32,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 14,
+    "pick_days_covered": 15,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "top5": {
-    "n": 31,
-    "mean_pct": -1.345,
-    "median_pct": -1.532,
-    "win_rate": 0.3226,
-    "cum_pct": -41.69,
-    "excess_mean_pct": -1.423,
+    "n": 32,
+    "mean_pct": -1.322,
+    "median_pct": -1.488,
+    "win_rate": 0.3125,
+    "cum_pct": -42.31,
+    "excess_mean_pct": -1.461,
     "excess_t": {
-     "n": 31,
-     "t": -2.072,
-     "p": 0.0469
+     "n": 32,
+     "t": -2.194,
+     "p": 0.0359
     },
-    "stop_rate": 0.3484
+    "stop_rate": 0.3375
    },
    "gated_top5": {
-    "n": 31,
-    "mean_pct": -0.347,
-    "median_pct": -0.839,
-    "win_rate": 0.4516,
-    "cum_pct": -10.76,
-    "excess_mean_pct": -0.425,
+    "n": 32,
+    "mean_pct": -0.322,
+    "median_pct": -0.569,
+    "win_rate": 0.4688,
+    "cum_pct": -10.32,
+    "excess_mean_pct": -0.462,
     "excess_t": {
-     "n": 31,
-     "t": -0.636,
-     "p": 0.5294
+     "n": 32,
+     "t": -0.712,
+     "p": 0.4817
     },
-    "stop_rate": 0.329,
-    "n_days": 31,
+    "stop_rate": 0.3187,
+    "n_days": 32,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 14,
+    "pick_days_covered": 15,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "top10": {
-    "n": 31,
-    "mean_pct": -0.971,
-    "median_pct": -2.09,
-    "win_rate": 0.4516,
-    "cum_pct": -30.11,
-    "excess_mean_pct": -1.05,
+    "n": 32,
+    "mean_pct": -0.909,
+    "median_pct": -1.201,
+    "win_rate": 0.4688,
+    "cum_pct": -29.1,
+    "excess_mean_pct": -1.049,
     "excess_t": {
-     "n": 31,
-     "t": -1.924,
-     "p": 0.0639
+     "n": 32,
+     "t": -1.985,
+     "p": 0.056
     },
-    "stop_rate": 0.3258
+    "stop_rate": 0.3156
    },
    "gated_top10": {
-    "n": 31,
-    "mean_pct": -0.162,
-    "median_pct": -0.721,
-    "win_rate": 0.4839,
-    "cum_pct": -5.02,
-    "excess_mean_pct": -0.24,
+    "n": 32,
+    "mean_pct": -0.137,
+    "median_pct": -0.351,
+    "win_rate": 0.5,
+    "cum_pct": -4.39,
+    "excess_mean_pct": -0.276,
     "excess_t": {
-     "n": 31,
-     "t": -0.473,
-     "p": 0.6399
+     "n": 32,
+     "t": -0.56,
+     "p": 0.5797
     },
-    "stop_rate": 0.3009,
-    "n_days": 31,
+    "stop_rate": 0.2915,
+    "n_days": 32,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 14,
+    "pick_days_covered": 15,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "official": {
     "axis": "공식 매수(기록된 결정)",
     "is_reconstruction": false,
-    "days_recorded": 31,
+    "days_recorded": 32,
     "days_unrecorded": 0,
-    "pick_days": 14,
+    "pick_days": 15,
     "no_pick_days": 17,
-    "pick_days_declared": 14,
+    "pick_days_declared": 15,
     "days_pick_unmeasured": 0,
-    "pick_day_rate": 0.4516,
-    "measured_pick_day_rate": 0.4516,
+    "pick_day_rate": 0.4688,
+    "measured_pick_day_rate": 0.4688,
     "on_pick_days": {
-     "n": 14,
-     "mean_pct": -5.064,
+     "n": 15,
+     "mean_pct": -4.726,
      "median_pct": -8.0,
-     "win_rate": 0.1429,
+     "win_rate": 0.1333,
      "cum_pct": -70.89,
-     "excess_mean_pct": -4.272,
+     "excess_mean_pct": -4.122,
      "excess_t": {
-      "n": 14,
-      "t": -4.476,
-      "p": 0.0006
+      "n": 15,
+      "t": -4.576,
+      "p": 0.0004
      },
-     "stop_rate": 0.7143
+     "stop_rate": 0.6667
     },
     "all_days_cash": {
-     "n": 31,
-     "mean_pct": -2.287,
+     "n": 32,
+     "mean_pct": -2.215,
      "median_pct": 0.0,
-     "win_rate": 0.0645,
+     "win_rate": 0.0625,
      "cum_pct": -70.89,
      "note": "픽 없는 날은 0%(현금)로 계산"
     }
@@ -214,208 +214,208 @@
     }
    },
    "by_normal": {
-    "n_days": 14,
-    "ic_mean": 0.0068,
+    "n_days": 15,
+    "ic_mean": 0.0157,
     "top1": {
-     "n": 14,
-     "mean_pct": -3.294,
-     "median_pct": -6.162,
-     "win_rate": 0.3571,
-     "cum_pct": -46.11
+     "n": 15,
+     "mean_pct": -3.494,
+     "median_pct": -6.299,
+     "win_rate": 0.3333,
+     "cum_pct": -52.41
     },
     "universe": {
-     "n": 14,
-     "mean_pct": -0.792,
-     "median_pct": -0.745,
-     "win_rate": 0.2857,
-     "cum_pct": -11.08
+     "n": 15,
+     "mean_pct": -0.604,
+     "median_pct": -0.732,
+     "win_rate": 0.3333,
+     "cum_pct": -9.06
     }
    }
   },
   "h5": {
-   "n_days": 29,
-   "ic_mean": 0.0443,
-   "ic_median": 0.0548,
-   "ic_positive_days": 19,
+   "n_days": 30,
+   "ic_mean": 0.0465,
+   "ic_median": 0.0743,
+   "ic_positive_days": 20,
    "ic_t": {
-    "n": 29,
-    "t": 1.445,
-    "p": 0.1597
+    "n": 30,
+    "t": 1.563,
+    "p": 0.129
    },
    "universe": {
-    "n": 29,
-    "mean_pct": 0.082,
-    "median_pct": -1.35,
-    "win_rate": 0.3793,
-    "cum_pct": 2.38
+    "n": 30,
+    "mean_pct": 0.065,
+    "median_pct": -0.943,
+    "win_rate": 0.3667,
+    "cum_pct": 1.96
    },
    "top1": {
-    "n": 29,
-    "mean_pct": -2.339,
-    "median_pct": -3.216,
-    "win_rate": 0.3448,
-    "cum_pct": -67.82,
-    "excess_mean_pct": -2.42,
+    "n": 30,
+    "mean_pct": -1.916,
+    "median_pct": -3.11,
+    "win_rate": 0.3667,
+    "cum_pct": -57.48,
+    "excess_mean_pct": -1.981,
     "excess_t": {
-     "n": 29,
-     "t": -2.375,
-     "p": 0.0246
+     "n": 30,
+     "t": -1.838,
+     "p": 0.0763
     },
-    "stop_rate": 0.4483
+    "stop_rate": 0.4333
    },
    "gated_top1": {
-    "n": 29,
-    "mean_pct": 0.116,
-    "median_pct": -6.765,
-    "win_rate": 0.4138,
-    "cum_pct": 3.36,
-    "excess_mean_pct": 0.034,
+    "n": 30,
+    "mean_pct": -0.155,
+    "median_pct": -7.383,
+    "win_rate": 0.4,
+    "cum_pct": -4.64,
+    "excess_mean_pct": -0.22,
     "excess_t": {
-     "n": 29,
-     "t": 0.026,
-     "p": 0.9798
+     "n": 30,
+     "t": -0.169,
+     "p": 0.8667
     },
-    "stop_rate": 0.4828,
-    "n_days": 29,
+    "stop_rate": 0.5,
+    "n_days": 30,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 12,
+    "pick_days_covered": 13,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "top3": {
-    "n": 29,
-    "mean_pct": -1.471,
-    "median_pct": -2.891,
-    "win_rate": 0.3448,
-    "cum_pct": -42.65,
-    "excess_mean_pct": -1.553,
+    "n": 30,
+    "mean_pct": -1.302,
+    "median_pct": -2.728,
+    "win_rate": 0.3667,
+    "cum_pct": -39.06,
+    "excess_mean_pct": -1.367,
     "excess_t": {
-     "n": 29,
-     "t": -1.874,
-     "p": 0.0715
+     "n": 30,
+     "t": -1.664,
+     "p": 0.1069
     },
-    "stop_rate": 0.4253
+    "stop_rate": 0.4222
    },
    "gated_top3": {
-    "n": 29,
-    "mean_pct": -0.119,
-    "median_pct": -2.382,
-    "win_rate": 0.3793,
-    "cum_pct": -3.45,
-    "excess_mean_pct": -0.201,
+    "n": 30,
+    "mean_pct": -0.288,
+    "median_pct": -2.442,
+    "win_rate": 0.3667,
+    "cum_pct": -8.65,
+    "excess_mean_pct": -0.354,
     "excess_t": {
-     "n": 29,
-     "t": -0.271,
-     "p": 0.7885
+     "n": 30,
+     "t": -0.483,
+     "p": 0.6326
     },
-    "stop_rate": 0.4138,
-    "n_days": 29,
+    "stop_rate": 0.4222,
+    "n_days": 30,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 12,
+    "pick_days_covered": 13,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "top5": {
-    "n": 29,
-    "mean_pct": -1.242,
-    "median_pct": -2.908,
-    "win_rate": 0.4483,
-    "cum_pct": -36.03,
-    "excess_mean_pct": -1.324,
+    "n": 30,
+    "mean_pct": -1.104,
+    "median_pct": -2.34,
+    "win_rate": 0.4667,
+    "cum_pct": -33.13,
+    "excess_mean_pct": -1.17,
     "excess_t": {
-     "n": 29,
-     "t": -2.041,
-     "p": 0.0508
+     "n": 30,
+     "t": -1.812,
+     "p": 0.0804
     },
-    "stop_rate": 0.4207
+    "stop_rate": 0.42
    },
    "gated_top5": {
-    "n": 29,
-    "mean_pct": -0.149,
-    "median_pct": -1.97,
-    "win_rate": 0.4483,
-    "cum_pct": -4.32,
-    "excess_mean_pct": -0.231,
+    "n": 30,
+    "mean_pct": -0.16,
+    "median_pct": -1.858,
+    "win_rate": 0.4333,
+    "cum_pct": -4.79,
+    "excess_mean_pct": -0.225,
     "excess_t": {
-     "n": 29,
-     "t": -0.299,
-     "p": 0.7673
+     "n": 30,
+     "t": -0.301,
+     "p": 0.7654
     },
-    "stop_rate": 0.4069,
-    "n_days": 29,
+    "stop_rate": 0.4067,
+    "n_days": 30,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 12,
+    "pick_days_covered": 13,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "top10": {
-    "n": 29,
-    "mean_pct": -1.182,
-    "median_pct": -2.245,
-    "win_rate": 0.4138,
-    "cum_pct": -34.27,
-    "excess_mean_pct": -1.263,
+    "n": 30,
+    "mean_pct": -1.077,
+    "median_pct": -1.675,
+    "win_rate": 0.4333,
+    "cum_pct": -32.3,
+    "excess_mean_pct": -1.142,
     "excess_t": {
-     "n": 29,
-     "t": -2.339,
-     "p": 0.0267
+     "n": 30,
+     "t": -2.131,
+     "p": 0.0417
     },
-    "stop_rate": 0.4069
+    "stop_rate": 0.4033
    },
    "gated_top10": {
-    "n": 29,
-    "mean_pct": -0.48,
-    "median_pct": -3.119,
-    "win_rate": 0.4138,
-    "cum_pct": -13.92,
-    "excess_mean_pct": -0.562,
+    "n": 30,
+    "mean_pct": -0.504,
+    "median_pct": -2.23,
+    "win_rate": 0.4,
+    "cum_pct": -15.12,
+    "excess_mean_pct": -0.569,
     "excess_t": {
-     "n": 29,
-     "t": -1.11,
-     "p": 0.2766
+     "n": 30,
+     "t": -1.164,
+     "p": 0.254
     },
-    "stop_rate": 0.4108,
-    "n_days": 29,
+    "stop_rate": 0.4138,
+    "n_days": 30,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
-    "pick_days_covered": 12,
+    "pick_days_covered": 13,
     "no_pick_days_counted": 17,
     "caveat": "공식 매수 발생 여부를 재현하지 않는다 — 픽이 없던 17일도 후보 1위를 산 것으로 계산했다. 공식 성적은 official 블록을 볼 것."
    },
    "official": {
     "axis": "공식 매수(기록된 결정)",
     "is_reconstruction": false,
-    "days_recorded": 29,
+    "days_recorded": 30,
     "days_unrecorded": 0,
-    "pick_days": 12,
+    "pick_days": 13,
     "no_pick_days": 17,
-    "pick_days_declared": 12,
+    "pick_days_declared": 13,
     "days_pick_unmeasured": 0,
-    "pick_day_rate": 0.4138,
-    "measured_pick_day_rate": 0.4138,
+    "pick_day_rate": 0.4333,
+    "measured_pick_day_rate": 0.4333,
     "on_pick_days": {
-     "n": 12,
-     "mean_pct": -4.751,
+     "n": 13,
+     "mean_pct": -5.001,
      "median_pct": -8.0,
-     "win_rate": 0.25,
-     "cum_pct": -57.01,
-     "excess_mean_pct": -3.963,
+     "win_rate": 0.2308,
+     "cum_pct": -65.01,
+     "excess_mean_pct": -4.242,
      "excess_t": {
-      "n": 12,
-      "t": -3.52,
-      "p": 0.0048
+      "n": 13,
+      "t": -3.955,
+      "p": 0.0019
      },
-     "stop_rate": 0.75
+     "stop_rate": 0.7692
     },
     "all_days_cash": {
-     "n": 29,
-     "mean_pct": -1.966,
+     "n": 30,
+     "mean_pct": -2.167,
      "median_pct": 0.0,
-     "win_rate": 0.1034,
-     "cum_pct": -57.01,
+     "win_rate": 0.1,
+     "cum_pct": -65.01,
      "note": "픽 없는 날은 0%(현금)로 계산"
     }
    },
@@ -438,28 +438,28 @@
     }
    },
    "by_normal": {
-    "n_days": 12,
-    "ic_mean": -0.012,
+    "n_days": 13,
+    "ic_mean": -0.0028,
     "top1": {
-     "n": 12,
-     "mean_pct": -2.725,
+     "n": 13,
+     "mean_pct": -1.72,
      "median_pct": -8.0,
-     "win_rate": 0.25,
-     "cum_pct": -32.7
+     "win_rate": 0.3077,
+     "cum_pct": -22.36
     },
     "universe": {
-     "n": 12,
-     "mean_pct": -0.788,
-     "median_pct": -1.13,
-     "win_rate": 0.3333,
-     "cum_pct": -9.46
+     "n": 13,
+     "mean_pct": -0.76,
+     "median_pct": -0.536,
+     "win_rate": 0.3077,
+     "cum_pct": -9.87
     }
    }
   }
  },
  "sessions": {
-  "snapshots": 124,
-  "real": 115,
+  "snapshots": 125,
+  "real": 116,
   "phantom_dropped": 9,
   "phantom_days": [
    "20260416",
@@ -2744,6 +2744,42 @@
     "gated_top10_excess_pct": -1.302,
     "gated_top10_stop_rate": 0.1,
     "gated_top1_name": "성호전자"
+   },
+   "h5": {
+    "n_scored": 359,
+    "ic": 0.1078,
+    "universe_pct": -0.415,
+    "top1_pct": 10.337,
+    "top1_excess_pct": 10.752,
+    "top1_stop_rate": 0.0,
+    "top3_pct": 3.59,
+    "top3_excess_pct": 4.005,
+    "top3_stop_rate": 0.3333,
+    "top5_pct": 2.898,
+    "top5_excess_pct": 3.312,
+    "top5_stop_rate": 0.4,
+    "top10_pct": 1.968,
+    "top10_excess_pct": 2.383,
+    "top10_stop_rate": 0.3,
+    "top1_name": "삼성전자우",
+    "official_n_scored": 1,
+    "official_pct": -8.0,
+    "official_excess_pct": -7.585,
+    "official_stop_rate": 1.0,
+    "gated_pool": 30,
+    "gated_top1_pct": -8.0,
+    "gated_top1_excess_pct": -7.585,
+    "gated_top1_stop_rate": 1.0,
+    "gated_top3_pct": -5.206,
+    "gated_top3_excess_pct": -4.791,
+    "gated_top3_stop_rate": 0.6667,
+    "gated_top5_pct": -0.465,
+    "gated_top5_excess_pct": -0.05,
+    "gated_top5_stop_rate": 0.4,
+    "gated_top10_pct": -1.199,
+    "gated_top10_excess_pct": -0.784,
+    "gated_top10_stop_rate": 0.5,
+    "gated_top1_name": "성호전자"
    }
   },
   {
@@ -2790,6 +2826,52 @@
     "gated_top10_excess_pct": -2.223,
     "gated_top10_stop_rate": 0.3,
     "gated_top1_name": "디앤디파마텍"
+   }
+  },
+  {
+   "ymd": "20260901",
+   "pool": 348,
+   "risk_off": false,
+   "official_recorded": true,
+   "official_n": 1,
+   "official_names": [
+    "현대로템"
+   ],
+   "h3": {
+    "n_scored": 348,
+    "ic": 0.1404,
+    "universe_pct": 2.027,
+    "top1_pct": -6.299,
+    "top1_excess_pct": -8.325,
+    "top1_stop_rate": 0.0,
+    "top3_pct": -1.212,
+    "top3_excess_pct": -3.239,
+    "top3_stop_rate": 0.0,
+    "top5_pct": -0.617,
+    "top5_excess_pct": -2.644,
+    "top5_stop_rate": 0.0,
+    "top10_pct": 1.008,
+    "top10_excess_pct": -1.019,
+    "top10_stop_rate": 0.0,
+    "top1_name": "한국콜마",
+    "official_n_scored": 1,
+    "official_pct": 0.0,
+    "official_excess_pct": -2.027,
+    "official_stop_rate": 0.0,
+    "gated_pool": 20,
+    "gated_top1_pct": 0.0,
+    "gated_top1_excess_pct": -2.027,
+    "gated_top1_stop_rate": 0.0,
+    "gated_top3_pct": 0.389,
+    "gated_top3_excess_pct": -1.638,
+    "gated_top3_stop_rate": 0.0,
+    "gated_top5_pct": 0.437,
+    "gated_top5_excess_pct": -1.59,
+    "gated_top5_stop_rate": 0.0,
+    "gated_top10_pct": 0.635,
+    "gated_top10_excess_pct": -1.391,
+    "gated_top10_stop_rate": 0.0,
+    "gated_top1_name": "현대로템"
    }
   }
  ],
