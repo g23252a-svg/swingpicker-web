@@ -13,7 +13,7 @@
     "stop_threshold_loss_count": 0,
     "research_forecasts": 5
   },
-  "prospective_summary": {
+  "generated_before_entry_summary": {
     "selected": 0,
     "completed": 0,
     "pending": 0,
@@ -23,7 +23,7 @@
     "stop_threshold_loss_count": 0,
     "research_forecasts": 0
   },
-  "retrospective_summary": {
+  "generated_after_entry_summary": {
     "selected": 0,
     "completed": 0,
     "pending": 0,
@@ -43,6 +43,8 @@
     "stop_threshold_loss_count": 0,
     "research_forecasts": 5
   },
+  "timing_basis": "internal_generation_timestamp",
+  "publication_verified": false,
   "execution_definition": "익일 시가 진입, 진입일 포함 최대 5거래일, -8% 손절과 갭 체결, 저장된 왕복비용 반영",
   "return_units": "fraction; 0.01 = 1%",
   "days": [
@@ -176,7 +178,7 @@
     "보유 기간이 겹치는 코호트 평균으로 계좌 누적수익·연환산수익을 뜻하지 않습니다.",
     "미성숙·미확인 결과는 수익률과 승률에서 제외되며 손실 0%로 대체하지 않습니다.",
     "미확인 상위 종목을 차순위로 교체하지 않습니다. 알려진 결과만의 평균에는 결측 편향이 남습니다.",
-    "생성 시각이 실제 익일 장 시작 이전임을 확인한 예측만 prospective_summary에 포함합니다.",
+    "내부 생성 시각으로 장 시작 전후를 분류하며 GitHub 게시·프론트 노출 시각과 실제 매수 가능성을 입증하지 않습니다.",
     "두 검증 기준 중 하나라도 실패한 저장 예측은 연구용이며, 통과한 예측도 실제 거래로 간주하지 않습니다."
   ]
 }

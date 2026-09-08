@@ -71,7 +71,11 @@ python scripts/audit_swing_expected_return.py --data-dir data --asof 20260907 --
 ```
 
 `swing_snapshot_latest.json`은 현재 표시용이며, `swing_snapshot_YYYYMMDD.json`은 첫 생성 결과를
-보존한다. `generated_at_utc`로 사후 생성과 실제 발표 이후 평가를 구분한다.
+보존한다. `generated_at_utc`로 내부 생성 시각이 장 시작 전인지 이후인지 구분한다.
+`generated_before_entry_summary`와 `generated_after_entry_summary`는 이 내부 시각만을
+기준으로 하며, 보고서는 `timing_basis=internal_generation_timestamp`,
+`publication_verified=false`를 명시한다. GitHub 게시·프론트 노출 시각과 실제 매수 가능성은
+이 생성 기록으로 입증하지 못하므로, 사전 공개된 실전 추천 성과로 해석하지 않는다.
 재실행은 해당 날짜의 최초 순위를 덮어쓰지 않는다. 날짜별 파일의 상위 선택을 고정한 후 실제
 가격 결과를 붙여 완료·보유 중·결과 누락을 구분하며, 연구 예측을 공식 체결로 간주하지 않는다.
 

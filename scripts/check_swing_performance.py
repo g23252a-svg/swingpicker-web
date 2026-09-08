@@ -3,6 +3,7 @@
 The figures describe overlapping forecast cohorts, never an account equity
 curve or recorded executions. Unknown selected outcomes remain in the cohort;
 the sixth-ranked stock cannot replace an unobserved top-five outcome.
+Generation timestamps do not establish GitHub publication or frontend visibility.
 """
 from __future__ import annotations
 
@@ -80,6 +81,7 @@ def _observed_sessions(directory, asof, panel):
 
 
 def _timing_status(generated_at, entry_day):
+    """Classify internal generation only; public availability is unverified."""
     if not generated_at:
         return "unknown_timestamp"
     try:
@@ -91,7 +93,7 @@ def _timing_status(generated_at, entry_day):
     if entry_day is None:
         return "pending_entry_session"
     entry_open = entry_day.tz_localize("Asia/Seoul") + pd.Timedelta(hours=9)
-    return "prospective" if generated <= entry_open else "retrospective"
+    return "generated_before_entry" if generated <= entry_open else "generated_after_entry"
 
 
 def _summary(rows):
@@ -210,15 +212,16 @@ def build_performance_report(data_dir="data", asof_ymd=None):
             "top_k": int(top_k), "round_trip_cost": cost, "summary": _summary(daily_rows), "picks": daily_rows,
         })
         all_rows.extend(daily_rows)
-    prospective = [row for row in all_rows if row["forecast_timing"] == "prospective"]
-    retrospective = [row for row in all_rows if row["forecast_timing"] == "retrospective"]
-    unknown = [row for row in all_rows if row["forecast_timing"] not in ("prospective", "retrospective")]
+    generated_before = [row for row in all_rows if row["forecast_timing"] == "generated_before_entry"]
+    generated_after = [row for row in all_rows if row["forecast_timing"] == "generated_after_entry"]
+    unknown = [row for row in all_rows if row["forecast_timing"] not in ("generated_before_entry", "generated_after_entry")]
     return {
         "asof": asof.strftime("%Y%m%d"), "forecast_days": len(result_days),
         "first_forecast_date": result_days[0]["signal_date"] if result_days else None,
         "last_forecast_date": result_days[-1]["signal_date"] if result_days else None,
-        "summary": _summary(all_rows), "prospective_summary": _summary(prospective),
-        "retrospective_summary": _summary(retrospective), "timing_unknown_summary": _summary(unknown),
+        "summary": _summary(all_rows), "generated_before_entry_summary": _summary(generated_before),
+        "generated_after_entry_summary": _summary(generated_after), "timing_unknown_summary": _summary(unknown),
+        "timing_basis": "internal_generation_timestamp", "publication_verified": False,
         "execution_definition": "익일 시가 진입, 진입일 포함 최대 5거래일, -8% 손절과 갭 체결, 저장된 왕복비용 반영",
         "return_units": "fraction; 0.01 = 1%", "days": result_days, "archive_errors": errors,
         "limitations": [
@@ -226,7 +229,7 @@ def build_performance_report(data_dir="data", asof_ymd=None):
             "보유 기간이 겹치는 코호트 평균으로 계좌 누적수익·연환산수익을 뜻하지 않습니다.",
             "미성숙·미확인 결과는 수익률과 승률에서 제외되며 손실 0%로 대체하지 않습니다.",
             "미확인 상위 종목을 차순위로 교체하지 않습니다. 알려진 결과만의 평균에는 결측 편향이 남습니다.",
-            "생성 시각이 실제 익일 장 시작 이전임을 확인한 예측만 prospective_summary에 포함합니다.",
+            "내부 생성 시각으로 장 시작 전후를 분류하며 GitHub 게시·프론트 노출 시각과 실제 매수 가능성을 입증하지 않습니다.",
             "두 검증 기준 중 하나라도 실패한 저장 예측은 연구용이며, 통과한 예측도 실제 거래로 간주하지 않습니다.",
         ],
     }

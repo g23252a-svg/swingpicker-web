@@ -1,4 +1,4 @@
-"""Frozen rankings, censoring and prospective timing must survive monitoring."""
+"""Frozen rankings, censoring and internal generation timing survive monitoring."""
 import json
 
 import pandas as pd
@@ -70,7 +70,7 @@ def test_late_availability_stays_pending_even_after_planned_exit(tmp_path, monke
     assert result["summary"]["completed"] == 0
 
 
-def test_research_and_retrospective_forecasts_are_not_live_evidence(tmp_path, monkeypatch):
+def test_internal_generation_does_not_prove_publication_or_live_evidence(tmp_path, monkeypatch):
     _snapshot(tmp_path, day="20260907", generated="2026-09-08T00:30:00+00:00")  # entry 09:30 KST
     _snapshot(tmp_path, day="20260908", generated="2026-09-08T19:00:00+00:00")  # before next open
     _snapshot(tmp_path, day="20260909", generated=None)
@@ -82,10 +82,16 @@ def test_research_and_retrospective_forecasts_are_not_live_evidence(tmp_path, mo
     _sources(monkeypatch, panel)
     result = monitor.build_performance_report(tmp_path, "20260917")
     assert result["summary"]["selected"] == 15
-    assert result["prospective_summary"]["selected"] == 5
-    assert result["retrospective_summary"]["selected"] == 5
+    assert result["generated_before_entry_summary"]["selected"] == 5
+    assert result["generated_after_entry_summary"]["selected"] == 5
     assert result["timing_unknown_summary"]["selected"] == 5
-    assert [day["forecast_timing"] for day in result["days"]] == ["retrospective", "prospective", "unknown_timestamp"]
+    assert [day["forecast_timing"] for day in result["days"]] == [
+        "generated_after_entry", "generated_before_entry", "unknown_timestamp"]
+    assert result["timing_basis"] == "internal_generation_timestamp"
+    assert result["publication_verified"] is False
+    assert "prospective_summary" not in result
+    assert "retrospective_summary" not in result
+    assert any("프론트 노출" in text and "입증하지 않습니다" in text for text in result["limitations"])
     assert all(day["forecast_mode"] == "research" for day in result["days"])
 
 
@@ -110,7 +116,7 @@ def test_future_archive_is_ignored_and_missing_entry_calendar_is_unknown(tmp_pat
     _sources(monkeypatch, _outcomes(end=None, available=None), sessions=pd.DatetimeIndex([]))
     result = monitor.build_performance_report(tmp_path, "20260907")
     assert result["forecast_days"] == 1
-    assert result["prospective_summary"]["selected"] == 0
+    assert result["generated_before_entry_summary"]["selected"] == 0
     assert result["days"][0]["forecast_timing"] == "pending_entry_session"
 
 
@@ -123,7 +129,7 @@ def test_market_calendar_uses_observed_sessions_instead_of_weekday_guess(tmp_pat
     result = monitor.build_performance_report(tmp_path)
     assert result["asof"] == "20260915"
     assert result["days"][0]["picks"][0]["entry_date"] == "20260909"
-    assert result["prospective_summary"]["selected"] == 5
+    assert result["generated_before_entry_summary"]["selected"] == 5
 
 
 def test_invalid_archive_is_reported_without_reconstructing_its_ranks(tmp_path, monkeypatch):
