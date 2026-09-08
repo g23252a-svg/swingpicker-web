@@ -1,0 +1,371 @@
+{
+  "asof": "20260907",
+  "policy": {
+    "min_train_days": 60,
+    "purge_sessions": 5,
+    "min_calibration_days": 10,
+    "calibration_days": 15,
+    "test_block_days": 20,
+    "max_folds": 4,
+    "min_oos_days": 40,
+    "min_auc": 0.53,
+    "min_hit_lift": 0.03,
+    "max_calibration_error": 0.06,
+    "top_k": 5,
+    "round_trip_cost": 0.003,
+    "min_turnover": 1000000000,
+    "max_day_move": 0.25
+  },
+  "features": [
+    "ret_1d",
+    "ret_3d",
+    "ret_5d",
+    "ret_10d",
+    "ret_20d",
+    "gap_1d",
+    "intraday_return",
+    "range_pct",
+    "close_location",
+    "ma5_distance",
+    "ma20_distance",
+    "volatility_20d",
+    "relative_volume_20d",
+    "log_turnover",
+    "universe_ret_1d",
+    "universe_ret_5d",
+    "relative_ret_1d",
+    "relative_ret_5d",
+    "universe_breadth"
+  ],
+  "specification": "Ridge alpha100 + HGB squared-error depth3 leaf7 minleaf80 iter100 L2=10 lr=.05, equal weights; daily equal sample totals; calibration mean-bias correction only",
+  "target": "D+1 open to D+5 close, -8% stop with actual opening gap execution, 0.003 cost deducted",
+  "selection": "Top5 ranked before missing outcomes filtered; no rank threshold or hyperparameter search",
+  "overall": {
+    "days": 46,
+    "rows": 13901,
+    "selected_rows": 230,
+    "selected_unresolved": 5,
+    "overall_outcome_coverage": 0.9900726566434069,
+    "observed_selected_net_mean": -0.020940747324018762,
+    "observed_selected_hit_rate": 0.3086956521739131,
+    "observed_universe_net_mean": -0.010499106243777258,
+    "observed_universe_hit_rate": 0.364939642584816,
+    "observed_excess_mean": -0.010441641080241502,
+    "selected_net_block_ci95": [
+      -0.0404689069647401,
+      0.005339661312533768
+    ],
+    "excess_block_ci95": [
+      -0.025115062685658506,
+      0.003723875599323435
+    ],
+    "mean_daily_ic": -0.03359101492088718,
+    "profit_direction_auc": 0.44629887738280044,
+    "predicted_net_mean": -0.021152134733213215,
+    "observed_net_mean": -0.010499106243777258,
+    "mean_absolute_error": 0.07657269638698365,
+    "mean_baseline_absolute_error": 0.07912422690053696
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "train_days": 60,
+      "calibration_days": 10,
+      "train_label_available": "20260602",
+      "cal_start": "20260604",
+      "cal_label_available": "20260624",
+      "test_start": "20260625",
+      "test_end": "20260723",
+      "calibration_mean_bias": -0.013231504323127911,
+      "days": 20,
+      "rows": 5906,
+      "selected_rows": 100,
+      "selected_unresolved": 1,
+      "overall_outcome_coverage": 0.9922113105316627,
+      "observed_selected_net_mean": -0.03237340866002703,
+      "observed_selected_hit_rate": 0.2325,
+      "observed_universe_net_mean": -0.03594294747083286,
+      "observed_universe_hit_rate": 0.25516707178486275,
+      "observed_excess_mean": 0.003569538810805832,
+      "selected_net_block_ci95": [
+        -0.05681458230999274,
+        -0.010418574276677781
+      ],
+      "excess_block_ci95": [
+        -0.014430656653125078,
+        0.02412876250777931
+      ],
+      "mean_daily_ic": -0.06767480602257514,
+      "profit_direction_auc": 0.5596720487035858,
+      "predicted_net_mean": -0.020619545650561462,
+      "observed_net_mean": -0.03594294747083286,
+      "mean_absolute_error": 0.06293785348541167,
+      "mean_baseline_absolute_error": 0.06910363776621246
+    },
+    {
+      "fold": 2,
+      "train_days": 80,
+      "calibration_days": 10,
+      "train_label_available": "20260701",
+      "cal_start": "20260702",
+      "cal_label_available": "20260723",
+      "test_start": "20260724",
+      "test_end": "20260821",
+      "calibration_mean_bias": -0.031470234805394695,
+      "days": 20,
+      "rows": 6122,
+      "selected_rows": 100,
+      "selected_unresolved": 1,
+      "overall_outcome_coverage": 0.9908526625285854,
+      "observed_selected_net_mean": -0.006994008302205737,
+      "observed_selected_hit_rate": 0.37000000000000005,
+      "observed_universe_net_mean": 0.015827091975118897,
+      "observed_universe_hit_rate": 0.47442390114664434,
+      "observed_excess_mean": -0.022821100277324636,
+      "selected_net_block_ci95": [
+        -0.044517104152828085,
+        0.039051450259378784
+      ],
+      "excess_block_ci95": [
+        -0.04004007907473776,
+        -0.0045619091429552
+      ],
+      "mean_daily_ic": -0.0366698776655953,
+      "profit_direction_auc": 0.4629213924111905,
+      "predicted_net_mean": -0.035483578923789255,
+      "observed_net_mean": 0.015827091975118897,
+      "mean_absolute_error": 0.09193267875907038,
+      "mean_baseline_absolute_error": 0.09165891025649117
+    },
+    {
+      "fold": 3,
+      "train_days": 100,
+      "calibration_days": 10,
+      "train_label_available": "20260730",
+      "cal_start": "20260731",
+      "cal_label_available": "20260821",
+      "test_start": "20260824",
+      "test_end": "20260831",
+      "calibration_mean_bias": 0.034122902054012805,
+      "days": 6,
+      "rows": 1873,
+      "selected_rows": 30,
+      "selected_unresolved": 3,
+      "overall_outcome_coverage": 0.9807794981313401,
+      "observed_selected_net_mean": -0.029321006276701256,
+      "observed_selected_hit_rate": 0.3583333333333334,
+      "observed_universe_net_mean": -0.013440296216579087,
+      "observed_universe_hit_rate": 0.3659006833785652,
+      "observed_excess_mean": -0.015880710060122167,
+      "selected_net_block_ci95": [
+        null,
+        null
+      ],
+      "excess_block_ci95": [
+        null,
+        null
+      ],
+      "mean_daily_ic": 0.09028449790043298,
+      "profit_direction_auc": 0.5715338862814947,
+      "predicted_net_mean": 0.024844048959867714,
+      "observed_net_mean": -0.013440296216579085,
+      "mean_absolute_error": 0.07082223148526787,
+      "mean_baseline_absolute_error": 0.07074391282843771
+    }
+  ],
+  "probability_model_reference": {
+    "validated": false,
+    "trade_validated": false,
+    "outcome_coverage": 0.9900726566434069,
+    "unresolved_selected": 8,
+    "return_scope": "관측 가능한 선택 코호트 평균; 미확정 결과가 있으면 검증 실패",
+    "oos_days": 46,
+    "oos_rows": 13901,
+    "pick_rows": 230,
+    "period_start": "20260625",
+    "period_end": "20260831",
+    "auc": 0.3736571998794596,
+    "brier": 0.29658969281160347,
+    "baseline_brier": 0.26190375620680195,
+    "calibration_error": 0.24705231173029082,
+    "calibration_bins": [
+      {
+        "n": 1157,
+        "predicted": 0.19680405252586078,
+        "observed": 0.46786962485935096
+      },
+      {
+        "n": 5183,
+        "predicted": 0.21014867837804765,
+        "observed": 0.46561267407638895
+      },
+      {
+        "n": 1136,
+        "predicted": 0.35875003527633476,
+        "observed": 0.29112601496192775
+      },
+      {
+        "n": 2243,
+        "predicted": 0.4585045843371984,
+        "observed": 0.34601831354306384
+      },
+      {
+        "n": 2533,
+        "predicted": 0.5435220260434709,
+        "observed": 0.27083888190367683
+      },
+      {
+        "n": 1052,
+        "predicted": 0.6449080998079664,
+        "observed": 0.18945648485502387
+      },
+      {
+        "n": 376,
+        "predicted": 0.7348432160757403,
+        "observed": 0.24038189065049037
+      },
+      {
+        "n": 74,
+        "predicted": 0.8424675044719718,
+        "observed": 0.106947376338803
+      },
+      {
+        "n": 9,
+        "predicted": 0.9339151932926981,
+        "observed": 0.12026502900294016
+      }
+    ],
+    "hit_rate": 0.283695652173913,
+    "universe_hit_rate": 0.364939642584816,
+    "hit_lift": -0.08124399041090291,
+    "net_return_mean": -0.026784459376119066,
+    "universe_net_return_mean": -0.010499106243777258,
+    "net_return_ci95": [
+      -0.04880330417714814,
+      -0.001726649852676222
+    ],
+    "excess_return_mean": -0.016285353132341807,
+    "excess_return_ci95": [
+      -0.03516892982111432,
+      0.002963260750150866
+    ],
+    "cost_sensitivity": {
+      "20": -0.02578445937611907,
+      "30": -0.026784459376119066,
+      "40": -0.027784459376119067
+    },
+    "trade_checks": {
+      "net_ci_positive": false,
+      "excess_ci_positive": false
+    },
+    "trade_reason": "비용 후 수익 우위 미확인",
+    "checks": {
+      "sample": true,
+      "outcome_coverage": false,
+      "auc": false,
+      "brier_skill": false,
+      "top5_hit_lift": false,
+      "calibration": false
+    },
+    "reason": "검증 미달: outcome_coverage, auc, brier_skill, top5_hit_lift, calibration",
+    "label_quality": {
+      "complete": 26346,
+      "stopped": 25182,
+      "immature": 1398,
+      "missing_bar": 312,
+      "missing_entry": 261,
+      "price_discontinuity": 36,
+      "unfillable_lower_limit": 8,
+      "unfillable_upper_limit": 6
+    },
+    "version": "swing_net_profit_v1",
+    "asof": "20260907",
+    "target_definition": "익일 시가 진입·최대 5거래일 보유·손절 및 비용 후 수익",
+    "policy": {
+      "min_train_days": 60,
+      "purge_sessions": 5,
+      "min_calibration_days": 10,
+      "calibration_days": 15,
+      "test_block_days": 20,
+      "max_folds": 4,
+      "min_oos_days": 40,
+      "min_auc": 0.53,
+      "min_hit_lift": 0.03,
+      "max_calibration_error": 0.06,
+      "top_k": 5,
+      "round_trip_cost": 0.003,
+      "min_turnover": 1000000000,
+      "max_day_move": 0.25
+    },
+    "features": [
+      "ret_1d",
+      "ret_3d",
+      "ret_5d",
+      "ret_10d",
+      "ret_20d",
+      "gap_1d",
+      "intraday_return",
+      "range_pct",
+      "close_location",
+      "ma5_distance",
+      "ma20_distance",
+      "volatility_20d",
+      "relative_volume_20d",
+      "log_turnover",
+      "universe_ret_1d",
+      "universe_ret_5d",
+      "relative_ret_1d",
+      "relative_ret_5d",
+      "universe_breadth"
+    ],
+    "folds": [
+      {
+        "train_label_available": "20260602",
+        "cal_label_available": "20260624",
+        "train_label_end": "20260602",
+        "cal_start": "20260604",
+        "cal_label_end": "20260624",
+        "test_start": "20260625",
+        "test_end": "20260723"
+      },
+      {
+        "train_label_available": "20260701",
+        "cal_label_available": "20260723",
+        "train_label_end": "20260701",
+        "cal_start": "20260702",
+        "cal_label_end": "20260723",
+        "test_start": "20260724",
+        "test_end": "20260821"
+      },
+      {
+        "train_label_available": "20260730",
+        "cal_label_available": "20260821",
+        "train_label_end": "20260730",
+        "cal_start": "20260731",
+        "cal_label_end": "20260821",
+        "test_start": "20260824",
+        "test_end": "20260831"
+      }
+    ],
+    "execution_definition": "익일 시가 진입→5번째 보유 거래일 종가, -8% 손절·갭 체결·비용 반영",
+    "universe_definition": "날짜별 저장 추천 모집단, 유동성 기준 적용",
+    "limitations": [
+      "저장 추천 모집단 밖 종목은 평가하지 않음",
+      "중첩 보유 코호트 평균수익, 계좌 누적수익이 아님",
+      "시가 체결 가정, 거래비용·슬리피지 왕복0.3% 시나리오"
+    ],
+    "live_fit": {
+      "train_days": 106,
+      "calibration_days": 15,
+      "train_label_available": "2026-08-07 00:00:00",
+      "calibration_start": "2026-08-10 00:00:00",
+      "calibration_label_available": "2026-09-07 00:00:00"
+    }
+  },
+  "limitations": [
+    "Exploratory comparison after observing the failed probability model; not untouched holdout approval",
+    "Unknown selected outcomes disqualify any profitability claim",
+    "Overlapping holding-cohort means, not portfolio compounding"
+  ],
+  "seconds": 5.8
+}

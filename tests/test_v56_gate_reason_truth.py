@@ -171,11 +171,13 @@ def test_humanize_keeps_real_alpha_shortfall():
 
 
 def test_watch_section_label_matches_actual_sort_key():
-    """'조건에 가까운 순서'는 거짓 — 실제는 ALPHA_SCORE 내림차순."""
+    """v70/v77 use the funnel's alpha × reward/risk key, not alpha alone."""
     src = (ROOT / "components" / "decision_center.py").read_text(encoding="utf-8")
     code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
     assert "조건에 가까운 순서이며" not in code
-    assert "AI 알파 점수 순" in code
+    assert "AI 알파 점수 순" not in code
+    assert "엔진 선별 우선순위" in code
+    assert "점수와 손익비를 함께 반영" in code
     assert "전 종목 신규진입이 보류돼" in code
 
 

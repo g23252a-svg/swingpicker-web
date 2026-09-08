@@ -311,8 +311,8 @@ async def index():
     _has_new_update = bool(_last_seen != APP_VERSION)
     _update_label = "🧩 업데이트 🔴" if _has_new_update else "🧩 업데이트"
 
-    # 핵심 행동 탭을 앞에, 연구/운영 탭을 뒤에 둔다. 첫 화면에서는
-    # raw ranking이 아니라 PRODUCTION_BUY 한 가지 계약만 보여준다.
+    # 추천·자산·성과를 기본 탐색에 두고 나머지 기능은 더보기로 펼친다.
+    # 오늘의 스윙 순위와 공식매수 실행 계약은 별도로 표시한다.
     TAB_DEFS = [
         ("t0", "🎯 오늘"),
         ("t2", "🔎 종목"),
@@ -329,12 +329,15 @@ async def index():
     if auth == "admin":
         TAB_DEFS.append(("t8", "👑 관리"))
 
-    with ui.tabs().props("dense mobile-arrows outside-arrows").classes("w-full text-white") as tabs:
-        tab_refs = {}
-        label_to_key = {}
-        for key, label in TAB_DEFS:
-            tab_refs[key] = ui.tab(label)
-            label_to_key[label] = key
+    core_tabs = {"t0", "t2", "t3", "t1", "t7"}
+    with ui.row().classes("w-full items-center gap-2 flex-nowrap"):
+        with ui.tabs().props("dense mobile-arrows outside-arrows").classes("grow min-w-0 text-white") as tabs:
+            tab_refs = {}
+            label_to_key = {}
+            for key, label in TAB_DEFS:
+                tab_refs[key] = ui.tab(label)
+                label_to_key[label] = key
+        more_button = ui.button("더보기").props("flat no-caps").classes("shrink-0 text-slate-300")
 
     # [v24.9.1] 모바일 복귀 시 탭 원복 방지 — 마지막 탭을 세션(storage.user)에 저장/복원.
     # 배경: 모바일에서 타 앱(토스 등) 전환 시 웹소켓이 끊기고, 유예 초과 시 페이지가
@@ -343,7 +346,7 @@ async def index():
     try:
         # UX 계약이 바뀐 첫 방문에는 기존 저장 탭보다 '오늘의 결정'을
         # 한 번 우선 노출한다. 이후부터는 사용자의 마지막 탭을 복원한다.
-        _nav_version = "decision_center_v2"
+        _nav_version = "swing_board_v1"
         _seen_nav_version = app.storage.user.get("main_nav_version", "")
         _cand = app.storage.user.get("main_active_tab", "t0")
         if _seen_nav_version == _nav_version and _cand in tab_refs:
@@ -353,6 +356,24 @@ async def index():
             app.storage.user["main_active_tab"] = "t0"
     except Exception:
         logger.warning("사용자 내비게이션 상태 복원 실패", exc_info=True)
+
+    navigation = {"expanded": _saved_key not in core_tabs}
+    def show_navigation():
+        for key, tab in tab_refs.items():
+            tab.set_visibility(key in core_tabs or navigation["expanded"])
+        more_button.set_text("접기" if navigation["expanded"] else "더보기")
+
+    def toggle_navigation():
+        navigation["expanded"] = not navigation["expanded"]
+        # Keep an active secondary page reachable when its navigation is folded.
+        current_name = getattr(tabs.value, "name", tabs.value)
+        active_core = any(current_name == tab_refs[key].name for key in core_tabs)
+        if not navigation["expanded"] and not active_core:
+            tabs.set_value(tab_refs["t0"])
+        show_navigation()
+
+    more_button.on_click(toggle_navigation)
+    show_navigation()
 
     # ─── 빈 컨테이너 패널 (Lazy Loading 핵심) ───
     containers = {}

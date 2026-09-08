@@ -19,6 +19,7 @@ logger = logging.getLogger("decision_center")
 
 from services.recommendation_quality import awaiting_execution_mask, production_buy_mask
 from services.snapshot_integrity import freshness_summary
+from components.swing_board import render_swing_board
 
 
 MARKET_BREADTH_FLOOR = 35.0
@@ -439,11 +440,13 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     else:
         logger.warning("[v69] robust_depth 없음 — depth 그대로 사용")
     if _funnel_key is not None and _funnel_key.notna().any():
+        watch_pool_count = int(((~production) & _funnel_key.notna()).sum())
         watch_df = (work.assign(_fk=_funnel_key)
                     .loc[lambda x: (~production) & x["_fk"].notna()]
                     .sort_values("_fk", ascending=False)
                     .head(_watch_depth))
     else:
+        watch_pool_count = int(((~production) & action.eq("WATCH") & (_qty > 0)).sum())
         watch_df = work[(~production) & action.eq("WATCH") & (_qty > 0)].sort_values(
             _sort_cols, ascending=False
         ).head(_watch_depth)
@@ -636,6 +639,7 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
         "buys": buys,
         "watch": watch,
         "watch_depth": int(_watch_depth),
+        "watch_pool_count": watch_pool_count,
         "watch_pool_line": (
             "목록 기준을 **퍼널 통과 순위**로 바꿨습니다(v70). 종전 기준"
             "(관망+수량>0)은 같은 퍼널 안에서 성적이 나쁜 쪽을 골라내고 "
@@ -1056,176 +1060,188 @@ def render_decision_center(df: pd.DataFrame, auth: str = "free") -> None:
         if freshness["stale"]:
             ui.label("표시 가격은 추천 기준일보다 이전 데이터입니다. 주문 전 최신 가격을 확인하세요.").classes(
                 "w-full rounded-xl p-3 bg-amber-950 text-amber-200 text-sm")
-        cash = summary["status"] != "BUY"
-        with ui.card().classes("sp-decision-hero w-full p-6 md:p-8 rounded-3xl"):
-            with ui.row().classes("w-full items-start justify-between gap-4 flex-wrap"):
-                with ui.column().classes("gap-2 max-w-3xl grow"):
-                    ui.label("오늘 해야 할 일").classes(
-                        "text-xs font-bold tracking-[0.18em] text-slate-400 uppercase"
-                    )
-                    ui.label(summary["action_label"]).classes(
-                        "sp-decision-title text-2xl md:text-4xl font-bold "
-                        + ("text-amber-200" if cash else "text-emerald-200")
-                    )
-                    ui.label(summary["action_detail"]).classes(
-                        "text-sm md:text-base text-slate-300 leading-relaxed"
-                    )
-                with ui.column().classes("sp-decision-status items-end gap-1 rounded-2xl px-4 py-3 min-w-[150px]"):
-                    ui.label("최종 결정").classes("text-[10px] font-bold tracking-wider text-slate-500")
-                    ui.badge(
-                        "CASH · 주문 보류" if cash else "BUY · 지정가",
-                        color="#F59E0B" if cash else "#10B981",
-                    ).classes("text-sm font-bold px-3 py-1")
-                    ui.label(f"공식 매수 {summary['production_count']}개").classes("text-xs text-slate-400")
-            with ui.row().classes("sp-next-check w-full items-start gap-3 rounded-xl p-3 mt-4"):
-                ui.label("다음 확인").classes("text-xs font-bold text-sky-300 shrink-0")
-                ui.label(summary["next_check"]).classes("text-xs md:text-sm text-slate-300")
-            # [v34] 폭락 방어(risk_off) 잠금 스트립 — '왜 안 사는지'의 최상위 이유를
-            # 해제 조건·진행률과 함께 노출 (7/16 피드백: 차단자가 화면에 없었음)
-            _ro = summary.get("risk_off") or {}
-            _mkt = _ro.get("market") or {}
-            if _ro.get("active") or _mkt.get("risk_off"):
-                with ui.column().classes("w-full gap-1 rounded-xl p-3 mt-2").style(
-                    "background:rgba(180,83,9,.10); border:1px solid rgba(245,158,11,.28);"
-                ):
-                    # [v55] 문구 정직화. 기존 문구는 '실측 승률 17%라 자동 차단'이라고
-                    # 단정했지만 v55 재측정은 그것을 확인하지 못했다 — 패널 내 차단일
-                    # 6일의 반사실 픽은 오히려 +3.15%(승률 66.7%)였고 허용일보다
-                    # 나빴다는 증거가 없다(Welch -0.72%p t=-0.20 p=0.85 · 순열 p=0.60).
-                    # 깊은 폭락 구간(-8~-20%)은 아직 선행수익이 없어 평가 불가이고,
-                    # v49 기록대로 이 축은 창 길이에 따라 부호가 뒤집힌 이력이 있다.
-                    # 규칙은 그대로 두되(안전 쪽), '검증됨'이라고 말하지 않는다.
-                    ui.label(
-                        "🔒 폭락 방어(risk_off) 작동 중 — 코스피가 하락하는 20일선 아래로 "
-                        "3% 이상 이탈한 구간에서는 전 종목 신규진입을 자동 보류합니다"
-                    ).classes("text-xs md:text-sm font-bold text-amber-200")
-                    if _mkt.get("ok"):
-                        ui.label(_mkt.get("reason", "")).classes(
-                            "text-xs text-amber-100 font-semibold")
-                    if _ro.get("line"):
-                        ui.label(_ro["line"]).classes("text-xs text-slate-300")
-                    ui.label(
-                        "이 보류 규칙이 수익을 지킨다는 것은 아직 통계로 확립되지 않았습니다 "
-                        "— 안전 쪽 선택이며, 깊은 하락 구간의 성과는 표본이 쌓이면 재검증합니다"
-                    ).classes("text-[10px] text-slate-500")
-                    if _ro.get("progress") is not None:
-                        with ui.element("div").style(
-                            "width:100%; height:8px; background:rgba(148,163,184,.15);"
-                            " border-radius:6px; overflow:hidden; margin-top:2px;"
-                        ):
-                            ui.element("div").style(
-                                f"width:{_ro['progress']:.0f}%; height:100%;"
-                                " background:linear-gradient(90deg,#F59E0B,#10B981);"
-                            )
+        # Ranking and order permission are separate: forecasts never promote a buy.
+        render_swing_board(df, summary)
+
+        with ui.expansion(
+            f"공식 매수 계획 · 보유 관리 (공식 {summary['production_count']}개)",
+            icon="assignment", value=False,
+        ).classes("w-full rounded-xl border border-slate-700 text-slate-200").props("dense"):
+            cash = summary["status"] != "BUY"
+            with ui.card().classes("sp-decision-hero w-full p-6 md:p-8 rounded-3xl"):
+                with ui.row().classes("w-full items-start justify-between gap-4 flex-wrap"):
+                    with ui.column().classes("gap-2 max-w-3xl grow"):
+                        ui.label("오늘 해야 할 일").classes(
+                            "text-xs font-bold tracking-[0.18em] text-slate-400 uppercase"
+                        )
+                        ui.label(summary["action_label"]).classes(
+                            "sp-decision-title text-2xl md:text-4xl font-bold "
+                            + ("text-amber-200" if cash else "text-emerald-200")
+                        )
+                        ui.label(summary["action_detail"]).classes(
+                            "text-sm md:text-base text-slate-300 leading-relaxed"
+                        )
+                    with ui.column().classes("sp-decision-status items-end gap-1 rounded-2xl px-4 py-3 min-w-[150px]"):
+                        ui.label("최종 결정").classes("text-[10px] font-bold tracking-wider text-slate-500")
+                        ui.badge(
+                            "CASH · 주문 보류" if cash else "BUY · 지정가",
+                            color="#F59E0B" if cash else "#10B981",
+                        ).classes("text-sm font-bold px-3 py-1")
+                        ui.label(f"공식 매수 {summary['production_count']}개").classes("text-xs text-slate-400")
+                with ui.row().classes("sp-next-check w-full items-start gap-3 rounded-xl p-3 mt-4"):
+                    ui.label("다음 확인").classes("text-xs font-bold text-sky-300 shrink-0")
+                    ui.label(summary["next_check"]).classes("text-xs md:text-sm text-slate-300")
+                # [v34] 폭락 방어(risk_off) 잠금 스트립 — '왜 안 사는지'의 최상위 이유를
+                # 해제 조건·진행률과 함께 노출 (7/16 피드백: 차단자가 화면에 없었음)
+                _ro = summary.get("risk_off") or {}
+                _mkt = _ro.get("market") or {}
+                if _ro.get("active") or _mkt.get("risk_off"):
+                    with ui.column().classes("w-full gap-1 rounded-xl p-3 mt-2").style(
+                        "background:rgba(180,83,9,.10); border:1px solid rgba(245,158,11,.28);"
+                    ):
+                        # [v55] 문구 정직화. 기존 문구는 '실측 승률 17%라 자동 차단'이라고
+                        # 단정했지만 v55 재측정은 그것을 확인하지 못했다 — 패널 내 차단일
+                        # 6일의 반사실 픽은 오히려 +3.15%(승률 66.7%)였고 허용일보다
+                        # 나빴다는 증거가 없다(Welch -0.72%p t=-0.20 p=0.85 · 순열 p=0.60).
+                        # 깊은 폭락 구간(-8~-20%)은 아직 선행수익이 없어 평가 불가이고,
+                        # v49 기록대로 이 축은 창 길이에 따라 부호가 뒤집힌 이력이 있다.
+                        # 규칙은 그대로 두되(안전 쪽), '검증됨'이라고 말하지 않는다.
                         ui.label(
-                            "해제 진행률 — 코스피가 20일선 -3% 이내로 회복하면 매수 후보가 자동 재개됩니다"
+                            "🔒 폭락 방어(risk_off) 작동 중 — 코스피가 하락하는 20일선 아래로 "
+                            "3% 이상 이탈한 구간에서는 전 종목 신규진입을 자동 보류합니다"
+                        ).classes("text-xs md:text-sm font-bold text-amber-200")
+                        if _mkt.get("ok"):
+                            ui.label(_mkt.get("reason", "")).classes(
+                                "text-xs text-amber-100 font-semibold")
+                        if _ro.get("line"):
+                            ui.label(_ro["line"]).classes("text-xs text-slate-300")
+                        ui.label(
+                            "이 보류 규칙이 수익을 지킨다는 것은 아직 통계로 확립되지 않았습니다 "
+                            "— 안전 쪽 선택이며, 깊은 하락 구간의 성과는 표본이 쌓이면 재검증합니다"
                         ).classes("text-[10px] text-slate-500")
+                        if _ro.get("progress") is not None:
+                            with ui.element("div").style(
+                                "width:100%; height:8px; background:rgba(148,163,184,.15);"
+                                " border-radius:6px; overflow:hidden; margin-top:2px;"
+                            ):
+                                ui.element("div").style(
+                                    f"width:{_ro['progress']:.0f}%; height:100%;"
+                                    " background:linear-gradient(90deg,#F59E0B,#10B981);"
+                                )
+                            ui.label(
+                                "해제 진행률 — 코스피가 20일선 -3% 이내로 회복하면 매수 후보가 자동 재개됩니다"
+                            ).classes("text-[10px] text-slate-500")
 
-        # [v67] 파는 것이 사는 것보다 급하다 — 매수 게이트보다 위에 둔다.
-        _render_holdings(summary)
-        _render_winrate_truth(summary)
+            # [v67] 파는 것이 사는 것보다 급하다 — 매수 게이트보다 위에 둔다.
+            _render_holdings(summary)
 
-        ui.label("매수 가능 여부").classes("text-lg font-bold text-white mt-1")
-        with ui.grid(columns=3).classes("sp-gate-grid w-full gap-2"):
-            for gate in summary["gates"]:
-                status_color = {
-                    "green": "#059669",
-                    "amber": "#B45309",
-                    "slate": "#475569",
-                }[gate["tone"]]
-                with ui.card().classes("sp-gate-card w-full p-4 rounded-2xl"):
-                    with ui.row().classes("w-full items-center justify-between gap-2"):
-                        with ui.row().classes("items-center gap-2"):
-                            ui.label(gate["step"]).classes("sp-gate-step")
-                            ui.label(gate["label"]).classes("text-sm font-bold text-slate-200")
-                        ui.badge(gate["status"], color=status_color).classes("font-bold")
-                    ui.label(gate["value"]).classes("text-lg font-bold text-white mt-3")
-                    ui.label(gate["detail"]).classes("text-xs text-slate-500 mt-1")
+            ui.label("매수 가능 여부").classes("text-lg font-bold text-white mt-1")
+            with ui.grid(columns=3).classes("sp-gate-grid w-full gap-2"):
+                for gate in summary["gates"]:
+                    status_color = {
+                        "green": "#059669",
+                        "amber": "#B45309",
+                        "slate": "#475569",
+                    }[gate["tone"]]
+                    with ui.card().classes("sp-gate-card w-full p-4 rounded-2xl"):
+                        with ui.row().classes("w-full items-center justify-between gap-2"):
+                            with ui.row().classes("items-center gap-2"):
+                                ui.label(gate["step"]).classes("sp-gate-step")
+                                ui.label(gate["label"]).classes("text-sm font-bold text-slate-200")
+                            ui.badge(gate["status"], color=status_color).classes("font-bold")
+                        ui.label(gate["value"]).classes("text-lg font-bold text-white mt-3")
+                        ui.label(gate["detail"]).classes("text-xs text-slate-500 mt-1")
 
-        if summary["buys"]:
-            ui.label("오늘의 공식 매수").classes("text-lg font-bold text-white mt-2")
-            for stock in summary["buys"]:
-                _render_buy_card(stock)
-        else:
-            with ui.card().classes("sp-blocker-card w-full p-4 md:p-5 rounded-2xl"):
-                ui.label("오늘 매수가 막힌 이유").classes("font-bold text-amber-200")
-                with ui.column().classes("w-full gap-2 mt-2"):
-                    for index, reason in enumerate(summary["blockers"], 1):
-                        with ui.row().classes("w-full items-start gap-2"):
-                            ui.label(str(index)).classes("sp-blocker-number")
-                            ui.label(reason).classes("text-sm text-slate-200 leading-relaxed")
+            if summary["buys"]:
+                ui.label("오늘의 공식 매수").classes("text-lg font-bold text-white mt-2")
+                for stock in summary["buys"]:
+                    _render_buy_card(stock)
+            else:
+                with ui.card().classes("sp-blocker-card w-full p-4 md:p-5 rounded-2xl"):
+                    ui.label("오늘 매수가 막힌 이유").classes("font-bold text-amber-200")
+                    with ui.column().classes("w-full gap-2 mt-2"):
+                        for index, reason in enumerate(summary["blockers"], 1):
+                            with ui.row().classes("w-full items-start gap-2"):
+                                ui.label(str(index)).classes("sp-blocker-number")
+                                ui.label(reason).classes("text-sm text-slate-200 leading-relaxed")
 
-        if summary["watch"]:
-            with ui.row().classes("w-full items-end justify-between gap-3 flex-wrap mt-2"):
-                with ui.column().classes("gap-0"):
-                    # [v56] '조건에 가까운 순서'는 거짓이었다 — 실제 정렬키는
-                    # ALPHA_SCORE 내림차순이다(위 _sort_cols). 게다가 전 종목이
-                    # 차단된 날에는 '가까운' 것 자체가 없다(2026-08-06: 278/278 차단,
-                    # 1위 흥구석유 알파 100점이 문턱 85를 통과했는데도 픽 아님).
-                    _rs = summary.get("risk_off") or {}
-                    _blocked_now = bool((_rs.get("market") or {}).get("risk_off")) or \
-                        bool(_rs.get("active"))
-                    ui.label("AI 알파 상위 관찰 후보").classes("text-lg font-bold text-white")
+            if summary["watch"]:
+                with ui.row().classes("w-full items-end justify-between gap-3 flex-wrap mt-2"):
+                    with ui.column().classes("gap-0"):
+                        # v70/v77 rank the eligible funnel by alpha × reward/risk.
+                        # This is a legacy swing priority, never an individual probability.
+                        _rs = summary.get("risk_off") or {}
+                        _blocked_now = bool((_rs.get("market") or {}).get("risk_off")) or \
+                            bool(_rs.get("active"))
+                        ui.label("기존 엔진 상위 관찰 후보").classes("text-lg font-bold text-white")
+                        ui.label(
+                            "엔진 선별 우선순위입니다. 오늘은 전 종목 신규진입이 보류돼 "
+                            "조건 근접도와 무관하며, 매수 추천이 아닙니다."
+                            if _blocked_now else
+                            "엔진 선별 우선순위이며 매수 추천이 아닙니다. 알파 적용 시 점수와 손익비를 함께 반영합니다."
+                        ).classes("text-xs text-slate-500")
+                        # [v70] 목록 모집단을 바꾼 근거를 화면에 남긴다
+                        if summary.get("watch_pool_line"):
+                            ui.label(summary["watch_pool_line"]).classes(
+                                "text-[11px] text-emerald-200 leading-relaxed")
+                        # [v69] 왜 이만큼만 보여주는지 — 근거 없이 자르지 않는다
+                        if summary.get("watch_depth_line"):
+                            ui.label(summary["watch_depth_line"]).classes(
+                                "text-[11px] text-amber-200 leading-relaxed")
+                    ui.badge(f"선별 대상 {summary.get('watch_pool_count', 0)}개", color="#475569")
+                for rank, stock in enumerate(summary["watch"], 1):
+                    _render_watch_card(stock, rank)
+                if summary.get("watch_pool_count", 0) > len(summary["watch"]):
                     ui.label(
-                        "AI 알파 점수 순입니다. 오늘은 전 종목 신규진입이 보류돼 "
-                        "조건 근접도와 무관하며, 매수 추천이 아닙니다."
-                        if _blocked_now else
-                        "AI 알파 점수 순이며 매수 추천이 아닙니다."
+                        f"상위 {len(summary['watch'])}개만 표시했습니다. "
+                        "표시 깊이의 측정 근거는 위 검증 내용을 확인하세요."
                     ).classes("text-xs text-slate-500")
-                    # [v70] 목록 모집단을 바꾼 근거를 화면에 남긴다
-                    if summary.get("watch_pool_line"):
-                        ui.label(summary["watch_pool_line"]).classes(
-                            "text-[11px] text-emerald-200 leading-relaxed")
-                    # [v69] 왜 이만큼만 보여주는지 — 근거 없이 자르지 않는다
-                    if summary.get("watch_depth_line"):
-                        ui.label(summary["watch_depth_line"]).classes(
-                            "text-[11px] text-amber-200 leading-relaxed")
-                ui.badge(f"전체 관찰 {summary['watch_count']}개", color="#475569")
-            for rank, stock in enumerate(summary["watch"], 1):
-                _render_watch_card(stock, rank)
-            if summary["watch_count"] > len(summary["watch"]):
-                ui.label(
-                    f"상위 {len(summary['watch'])}개만 표시했습니다. "
-                    f"나머지 {summary['watch_count'] - len(summary['watch'])}개는 "
-                    "종목 탭에 있지만, 그 깊이에서는 실측 초과수익이 0 이하였습니다."
-                ).classes("text-xs text-slate-500")
 
-        _render_risk_total(summary)
+            _render_risk_total(summary)
 
-        # [v58.1] 이 엔진의 지난 성적 — 매일 산출하면서 화면에 없던 것.
-        #   숫자를 자랑하려는 자리가 아니다. 표본이 얇고 최근 구간이 5년 만의
-        #   폭락이었다는 사실까지 같이 보여야 사용자가 픽을 과대평가하지 않는다.
-        if summary.get("track_record"):
-            with ui.column().classes("w-full gap-1 mt-2"):
-                ui.label("이 엔진의 지난 성적 (과거 관측 · 미래 약속 아님)").classes(
-                    "text-xs font-bold text-slate-400")
-                for _line in summary["track_record"]:
-                    ui.label(_line).classes("text-xs text-slate-400 leading-relaxed")
 
-        # [v80] 검증 루프 상태 — v73 레인·v78 승자 프로파일·v76 예산·손절 실체.
-        #   사장님이 20일 판정을 내리려면 화면에서 매일 봐야 한다.
-        try:
-            _render_validation_loops(_validation_payload(df))
-        except Exception as _ve:
-            logger.warning(f"[v80] 검증 루프 섹션 생략: {_ve}")
+        with ui.expansion("기존 엔진 성과 · 승률 검증", icon="analytics", value=False).classes(
+            "w-full rounded-xl border border-slate-700 text-slate-300"
+        ).props("dense"):
+            _render_winrate_truth(summary)
+            # [v58.1] 이 엔진의 지난 성적 — 매일 산출하면서 화면에 없던 것.
+            #   숫자를 자랑하려는 자리가 아니다. 표본이 얇고 최근 구간이 5년 만의
+            #   폭락이었다는 사실까지 같이 보여야 사용자가 픽을 과대평가하지 않는다.
+            if summary.get("track_record"):
+                with ui.column().classes("w-full gap-1 mt-2"):
+                    ui.label("이 엔진의 지난 성적 (과거 관측 · 미래 약속 아님)").classes(
+                        "text-xs font-bold text-slate-400")
+                    for _line in summary["track_record"]:
+                        ui.label(_line).classes("text-xs text-slate-400 leading-relaxed")
 
-        with ui.row().classes("sp-rule-row w-full gap-2 mt-2"):
-            for text in [
-                "공식 매수 0개면 주문 없음",
-                "관찰 후보·AI 점수만으로 매수 금지",
-                "매수 시 지정가·손절가·비중 동시 준수",
-                # [v45 정정] v37의 '당일 3~5종목 분산' 권고는 구 게이트(알파≥80,
-                # 저점추세 미적용) 풀에서 측정한 값이었다. 현행 게이트(알파≥85 +
-                # 저점추세≥0, 풀 27개/일)로 재측정하면 정반대 —
-                #   top1 +2.86%/일 승률50% (누적 +183%)  vs  top3 -0.12%/47%
-                #   페어드 t=-2.92 p=0.005 (top3가 유의하게 열위)
-                # 게이트가 정제된 뒤로는 1등 픽이 최선이고, 분산은 '같은 날 쪼개기'가
-                # 아니라 '종목당 비중 제한 + 날짜 분산'으로 달성한다.
-                "하루 1종목 · 종목당 3~5% 비중 (당일 분산은 실측 열위)",
-            ]:
-                with ui.row().classes("sp-rule-pill items-center gap-2 rounded-xl px-3 py-2 grow"):
-                    ui.label("✓").classes("text-emerald-400 font-bold")
-                    ui.label(text).classes("text-xs text-slate-400")
+
+        with ui.expansion("검증 중인 전략 · 운용 원칙", icon="science", value=False).classes(
+            "w-full rounded-xl border border-slate-700 text-slate-300"
+        ).props("dense"):
+            # [v80] 검증 루프 상태 — v73 레인·v78 승자 프로파일·v76 예산·손절 실체.
+            #   사장님이 20일 판정을 내리려면 화면에서 매일 봐야 한다.
+            try:
+                _render_validation_loops(_validation_payload(df))
+            except Exception as _ve:
+                logger.warning(f"[v80] 검증 루프 섹션 생략: {_ve}")
+
+            with ui.row().classes("sp-rule-row w-full gap-2 mt-2"):
+                for text in [
+                    "공식 매수 0개면 주문 없음",
+                    "관찰 후보·AI 점수만으로 매수 금지",
+                    "매수 시 지정가·손절가·비중 동시 준수",
+                    # [v45 정정] v37의 '당일 3~5종목 분산' 권고는 구 게이트(알파≥80,
+                    # 저점추세 미적용) 풀에서 측정한 값이었다. 현행 게이트(알파≥85 +
+                    # 저점추세≥0, 풀 27개/일)로 재측정하면 정반대 —
+                    #   top1 +2.86%/일 승률50% (누적 +183%)  vs  top3 -0.12%/47%
+                    #   페어드 t=-2.92 p=0.005 (top3가 유의하게 열위)
+                    # 게이트가 정제된 뒤로는 1등 픽이 최선이고, 분산은 '같은 날 쪼개기'가
+                    # 아니라 '종목당 비중 제한 + 날짜 분산'으로 달성한다.
+                    "하루 1종목 · 종목당 3~5% 비중 (당일 분산은 실측 열위)",
+                ]:
+                    with ui.row().classes("sp-rule-pill items-center gap-2 rounded-xl px-3 py-2 grow"):
+                        ui.label("✓").classes("text-emerald-400 font-bold")
+                        ui.label(text).classes("text-xs text-slate-400")
 
         ui.label("성과를 보장하지 않습니다. 오늘 탭의 공식 결정과 가격 규칙을 함께 지켜야 검증 결과와 실제 운용의 차이를 줄일 수 있습니다.").classes(
             "text-xs text-slate-600 mt-1"

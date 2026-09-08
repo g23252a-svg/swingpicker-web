@@ -119,6 +119,11 @@ jobs:
           python collector.py
           echo ">>> Collector 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
+      - name: Check Frozen Swing Forecast Performance
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        run: python scripts/check_swing_performance.py --data-dir data --output data/swing_performance_latest.json
+
       # [v3.7.21] 매일 백테스트 검증 자동 재실행
       # ┌─ 이전엔 수동으로만 돌려서 backtest_validation_latest.json이 정체됨
       # │  (매일 같은 통계가 Tab 2에 표시됨 — 'wf capital 0/5', '실집행 5건' 고착)

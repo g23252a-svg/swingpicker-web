@@ -348,6 +348,9 @@ class DataStore:
                 df["RECOMMENDED_WEIGHT_PCT"] = 0.0
                 df["QUALITY_GUARD_REASON"] = "품질게이트 실행 실패"
 
+            from services.swing_service import enrich_from_snapshot
+            df = enrich_from_snapshot(df, DATA_DIR)
+
             data_ts = snapshot_date(df) or "확인 불가"
             if source == "remote":
                 # Replace in one operation; a failed write never truncates the cache.
