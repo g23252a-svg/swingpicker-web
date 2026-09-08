@@ -63,3 +63,6 @@ research/_panel_cache.parquet
 research/_pool_cache.parquet
 research/_full_panel_cache.parquet
 research/_volume_history.parquet
+
+# Derived swing training cache (prediction/audit artifacts are committed separately)
+data/.swing_cache/

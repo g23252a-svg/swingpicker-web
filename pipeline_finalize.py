@@ -1917,6 +1917,18 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         df_out["RECOMMENDED_WEIGHT_PCT"] = 0.0
         df_out["QUALITY_GUARD_REASON"] = "품질게이트 실행 실패"
 
+    # 다음 거래일 진입용 스윙 후보. 기존 공식매수·수량 계약과 분리된 확률/연구 순위.
+    try:
+        from services.swing_model import run as _run_swing_model
+        from services.swing_service import attach_predictions as _attach_swing_predictions
+        _sp, _sr = _run_swing_model(OUT_DIR, trade_ymd,
+                                    current_codes=df_out["종목코드"].astype(str).tolist())
+        df_out = _attach_swing_predictions(df_out, _sp, _sr)
+        log(f"스윙 후보 {len(_sp)}개 · 확률검증 {_sr.get('validated')} · "
+            f"비용후우위 {_sr.get('trade_validated')} · OOS {_sr.get('oos_days', 0)}일")
+    except Exception as _se:
+        logger.warning("스윙 확률 모델 실패 — 기존 추천 유지: %s", _se)
+
     # [v74.1] 재추천 이력 — **CSV 저장보다 먼저** 돌아야 한다.
     #   첫 배선은 저장 뒤(구 2185행)에 있어서 컬럼을 붙이고 그대로 버렸다.
     #   8/28 첫 실배치 실측: 로그는 '5종목 재등장'인데 CSV에 PICK_* 컬럼이

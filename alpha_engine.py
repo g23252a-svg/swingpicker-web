@@ -52,6 +52,9 @@ _BAN_COLS = {
 GATE_MIN_IC_T = 2.0
 GATE_MIN_AUC = 0.52
 GATE_MIN_SPREAD = 0.0
+# Older artifacts used previous-month rows whose labels reached into the test
+# month.  They must be revalidated before being used after this correction.
+VALIDATION_SCHEME = "purged_label_end_v1"
 # 픽 바닥 필터 (당일 백분위)
 ALPHA_FLOOR_PCT = 30.0
 
@@ -290,6 +293,11 @@ def build_training_panel(data_dir: str = "data", max_days: int = 200):
     close, fwd = _load_ohlcv_panel(data_dir)
     if close is None:
         return None
+    # Match the exact row-shift used by _load_ohlcv_panel.  BDay offsets are not
+    # safe here: Korean exchange holidays can extend a label across a month.
+    label_end = pd.Series(close.index.strftime("%Y%m%d"), index=close.index).shift(
+        -(_HOLD_BDAYS + 1)
+    )
     parts = []
     files = sorted(glob.glob(os.path.join(data_dir, "recommend_2*.csv")))[-max_days:]
     for f in files:
@@ -317,6 +325,7 @@ def build_training_panel(data_dir: str = "data", max_days: int = 200):
         if len(rec) < 30:
             continue
         rec["_ymd"] = ymd
+        rec["_label_end_ymd"] = label_end.loc[d]
         parts.append(rec)
     if not parts:
         return None
@@ -415,26 +424,67 @@ def _fit_predict(panel, feats, train_mask, pred_mask):
     return model, ok, model.predict(X)
 
 
+def _validation_label_ends(panel: pd.DataFrame) -> tuple[pd.Series, str]:
+    """Resolve when each forward label was fully observable.
+
+    Production panels carry the actual OHLCV session.  Legacy/synthetic panels
+    use their observed sessions, which can conservatively purge extra rows when
+    a recommendation day is missing.  Invalid explicit endpoints never fall
+    back to an earlier estimate.
+    """
+    anchors = pd.to_datetime(panel["_ymd"].astype(str), format="%Y%m%d", errors="coerce")
+    if "_label_end_ymd" in panel.columns:
+        ends = pd.to_datetime(
+            panel["_label_end_ymd"].astype(str), format="%Y%m%d", errors="coerce"
+        )
+        source = "ohlcv_label_end"
+    else:
+        sessions = pd.DatetimeIndex(anchors.dropna().unique()).sort_values()
+        mapping = pd.Series(sessions, index=sessions).shift(-(_HOLD_BDAYS + 1))
+        ends = anchors.map(mapping)
+        source = "observed_panel_sessions_conservative"
+    return ends.where(ends > anchors), source
+
+
 def walk_forward_validate(panel: pd.DataFrame, feats: list, min_train_days: int = 25) -> dict:
-    """월 단위 워크포워드 → OOS 지표. 학습에 미래 정보 없음."""
+    """월 단위 검증. 테스트월 시작 전에 확정된 라벨만 학습한다."""
     from sklearn.metrics import roc_auc_score
     panel = panel.copy()
     panel["_ym"] = panel["_ymd"].str[:6]
     months = sorted(panel["_ym"].unique())
     panel["_pred"] = np.nan
+    label_ends, label_end_source = _validation_label_ends(panel)
+    folds = []
     for m in months[1:]:
-        tr = panel["_ym"] < m
+        past = panel["_ym"] < m
+        test_start = pd.to_datetime(m + "01", format="%Y%m%d")
+        tr = past & label_ends.notna() & (label_ends < test_start)
         te = panel["_ym"] == m
         if panel.loc[tr, "_ymd"].nunique() < min_train_days or te.sum() < 300:
             continue
         try:
             _, _, preds = _fit_predict(panel, feats, tr, te)
             panel.loc[te, "_pred"] = preds
+            folds.append({
+                "test_month": m,
+                "test_start": test_start.strftime("%Y%m%d"),
+                "train_last_anchor": str(panel.loc[tr, "_ymd"].max()),
+                "train_last_label_end": label_ends.loc[tr].max().strftime("%Y%m%d"),
+                "train_days": int(panel.loc[tr, "_ymd"].nunique()),
+                "purged_rows": int((past & ~tr).sum()),
+            })
         except Exception as e:
             logger.warning(f"워크포워드 {m} 학습 실패: {e}")
     oos = panel[panel["_pred"].notna()]
+    split_meta = {
+        "validation_scheme": VALIDATION_SCHEME,
+        "label_end_source": label_end_source,
+        "label_end_offset_sessions": _HOLD_BDAYS + 1,
+        "folds": folds,
+    }
     if oos["_ymd"].nunique() < 20:
-        return {"ok": False, "reason": f"OOS 일수 부족 ({oos['_ymd'].nunique()}일)"}
+        return {"ok": False, "validated": False,
+                "reason": f"OOS 일수 부족 ({oos['_ymd'].nunique()}일)", **split_meta}
     ics, spreads = [], []
     for _, g in oos.groupby("_ymd"):
         # [v31.8] non-finite 수익률 방어 (0원 시가 글리치 등)
@@ -473,6 +523,7 @@ def walk_forward_validate(panel: pd.DataFrame, feats: list, min_train_days: int 
         "auc": round(auc, 4), "q5q1_spread_pct": round(spread, 3),
         "gate": {"min_ic_t": GATE_MIN_IC_T, "min_auc": GATE_MIN_AUC, "min_spread": GATE_MIN_SPREAD},
         "calibration": calib,
+        **split_meta,
     }
 
 
@@ -541,7 +592,7 @@ def score_today(df: pd.DataFrame, data_dir: str = "data",
     out["ALPHA_WIN_PROB"] = np.nan
     out["ALPHA_VALIDATED"] = 0
     meta = load_meta(data_dir)
-    if not meta.get("validated"):
+    if not meta.get("validated") or meta.get("validation_scheme") != VALIDATION_SCHEME:
         return out
     model_file = os.path.join(data_dir, MODEL_PATH)
     if not os.path.exists(model_file):
