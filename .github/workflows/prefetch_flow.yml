@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  actions: write     # [v81] auto_collect 체인 dispatch
 
 jobs:
   prefetch:
@@ -72,3 +73,25 @@ jobs:
             git push origin main
           }
           echo "Done."
+
+      # [v81] 배치 체인 — auto_collect의 cron(11:23Z)은 8/27 이후 매일 3~4시간 늦게
+      #   자정 넘어 발화해 가드에 스킵되고, 외부 감시자는 4일 중 1일만 성공했다
+      #   (9/4·9/8·9/9 배치 누락 → 화면이 9/7 픽을 사흘 보여줌). 반면 이 워크플로의
+      #   cron은 늦더라도 매일 저녁(20:33~22:02 KST)에는 꼭 발화한다. 그래서 여기서
+      #   오늘자 CSV가 없으면 auto_collect를 dispatch한다 — dispatch는 가드를 우회하고
+      #   배치는 멱등이다. GITHUB_TOKEN은 workflow_dispatch 생성이 허용된다.
+      - name: Chain auto_collect if today's batch is missing
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
+          git fetch origin main --quiet || true
+          if git cat-file -e "origin/main:data/recommend_${TODAY}.csv" 2>/dev/null; then
+            echo "recommend_${TODAY}.csv 이미 있음 — 체인 생략"
+          elif [ "$(TZ=Asia/Seoul date +%u)" -ge 6 ]; then
+            echo "주말 — 체인 생략"
+          else
+            echo "오늘 배치 없음 — auto_collect dispatch"
+            gh workflow run auto_collect.yml --ref main
+          fi

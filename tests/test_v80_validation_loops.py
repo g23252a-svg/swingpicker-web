@@ -171,3 +171,28 @@ class TestScreen:
     def test_finalize_runs_track_after_lane(self):
         src = open("pipeline_finalize.py", encoding="utf-8").read()
         assert src.index("_qb.run_batch") < src.index("_QT.run_batch") < src.index("_IFF.collect")
+
+
+class TestBatchChain:
+    """[v81] prefetch_flow → auto_collect 체인. 저녁에 꼭 발화하는 cron이 배치를 보장한다."""
+
+    def _y(self):
+        return open(".github/workflows/prefetch_flow.yml", encoding="utf-8").read()
+
+    def test_chain_step_exists_and_dispatches(self):
+        y = self._y()
+        assert "gh workflow run auto_collect.yml --ref main" in y
+        assert "actions: write" in y, "GITHUB_TOKEN으로 dispatch하려면 actions: write"
+
+    def test_chain_skips_when_csv_exists_or_weekend(self):
+        y = self._y()
+        i = y.index("Chain auto_collect")
+        blk = y[i:i + 1500]
+        assert 'recommend_${TODAY}.csv' in blk and "체인 생략" in blk
+        assert 'date +%u)" -ge 6' in blk
+
+    def test_chain_runs_even_if_prefetch_failed(self):
+        """수급 수집이 실패해도 배치 체인은 돌아야 한다."""
+        y = self._y()
+        i = y.index("Chain auto_collect")
+        assert "if: always()" in y[i:i + 300]
