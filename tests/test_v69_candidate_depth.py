@@ -261,9 +261,17 @@ class TestRealMeasurement:
         assert cur[max(cur)]["excess_pct"] <= 0.5
 
     def test_nothing_is_significant(self, rep):
-        """유의한 N이 생기면 이 패치의 전제(‘검증되지 않았다’)를 갱신해야 한다."""
-        assert all(c["p"] > 0.05 for c in rep["curve"]), \
-            "0.05를 넘긴 N이 생겼다 — caveat과 규칙을 재검토하라"
+        """유의하게 **나은** N이 생기면 이 패치의 전제(‘검증되지 않았다’)를 갱신해야 한다.
+
+        [v82.1] 9/9 배치까지 35일 실측에서 N=12가 p=0.044로 걸렸다 — 그런데
+        초과수익 -0.95%p, 즉 유니버스보다 유의하게 **나쁜** 깊이다. 그건 전제
+        ('어떤 깊이도 낫다고 검증되지 않았다')를 뒤집는 게 아니라 '깊이 들어갈수록
+        나빠진다'는 v69의 이유를 강화한다. 경보는 '유의하게 나은 N'에만 건다.
+        나쁜 쪽 유의성은 아래 test_deep_ranks_*가 이미 방향을 잡고 있다.
+        """
+        better = [c for c in rep["curve"] if c["excess_pct"] > 0 and c["p"] <= 0.05]
+        assert not better, \
+            f"유니버스보다 유의하게 나은 N이 생겼다 {[(c['n'], c['p']) for c in better]} — caveat과 규칙을 재검토하라"
 
     def test_screen_depth_is_conservative(self, rep):
         d = CD.effective_depth(rep)
