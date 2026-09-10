@@ -6,57 +6,58 @@
  "axes": {
   "STRUCT_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0474,
-   "t_stat": -2.19,
+   "mean_ic": -0.0485,
+   "t_stat": -2.24,
    "orientation": 1,
-   "pct_positive": 0.382,
+   "pct_positive": 0.364,
    "verdict": "역주행"
   },
   "TIMING_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0377,
-   "t_stat": -1.76,
+   "mean_ic": -0.0458,
+   "t_stat": -2.1,
    "orientation": 1,
-   "pct_positive": 0.473,
-   "verdict": "무신호"
+   "pct_positive": 0.455,
+   "verdict": "역주행"
   },
   "AI_SCORE": {
-   "n_days": 19,
-   "mean_ic": -0.1879,
-   "t_stat": -5.63,
+   "n_days": 18,
+   "mean_ic": -0.1881,
+   "t_stat": -5.3,
    "orientation": 1,
-   "pct_positive": 0.053,
+   "pct_positive": 0.056,
    "verdict": "역주행"
   },
   "FINAL_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0729,
-   "t_stat": -3.18,
+   "mean_ic": -0.0766,
+   "t_stat": -3.33,
    "orientation": 1,
-   "pct_positive": 0.345,
+   "pct_positive": 0.327,
    "verdict": "역주행"
   },
   "ELITE_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0723,
-   "t_stat": -4.0,
+   "mean_ic": -0.072,
+   "t_stat": -3.98,
    "orientation": 1,
-   "pct_positive": 0.273,
+   "pct_positive": 0.255,
    "verdict": "역주행"
   },
   "POC_GAP": {
    "n_days": 55,
-   "mean_ic": -0.0925,
-   "t_stat": -3.76,
+   "mean_ic": -0.1004,
+   "t_stat": -4.02,
    "orientation": -1,
-   "pct_positive": 0.382,
+   "pct_positive": 0.364,
    "verdict": "유효"
   }
  },
  "warnings": [
-  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0474 (t=-2.2, 55일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: AI_SCORE IC -0.1879 (t=-5.6, 19일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: FINAL_SCORE IC -0.0729 (t=-3.2, 55일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: ELITE_SCORE IC -0.0723 (t=-4.0, 55일) — 점수가 높을수록 수익률 낮음"
+  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0485 (t=-2.2, 55일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: TIMING_SCORE IC -0.0458 (t=-2.1, 55일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: AI_SCORE IC -0.1881 (t=-5.3, 18일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: FINAL_SCORE IC -0.0766 (t=-3.3, 55일) — 점수가 높을수록 수익률 낮음",
+  "⚠️ 축 역주행: ELITE_SCORE IC -0.0720 (t=-4.0, 55일) — 점수가 높을수록 수익률 낮음"
  ]
 }

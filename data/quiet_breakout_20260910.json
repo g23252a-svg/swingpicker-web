@@ -1,0 +1,9 @@
+{
+ "ok": false,
+ "reason": "밴드 비어있음 (표에 342종목 — 1200위까지 담긴 표가 필요하다)",
+ "universe_size": 342,
+ "trade_ymd": "20260910",
+ "fetched": 0,
+ "fetch_failed": 0,
+ "still_missing": 0
+}
