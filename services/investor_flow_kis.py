@@ -32,6 +32,16 @@ SK하이닉스 -381,452 · 삼성전자 +22,861 — 같은 KIS 계열인 랭킹 
 교차검증으로 확정하고 unit_note에 적는다.
 
 대금 필드가 없으면 순매수량 × 종가(원)로 근사하고 그건 /1e8 이다.
+
+## [v79.3] 단위는 매 실행 자가 검증한다
+
+위 확정의 근거였던 랭킹 API(외국인·기관 매매종목 **가집계**)는 잠정 집계라
+같은 날·같은 종목의 값이 종목별 API와 크게 다를 수 있다(9/10 실측: 삼성전자
+가집계 +134억 vs 종목별 -1.5조). 외부 기준을 믿는 대신 응답 안의 두 값을
+맞춰 본다 — 같은 행의 순매수량(*_ntby_qty, 주) × 종가(stck_clpr, 원)는 단위가
+확실하다. 전 종목 행에서 |qty×px(원)| / |tr_pbmn| 의 중위값이 10^6 근처면
+백만원, 10^3이면 천원, 1이면 원으로 판정해 억으로 환산하고 unit_note에
+비율까지 적는다. 수량 필드가 없으면 종전 확정값(백만원)을 쓴다.
 """
 from __future__ import annotations
 
@@ -56,6 +66,34 @@ FILE_FMT = "flow_full_{ymd}.parquet"
 _WON_PER_EOK = 1e8
 #: *_ntby_tr_pbmn 은 백만원 — 실측 교차검증으로 확정 (모듈 docstring).
 _MILLION_WON_PER_EOK = 100.0
+#: [v79.3] tr_pbmn 단위 후보 — 원 단위당 배수 (원·천원·백만원).
+_UNIT_CANDIDATES = {"원": 1.0, "천원": 1e3, "백만원": 1e6}
+_DEFAULT_UNIT = "백만원"
+
+
+def infer_unit(raw_pbmn: List[float], qty_px_won: List[float]) -> Tuple[str, Optional[float]]:
+    """[v79.3] |qty×px(원)| / |tr_pbmn| 의 중위값으로 tr_pbmn 단위를 고른다.
+
+    반환: (단위명, 중위비). 표본이 없거나 비율이 후보 어디에도 가깝지 않으면
+    (기본 백만원, None/비율) — 판정 실패도 기록에 남긴다.
+    """
+    import math
+    ratios = []
+    for a, b in zip(raw_pbmn, qty_px_won):
+        try:
+            a = abs(float(a)); b = abs(float(b))
+        except Exception:
+            continue
+        if a > 0 and b > 0 and math.isfinite(a) and math.isfinite(b):
+            ratios.append(b / a)
+    if not ratios:
+        return _DEFAULT_UNIT, None
+    ratios.sort()
+    med = ratios[len(ratios) // 2]
+    best = min(_UNIT_CANDIDATES.items(), key=lambda kv: abs(math.log10(med) - math.log10(kv[1])))
+    if abs(math.log10(med) - math.log10(best[1])) > 1.0:      # 10배 넘게 빗나가면 판정 보류
+        return _DEFAULT_UNIT, med
+    return best[0], med
 
 
 def universe_codes(data_dir: str) -> List[str]:
@@ -81,22 +119,33 @@ def _num(v) -> float:
         return float("nan")
 
 
-def parse_rows(output: list) -> Tuple[List[dict], str]:
-    """KIS output → [{ymd, frg_eok, inst_eok}], unit_note."""
-    rows, note = [], "tr_pbmn(백만원)/100"
+def parse_rows(output: list, unit: str = _DEFAULT_UNIT) -> Tuple[List[dict], str]:
+    """KIS output → [{ymd, frg_eok, inst_eok, _raw_frg, _raw_inst, _qtypx_frg, _qtypx_inst}], unit_note.
+
+    unit 은 tr_pbmn 의 단위명(원·천원·백만원). _raw_*/_qtypx_* 는 collect 단계의
+    단위 자가 검증용(infer_unit)이며 저장 컬럼이 아니다.
+    """
+    per_eok = _WON_PER_EOK / _UNIT_CANDIDATES[unit]
+    rows, note = [], f"tr_pbmn({unit})/{per_eok:g}"
     for r in output or []:
         ymd = str(r.get("stck_bsop_date", "")).replace("-", "")
         if len(ymd) != 8:
             continue
+        px = _num(r.get("stck_clpr"))
+        q_frg = _num(r.get("frgn_ntby_qty")) * px if "frgn_ntby_qty" in r else float("nan")
+        q_inst = _num(r.get("orgn_ntby_qty")) * px if "orgn_ntby_qty" in r else float("nan")
         if "frgn_ntby_tr_pbmn" in r or "orgn_ntby_tr_pbmn" in r:
-            frg = _num(r.get("frgn_ntby_tr_pbmn")) / _MILLION_WON_PER_EOK
-            inst = _num(r.get("orgn_ntby_tr_pbmn")) / _MILLION_WON_PER_EOK
+            raw_f = _num(r.get("frgn_ntby_tr_pbmn")); raw_i = _num(r.get("orgn_ntby_tr_pbmn"))
+            frg = raw_f / per_eok
+            inst = raw_i / per_eok
         else:                                   # 대금 필드가 없으면 수량×종가 근사
-            px = _num(r.get("stck_clpr"))
-            frg = _num(r.get("frgn_ntby_qty")) * px / _WON_PER_EOK
-            inst = _num(r.get("orgn_ntby_qty")) * px / _WON_PER_EOK
+            raw_f = raw_i = float("nan")
+            frg = q_frg / _WON_PER_EOK
+            inst = q_inst / _WON_PER_EOK
             note = "ntby_qty×stck_clpr(원)/1e8 근사"
-        rows.append({"ymd": ymd, "frg_eok": frg, "inst_eok": inst})
+        rows.append({"ymd": ymd, "frg_eok": frg, "inst_eok": inst,
+                     "_raw_frg": raw_f, "_raw_inst": raw_i,
+                     "_qtypx_frg": q_frg, "_qtypx_inst": q_inst})
     return rows, note
 
 
@@ -127,6 +176,7 @@ def collect_universe(session, token: str, app_key: str, app_secret: str,
     per_day: Dict[str, List[dict]] = {}
     ok = fail = consec = 0
     unit_note = ""
+    raw_all: List[float] = []; qtypx_all: List[float] = []
     for i, code in enumerate(codes):
         out = fetch_ticker(session, token, app_key, app_secret, code)
         if out is None:
@@ -140,8 +190,26 @@ def collect_universe(session, token: str, app_key: str, app_secret: str,
         for r in rows:
             per_day.setdefault(r["ymd"], []).append(
                 {"종목코드": code, "frg_eok": r["frg_eok"], "inst_eok": r["inst_eok"]})
+            for k_raw, k_q in (("_raw_frg", "_qtypx_frg"), ("_raw_inst", "_qtypx_inst")):
+                raw_all.append(r.get(k_raw, float("nan"))); qtypx_all.append(r.get(k_q, float("nan")))
         if sleep_sec:
             time.sleep(sleep_sec)
+    # [v79.3] 단위 자가 검증 — tr_pbmn 을 기본 단위(백만원)로 읽어 두고, 같은 행의
+    #   수량×종가(원)와의 중위비로 실제 단위를 판정해 필요하면 전부 다시 환산한다.
+    unit, med = infer_unit(raw_all, qtypx_all)
+    if unit_note.startswith("tr_pbmn("):
+        if med is None:
+            unit_note += " · 자가검증 불가(수량 필드 없음) — 기본 단위 사용"
+        else:
+            unit_note += f" · 자가검증 qty×px/tr_pbmn 중위비 {med:.3g} → {unit}"
+        if unit != _DEFAULT_UNIT:
+            factor = _UNIT_CANDIDATES[_DEFAULT_UNIT] / _UNIT_CANDIDATES[unit]
+            for rows_ in per_day.values():
+                for x in rows_:
+                    x["frg_eok"] = x["frg_eok"] / factor; x["inst_eok"] = x["inst_eok"] / factor
+            unit_note = unit_note.replace(f"tr_pbmn({_DEFAULT_UNIT})", f"tr_pbmn({unit})", 1)
+            logger.warning("[v79.3] tr_pbmn 단위가 기본(%s)이 아니라 %s 로 판정 — 재환산 (중위비 %.3g)",
+                           _DEFAULT_UNIT, unit, med)
     written = []
     os.makedirs(data_dir, exist_ok=True)
     for ymd, rows in sorted(per_day.items()):

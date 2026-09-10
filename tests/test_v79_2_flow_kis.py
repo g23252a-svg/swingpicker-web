@@ -137,3 +137,69 @@ class TestWiring:
     def test_workflow_commits_parquet_and_installs_pyarrow(self):
         y = open(".github/workflows/prefetch_flow.yml", encoding="utf-8").read()
         assert "data/flow_full_*.parquet" in y and "pyarrow" in y
+
+
+# ══════════════════════════════════════════════════════════════════
+#  [v79.3] 단위 자가 검증 — 같은 행의 수량×종가(원)로 tr_pbmn 단위를 판정
+# ══════════════════════════════════════════════════════════════════
+def _rows_q(days, frg_mw, inst_mw, px=10000, unit_won=1e6):
+    """tr_pbmn 을 unit_won 단위로 주고, 그와 일치하는 순매수량(주)도 함께 준다."""
+    return [{"stck_bsop_date": d, "stck_clpr": str(px),
+             "frgn_ntby_tr_pbmn": str(frg_mw), "orgn_ntby_tr_pbmn": str(inst_mw),
+             "frgn_ntby_qty": str(int(frg_mw * unit_won / px)),
+             "orgn_ntby_qty": str(int(inst_mw * unit_won / px))}
+            for d in days]
+
+
+def _out_q(days, frg, inst, **kw):
+    return {"rt_cd": "0", "output": _rows_q(days, frg, inst, **kw)}
+
+
+class TestInferUnit:
+    def test_million_won(self):
+        u, med = K.infer_unit([100, -200], [100 * 1e6 * 1.01, -200 * 1e6 * 0.98])
+        assert u == "백만원" and 0.9e6 < med < 1.1e6
+
+    def test_thousand_won_and_won(self):
+        assert K.infer_unit([5, 7], [5e3, 7e3])[0] == "천원"
+        assert K.infer_unit([5000, 7000], [5000, 7000])[0] == "원"
+
+    def test_no_sample_falls_back_to_default(self):
+        assert K.infer_unit([], []) == ("백만원", None)
+        assert K.infer_unit([1, 2], [float("nan"), 0])[0] == "백만원"
+
+    def test_wildly_off_ratio_keeps_default_but_reports(self):
+        u, med = K.infer_unit([1, 1], [1e9, 1e9])
+        assert u == "백만원" and med == pytest.approx(1e9)
+
+
+class TestCollectSelfVerifies:
+    def test_consistent_million_won_keeps_values_and_notes_check(self, tmp_path):
+        sess = _Sess({"000001": _out_q(["20260903"], 100, -50)})
+        s = K.collect_universe(sess, "t", "k", "s", ["000001"], str(tmp_path), sleep_sec=0)
+        df = pd.read_parquet(tmp_path / "flow_full_20260903.parquet")
+        assert df["frg_eok"].iloc[0] == pytest.approx(1.0)          # 100백만원 = 1억
+        assert "자가검증" in s["unit_note"] and "→ 백만원" in s["unit_note"]
+
+    def test_thousand_won_response_is_rescaled(self, tmp_path):
+        """API가 천원으로 주면(가정) 저장값은 여전히 억이어야 한다 — 1000배 틀리지 않게."""
+        sess = _Sess({"000001": _out_q(["20260903"], 100_000, -50_000, unit_won=1e3)})
+        s = K.collect_universe(sess, "t", "k", "s", ["000001"], str(tmp_path), sleep_sec=0)
+        df = pd.read_parquet(tmp_path / "flow_full_20260903.parquet")
+        assert df["frg_eok"].iloc[0] == pytest.approx(1.0)          # 100,000천원 = 1억
+        assert df["inst_eok"].iloc[0] == pytest.approx(-0.5)
+        assert "천원" in s["unit_note"] and "백만원" not in s["unit_note"].split("·")[0]
+
+    def test_without_qty_field_reports_unverified(self, tmp_path):
+        sess = _Sess({"000001": _out(["20260903"], 100, 0)})
+        s = K.collect_universe(sess, "t", "k", "s", ["000001"], str(tmp_path), sleep_sec=0)
+        assert "자가검증 불가" in s["unit_note"]
+        df = pd.read_parquet(tmp_path / "flow_full_20260903.parquet")
+        assert df["frg_eok"].iloc[0] == pytest.approx(1.0)
+
+    def test_saved_columns_unchanged(self, tmp_path):
+        """검증용 임시 키(_raw_*, _qtypx_*)는 파일에 남지 않는다 — winner_profile 규격 유지."""
+        sess = _Sess({"000001": _out_q(["20260903"], 1, 1)})
+        K.collect_universe(sess, "t", "k", "s", ["000001"], str(tmp_path), sleep_sec=0)
+        df = pd.read_parquet(tmp_path / "flow_full_20260903.parquet")
+        assert list(df.columns) == ["종목코드", "frg_eok", "inst_eok"]
