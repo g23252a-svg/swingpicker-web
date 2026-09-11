@@ -6378,5 +6378,55 @@
       "377300_20260805_TP1_HIT_20260910",
       "377300_20260805_TP2_HIT_20260910"
     ]
+  },
+  {
+    "code": "018290",
+    "name": "브이티",
+    "entry_ymd": "20260814",
+    "entry_px": 12990.0,
+    "qty": 0,
+    "stop_px": 11950.0,
+    "stop_px_initial": 11950.0,
+    "take_px1": 15560.0,
+    "take_px2": 16540.0,
+    "trailing_high": 13870.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260911",
+    "last_close_px": 11730.0,
+    "unrealized_pnl_pct": -9.7,
+    "realized_pnl_pct": -9.7,
+    "close_ymd": "20260911",
+    "close_px": 11730.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "018290_20260814_WARN_DRAWDOWN_20260819",
+      "018290_20260814_WARN_DRAWDOWN_20260821",
+      "018290_20260814_WARN_DRAWDOWN_20260827",
+      "018290_20260814_WARN_DRAWDOWN_20260903",
+      "018290_20260814_STOP_HIT_20260911"
+    ]
+  },
+  {
+    "code": "0126Z0",
+    "name": "삼성에피스홀딩스",
+    "entry_ymd": "20260907",
+    "entry_px": 360000.0,
+    "qty": 0,
+    "stop_px": 342000.0,
+    "stop_px_initial": 342000.0,
+    "take_px1": 396000.0,
+    "take_px2": 435500.0,
+    "trailing_high": 362000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260911",
+    "last_close_px": 340000.0,
+    "unrealized_pnl_pct": -5.56,
+    "realized_pnl_pct": -5.56,
+    "close_ymd": "20260911",
+    "close_px": 340000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "0126Z0_20260907_STOP_HIT_20260911"
+    ]
   }
 ]
