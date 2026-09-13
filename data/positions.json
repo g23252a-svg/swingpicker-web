@@ -492,17 +492,18 @@
     "stop_px_initial": 9550.0,
     "take_px1": 13150.0,
     "take_px2": 30550.0,
-    "trailing_high": 13280.0,
+    "trailing_high": 16060.0,
     "status": "OPEN",
     "last_check_ymd": "20260911",
     "last_close_px": 16060.0,
-    "unrealized_pnl_pct": 9.15,
+    "unrealized_pnl_pct": 54.72,
     "realized_pnl_pct": 0.0,
     "close_ymd": "",
     "close_px": 0.0,
     "close_reason": "",
     "alerted_events": [
-      "356680_20260804_CORPORATE_ACTION_20260911"
+      "356680_20260804_CORPORATE_ACTION_20260911",
+      "356680_20260804_TP1_HIT_20260911"
     ]
   },
   {

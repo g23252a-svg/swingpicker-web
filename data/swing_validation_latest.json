@@ -10,53 +10,53 @@
   "period_start": "20260625",
   "period_end": "20260903",
   "auc": 0.3993729319877411,
-  "brier": 0.28754043065059476,
+  "brier": 0.28754043065062834,
   "baseline_brier": 0.2611690677192546,
-  "calibration_error": 0.22742041706114183,
+  "calibration_error": 0.22742041706120025,
   "calibration_bins": [
     {
       "n": 1752,
-      "predicted": 0.19195342357014997,
+      "predicted": 0.19195342357015016,
       "observed": 0.4829243762563385
     },
     {
       "n": 4548,
-      "predicted": 0.21730456764108627,
+      "predicted": 0.21730456764107775,
       "observed": 0.4619498235057074
     },
     {
       "n": 1127,
-      "predicted": 0.3651996515204769,
+      "predicted": 0.3651996515204673,
       "observed": 0.32094916556738456
     },
     {
       "n": 2839,
-      "predicted": 0.4560704405696275,
+      "predicted": 0.4560704405697342,
       "observed": 0.33767186716853687
     },
     {
       "n": 3017,
-      "predicted": 0.5455502297112221,
+      "predicted": 0.5455502297113344,
       "observed": 0.2694294838866794
     },
     {
       "n": 1173,
-      "predicted": 0.6374417380933287,
+      "predicted": 0.6374417380934526,
       "observed": 0.31205508450463026
     },
     {
       "n": 220,
-      "predicted": 0.7365870515982692,
+      "predicted": 0.736587051598395,
       "observed": 0.27490531410219676
     },
     {
       "n": 18,
-      "predicted": 0.8284145057633459,
+      "predicted": 0.8284145057635374,
       "observed": 0.22187508188033245
     },
     {
       "n": 1,
-      "predicted": 0.9090898836463507,
+      "predicted": 0.9090898836465735,
       "observed": 0.0
     }
   ],
@@ -96,7 +96,7 @@
   "label_quality": {
     "complete": 27459,
     "stopped": 25589,
-    "immature": 1379,
+    "immature": 1380,
     "missing_bar": 317,
     "missing_entry": 273,
     "price_discontinuity": 38,

@@ -2,7 +2,7 @@
  "registry": "v1-20260831",
  "trade_ymd": "20260911",
  "logged_ymd": "20260903",
- "added": true,
+ "added": false,
  "days_total": 7,
  "protocol": {
   "min_days": 40,
