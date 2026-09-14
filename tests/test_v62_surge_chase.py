@@ -182,7 +182,11 @@ class TestRealBatch:
         assert float(dsn["ret_1d_%"].iloc[0]) >= AE._SURGE_CHASE_PCT
         assert int(dsn["TOP_PICK"].iloc[0]) == 0, "급등 추격 픽이 남았다"
         assert float(cur["ret_1d_%"].iloc[0]) < 0
-        assert int(cur["TOP_PICK"].iloc[0]) == 1, "정상 픽이 함께 죽었다"
+        assert int(cur["ALPHA_SURGE_OK"].iloc[0]) == 1, "급등 브레이크가 정상 픽을 함께 죽였다"
+        # [v83] 큐리옥스는 8/13 변동성 당일 상위 40%라 이제 고변동 게이트가 막는다 —
+        #   급등 브레이크의 판정과는 별개다. TOP_PICK이 0이면 그 사유가 변동성이어야 한다.
+        if int(cur["TOP_PICK"].iloc[0]) == 0:
+            assert int(cur["ALPHA_VOL_OK"].iloc[0]) == 0, "정상 픽이 급등 브레이크에 죽었다"
 
     def test_pick_count_reduced_but_not_zeroed(self):
         d = self._batch()

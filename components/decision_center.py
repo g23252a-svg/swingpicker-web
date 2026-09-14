@@ -941,7 +941,8 @@ def _render_watch_card(stock: dict[str, Any], rank: int) -> None:
 def _validation_payload(df: pd.DataFrame, data_dir: str = "data") -> dict[str, Any]:
     """검증 중인 것들의 현재 상태. 전부 표시 전용이며 하나가 깨져도 나머지는 산다."""
     out: dict[str, Any] = {"lane_line": "", "lane_picks": [], "lane_verdict": "",
-                           "winner_line": "", "budget_line": "", "stop_lines": []}
+                           "winner_line": "", "budget_line": "", "stop_lines": [],
+                           "shadow_line": ""}
     try:
         from services import quiet_breakout as _qb
         from services import quiet_lane_track as _qt
@@ -983,13 +984,20 @@ def _validation_payload(df: pd.DataFrame, data_dir: str = "data") -> dict[str, A
             out["stop_lines"].append(_l)
     except Exception as e:
         logger.warning(f"[v80] 손절 실체 생략: {e}")
+    # [v83] 선별 그림자 3종(구엔진·현행·저변동) — 랭킹 축 판정은 발견 이후 표본으로만.
+    try:
+        from services import selection_shadow as _ss
+        out["shadow_line"] = _ss.line(_ss.load(data_dir))
+    except Exception as e:
+        logger.warning(f"[v83] 선별 그림자 상태 생략: {e}")
     return out
 
 
 def _render_validation_loops(payload: dict[str, Any]) -> None:
     """'검증 중' 섹션 — 주문과 무관함을 제목에 박는다."""
     if not any([payload.get("lane_line"), payload.get("winner_line"),
-                payload.get("budget_line"), payload.get("stop_lines")]):
+                payload.get("budget_line"), payload.get("stop_lines"),
+                payload.get("shadow_line")]):
         return
     with ui.card().classes("sp-watch-card w-full p-4 rounded-2xl mt-2"):
         ui.label("검증 중인 것들 (표시 전용 · 주문에 반영되지 않음)").classes(
@@ -1007,6 +1015,9 @@ def _render_validation_loops(payload: dict[str, Any]) -> None:
         if payload.get("winner_line"):
             ui.label("🧬 " + payload["winner_line"]).classes(
                 "text-xs text-violet-200 leading-relaxed mt-2")
+        if payload.get("shadow_line"):
+            ui.label("🪞 " + payload["shadow_line"]).classes(
+                "text-xs text-amber-200 leading-relaxed mt-2")
         if payload.get("budget_line"):
             ui.label("🧮 " + payload["budget_line"]).classes(
                 "text-xs text-emerald-200 leading-relaxed mt-2")

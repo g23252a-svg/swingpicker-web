@@ -1677,6 +1677,38 @@ def _sort_by_engine_axis(fdf: pd.DataFrame) -> pd.DataFrame:
     return fdf
 
 
+def header_pick_codes(df: pd.DataFrame, max_n: int = 3) -> list:
+    """[v82] 종목탭 상단 '🏆 오늘의 실전 후보' = 오늘탭 공식 매수와 **같은 집합·같은 순서**.
+
+    사용자: "오늘탭과 종목탭이 추천이 안맞는데" (9/9 배치: 오늘탭 공식 매수
+    카카오 vs 종목탭 카드 '오늘 실전 후보 없음'). 원인은 이 카드가
+    pick_top1/pick_top3(🛡️ 콤보·✅ 즉시진입 **라벨** 경로)로 종목을 뽑는데,
+    2026년 배치 전부에서 그 라벨이 비어 있어 카드가 항상 빈 목록을 냈기
+    때문이다. 같은 화면 바로 위 스트립은 "매수 후보 1종목"이라 적고 있었다.
+
+    규칙: 공식 매수 계약(production_buy_mask — 오늘탭·픽 이력·성적 SSOT)이
+    있으면 **그 집합만** 쓰고, 순서는 엔진 축(알파×손익비, v77)으로 맞춘다.
+    계약 컬럼이 아예 없는 legacy CSV만 예전 라벨 경로로 폴백한다.
+    """
+    if df is None or df.empty or "종목코드" not in df.columns:
+        return []
+    if not any(c in df.columns for c in ("PRODUCTION_BUY", "TOP_PICK")):
+        t1 = pick_top1(df)
+        return t1 if t1 else pick_top3(df)
+    from services.recommendation_quality import production_buy_mask
+    mask = production_buy_mask(df)
+    if not bool(mask.any()):
+        return []
+    picked = _sort_by_engine_axis(df.loc[mask])
+    out: list = []
+    for code in picked["종목코드"].astype(str).str.zfill(6):
+        if code not in out:
+            out.append(code)
+        if len(out) >= max_n:
+            break
+    return out
+
+
 def _render_member_summary(capital_top1: dict, signal_top1: dict,
                             daily_top1: dict, confidence: dict,
                             pre_entry_risk: dict = None,
@@ -3651,7 +3683,8 @@ def _render_validation_scorecard(bt: dict) -> None:
 
 
 def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
-                       auth: str = "free", official_decision: dict | None = None):
+                       auth: str = "free", official_decision: dict | None = None,
+                       watch_items: list | None = None):
     """Tab 2 상단 헤더 카드 — 오늘의 검증 Top 3 표시."""
     # [v3.7.8] 확장 JSON 스키마
     #   daily_top3_backtest   — 체결 검증 포함 Top3 성능
@@ -3781,10 +3814,25 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
         ).props("dense"):
             _render_validation_scorecard(bt)
 
+        # [v82] 관찰 후보도 오늘탭과 같은 목록(퍼널 통과군 · 알파×손익비 · 실측 깊이)
+        #   을 한 줄로 적는다 — 두 탭이 다른 종목을 말하는 일이 없게.
+        if watch_items:
+            _w = " · ".join(
+                f"{str(w.get('name') or w.get('code') or '?')}" for w in watch_items)
+            ui.label(f"👀 관찰 후보 (매수 아님 · 오늘탭과 같은 순서): {_w}").classes(
+                "text-xs text-gray-400 mt-1")
         if not top3_codes:
             # [v31.4] 빈 상태 — 요약 한 줄은 카드 상단(위)에서 이미 표시됨.
             return
 
+        # [v82] 공식 매수 행은 ELITE_LABEL이 비어 있어 배지가 '—'로 나온다 →
+        #   계약 이름(공식 매수)을 그대로 배지로 쓴다.
+        try:
+            from services.recommendation_quality import production_buy_mask as _pbm
+            _prod_codes = set(
+                df.loc[_pbm(df), "종목코드"].astype(str).str.zfill(6))
+        except Exception:
+            _prod_codes = set()
         with ui.row().classes("w-full gap-3 flex-wrap"):
             for i, code in enumerate(top3_codes, 1):
                 match = df[df["종목코드"].astype(str).str.zfill(6) == code]
@@ -3793,6 +3841,9 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 name = str(r.get("종목명", "?"))
                 lbl = str(r.get("ELITE_LABEL", ""))
                 color = str(r.get("ELITE_LABEL_COLOR", "#3B82F6"))
+                _lbl_disp = _ae_label_disp(lbl, short=True)
+                if code in _prod_codes and (not lbl or _lbl_disp in ("", "—")):
+                    _lbl_disp, color = "🟢 공식 매수", "#047857"
                 desc = str(r.get("ELITE_LABEL_DESC", ""))
                 s_v = _nz(r.get("STRUCT_SCORE", 0))
                 t_v = _nz(r.get("TIMING_SCORE", 0))
@@ -3813,7 +3864,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                     with ui.row().classes("items-center gap-2 mb-1 flex-wrap"):
                         ui.label(f"#{i}").classes("text-sm text-gray-500")
                         # [Step AE] 라벨 표시는 매핑 통과 (내부값 lbl 그대로 유지)
-                        ui.badge(_ae_label_disp(lbl, short=True), color=color).classes("text-xs")
+                        ui.badge(_lbl_disp, color=color).classes("text-xs")
                         # [v3.9.7] 종목별 ENTRY_RISK 뱃지 우선, 없으면 v3.9.5 시스템 뱃지
                         # 우선순위: RED > ORANGE > 시스템 "오늘 보수 접근" > 없음
                         # [v3.9.11 hotfix] strip().upper() — 소문자/공백 데이터 silent miss 방지
@@ -4223,10 +4274,11 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
     # Top1이 "진짜 수익 나는" 기본 모드. 🏆 최강이 없으면 pick_top3으로 폴백.
     # (UI에선 헤더 카드에 Top1을 강조 표시, 테이블엔 여러 종목도 함께 표시)
     df = compute_elite_labels(df)
-    top1_codes = pick_top1(df)
-    top3_fallback = pick_top3(df) if not top1_codes else []
-    # 헤더 카드에 표시할 종목들: Top1이 있으면 Top1만, 없으면 폴백 Top3
-    top3_codes = top1_codes if top1_codes else top3_fallback
+    # [v82] 헤더 카드는 오늘탭 공식 매수(PRODUCTION_BUY)와 같은 집합·순서.
+    #   종전 pick_top1/pick_top3(라벨 경로)는 2026년 배치 전부에서 빈 목록이라
+    #   카드가 '실전 후보 없음'을 말하고 오늘탭은 공식 매수를 보여주는
+    #   모순이 있었다. 라벨 경로는 계약 컬럼이 없는 legacy CSV에서만 폴백.
+    top3_codes = header_pick_codes(df)
 
     ui.label("🎯 AI & Quant 추천 종목").classes(
         "text-xl font-bold text-white mb-2"
@@ -4247,9 +4299,16 @@ def render_tab_stocks(df: pd.DataFrame, auth: str, store=None):
         _render_stock_detail(code, match.iloc[0], df)
 
     # ── [v3.7] Top 3 헤더 카드 (백테스트 검증 기반) — 실전 후보는 항상 노출 ──
+    # [v82] 관찰 후보는 오늘탭이 쓰는 요약(build_decision_summary)에서 그대로 가져온다.
+    _watch_items: list = []
+    try:
+        from components.decision_center import build_decision_summary as _bds
+        _watch_items = list((_bds(df) or {}).get("watch") or [])
+    except Exception as _we:
+        _logger.warning(f"[v82] 오늘탭 관찰 후보 조회 실패 (표시 생략): {_we}")
     _render_top3_card(
         df, top3_codes, on_card_click=_on_top_pick_click, auth=auth,
-        official_decision=official_decision,
+        official_decision=official_decision, watch_items=_watch_items,
     )
 
     # ── [v31] 판정 근거·보조 레인 서랍 — 기본 접힘 ──

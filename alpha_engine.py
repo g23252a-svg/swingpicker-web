@@ -139,6 +139,30 @@ _LT_PCTL_FLOOR = 0.30          # 당일 하위 30% 제외
 #     PRODUCTION_BUY 4건 중 0건 · **픽이 0이 되는 날 0일** (v57 교훈 반영).
 _SURGE_CHASE_PCT = 5.0         # 진입일 등락률 이 이상이면 추격으로 본다
 _LT_PCTL_MIN_SAMPLE = 30       # 분위 안정화 최소 표본 — 미달 시 구 절대규칙 폴백
+# [v83] 고변동 차단 — 선별 로직 대규모 점검(docs/SELECTION_AUDIT_V83.md)의 유일한
+#   IS/OOS 동시 강건 발견. 생존편향 없는 전체 유니버스 패널(2,810종목·115일)에
+#   후보풀 48,580행을 붙여 잰 당일 횡단면 변동성(ATR%·20일 수익률 표준편차)의
+#   5일 실현수익 랭크IC(진입 t+1 시가·-8% 장중손절·t+5 종가):
+#     ATR%     -8%손절 전체 -0.252 (HAC t -5.54) · IS -0.213 (t -5.48) / OOS -0.274 (t -4.13)
+#              무손절   전체 -0.203 (t -3.30)   · IS -0.232 (t -4.00) / OOS -0.187 (t -2.10)
+#     vol_20d  -8%손절 IS -0.162 (t -7.47) / OOS -0.274 (t -4.47) · 음수일 90%
+#   손절 기계 효과가 아니다 — 무손절 수익에서도 같은 부호·유의. 월별 7/7 음수.
+#   당일 5분위(1=저변동) 5일 실현수익 · 손절적중률:
+#     IS  Q1 -3.22 (51%) Q2 -3.54 (69%) Q3 -3.36 (75%) Q4 -3.50 (78%) Q5 -4.81 (85%)
+#     OOS Q1 +0.11 (25%) Q2 -1.26 (47%) Q3 -2.45 (62%) Q4 -2.34 (67%) Q5 -2.52 (72%)
+#   그런데 현행 공식픽(알파 시대 14건·측정가능)은 변동성 분위 중위 0.79 — 풀에서
+#   가장 변동성 큰 25%에서 골라 왔고, 14건 중 11건이 -8% 손절, 승률 14%,
+#   평균 -5.61%(풀 대비 -4.38%p, HAC t -5.22). 알파 점수는 변동성과 양의
+#   상관이 아니지만(풀 내 스피어만 -0.21) 손익비(RR) 축과 알파 문턱이 결합하면
+#   최상위가 고변동 소형주로 수렴한다.
+#   상위 40%를 자르는 이유: Q5는 IS·OOS 모두 최악, Q4는 OOS 최악군·IS 중립 —
+#   두 구간에서 손해가 없는 최대 절단이 40%다(60% 절단은 IS Q3가 중립이라 근거 없음).
+#   알파 시대 퍼널 후보(18일)에서 같은 알파×손익비 랭킹에 이 게이트만 얹으면
+#   1등 평균 -6.15% → -1.00% (후보평균 대비 -3.49%p → +1.66%p), 손절 78% → 33%.
+#   결측·표본 부족은 통과 — 데이터 이슈가 전면 차단으로 번지지 않게(LT·급등과 동일).
+_VOL_GATE_COL = "V23_ATR_Pct"  # ml_engine ATR%(소수) — 2026-05-11 이후 모든 배치에 존재
+_VOL_GATE_PCTL = 0.60          # 당일 변동성 분위 이 이하만 통과 (상위 40% 차단)
+_VOL_GATE_MIN_SAMPLE = 30      # 분위 안정화 최소 표본 — 미달 시 게이트 비활성(전부 통과)
 
 # ═══════════════════════════════════════════════════════════════
 # [v47] 위험구간 — 검증된 숏 신호를 공매도 없이 실행 가능한 형태로
@@ -662,6 +686,7 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
       TOP_PICK = 리스크가드(ENTRY_RISK_GATE_OK) AND 알파백분위 ≥ 레짐문턱
                  AND 저점추세 당일 분위 > 30% (결측은 통과)          [v46]
                  AND 진입일 등락률 < +5% (급등 추격 차단, 결측은 통과)  [v62]
+                 AND 당일 변동성(ATR%) 분위 ≤ 60% (고변동 차단, 결측은 통과) [v83]
     · ROUTE는 건드리지 않는다(타이밍 배지로만 존치).
     · ENTRY_RISK_GATE_OK가 없으면(레거시) close>stop 등 기본 가드만 재구성.
     · 미검증이면 TOP_PICK을 그대로 두고 ALPHA_GATE_ACTIVE=0 (레거시 폴백).
@@ -670,6 +695,7 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
       ALPHA_GATE_ACTIVE, ALPHA_ENTRY_THRESHOLD, ALPHA_ENTRY_OK, ALPHA_LT_OK,
       LOW_TREND_PCTL, ALPHA_LT_RULE                                  [v46]
       SURGE_CHASE_FLAG, ALPHA_SURGE_OK, ALPHA_SURGE_RULE             [v62]
+      VOL_GATE_PCTL, ALPHA_VOL_OK, ALPHA_VOL_RULE                     [v83]
     """
     out = df.copy()
     n = len(out)
@@ -760,8 +786,25 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     out["ALPHA_SURGE_OK"] = surge_ok.astype(int)
     out["ALPHA_SURGE_RULE"] = f"ret_1d<+{_SURGE_CHASE_PCT:.0f}%"
 
+    # [v83] 고변동 차단 — 당일 횡단면 ATR% 분위 상위 40% 제외 (근거: 상수 주석).
+    if _VOL_GATE_COL in out.columns:
+        _vol = pd.to_numeric(out[_VOL_GATE_COL], errors="coerce")
+    else:
+        _vol = pd.Series(np.nan, index=out.index)
+    if int(_vol.notna().sum()) >= _VOL_GATE_MIN_SAMPLE:
+        _vpct = _vol.rank(pct=True)
+        out["VOL_GATE_PCTL"] = (_vpct * 100).round(1)
+        vol_ok = _vol.isna() | (_vpct <= _VOL_GATE_PCTL)
+        out["ALPHA_VOL_RULE"] = f"atr_pctl<={_VOL_GATE_PCTL:.2f}"
+    else:
+        out["VOL_GATE_PCTL"] = np.nan
+        vol_ok = pd.Series(True, index=out.index)
+        out["ALPHA_VOL_RULE"] = "inactive(sample)"   # 표본 부족 — 게이트 비활성
+    vol_ok = vol_ok.fillna(True)
+    out["ALPHA_VOL_OK"] = vol_ok.astype(int)
+
     entry_ok = (risk_ok & ascore.notna() & (ascore >= thr) & (~blocked)
-                & lt_ok & surge_ok)
+                & lt_ok & surge_ok & vol_ok)
     out["ALPHA_GATE_ACTIVE"] = 1
     out["ALPHA_ENTRY_OK"] = entry_ok.astype(int)
 
@@ -785,6 +828,8 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
     _surge_short = surge.fillna(False) if hasattr(surge, "fillna") else surge
     _blk = blocked.fillna(False) if hasattr(blocked, "fillna") else blocked
     _ltp = pd.to_numeric(out["LOW_TREND_PCTL"], errors="coerce")
+    _vol_short = (~vol_ok).fillna(False)
+    _vgp = pd.to_numeric(out["VOL_GATE_PCTL"], errors="coerce")
 
     def _row_reason(i) -> str:
         bits = []
@@ -806,6 +851,12 @@ def apply_alpha_entry_gate(df: pd.DataFrame) -> pd.DataFrame:
                 f"진입일 +{_v:.1f}% 급등 — 추격 진입 실측 손실"
                 f"(5일 -3.0%p·승률 46%, 검증 q=0.046)"
                 if np.isfinite(_v) else "진입일 급등 추격")
+        if bool(_vol_short.iat[i]):
+            _p = _vgp.iat[i]
+            bits.append(
+                f"변동성 당일 상위 {100 - _p:.0f}% — 고변동 실측 손실"
+                f"(5일 손절률 67~72%, IC t -5.5, v83)"
+                if np.isfinite(_p) else "변동성 당일 상위 40% (v83)")
         return " · ".join(bits)
 
     out["ALPHA_ENTRY_BLOCK_REASON"] = [
