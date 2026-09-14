@@ -2256,6 +2256,17 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     except Exception as e:
         log(f"⚠️ [v78] 승자 프로파일 스킵 (현행 산출에 영향 없음): {e}")
 
+    # [v83] 선별 그림자 3종 — 구엔진(고변동 게이트 없음)·현행·저변동 최저의 '오늘 1등'을
+    #   매일 기록하고 SSOT 실현수익으로 나란히 잰다. 게이트는 실전에 들어갔지만
+    #   랭킹 축은 18일 표본으로 갈리지 않았다 — 발견 이후 표본으로만 판정한다
+    #   (v73·v78과 같은 규율). 기록 전용, 현행 산출 무변경.
+    try:
+        from services import selection_shadow as _SS
+        _ss = _SS.run_batch(df_out, OUT_DIR, trade_ymd)
+        log(f"🪞 [v83] {_SS.line(_ss)}")
+    except Exception as e:
+        log(f"⚠️ [v83] 선별 그림자 스킵 (현행 산출에 영향 없음): {e}")
+
 
     # [v68] 선언 승률 vs 같은 점수 구간 실측 — 과신 방지 캡이 8월 내내
     #   조용히 미적용이었다. 원인 둘: (1) 픽이 사는 ELITE_SCORE [0,50) 구간의
