@@ -6428,5 +6428,53 @@
     "alerted_events": [
       "0126Z0_20260907_STOP_HIT_20260911"
     ]
+  },
+  {
+    "code": "298000",
+    "name": "효성화학",
+    "entry_ymd": "20260720",
+    "entry_px": 58900.0,
+    "qty": 0,
+    "stop_px": 54100.0,
+    "stop_px_initial": 54100.0,
+    "take_px1": 82000.0,
+    "take_px2": 87500.0,
+    "trailing_high": 83900.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260914",
+    "last_close_px": 53900.0,
+    "unrealized_pnl_pct": -8.49,
+    "realized_pnl_pct": -8.49,
+    "close_ymd": "20260914",
+    "close_px": 53900.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "298000_20260720_WARN_DRAWDOWN_20260903",
+      "298000_20260720_WARN_DRAWDOWN_20260911",
+      "298000_20260720_STOP_HIT_20260914"
+    ]
+  },
+  {
+    "code": "066970",
+    "name": "엘앤에프",
+    "entry_ymd": "20260910",
+    "entry_px": 123100.0,
+    "qty": 0,
+    "stop_px": 113200.0,
+    "stop_px_initial": 113200.0,
+    "take_px1": 147600.0,
+    "take_px2": 161800.0,
+    "trailing_high": 124600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260914",
+    "last_close_px": 113100.0,
+    "unrealized_pnl_pct": -8.12,
+    "realized_pnl_pct": -8.12,
+    "close_ymd": "20260914",
+    "close_px": 113100.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "066970_20260910_STOP_HIT_20260914"
+    ]
   }
 ]

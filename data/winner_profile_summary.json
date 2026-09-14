@@ -1,9 +1,9 @@
 {
  "registry": "v1-20260831",
- "trade_ymd": "20260911",
- "logged_ymd": "20260903",
- "added": false,
- "days_total": 7,
+ "trade_ymd": "20260914",
+ "logged_ymd": "20260904",
+ "added": true,
+ "days_total": 8,
  "protocol": {
   "min_days": 40,
   "fdr_q": 0.05,
@@ -12,9 +12,99 @@
  },
  "features": [
   {
+   "feature": "tv_eok",
+   "days": 8,
+   "ic_mean": -0.19071571694338504,
+   "t": -539425506.9180868,
+   "p": 1.9872607400068611e-59,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "tv_rank_pctl",
+   "days": 8,
+   "ic_mean": -0.19071571694338504,
+   "t": -539425506.9180868,
+   "p": 1.9872607400068611e-59,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "ret_20d",
+   "days": 8,
+   "ic_mean": -0.10952224622425367,
+   "t": -22.499948149568986,
+   "p": 8.668570680837465e-08,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "vol_ratio",
+   "days": 8,
+   "ic_mean": -0.09366293983041832,
+   "t": -5.558592763420382,
+   "p": 0.0008521746823036304,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "volat_20d",
+   "days": 8,
+   "ic_mean": -0.11379758507430682,
+   "t": -4.433173066419306,
+   "p": 0.0030326006840600724,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "rsi14",
+   "days": 8,
+   "ic_mean": -0.09879099250552116,
+   "t": -4.079673364452385,
+   "p": 0.004691617036651398,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "ma20_gap",
+   "days": 8,
+   "ic_mean": -0.07780353183444154,
+   "t": -3.493304504333762,
+   "p": 0.010083624549288043,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "ret_1d",
+   "days": 8,
+   "ic_mean": -0.08813071138532792,
+   "t": -2.982829867887465,
+   "p": 0.020432777427937143,
+   "sign_stable": true,
+   "stage1": false
+  },
+  {
+   "feature": "ret_5d",
+   "days": 8,
+   "ic_mean": -0.09156373809607055,
+   "t": -2.1111895596433516,
+   "p": 0.07266068295332802,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "hi60_gap",
+   "days": 8,
+   "ic_mean": -0.09816970522786131,
+   "t": -1.8832364171583758,
+   "p": 0.10168115485868362,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
    "feature": "flow_frg_str",
-   "days": 4,
-   "ic_mean": -0.012030928075337441,
+   "days": 5,
+   "ic_mean": -0.02424230520392054,
    "t": NaN,
    "p": NaN,
    "sign_stable": false,
@@ -22,98 +112,8 @@
   },
   {
    "feature": "flow_inst_str",
-   "days": 4,
-   "ic_mean": -0.07838541755501023,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "hi60_gap",
-   "days": 7,
-   "ic_mean": -0.10430743807538592,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "ma20_gap",
-   "days": 7,
-   "ic_mean": -0.09165647651584223,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "ret_1d",
-   "days": 7,
-   "ic_mean": -0.07424296658187764,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "ret_20d",
-   "days": 7,
-   "ic_mean": -0.12488666868737879,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "ret_5d",
-   "days": 7,
-   "ic_mean": -0.0958888367182098,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "rsi14",
-   "days": 7,
-   "ic_mean": -0.10707881337418287,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "tv_eok",
-   "days": 7,
-   "ic_mean": -0.17591214253156714,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "tv_rank_pctl",
-   "days": 7,
-   "ic_mean": -0.17591214253156714,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "vol_ratio",
-   "days": 7,
-   "ic_mean": -0.09072585095180011,
-   "t": NaN,
-   "p": NaN,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "volat_20d",
-   "days": 7,
-   "ic_mean": -0.10782979587811135,
+   "days": 5,
+   "ic_mean": -0.06410452503264455,
    "t": NaN,
    "p": NaN,
    "sign_stable": false,

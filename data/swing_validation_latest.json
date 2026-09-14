@@ -1,83 +1,83 @@
 {
   "validated": false,
   "trade_validated": false,
-  "outcome_coverage": 0.9896955818965517,
+  "outcome_coverage": 0.9903098220171391,
   "unresolved_selected": 13,
   "return_scope": "관측 가능한 선택 코호트 평균; 미확정 결과가 있으면 검증 실패",
-  "oos_days": 49,
-  "oos_rows": 14848,
-  "pick_rows": 245,
+  "oos_days": 50,
+  "oos_rows": 15170,
+  "pick_rows": 250,
   "period_start": "20260625",
-  "period_end": "20260903",
-  "auc": 0.3993729319877411,
-  "brier": 0.28754043065062834,
-  "baseline_brier": 0.2611690677192546,
-  "calibration_error": 0.22742041706120025,
+  "period_end": "20260907",
+  "auc": 0.3985913869172252,
+  "brier": 0.28785724019521597,
+  "baseline_brier": 0.261256067816885,
+  "calibration_error": 0.2299508744536945,
   "calibration_bins": [
     {
-      "n": 1752,
-      "predicted": 0.19195342357015016,
-      "observed": 0.4829243762563385
+      "n": 1600,
+      "predicted": 0.19397789779384894,
+      "observed": 0.4829613155542644
     },
     {
-      "n": 4548,
-      "predicted": 0.21730456764107775,
-      "observed": 0.4619498235057074
+      "n": 4702,
+      "predicted": 0.21436301993142717,
+      "observed": 0.4625953175917012
     },
     {
-      "n": 1127,
-      "predicted": 0.3651996515204673,
-      "observed": 0.32094916556738456
+      "n": 1151,
+      "predicted": 0.3645475496776008,
+      "observed": 0.3221106448534678
     },
     {
-      "n": 2839,
-      "predicted": 0.4560704405697342,
-      "observed": 0.33767186716853687
+      "n": 2838,
+      "predicted": 0.45612854814613274,
+      "observed": 0.3384984286329506
     },
     {
-      "n": 3017,
-      "predicted": 0.5455502297113344,
-      "observed": 0.2694294838866794
+      "n": 3203,
+      "predicted": 0.5454663195762072,
+      "observed": 0.2647405442006978
     },
     {
-      "n": 1173,
-      "predicted": 0.6374417380934526,
-      "observed": 0.31205508450463026
+      "n": 1259,
+      "predicted": 0.6378823863928613,
+      "observed": 0.30923542326022013
     },
     {
-      "n": 220,
-      "predicted": 0.736587051598395,
-      "observed": 0.27490531410219676
+      "n": 247,
+      "predicted": 0.7365613293485982,
+      "observed": 0.2847124815104253
     },
     {
-      "n": 18,
-      "predicted": 0.8284145057635374,
-      "observed": 0.22187508188033245
+      "n": 22,
+      "predicted": 0.827144716084344,
+      "observed": 0.22741241360896755
     },
     {
       "n": 1,
-      "predicted": 0.9090898836465735,
+      "predicted": 0.9090898836463507,
       "observed": 0.0
     }
   ],
-  "hit_rate": 0.28537414965986396,
-  "universe_hit_rate": 0.37418812958932274,
-  "hit_lift": -0.08881397992945879,
-  "net_return_mean": -0.02484061340099243,
-  "universe_net_return_mean": -0.008685553226137809,
+  "hit_rate": 0.293,
+  "universe_hit_rate": 0.37152655416966046,
+  "hit_lift": -0.07852655416966042,
+  "net_return_mean": -0.023474031071101336,
+  "universe_net_return_mean": -0.008984157173149014,
   "net_return_ci95": [
-    -0.04780160776747747,
-    0.0003170665697359765
+    -0.04593779059486721,
+    0.0009948294423637995
   ],
-  "excess_return_mean": -0.01615506017485462,
+  "excess_return_mean": -0.014489873897952319,
   "excess_return_ci95": [
-    -0.03348501380245308,
-    0.0022901405886637132
+    -0.031191042574022013,
+    0.0032403318418922837
   ],
   "cost_sensitivity": {
-    "20": -0.02384061340099243,
-    "30": -0.02484061340099243,
-    "40": -0.025840613400992432
+    "20": -0.02247403107110134,
+    "30": -0.023474031071101336,
+    "40": -0.024474031071101337
   },
   "trade_checks": {
     "net_ci_positive": false,
@@ -94,17 +94,17 @@
   },
   "reason": "검증 미달: outcome_coverage, auc, brier_skill, top5_hit_lift, calibration",
   "label_quality": {
-    "complete": 27459,
-    "stopped": 25589,
-    "immature": 1380,
-    "missing_bar": 317,
-    "missing_entry": 273,
+    "complete": 27705,
+    "stopped": 25708,
+    "immature": 1363,
+    "missing_bar": 309,
+    "missing_entry": 269,
     "price_discontinuity": 38,
     "unfillable_lower_limit": 8,
     "unfillable_upper_limit": 6
   },
   "version": "swing_net_profit_v1",
-  "asof": "20260911",
+  "asof": "20260914",
   "target_definition": "익일 시가 진입·최대 5거래일 보유·손절 및 비용 후 수익",
   "policy": {
     "min_train_days": 60,
@@ -169,7 +169,7 @@
       "cal_start": "20260731",
       "cal_label_end": "20260821",
       "test_start": "20260824",
-      "test_end": "20260903"
+      "test_end": "20260907"
     }
   ],
   "execution_definition": "익일 시가 진입→5번째 보유 거래일 종가, -8% 손절·갭 체결·비용 반영",
@@ -180,10 +180,10 @@
     "시가 체결 가정, 거래비용·슬리피지 왕복0.3% 시나리오"
   ],
   "live_fit": {
-    "train_days": 109,
+    "train_days": 110,
     "calibration_days": 15,
-    "train_label_available": "2026-08-12 00:00:00",
-    "calibration_start": "2026-08-13 00:00:00",
-    "calibration_label_available": "2026-09-11 00:00:00"
+    "train_label_available": "2026-08-13 00:00:00",
+    "calibration_start": "2026-08-14 00:00:00",
+    "calibration_label_available": "2026-09-14 00:00:00"
   }
 }

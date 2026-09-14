@@ -1,0 +1,81 @@
+{
+ "live_from": "20260914",
+ "target_days": 20,
+ "days_total": 1,
+ "variants": {
+  "legacy": {
+   "days": 0,
+   "avg_ret_pct": null,
+   "win_rate": null,
+   "stop_rate": null,
+   "hac_t": null,
+   "hac_p": null
+  },
+  "live": {
+   "days": 0,
+   "avg_ret_pct": null,
+   "win_rate": null,
+   "stop_rate": null,
+   "hac_t": null,
+   "hac_p": null
+  },
+  "lowvol": {
+   "days": 0,
+   "avg_ret_pct": null,
+   "win_rate": null,
+   "stop_rate": null,
+   "hac_t": null,
+   "hac_p": null
+  }
+ },
+ "paired": {
+  "live-legacy": {
+   "days": 0,
+   "diff_pct": null,
+   "positive_days": 0,
+   "hac_t": null,
+   "hac_p": null
+  },
+  "lowvol-live": {
+   "days": 0,
+   "diff_pct": null,
+   "positive_days": 0,
+   "hac_t": null,
+   "hac_p": null
+  }
+ },
+ "verdict": "판정 전 — 20 거래일 후 사용자 판정",
+ "today": [
+  {
+   "ymd": "20260914",
+   "variant": "legacy",
+   "종목코드": "450080",
+   "종목명": "에코프로머티",
+   "alpha": 98.5,
+   "rr": 3.0,
+   "atr_pct": 0.053259966777408636,
+   "vol_pctl": 36.7
+  },
+  {
+   "ymd": "20260914",
+   "variant": "live",
+   "종목코드": "450080",
+   "종목명": "에코프로머티",
+   "alpha": 98.5,
+   "rr": 3.0,
+   "atr_pct": 0.053259966777408636,
+   "vol_pctl": 36.7
+  },
+  {
+   "ymd": "20260914",
+   "variant": "lowvol",
+   "종목코드": "097950",
+   "종목명": "CJ제일제당",
+   "alpha": 64.7,
+   "rr": 1.41,
+   "atr_pct": 0.019718086791257524,
+   "vol_pctl": 1.2
+  }
+ ],
+ "added": true
+}
