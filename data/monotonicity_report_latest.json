@@ -1,33 +1,33 @@
 {
-  "asof_ymd": "20260914",
-  "generated_at": "2026-09-14T22:30:06.943161",
+  "asof_ymd": "20260915",
+  "generated_at": "2026-09-15T21:19:19.488478",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
   "quality_policy_version": "alpha_gate_v62_input_integrity_v1",
-  "declared_wr_active": 0.4697,
-  "declared_wr_top_pick": 0.4712,
+  "declared_wr_active": 0.4683,
+  "declared_wr_top_pick": 0.4722,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
       {
         "score_lo": 0,
         "score_hi": 50.0,
-        "n_raw": 204,
-        "p_win": 0.3763,
-        "p_win_lcb": 0.3138,
-        "avg_ret_net_pct": -2.3695,
-        "avg_ret_excess_pct": -2.1053
+        "n_raw": 239,
+        "p_win": 0.371,
+        "p_win_lcb": 0.3136,
+        "avg_ret_net_pct": -2.1871,
+        "avg_ret_excess_pct": -2.1255
       },
       {
         "score_lo": 50,
         "score_hi": 60.0,
-        "n_raw": 1,
-        "p_win": 0.3333,
+        "n_raw": 2,
+        "p_win": 0.25,
         "p_win_lcb": 0.0,
-        "avg_ret_net_pct": -13.2497,
-        "avg_ret_excess_pct": -9.6397
+        "avg_ret_net_pct": -7.909,
+        "avg_ret_excess_pct": -7.769
       },
       {
         "score_lo": 60,
@@ -42,7 +42,7 @@
         "score_lo": 70,
         "score_hi": 80.0,
         "n_raw": 41,
-        "p_win": 0.3274,
+        "p_win": 0.3277,
         "p_win_lcb": 0.1956,
         "avg_ret_net_pct": -4.3862,
         "avg_ret_excess_pct": -7.1252
@@ -70,22 +70,22 @@
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
-  "realized_wr": 0.3681,
-  "realized_wr_top_pick": 0.3763,
-  "realized_wr_top_pick_n": 204,
-  "realized_wr_active": 0.3763,
-  "realized_wr_active_n": 204,
-  "declared_vs_realized_gap_active": 0.0934,
-  "declared_vs_realized_gap_top_pick": 0.0949,
-  "declared_vs_realized_gap": 0.0949,
-  "avg_ret_excess_pct": -2.9478,
+  "realized_wr": 0.3647,
+  "realized_wr_top_pick": 0.371,
+  "realized_wr_top_pick_n": 239,
+  "realized_wr_active": 0.371,
+  "realized_wr_active_n": 239,
+  "declared_vs_realized_gap_active": 0.0973,
+  "declared_vs_realized_gap_top_pick": 0.1012,
+  "declared_vs_realized_gap": 0.1012,
+  "avg_ret_excess_pct": -2.8771,
   "top_pick_funnel": {
-    "trade_ymd": "20260914",
-    "total": 337,
+    "trade_ymd": "20260915",
+    "total": 353,
     "aggressive_funnel": {
-      "total": 337,
-      "route_active": 29,
-      "hard_gate": 202,
+      "total": 353,
+      "route_active": 39,
+      "hard_gate": 191,
       "elite_75": 0,
       "struct_80": 0,
       "timing_70": 0,
@@ -93,9 +93,9 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 337,
-      "route_active": 29,
-      "hard_gate": 202,
+      "total": 353,
+      "route_active": 39,
+      "hard_gate": 191,
       "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
@@ -117,31 +117,31 @@
     {
       "gate": "top_pick_tp1_positive",
       "status": "PASS",
-      "subject_n": 13
+      "subject_n": 28
     },
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "min_rr=1.09",
-      "subject_n": 13
+      "detail": "min_rr=1.03",
+      "subject_n": 28
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
       "status": "PASS",
-      "detail": "gap_top_pick=9.5% (n=204)",
-      "subject_n": 204
+      "detail": "gap_top_pick=10.1% (n=239)",
+      "subject_n": 239
     }
   ],
   "ci_soft": [
     {
       "gate": "top_pick_route_positive_observed",
       "status": "WARN",
-      "detail": "TOP_PICK 3건이 ATTACK/ARMED 아님 (v32 이후 정상 — 관측만)"
+      "detail": "TOP_PICK 14건이 ATTACK/ARMED 아님 (v32 이후 정상 — 관측만)"
     },
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "OK",
-      "detail": "gap_active=9.3% (n=204)"
+      "detail": "gap_active=9.7% (n=239)"
     },
     {
       "gate": "wilson_monotonicity",
@@ -151,7 +151,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-2.95%"
+      "detail": "avg_ret_excess=-2.88%"
     },
     {
       "gate": "market_map_coverage_95",
@@ -165,7 +165,7 @@
   ],
   "ci_hard_all_pass": true,
   "ci_soft_any_warn": true,
-  "top_pick_count": 13,
+  "top_pick_count": 28,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": 1.09
+  "top_pick_min_rr": 1.03
 }

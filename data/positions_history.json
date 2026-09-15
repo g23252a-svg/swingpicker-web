@@ -6476,5 +6476,28 @@
     "alerted_events": [
       "066970_20260910_STOP_HIT_20260914"
     ]
+  },
+  {
+    "code": "004370",
+    "name": "농심",
+    "entry_ymd": "20260903",
+    "entry_px": 430500.0,
+    "qty": 0,
+    "stop_px": 409000.0,
+    "stop_px_initial": 409000.0,
+    "take_px1": 460000.0,
+    "take_px2": 473500.0,
+    "trailing_high": 442500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260915",
+    "last_close_px": 408500.0,
+    "unrealized_pnl_pct": -5.11,
+    "realized_pnl_pct": -5.11,
+    "close_ymd": "20260915",
+    "close_px": 408500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "004370_20260903_STOP_HIT_20260915"
+    ]
   }
 ]
