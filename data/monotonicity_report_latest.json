@@ -1,13 +1,13 @@
 {
-  "asof_ymd": "20260915",
-  "generated_at": "2026-09-15T21:19:19.488478",
+  "asof_ymd": "20260916",
+  "generated_at": "2026-09-16T21:18:55.040510",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
   "benchmark_mapping_warning": null,
   "quality_policy_version": "alpha_gate_v62_input_integrity_v1",
-  "declared_wr_active": 0.4683,
-  "declared_wr_top_pick": 0.4722,
+  "declared_wr_active": 0.4813,
+  "declared_wr_top_pick": 0.4881,
   "elite_monotonicity": {
     "valid": true,
     "bins": [
@@ -15,10 +15,10 @@
         "score_lo": 0,
         "score_hi": 50.0,
         "n_raw": 239,
-        "p_win": 0.371,
-        "p_win_lcb": 0.3136,
-        "avg_ret_net_pct": -2.1871,
-        "avg_ret_excess_pct": -2.1255
+        "p_win": 0.353,
+        "p_win_lcb": 0.2937,
+        "avg_ret_net_pct": -2.4037,
+        "avg_ret_excess_pct": -1.5582
       },
       {
         "score_lo": 50,
@@ -26,8 +26,8 @@
         "n_raw": 2,
         "p_win": 0.25,
         "p_win_lcb": 0.0,
-        "avg_ret_net_pct": -7.909,
-        "avg_ret_excess_pct": -7.769
+        "avg_ret_net_pct": -9.0124,
+        "avg_ret_excess_pct": -4.8523
       },
       {
         "score_lo": 60,
@@ -70,22 +70,22 @@
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
-  "realized_wr": 0.3647,
-  "realized_wr_top_pick": 0.371,
+  "realized_wr": 0.3493,
+  "realized_wr_top_pick": 0.353,
   "realized_wr_top_pick_n": 239,
-  "realized_wr_active": 0.371,
+  "realized_wr_active": 0.353,
   "realized_wr_active_n": 239,
-  "declared_vs_realized_gap_active": 0.0973,
-  "declared_vs_realized_gap_top_pick": 0.1012,
-  "declared_vs_realized_gap": 0.1012,
-  "avg_ret_excess_pct": -2.8771,
+  "declared_vs_realized_gap_active": 0.1283,
+  "declared_vs_realized_gap_top_pick": 0.1351,
+  "declared_vs_realized_gap": 0.1351,
+  "avg_ret_excess_pct": -2.4164,
   "top_pick_funnel": {
-    "trade_ymd": "20260915",
-    "total": 353,
+    "trade_ymd": "20260916",
+    "total": 354,
     "aggressive_funnel": {
-      "total": 353,
-      "route_active": 39,
-      "hard_gate": 191,
+      "total": 354,
+      "route_active": 47,
+      "hard_gate": 193,
       "elite_75": 0,
       "struct_80": 0,
       "timing_70": 0,
@@ -93,9 +93,9 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 353,
-      "route_active": 39,
-      "hard_gate": 191,
+      "total": 354,
+      "route_active": 47,
+      "hard_gate": 193,
       "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
@@ -117,18 +117,18 @@
     {
       "gate": "top_pick_tp1_positive",
       "status": "PASS",
-      "subject_n": 28
+      "subject_n": 26
     },
     {
       "gate": "top_pick_rr_now_tp1_1",
       "status": "PASS",
-      "detail": "min_rr=1.03",
-      "subject_n": 28
+      "detail": "min_rr=1.01",
+      "subject_n": 26
     },
     {
       "gate": "declared_vs_realized_gap_15pp",
       "status": "PASS",
-      "detail": "gap_top_pick=10.1% (n=239)",
+      "detail": "gap_top_pick=13.5% (n=239)",
       "subject_n": 239
     }
   ],
@@ -136,12 +136,12 @@
     {
       "gate": "top_pick_route_positive_observed",
       "status": "WARN",
-      "detail": "TOP_PICK 14건이 ATTACK/ARMED 아님 (v32 이후 정상 — 관측만)"
+      "detail": "TOP_PICK 8건이 ATTACK/ARMED 아님 (v32 이후 정상 — 관측만)"
     },
     {
       "gate": "declared_vs_realized_gap_active",
       "status": "OK",
-      "detail": "gap_active=9.7% (n=239)"
+      "detail": "gap_active=12.8% (n=239)"
     },
     {
       "gate": "wilson_monotonicity",
@@ -151,7 +151,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-2.88%"
+      "detail": "avg_ret_excess=-2.42%"
     },
     {
       "gate": "market_map_coverage_95",
@@ -165,7 +165,7 @@
   ],
   "ci_hard_all_pass": true,
   "ci_soft_any_warn": true,
-  "top_pick_count": 28,
+  "top_pick_count": 26,
   "top_pick_rr_lt1_count": 0,
-  "top_pick_min_rr": 1.03
+  "top_pick_min_rr": 1.01
 }

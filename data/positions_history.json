@@ -6499,5 +6499,53 @@
     "alerted_events": [
       "004370_20260903_STOP_HIT_20260915"
     ]
+  },
+  {
+    "code": "021240",
+    "name": "코웨이",
+    "entry_ymd": "20260727",
+    "entry_px": 92300.0,
+    "qty": 0,
+    "stop_px": 86200.0,
+    "stop_px_initial": 86200.0,
+    "take_px1": 100500.0,
+    "take_px2": 102700.0,
+    "trailing_high": 108500.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260916",
+    "last_close_px": 107400.0,
+    "unrealized_pnl_pct": 16.36,
+    "realized_pnl_pct": 16.36,
+    "close_ymd": "20260916",
+    "close_px": 107400.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "021240_20260727_TP1_HIT_20260915",
+      "021240_20260727_TP1_HIT_20260916",
+      "021240_20260727_TP2_HIT_20260916"
+    ]
+  },
+  {
+    "code": "035720",
+    "name": "카카오",
+    "entry_ymd": "20260909",
+    "entry_px": 35050.0,
+    "qty": 0,
+    "stop_px": 33600.0,
+    "stop_px_initial": 33600.0,
+    "take_px1": 40100.0,
+    "take_px2": 41450.0,
+    "trailing_high": 36700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260916",
+    "last_close_px": 33550.0,
+    "unrealized_pnl_pct": -4.28,
+    "realized_pnl_pct": -4.28,
+    "close_ymd": "20260916",
+    "close_px": 33550.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "035720_20260909_STOP_HIT_20260916"
+    ]
   }
 ]
