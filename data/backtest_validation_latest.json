@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-16T21:26:17",
+  "generated_at": "2026-09-17T21:23:39",
   "version": "v3.9.2",
   "engine_version": "v3.9.2",
   "horizon_bdays": 10,
   "trade_cost_pct": 0.22,
-  "days_covered": 143,
+  "days_covered": 144,
   "ohlc_coverage_note": "OHLC parquet 종목수: 1761 — 이 종목들만 장중 고가/저가 터치 판정, 나머지는 종가 폴백",
   "methodology": {
     "horizon_days": 10,
@@ -17,7 +17,7 @@
     "selection_mode": "top1_first_then_top3_fallback",
     "date_range": [
       "2026-02-26",
-      "2026-09-16"
+      "2026-09-17"
     ],
     "description": "매일 pick_top1()로 🏆 최강 1위 추천 → fill_window 3일 내 체결 검증 → OHLC 기반 TP1/Stop 터치 판정 (장중 고가/저가) → horizon 10일 미도달시 종가 마감. 자본 시뮬은 max_positions=1, 이미 보유 중이면 스킵, exit 후 재진입 가능."
   },
@@ -45,17 +45,17 @@
       "tp3_before_stop_rate": 0.1163,
       "tp1_to_tp2_conv": 0.4286,
       "tp2_to_tp3_conv": 0.4167,
-      "avg_max_high_pct": 17.83,
-      "avg_min_low_pct": -14.46,
-      "avg_max_high_pct_tp3_miss": 11.32,
+      "avg_max_high_pct": 17.48,
+      "avg_min_low_pct": -14.66,
+      "avg_max_high_pct_tp3_miss": 10.93,
       "n_tp2_avail": 62,
       "n_tp3_avail": 43
     },
     "tp2_rate": 0.1935,
     "tp3_rate": 0.1163,
     "tp3_before_stop_rate": 0.1163,
-    "avg_max_high_pct": 17.83,
-    "avg_max_high_pct_tp3_miss": 11.32
+    "avg_max_high_pct": 17.48,
+    "avg_max_high_pct_tp3_miss": 10.93
   },
   "entry_mode_shadow": {
     "enabled": true,
@@ -303,17 +303,17 @@
         "tp3_before_stop_rate": 0.1163,
         "tp1_to_tp2_conv": 0.4286,
         "tp2_to_tp3_conv": 0.4167,
-        "avg_max_high_pct": 17.83,
-        "avg_min_low_pct": -14.46,
-        "avg_max_high_pct_tp3_miss": 11.32,
+        "avg_max_high_pct": 17.48,
+        "avg_min_low_pct": -14.66,
+        "avg_max_high_pct_tp3_miss": 10.93,
         "n_tp2_avail": 62,
         "n_tp3_avail": 43
       },
       "tp2_rate": 0.1935,
       "tp3_rate": 0.1163,
       "tp3_before_stop_rate": 0.1163,
-      "avg_max_high_pct": 17.83,
-      "avg_max_high_pct_tp3_miss": 11.32
+      "avg_max_high_pct": 17.48,
+      "avg_max_high_pct_tp3_miss": 10.93
     }
   },
   "daily_top1_backtest": {
@@ -340,17 +340,17 @@
       "tp3_before_stop_rate": 0.0,
       "tp1_to_tp2_conv": 0.3636,
       "tp2_to_tp3_conv": 0.0,
-      "avg_max_high_pct": 13.35,
-      "avg_min_low_pct": -14.48,
-      "avg_max_high_pct_tp3_miss": 13.35,
+      "avg_max_high_pct": 12.64,
+      "avg_min_low_pct": -14.87,
+      "avg_max_high_pct_tp3_miss": 12.64,
       "n_tp2_avail": 31,
       "n_tp3_avail": 22
     },
     "tp2_rate": 0.129,
     "tp3_rate": 0.0,
     "tp3_before_stop_rate": 0.0,
-    "avg_max_high_pct": 13.35,
-    "avg_max_high_pct_tp3_miss": 13.35
+    "avg_max_high_pct": 12.64,
+    "avg_max_high_pct_tp3_miss": 12.64
   },
   "all_trades_top1": [
     {
@@ -1385,7 +1385,7 @@
       "stop": 2990.0,
       "outcome": "LOSS",
       "exit_price": 2990.0,
-      "days_held": 5,
+      "days_held": 3,
       "method": "ohlc_low_touch",
       "fill_date": "2026-05-26",
       "ret_pct": -15.06,
@@ -1399,13 +1399,13 @@
       "tp3_hit": false,
       "tp3_day": 0,
       "stop_hit": true,
-      "stop_day": 5,
+      "stop_day": 3,
       "tp1_before_stop": false,
       "tp2_before_stop": false,
       "tp3_before_stop": false,
-      "max_high_pct": 17.76,
-      "min_low_pct": -33.95,
-      "max_close_pct": 12.93
+      "max_high_pct": 6.82,
+      "min_low_pct": -40.09,
+      "max_close_pct": 2.44
     },
     {
       "date": "20260525",
@@ -1419,7 +1419,7 @@
       "stop": 2990.0,
       "outcome": "LOSS",
       "exit_price": 2990.0,
-      "days_held": 5,
+      "days_held": 3,
       "method": "ohlc_low_touch",
       "fill_date": "2026-05-26",
       "ret_pct": -15.06,
@@ -1433,13 +1433,13 @@
       "tp3_hit": false,
       "tp3_day": 0,
       "stop_hit": true,
-      "stop_day": 5,
+      "stop_day": 3,
       "tp1_before_stop": false,
       "tp2_before_stop": false,
       "tp3_before_stop": false,
-      "max_high_pct": 17.76,
-      "min_low_pct": -33.95,
-      "max_close_pct": 12.93
+      "max_high_pct": 6.82,
+      "min_low_pct": -40.09,
+      "max_close_pct": 2.44
     },
     {
       "date": "20260526",
@@ -2396,6 +2396,11 @@
       "date": "20260916",
       "n_picked": 0,
       "codes": []
+    },
+    {
+      "date": "20260917",
+      "n_picked": 0,
+      "codes": []
     }
   ],
   "signal_top1": {
@@ -2428,7 +2433,7 @@
     "n_trades_filled": 26,
     "n_skipped_duplicate": 13,
     "n_skipped_not_filled": 12,
-    "positive_day_rate": 0.2973,
+    "positive_day_rate": 0.2895,
     "cost_basis": "net (거래당 0.22% 차감)"
   },
   "capital_portfolio_top1": {

@@ -6547,5 +6547,28 @@
     "alerted_events": [
       "035720_20260909_STOP_HIT_20260916"
     ]
+  },
+  {
+    "code": "035420",
+    "name": "NAVER",
+    "entry_ymd": "20260902",
+    "entry_px": 209000.0,
+    "qty": 0,
+    "stop_px": 200500.0,
+    "stop_px_initial": 200500.0,
+    "take_px1": 235000.0,
+    "take_px2": 288500.0,
+    "trailing_high": 219500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260917",
+    "last_close_px": 199500.0,
+    "unrealized_pnl_pct": -4.55,
+    "realized_pnl_pct": -4.55,
+    "close_ymd": "20260917",
+    "close_px": 199500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "035420_20260902_STOP_HIT_20260917"
+    ]
   }
 ]
