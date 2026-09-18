@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0d0a16">
+<meta name="description" content="한 손으로 즐기는 실시간 생존 액션. 6분 동안 백귀의 밤을 버텨라.">
+<title>백귀야행</title>
+<style>
+:root{
+  --bg:#0d0a16;
+  --panel:rgba(20,15,34,.86);
+  --line:rgba(255,255,255,.10);
+  --gold:#f0b23c;
+  --red:#e5484d;
+  --blue:#4c8dff;
+  --green:#3fd07a;
+  --text:#ece8f7;
+  --dim:#8d86a8;
+  --font:'Pretendard','Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic',system-ui,sans-serif;
+  --num:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; overflow:hidden; }
+body{
+  background:var(--bg); color:var(--text);
+  font-family:var(--font);
+  -webkit-font-smoothing:antialiased;
+  -webkit-tap-highlight-color:transparent;
+  overscroll-behavior:none; touch-action:none; user-select:none;
+}
+#app{ position:fixed; inset:0; }
+#game{ display:block; width:100%; height:100%; touch-action:none; }
+
+/* ── 상단 계기 ─────────────────────────── */
+#hud{
+  position:absolute; left:0; right:0;
+  top:env(safe-area-inset-top);
+  padding:8px 10px 0; pointer-events:none;
+  display:flex; flex-direction:column; gap:5px;
+}
+.row{ display:flex; align-items:center; gap:8px; }
+.clock{
+  font-family:var(--num); font-size:1.6rem; font-weight:700;
+  font-variant-numeric:tabular-nums; letter-spacing:.02em;
+  text-shadow:0 2px 6px #000a;
+}
+.lvchip{
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:999px; padding:2px 10px;
+  font-size:.72rem; font-weight:700; letter-spacing:.06em; color:var(--gold);
+}
+.lvchip b{ font-family:var(--num); font-size:.9rem; }
+.spacer{ flex:1; }
+.kills{ font-size:.74rem; color:var(--dim); }
+.kills b{ font-family:var(--num); font-size:.95rem; color:var(--text); }
+.combo{
+  flex:0 0 auto; white-space:nowrap; line-height:1;
+  font-weight:900; letter-spacing:.02em; color:var(--gold);
+  text-shadow:0 2px 8px #000, 0 0 14px rgba(240,178,60,.5);
+  font-variant-numeric:tabular-nums;
+}
+.combo.hot{ color:#ff8a4c; text-shadow:0 2px 8px #000, 0 0 18px rgba(255,110,60,.7); }
+#mute{
+  pointer-events:auto; appearance:none; border:none; background:none;
+  font-size:1.05rem; padding:2px 4px; cursor:pointer; opacity:.75;
+}
+#mute:focus-visible{ outline:2px solid var(--gold); border-radius:6px; }
+
+.bar{
+  position:relative; height:11px; flex:1;
+  background:rgba(0,0,0,.55); border:1px solid var(--line);
+  border-radius:3px; overflow:hidden;
+}
+.bar i{ position:absolute; inset:0 auto 0 0; transition:width .12s linear; }
+#hpfill{ background:linear-gradient(180deg,#ff6b6b,var(--red)); }
+#xpfill{ background:linear-gradient(180deg,#7fb0ff,var(--blue)); }
+.bar.xp{ height:6px; }
+.hptext{
+  position:absolute; inset:0; display:grid; place-items:center;
+  font-family:var(--num); font-size:.62rem; font-weight:700;
+  color:#fff; text-shadow:0 1px 2px #000c;
+}
+#arms{ display:flex; flex-wrap:wrap; gap:4px; }
+.pip{
+  background:var(--panel); border:1px solid var(--line); border-radius:5px;
+  padding:1px 5px; font-size:.78rem; display:inline-flex; align-items:center; gap:2px;
+}
+.pip b{ font-family:var(--num); font-size:.66rem; color:var(--gold); }
+.pip.dim{ opacity:.72; }
+.pip.dim b{ color:var(--green); }
+.pip.ready{ border-color:rgba(255,211,92,.8); box-shadow:0 0 10px rgba(240,178,60,.5); }
+.pip.evo{ border-color:#ffd35c; background:rgba(90,64,20,.9); }
+.pip.evo b{ color:#ffd35c; }
+.kills.soul b{ color:#8fd0ff; }
+.stats dd.soulv{ color:#8fd0ff; }
+
+/* ── 보스 막대 ─────────────────────────── */
+#bossbar{
+  position:absolute; left:50%; transform:translateX(-50%);
+  bottom:calc(env(safe-area-inset-bottom) + 96px);
+  width:min(78%,420px); pointer-events:none;
+}
+#bossname{
+  display:block; text-align:center; font-size:.74rem; font-weight:700;
+  letter-spacing:.14em; color:#ffb0a8; margin-bottom:3px; text-shadow:0 2px 5px #000;
+}
+#bossbar .bar{ height:9px; border-color:rgba(255,90,90,.5); }
+#bossfill{ background:linear-gradient(180deg,#ff8a5c,#d7263d); }
+
+/* ── 회피 ──────────────────────────────── */
+#dash{
+  position:absolute;
+  right:calc(env(safe-area-inset-right) + 18px);
+  bottom:calc(env(safe-area-inset-bottom) + 22px);
+  width:76px; height:76px; border-radius:50%;
+  background:rgba(30,22,52,.66);
+  border:2px solid rgba(200,190,255,.42);
+  color:var(--text); font-family:var(--font);
+  font-size:.82rem; font-weight:700; letter-spacing:.06em;
+  cursor:pointer; touch-action:none;
+  display:grid; place-items:center;
+}
+#dash:active{ background:rgba(70,55,120,.8); transform:scale(.94); }
+#dash:focus-visible{ outline:2px solid var(--gold); outline-offset:3px; }
+#dash::after{
+  content:''; position:absolute; inset:-2px; border-radius:50%;
+  background:conic-gradient(rgba(120,170,255,.85) calc(var(--cd,0) * 1turn), transparent 0);
+  -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  mask:radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  pointer-events:none;
+}
+
+/* ── 필살기 ────────────────────────────── */
+#ult{
+  position:absolute;
+  left:calc(env(safe-area-inset-left) + 18px);
+  bottom:calc(env(safe-area-inset-bottom) + 22px);
+  width:70px; height:70px; border-radius:50%;
+  background:
+    linear-gradient(to top, rgba(240,178,60,.55) calc(var(--fill,0) * 100%), rgba(0,0,0,0) 0),
+    rgba(30,22,52,.6);
+  border:2px solid rgba(240,178,60,.35);
+  color:var(--dim); font-family:var(--font);
+  font-size:.72rem; font-weight:800; letter-spacing:.02em;
+  cursor:pointer; touch-action:none; display:grid; place-items:center;
+  transition:border-color .2s, color .2s;
+}
+#ult.ready{
+  border-color:#ffd35c; color:#2a1a02;
+  background:linear-gradient(180deg,#ffe9a8,var(--gold));
+  box-shadow:0 0 22px rgba(240,178,60,.75);
+  animation:ultPulse 1s ease-in-out infinite;
+}
+@keyframes ultPulse{ 50%{ box-shadow:0 0 34px rgba(255,211,92,.95); } }
+#ult:active{ transform:scale(.94); }
+#ult:focus-visible{ outline:2px solid var(--gold); outline-offset:3px; }
+
+/* ── 이야기 ────────────────────────────── */
+.stitle{
+  font-size:clamp(1.5rem,7vw,2.1rem); font-weight:900;
+  letter-spacing:.14em; text-indent:.14em; margin:0 0 1.4rem; color:var(--gold);
+}
+.sbody{ max-width:24rem; margin:0 0 1.9rem; }
+.sbody p{
+  margin:0 0 .55rem; font-size:.95rem; line-height:1.85;
+  color:var(--text); text-wrap:balance;
+}
+.sbody.small p{ font-size:.82rem; color:var(--dim); margin-bottom:.3rem; }
+
+/* ── 인물 고르기 ───────────────────────── */
+#chars{ display:flex; gap:8px; margin:0 0 1.3rem; }
+.chr{
+  appearance:none; cursor:pointer; font-family:var(--font);
+  display:flex; flex-direction:column; align-items:center; gap:1px;
+  background:rgba(28,22,48,.9); border:1px solid var(--line);
+  border-radius:11px; padding:9px 10px; color:var(--text); min-width:92px;
+}
+.chr .ci{ font-size:1.5rem; line-height:1.2; }
+.chr .cn{ font-size:.88rem; font-weight:800; }
+.chr .cd{ font-size:.62rem; color:var(--dim); }
+.chr.on{
+  border-color:var(--gold); background:rgba(64,48,20,.95);
+  box-shadow:0 0 16px rgba(240,178,60,.35);
+}
+.chr.on .cd{ color:#e5c98a; }
+
+/* ── 막(幕) 공통 ───────────────────────── */
+.veil{
+  position:absolute; inset:0; z-index:30;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:0; text-align:center; padding:22px;
+  background:radial-gradient(circle at 50% 40%, rgba(24,17,44,.90), rgba(6,4,12,.96));
+  backdrop-filter:blur(2px);
+}
+[hidden]{ display:none !important; }
+
+.brand{
+  font-size:clamp(2.6rem,13vw,4rem); font-weight:900;
+  letter-spacing:.16em; text-indent:.16em; margin:0 0 .3rem;
+  background:linear-gradient(180deg,#fff3d0,var(--gold) 60%,#b7761c);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  filter:drop-shadow(0 4px 14px rgba(240,178,60,.28));
+}
+.tag{ color:var(--dim); font-size:.86rem; margin:0 0 1.5rem; line-height:1.7; }
+.tag b{ color:var(--text); font-weight:700; }
+.big{
+  appearance:none; border:none; cursor:pointer;
+  background:linear-gradient(180deg,#ffd472,var(--gold));
+  color:#2a1a02; font-family:var(--font);
+  font-size:1.05rem; font-weight:900; letter-spacing:.12em; text-indent:.12em;
+  padding:.85rem 2.6rem; border-radius:10px;
+  box-shadow:0 6px 0 #94631a, 0 10px 22px rgba(0,0,0,.45);
+}
+.big:active{ transform:translateY(3px); box-shadow:0 3px 0 #94631a, 0 6px 14px rgba(0,0,0,.45); }
+.big:focus-visible{ outline:3px solid #fff6; outline-offset:3px; }
+.hint{ margin-top:1.4rem; font-size:.74rem; color:var(--dim); line-height:1.85; }
+.hint b{ color:var(--text); }
+#bestHint{ color:var(--gold); font-size:.78rem; margin:0 0 1.1rem; font-family:var(--num); }
+
+/* ── 레벨업 ────────────────────────────── */
+#levelup{ justify-content:center; gap:0; }
+.lvtitle{
+  font-size:1.5rem; font-weight:900; letter-spacing:.1em; margin:0 0 .15rem; color:var(--gold);
+}
+.lvsub{ font-size:.76rem; color:var(--dim); margin:0 0 1.2rem; }
+#cards{ display:flex; flex-direction:column; gap:10px; width:min(100%,380px); }
+.card{
+  appearance:none; cursor:pointer; text-align:left;
+  display:grid; grid-template-columns:52px 1fr auto; grid-template-rows:auto auto;
+  column-gap:12px; row-gap:2px; align-items:center;
+  background:linear-gradient(180deg,rgba(46,36,78,.95),rgba(26,20,46,.95));
+  border:1px solid rgba(255,255,255,.14); border-left:4px solid var(--blue);
+  border-radius:12px; padding:12px 14px; color:var(--text);
+  font-family:var(--font);
+}
+.card.fresh{ border-left-color:var(--gold); }
+.card.evo{
+  border-left-color:#ffd35c; border-color:rgba(255,211,92,.55);
+  background:linear-gradient(180deg,rgba(84,60,24,.95),rgba(40,28,14,.95));
+  box-shadow:0 0 22px rgba(240,178,60,.28);
+}
+.card.evo .cl{ background:#ffd35c; }
+.card:active{ transform:translateY(2px); background:linear-gradient(180deg,rgba(60,47,102,.95),rgba(34,26,60,.95)); }
+.card:focus-visible{ outline:2px solid var(--gold); outline-offset:2px; }
+.ci{ grid-row:1/3; font-size:1.9rem; text-align:center; }
+.cn{ font-size:1.02rem; font-weight:800; }
+.cl{
+  font-size:.68rem; font-weight:700; color:#0e0a1c;
+  background:var(--blue); border-radius:999px; padding:2px 9px;
+}
+.card.fresh .cl{ background:var(--gold); }
+.cd{ grid-column:2/4; font-size:.75rem; color:var(--dim); }
+.cd i{ font-style:normal; color:var(--gold); font-weight:700; }
+
+/* ── 알림띠 ────────────────────────────── */
+#banner{
+  position:absolute; left:50%; transform:translateX(-50%);
+  top:calc(env(safe-area-inset-top) + 30%);
+  font-size:1.35rem; font-weight:900; letter-spacing:.16em; text-indent:.16em;
+  color:#ffd8a8; text-shadow:0 0 18px rgba(255,140,60,.8), 0 3px 10px #000;
+  pointer-events:none; white-space:nowrap;
+}
+
+/* ── 상자 ──────────────────────────────── */
+#chestList{ display:flex; flex-direction:column; gap:8px; width:min(100%,360px); }
+.loot{
+  display:grid; grid-template-columns:44px 1fr auto; align-items:center; gap:10px;
+  background:linear-gradient(180deg,rgba(62,48,24,.95),rgba(34,26,14,.95));
+  border:1px solid rgba(240,178,60,.4); border-radius:10px; padding:9px 12px;
+}
+.loot .ci{ font-size:1.6rem; text-align:center; }
+.loot .cn{ font-weight:800; font-size:.98rem; }
+.loot .cl{
+  font-size:.66rem; font-weight:700; color:#2a1a02;
+  background:var(--gold); border-radius:999px; padding:2px 9px;
+}
+
+/* ── 넋 상점 ───────────────────────────── */
+.shopbox{ width:min(100%,380px); margin-top:1.2rem; text-align:left; }
+.shopbox summary{
+  cursor:pointer; list-style:none; text-align:center;
+  font-size:.8rem; font-weight:700; color:var(--dim);
+  padding:.5rem; border:1px solid var(--line); border-radius:8px;
+}
+.shopbox summary::-webkit-details-marker{ display:none; }
+.shopbox summary b{ color:#8fd0ff; font-family:var(--num); }
+#shop{ display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.buy{
+  appearance:none; cursor:pointer; text-align:left; font-family:var(--font);
+  display:grid; grid-template-columns:34px 1fr auto; grid-template-rows:auto auto;
+  column-gap:9px; align-items:center;
+  background:rgba(30,24,52,.9); color:var(--text);
+  border:1px solid var(--line); border-radius:9px; padding:8px 11px;
+}
+.buy .bi{ grid-row:1/3; font-size:1.35rem; text-align:center; }
+.buy .bn{ font-size:.86rem; font-weight:700; }
+.buy .bn i{ font-style:normal; color:var(--dim); font-size:.7rem; }
+.buy .bd{ grid-column:2/4; font-size:.7rem; color:var(--dim); }
+.buy .bc{
+  grid-column:3; grid-row:1/3; align-self:center;
+  font-size:.74rem; font-weight:700; color:#8fd0ff; font-family:var(--num);
+  white-space:nowrap;
+}
+.buy.poor{ opacity:.45; cursor:default; }
+.buy.maxed{ opacity:.6; cursor:default; border-color:rgba(240,178,60,.4); }
+.buy.maxed .bc{ color:var(--gold); }
+.buy:not(:disabled):active{ transform:translateY(2px); background:rgba(48,38,80,.95); }
+
+/* ── 결과 ──────────────────────────────── */
+#overTitle{
+  font-size:clamp(1.9rem,9vw,2.6rem); font-weight:900;
+  letter-spacing:.12em; margin:0 0 .3rem;
+}
+#overTitle.bad{ color:#ff7b7b; }
+#overTitle.good{ color:var(--gold); }
+#overSub{ color:var(--dim); font-size:.84rem; margin:0 0 1.6rem; }
+.stats{
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px 16px; margin:0 0 1.5rem; width:min(100%,360px);
+}
+.stats div{ display:flex; flex-direction:column; gap:2px; }
+.stats dt{ font-size:.64rem; color:var(--dim); letter-spacing:.1em; }
+.stats dd{
+  margin:0; font-family:var(--num); font-size:1.25rem; font-weight:700;
+  font-variant-numeric:tabular-nums;
+}
+.stats dd.hi{ color:var(--gold); }
+
+@media (prefers-reduced-motion:reduce){
+  *{ transition-duration:.001ms !important; }
+}
+@media (min-width:520px){
+  #cards{ width:420px; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="game"></canvas>
+
+  <header id="hud">
+    <div class="row">
+      <span class="lvchip">LV <b id="lv">1</b></span>
+      <span class="spacer"></span>
+      <span class="clock" id="clock">0:00</span>
+      <span class="spacer"></span>
+      <span class="kills">처치 <b id="kills">0</b></span>
+      <span class="kills soul">넋 <b id="soulnow">0</b></span>
+      <button id="mute" aria-pressed="true" aria-label="소리 켜기/끄기">🔊</button>
+    </div>
+    <div class="row">
+      <div class="bar"><i id="hpfill" style="width:100%"></i><span class="hptext" id="hptext">100 / 100</span></div>
+    </div>
+    <div class="row">
+      <div class="bar xp"><i id="xpfill" style="width:0%"></i></div>
+    </div>
+    <div class="row"><div id="arms"></div><span class="spacer"></span><span class="combo" id="combo" hidden></span></div>
+  </header>
+
+  <div id="banner" hidden>혼불 무리</div>
+
+  <div id="bossbar" hidden>
+    <span id="bossname">구미호</span>
+    <div class="bar"><i id="bossfill" style="width:100%"></i></div>
+  </div>
+
+  <button id="dash" aria-label="회피">회피</button>
+  <button id="ult" aria-label="필살기 백귀참"><span>백귀참</span></button>
+
+  <!-- 레벨업 -->
+  <section class="veil" id="levelup" hidden>
+    <p class="lvtitle">LEVEL <span id="lvnum">2</span></p>
+    <p class="lvsub">하나를 고르시오</p>
+    <div id="cards"></div>
+  </section>
+
+  <!-- 이야기 -->
+  <section class="veil" id="story" hidden>
+    <h2 id="storyTitle" class="stitle">백귀야행</h2>
+    <div id="storyBody" class="sbody"></div>
+    <button class="big" id="storyOk">나 선 다</button>
+  </section>
+
+  <!-- 상자 -->
+  <section class="veil" id="chest" hidden>
+    <p class="lvtitle" style="color:var(--gold)">보물 상자</p>
+    <p class="lvsub">정예를 벤 값이다</p>
+    <div id="chestList"></div>
+    <button class="big" id="chestOk" style="margin-top:1.3rem">계 속</button>
+  </section>
+
+  <!-- 시작 -->
+  <section class="veil" id="title">
+    <h1 class="brand">백귀야행</h1>
+    <p class="tag">
+      해가 지면 온갖 것이 기어 나온다.<br>
+      세 마당을 지나 <b>저승사자</b>를 베어라.
+    </p>
+    <div id="chars"></div>
+    <p id="bestHint"></p>
+    <button class="big" id="start">시 작</button>
+    <details class="shopbox">
+      <summary>넋 강화 <b id="soulbank">0</b></summary>
+      <div id="shop"></div>
+    </details>
+    <p class="hint">
+      화면 아무 데나 <b>손가락을 대고 끌면</b> 그쪽으로 달립니다.<br>
+      공격은 <b>자동</b>입니다. 오른쪽 아래 <b>회피</b>로 빠져나가세요.<br>
+      왼쪽 아래 <b>백귀참</b>은 처치로 차오릅니다. 직접 터뜨리세요.<br>
+      <b>회피</b>는 지나가며 적을 벱니다. 무기 <b>4단</b> + 보조 <b>2단</b>이면 <b>진화</b>.<br>
+      세 마당을 지나 <b>세 보스</b>를 넘어야 밤이 끝납니다.<br>
+      <b>소리를 켜고</b> 하시면 훨씬 낫습니다.
+    </p>
+  </section>
+
+  <!-- 결과 -->
+  <section class="veil" id="over" hidden>
+    <h2 id="overTitle" class="bad">쓰러졌다</h2>
+    <p id="overSub"></p>
+    <div id="overStory" class="sbody small"></div>
+    <dl class="stats">
+      <div><dt>버틴 시간</dt><dd id="rTime">0:00</dd></div>
+      <div><dt>처치</dt><dd id="rKill">0</dd></div>
+      <div><dt>레벨</dt><dd id="rLv">1</dd></div>
+      <div><dt>점수</dt><dd id="rScore">0</dd></div>
+      <div><dt>최고</dt><dd class="hi" id="rBest">0</dd></div>
+      <div><dt>얻은 넋</dt><dd class="soulv" id="rSoul">0</dd></div>
+    </dl>
+    <button class="big" id="again">계 속</button>
+  </section>
+</div>
+
+<script src="sprites.js"></script>
+<script src="audio.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
