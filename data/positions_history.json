@@ -6570,5 +6570,72 @@
     "alerted_events": [
       "035420_20260902_STOP_HIT_20260917"
     ]
+  },
+  {
+    "code": "081660",
+    "name": "미스토홀딩스",
+    "entry_ymd": "20260710",
+    "entry_px": 44650.0,
+    "qty": 0,
+    "stop_px": 37950.0,
+    "stop_px_initial": 37950.0,
+    "take_px1": 52400.0,
+    "take_px2": 55800.0,
+    "trailing_high": 49500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260922",
+    "last_close_px": 37800.0,
+    "unrealized_pnl_pct": -15.34,
+    "realized_pnl_pct": -15.34,
+    "close_ymd": "20260922",
+    "close_px": 37800.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "081660_20260710_WARN_DRAWDOWN_20260820",
+      "081660_20260710_WARN_DRAWDOWN_20260821",
+      "081660_20260710_WARN_DRAWDOWN_20260824",
+      "081660_20260710_WARN_DRAWDOWN_20260825",
+      "081660_20260710_WARN_DRAWDOWN_20260826",
+      "081660_20260710_WARN_DRAWDOWN_20260827",
+      "081660_20260710_WARN_DRAWDOWN_20260828",
+      "081660_20260710_WARN_DRAWDOWN_20260831",
+      "081660_20260710_WARN_DRAWDOWN_20260901",
+      "081660_20260710_WARN_DRAWDOWN_20260902",
+      "081660_20260710_WARN_DRAWDOWN_20260903",
+      "081660_20260710_WARN_DRAWDOWN_20260907",
+      "081660_20260710_WARN_DRAWDOWN_20260909",
+      "081660_20260710_WARN_DRAWDOWN_20260910",
+      "081660_20260710_WARN_DRAWDOWN_20260911",
+      "081660_20260710_WARN_DRAWDOWN_20260914",
+      "081660_20260710_WARN_DRAWDOWN_20260915",
+      "081660_20260710_WARN_DRAWDOWN_20260916",
+      "081660_20260710_WARN_DRAWDOWN_20260917",
+      "081660_20260710_WARN_DRAWDOWN_20260918",
+      "081660_20260710_WARN_DRAWDOWN_20260921",
+      "081660_20260710_STOP_HIT_20260922"
+    ]
+  },
+  {
+    "code": "051910",
+    "name": "LG화학",
+    "entry_ymd": "20260911",
+    "entry_px": 273000.0,
+    "qty": 0,
+    "stop_px": 258000.0,
+    "stop_px_initial": 258000.0,
+    "take_px1": 300000.0,
+    "take_px2": 357000.0,
+    "trailing_high": 280000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260922",
+    "last_close_px": 254500.0,
+    "unrealized_pnl_pct": -6.78,
+    "realized_pnl_pct": -6.78,
+    "close_ymd": "20260922",
+    "close_px": 254500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "051910_20260911_STOP_HIT_20260922"
+    ]
   }
 ]
