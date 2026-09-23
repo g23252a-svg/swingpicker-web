@@ -6637,5 +6637,29 @@
     "alerted_events": [
       "051910_20260911_STOP_HIT_20260922"
     ]
+  },
+  {
+    "code": "005935",
+    "name": "삼성전자우",
+    "entry_ymd": "20260824",
+    "entry_px": 189300.0,
+    "qty": 0,
+    "stop_px": 174100.0,
+    "stop_px_initial": 174100.0,
+    "take_px1": 210000.0,
+    "take_px2": 215000.0,
+    "trailing_high": 220000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20260923",
+    "last_close_px": 220000.0,
+    "unrealized_pnl_pct": 16.22,
+    "realized_pnl_pct": 16.22,
+    "close_ymd": "20260923",
+    "close_px": 220000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "005935_20260824_TP1_HIT_20260923",
+      "005935_20260824_TP2_HIT_20260923"
+    ]
   }
 ]
