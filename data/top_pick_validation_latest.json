@@ -1,39 +1,38 @@
 {
-  "trade_ymd": "20260923",
-  "top_pick_count": 20,
+  "trade_ymd": "20260924",
+  "top_pick_count": 18,
   "top_pick_by_type": {
-    "ALPHA": 20
+    "ALPHA": 18
   },
-  "avg_elite": 20.5,
-  "avg_rr": 2.19,
-  "min_rr": 1.25,
+  "avg_elite": 19.0,
+  "avg_rr": 2.21,
+  "min_rr": 1.19,
   "rr_lt_1_count": 0,
-  "avg_balance": 43.3,
-  "avg_win_rate": 0.498,
+  "avg_balance": 48.0,
+  "avg_win_rate": 0.478,
   "est_win_rate_method": "ELITE_SCORE",
   "est_win_rate_mode": "MATURE",
-  "est_win_rate_n": 15332,
+  "est_win_rate_n": 15437,
   "routes": {
-    "ARMED": 8,
-    "WAIT": 7,
-    "ATTACK": 4,
-    "CARRY": 1
+    "ARMED": 9,
+    "WAIT": 6,
+    "ATTACK": 3
   },
   "picks": [
     {
-      "종목코드": "000370",
-      "종목명": "한화손해보험",
+      "종목코드": "071970",
+      "종목명": "HD현대마린엔진",
       "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 14.3,
-      "RR_NOW_TP1": 3.05,
-      "BALANCE_SCORE": 59.2,
+      "ELITE_SCORE": 17.1,
+      "RR_NOW_TP1": 3.21,
+      "BALANCE_SCORE": 47.0,
       "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 16.6,
-      "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.508,
+      "TP1_PCT": 14.1,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "375500",
@@ -45,25 +44,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 11.7,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.44,
+      "EST_WIN_RATE": 0.437,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
-    },
-    {
-      "종목코드": "028050",
-      "종목명": "삼성E&A",
-      "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 37.4,
-      "RR_NOW_TP1": 2.07,
-      "BALANCE_SCORE": 0.0,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 11.3,
-      "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.445,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "298040",
@@ -75,10 +59,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 12.9,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.502,
+      "EST_WIN_RATE": 0.479,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "079550",
@@ -90,10 +74,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 11.6,
       "ROUTE": "ATTACK",
-      "EST_WIN_RATE": 0.499,
+      "EST_WIN_RATE": 0.477,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "090710",
@@ -105,10 +89,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 12.5,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "329180",
@@ -120,10 +104,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 10.6,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "028670",
@@ -135,25 +119,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 12.3,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
-    },
-    {
-      "종목코드": "003280",
-      "종목명": "흥아해운",
-      "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 27.6,
-      "RR_NOW_TP1": 1.48,
-      "BALANCE_SCORE": 13.1,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 6.1,
-      "ROUTE": "CARRY",
-      "EST_WIN_RATE": 0.495,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "319400",
@@ -165,10 +134,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 14.9,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "088350",
@@ -180,40 +149,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 15.3,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.501,
+      "EST_WIN_RATE": 0.478,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
-    },
-    {
-      "종목코드": "450080",
-      "종목명": "에코프로머티",
-      "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 11.9,
-      "RR_NOW_TP1": 2.34,
-      "BALANCE_SCORE": 64.2,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 14.7,
-      "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.508,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
-    },
-    {
-      "종목코드": "071970",
-      "종목명": "HD현대마린엔진",
-      "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 17.1,
-      "RR_NOW_TP1": 3.21,
-      "BALANCE_SCORE": 47.0,
-      "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 14.1,
-      "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.508,
-      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
-      "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "009540",
@@ -225,10 +164,25 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 10.6,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
+    },
+    {
+      "종목코드": "120110",
+      "종목명": "코오롱인더",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 4.1,
+      "RR_NOW_TP1": 2.77,
+      "BALANCE_SCORE": 88.4,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 15.3,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.483,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "267270",
@@ -240,10 +194,25 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 14.4,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.467,
+      "EST_WIN_RATE": 0.455,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
+    },
+    {
+      "종목코드": "000370",
+      "종목명": "한화손해보험",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 14.3,
+      "RR_NOW_TP1": 3.05,
+      "BALANCE_SCORE": 59.2,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 16.6,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.483,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "175330",
@@ -255,10 +224,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 9.4,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "005180",
@@ -270,10 +239,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 14.6,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "025980",
@@ -285,10 +254,10 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 10.1,
       "ROUTE": "ARMED",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
       "종목코드": "069960",
@@ -300,25 +269,25 @@
       "ENTRY_GAP_PCT": 0.0,
       "TP1_PCT": 6.6,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     },
     {
-      "종목코드": "006800",
-      "종목명": "미래에셋증권",
+      "종목코드": "021240",
+      "종목명": "코웨이",
       "TOP_PICK_TYPE": "ALPHA",
-      "ELITE_SCORE": 10.0,
-      "RR_NOW_TP1": 2.24,
-      "BALANCE_SCORE": 70.5,
+      "ELITE_SCORE": 15.8,
+      "RR_NOW_TP1": 1.19,
+      "BALANCE_SCORE": 57.8,
       "ENTRY_GAP_PCT": 0.0,
-      "TP1_PCT": 13.1,
+      "TP1_PCT": 9.5,
       "ROUTE": "WAIT",
-      "EST_WIN_RATE": 0.508,
+      "EST_WIN_RATE": 0.483,
       "EST_WIN_RATE_METHOD": "ELITE_SCORE",
       "EST_WIN_RATE_MODE": "MATURE",
-      "EST_WIN_RATE_N": 15332
+      "EST_WIN_RATE_N": 15437
     }
   ]
 }

@@ -17,7 +17,7 @@
       "STRUCT_SCORE": 69.6,
       "ENTRY_RISK_LEVEL": "GREEN",
       "ROUTE": "WAIT",
-      "MARKET_BREADTH": 50.7
+      "MARKET_BREADTH": 50.9
     },
     {
       "종목코드": "007660",
@@ -32,7 +32,7 @@
       "STRUCT_SCORE": 43.7,
       "ENTRY_RISK_LEVEL": "ORANGE",
       "ROUTE": "WAIT",
-      "MARKET_BREADTH": 50.7
+      "MARKET_BREADTH": 50.9
     },
     {
       "종목코드": "096770",
@@ -47,7 +47,7 @@
       "STRUCT_SCORE": 91.8,
       "ENTRY_RISK_LEVEL": "GREEN",
       "ROUTE": "WAIT",
-      "MARKET_BREADTH": 50.7
+      "MARKET_BREADTH": 50.9
     }
   ],
   "rule_pass_count": 16,
@@ -70,7 +70,7 @@
     "oos_pass": false,
     "baseline_test": 33.0
   },
-  "baseline_train": 31.4,
+  "baseline_train": 31.3,
   "baseline_test": 33.0,
   "oos_rules_found": 0,
   "total_rules_evaluated": 6,
