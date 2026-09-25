@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-24T12:19:20.973223+00:00",
+  "generated_at_utc": "2026-09-25T12:18:25.441290+00:00",
   "validation": {
     "validated": false,
     "trade_validated": false,
@@ -12,53 +12,53 @@
     "period_start": "20260625",
     "period_end": "20260916",
     "auc": 0.4254041519229748,
-    "brier": 0.28637746080216286,
+    "brier": 0.2863774608020218,
     "baseline_brier": 0.26034878428016944,
-    "calibration_error": 0.21864569205767784,
+    "calibration_error": 0.21864569205744672,
     "calibration_bins": [
       {
         "n": 1791,
-        "predicted": 0.19204430484964324,
+        "predicted": 0.19204430484964383,
         "observed": 0.484467303685104
       },
       {
         "n": 4501,
-        "predicted": 0.21715727989224592,
+        "predicted": 0.217157279892295,
         "observed": 0.4618905350975806
       },
       {
         "n": 1132,
-        "predicted": 0.36309686908323097,
+        "predicted": 0.36309686908350963,
         "observed": 0.30766520217462195
       },
       {
         "n": 3076,
-        "predicted": 0.45961356539012505,
+        "predicted": 0.45961356538975534,
         "observed": 0.35919334398686625
       },
       {
         "n": 4109,
-        "predicted": 0.5452316361022131,
+        "predicted": 0.5452316361018363,
         "observed": 0.3064579240252745
       },
       {
         "n": 1876,
-        "predicted": 0.6388076127259313,
+        "predicted": 0.6388076127253751,
         "observed": 0.3531193625027233
       },
       {
         "n": 378,
-        "predicted": 0.7371712059297554,
+        "predicted": 0.7371712059292429,
         "observed": 0.32008383817172986
       },
       {
         "n": 33,
-        "predicted": 0.8262219170734708,
+        "predicted": 0.8262219170724974,
         "observed": 0.21124155808796435
       },
       {
         "n": 1,
-        "predicted": 0.9098242840889151,
+        "predicted": 0.9098242840867988,
         "observed": 0.0
       }
     ],
@@ -106,7 +106,7 @@
       "unfillable_upper_limit": 6
     },
     "version": "swing_net_profit_v1",
-    "asof": "20260924",
+    "asof": "20260925",
     "target_definition": "익일 시가 진입·최대 5거래일 보유·손절 및 비용 후 수익",
     "policy": {
       "min_train_days": 60,
