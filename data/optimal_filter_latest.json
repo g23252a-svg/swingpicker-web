@@ -372,11 +372,11 @@
     }
   ],
   "meta": {
-    "total_trades": 57986,
+    "total_trades": 58352,
     "total_win_rate": 48.3,
-    "matched_days": 133,
+    "matched_days": 134,
     "horizon": 3,
     "min_samples": 10
   },
-  "generated_at": "2026-09-25T21:28:13.350484"
+  "generated_at": "2026-09-28T23:46:14.716932"
 }

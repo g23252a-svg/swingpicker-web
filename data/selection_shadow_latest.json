@@ -1,28 +1,28 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 10,
+ "days_total": 11,
  "variants": {
   "legacy": {
-   "days": 2,
-   "avg_ret_pct": 1.448786510973735,
+   "days": 3,
+   "avg_ret_pct": 1.2222679303927464,
    "win_rate": 1.0,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "live": {
-   "days": 2,
-   "avg_ret_pct": 1.448786510973735,
+   "days": 3,
+   "avg_ret_pct": 1.2222679303927464,
    "win_rate": 1.0,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol": {
-   "days": 2,
-   "avg_ret_pct": -1.282077532077532,
-   "win_rate": 0.5,
+   "days": 3,
+   "avg_ret_pct": 0.23055296311110274,
+   "win_rate": 0.6666666666666666,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
@@ -30,16 +30,16 @@
  },
  "paired": {
   "live-legacy": {
-   "days": 2,
+   "days": 3,
    "diff_pct": 0.0,
    "positive_days": 0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol-live": {
-   "days": 2,
-   "diff_pct": -2.730864043051267,
-   "positive_days": 1,
+   "days": 3,
+   "diff_pct": -0.9917149672816437,
+   "positive_days": 2,
    "hac_t": null,
    "hac_p": null
   }
@@ -47,34 +47,34 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20260925",
+   "ymd": "20260928",
    "variant": "legacy",
-   "종목코드": "476830",
-   "종목명": "알지노믹스",
-   "alpha": 98.4,
+   "종목코드": "004020",
+   "종목명": "현대제철",
+   "alpha": 99.5,
    "rr": 3.0,
-   "atr_pct": 0.07017787659811006,
-   "vol_pctl": 73.2
+   "atr_pct": 0.05875576036866359,
+   "vol_pctl": 54.6
   },
   {
-   "ymd": "20260925",
+   "ymd": "20260928",
    "variant": "live",
-   "종목코드": "071970",
-   "종목명": "HD현대마린엔진",
-   "alpha": 96.7,
+   "종목코드": "004020",
+   "종목명": "현대제철",
+   "alpha": 99.5,
    "rr": 3.0,
-   "atr_pct": 0.04829793424498109,
-   "vol_pctl": 37.6
+   "atr_pct": 0.05875576036866359,
+   "vol_pctl": 54.6
   },
   {
-   "ymd": "20260925",
+   "ymd": "20260928",
    "variant": "lowvol",
-   "종목코드": "139480",
-   "종목명": "이마트",
-   "alpha": 32.7,
-   "rr": 1.74,
-   "atr_pct": 0.023676880222841225,
-   "vol_pctl": 3.4
+   "종목코드": "030200",
+   "종목명": "KT",
+   "alpha": 19.7,
+   "rr": 1.33,
+   "atr_pct": 0.019142316017316016,
+   "vol_pctl": 1.1
   }
  ],
  "added": true
