@@ -1,28 +1,28 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 11,
+ "days_total": 12,
  "variants": {
   "legacy": {
-   "days": 3,
-   "avg_ret_pct": 1.2222679303927464,
+   "days": 4,
+   "avg_ret_pct": 2.6244808339425676,
    "win_rate": 1.0,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "live": {
-   "days": 3,
-   "avg_ret_pct": 1.2222679303927464,
+   "days": 4,
+   "avg_ret_pct": 2.6244808339425676,
    "win_rate": 1.0,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol": {
-   "days": 3,
-   "avg_ret_pct": 0.23055296311110274,
-   "win_rate": 0.6666666666666666,
+   "days": 4,
+   "avg_ret_pct": 0.5414650908836955,
+   "win_rate": 0.75,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
@@ -30,15 +30,15 @@
  },
  "paired": {
   "live-legacy": {
-   "days": 3,
+   "days": 4,
    "diff_pct": 0.0,
    "positive_days": 0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol-live": {
-   "days": 3,
-   "diff_pct": -0.9917149672816437,
+   "days": 4,
+   "diff_pct": -2.083015743058872,
    "positive_days": 2,
    "hac_t": null,
    "hac_p": null
@@ -47,34 +47,34 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20260928",
+   "ymd": "20260929",
    "variant": "legacy",
-   "종목코드": "004020",
-   "종목명": "현대제철",
-   "alpha": 99.5,
+   "종목코드": "009540",
+   "종목명": "HD한국조선해양",
+   "alpha": 87.6,
    "rr": 3.0,
-   "atr_pct": 0.05875576036866359,
-   "vol_pctl": 54.6
+   "atr_pct": 0.04721362229102167,
+   "vol_pctl": 32.1
   },
   {
-   "ymd": "20260928",
+   "ymd": "20260929",
    "variant": "live",
-   "종목코드": "004020",
-   "종목명": "현대제철",
-   "alpha": 99.5,
+   "종목코드": "009540",
+   "종목명": "HD한국조선해양",
+   "alpha": 87.6,
    "rr": 3.0,
-   "atr_pct": 0.05875576036866359,
-   "vol_pctl": 54.6
+   "atr_pct": 0.04721362229102167,
+   "vol_pctl": 32.1
   },
   {
-   "ymd": "20260928",
+   "ymd": "20260929",
    "variant": "lowvol",
-   "종목코드": "030200",
-   "종목명": "KT",
-   "alpha": 19.7,
-   "rr": 1.33,
-   "atr_pct": 0.019142316017316016,
-   "vol_pctl": 1.1
+   "종목코드": "097950",
+   "종목명": "CJ제일제당",
+   "alpha": 9.0,
+   "rr": 1.5,
+   "atr_pct": 0.01597482272328898,
+   "vol_pctl": 0.3
   }
  ],
  "added": true

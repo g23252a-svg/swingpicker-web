@@ -6703,5 +6703,60 @@
       "096770_20260727_TP1_HIT_20260928",
       "096770_20260727_TP2_HIT_20260928"
     ]
+  },
+  {
+    "code": "267260",
+    "name": "HD현대일렉트릭",
+    "entry_ymd": "20260821",
+    "entry_px": 718000.0,
+    "qty": 0,
+    "stop_px": 686000.0,
+    "stop_px_initial": 686000.0,
+    "take_px1": 870000.0,
+    "take_px2": 974000.0,
+    "trailing_high": 854000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260929",
+    "last_close_px": 684000.0,
+    "unrealized_pnl_pct": -4.74,
+    "realized_pnl_pct": -4.74,
+    "close_ymd": "20260929",
+    "close_px": 684000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "267260_20260821_STOP_HIT_20260929"
+    ]
+  },
+  {
+    "code": "015760",
+    "name": "한국전력",
+    "entry_ymd": "20260910",
+    "entry_px": 32750.0,
+    "qty": 0,
+    "stop_px": 30200.0,
+    "stop_px_initial": 30200.0,
+    "take_px1": 36400.0,
+    "take_px2": 38000.0,
+    "trailing_high": 33800.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20260929",
+    "last_close_px": 30050.0,
+    "unrealized_pnl_pct": -8.24,
+    "realized_pnl_pct": -8.24,
+    "close_ymd": "20260929",
+    "close_px": 30050.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "015760_20260910_WARN_DRAWDOWN_20260916",
+      "015760_20260910_WARN_DRAWDOWN_20260917",
+      "015760_20260910_WARN_DRAWDOWN_20260918",
+      "015760_20260910_WARN_DRAWDOWN_20260921",
+      "015760_20260910_WARN_DRAWDOWN_20260922",
+      "015760_20260910_WARN_DRAWDOWN_20260923",
+      "015760_20260910_WARN_DRAWDOWN_20260924",
+      "015760_20260910_WARN_DRAWDOWN_20260925",
+      "015760_20260910_WARN_DRAWDOWN_20260928",
+      "015760_20260910_STOP_HIT_20260929"
+    ]
   }
 ]
