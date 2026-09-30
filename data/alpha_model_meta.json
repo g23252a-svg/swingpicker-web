@@ -1,5 +1,5 @@
 {
- "trained_ymd": "20260929",
+ "trained_ymd": "20260930",
  "n_features": 103,
  "features": [
   "거래대금(억원)",
@@ -108,12 +108,12 @@
  ],
  "ok": true,
  "validated": true,
- "oos_days": 92,
- "oos_rows": 31261,
- "mean_ic": 0.1043,
- "ic_t": 4.51,
- "auc": 0.5549,
- "q5q1_spread_pct": 1.977,
+ "oos_days": 93,
+ "oos_rows": 31615,
+ "mean_ic": 0.1041,
+ "ic_t": 4.37,
+ "auc": 0.5488,
+ "q5q1_spread_pct": 2.191,
  "gate": {
   "min_ic_t": 2.0,
   "min_auc": 0.52,
@@ -122,63 +122,63 @@
  "calibration": [
   {
    "decile": 0,
-   "n": 3077,
-   "win_rate": 0.3383,
-   "avg_fwd_pct": -4.269
+   "n": 3112,
+   "win_rate": 0.3458,
+   "avg_fwd_pct": -4.177
   },
   {
    "decile": 1,
-   "n": 3118,
-   "win_rate": 0.3445,
-   "avg_fwd_pct": -3.378
+   "n": 3154,
+   "win_rate": 0.3348,
+   "avg_fwd_pct": -3.583
   },
   {
    "decile": 2,
-   "n": 3127,
-   "win_rate": 0.3473,
-   "avg_fwd_pct": -3.129
+   "n": 3163,
+   "win_rate": 0.349,
+   "avg_fwd_pct": -2.875
   },
   {
    "decile": 3,
-   "n": 3131,
-   "win_rate": 0.3577,
-   "avg_fwd_pct": -2.682
+   "n": 3165,
+   "win_rate": 0.3678,
+   "avg_fwd_pct": -2.728
   },
   {
    "decile": 4,
-   "n": 3107,
-   "win_rate": 0.355,
-   "avg_fwd_pct": -2.905
+   "n": 3143,
+   "win_rate": 0.3573,
+   "avg_fwd_pct": -2.721
   },
   {
    "decile": 5,
-   "n": 3139,
-   "win_rate": 0.3673,
-   "avg_fwd_pct": -2.492
+   "n": 3175,
+   "win_rate": 0.3603,
+   "avg_fwd_pct": -2.609
   },
   {
    "decile": 6,
-   "n": 3138,
-   "win_rate": 0.3808,
-   "avg_fwd_pct": -2.145
+   "n": 3171,
+   "win_rate": 0.3882,
+   "avg_fwd_pct": -2.153
   },
   {
    "decile": 7,
-   "n": 3120,
-   "win_rate": 0.3936,
-   "avg_fwd_pct": -1.769
+   "n": 3157,
+   "win_rate": 0.3887,
+   "avg_fwd_pct": -1.732
   },
   {
    "decile": 8,
-   "n": 3125,
-   "win_rate": 0.4064,
-   "avg_fwd_pct": -1.409
+   "n": 3160,
+   "win_rate": 0.407,
+   "avg_fwd_pct": -1.304
   },
   {
    "decile": 9,
-   "n": 3179,
-   "win_rate": 0.4042,
-   "avg_fwd_pct": -1.621
+   "n": 3215,
+   "win_rate": 0.4012,
+   "avg_fwd_pct": -1.534
   }
  ],
  "validation_scheme": "purged_label_end_v1",
@@ -199,7 +199,7 @@
    "train_last_anchor": "20260520",
    "train_last_label_end": "20260529",
    "train_days": 52,
-   "purged_rows": 2825
+   "purged_rows": 2827
   },
   {
    "test_month": "202607",
@@ -223,7 +223,7 @@
    "train_last_anchor": "20260821",
    "train_last_label_end": "20260831",
    "train_days": 115,
-   "purged_rows": 1769
+   "purged_rows": 1770
   }
  ],
  "model_saved": true

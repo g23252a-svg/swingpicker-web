@@ -1,28 +1,28 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 12,
+ "days_total": 13,
  "variants": {
   "legacy": {
-   "days": 4,
-   "avg_ret_pct": 2.6244808339425676,
-   "win_rate": 1.0,
+   "days": 5,
+   "avg_ret_pct": 1.8324728140655733,
+   "win_rate": 0.8,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "live": {
-   "days": 4,
-   "avg_ret_pct": 2.6244808339425676,
-   "win_rate": 1.0,
+   "days": 5,
+   "avg_ret_pct": 1.8324728140655733,
+   "win_rate": 0.8,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol": {
-   "days": 4,
-   "avg_ret_pct": 0.5414650908836955,
-   "win_rate": 0.75,
+   "days": 5,
+   "avg_ret_pct": 0.3200179001468433,
+   "win_rate": 0.6,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
@@ -30,16 +30,16 @@
  },
  "paired": {
   "live-legacy": {
-   "days": 4,
+   "days": 5,
    "diff_pct": 0.0,
    "positive_days": 0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol-live": {
-   "days": 4,
-   "diff_pct": -2.083015743058872,
-   "positive_days": 2,
+   "days": 5,
+   "diff_pct": -1.5124549139187298,
+   "positive_days": 3,
    "hac_t": null,
    "hac_p": null
   }
@@ -47,34 +47,34 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20260929",
+   "ymd": "20260930",
    "variant": "legacy",
-   "종목코드": "009540",
-   "종목명": "HD한국조선해양",
-   "alpha": 87.6,
-   "rr": 3.0,
-   "atr_pct": 0.04721362229102167,
-   "vol_pctl": 32.1
+   "종목코드": "336260",
+   "종목명": "두산퓨얼셀",
+   "alpha": 86.1,
+   "rr": 2.62,
+   "atr_pct": 0.07899251403618215,
+   "vol_pctl": 80.7
   },
   {
-   "ymd": "20260929",
+   "ymd": "20260930",
    "variant": "live",
-   "종목코드": "009540",
-   "종목명": "HD한국조선해양",
-   "alpha": 87.6,
-   "rr": 3.0,
-   "atr_pct": 0.04721362229102167,
-   "vol_pctl": 32.1
+   "종목코드": "079550",
+   "종목명": "LIG디펜스앤에어로스페이스",
+   "alpha": 86.6,
+   "rr": 2.13,
+   "atr_pct": 0.049958106409719316,
+   "vol_pctl": 39.7
   },
   {
-   "ymd": "20260929",
+   "ymd": "20260930",
    "variant": "lowvol",
    "종목코드": "097950",
    "종목명": "CJ제일제당",
-   "alpha": 9.0,
-   "rr": 1.5,
-   "atr_pct": 0.01597482272328898,
-   "vol_pctl": 0.3
+   "alpha": 37.8,
+   "rr": 1.56,
+   "atr_pct": 0.015979546180888465,
+   "vol_pctl": 0.5
   }
  ],
  "added": true
