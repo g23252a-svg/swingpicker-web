@@ -6758,5 +6758,31 @@
       "015760_20260910_WARN_DRAWDOWN_20260928",
       "015760_20260910_STOP_HIT_20260929"
     ]
+  },
+  {
+    "code": "039030",
+    "name": "이오테크닉스",
+    "entry_ymd": "20260914",
+    "entry_px": 425500.0,
+    "qty": 0,
+    "stop_px": 391000.0,
+    "stop_px_initial": 391000.0,
+    "take_px1": 489500.0,
+    "take_px2": 525000.0,
+    "trailing_high": 526000.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261001",
+    "last_close_px": 560000.0,
+    "unrealized_pnl_pct": 31.61,
+    "realized_pnl_pct": 31.61,
+    "close_ymd": "20261001",
+    "close_px": 560000.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "039030_20260914_TP1_HIT_20260929",
+      "039030_20260914_TP1_HIT_20260930",
+      "039030_20260914_TP1_HIT_20261001",
+      "039030_20260914_TP2_HIT_20261001"
+    ]
   }
 ]

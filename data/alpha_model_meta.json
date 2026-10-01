@@ -1,5 +1,5 @@
 {
- "trained_ymd": "20260930",
+ "trained_ymd": "20261001",
  "n_features": 103,
  "features": [
   "거래대금(억원)",
@@ -108,12 +108,12 @@
  ],
  "ok": true,
  "validated": true,
- "oos_days": 93,
- "oos_rows": 31615,
- "mean_ic": 0.1041,
- "ic_t": 4.37,
- "auc": 0.5488,
- "q5q1_spread_pct": 2.191,
+ "oos_days": 94,
+ "oos_rows": 31880,
+ "mean_ic": 0.0997,
+ "ic_t": 4.16,
+ "auc": 0.5473,
+ "q5q1_spread_pct": 2.086,
  "gate": {
   "min_ic_t": 2.0,
   "min_auc": 0.52,
@@ -122,63 +122,63 @@
  "calibration": [
   {
    "decile": 0,
-   "n": 3112,
-   "win_rate": 0.3458,
-   "avg_fwd_pct": -4.177
+   "n": 3138,
+   "win_rate": 0.3477,
+   "avg_fwd_pct": -4.117
   },
   {
    "decile": 1,
-   "n": 3154,
-   "win_rate": 0.3348,
-   "avg_fwd_pct": -3.583
+   "n": 3180,
+   "win_rate": 0.3381,
+   "avg_fwd_pct": -3.476
   },
   {
    "decile": 2,
-   "n": 3163,
-   "win_rate": 0.349,
-   "avg_fwd_pct": -2.875
+   "n": 3190,
+   "win_rate": 0.3517,
+   "avg_fwd_pct": -2.804
   },
   {
    "decile": 3,
-   "n": 3165,
-   "win_rate": 0.3678,
-   "avg_fwd_pct": -2.728
+   "n": 3191,
+   "win_rate": 0.3692,
+   "avg_fwd_pct": -2.683
   },
   {
    "decile": 4,
-   "n": 3143,
-   "win_rate": 0.3573,
-   "avg_fwd_pct": -2.721
+   "n": 3170,
+   "win_rate": 0.3587,
+   "avg_fwd_pct": -2.659
   },
   {
    "decile": 5,
-   "n": 3175,
-   "win_rate": 0.3603,
-   "avg_fwd_pct": -2.609
+   "n": 3201,
+   "win_rate": 0.3618,
+   "avg_fwd_pct": -2.587
   },
   {
    "decile": 6,
-   "n": 3171,
-   "win_rate": 0.3882,
-   "avg_fwd_pct": -2.153
+   "n": 3198,
+   "win_rate": 0.3877,
+   "avg_fwd_pct": -2.159
   },
   {
    "decile": 7,
-   "n": 3157,
-   "win_rate": 0.3887,
-   "avg_fwd_pct": -1.732
+   "n": 3183,
+   "win_rate": 0.3883,
+   "avg_fwd_pct": -1.711
   },
   {
    "decile": 8,
-   "n": 3160,
-   "win_rate": 0.407,
-   "avg_fwd_pct": -1.304
+   "n": 3187,
+   "win_rate": 0.4057,
+   "avg_fwd_pct": -1.3
   },
   {
    "decile": 9,
-   "n": 3215,
-   "win_rate": 0.4012,
-   "avg_fwd_pct": -1.534
+   "n": 3242,
+   "win_rate": 0.4013,
+   "avg_fwd_pct": -1.528
   }
  ],
  "validation_scheme": "purged_label_end_v1",

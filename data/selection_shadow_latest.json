@@ -1,28 +1,28 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 13,
+ "days_total": 14,
  "variants": {
   "legacy": {
    "days": 5,
-   "avg_ret_pct": 1.8324728140655733,
-   "win_rate": 0.8,
+   "avg_ret_pct": 2.128654434595915,
+   "win_rate": 1.0,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "live": {
    "days": 5,
-   "avg_ret_pct": 1.8324728140655733,
-   "win_rate": 0.8,
+   "avg_ret_pct": 2.128654434595915,
+   "win_rate": 1.0,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol": {
    "days": 5,
-   "avg_ret_pct": 0.3200179001468433,
-   "win_rate": 0.6,
+   "avg_ret_pct": 0.45362197045746766,
+   "win_rate": 0.8,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
@@ -38,8 +38,8 @@
   },
   "lowvol-live": {
    "days": 5,
-   "diff_pct": -1.5124549139187298,
-   "positive_days": 3,
+   "diff_pct": -1.6750324641384466,
+   "positive_days": 2,
    "hac_t": null,
    "hac_p": null
   }
@@ -47,34 +47,24 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20260930",
+   "ymd": "20261001",
    "variant": "legacy",
-   "종목코드": "336260",
-   "종목명": "두산퓨얼셀",
-   "alpha": 86.1,
-   "rr": 2.62,
-   "atr_pct": 0.07899251403618215,
-   "vol_pctl": 80.7
+   "종목코드": "317400",
+   "종목명": "자이에스앤디",
+   "alpha": 93.1,
+   "rr": 2.74,
+   "atr_pct": 0.07965902410346855,
+   "vol_pctl": 83.6
   },
   {
-   "ymd": "20260930",
-   "variant": "live",
-   "종목코드": "079550",
-   "종목명": "LIG디펜스앤에어로스페이스",
-   "alpha": 86.6,
-   "rr": 2.13,
-   "atr_pct": 0.049958106409719316,
-   "vol_pctl": 39.7
-  },
-  {
-   "ymd": "20260930",
+   "ymd": "20261001",
    "variant": "lowvol",
-   "종목코드": "097950",
-   "종목명": "CJ제일제당",
-   "alpha": 37.8,
-   "rr": 1.56,
-   "atr_pct": 0.015979546180888465,
-   "vol_pctl": 0.5
+   "종목코드": "030200",
+   "종목명": "KT",
+   "alpha": 26.1,
+   "rr": 1.49,
+   "atr_pct": 0.017616295072942472,
+   "vol_pctl": 0.8
   }
  ],
  "added": true
