@@ -1,28 +1,28 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 14,
+ "days_total": 15,
  "variants": {
   "legacy": {
-   "days": 5,
-   "avg_ret_pct": 2.128654434595915,
-   "win_rate": 1.0,
+   "days": 7,
+   "avg_ret_pct": 0.5191362917555632,
+   "win_rate": 0.7142857142857143,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "live": {
-   "days": 5,
-   "avg_ret_pct": 2.128654434595915,
-   "win_rate": 1.0,
+   "days": 7,
+   "avg_ret_pct": 0.5191362917555632,
+   "win_rate": 0.7142857142857143,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol": {
-   "days": 5,
-   "avg_ret_pct": 0.45362197045746766,
-   "win_rate": 0.8,
+   "days": 7,
+   "avg_ret_pct": 0.24319128421239608,
+   "win_rate": 0.5714285714285714,
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
@@ -30,16 +30,16 @@
  },
  "paired": {
   "live-legacy": {
-   "days": 5,
+   "days": 7,
    "diff_pct": 0.0,
    "positive_days": 0,
    "hac_t": null,
    "hac_p": null
   },
   "lowvol-live": {
-   "days": 5,
-   "diff_pct": -1.6750324641384466,
-   "positive_days": 2,
+   "days": 7,
+   "diff_pct": -0.2759450075431668,
+   "positive_days": 4,
    "hac_t": null,
    "hac_p": null
   }
@@ -47,24 +47,34 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20261001",
+   "ymd": "20261002",
    "variant": "legacy",
-   "종목코드": "317400",
-   "종목명": "자이에스앤디",
-   "alpha": 93.1,
-   "rr": 2.74,
-   "atr_pct": 0.07965902410346855,
-   "vol_pctl": 83.6
+   "종목코드": "397030",
+   "종목명": "에이프릴바이오",
+   "alpha": 97.3,
+   "rr": 3.0,
+   "atr_pct": 0.07989167230873392,
+   "vol_pctl": 83.1
   },
   {
-   "ymd": "20261001",
+   "ymd": "20261002",
+   "variant": "live",
+   "종목코드": "005935",
+   "종목명": "삼성전자우",
+   "alpha": 86.4,
+   "rr": 1.33,
+   "atr_pct": 0.04739454094292804,
+   "vol_pctl": 33.2
+  },
+  {
+   "ymd": "20261002",
    "variant": "lowvol",
    "종목코드": "030200",
    "종목명": "KT",
-   "alpha": 26.1,
-   "rr": 1.49,
-   "atr_pct": 0.017616295072942472,
-   "vol_pctl": 0.8
+   "alpha": 15.8,
+   "rr": 1.35,
+   "atr_pct": 0.01607142857142857,
+   "vol_pctl": 0.3
   }
  ],
  "added": true

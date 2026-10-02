@@ -6784,5 +6784,54 @@
       "039030_20260914_TP1_HIT_20261001",
       "039030_20260914_TP2_HIT_20261001"
     ]
+  },
+  {
+    "code": "000720",
+    "name": "현대건설",
+    "entry_ymd": "20260914",
+    "entry_px": 125500.0,
+    "qty": 0,
+    "stop_px": 115400.0,
+    "stop_px_initial": 115400.0,
+    "take_px1": 142000.0,
+    "take_px2": 155600.0,
+    "trailing_high": 136100.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261002",
+    "last_close_px": 114600.0,
+    "unrealized_pnl_pct": -8.69,
+    "realized_pnl_pct": -8.69,
+    "close_ymd": "20261002",
+    "close_px": 114600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "000720_20260914_WARN_DRAWDOWN_20260929",
+      "000720_20260914_WARN_DRAWDOWN_20260930",
+      "000720_20260914_WARN_DRAWDOWN_20261001",
+      "000720_20260914_STOP_HIT_20261002"
+    ]
+  },
+  {
+    "code": "375500",
+    "name": "DL이앤씨",
+    "entry_ymd": "20260923",
+    "entry_px": 81100.0,
+    "qty": 0,
+    "stop_px": 76600.0,
+    "stop_px_initial": 76600.0,
+    "take_px1": 90600.0,
+    "take_px2": 97500.0,
+    "trailing_high": 84900.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261002",
+    "last_close_px": 75800.0,
+    "unrealized_pnl_pct": -6.54,
+    "realized_pnl_pct": -6.54,
+    "close_ymd": "20261002",
+    "close_px": 75800.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "375500_20260923_STOP_HIT_20261002"
+    ]
   }
 ]
