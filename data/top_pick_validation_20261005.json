@@ -1,0 +1,51 @@
+{
+  "trade_ymd": "20261005",
+  "top_pick_count": 2,
+  "top_pick_by_type": {
+    "ALPHA": 2
+  },
+  "avg_elite": 42.5,
+  "avg_rr": 1.27,
+  "min_rr": 1.2,
+  "rr_lt_1_count": 0,
+  "avg_balance": 0.0,
+  "avg_win_rate": 0.426,
+  "est_win_rate_method": "ELITE_SCORE",
+  "est_win_rate_mode": "MATURE",
+  "est_win_rate_n": 16075,
+  "routes": {
+    "ATTACK": 2
+  },
+  "picks": [
+    {
+      "종목코드": "005935",
+      "종목명": "삼성전자우",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 40.1,
+      "RR_NOW_TP1": 1.33,
+      "BALANCE_SCORE": 0.0,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 10.2,
+      "ROUTE": "ATTACK",
+      "EST_WIN_RATE": 0.428,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 16075
+    },
+    {
+      "종목코드": "083450",
+      "종목명": "GST",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 44.8,
+      "RR_NOW_TP1": 1.2,
+      "BALANCE_SCORE": 0.0,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 9.6,
+      "ROUTE": "ATTACK",
+      "EST_WIN_RATE": 0.425,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 16075
+    }
+  ]
+}

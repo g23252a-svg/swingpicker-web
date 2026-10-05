@@ -92,7 +92,7 @@
     "top5_hit_lift": false,
     "calibration": false
   },
-  "reason": "검증 미달: outcome_coverage, auc, brier_skill, top5_hit_lift, calibration",
+  "reason": "학습 이력 또는 당일 가격 부족",
   "label_quality": {
     "complete": 30941,
     "stopped": 26454,
@@ -104,7 +104,7 @@
     "unfillable_upper_limit": 6
   },
   "version": "swing_net_profit_v1",
-  "asof": "20261002",
+  "asof": "20261005",
   "target_definition": "익일 시가 진입·최대 5거래일 보유·손절 및 비용 후 수익",
   "policy": {
     "min_train_days": 60,
@@ -187,12 +187,5 @@
     "저장 추천 모집단 밖 종목은 평가하지 않음",
     "중첩 보유 코호트 평균수익, 계좌 누적수익이 아님",
     "시가 체결 가정, 거래비용·슬리피지 왕복0.3% 시나리오"
-  ],
-  "live_fit": {
-    "train_days": 121,
-    "calibration_days": 15,
-    "train_label_available": "2026-08-31 00:00:00",
-    "calibration_start": "2026-09-01 00:00:00",
-    "calibration_label_available": "2026-10-02 00:00:00"
-  }
+  ]
 }
