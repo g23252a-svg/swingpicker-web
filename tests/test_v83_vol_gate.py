@@ -180,7 +180,7 @@ class TestShadowPicks:
         assert s["days_total"] == 1
         assert s["variants"]["live"]["days"] == 0
         assert "판정 전" in s["verdict"]
-        assert SS.line({**s, "today": SS.pick_today(_shadow_df(), "20260914")}).startswith("선별 그림자 3종")
+        assert SS.line({**s, "today": SS.pick_today(_shadow_df(), "20260914")}).startswith("선별 그림자")
 
     def test_build_measures_realized_and_pairs(self, tmp_path, monkeypatch):
         """가격이 있으면 SSOT 실현수익으로 변형별·페어드 요약을 낸다."""

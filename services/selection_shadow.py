@@ -12,6 +12,8 @@ v83 점검(docs/SELECTION_AUDIT_V83.md)은 고변동 차단 게이트를 실전�
     legacy : v83 이전 엔진 — 고변동 게이트 없이 알파 문턱·저점추세 통과 후 알파×손익비 1등
     live   : 현행 공식픽 (PRODUCTION_BUY=1) — v83 게이트 포함
     lowvol : 알파 문턱·저점추세 없이 리스크가드·급등·변동성 게이트만 통과한 후보 중 ATR% 최저
+    ext_lowtv : [v84] 캐시 ∪ 레인(≈1,200종목)에서 선등록 5특징(거래대금·20일수익·60일고점이격·
+                RSI·거래량비) 분위 평균 최저 — 승자 프로파일 전방 로그가 가리키는 방향의 기록
 
 실현수익은 pick_history._realized(SSOT: 진입 t+1 시가 · -8% 장중 손절 · t+5 종가)로 잰다.
 이 모듈은 아무것도 막지 않는다 — PRODUCTION_BUY·켈리·목록 무변경.
@@ -31,7 +33,7 @@ from services.winner_profile import _hac_p, _load_universe_ohlcv
 
 logger = logging.getLogger("selection_shadow")
 
-VARIANTS = ("legacy", "live", "lowvol")
+VARIANTS = ("legacy", "live", "lowvol", "ext_lowtv")
 LOG_NAME = "selection_shadow_log.parquet"
 SUMMARY_NAME = "selection_shadow_latest.json"
 TARGET_DAYS = 20
@@ -39,6 +41,25 @@ TARGET_DAYS = 20
 LIVE_FROM = "20260914"
 #: 켈리가 0주로 만드는 상태 — recommendation_quality._inactive_routes 와 같은 취지의 근사.
 _INACTIVE_ROUTES = ("OVERHEAT", "CARRY", "NEUTRAL", "CASH", "EXIT", "WEAK")
+
+# ── [v84] 확장 유니버스 변형 'ext_lowtv' ────────────────────────────────────
+# v78 승자 프로파일 전방 로그(선등록 v1-20260831, 2026-09-14 기준 20일)에서 부호가
+# 안정적이고 p<0.05 인 특징 다섯 개 — 전부 '낮을수록 좋다':
+#   tv_rank_pctl IC -0.216 (HAC t -17.0) · ret_20d -0.112 (t -5.5) · hi60_gap -0.143 (t -3.6)
+#   rsi14 -0.062 (t -3.2) · vol_ratio -0.046 (t -2.2)
+# 즉 '거래대금 하위 · 20일 하락 · 60일 고점에서 멀고 · RSI 낮고 · 거래량이 터지지 않은'
+# 종목이 5일 뒤 더 낫다. 가장 센 축(거래대금)은 상위600 풀 **안**에서는 정보가 없고
+# (풀 내 IC -0.001), 601~1200 레인 유니버스 대 풀의 차이에서 온다 — 8/27 편입 결함과
+# 같은 방향이다. 그래서 이 변형은 배치 캐시 ∪ 레인 캐시(≈1,200종목) 전체에서 다섯
+# 특징의 분위 평균이 가장 낮은 1종목을 고른다. 프로토콜상 1단계(40일)가 아직 안 찼으므로
+# **승격이 아니라 기록**이다 — 다섯 특징과 부호를 여기 고정해(v1-20261006) 앞으로 쌓이는
+# 표본으로만 판정한다. 결과를 보고 특징을 바꾸면 이 변형은 무효다.
+EXT_REGISTRY = "v1-20261006"
+EXT_FEATURES = ("tv_rank_pctl", "ret_20d", "hi60_gap", "rsi14", "vol_ratio")
+#: 소액 계좌 체결 가능성 — 레인 유니버스 거래대금 p10이 3.4억(10/2 실측).
+EXT_MIN_TV_EOK = 3.0
+EXT_MIN_PRICE = 1000.0
+EXT_MIN_HISTORY = 60
 
 
 def _num(df: pd.DataFrame, c: str) -> pd.Series:
@@ -73,8 +94,44 @@ def variant_masks(df: pd.DataFrame) -> Dict[str, pd.Series]:
     }
 
 
-def pick_today(df: pd.DataFrame, trade_ymd: str) -> List[dict]:
-    """세 변형의 '오늘 1등' 한 행씩. 후보가 없으면 변형은 빠진다(현금)."""
+def ext_lowtv_pick(data_dir: str, trade_ymd: str, px: Optional[pd.DataFrame] = None) -> Optional[dict]:
+    """[v84] 확장 유니버스(캐시 ∪ 레인)에서 선등록 5특징 분위 평균 최저 1종목."""
+    from services.winner_profile import _features
+    if px is None:
+        px = _load_universe_ohlcv(data_dir)
+    if px is None or px.empty:
+        return None
+    dt = pd.to_datetime(str(trade_ymd))
+    rows = []
+    for code, g in px.groupby("종목코드", sort=False):
+        h = g[g["Date"] <= dt]
+        if len(h) < EXT_MIN_HISTORY or h["Date"].iloc[-1] != dt:
+            continue                                   # 오늘 봉이 없는 종목(정지·상폐)은 제외
+        f = _features(h.tail(70), None)
+        if f is None or f["tv_eok"] < EXT_MIN_TV_EOK or float(h["종가"].iloc[-1]) < EXT_MIN_PRICE:
+            continue
+        f["종목코드"] = str(code).zfill(6)
+        rows.append(f)
+    if len(rows) < 30:
+        return None
+    d = pd.DataFrame(rows)
+    d["tv_rank_pctl"] = d["tv_eok"].rank(pct=True) * 100
+    ranks = pd.concat([pd.to_numeric(d[c], errors="coerce").rank(pct=True) for c in EXT_FEATURES], axis=1)
+    d["_score"] = ranks.mean(axis=1, skipna=False)
+    d = d.dropna(subset=["_score"])
+    if d.empty:
+        return None
+    r = d.loc[d["_score"].idxmin()]
+    return {"ymd": str(trade_ymd), "variant": "ext_lowtv", "종목코드": r["종목코드"], "종목명": "",
+            "alpha": float("nan"), "rr": float("nan"), "atr_pct": float("nan"),
+            "vol_pctl": float("nan"), "ext_score": float(r["_score"]), "tv_eok": float(r["tv_eok"])}
+
+
+def pick_today(df: pd.DataFrame, trade_ymd: str, data_dir: Optional[str] = None) -> List[dict]:
+    """변형별 '오늘 1등' 한 행씩. 후보가 없으면 변형은 빠진다(현금).
+
+    data_dir 가 주어지면 [v84] 확장 유니버스 변형(ext_lowtv)도 함께 고른다.
+    """
     if df is None or df.empty or "종목코드" not in df.columns:
         return []
     m = variant_masks(df)
@@ -83,7 +140,7 @@ def pick_today(df: pd.DataFrame, trade_ymd: str) -> List[dict]:
     key = {"legacy": a * rr * 1_000 + a, "live": a * rr * 1_000 + a,
            "lowvol": -_num(df, "V23_ATR_Pct")}
     out = []
-    for v in VARIANTS:
+    for v in ("legacy", "live", "lowvol"):           # 배치 df 기반 변형 — ext_lowtv 는 아래에서 별도
         sub = df[m[v]]
         if sub.empty:
             continue
@@ -98,6 +155,16 @@ def pick_today(df: pd.DataFrame, trade_ymd: str) -> List[dict]:
                     "alpha": float(a.loc[i]), "rr": float(rr.loc[i]),
                     "atr_pct": float(_num(df, "V23_ATR_Pct").loc[i]) if "V23_ATR_Pct" in df else np.nan,
                     "vol_pctl": float(_num(df, "VOL_GATE_PCTL").loc[i]) if "VOL_GATE_PCTL" in df else np.nan})
+    if data_dir:
+        try:
+            e = ext_lowtv_pick(data_dir, trade_ymd)
+        except Exception as ex:                       # 변형 하나가 깨져도 나머지 기록은 산다
+            logger.warning("[v84] ext_lowtv 선정 실패 — 생략: %s", ex)
+            e = None
+        if e is not None:
+            nm = df.loc[df["종목코드"].astype(str).str.zfill(6) == e["종목코드"], "종목명"]
+            e["종목명"] = str(nm.iloc[0]) if len(nm) else e["종목코드"]
+            out.append(e)
     return out
 
 
@@ -162,7 +229,7 @@ def build(data_dir: str) -> dict:
             "hac_t": (None if not np.isfinite(t) else float(t)),
             "hac_p": (None if not np.isfinite(p) else float(p)),
         }
-    for a, b in (("live", "legacy"), ("lowvol", "live")):
+    for a, b in (("live", "legacy"), ("lowvol", "live"), ("ext_lowtv", "live")):
         dd = (daily[a] - daily[b]).dropna()
         t, p = _hac_p(dd.values.astype(float)) if len(dd) else (np.nan, np.nan)
         out["paired"][f"{a}-{b}"] = {
@@ -199,7 +266,7 @@ def load(data_dir: str) -> Optional[dict]:
 
 def run_batch(df: pd.DataFrame, data_dir: str, trade_ymd: str) -> dict:
     """오늘 3변형 픽 기록 → 누적 성적 요약 저장. 반환: 요약(+ today)."""
-    today = pick_today(df, trade_ymd)
+    today = pick_today(df, trade_ymd, data_dir=data_dir)
     added = append_log(data_dir, today)
     s = build(data_dir)
     s["today"] = today
@@ -213,13 +280,14 @@ def line(s: Optional[dict]) -> str:
         return ""
     v = s.get("variants") or {}
     n = (v.get("live") or {}).get("days", 0)
-    head = f"선별 그림자 3종 — 측정 {n}/{s.get('target_days', TARGET_DAYS)}일 (기록 {s.get('days_total', 0)}일)"
+    head = f"선별 그림자 {len(VARIANTS)}종 — 측정 {n}/{s.get('target_days', TARGET_DAYS)}일 (기록 {s.get('days_total', 0)}일)"
     today = s.get("today") or []
     tl = " · ".join(f"{t['variant']} {t['종목명']}" for t in today)
     if not n:
         return head + (f" · 오늘 {tl}" if tl else "") + " · 첫 5일 창이 아직 안 닫혔습니다"
     parts = []
-    for k, lab in (("live", "현행(v83 게이트)"), ("legacy", "구엔진(게이트 없음)"), ("lowvol", "저변동 최저")):
+    for k, lab in (("live", "현행(v83 게이트)"), ("legacy", "구엔진(게이트 없음)"), ("lowvol", "저변동 최저"),
+                   ("ext_lowtv", "확장유니버스 저거래대금")):
         x = v.get(k) or {}
         if x.get("days"):
             parts.append(f"{lab} {x['avg_ret_pct']:+.2f}%/승률 {x['win_rate'] * 100:.0f}%/손절 {x['stop_rate'] * 100:.0f}%")

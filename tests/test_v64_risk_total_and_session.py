@@ -48,7 +48,8 @@ if str(ROOT) not in sys.path:
 from components import decision_center as DC  # noqa: E402
 from services import session_freshness as SF  # noqa: E402
 
-BATCH_0817 = ROOT / "data" / "recommend_20260817.csv"
+# [v84] 8/17은 광복절 대체휴일 팬텀 배치(전일 복제)라 보관 폴더로 옮겼다 — 여기선 프레임 용도.
+BATCH_0817 = ROOT / "data" / "phantom_batches" / "recommend_20260817.csv"
 
 
 def _batch():
