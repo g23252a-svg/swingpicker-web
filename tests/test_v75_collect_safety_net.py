@@ -96,8 +96,9 @@ def test_manual_dispatch_bypasses_guard(src):
 
 def test_every_working_step_is_guarded(wf):
     steps = wf["jobs"]["build"]["steps"]
+    # [v84] 수집 뒤 검증 스텝은 휴장일 마커 게이트가 AND로 붙는다 — 가드는 그대로 선행 조건.
     unguarded = [s.get("name") for s in steps[2:]
-                 if s.get("if") != "steps.guard.outputs.skip != 'true'"]
+                 if not str(s.get("if") or "").startswith("steps.guard.outputs.skip != 'true'")]
     assert unguarded == [], f"가드 없이 도는 스텝: {unguarded}"
 
 
