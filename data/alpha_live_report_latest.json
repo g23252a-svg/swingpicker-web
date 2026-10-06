@@ -1,7 +1,7 @@
 {
  "ok": true,
  "alpha_live_from": "20260714",
- "asof": "20260928",
+ "asof": "20260929",
  "n_days": 46,
  "files_scanned": 120,
  "files_skipped": 0,
@@ -10,48 +10,48 @@
  "horizons": {
   "h3": {
    "n_days": 46,
-   "ic_mean": 0.0415,
-   "ic_median": 0.0418,
+   "ic_mean": 0.0445,
+   "ic_median": 0.0474,
    "ic_positive_days": 30,
    "ic_t": {
     "n": 46,
-    "t": 1.645,
-    "p": 0.107
+    "t": 1.759,
+    "p": 0.0853
    },
    "universe": {
     "n": 46,
-    "mean_pct": 0.266,
-    "median_pct": 0.086,
-    "win_rate": 0.5435,
-    "cum_pct": 12.24
+    "mean_pct": 0.383,
+    "median_pct": 0.121,
+    "win_rate": 0.5652,
+    "cum_pct": 17.62
    },
    "top1": {
     "n": 46,
-    "mean_pct": -1.363,
-    "median_pct": -0.913,
+    "mean_pct": -1.328,
+    "median_pct": -0.9,
     "win_rate": 0.413,
-    "cum_pct": -62.68,
-    "excess_mean_pct": -1.629,
+    "cum_pct": -61.1,
+    "excess_mean_pct": -1.711,
     "excess_t": {
      "n": 46,
-     "t": -2.095,
-     "p": 0.0418
+     "t": -2.186,
+     "p": 0.0341
     },
     "stop_rate": 0.2609
    },
    "gated_top1": {
     "n": 46,
-    "mean_pct": -0.663,
-    "median_pct": -0.222,
-    "win_rate": 0.4783,
-    "cum_pct": -30.48,
-    "excess_mean_pct": -0.929,
+    "mean_pct": -0.378,
+    "median_pct": 0.301,
+    "win_rate": 0.5,
+    "cum_pct": -17.4,
+    "excess_mean_pct": -0.761,
     "excess_t": {
      "n": 46,
-     "t": -1.215,
-     "p": 0.2305
+     "t": -1.016,
+     "p": 0.3151
     },
-    "stop_rate": 0.3261,
+    "stop_rate": 0.3043,
     "n_days": 46,
     "axis": "후보 풀 상단(재구성)",
     "is_reconstruction": true,
@@ -61,29 +61,29 @@
    },
    "top3": {
     "n": 46,
-    "mean_pct": -0.962,
-    "median_pct": -1.607,
-    "win_rate": 0.3696,
-    "cum_pct": -44.23,
-    "excess_mean_pct": -1.228,
+    "mean_pct": -0.82,
+    "median_pct": -1.404,
+    "win_rate": 0.3913,
+    "cum_pct": -37.74,
+    "excess_mean_pct": -1.203,
     "excess_t": {
      "n": 46,
-     "t": -2.024,
-     "p": 0.0489
+     "t": -1.993,
+     "p": 0.0524
     },
-    "stop_rate": 0.2754
+    "stop_rate": 0.2681
    },
    "gated_top3": {
     "n": 46,
-    "mean_pct": -0.232,
+    "mean_pct": -0.181,
     "median_pct": -0.231,
     "win_rate": 0.5,
-    "cum_pct": -10.65,
-    "excess_mean_pct": -0.498,
+    "cum_pct": -8.32,
+    "excess_mean_pct": -0.564,
     "excess_t": {
      "n": 46,
-     "t": -0.879,
-     "p": 0.384
+     "t": -0.975,
+     "p": 0.3345
     },
     "stop_rate": 0.2754,
     "n_days": 46,
@@ -95,29 +95,29 @@
    },
    "top5": {
     "n": 46,
-    "mean_pct": -1.069,
-    "median_pct": -1.325,
-    "win_rate": 0.3261,
-    "cum_pct": -49.18,
-    "excess_mean_pct": -1.335,
+    "mean_pct": -0.847,
+    "median_pct": -1.076,
+    "win_rate": 0.3478,
+    "cum_pct": -38.95,
+    "excess_mean_pct": -1.23,
     "excess_t": {
      "n": 46,
-     "t": -2.711,
-     "p": 0.0095
+     "t": -2.526,
+     "p": 0.0151
     },
-    "stop_rate": 0.2609
+    "stop_rate": 0.2522
    },
    "gated_top5": {
     "n": 46,
-    "mean_pct": -0.232,
+    "mean_pct": -0.139,
     "median_pct": 0.18,
-    "win_rate": 0.5217,
-    "cum_pct": -10.69,
-    "excess_mean_pct": -0.499,
+    "win_rate": 0.5435,
+    "cum_pct": -6.41,
+    "excess_mean_pct": -0.522,
     "excess_t": {
      "n": 46,
-     "t": -1.016,
-     "p": 0.3152
+     "t": -1.055,
+     "p": 0.2971
     },
     "stop_rate": 0.2478,
     "n_days": 46,
@@ -129,29 +129,29 @@
    },
    "top10": {
     "n": 46,
-    "mean_pct": -0.45,
-    "median_pct": -0.031,
-    "win_rate": 0.5,
-    "cum_pct": -20.72,
-    "excess_mean_pct": -0.716,
+    "mean_pct": -0.236,
+    "median_pct": 0.21,
+    "win_rate": 0.5217,
+    "cum_pct": -10.86,
+    "excess_mean_pct": -0.619,
     "excess_t": {
      "n": 46,
-     "t": -1.851,
-     "p": 0.0708
+     "t": -1.581,
+     "p": 0.1208
     },
-    "stop_rate": 0.2478
+    "stop_rate": 0.2391
    },
    "gated_top10": {
     "n": 46,
-    "mean_pct": -0.139,
-    "median_pct": -0.666,
-    "win_rate": 0.4783,
-    "cum_pct": -6.38,
-    "excess_mean_pct": -0.405,
+    "mean_pct": -0.048,
+    "median_pct": -0.296,
+    "win_rate": 0.5,
+    "cum_pct": -2.23,
+    "excess_mean_pct": -0.431,
     "excess_t": {
      "n": 46,
-     "t": -1.1,
-     "p": 0.2771
+     "t": -1.163,
+     "p": 0.2512
     },
     "stop_rate": 0.2245,
     "n_days": 46,
@@ -174,24 +174,24 @@
     "measured_pick_day_rate": 0.6304,
     "on_pick_days": {
      "n": 29,
-     "mean_pct": -1.836,
-     "median_pct": -1.017,
+     "mean_pct": -1.869,
+     "median_pct": -1.362,
      "win_rate": 0.4138,
-     "cum_pct": -53.23,
-     "excess_mean_pct": -1.792,
+     "cum_pct": -54.21,
+     "excess_mean_pct": -2.011,
      "excess_t": {
       "n": 29,
-      "t": -2.199,
-      "p": 0.0363
+      "t": -2.412,
+      "p": 0.0227
      },
      "stop_rate": 0.3448
     },
     "all_days_cash": {
      "n": 46,
-     "mean_pct": -1.157,
+     "mean_pct": -1.179,
      "median_pct": 0.0,
      "win_rate": 0.2609,
-     "cum_pct": -53.23,
+     "cum_pct": -54.21,
      "note": "픽 없는 날은 0%(현금)로 계산"
     }
    },
@@ -215,20 +215,20 @@
    },
    "by_normal": {
     "n_days": 29,
-    "ic_mean": 0.0174,
+    "ic_mean": 0.0222,
     "top1": {
      "n": 29,
-     "mean_pct": -1.331,
-     "median_pct": -2.466,
+     "mean_pct": -1.277,
+     "median_pct": -0.906,
      "win_rate": 0.4138,
-     "cum_pct": -38.6
+     "cum_pct": -37.02
     },
     "universe": {
      "n": 29,
-     "mean_pct": -0.044,
-     "median_pct": 0.028,
-     "win_rate": 0.5172,
-     "cum_pct": -1.27
+     "mean_pct": 0.142,
+     "median_pct": 0.063,
+     "win_rate": 0.5517,
+     "cum_pct": 4.1
     }
    }
   },
@@ -458,8 +458,8 @@
   }
  },
  "sessions": {
-  "snapshots": 141,
-  "real": 130,
+  "snapshots": 142,
+  "real": 131,
   "phantom_dropped": 11,
   "phantom_days": [
    "20260416",
@@ -3495,52 +3495,6 @@
    }
   },
   {
-   "ymd": "20260924",
-   "pool": 367,
-   "risk_off": false,
-   "official_recorded": true,
-   "official_n": 1,
-   "official_names": [
-    "HD현대마린엔진"
-   ],
-   "h3": {
-    "n_scored": 367,
-    "ic": 0.0025,
-    "universe_pct": -0.301,
-    "top1_pct": -2.466,
-    "top1_excess_pct": -2.165,
-    "top1_stop_rate": 0.0,
-    "top3_pct": -5.051,
-    "top3_excess_pct": -4.75,
-    "top3_stop_rate": 0.3333,
-    "top5_pct": -5.207,
-    "top5_excess_pct": -4.906,
-    "top5_stop_rate": 0.4,
-    "top10_pct": -2.426,
-    "top10_excess_pct": -2.125,
-    "top10_stop_rate": 0.4,
-    "top1_name": "SK하이닉스",
-    "official_n_scored": 1,
-    "official_pct": -1.017,
-    "official_excess_pct": -0.716,
-    "official_stop_rate": 0.0,
-    "gated_pool": 27,
-    "gated_top1_pct": -8.0,
-    "gated_top1_excess_pct": -7.699,
-    "gated_top1_stop_rate": 1.0,
-    "gated_top3_pct": -3.967,
-    "gated_top3_excess_pct": -3.666,
-    "gated_top3_stop_rate": 0.3333,
-    "gated_top5_pct": -4.231,
-    "gated_top5_excess_pct": -3.93,
-    "gated_top5_stop_rate": 0.2,
-    "gated_top10_pct": -2.117,
-    "gated_top10_excess_pct": -1.816,
-    "gated_top10_stop_rate": 0.1,
-    "gated_top1_name": "알지노믹스"
-   }
-  },
-  {
    "ymd": "20260928",
    "pool": 385,
    "risk_off": false,
@@ -3584,6 +3538,52 @@
     "gated_top10_excess_pct": 0.446,
     "gated_top10_stop_rate": 0.0,
     "gated_top1_name": "현대제철"
+   }
+  },
+  {
+   "ymd": "20260929",
+   "pool": 378,
+   "risk_off": false,
+   "official_recorded": true,
+   "official_n": 1,
+   "official_names": [
+    "HD한국조선해양"
+   ],
+   "h3": {
+    "n_scored": 378,
+    "ic": 0.1418,
+    "universe_pct": 5.076,
+    "top1_pct": -0.894,
+    "top1_excess_pct": -5.97,
+    "top1_stop_rate": 0.0,
+    "top3_pct": 1.442,
+    "top3_excess_pct": -3.633,
+    "top3_stop_rate": 0.0,
+    "top5_pct": 5.021,
+    "top5_excess_pct": -0.055,
+    "top5_stop_rate": 0.0,
+    "top10_pct": 7.429,
+    "top10_excess_pct": 2.353,
+    "top10_stop_rate": 0.0,
+    "top1_name": "SK하이닉스",
+    "official_n_scored": 1,
+    "official_pct": -2.0,
+    "official_excess_pct": -7.076,
+    "official_stop_rate": 0.0,
+    "gated_pool": 17,
+    "gated_top1_pct": 5.082,
+    "gated_top1_excess_pct": 0.006,
+    "gated_top1_stop_rate": 0.0,
+    "gated_top3_pct": -1.639,
+    "gated_top3_excess_pct": -6.715,
+    "gated_top3_stop_rate": 0.3333,
+    "gated_top5_pct": 0.056,
+    "gated_top5_excess_pct": -5.02,
+    "gated_top5_stop_rate": 0.2,
+    "gated_top10_pct": 2.034,
+    "gated_top10_excess_pct": -3.042,
+    "gated_top10_stop_rate": 0.1,
+    "gated_top1_name": "무림P&P"
    }
   }
  ],

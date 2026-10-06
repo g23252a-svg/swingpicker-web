@@ -1,0 +1,24 @@
+{
+  "trade_date": "20261006",
+  "generated_at": "2026-10-06 22:57:07",
+  "count": 1,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "368770",
+      "name": "파이버프로",
+      "route": "ATTACK",
+      "score": 68.9,
+      "close": 14620,
+      "entry": 14620,
+      "stop": 13450,
+      "target1": 16290,
+      "target2": 23300,
+      "est_win_rate": 0.425,
+      "rr": 1.4,
+      "sector": "기타",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/368770"
+    }
+  ]
+}

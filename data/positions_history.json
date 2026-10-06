@@ -6833,5 +6833,56 @@
     "alerted_events": [
       "375500_20260923_STOP_HIT_20261002"
     ]
+  },
+  {
+    "code": "000370",
+    "name": "한화손해보험",
+    "entry_ymd": "20260923",
+    "entry_px": 7690.0,
+    "qty": 0,
+    "stop_px": 7270.0,
+    "stop_px_initial": 7270.0,
+    "take_px1": 8970.0,
+    "take_px2": 9290.0,
+    "trailing_high": 8060.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261006",
+    "last_close_px": 7230.0,
+    "unrealized_pnl_pct": -5.98,
+    "realized_pnl_pct": -5.98,
+    "close_ymd": "20261006",
+    "close_px": 7230.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "000370_20260923_WARN_DRAWDOWN_20261002",
+      "000370_20260923_WARN_DRAWDOWN_20261005",
+      "000370_20260923_STOP_HIT_20261006"
+    ]
+  },
+  {
+    "code": "452280",
+    "name": "한선엔지니어링",
+    "entry_ymd": "20260929",
+    "entry_px": 12600.0,
+    "qty": 0,
+    "stop_px": 11590.0,
+    "stop_px_initial": 11590.0,
+    "take_px1": 14270.0,
+    "take_px2": 14590.0,
+    "trailing_high": 15320.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261006",
+    "last_close_px": 15020.0,
+    "unrealized_pnl_pct": 19.21,
+    "realized_pnl_pct": 19.21,
+    "close_ymd": "20261006",
+    "close_px": 15020.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "452280_20260929_TP1_HIT_20261002",
+      "452280_20260929_TP1_HIT_20261005",
+      "452280_20260929_TP1_HIT_20261006",
+      "452280_20260929_TP2_HIT_20261006"
+    ]
   }
 ]
