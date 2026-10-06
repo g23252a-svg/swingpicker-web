@@ -191,6 +191,13 @@ class TestBatchChain:
         assert 'recommend_${TODAY}.csv' in blk and "체인 생략" in blk
         assert 'date +%u)" -ge 6' in blk
 
+    def test_chain_skips_before_market_close(self):
+        """[v84.1] 자정 넘어 발화한 prefetch가 장 시작 전 배치를 띄우지 않는다 — 16시 가드."""
+        y = self._y()
+        i = y.index("Chain auto_collect"); blk = y[i:i + 1500]
+        assert 'date +%H)" -lt 16' in blk and "체인 생략" in blk
+        assert blk.index('date +%H)" -lt 16') < blk.index("gh workflow run auto_collect.yml")
+
     def test_chain_runs_even_if_prefetch_failed(self):
         """수급 수집이 실패해도 배치 체인은 돌아야 한다."""
         y = self._y()

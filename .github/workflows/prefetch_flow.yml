@@ -91,6 +91,11 @@ jobs:
             echo "recommend_${TODAY}.csv 이미 있음 — 체인 생략"
           elif [ "$(TZ=Asia/Seoul date +%u)" -ge 6 ]; then
             echo "주말 — 체인 생략"
+          elif [ "$(TZ=Asia/Seoul date +%H)" -lt 16 ]; then
+            # [v84.1] prefetch cron이 자정을 넘겨 발화하면(10/6 00:15 KST 실측) TODAY가
+            #   다음 날로 바뀌어 '오늘 배치 없음'이 되고, 장 시작 전 배치를 띄운다 —
+            #   전일 복제 팬텀의 또 다른 경로. auto_collect 가드와 같은 16시 기준.
+            echo "장 마감 전(KST) — 체인 생략"
           else
             echo "오늘 배치 없음 — auto_collect dispatch"
             gh workflow run auto_collect.yml --ref main
