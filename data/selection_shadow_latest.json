@@ -1,7 +1,7 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 16,
+ "days_total": 13,
  "variants": {
   "legacy": {
    "days": 7,
@@ -26,6 +26,14 @@
    "stop_rate": 0.0,
    "hac_t": null,
    "hac_p": null
+  },
+  "ext_lowtv": {
+   "days": 0,
+   "avg_ret_pct": null,
+   "win_rate": null,
+   "stop_rate": null,
+   "hac_t": null,
+   "hac_p": null
   }
  },
  "paired": {
@@ -42,40 +50,15 @@
    "positive_days": 4,
    "hac_t": null,
    "hac_p": null
+  },
+  "ext_lowtv-live": {
+   "days": 0,
+   "diff_pct": null,
+   "positive_days": 0,
+   "hac_t": null,
+   "hac_p": null
   }
  },
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
- "today": [
-  {
-   "ymd": "20261005",
-   "variant": "legacy",
-   "종목코드": "397030",
-   "종목명": "에이프릴바이오",
-   "alpha": 97.6,
-   "rr": 3.0,
-   "atr_pct": 0.07989167230873392,
-   "vol_pctl": 83.1
-  },
-  {
-   "ymd": "20261005",
-   "variant": "live",
-   "종목코드": "005935",
-   "종목명": "삼성전자우",
-   "alpha": 86.4,
-   "rr": 1.33,
-   "atr_pct": 0.04739454094292804,
-   "vol_pctl": 33.2
-  },
-  {
-   "ymd": "20261005",
-   "variant": "lowvol",
-   "종목코드": "030200",
-   "종목명": "KT",
-   "alpha": 15.5,
-   "rr": 1.35,
-   "atr_pct": 0.01607142857142857,
-   "vol_pctl": 0.3
-  }
- ],
- "added": true
+ "today": []
 }

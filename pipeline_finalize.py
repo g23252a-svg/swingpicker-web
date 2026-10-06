@@ -1390,6 +1390,23 @@ def finalize_sort(df: pd.DataFrame) -> pd.DataFrame:
 def finalize_outputs(ctx: PipelineContext) -> None:
     from collector import make_rank_validation_report  # 아직 collector에만 있음
     df_out = ctx.df_out; trade_ymd = ctx.trade_ymd
+    # [v84] 휴장일 가드 — 수집한 OHLCV의 마지막 봉이 오늘이 아니면 장이 안 열린 날이다.
+    #   평일 휴장일(대체공휴일·선거일·추석)에 체인이 배치를 돌려 전일 복제본을 새
+    #   기준일로 저장한 팬텀 배치가 2026년 10건(services/market_calendar 주석).
+    #   거래일 산출을 막는 쪽으로 틀리면 안 되므로 표본 부족은 진행한다.
+    try:
+        from services import market_calendar as _MC
+        _ok, _info = _MC.is_trading_session(getattr(ctx, "ohlcv_map", None) or {}, trade_ymd)
+        if not _ok:
+            _mp = _MC.write_skip_marker(OUT_DIR, _info)
+            log(f"🛑 [v84] 휴장일 판정 — 오늘({trade_ymd}) 봉을 가진 종목 "
+                f"{(_info.get('share_today') or 0) * 100:.0f}% ({_info.get('tickers')}종목). "
+                f"산출물을 쓰지 않는다 (팬텀 배치 방지) → {_mp}")
+            return
+        log(f"📅 [v84] 거래일 확인 — 오늘 봉 보유 {(_info.get('share_today') or 0) * 100:.0f}% "
+            f"({_info.get('tickers')}종목, {_info.get('verdict')})")
+    except Exception as e:
+        log(f"⚠️ [v84] 휴장일 판정 실패 — 진행: {e}")
     _am = {Route.ATTACK:1,"ATTACK":1,Route.ARMED:2,"ARMED":2,Route.WAIT:3,"WAIT":3,
            Route.NEUTRAL:4,"NEUTRAL":4,Route.OVERHEAT:5,"OVERHEAT":5,
            Route.EXIT_WARNING:6,"EXIT_WARNING":6,Route.CARRY:7,"CARRY":7}

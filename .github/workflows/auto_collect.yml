@@ -113,14 +113,24 @@ jobs:
           echo "MASTER_ADMIN_PW length: ${#MASTER_ADMIN_PW}"
 
       - name: Run Collector
+        id: collect
         if: steps.guard.outputs.skip != 'true'
         run: |
           echo ">>> Collector 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python collector.py
           echo ">>> Collector 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+          # [v84] 파이프라인이 휴장일로 판정하면 마커를 남긴다 — 후속 검증 스텝은 건너뛴다
+          #   (오늘자 CSV가 없으니 돌려봐야 어제 것을 다시 셀 뿐이다).
+          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
+          if [ -f "data/holiday_skip_${TODAY}.json" ]; then
+            echo "휴장일 판정 — 후속 스텝 건너뜀"; cat "data/holiday_skip_${TODAY}.json"
+            echo "holiday=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "holiday=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check Frozen Swing Forecast Performance
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.collect.outputs.holiday != 'true'
         continue-on-error: true
         run: python scripts/check_swing_performance.py --data-dir data --output data/swing_performance_latest.json
 
@@ -129,7 +139,7 @@ jobs:
       # │  (매일 같은 통계가 Tab 2에 표시됨 — 'wf capital 0/5', '실집행 5건' 고착)
       # └─ Collector 직후 자동 실행 → 어제 장 마감까지 반영된 최신 통계로 갱신
       - name: Run Backtest Validation
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.collect.outputs.holiday != 'true'
         run: |
           echo ">>> Backtest validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python backtest_validation.py || {
@@ -139,7 +149,7 @@ jobs:
           echo ">>> Backtest validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run Official Buy Validation
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.collect.outputs.holiday != 'true'
         run: |
           echo ">>> Official buy validation 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python scripts/official_buy_validation.py --data-dir data --out-dir data || {
@@ -149,7 +159,7 @@ jobs:
           echo ">>> Official buy validation 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run No-Buy Breaker Backtest
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.collect.outputs.holiday != 'true'
         run: |
           echo ">>> No-buy breaker backtest 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python scripts/no_buy_breaker_backtest_v3926.py --data-dir data --out-dir data || {
@@ -159,7 +169,7 @@ jobs:
           echo ">>> No-buy breaker backtest 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Run Historical RR Alpha Pick
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.collect.outputs.holiday != 'true'
         run: |
           echo ">>> Historical RR Alpha Pick 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           python scripts/find_best_historical_alpha_combo_v22322.py --data-dir data --out-dir data || {
@@ -169,7 +179,7 @@ jobs:
           echo ">>> Historical RR Alpha Pick 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Show outputs
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.collect.outputs.holiday != 'true'
         run: |
           ls -alh data || true
           head -n 5 data/recommend_latest.csv || true
