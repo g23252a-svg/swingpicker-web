@@ -163,9 +163,24 @@ def pick_today(df: pd.DataFrame, trade_ymd: str, data_dir: Optional[str] = None)
             e = None
         if e is not None:
             nm = df.loc[df["종목코드"].astype(str).str.zfill(6) == e["종목코드"], "종목명"]
-            e["종목명"] = str(nm.iloc[0]) if len(nm) else e["종목코드"]
+            e["종목명"] = str(nm.iloc[0]) if len(nm) else _krx_name(data_dir, e["종목코드"])
             out.append(e)
     return out
+
+
+def _krx_name(data_dir: str, code: str) -> str:
+    """[v84.1] 풀 밖 종목(레인 유니버스)의 이름 — 최신 krx_codes_*.csv 에서. 없으면 코드."""
+    import glob as _g
+    files = sorted(_g.glob(os.path.join(data_dir, "krx_codes_2*.csv")))
+    if not files:
+        return code
+    try:
+        k = pd.read_csv(files[-1], dtype=str, usecols=["종목코드", "종목명"])
+        hit = k.loc[k["종목코드"].astype(str).str.zfill(6) == str(code).zfill(6), "종목명"]
+        return str(hit.iloc[0]) if len(hit) else code
+    except Exception as e:
+        logger.warning("[v84.1] krx_codes 이름 조회 실패: %s", e)
+        return code
 
 
 def append_log(data_dir: str, rows: List[dict]) -> bool:
