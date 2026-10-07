@@ -183,6 +183,19 @@ class TestExtLowTv:
         row = [x for x in SS.pick_today(df, ymd, data_dir="x") if x["variant"] == "ext_lowtv"][0]
         assert row["종목명"] == "A", "배치 df에 있는 종목이면 이름을 붙인다"
 
+    def test_name_falls_back_to_krx_codes_for_lane_stock(self, tmp_path, monkeypatch):
+        """[v84.1] 풀 밖 종목은 배치 df에 이름이 없다 — krx_codes 에서 찾고, 없으면 코드."""
+        px = _universe(); ymd = px["Date"].max().strftime("%Y%m%d")
+        monkeypatch.setattr(SS, "_load_universe_ohlcv", lambda _d: px)
+        df = pd.DataFrame([{"종목코드": "000002", "종목명": "B", "PRODUCTION_BUY": 1, "ALPHA_SCORE": 90,
+                            "ALPHA_ENTRY_THRESHOLD": 85, "RR_NOW_TP1": 2.0, "V23_ATR_Pct": 0.05,
+                            "ENTRY_RISK_GATE_OK": 1, "ALPHA_VOL_OK": 1}])
+        ext = [x for x in SS.pick_today(df, ymd, data_dir=str(tmp_path)) if x["variant"] == "ext_lowtv"][0]
+        assert ext["종목코드"] == "000001" and ext["종목명"] == "000001"        # krx_codes 없음 → 코드
+        pd.DataFrame({"종목코드": ["000001"], "종목명": ["서산"]}).to_csv(tmp_path / "krx_codes_20261006.csv", index=False)
+        ext = [x for x in SS.pick_today(df, ymd, data_dir=str(tmp_path)) if x["variant"] == "ext_lowtv"][0]
+        assert ext["종목명"] == "서산"
+
     def test_build_pairs_ext_with_live(self, tmp_path, monkeypatch):
         px = _universe(); ymd = "20260910"
         monkeypatch.setattr(SS, "_load_universe_ohlcv", lambda _d: px)
