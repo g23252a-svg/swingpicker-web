@@ -1,0 +1,83 @@
+{
+  "trade_ymd": "20261007",
+  "top_pick_count": 4,
+  "top_pick_by_type": {
+    "ALPHA": 4
+  },
+  "avg_elite": 26.5,
+  "avg_rr": 1.91,
+  "min_rr": 1.05,
+  "rr_lt_1_count": 0,
+  "avg_balance": 27.2,
+  "avg_win_rate": 0.439,
+  "est_win_rate_method": "ELITE_SCORE",
+  "est_win_rate_mode": "MATURE",
+  "est_win_rate_n": 16246,
+  "routes": {
+    "ATTACK": 2,
+    "WAIT": 1,
+    "ARMED": 1
+  },
+  "picks": [
+    {
+      "종목코드": "000660",
+      "종목명": "SK하이닉스",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 16.0,
+      "RR_NOW_TP1": 4.07,
+      "BALANCE_SCORE": 49.0,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 12.8,
+      "ROUTE": "WAIT",
+      "EST_WIN_RATE": 0.446,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 16246
+    },
+    {
+      "종목코드": "090710",
+      "종목명": "휴림로봇",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 16.3,
+      "RR_NOW_TP1": 1.47,
+      "BALANCE_SCORE": 50.2,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 11.9,
+      "ROUTE": "ARMED",
+      "EST_WIN_RATE": 0.446,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 16246
+    },
+    {
+      "종목코드": "059090",
+      "종목명": "미코",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 41.6,
+      "RR_NOW_TP1": 1.05,
+      "BALANCE_SCORE": 0.0,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 8.6,
+      "ROUTE": "ATTACK",
+      "EST_WIN_RATE": 0.425,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 16246
+    },
+    {
+      "종목코드": "000990",
+      "종목명": "DB하이텍",
+      "TOP_PICK_TYPE": "ALPHA",
+      "ELITE_SCORE": 32.0,
+      "RR_NOW_TP1": 1.05,
+      "BALANCE_SCORE": 9.6,
+      "ENTRY_GAP_PCT": 0.0,
+      "TP1_PCT": 8.4,
+      "ROUTE": "ATTACK",
+      "EST_WIN_RATE": 0.437,
+      "EST_WIN_RATE_METHOD": "ELITE_SCORE",
+      "EST_WIN_RATE_MODE": "MATURE",
+      "EST_WIN_RATE_N": 16246
+    }
+  ]
+}
