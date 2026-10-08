@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "v20.8",
-    "as_of_ymd": "20261007",
+    "as_of_ymd": "20261008",
     "horizon_bdays": 5,
     "entry_rule": "next_open",
     "exit_rule": "horizon_close",
@@ -27,17 +27,17 @@
     {
       "score_lo": 0,
       "score_hi": 50.0,
-      "p_win": 0.3826,
+      "p_win": 0.3742,
       "n_raw": 428,
       "n_effective": 353.8,
-      "avg_ret_net_pct": -0.9947,
-      "avg_win_ret": 5.4718,
-      "avg_loss_ret": 5.0118,
-      "b_ratio": 1.0918,
+      "avg_ret_net_pct": -1.0703,
+      "avg_win_ret": 5.5225,
+      "avg_loss_ret": 5.0457,
+      "b_ratio": 1.0945,
       "sufficient": true,
       "benchmark_avg_pct": -2.156,
-      "avg_ret_excess_pct": 1.1612,
-      "p_win_excess": 0.5823
+      "avg_ret_excess_pct": 1.0857,
+      "p_win_excess": 0.571
     },
     {
       "score_lo": 50,

@@ -7075,5 +7075,85 @@
     "alerted_events": [
       "443060_20261002_STOP_HIT_20261007"
     ]
+  },
+  {
+    "code": "267270",
+    "name": "HD건설기계",
+    "entry_ymd": "20260714",
+    "entry_px": 122800.0,
+    "qty": 0,
+    "stop_px": 112900.0,
+    "stop_px_initial": 112900.0,
+    "take_px1": 163500.0,
+    "take_px2": 217500.0,
+    "trailing_high": 149100.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261008",
+    "last_close_px": 107200.0,
+    "unrealized_pnl_pct": -12.7,
+    "realized_pnl_pct": -12.7,
+    "close_ymd": "20261008",
+    "close_px": 107200.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "267270_20260714_WARN_DRAWDOWN_20260730",
+      "267270_20260714_WARN_DRAWDOWN_20260821",
+      "267270_20260714_WARN_DRAWDOWN_20261007",
+      "267270_20260714_STOP_HIT_20261008"
+    ]
+  },
+  {
+    "code": "088350",
+    "name": "한화생명",
+    "entry_ymd": "20260909",
+    "entry_px": 5710.0,
+    "qty": 0,
+    "stop_px": 5250.0,
+    "stop_px_initial": 5250.0,
+    "take_px1": 6550.0,
+    "take_px2": 6900.0,
+    "trailing_high": 6260.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261008",
+    "last_close_px": 5180.0,
+    "unrealized_pnl_pct": -9.28,
+    "realized_pnl_pct": -9.28,
+    "close_ymd": "20261008",
+    "close_px": 5180.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "088350_20260909_WARN_DRAWDOWN_20260930",
+      "088350_20260909_WARN_DRAWDOWN_20261001",
+      "088350_20260909_WARN_DRAWDOWN_20261002",
+      "088350_20260909_WARN_DRAWDOWN_20261005",
+      "088350_20260909_WARN_DRAWDOWN_20261006",
+      "088350_20260909_WARN_DRAWDOWN_20261007",
+      "088350_20260909_STOP_HIT_20261008"
+    ]
+  },
+  {
+    "code": "034020",
+    "name": "두산에너빌리티",
+    "entry_ymd": "20260914",
+    "entry_px": 85600.0,
+    "qty": 0,
+    "stop_px": 78700.0,
+    "stop_px_initial": 78700.0,
+    "take_px1": 94400.0,
+    "take_px2": 101900.0,
+    "trailing_high": 90400.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261008",
+    "last_close_px": 78000.0,
+    "unrealized_pnl_pct": -8.88,
+    "realized_pnl_pct": -8.88,
+    "close_ymd": "20261008",
+    "close_px": 78000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "034020_20260914_WARN_DRAWDOWN_20260929",
+      "034020_20260914_WARN_DRAWDOWN_20261007",
+      "034020_20260914_STOP_HIT_20261008"
+    ]
   }
 ]
