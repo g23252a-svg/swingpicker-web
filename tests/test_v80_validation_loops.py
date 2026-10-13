@@ -115,17 +115,19 @@ class TestWorkflow:
     def _wf(self):
         return open(".github/workflows/auto_collect.yml", encoding="utf-8").read()
 
-    def test_pre_close_delayed_fire_skipped(self):
-        """장 마감 전(16시 KST 이전) schedule 이벤트는 전날 cron의 지연 발화 — 스킵."""
+    def test_market_hours_schedule_skipped(self):
+        """[v84.2] 장중(08~16시 KST) schedule 발화는 건너뛴다 — 대상 세션은 batch_target.sh.
+        v80의 '16시 전 전부 스킵'은 새벽 회수까지 막아 10/12 배치를 잃게 했다."""
         src = self._wf()
-        i_hour = src.index('date +%H)" -lt 16')
-        i_csv = src.index('-f "data/recommend_${TODAY}.csv"')
-        assert src.index('"workflow_dispatch" ]') < i_hour < i_csv
+        i_disp = src.index('"workflow_dispatch" ]')
+        i_mkt = src.index('"$BATCH_WINDOW" = "market"')
+        i_csv = src.index('-f "data/recommend_${BATCH_TARGET}.csv"')
+        assert i_disp < i_mkt < i_csv
 
     def test_weekend_schedule_skipped_before_csv_check(self):
         src = self._wf()
-        i_weekend = src.index('date +%u)" -ge 6')
-        i_csv = src.index('-f "data/recommend_${TODAY}.csv"')
+        i_weekend = src.index('"$BATCH_WINDOW" = "weekend"')
+        i_csv = src.index('-f "data/recommend_${BATCH_TARGET}.csv"')
         i_dispatch = src.index('"workflow_dispatch" ]')
         assert i_dispatch < i_weekend < i_csv, "dispatch → 주말 → CSV 순이어야 한다"
 
@@ -187,16 +189,16 @@ class TestBatchChain:
     def test_chain_skips_when_csv_exists_or_weekend(self):
         y = self._y()
         i = y.index("Chain auto_collect")
-        blk = y[i:i + 1500]
-        assert 'recommend_${TODAY}.csv' in blk and "체인 생략" in blk
-        assert 'date +%u)" -ge 6' in blk
+        blk = y[i:i + 2500]
+        assert 'recommend_${BATCH_TARGET}.csv' in blk and "체인 생략" in blk
+        assert '"$BATCH_WINDOW" = "weekend"' in blk
 
-    def test_chain_skips_before_market_close(self):
-        """[v84.1] 자정 넘어 발화한 prefetch가 장 시작 전 배치를 띄우지 않는다 — 16시 가드."""
+    def test_chain_recovers_overnight_instead_of_skipping(self):
+        """[v84.2] v84.1의 '16시 전 생략'은 오진 — 자정 넘긴 발화는 직전 평일을 회수한다."""
         y = self._y()
-        i = y.index("Chain auto_collect"); blk = y[i:i + 1500]
-        assert 'date +%H)" -lt 16' in blk and "체인 생략" in blk
-        assert blk.index('date +%H)" -lt 16') < blk.index("gh workflow run auto_collect.yml")
+        i = y.index("Chain auto_collect"); blk = y[i:i + 2500]
+        assert 'date +%H)" -lt 16' not in blk
+        assert 'eval "$(bash scripts/batch_target.sh)"' in blk
 
     def test_chain_runs_even_if_prefetch_failed(self):
         """수급 수집이 실패해도 배치 체인은 돌아야 한다."""
