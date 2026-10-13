@@ -1,7 +1,24 @@
 {
-  "trade_date": "20261008",
-  "generated_at": "2026-10-08 23:19:09",
-  "decision": "CASH",
-  "count": 0,
-  "stocks": []
+  "trade_date": "20261013",
+  "generated_at": "2026-10-13 23:55:41",
+  "count": 1,
+  "stocks": [
+    {
+      "rank": 1,
+      "code": "160980",
+      "name": "싸이맥스",
+      "route": "ATTACK",
+      "score": 59.6,
+      "close": 26250,
+      "entry": 26250,
+      "stop": 24150,
+      "target1": 30350,
+      "target2": 38350,
+      "est_win_rate": 0.453,
+      "rr": 2.0,
+      "sector": "조선·기계·설비",
+      "market": "KOSDAQ",
+      "url": "https://ldyprotrader.com/stock/160980"
+    }
+  ]
 }
