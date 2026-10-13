@@ -85,18 +85,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
+          # [v84.2] 대상 세션은 scripts/batch_target.sh 가 정한다 — 자정 넘긴 지연 발화는
+          #   직전 평일을 회수한다. v84.1의 '16시 전 체인 생략'은 오진이었고 10/12 배치를
+          #   통째로 잃게 했다(prefetch 10/13 00:55 KST 발화 → 생략).
+          eval "$(bash scripts/batch_target.sh)"
           git fetch origin main --quiet || true
-          if git cat-file -e "origin/main:data/recommend_${TODAY}.csv" 2>/dev/null; then
-            echo "recommend_${TODAY}.csv 이미 있음 — 체인 생략"
-          elif [ "$(TZ=Asia/Seoul date +%u)" -ge 6 ]; then
+          if [ "$BATCH_WINDOW" = "market" ]; then
+            echo "장중(KST 08~16시) — 체인 생략 (장중 시세로 배치를 만들지 않는다)"
+          elif [ "$BATCH_WINDOW" = "weekend" ]; then
             echo "주말 — 체인 생략"
-          elif [ "$(TZ=Asia/Seoul date +%H)" -lt 16 ]; then
-            # [v84.1] prefetch cron이 자정을 넘겨 발화하면(10/6 00:15 KST 실측) TODAY가
-            #   다음 날로 바뀌어 '오늘 배치 없음'이 되고, 장 시작 전 배치를 띄운다 —
-            #   전일 복제 팬텀의 또 다른 경로. auto_collect 가드와 같은 16시 기준.
-            echo "장 마감 전(KST) — 체인 생략"
+          elif git cat-file -e "origin/main:data/recommend_${BATCH_TARGET}.csv" 2>/dev/null; then
+            echo "recommend_${BATCH_TARGET}.csv 이미 있음 — 체인 생략"
+          elif git cat-file -e "origin/main:data/holiday_skip_${BATCH_TARGET}.json" 2>/dev/null; then
+            echo "${BATCH_TARGET} 휴장일 확정 — 체인 생략"
           else
-            echo "오늘 배치 없음 — auto_collect dispatch"
+            echo "${BATCH_WINDOW}: 대상 세션 ${BATCH_TARGET} 배치 없음 — auto_collect dispatch"
             gh workflow run auto_collect.yml --ref main
           fi

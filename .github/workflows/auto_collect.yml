@@ -57,28 +57,29 @@ jobs:
       - name: Skip if today's CSV already exists
         id: guard
         run: |
-          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
+          # [v84.2] 대상 세션은 scripts/batch_target.sh 가 정한다(prefetch 체인과 단일 출처).
+          #   v80은 16시 전 schedule 발화를 전부 버렸다 — 9/2 새벽 재수집·8/29(토) 덮어쓰기
+          #   때문이었는데, 둘 다 '오늘(달력)' CSV 유무를 본 탓이다. 대상 세션의 CSV 유무를
+          #   보면 이미 있는 배치는 다시 돌지 않고, 빠진 배치는 새벽 cron(05~07시 KST
+          #   발화가 흔하다)이 회수한다.
+          eval "$(bash scripts/batch_target.sh)"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "manual dispatch — 강제 실행"
             echo "skip=false" >> "$GITHUB_OUTPUT"
-          elif [ "$(TZ=Asia/Seoul date +%H)" -lt 16 ]; then
-            # [v80] cron은 20:23·22:40 KST에만 걸려 있다. 장 마감 전(16시 이전)에
-            #   온 schedule 이벤트는 전날 cron의 지연 발화다 — 9/2 00:26·02:25 KST
-            #   두 번이 9/1 산출물을 재수집했다. 얻는 게 없다.
-            echo "장 마감 전 KST 지연 발화 — 건너뜀"
+          elif [ "$BATCH_WINDOW" = "market" ]; then
+            echo "장중(KST 08~16시) schedule 발화 — 건너뜀"
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ "$(TZ=Asia/Seoul date +%u)" -ge 6 ]; then
-            # [v80] 주말에 온 schedule 이벤트 = 금요일 cron의 지연 발화다.
-            #   2026-08-29(토) 06:33·08:27 KST 두 번 돌아 8/28 산출물을
-            #   KRX 야간차단 폴백 데이터로 덮었다(레인 1일차 소실). 장이 없는
-            #   날 재수집은 얻는 게 없고 잃을 것만 있다.
-            echo "주말(KST) 지연 발화 — 건너뜀"
+          elif [ "$BATCH_WINDOW" = "weekend" ]; then
+            echo "주말(KST) 저녁 발화 — 건너뜀"
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ -f "data/recommend_${TODAY}.csv" ]; then
-            echo "data/recommend_${TODAY}.csv 이미 있음 — 건너뜀"
+          elif [ -f "data/recommend_${BATCH_TARGET}.csv" ]; then
+            echo "data/recommend_${BATCH_TARGET}.csv 이미 있음 — 건너뜀"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ -f "data/holiday_skip_${BATCH_TARGET}.json" ]; then
+            echo "${BATCH_TARGET} 휴장일 확정 — 건너뜀"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "오늘(${TODAY}) 산출물 없음 — 실행"
+            echo "${BATCH_WINDOW}: 대상 세션 ${BATCH_TARGET} 산출물 없음 — 실행"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -117,13 +118,16 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: |
           echo ">>> Collector 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+          touch "$RUNNER_TEMP/collect_start"
           python collector.py
           echo ">>> Collector 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
           # [v84] 파이프라인이 휴장일로 판정하면 마커를 남긴다 — 후속 검증 스텝은 건너뛴다
           #   (오늘자 CSV가 없으니 돌려봐야 어제 것을 다시 셀 뿐이다).
-          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
-          if [ -f "data/holiday_skip_${TODAY}.json" ]; then
-            echo "휴장일 판정 — 후속 스텝 건너뜀"; cat "data/holiday_skip_${TODAY}.json"
+          # [v84.2] 새벽 회수 실행은 직전 평일이 대상이라 마커 이름이 오늘 날짜가 아니다 —
+          #   이번 실행이 새로 쓴 마커가 있는지로 판정한다.
+          NEW_MARKER=$(find data -maxdepth 1 -name 'holiday_skip_*.json' -newer "$RUNNER_TEMP/collect_start" | head -1)
+          if [ -n "$NEW_MARKER" ]; then
+            echo "휴장일 판정 — 후속 스텝 건너뜀"; cat "$NEW_MARKER"
             echo "holiday=true" >> "$GITHUB_OUTPUT"
           else
             echo "holiday=false" >> "$GITHUB_OUTPUT"
