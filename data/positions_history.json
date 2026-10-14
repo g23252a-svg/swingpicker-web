@@ -7436,5 +7436,75 @@
     "close_px": 2835.0,
     "close_reason": "STOP_HIT",
     "alerted_events": []
+  },
+  {
+    "code": "048410",
+    "name": "현대바이오",
+    "entry_ymd": "20260930",
+    "entry_px": 6970.0,
+    "qty": 0,
+    "stop_px": 6410.0,
+    "stop_px_initial": 6410.0,
+    "take_px1": 7730.0,
+    "take_px2": 8110.0,
+    "trailing_high": 7420.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261014",
+    "last_close_px": 6410.0,
+    "unrealized_pnl_pct": -8.03,
+    "realized_pnl_pct": -8.03,
+    "close_ymd": "20261014",
+    "close_px": 6410.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "048410_20260930_WARN_DRAWDOWN_20261013",
+      "048410_20260930_STOP_HIT_20261014"
+    ]
+  },
+  {
+    "code": "388210",
+    "name": "씨엠티엑스",
+    "entry_ymd": "20261007",
+    "entry_px": 88900.0,
+    "qty": 0,
+    "stop_px": 81700.0,
+    "stop_px_initial": 81700.0,
+    "take_px1": 98600.0,
+    "take_px2": 109400.0,
+    "trailing_high": 96700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261014",
+    "last_close_px": 81400.0,
+    "unrealized_pnl_pct": -8.44,
+    "realized_pnl_pct": -8.44,
+    "close_ymd": "20261014",
+    "close_px": 81400.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "388210_20261007_STOP_HIT_20261014"
+    ]
+  },
+  {
+    "code": "089970",
+    "name": "브이엠",
+    "entry_ymd": "20261013",
+    "entry_px": 61500.0,
+    "qty": 0,
+    "stop_px": 56500.0,
+    "stop_px_initial": 56500.0,
+    "take_px1": 72000.0,
+    "take_px2": 73500.0,
+    "trailing_high": 61600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261014",
+    "last_close_px": 56400.0,
+    "unrealized_pnl_pct": -8.29,
+    "realized_pnl_pct": -8.29,
+    "close_ymd": "20261014",
+    "close_px": 56400.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "089970_20261013_STOP_HIT_20261014"
+    ]
   }
 ]
