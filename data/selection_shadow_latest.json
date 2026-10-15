@@ -1,15 +1,15 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 18,
+ "days_total": 19,
  "variants": {
   "legacy": {
-   "days": 16,
-   "avg_ret_pct": -4.130950789023608,
-   "win_rate": 0.3125,
-   "stop_rate": 0.5,
-   "hac_t": -1.7593501621690275,
-   "hac_p": 0.09889244888510189
+   "days": 17,
+   "avg_ret_pct": -4.358541919081042,
+   "win_rate": 0.29411764705882354,
+   "stop_rate": 0.5294117647058824,
+   "hac_t": -1.9184443690068034,
+   "hac_p": 0.07307757250316575
   },
   "live": {
    "days": 16,
@@ -20,15 +20,15 @@
    "hac_p": 0.09889244888510189
   },
   "lowvol": {
-   "days": 13,
-   "avg_ret_pct": -0.523075723548255,
-   "win_rate": 0.46153846153846156,
+   "days": 14,
+   "avg_ret_pct": -0.5814239127382681,
+   "win_rate": 0.42857142857142855,
    "stop_rate": 0.0,
-   "hac_t": -0.8754400362401564,
-   "hac_p": 0.39851889740019114
+   "hac_t": -0.9755791676418432,
+   "hac_p": 0.34707830745058343
   },
   "ext_lowtv": {
-   "days": 2,
+   "days": 3,
    "avg_ret_pct": -8.0,
    "win_rate": 0.0,
    "stop_rate": 1.0,
@@ -38,21 +38,21 @@
  },
  "paired": {
   "live-legacy": {
-   "days": 15,
+   "days": 16,
    "diff_pct": 0.0,
    "positive_days": 0,
    "hac_t": 0.0,
    "hac_p": 1.0
   },
   "lowvol-live": {
-   "days": 12,
-   "diff_pct": 2.6372715971688367,
-   "positive_days": 9,
-   "hac_t": 1.1885717578153912,
-   "hac_p": 0.2596353728385058
+   "days": 13,
+   "diff_pct": 2.946716061062893,
+   "positive_days": 10,
+   "hac_t": 1.3463359237127406,
+   "hac_p": 0.20307527690128674
   },
   "ext_lowtv-live": {
-   "days": 2,
+   "days": 3,
    "diff_pct": 0.0,
    "positive_days": 0,
    "hac_t": null,
@@ -62,16 +62,16 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20261014",
+   "ymd": "20261015",
    "variant": "ext_lowtv",
-   "종목코드": "397030",
-   "종목명": "에이프릴바이오",
+   "종목코드": "475830",
+   "종목명": "오름테라퓨틱",
    "alpha": NaN,
    "rr": NaN,
    "atr_pct": NaN,
    "vol_pctl": NaN,
-   "ext_score": 0.0807079646017699,
-   "tv_eok": 20.3796446
+   "ext_score": 0.06505190311418686,
+   "tv_eok": 33.5771401
   }
  ],
  "added": true
