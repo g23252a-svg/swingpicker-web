@@ -1062,6 +1062,13 @@ def _render_official_buy_validation_card() -> None:
             _shadow_stat("검증일", f"{int(s.get('signal_days', 0)):,}일")
             _shadow_stat("공식 신호", f"{int(s.get('official_buy_signals', 0)):,}건")
             _shadow_stat("공식 결과", f"{int(s.get('official_buy_results', 0)):,}건")
+            # [v85] 결과에서 뺀 공식 매수 — 체결 못 함(0.0으로 세지 않음) / 아직 측정중
+            if "official_buy_not_filled" in s or "official_buy_pending" in s:
+                _shadow_stat(
+                    "미체결·측정중",
+                    f"{int(s.get('official_buy_not_filled', 0) or 0):,} · "
+                    f"{int(s.get('official_buy_pending', 0) or 0):,}건",
+                )
             _shadow_stat(
                 "공식 승률",
                 _pct_or_dash(s.get("official_buy_win_rate"), digits=1),
@@ -1574,6 +1581,30 @@ def _code6_top1(x):
     return s.zfill(6)
 
 
+def _prefer_newest_matured(trades: pd.DataFrame) -> pd.DataFrame:
+    """[v85] (date, code)별 한 행 — 확정 결과(matured) 우선, 그다음 최신 파일.
+
+    matured 컬럼이 없는 예전 파일은 outcome이 PENDING이 아니면 확정으로 본다
+    (예전 엔진엔 PENDING이 없었다). _file_rank(클수록 최신)가 없으면 행 순서를 쓴다.
+    """
+    if trades is None or trades.empty or not {"date", "code"} <= set(trades.columns):
+        return trades
+    t = trades.copy()
+    if "_file_rank" not in t.columns:
+        t["_file_rank"] = range(len(t))
+    outcome = t.get("outcome", pd.Series("", index=t.index)).astype(str).str.strip().str.upper()
+    matured = (outcome != "PENDING")
+    if "matured" in t.columns:
+        raw = t["matured"]
+        has = raw.notna() & (raw.astype(str).str.strip() != "")
+        explicit = raw.astype(str).str.strip().str.lower().isin({"1", "1.0", "true", "t", "yes", "y"})
+        matured = matured.where(~has, explicit)
+    t["_matured_rank"] = matured.astype(int)
+    t = t.sort_values(["_matured_rank", "_file_rank"], ascending=[False, False], kind="mergesort")
+    t = t.drop_duplicates(subset=["date", "code"], keep="first")
+    return t.drop(columns=["_matured_rank", "_file_rank"]).sort_index()
+
+
 def _load_top1_trades() -> pd.DataFrame:
     """[v3.9.14d + v3.9.22c-1] backtest_top1_trades 최근 15일치 로딩 + 정규화.
 
@@ -1590,6 +1621,11 @@ def _load_top1_trades() -> pd.DataFrame:
     컬럼 추가:
       - fill_date(datetime), net_pct_num(float), outcome_norm(upper str)
       - DATA_QUALITY_FLAG(str): "OK" / "EXIT_ZERO" / ""
+
+    [v85] 같은 (date, code)가 누적 dated 파일마다 반복된다. 예전엔 오래된 파일부터
+    concat 후 keep='first' → **가장 미성숙한 첫 스냅샷**(D+1 밤 봉 1개)이 이겼다.
+    이제 (확정 결과 우선 → 최신 파일 우선) 안정 정렬 뒤 keep='first'.
+    NOT_FILLED·PENDING은 net_pct가 공란(새 엔진) — 0.0 결과로 세지 않는다.
     """
     import glob as _g
     try:
@@ -1597,12 +1633,14 @@ def _load_top1_trades() -> pd.DataFrame:
         trade_files = [f for f in trade_files if "latest" not in os.path.basename(f)]
         if len(trade_files) < 3:
             return pd.DataFrame()
-        trades = pd.concat(
-            [pd.read_csv(f) for f in trade_files[-15:]],
-            ignore_index=True,
-        )
+        _frames = []
+        for _rank, _f in enumerate(trade_files[-15:]):
+            _df = pd.read_csv(_f)
+            _df["_file_rank"] = _rank          # 클수록 최신 파일
+            _frames.append(_df)
+        trades = pd.concat(_frames, ignore_index=True)
         trades.columns = [c.lstrip("\ufeff") for c in trades.columns]
-        trades = trades.drop_duplicates(subset=["date", "code"])
+        trades = _prefer_newest_matured(trades)
 
         if "fill_date" not in trades.columns or "outcome" not in trades.columns:
             return pd.DataFrame()
@@ -1613,6 +1651,9 @@ def _load_top1_trades() -> pd.DataFrame:
         trades["net_pct_num"] = pd.to_numeric(trades["net_pct"], errors="coerce")
         # [v3.9.14b 보정 3] outcome 대소문자/공백 정규화
         trades["outcome_norm"] = trades["outcome"].astype(str).str.strip().str.upper()
+        # [v85] 미체결·측정중·가격없음은 결과가 아니다 — 예전 파일의 net 0.0도 통계에서 뺀다
+        trades.loc[trades["outcome_norm"].isin({"NOT_FILLED", "PENDING", "NODATA"}),
+                   "net_pct_num"] = pd.NA
 
         # ─── [v3.9.22c-1 DATA_AUDIT] 데이터 결손 태깅 + 필터 ───
         exit_price_num = pd.to_numeric(
@@ -2255,14 +2296,20 @@ def _render_validation_basis_card() -> None:
             ui.label(
                 "• 상단 성과 요약 — Top5 후보를 5영업일 보유했을 때의 평균 검증"
             ).classes("text-xs text-gray-300")
+            # [v85] 종목탭 성적표는 배치가 기록한 공식 매수(PRODUCTION_BUY)만 채점한다.
+            #   예전 문구('Top1 실전 검증'·'데이터 준비 중')는 동결된 라벨 전략 시절 것.
             ui.label(
-                "• 종목탭 Top Pick — 실제 하루 1종목 운용에 가까운 Top1 실전 검증 (10영업일)"
+                "• 종목탭 성적표 — 배치가 기록한 공식 매수(PRODUCTION_BUY=1)만 채점. "
+                "헤드라인은 픽 이력과 같은 정의(다음날 시가 진입 · -8% 손절 · 5일), "
+                "보조로 제시가 지정가 모델(3일 체결창 · 10영업일)"
             ).classes("text-xs text-gray-300")
             ui.label(
-                "• Shadow 실험실 — 추천 로직을 바꾸지 않고 \"바꿨다면 어땠을지\"를 측정한 실험 결과"
+                "• Shadow 실험실 — 추천 로직을 바꾸지 않고 \"바꿨다면 어땠을지\"를 측정한 실험 결과 "
+                "(기준선은 레거시 라벨 Top3 — 공식 매수 성적과 다른 기준)"
             ).classes("text-xs text-gray-300")
             ui.label(
-                "• 공식 신규매수 — TOP_PICK + BUY_NOW_ELIGIBLE 기준. 현재는 별도 누적 전이라 데이터 준비 중"
+                "• 공식 신규매수 — 기록된 공식 매수(PRODUCTION_BUY, 없으면 TOP_PICK + "
+                "BUY_NOW_ELIGIBLE)의 결과 누적. 체결 못 한 건·측정중인 건은 성과에서 제외"
             ).classes("text-xs text-amber-200")
         ui.label(
             "※ 각 영역의 숫자가 다른 이유는 \"검증 기준\"이 다르기 때문이며, "

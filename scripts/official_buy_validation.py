@@ -8,6 +8,16 @@ TOP_PICK이지만 BUY_NOW_ELIGIBLE=0으로 보류한 종목의 이후 결과를
 Measurement-only script:
 - BUY_NOW_ELIGIBLE / TOP_PICK / 점수 산식은 변경하지 않는다.
 - recommend_YYYYMMDD.csv와 backtest_top1/top3_trades_*.csv를 날짜+종목코드로 조인한다.
+
+[v85] 전부 PENDING 고착 해소
+- 같은 신호가 누적 dated 파일마다 반복되는데 예전엔 안정 정렬 + keep='first'로
+  **가장 오래된(=가장 미성숙한) 스냅샷**이 이겼다 (D+1 밤 봉 1개짜리 '미체결'·
+  1일 OPEN이 영구 고정 → 실측 대비 평균 +1.9%p 낙관, 승률 2배 과대).
+  이제 (결과 확정 우선, 최신 파일 우선, top1 우선)으로 정렬한 뒤 keep='first'.
+- NOT_FILLED(체결 못 함)·PENDING(측정중)·NODATA는 결과가 아니다 —
+  net_pct=0.0으로 승률/평균에 섞지 않는다 (예전 파일의 0.0도 무시).
+- 컬럼이 있으면 공식 매수는 **기록된** PRODUCTION_BUY로 판정 (가드 이후
+  BUY_NOW_ELIGIBLE과 같은 값 — v65 recorded-only).
 """
 
 from __future__ import annotations
@@ -109,11 +119,16 @@ def load_top_pick_signals(data_dir: str | Path) -> pd.DataFrame:
             logger.debug("종목코드 컬럼 없음: %s", path)
             continue
 
+        # [v85] 기록된 PRODUCTION_BUY가 있으면 그것이 공식 매수 (재계산 안 함)
+        has_pb = "PRODUCTION_BUY" in df.columns
         for _, r in df[df["TOP_PICK"].map(_truthy)].iterrows():
             code = _norm_code(r.get(code_col))
             if not code:
                 continue
-            eligible = _truthy(r.get("BUY_NOW_ELIGIBLE", 0))
+            if has_pb:
+                eligible = _truthy(r.get("PRODUCTION_BUY", 0))
+            else:
+                eligible = _truthy(r.get("BUY_NOW_ELIGIBLE", 0))
             rows.append(
                 {
                     "signal_date": signal_date,
@@ -152,8 +167,28 @@ def _trade_files(data_dir: Path) -> list[Path]:
     return sorted(files)
 
 
+# [v85] 결과가 아닌 outcome — net_pct가 있어도(예전 파일의 0.0) 결과로 세지 않는다.
+NON_RESULT_OUTCOMES = {"NOT_FILLED", "PENDING", "NODATA"}
+
+
+def _matured_flag(row) -> int:
+    """[v85] 이 행이 확정 결과인가 — 1(확정)/0(측정중).
+
+    새 파일은 matured 컬럼이 있다. 예전 파일은 컬럼이 없으므로 outcome으로
+    추정한다 (PENDING만 미확정 — 예전 엔진엔 PENDING 자체가 없었다).
+    """
+    raw = row.get("matured") if hasattr(row, "get") else None
+    if raw is not None and not (isinstance(raw, float) and pd.isna(raw)) and str(raw).strip() != "":
+        return 1 if _truthy(raw) else 0
+    return 0 if str(row.get("outcome", "")).strip().upper() == "PENDING" else 1
+
+
 def load_realized_trades(data_dir: str | Path) -> pd.DataFrame:
-    """backtest_top1/top3 trades에서 날짜+종목코드별 실현 결과를 로드."""
+    """backtest_top1/top3 trades에서 날짜+종목코드별 실현 결과를 로드.
+
+    [v85] 같은 (signal_date, code)가 여러 dated 파일에 반복되면
+    ① 확정 결과(matured) ② 최신 파일 ③ top1 파일 순으로 하나만 남긴다.
+    """
     data_path = Path(data_dir)
     frames: list[pd.DataFrame] = []
 
@@ -168,6 +203,9 @@ def load_realized_trades(data_dir: str | Path) -> pd.DataFrame:
         tmp["signal_date"] = tmp["date"].astype(str).str.replace("-", "", regex=False).str[:8]
         tmp["code"] = tmp["code"].map(_norm_code)
         tmp["trade_source"] = path.name
+        tmp["_file_date"] = _date_from_name(path) or ""
+        tmp["_is_top1"] = int("top1" in path.name)
+        tmp["_matured"] = tmp.apply(_matured_flag, axis=1)
         frames.append(tmp)
 
     if not frames:
@@ -189,20 +227,32 @@ def load_realized_trades(data_dir: str | Path) -> pd.DataFrame:
             "exit_price",
             "tp1_hit",
             "stop_hit",
+            "matured",
             "trade_source",
+            "_file_date",
+            "_is_top1",
+            "_matured",
         ]
         if c in out.columns
     ]
     out = out[keep_cols].copy()
     out["net_pct"] = out.get("net_pct", pd.Series(dtype=float)).map(_safe_float)
     out["ret_pct"] = out.get("ret_pct", pd.Series(dtype=float)).map(_safe_float)
+    if "outcome" in out.columns:
+        # [v85] 미체결·측정중·가격없음은 결과가 아니다 — 예전 파일의 net 0.0도 지운다
+        non_result = out["outcome"].astype(str).str.strip().str.upper().isin(NON_RESULT_OUTCOMES)
+        out.loc[non_result, ["net_pct", "ret_pct"]] = None
 
-    # 같은 날짜+종목이 Top1/Top3 또는 여러 검증 파일에 중복될 수 있어 첫 결과만 사용.
-    # 최신 파일 중복보다 날짜별 파일을 우선하되, net_pct가 있는 행을 우선한다.
-    out["_has_result"] = out["net_pct"].notna().astype(int)
-    out = out.sort_values(["signal_date", "code", "_has_result"], ascending=[True, True, False])
+    # 같은 날짜+종목이 Top1/Top3 또는 여러 누적 dated 파일에 중복된다.
+    # [v85] 안정 정렬로 (확정 결과 → 최신 파일 → top1) 순서를 만든 뒤 keep='first'.
+    #       예전엔 가장 오래된 파일이 이겨 D+1 밤의 미성숙 스냅샷이 영구 고정됐다.
+    out = out.sort_values(
+        ["signal_date", "code", "_matured", "_file_date", "_is_top1"],
+        ascending=[True, True, False, False, False],
+        kind="mergesort",
+    )
     out = out.drop_duplicates(["signal_date", "code"], keep="first")
-    return out.drop(columns=["_has_result"])
+    return out.drop(columns=["_file_date", "_is_top1", "_matured"])
 
 
 def _mean_pct(values: Iterable[float | None]) -> float | None:
@@ -256,7 +306,10 @@ def build_official_buy_validation(data_dir: str | Path, out_dir: str | Path) -> 
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "summary": summary,
         "notes": [
-            "official_buy_signal = TOP_PICK + BUY_NOW_ELIGIBLE",
+            "official_buy_signal = TOP_PICK + BUY_NOW_ELIGIBLE "
+            "(PRODUCTION_BUY 컬럼이 있으면 기록된 PRODUCTION_BUY)",
+            "results = 체결되고 확정된 거래만 (NOT_FILLED·PENDING은 결과 아님, 0.0 미집계)",
+            "dedup = 확정 결과 → 최신 trades 파일 → top1 우선",
             "top_pick_holdout = TOP_PICK=1 and BUY_NOW_ELIGIBLE=0",
             "cash_vs_top_pick_pct = 0% cash return - holdout TOP_PICK net_pct",
             "measurement-only: recommendation formulas are not modified",
@@ -294,6 +347,12 @@ def _official_verdict(row) -> str:
         return "NOT_OFFICIAL_BUY"
     net = row.get("net_pct")
     if pd.isna(net):
+        # [v85] 체결 못 한 공식 매수는 '측정중'이 아니라 확정된 미체결이다
+        outcome = str(row.get("outcome", "") or "").strip().upper()
+        if outcome == "NOT_FILLED":
+            return "NOT_FILLED"
+        if outcome == "NODATA":
+            return "NO_DATA"
         return "PENDING"
     return "WIN" if float(net) > 0 else "LOSS_OR_FLAT"
 
@@ -305,6 +364,8 @@ def summarize_validation(df: pd.DataFrame) -> dict:
             "top_pick_signals": 0,
             "official_buy_signals": 0,
             "official_buy_results": 0,
+            "official_buy_not_filled": 0,
+            "official_buy_pending": 0,
             "official_buy_win_rate": None,
             "official_buy_avg_net_pct": None,
             "no_official_buy_days": 0,
@@ -319,6 +380,8 @@ def summarize_validation(df: pd.DataFrame) -> dict:
 
     official = df[df["official_buy_signal"].astype(bool)]
     official_done = official[official["net_pct"].notna()]
+    _verdicts = (official["official_verdict"] if "official_verdict" in official.columns
+                 else pd.Series(dtype=object))
     holdout = df[df["top_pick_holdout"].astype(bool)]
     holdout_done = holdout[holdout["net_pct"].notna()]
 
@@ -330,6 +393,9 @@ def summarize_validation(df: pd.DataFrame) -> dict:
         "top_pick_signals": int(len(df)),
         "official_buy_signals": int(len(official)),
         "official_buy_results": int(len(official_done)),
+        # [v85] 결과에서 뺀 공식 매수 — 체결 못 함 / 아직 측정중
+        "official_buy_not_filled": int((_verdicts == "NOT_FILLED").sum()),
+        "official_buy_pending": int(_verdicts.isin(["PENDING", "NO_DATA"]).sum()),
         "official_buy_win_rate": _win_rate(official_done["net_pct"]),
         "official_buy_avg_net_pct": _mean_pct(official_done["net_pct"]),
         "no_official_buy_days": no_official_buy_days,

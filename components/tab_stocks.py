@@ -1530,15 +1530,208 @@ def _is_low_confidence_today() -> bool:
     True면 종목 카드 라벨 옆에 "⚠️ 오늘 보수 접근" 보조 뱃지 표시.
     """
     bt = _load_backtest_stats()
-    capital_top1 = bt.get("capital_portfolio_top1") or {}
-    signal_top1 = bt.get("signal_top1") or {}
-    daily_top1 = bt.get("daily_top1_backtest") or {}
-    if signal_top1:
-        ev = signal_top1.get("ev_net_pct", 0)
+    # [v85] 헤드라인 기대값은 official_ssot(픽 이력 SSOT) 우선 — _headline_metrics 참조
+    hm = _headline_metrics(bt)
+    return hm["ev"] < 0 and hm["cap_ret"] < 0
+
+
+# ═══════════════════════════════════════════════════
+# [v85] 성적표 기준·신선도 헬퍼 (순수 함수 — UI 없이 테스트 가능)
+# ═══════════════════════════════════════════════════
+# 옛 형식 JSON(freshness 블록 없음 = 레거시 '🏆 최강' 라벨 기준)은 마지막 신호가
+# 최신 배치보다 이 배치 수를 넘게 뒤처지면 '갱신 정지'로 본다. 라벨 경로는 원래
+# 드문드문 뽑았으므로(0226~0710 92배치 중 34일) 새 형식보다 넉넉하게 잡는다.
+_SCORECARD_OLD_FORMAT_LAG_BATCHES = 10
+# 새 형식이라도 리포트의 최신 배치가 data/의 최신 recommend CSV보다 이만큼 넘게
+# 밀리면(nightly 실패를 `|| exit 0`이 삼킨 경우) 갱신 지연으로 본다.
+_SCORECARD_REPORT_LAG_BATCHES = 2
+
+
+def _recommend_batch_dates(data_dir: Optional[str] = None) -> list:
+    """[v85] data/recommend_YYYYMMDD.csv 파일명 → 정렬된 배치일 목록 (파일은 열지 않음)."""
+    import glob as _glob
+    import re as _re
+    if data_dir is None:
+        data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+    out = set()
+    for p in _glob.glob(os.path.join(data_dir, "recommend_2*.csv")):
+        m = _re.match(r"^recommend_(2\d{7})\.csv$", os.path.basename(p))
+        if m:
+            out.add(m.group(1))
+    return sorted(out)
+
+
+def _ymd8(value) -> str:
+    """'2026-07-09' / '20260709' / None → '20260709' 또는 ''."""
+    s = str(value or "").replace("-", "").replace(".", "").strip()
+    return s[:8] if len(s) >= 8 and s[:8].isdigit() else ""
+
+
+def _ymd_iso(value) -> str:
+    s = _ymd8(value)
+    return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if s else "?"
+
+
+def _span_txt(start, end) -> str:
+    """기간 표시 — 같은 해면 'MM/DD~MM/DD', 아니면 'YYYY.MM.DD~YYYY.MM.DD'."""
+    a, b = _ymd8(start), _ymd8(end)
+    if not a or not b:
+        return "기간 미상"
+    if a[:4] == b[:4]:
+        return f"{a[4:6]}/{a[6:8]}~{b[4:6]}/{b[6:8]}"
+    return f"{a[:4]}.{a[4:6]}.{a[6:8]}~{b[:4]}.{b[4:6]}.{b[6:8]}"
+
+
+def _report_last_signal(bt: dict) -> str:
+    """리포트의 마지막 신호일 — freshness가 없으면(옛 JSON) 로그·거래에서 추정."""
+    fr = bt.get("freshness") if isinstance(bt.get("freshness"), dict) else {}
+    if fr.get("last_signal_date"):
+        return _ymd8(fr["last_signal_date"])
+    dates = []
+    for e in bt.get("daily_picks_log_top1") or []:
+        if isinstance(e, dict):
+            try:
+                n = int(e.get("n_picked", 0) or 0)
+            except (TypeError, ValueError):
+                n = 0
+            if n > 0:
+                dates.append(_ymd8(e.get("date")))
+    for t in bt.get("all_trades_top1") or []:
+        if isinstance(t, dict):
+            dates.append(_ymd8(t.get("date")))
+    dates = [d for d in dates if d]
+    return max(dates) if dates else ""
+
+
+def _report_latest_batch(bt: dict) -> str:
+    """리포트가 반영한 최신 배치일."""
+    fr = bt.get("freshness") if isinstance(bt.get("freshness"), dict) else {}
+    if fr.get("latest_batch_date"):
+        return _ymd8(fr["latest_batch_date"])
+    dr = (bt.get("methodology") or {}).get("date_range") or []
+    if isinstance(dr, (list, tuple)) and len(dr) >= 2 and _ymd8(dr[1]):
+        return _ymd8(dr[1])
+    log = [e for e in (bt.get("daily_picks_log_top1") or []) if isinstance(e, dict)]
+    return _ymd8(log[-1].get("date")) if log else ""
+
+
+def _scorecard_freshness(bt: dict, batch_dates: Optional[list] = None) -> dict:
+    """[v85] 성적표가 '지금' 숫자인지 판정 — 새 JSON(freshness 블록)과 옛 JSON 모두.
+
+    배포 직후엔 새 코드가 옛 JSON(라벨 전략, freshness 없음)을 읽는다 — 그때도
+    '0709에서 멈춘 숫자'임을 드러내야 한다.
+      · 새 JSON : freshness.stale 그대로 + 리포트 자체가 최신 recommend CSV보다
+                  _SCORECARD_REPORT_LAG_BATCHES 넘게 밀렸는지 (nightly 실패 감지)
+      · 옛 JSON : 마지막 신호 이후 배치 수 > _SCORECARD_OLD_FORMAT_LAG_BATCHES
+    Returns {stale, reason, basis('contract'|'legacy'|'none'), last_signal,
+             latest_batch, newest_batch, lag_batches}
+    """
+    out = {"stale": False, "reason": "", "basis": "none", "last_signal": "",
+           "latest_batch": "", "newest_batch": "", "lag_batches": 0}
+    if not bt:
+        return out
+    dates = sorted({_ymd8(d) for d in (batch_dates or []) if _ymd8(d)})
+    last_sig = _report_last_signal(bt)
+    latest = _report_latest_batch(bt)
+    newest = dates[-1] if dates else latest
+    out.update(last_signal=last_sig, latest_batch=latest, newest_batch=newest)
+    reasons = []
+    fr = bt.get("freshness")
+    if isinstance(fr, dict):
+        out["basis"] = "contract"
+        if fr.get("stale"):
+            reasons.append(str(fr.get("stale_reason") or "백테스트가 공식 매수를 따라가지 못함"))
+        if dates and latest:
+            report_lag = sum(1 for d in dates if d > latest)
+            out["lag_batches"] = report_lag
+            if report_lag > _SCORECARD_REPORT_LAG_BATCHES:
+                reasons.append(f"리포트가 최근 {report_lag}개 배치를 반영 못함 "
+                               f"(마지막 반영 {_ymd_iso(latest)}, 최신 배치 {_ymd_iso(newest)})")
     else:
-        ev = daily_top1.get("ev", 0)
-    cap_ret = capital_top1.get("total_return_pct", 0) if capital_top1 else 0
-    return ev < 0 and cap_ret < 0
+        out["basis"] = "legacy"
+        ref = dates or [_ymd8(e.get("date")) for e in (bt.get("daily_picks_log_top1") or [])
+                        if isinstance(e, dict) and _ymd8(e.get("date"))]
+        lag = sum(1 for d in ref if not last_sig or d > last_sig)
+        out["lag_batches"] = lag
+        if ref and lag > _SCORECARD_OLD_FORMAT_LAG_BATCHES:
+            since = f"{_ymd_iso(last_sig)} 이후" if last_sig else "기간 내내"
+            reasons.append(f"{since} {lag}개 배치 동안 새 신호 없음 — 옛 라벨 전략 기준이라 "
+                           f"공식 매수를 반영하지 못함 (최신 배치 {_ymd_iso(newest)})")
+    out["stale"] = bool(reasons)
+    out["reason"] = " · ".join(reasons)
+    return out
+
+
+def _validation_scorecard_title(bt: dict, fresh: Optional[dict] = None) -> str:
+    """[v85] 성적표 펼침 제목 — 예전 하드코딩 제목(v31.5 당시 days_covered=99 고정) 대체.
+
+    새 JSON: 공식 매수 기준 기간·배치 수·공식픽 일수. 옛 JSON: 라벨 전략임을 밝힌다.
+    stale이면 '⚠️ 갱신 정지'를 붙인다.
+    """
+    fresh = fresh or {}
+    tail = " (펼쳐 보기)"
+    stale_tag = " · ⚠️ 갱신 정지" if fresh.get("stale") else ""
+    if not bt:
+        return "📊 성적표 — 추천을 따랐다면? (데이터 준비중)" + tail
+    meth = bt.get("methodology") or {}
+    fr = bt.get("freshness")
+    if isinstance(fr, dict):
+        dr = meth.get("contract_date_range") or [fr.get("first_determinable_date"),
+                                                 fr.get("latest_batch_date")]
+        dr = list(dr) + ["", ""]
+        try:
+            n_cov = int(fr.get("contract_days_covered") or 0)
+            n_pick = int(fr.get("contract_pick_days") or 0)
+        except (TypeError, ValueError):
+            n_cov = n_pick = 0
+        return (f"📊 공식 매수 성적표 — {_span_txt(dr[0], dr[1])} · "
+                f"{n_cov}개 배치 중 공식 매수 {n_pick}일{stale_tag}{tail}")
+    dr = list(meth.get("date_range") or []) + ["", ""]
+    try:
+        days = int(bt.get("days_covered") or 0)
+    except (TypeError, ValueError):
+        days = 0
+    return (f"📊 지난 성적표 (옛 라벨 전략) — {_span_txt(dr[0], dr[1])} · "
+            f"{days}개 배치{stale_tag}{tail}")
+
+
+def _headline_metrics(bt: dict) -> dict:
+    """[v85] 종목탭 헤드라인 숫자의 단일 출처 (회원 카드·보수 접근 뱃지·안내문·성적표).
+
+    기대값(ev)은 official_ssot 평균(픽 이력 SSOT: 다음날 시가 진입 · -8% 손절 ·
+    5일 종가)을 우선 쓴다 — 오늘탭(alpha_live_report)·픽 이력과 **같은 정의**라야
+    같은 공식픽에 탭마다 다른 숫자가 나오지 않는다. SSOT가 없는 옛 JSON에서만
+    signal_top1(지정가 모델) → daily_top1 순으로 대체한다.
+    1차 목표 도달률(tp1_rate)은 TP 사다리가 있는 지정가 모델에만 있으므로 그대로.
+    """
+    bt = bt or {}
+    ssot = bt.get("official_ssot") or {}
+    sig = bt.get("signal_top1") or {}
+    d1 = bt.get("daily_top1_backtest") or {}
+    cap1 = bt.get("capital_portfolio_top1") or {}
+    if sig:
+        ev_model, tp1 = sig.get("ev_net_pct", 0), sig.get("tp1_rate", 0)
+    else:
+        ev_model, tp1 = d1.get("ev", 0), d1.get("tp1_rate", 0)
+    try:
+        n_measured = int(ssot.get("n_measured") or 0)
+    except (TypeError, ValueError):
+        n_measured = 0
+    if n_measured > 0 and ssot.get("mean_pct") is not None:
+        ev = float(ssot["mean_pct"])
+        basis = "official_ssot"
+    else:
+        ev = float(ev_model or 0)
+        basis = "signal_top1" if sig else ("daily_top1" if d1 else "none")
+    return {
+        "ev": ev,
+        "tp1_rate": float(tp1 or 0),
+        "cap_ret": (cap1.get("total_return_pct", 0) or 0) if cap1 else 0,
+        "cap_n": (cap1.get("n_trades_filled", 0) or 0) if cap1 else 0,
+        "basis": basis,
+        "n_measured": n_measured,
+        "ev_model": float(ev_model or 0),
+    }
 
 
 
@@ -1713,7 +1906,9 @@ def _render_member_summary(capital_top1: dict, signal_top1: dict,
                             daily_top1: dict, confidence: dict,
                             pre_entry_risk: dict = None,
                             struct_risk: dict = None,
-                            official_decision: dict | None = None) -> None:
+                            official_decision: dict | None = None,
+                            official_ssot: dict | None = None,
+                            stale: bool = False) -> None:
     """[v3.9.3/v3.9.5] 회원용 요약 카드 — 결론 우선, 한글 용어.
 
     상태 판정 (v3.9.5 — shadow 신호 추가 반영):
@@ -1740,14 +1935,18 @@ def _render_member_summary(capital_top1: dict, signal_top1: dict,
         return
 
     # ── 지표 추출 ──
-    if signal_top1:
-        ev = signal_top1.get("ev_net_pct", 0)
-        tp1_rate = signal_top1.get("tp1_rate", 0)  # 0~1
-    else:
-        ev = daily_top1.get("ev", 0)
-        tp1_rate = daily_top1.get("tp1_rate", 0)
-    cap_ret = capital_top1.get("total_return_pct", 0) if capital_top1 else 0
-    cap_n = capital_top1.get("n_trades_filled", 0) if capital_top1 else 0
+    # [v85] 기대값은 official_ssot(픽 이력 SSOT) 우선 — _headline_metrics 단일 출처.
+    #       tp1_rate(0~1)는 지정가 모델(signal_top1) 그대로.
+    hm = _headline_metrics({
+        "official_ssot": official_ssot or {},
+        "signal_top1": signal_top1 or {},
+        "daily_top1_backtest": daily_top1 or {},
+        "capital_portfolio_top1": capital_top1 or {},
+    })
+    ev = hm["ev"]
+    tp1_rate = hm["tp1_rate"]
+    cap_ret = hm["cap_ret"]
+    cap_n = hm["cap_n"]
     conf_level = (confidence or {}).get("level", "LOW")
 
     # [v3.9.5] shadow 신호 추출 — 시장에 위험 패턴이 얼마나 있는지
@@ -1795,6 +1994,9 @@ def _render_member_summary(capital_top1: dict, signal_top1: dict,
     headline_parts.append(f"1차 목표 도달률 {tp1_rate*100:.1f}%")
     if cap_n > 0:
         headline_parts.append(f"실전 운용 {cap_ret:+.2f}%")
+    if stale:
+        # [v85] 성적표가 멈춰 있으면 이 숫자들을 '현재'처럼 읽지 않게
+        headline_parts.append("⚠️ 성적표 갱신 정지")
     headline_txt = " · ".join(headline_parts)
 
     # ── 렌더 ──
@@ -1819,7 +2021,9 @@ def _render_member_summary(capital_top1: dict, signal_top1: dict,
                              good=tp1_rate >= 0.35,
                              bad=tp1_rate < 0.20)
             _member_stat_box("기대값", f"{ev:+.2f}%",
-                             good=ev > 0, bad=ev < 0)
+                             good=ev > 0, bad=ev < 0,
+                             sub=(f"공식 매수 {hm['n_measured']}건 · 다음날 시가→5일"
+                                  if hm["basis"] == "official_ssot" else ""))
             if cap_n > 0:
                 _member_stat_box("실전 운용 결과", f"{cap_ret:+.2f}%",
                                  good=cap_ret > 0, bad=cap_ret < 0,
@@ -1863,18 +2067,12 @@ def _render_candidate_context_notice(official_decision: dict | None = None) -> N
     떠서 충돌. 상태에 따라 적절한 안내문 표시.
     """
     bt = _load_backtest_stats()
-    capital_top1 = bt.get("capital_portfolio_top1") or {}
-    signal_top1 = bt.get("signal_top1") or {}
-    daily_top1 = bt.get("daily_top1_backtest") or {}
 
-    # 지표 추출 (회원 카드와 동일 로직)
-    if signal_top1:
-        ev = signal_top1.get("ev_net_pct", 0)
-        tp1_rate = signal_top1.get("tp1_rate", 0)
-    else:
-        ev = daily_top1.get("ev", 0)
-        tp1_rate = daily_top1.get("tp1_rate", 0)
-    cap_ret = capital_top1.get("total_return_pct", 0) if capital_top1 else 0
+    # 지표 추출 (회원 카드와 동일 로직 — [v85] _headline_metrics 단일 출처)
+    hm = _headline_metrics(bt)
+    ev = hm["ev"]
+    tp1_rate = hm["tp1_rate"]
+    cap_ret = hm["cap_ret"]
 
     # 상태별 안내문 — v22.3.18: 공식 신규매수 0개면 관찰 전용 문구 우선
     if official_decision and not _official_decision_allows_entry(official_decision):
@@ -3562,25 +3760,40 @@ def _render_swing_alpha_oos_card(df: pd.DataFrame) -> None:
         ).classes("text-[10px] text-gray-500 mt-2")
 
 
-def _render_validation_scorecard(bt: dict) -> None:
+def _render_validation_scorecard(bt: dict, fresh: Optional[dict] = None) -> None:
     """[v31.5] 검증 성적표 — 전문용어 없이 '질문→답' 형식.
 
     기존: 'EV -0.79% · MDD 57.3% · rolling 0폴드 · 슬롯풀 16' 식의
     용어 나열 → 사용자가 해석 불가. 각 숫자를 그것이 답하는 질문 아래에
     사람 말로 다시 쓴다. 숫자는 하나도 빼지 않고 번역만 한다.
+
+    [v85] 헤드라인(Q1)은 official_ssot — 배치가 기록한 공식 매수를 픽 이력과 같은
+    정의(다음날 시가 · -8% 손절 · 5일)로 채점한 숫자. 지정가 모델(signal_top1)은
+    참고 줄로 내린다. 성적표가 멈췄으면(freshness.stale 또는 옛 JSON의 신호 공백)
+    맨 위에 호박색 경고를 띄운다 — 0709에 멈춘 숫자를 '현재'처럼 보이지 않게.
+    fresh를 안 주면 data/의 recommend CSV 파일명으로 직접 판정한다.
     """
+    bt = bt or {}
+    if fresh is None:
+        fresh = _scorecard_freshness(bt, _recommend_batch_dates()) if bt else {}
     daily_top1 = bt.get("daily_top1_backtest") or {}
     signal_top1 = bt.get("signal_top1") or {}
     capital_top1 = bt.get("capital_portfolio_top1") or {}
     capital_stats = bt.get("capital_portfolio") or {}
     port_stats = bt.get("daily_portfolio_summary") or {}
     confidence = bt.get("confidence") or {}
+    ssot = bt.get("official_ssot") or {}
+    fr = bt.get("freshness") if isinstance(bt.get("freshness"), dict) else {}
+    is_contract = bool(fr)
     days = bt.get("days_covered", 0)
+    if is_contract:
+        days = fr.get("contract_days_covered", days)
 
     blocks = []  # (색, 질문, 답변 문장들)
 
     # ── Q1. 추천 자체의 질 ──
     src = signal_top1 if signal_top1 else daily_top1
+    model_line = ""
     if src:
         if signal_top1:
             n_sig = src.get("n_signals_total", 0)
@@ -3592,18 +3805,63 @@ def _render_validation_scorecard(bt: dict) -> None:
             n_fill = src.get("n", 0)
             ev = src.get("ev", 0)
             tp1 = src.get("tp1_rate", 0) * 100
+        n_pend_model = int(src.get("n_pending", 0) or 0)
         if n_fill > 0:
             fill_pct = n_fill / n_sig * 100 if n_sig else 0
-            _judge = ("아직 마이너스 구간입니다" if ev <= 0
-                      else "플러스 구간입니다")
-            blocks.append((
-                "#60A5FA" if ev > 0 else "#F59E0B",
-                "추천 종목들은 실제로 올랐나?",
-                [
-                    f"지난 {days}일간 <b>{n_sig}번</b> 추천했고, 그중 <b>{n_fill}번({fill_pct:.0f}%)</b>은 제시한 가격에 살 수 있었습니다.",
-                    f"산 것 중 <b>{tp1:.0f}%</b>가 1차 목표가에 도달했고, 1건당 평균 손익은 <b>{ev:+.2f}%</b> — {_judge}.",
-                ],
-            ))
+            model_line = (
+                f"참고 — 제시가 지정가 모델(3일 안 체결 · 1차 목표/손절 · 최장 "
+                f"{(bt.get('methodology') or {}).get('horizon_days', 10)}일): "
+                f"<b>{n_fill}/{n_sig}건</b> 체결({fill_pct:.0f}%) · 1차 목표 {tp1:.0f}% · "
+                f"1건당 <b>{ev:+.2f}%</b> (수수료 차감)"
+                + (f" · 측정중 {n_pend_model}건 제외" if n_pend_model else "")
+            )
+
+    n_measured = int(ssot.get("n_measured", 0) or 0)
+    if n_measured > 0 and ssot.get("mean_pct") is not None:
+        mean = float(ssot.get("mean_pct") or 0)
+        med = ssot.get("median_pct")
+        win = float(ssot.get("win_rate") or 0) * 100
+        stp = float(ssot.get("stop_rate") or 0) * 100
+        n_off = int(ssot.get("n_official", n_measured) or n_measured)
+        n_pend = int(ssot.get("n_pending", 0) or 0)
+        n_unm = int(ssot.get("n_unmeasurable", 0) or 0)
+        _judge = "아직 마이너스 구간입니다" if mean <= 0 else "플러스 구간입니다"
+        lines = [
+            f"배치가 기록한 공식 매수 <b>{n_off}번</b> 중 결과가 나온 <b>{n_measured}번</b>의 "
+            f"평균 손익은 <b>{mean:+.2f}%</b>"
+            + (f" (중앙값 {float(med):+.2f}%)" if med is not None else "")
+            + f" — {_judge}.",
+            f"플러스로 끝난 비율 <b>{win:.0f}%</b> · -8% 손절에 걸린 비율 <b>{stp:.0f}%</b>"
+            + (f" · 측정중 {n_pend}건" if n_pend else "")
+            + (f" · 가격 없음 {n_unm}건" if n_unm else "") + ".",
+            "기준: 다음날 시가에 사서 -8% 손절 · 5일째 종가 청산 "
+            "(픽 이력·오늘탭과 같은 정의, 수수료 미차감).",
+        ]
+        if model_line:
+            lines.append(model_line)
+        blocks.append((
+            "#60A5FA" if mean > 0 else "#F59E0B",
+            "공식 매수 종목들은 실제로 올랐나?",
+            lines,
+        ))
+    elif src and model_line:
+        # 옛 JSON(라벨 전략) 또는 SSOT 계산 실패 — 지정가 모델 숫자만
+        ev_v = signal_top1.get("ev_net_pct", 0) if signal_top1 else daily_top1.get("ev", 0)
+        n_sig_v = (signal_top1.get("n_signals_total", 0) if signal_top1
+                   else daily_top1.get("n_all_picks", 0))
+        n_fill_v = signal_top1.get("n_filled", 0) if signal_top1 else daily_top1.get("n", 0)
+        tp1_v = (signal_top1.get("tp1_rate", 0) if signal_top1 else daily_top1.get("tp1_rate", 0)) * 100
+        fill_pct = n_fill_v / n_sig_v * 100 if n_sig_v else 0
+        _judge = ("아직 마이너스 구간입니다" if ev_v <= 0
+                  else "플러스 구간입니다")
+        blocks.append((
+            "#60A5FA" if ev_v > 0 else "#F59E0B",
+            "추천 종목들은 실제로 올랐나?",
+            [
+                f"지난 {days}개 배치 동안 <b>{n_sig_v}번</b> 추천했고, 그중 <b>{n_fill_v}번({fill_pct:.0f}%)</b>은 제시한 가격에 살 수 있었습니다.",
+                f"산 것 중 <b>{tp1_v:.0f}%</b>가 1차 목표가에 도달했고, 1건당 평균 손익은 <b>{ev_v:+.2f}%</b> — {_judge}.",
+            ],
+        ))
 
     # ── Q2. 실제 운용 시뮬레이션 ──
     if capital_top1 and capital_top1.get("n_trades_filled", 0) > 0:
@@ -3621,6 +3879,8 @@ def _render_validation_scorecard(bt: dict) -> None:
         ))
 
     # ── Q3. 3종목 분산이었다면 ──
+    # [v85] 공식 매수는 하루 최대 1종목 — 계약 기준에선 '3종목 분산'이 아니라
+    #       '공식 매수를 최대 3개까지 겹쳐 보유하며 전부 따른 경우'다.
     if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
         ret3 = capital_stats.get("total_return_pct", 0)
         mdd3 = capital_stats.get("max_drawdown_pct", 0)
@@ -3628,10 +3888,13 @@ def _render_validation_scorecard(bt: dict) -> None:
         extra = ""
         if port_stats and port_stats.get("n_days", 0) >= 5:
             pos = port_stats.get("positive_rate", 0) * 100
-            extra = f" 하루 단위로는 <b>{pos:.0f}%</b>의 날이 플러스로 마감했습니다."
+            extra = (f" 매수한 날 기준으로 <b>{pos:.0f}%</b>가 플러스로 끝났습니다."
+                     if is_contract else
+                     f" 하루 단위로는 <b>{pos:.0f}%</b>의 날이 플러스로 마감했습니다.")
         blocks.append((
             "#10B981" if ret3 > 0 else "#EF4444",
-            "3종목에 나눠 담았다면?",
+            ("공식 매수를 빠짐없이(최대 3종목 동시 보유) 따랐다면?" if is_contract
+             else "3종목에 나눠 담았다면?"),
             [
                 f"기간 수익률 <b>{ret3:+.1f}%</b> ({n3}건 · 최대 하락 <b>-{abs(mdd3):.0f}%</b>).{extra}",
             ],
@@ -3661,22 +3924,48 @@ def _render_validation_scorecard(bt: dict) -> None:
         for clr, q, answers in blocks
     )
 
+    # ── [v85] 갱신 정지 경고 (호박색) — 숫자보다 먼저 보여준다 ──
+    stale_html = ""
+    if fresh.get("stale"):
+        _basis_txt = ("옛 라벨 전략(🏆 최강) 기준 숫자입니다. 배치가 기록한 공식 매수는 반영되지 않았습니다."
+                      if fresh.get("basis") == "legacy" else
+                      "아래 숫자는 마지막으로 갱신된 시점 기준입니다.")
+        stale_html = f'''
+        <div style="border:1px solid rgba(245,158,11,0.55); background:rgba(245,158,11,0.10);
+                    border-radius:8px; padding:8px 12px; margin-bottom:10px;">
+          <div style="font-size:12px; font-weight:800; color:#FBBF24; margin-bottom:2px;">⚠️ 이 성적표는 갱신이 멈춰 있습니다</div>
+          <div style="font-size:11.5px; color:#FDE68A; line-height:1.6;">{h_escape(str(fresh.get("reason", "")))}</div>
+          <div style="font-size:11px; color:#FCD34D; line-height:1.6;">마지막 신호 {_ymd_iso(fresh.get("last_signal")) if fresh.get("last_signal") else "없음"} · 최신 배치 {_ymd_iso(fresh.get("newest_batch"))} — {_basis_txt}</div>
+        </div>'''
+
     # ── 검증 방식 + 갱신 시각 (사람 말로) ──
     meta_txt = ""
     m = bt.get("methodology")
     if isinstance(m, dict):
-        dr = m.get("date_range", ["", ""])
-        meta_txt = (
-            f"검증 방식: 추천 다음날부터 {m.get('fill_window_days','?')}일 안에 제시가 도달 시 매수 "
-            f"→ 최장 {m.get('horizon_days','?')}일 보유 → 수수료 {m.get('fee_pct_roundtrip','?')}% 차감 "
-            f"· 기간 {dr[0]} ~ {dr[1]}"
-        )
+        dr = list(m.get("date_range") or []) + ["", ""]
+        if is_contract:
+            cdr = list(m.get("contract_date_range") or dr) + ["", ""]
+            meta_txt = (
+                f"기준: 배치가 기록한 공식 매수(PRODUCTION_BUY) · 기간 {cdr[0]} ~ {cdr[1]} "
+                f"· 공식 매수 {fr.get('contract_pick_days', 0)}일 / 현금 {fr.get('contract_cash_days', 0)}일"
+                + (f" · 기록 이전 {fr.get('undeterminable_days', 0)}개 배치는 판정 불가로 제외"
+                   if fr.get("undeterminable_days") else "")
+                + f" · 지정가 모델: 다음날부터 {m.get('fill_window_days','?')}일 안에 제시가 도달 시 매수 "
+                  f"→ 최장 {m.get('horizon_days','?')}일 보유 → 수수료 {m.get('fee_pct_roundtrip','?')}% 차감"
+            )
+        else:
+            meta_txt = (
+                f"검증 방식: 추천 다음날부터 {m.get('fill_window_days','?')}일 안에 제시가 도달 시 매수 "
+                f"→ 최장 {m.get('horizon_days','?')}일 보유 → 수수료 {m.get('fee_pct_roundtrip','?')}% 차감 "
+                f"· 기간 {dr[0]} ~ {dr[1]}"
+            )
     gen = str(bt.get("generated_at", "")).replace("T", " ")[:16]
     if gen:
         meta_txt += f" · 갱신 {gen}"
 
     ui.html(f'''
       <div style="width:100%;">
+        {stale_html}
         {rows_html}
         <div style="font-size:10px; color:#64748B; font-style:italic; margin-top:4px;">{meta_txt}</div>
       </div>''')
@@ -3710,6 +3999,8 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
     capital_top1 = bt.get("capital_portfolio_top1") or {}  # [v3.7.11]
     confidence = bt.get("confidence") or {}  # [v3.7.14]
     days_covered = bt.get("days_covered", 0)
+    # [v85] 성적표 신선도 — 새/옛 JSON 모두 (옛 JSON = 0709에 멈춘 라벨 전략)
+    _sc_fresh = _scorecard_freshness(bt, _recommend_batch_dates()) if bt else {}
 
     # [v3.7.14] 헤더 summary_text — 신호 성과만 담기 (실집행은 아래 줄에서 별도)
     if daily_top1 and daily_top1.get("n", 0) >= 5:
@@ -3784,16 +4075,27 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
                 "⚪ 오늘 실전 후보 없음 — 관찰 전용" + _obs_txt
             ).classes("text-sm text-gray-300 font-semibold mb-1")
         if top3_codes:
+            # [v85] 기준선이 멈춘(레거시 라벨, baseline_frozen) shadow는 오늘 판정
+            #       격상에 쓰지 않는다 — 0709에 멈춘 실험값이 오늘 카드를 바꾸지 않게.
+            _pre_risk = bt.get("pre_entry_risk_shadow") or {}
+            _struct_risk = bt.get("struct_risk_shadow") or {}
+            if _pre_risk.get("baseline_frozen"):
+                _pre_risk = {}
+            if _struct_risk.get("baseline_frozen"):
+                _struct_risk = {}
             _render_member_summary(
                 capital_top1=capital_top1,
                 signal_top1=signal_top1,
                 daily_top1=daily_top1,
                 confidence=confidence,
                 # [v3.9.5] shadow 신호 반영 — 시장 위험 패턴 누적 시 판정 강화
-                pre_entry_risk=bt.get("pre_entry_risk_shadow") or {},
-                struct_risk=bt.get("struct_risk_shadow") or {},
+                pre_entry_risk=_pre_risk,
+                struct_risk=_struct_risk,
                 # [v22.3.18] 공식 신규매수 0개면 성과 카드도 '진입' 문구 금지
                 official_decision=official_decision,
+                # [v85] 기대값은 픽 이력 SSOT 기준 + 성적표 멈춤 표시
+                official_ssot=bt.get("official_ssot") or {},
+                stale=bool(_sc_fresh.get("stale")),
             )
 
         # ───────────────────────────────────────────
@@ -3803,7 +4105,8 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
         # 회원은 위 요약만 봐도 충분. 펼치면 신호/실집행/WF/Rolling 등 전체 확인.
         # [v3.9.5] 관리자는 기본 펼침 (디버그/운영 편의)
         # [v31] 상세 검증은 관리자 포함 전원 기본 접힘 — 화면 밀도 개선
-        _expansion_title = "📊 지난 99일 성적표 — 추천을 따랐다면? (펼쳐 보기)"
+        # [v85] 하드코딩 제목(99 고정, v31.5 당시 days_covered) → 리포트 기준·기간·신선도로 생성
+        _expansion_title = _validation_scorecard_title(bt, _sc_fresh)
         with ui.expansion(
             _expansion_title,
             icon="biotech",
@@ -3812,7 +4115,7 @@ def _render_top3_card(df: pd.DataFrame, top3_codes: list, on_card_click=None,
             "w-full mt-2 bg-[rgba(139,92,246,0.05)] "
             "border border-[rgba(139,92,246,0.2)] rounded"
         ).props("dense"):
-            _render_validation_scorecard(bt)
+            _render_validation_scorecard(bt, fresh=_sc_fresh)
 
         # [v82] 관찰 후보도 오늘탭과 같은 목록(퍼널 통과군 · 알파×손익비 · 실측 깊이)
         #   을 한 줄로 적는다 — 두 탭이 다른 종목을 말하는 일이 없게.
