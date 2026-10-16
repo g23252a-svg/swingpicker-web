@@ -2032,20 +2032,28 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     # ══════════════════════════════════════════════════════════
     #  [v20.6.4] After-market → sidecar 파일로 분리
     #  recommend_latest.csv는 절대 수정하지 않음 (원본 보존)
+    #  [v85] price_snapshot_latest.csv 도 더 이상 덮어쓰지 않는다 — 그 파일은 KRX 일봉
+    #    그대로 남아 portfolio/validation/position_tracker 가격 폴백으로 읽힌다.
+    #    recommend 전 종목을 AH_STATUS(OK/NO_PRINT/FETCH_FAIL)·AH_FINAL 과 함께 기록하고
+    #    aftermarket_prices_{ymd}.csv 로 날짜별 보관(latest 는 같은 사본).
+    #    연구용 수집만 — 선정/가드에는 쓰지 않는다. 실패해도 배치는 계속.
     # ══════════════════════════════════════════════════════════
     try:
-        from naver_aftermarket import fetch_after_market_prices_sidecar
-        _snl = os.path.join(OUT_DIR, 'price_snapshot_latest.csv')
-        _sidecar_path = os.path.join(OUT_DIR, 'aftermarket_prices_latest.csv')
-        _ac = fetch_after_market_prices_sidecar(op_l, _sidecar_path, _snl)
-        if _ac > 0:
-            log(f'After-market sidecar: {_ac} stocks → {_sidecar_path}')
+        from naver_aftermarket import build_aftermarket_archive
+        _am = build_aftermarket_archive(op_l, trade_ymd, OUT_DIR, tag=ctx.tag)
+        if _am.get("error"):
+            log(f"⚠️ [v85] 시간외 보관 실패 (무해): {_am['error']}")
         else:
-            log('After-market: no changes')
+            _amc = _am.get("counts", {})
+            log(f"🌙 [v85] 시간외 보관 {_am.get('n_rows', 0)}종목 — OK {_amc.get('OK', 0)} · "
+                f"NO_PRINT {_amc.get('NO_PRINT', 0)} · FETCH_FAIL {_amc.get('FETCH_FAIL', 0)} · "
+                f"확정 {_am.get('n_final', 0)} · KRX 기준 {_am.get('krx_snap_src')} "
+                f"({_am.get('elapsed_sec', 0)}s) → {_am.get('dated_path')}")
     except ImportError:
         # sidecar 함수 없으면 시간외 업데이트 스킵 (원본 보존 원칙)
         log('After-market: sidecar 함수 없음 — 스킵 (recommend 원본 보존)')
     except Exception as e:
+        logger.warning(f"[v85] After-market archive failed (무해): {e}")
         log(f'After-market sidecar failed: {e}')
 
     # 종목명 매핑
