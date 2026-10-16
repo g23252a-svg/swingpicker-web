@@ -122,10 +122,10 @@ def test_grid_includes_recommended_band():
 
 
 def test_real_data_smoke_if_present():
-    """실 recommend_2026*.csv + price_snapshot 있으면 백테스트 smoke. 없으면 skip."""
+    """실 recommend_YYYYMMDD.csv + price_snapshot 있으면 백테스트 smoke. 없으면 skip."""
     import glob
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-    if not glob.glob(os.path.join(data, "recommend_2026*.csv")):
+    if not glob.glob(os.path.join(data, "recommend_" + "[0-9]" * 8 + ".csv")):
         import pytest
         pytest.skip("recommend CSV 없음 — 운영 환경 전용")
     from combo_gate_v4 import run_v4_gate_backtest

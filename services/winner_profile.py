@@ -36,6 +36,8 @@
 
 배치 OHLCV 캐시는 거래대금 상위 ~600 + v73 레인 601~1200 캐시를 합쳐
 약 1,200종목이다. 전체 시장이 아니라 **관측된 유니버스 안의** 횡단면이다.
+[v85] 단, 2026-10-16 배치까지의 로그는 레인 캐시 행이 전부 빠진 ≈600종목 횡단면이었다
+(레인 캐시의 '날짜' 인덱스를 'Date' 로만 읽은 버그 — _with_date_col 참고). 이후 로그는 ≈1,190.
 수급 특징(flow_*)은 v79 전종목 수집이 쌓이기 전까지 NaN으로 기록된다 —
 NaN은 검정에서 자동 제외되고, 데이터가 생기면 그날부터 증거가 쌓인다.
 """
@@ -45,12 +47,14 @@ import glob
 import json
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from services.pick_history import _realized  # SSOT 실현수익 — 복제 금지
+from services.pick_history import HOLD_DAYS as _SSOT_HOLD_DAYS  # [v85] _realized_full_window 창 길이
 
 logger = logging.getLogger("winner_profile")
 
@@ -88,22 +92,48 @@ REGISTRY_VERSION = "v1-20260831"
 
 
 # ── 데이터 적재 ────────────────────────────────────────────────────────────
+#: [v85] 날짜 인덱스 이름 후보 — 배치 캐시는 'Date'(OHLCVCache.save), 레인 캐시는 pykrx
+#:   원본 그대로 '날짜'(quiet_breakout._save_lane_cache).
+_DATE_COL_ALIASES = ("Date", "날짜", "date", "index")
+
+
+def _with_date_col(d: pd.DataFrame, src: str = "") -> Optional[pd.DataFrame]:
+    """reset_index() 된 캐시 프레임의 날짜 컬럼을 'Date' 로 맞춘다. 못 찾으면 None.
+
+    [v85] v78~v84 는 'Date' 만 읽었다. 레인 캐시 30개 파일은 전부 '날짜' 인덱스라
+    레인 행의 Date 가 전부 NaT → 아래 결측 방어 필터에서 **레인 전체가 버려졌다**.
+    '≈1,200종목 유니버스'는 실제로 배치 캐시 ≈600(+양쪽에 다 있는 16종목)이었다.
+    """
+    for c in _DATE_COL_ALIASES:
+        if c in d.columns:
+            return d if c == "Date" else d.rename(columns={c: "Date"})
+    logger.warning("[v85] %s 날짜 컬럼 없음 — 이 캐시는 건너뜀 (컬럼 %s)", src, list(d.columns)[:10])
+    return None
+
+
 def _load_universe_ohlcv(data_dir: str) -> Optional[pd.DataFrame]:
-    """배치 캐시(상위 600) + v73 레인 캐시(601~1200) 합집합."""
+    """배치 캐시(상위 600) + v73 레인 캐시(601~1200) 합집합.
+
+    [v85] 레인 캐시의 '날짜' 인덱스를 'Date' 로 맞춘다(_with_date_col) — 전에는 레인 행이 전부
+    버려졌다.
+    """
     frames = []
     for pat in ("ohlcv_cache_2*.parquet", "quiet_lane_ohlcv_2*.parquet"):
         c = [f for f in sorted(glob.glob(os.path.join(data_dir, pat)))
              if "latest" not in os.path.basename(f)]
         if c:
             try:
-                frames.append(pd.read_parquet(c[-1]).reset_index())
+                f = _with_date_col(pd.read_parquet(c[-1]).reset_index(), c[-1])
             except Exception as e:
                 logger.warning("[v78] %s 읽기 실패: %s", c[-1], e)
+                continue
+            if f is not None:
+                frames.append(f)
     if not frames:
         return None
     d = pd.concat(frames, ignore_index=True)
     d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
-    d = d[d["Date"].notna()]                      # 레인 캐시의 결측 행 방어
+    d = d[d["Date"].notna()]                      # 날짜 결측 행 방어
     d["종목코드"] = d["종목코드"].astype(str).str.zfill(6)
     # 두 캐시에 같은 종목이 있으면 배치 캐시(먼저 읽은 쪽)를 남긴다.
     d = d.drop_duplicates(subset=["종목코드", "Date"], keep="first")
@@ -111,6 +141,75 @@ def _load_universe_ohlcv(data_dir: str) -> Optional[pd.DataFrame]:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
     return d.sort_values(["종목코드", "Date"])
+
+
+def _load_code_history(data_dir: str, codes, since: Optional[str] = None) -> Dict[str, pd.DataFrame]:
+    """[v85] 종목별로 '그 종목을 담은 가장 최근 날짜 파일'(배치 캐시·레인 캐시)의 시세.
+
+    레인(601~1200위)은 하루 ~30%씩 바뀐다. 최신 배치·레인 파일 둘만 보면(_load_universe_ohlcv)
+    밴드에서 빠진 과거 픽은 영영 측정되지 않는다 — quiet_lane_track 이 130픽 중 2픽만 잰
+    원인의 나머지 절반이다('날짜' 인덱스 버그가 앞 절반). 이미 커밋된 과거 날짜 파일에
+    그 종목의 시세가 남아 있으므로, 최신 → 과거 순으로 훑어 처음 만나는 파일의 시리즈를 쓴다.
+    같은 날짜면 배치 캐시를 먼저 본다(_load_universe_ohlcv 의 우선순위와 같다).
+    한 파일의 시리즈를 통째로 쓰므로 수정주가 기준이 섞이지 않는다.
+    이 시리즈로 수익을 잴 때는 _realized 가 아니라 _realized_full_window 를 쓴다(손절만 잡히는
+    중도절단 편향 — 그쪽 docstring 참고).
+
+    since: 이 날짜(YYYYMMDD)보다 오래된 파일은 보지 않는다(픽일 이전 파일로는 창을 못 잰다).
+    """
+    need = {str(c).zfill(6) for c in codes}
+    files = []
+    for pat, pri in (("ohlcv_cache_2*.parquet", 1), ("quiet_lane_ohlcv_2*.parquet", 0)):
+        for f in glob.glob(os.path.join(data_dir, pat)):
+            m = re.search(r"_(\d{8})\.parquet$", os.path.basename(f))
+            if m and (since is None or m.group(1) >= str(since)):
+                files.append((m.group(1), pri, f))
+    out: Dict[str, pd.DataFrame] = {}
+    for _, _, f in sorted(files, reverse=True):
+        left = need - set(out)
+        if not left:
+            break
+        try:
+            import pyarrow.parquet as pq
+            raw = pq.read_table(f, columns=["종목코드"]).column("종목코드").unique().to_pylist()
+            by_norm = {str(r).zfill(6): r for r in raw if r is not None}
+            hit = sorted(left & set(by_norm))
+            if not hit:
+                continue
+            d = pd.read_parquet(f, filters=[("종목코드", "in", [by_norm[c] for c in hit])]).reset_index()
+        except Exception as e:
+            logger.warning("[v85] %s 읽기 실패 — 건너뜀: %s", f, e)
+            continue
+        d = _with_date_col(d, f)
+        if d is None:
+            continue
+        d["종목코드"] = d["종목코드"].astype(str).str.zfill(6)
+        d = d[d["종목코드"].isin(hit)].copy()
+        d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+        d = d[d["Date"].notna()]
+        for c, g in d.groupby("종목코드", sort=False):
+            out[c] = g.sort_values("Date").reset_index(drop=True)
+    return out
+
+
+def _realized_full_window(g: Optional[pd.DataFrame], ymd: str) -> Optional[float]:
+    """[v85] _load_code_history 시리즈용 SSOT 실현수익 — 5일 창 전체가 시리즈 안에 있을 때만 잰다.
+
+    폴백 시리즈는 그 종목이 밴드에서 밀려나기 직전 파일에서 끝난다(최신 파일에 없으니 폴백이다).
+    거기에 _realized 를 그대로 쓰면 '창이 덜 찼어도 손절이 터졌으면 확정' 규칙 때문에 **손절(-8%)
+    만 측정되고 나머지는 영영 미측정** — 정보성 중도절단으로 손실 쪽 편향이 생긴다(실측
+    quiet_lane_track: 손절 전용 7행이 끼어 비용후 일평균 -0.57% → -2.47%, 손절률 56% → 63%).
+    최신 파일의 시리즈는 창이 시간이 지나면 닫히므로(양쪽 결과가 다 잡힌다) _realized 그대로 쓴다.
+    여기서는 진입 t+1 … 청산 t+1+HOLD_DAYS 가 시리즈 안에 다 있을 때만 재고, 아니면 None(미측정).
+    """
+    if g is None or not len(g):
+        return None
+    dts = pd.to_datetime(g["Date"], errors="coerce").dropna().sort_values().to_numpy()
+    t = np.datetime64(pd.Timestamp(ymd))
+    i = int(np.searchsorted(dts, t))
+    if i >= len(dts) or dts[i] != t or (len(dts) - 1 - i) < 1 + _SSOT_HOLD_DAYS:
+        return None
+    return _realized(g, ymd)
 
 
 def _load_flow(data_dir: str, ymd: str) -> Optional[pd.DataFrame]:

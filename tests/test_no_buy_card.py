@@ -110,7 +110,7 @@ def test_blockers_ranked_market_first():
 def test_real_nc_row_if_present():
     """실 recommend CSV에 매수보류(TOP_PICK=0 또는 ELIGIBLE=0) 행이 있으면 no-buy 처리 확인."""
     files = sorted(glob.glob(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "recommend_2026*.csv")))
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "recommend_" + "[0-9]" * 8 + ".csv")))
     if not files:
         import pytest
         pytest.skip("recommend CSV 없음")

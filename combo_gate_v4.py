@@ -32,6 +32,10 @@ from calibration_v4 import score_segment, relative_stable_gate, _build_lookup, b
 
 logger = logging.getLogger("combo_gate_v4")
 
+# [v85] 연도 무관 배치 파일 글롭 — 예전 '_2026*' 연도 고정 글롭은 2027년 파일을 못 봐 조용히 동결된다.
+#   정확히 8자리 날짜(YYYYMMDD)만 매칭: *_latest.csv·태그 파일(recommend_YYYYMMDD_tag.csv)은 제외.
+_YMD8_GLOB = "[0-9]" * 8
+
 # 검증 케이스 — 종목명 대신 종목코드 고정 (실 CSV 확인: 2026-05-30)
 VALIDATION_CASES = [
     {"name": "에스엔시스",   "code": "0008Z0", "date": "20260507", "note": "day-4 진입 케이스"},
@@ -47,9 +51,9 @@ EXPLORATORY_BANDS = {(3, 30)}
 # 1. 데이터 로더 (STABLE 재현용 컬럼 포함)
 # ─────────────────────────────────────────────────────────────────────────────
 def _load_trade_rows_v4(data_dir: str = "data", horizon: int = 5) -> pd.DataFrame:
-    """recommend_2026*.csv × horizon일 후 price_snapshot 매칭 → 거래결과 + STABLE 필드."""
-    rec_files = sorted(glob.glob(os.path.join(data_dir, "recommend_2026*.csv")))
-    snap_files = sorted(glob.glob(os.path.join(data_dir, "price_snapshot_2026*.csv")))
+    """recommend_YYYYMMDD.csv × horizon일 후 price_snapshot 매칭 → 거래결과 + STABLE 필드."""
+    rec_files = sorted(glob.glob(os.path.join(data_dir, f"recommend_{_YMD8_GLOB}.csv")))
+    snap_files = sorted(glob.glob(os.path.join(data_dir, f"price_snapshot_{_YMD8_GLOB}.csv")))
     snap_dates = [os.path.basename(f).replace("price_snapshot_", "").replace(".csv", "")
                   for f in snap_files]
 

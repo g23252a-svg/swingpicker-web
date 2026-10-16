@@ -1,25 +1,35 @@
 {
   "version": "22.3.12",
   "asof": "20261013",
-  "generated_at": "2026-10-16T21:11:41",
+  "generated_at": "2026-10-16T20:21:12",
   "summary": {
     "signal_days": 65,
     "top_pick_signals": 650,
     "official_buy_signals": 38,
-    "official_buy_results": 0,
-    "official_buy_win_rate": null,
-    "official_buy_avg_net_pct": null,
+    "official_buy_results": 35,
+    "official_buy_not_filled": 3,
+    "official_buy_pending": 0,
+    "official_buy_win_rate": 14.29,
+    "official_buy_avg_net_pct": -4.2046,
     "no_official_buy_days": 27,
     "top_pick_holdout_signals": 612,
-    "top_pick_holdout_results": 15,
-    "holdout_top_pick_win_rate": 20.0,
-    "holdout_top_pick_avg_net_pct": -2.72,
-    "cash_vs_top_pick_avg_pct": 2.72,
-    "cash_avoided_loss_days": 8,
-    "cash_opportunity_cost_days": 3
+    "top_pick_holdout_results": 12,
+    "holdout_top_pick_win_rate": 16.67,
+    "holdout_top_pick_avg_net_pct": -7.6767,
+    "cash_vs_top_pick_avg_pct": 7.6767,
+    "cash_avoided_loss_days": 10,
+    "cash_opportunity_cost_days": 2
+  },
+  "result_model": {
+    "name": "limit_fill",
+    "label": "제시가 지정가 모델",
+    "definition": "제시가 3일 체결창 · 1차 목표/손절 첫 터치 · 최장 10영업일 · 왕복 비용 0.22% 차감 (backtest_top1/top3_trades)"
   },
   "notes": [
-    "official_buy_signal = TOP_PICK + BUY_NOW_ELIGIBLE",
+    "official_buy_signal = TOP_PICK + BUY_NOW_ELIGIBLE (PRODUCTION_BUY 컬럼이 있으면 기록된 PRODUCTION_BUY)",
+    "results = 체결되고 확정된 거래만 (NOT_FILLED·PENDING은 결과 아님, 0.0 미집계)",
+    "dedup = 확정 결과 → 최신 trades 파일 → top1 우선",
+    "result model = 제시가 지정가 모델(3일 체결창 · TP1/손절 · 10일 · 비용 차감) — 종목탭 헤드라인 official_ssot(다음날 시가 · -8% · 5일)과 정의가 다름",
     "top_pick_holdout = TOP_PICK=1 and BUY_NOW_ELIGIBLE=0",
     "cash_vs_top_pick_pct = 0% cash return - holdout TOP_PICK net_pct",
     "measurement-only: recommendation formulas are not modified"

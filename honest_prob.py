@@ -37,6 +37,10 @@ import pandas as pd
 
 logger = logging.getLogger("honest_prob")
 
+# [v85] 연도 무관 배치 파일 글롭 — 예전 '_2026*' 연도 고정 글롭은 2027년 파일을 못 봐 조용히 동결된다.
+#   정확히 8자리 날짜(YYYYMMDD)만 매칭: *_latest.csv·태그 파일(recommend_YYYYMMDD_tag.csv)은 제외.
+_YMD8_GLOB = "[0-9]" * 8
+
 SRP_OUTPUT_COLS = ["SRP_BASE_PROB_2D", "SRP_EDGE_STATUS", "SRP_NOTE"]
 EDGE_STATUS = "NO_EDGE_VALIDATED"   # 재검증 통과 시에만 변경할 것
 _H = 2                              # 지평(거래일)
@@ -70,7 +74,7 @@ def compute_market_base_prob(data_dir: str = "data",
         fwd_up = (close.shift(-horizon) > close)          # 각 (일, 종목) 상승여부
         has_fwd = close.shift(-horizon).notna() & close.notna()
 
-        rec_files = sorted(glob.glob(os.path.join(data_dir, "recommend_2026*.csv")))
+        rec_files = sorted(glob.glob(os.path.join(data_dir, f"recommend_{_YMD8_GLOB}.csv")))
         # 결과 확정된 추천일만, 최근 lookback개
         days = [int(f[-12:-4]) for f in rec_files if int(f[-12:-4]) in close.index]
         days = [d for d in days if bool(has_fwd.loc[d].any())][-lookback:]

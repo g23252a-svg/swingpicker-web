@@ -50,6 +50,10 @@ from data_integrity import audit_ohlcv_window  # noqa: E402
 
 logger = logging.getLogger("backtest_data_integrity")
 
+# [v85] 연도 무관 배치 파일 글롭 — 예전 '_2026*' 연도 고정 글롭은 2027년 파일을 못 봐 조용히 동결된다.
+#   정확히 8자리 날짜(YYYYMMDD)만 매칭: *_latest.csv·태그 파일(recommend_YYYYMMDD_tag.csv)은 제외.
+_YMD8_GLOB = "[0-9]" * 8
+
 PANEL_FILENAME = "data_integrity_asof_panel.csv"
 RESULT_FILENAME = "backtest_data_integrity_latest.json"
 
@@ -107,7 +111,7 @@ def build_asof_panel(data_dir: str, *, rebuild: bool = False) -> pd.DataFrame:
     max_bad = int(_cfg(di, "max_bad_bars", 0))
     surge_th = float(_cfg(di, "surge_ret10_pct", 300.0))
 
-    rec_files = sorted(glob.glob(os.path.join(data_dir, "recommend_2026*.csv")))
+    rec_files = sorted(glob.glob(os.path.join(data_dir, f"recommend_{_YMD8_GLOB}.csv")))
     rows: List[dict] = []
     n_days_audited = 0
 
@@ -187,7 +191,7 @@ def build_asof_panel(data_dir: str, *, rebuild: bool = False) -> pd.DataFrame:
 def build_trades(data_dir: str, panel: pd.DataFrame,
                  horizons: List[int]) -> pd.DataFrame:
     """추천 행 × 호라이즌 forward 수익률 + 패널 플래그 결합."""
-    snap_files = sorted(glob.glob(os.path.join(data_dir, "price_snapshot_2026*.csv")))
+    snap_files = sorted(glob.glob(os.path.join(data_dir, f"price_snapshot_{_YMD8_GLOB}.csv")))
     snap_dates = [
         os.path.basename(f).replace("price_snapshot_", "").replace(".csv", "")
         for f in snap_files
@@ -211,7 +215,7 @@ def build_trades(data_dir: str, panel: pd.DataFrame,
     pkey = panel.copy()
     pkey["rec_ymd"] = pkey["rec_ymd"].astype(str)
     pkey = pkey.set_index(["rec_ymd", "종목코드"])
-    rec_files = sorted(glob.glob(os.path.join(data_dir, "recommend_2026*.csv")))
+    rec_files = sorted(glob.glob(os.path.join(data_dir, f"recommend_{_YMD8_GLOB}.csv")))
     rows: List[dict] = []
 
     def _flag01(v) -> int:
