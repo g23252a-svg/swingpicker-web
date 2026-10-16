@@ -29,6 +29,8 @@ data/*.parquet
 data/*.joblib
 data/*.pkl
 data/ohlcv_cache_*
+# [v85] OHLCV 버전 저장소 — 하위 폴더라 위 data/*.parquet 패턴에 안 걸린다(~29MB+, 배치 전용)
+data/ohlcv_store/
 data/feature_cache_*
 data/per_trade_log.csv
 docs_cache/

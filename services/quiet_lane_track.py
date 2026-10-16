@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from services.pick_history import _realized          # SSOT — 복제 금지
-from services.winner_profile import _load_universe_ohlcv
+from services.winner_profile import _load_code_history, _load_universe_ohlcv
 
 logger = logging.getLogger("quiet_lane_track")
 
@@ -63,19 +63,29 @@ def _load_picks(data_dir: str, ymd: str) -> List[dict]:
 
 
 def build(data_dir: str) -> dict:
-    """레인 픽 전수 × SSOT 실현수익 → 누적 요약."""
+    """레인 픽 전수 × SSOT 실현수익 → 누적 요약.
+
+    [v85] 시세 = 최신 배치 ∪ 최신 레인 캐시(_load_universe_ohlcv — '날짜' 인덱스 버그 수정으로
+    레인 행이 이제 들어온다) + 거기 없는 픽 종목은 그 종목을 담은 가장 최근 날짜 파일
+    (_load_code_history). 레인은 하루 ~30%씩 바뀌어 최신 파일 둘만으로는 과거 픽 대부분이
+    빠졌다(130픽 중 2픽 측정). 그래도 5일 창이 닫힌 뒤까지 어느 파일에도 남지 못한 종목
+    (밴드 밖으로 밀려난 종목)은 측정되지 않는다 — 생존 편향은 줄었을 뿐 없어지지 않았다.
+    """
     days = _lane_days(data_dir)
     px = _load_universe_ohlcv(data_dir)
     by_code: Dict[str, pd.DataFrame] = (
         {c: g.reset_index(drop=True) for c, g in px.groupby("종목코드")} if px is not None else {})
+    picks = [(ymd, p) for ymd in days for p in _load_picks(data_dir, ymd)]
+    missing = {str(p["종목코드"]).zfill(6) for _, p in picks} - set(by_code)
+    if missing and days:
+        by_code.update(_load_code_history(data_dir, missing, since=days[0]))
     rows = []
-    for ymd in days:
-        for p in _load_picks(data_dir, ymd):
-            code = str(p["종목코드"]).zfill(6)
-            g = by_code.get(code)
-            ret = _realized(g, ymd) if g is not None else None
-            rows.append({"ymd": ymd, "종목코드": code, "종목명": p.get("종목명", ""),
-                         "ret": (None if ret is None else float(ret))})
+    for ymd, p in picks:
+        code = str(p["종목코드"]).zfill(6)
+        g = by_code.get(code)
+        ret = _realized(g, ymd) if g is not None else None
+        rows.append({"ymd": ymd, "종목코드": code, "종목명": p.get("종목명", ""),
+                     "ret": (None if ret is None else float(ret))})
     df = pd.DataFrame(rows, columns=["ymd", "종목코드", "종목명", "ret"])
     measured = df[df["ret"].notna()].copy()
     daily = (measured.groupby("ymd")["ret"].mean() * 100 - COST_PCT) if len(measured) else pd.Series(dtype=float)

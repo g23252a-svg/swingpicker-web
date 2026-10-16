@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from services.pick_history import _realized          # SSOT — 복제 금지
-from services.winner_profile import _hac_p, _load_universe_ohlcv
+from services.winner_profile import _hac_p, _load_code_history, _load_universe_ohlcv
 
 logger = logging.getLogger("selection_shadow")
 
@@ -54,6 +54,11 @@ _INACTIVE_ROUTES = ("OVERHEAT", "CARRY", "NEUTRAL", "CASH", "EXIT", "WEAK")
 # 특징의 분위 평균이 가장 낮은 1종목을 고른다. 프로토콜상 1단계(40일)가 아직 안 찼으므로
 # **승격이 아니라 기록**이다 — 다섯 특징과 부호를 여기 고정해(v1-20261006) 앞으로 쌓이는
 # 표본으로만 판정한다. 결과를 보고 특징을 바꾸면 이 변형은 무효다.
+#
+# [v85] 주의 — 10/06~10/16 기록분(7행)은 '≈1,200'이 아니라 배치 캐시 ≈600 에서 골랐다.
+#   winner_profile._load_universe_ohlcv 가 레인 캐시('날짜' 인덱스) 행을 전부 버리던 버그다.
+#   수정 후 같은 날짜를 시점별 파일로 다시 고르면 7일 모두 다른 종목(전부 레인 종목)이
+#   나온다(유니버스 599~609 → 1,184~1,193). 기록은 고치지 않는다 — 판정 때 구분할 것.
 EXT_REGISTRY = "v1-20261006"
 EXT_FEATURES = ("tv_rank_pctl", "ret_20d", "hi60_gap", "rsi14", "vol_ratio")
 #: 소액 계좌 체결 가능성 — 레인 유니버스 거래대금 p10이 3.4억(10/2 실측).
@@ -222,6 +227,13 @@ def build(data_dir: str) -> dict:
     px = _load_universe_ohlcv(data_dir)
     by_code: Dict[str, pd.DataFrame] = (
         {c: g.reset_index(drop=True) for c, g in px.groupby("종목코드")} if px is not None else {})
+    # [v85] '날짜' 버그 수정으로 ext_lowtv 가 레인(601~1200위) 종목을 고르게 됐다 — 레인은 하루
+    #   ~30%씩 바뀌므로 최신 파일에 없는 픽 종목은 그 종목을 담은 가장 최근 날짜 파일에서 잰다.
+    #   변형 간 같은 잣대를 쓰려고 모든 변형에 적용한다(현재 로그 57행에서는 측정 수 변화 0).
+    if len(log):
+        missing = set(log["종목코드"].astype(str).str.zfill(6)) - set(by_code)
+        if missing:
+            by_code.update(_load_code_history(data_dir, missing, since=str(log["ymd"].astype(str).min())))
     rets = []
     for _, r in log.iterrows():
         g = by_code.get(str(r["종목코드"]).zfill(6))
