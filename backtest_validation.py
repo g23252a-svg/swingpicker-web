@@ -523,20 +523,17 @@ def load_ohlc(data_dir: Path) -> pd.DataFrame:
     return df
 
 
-_CALENDAR_CACHE: dict = {}
-
-
 def _market_calendar(ohlc_df: pd.DataFrame) -> np.ndarray:
-    """[v85] OHLC 전체의 거래일 달력 (정렬된 datetime64 배열). 프레임별 캐시."""
+    """[v85] OHLC 전체의 거래일 달력 (정렬된 datetime64 배열).
+
+    모듈 캐시를 두지 않는다 — (id(df), len(df)) 키는 프레임이 해제된 뒤 같은
+    주소·길이의 다른 프레임이 오거나, 같은 프레임을 제자리에서 바꾸면 남의
+    달력을 돌려줘 성숙도(PENDING/NOT_FILLED/OPEN)를 조용히 틀리게 만든다.
+    대신 호출자가 한 번 계산해 calendar 인자로 넘긴다 (build_report·튜닝 그리드).
+    """
     if ohlc_df is None or ohlc_df.empty or "Date" not in ohlc_df.columns:
         return np.array([], dtype="datetime64[ns]")
-    key = (id(ohlc_df), len(ohlc_df))
-    cal = _CALENDAR_CACHE.get(key)
-    if cal is None:
-        cal = np.unique(pd.to_datetime(ohlc_df["Date"]).to_numpy(dtype="datetime64[ns]"))
-        _CALENDAR_CACHE.clear()          # 프레임은 보통 하나 — 오래된 키 정리
-        _CALENDAR_CACHE[key] = cal
-    return cal
+    return np.unique(pd.to_datetime(ohlc_df["Date"]).to_numpy(dtype="datetime64[ns]"))
 
 
 def _market_bars_after(calendar: np.ndarray, signal_date: pd.Timestamp,
@@ -585,7 +582,8 @@ def simulate_ohlc(code: str, entry_date: pd.Timestamp, entry: float, tp1: float,
         그 전에는 PENDING (부분 horizon을 '최종'으로 세던 오판 제거).
       · 종목 봉이 하나도 없는데 시장 봉도 fill_window 미만 → PENDING
         (신호 당일 밤 — 예전엔 NODATA로 버려져 최신 공식픽이 사라졌다).
-      market_bars_after=None이면 예전 동작 그대로 (shadow 내부 재현용).
+      market_bars_after=None이면 예전 동작 그대로 (외부 연구 스크립트 호환용 —
+      nightly의 기준선·shadow 재현은 모두 market_bars_after를 넘긴다).
       모든 반환에 matured(결과 확정 여부)·bars_after_signal 키가 붙는다.
       ladder(tp2/tp3 도달·극값)는 첫 터치 뒤에도 horizon 끝까지 누적되므로
       확정 거래라도 horizon이 덜 찼으면 ladder 값은 잠정치다.
@@ -1006,7 +1004,8 @@ def _make_trade_row(ymd: str, pick: dict, result: dict) -> dict:
 
 def _run_daily_backtest(days: list, ohlc_df: pd.DataFrame, legacy_picker,
                         thresholds: Optional[dict], min_rank: float,
-                        selector: str, max_n: int) -> dict:
+                        selector: str, max_n: int,
+                        calendar: Optional[np.ndarray] = None) -> dict:
     """[v85] daily_top1/top3 공통 루프 — selector로 선택 경로만 바꾼다.
 
     legacy  : legacy_picker(rows) — 🏆 최강 라벨 재계산 (예전과 동일 결과).
@@ -1014,6 +1013,8 @@ def _run_daily_backtest(days: list, ohlc_df: pd.DataFrame, legacy_picker,
               판정 불가일·현금일은 거래 없음 (daily_picks 로그에 day_status로 구분).
 
     성숙도: 신호일 이후 시장 봉 수(market_bars_after)를 simulate_*에 넘긴다.
+    calendar(= _market_calendar(ohlc_df))를 주면 재계산하지 않는다 — 반드시 같은
+    ohlc_df에서 만든 달력이어야 한다. None이면 여기서 ohlc_df로 계산.
     NODATA(가격 없음) — legacy는 예전처럼 버리고, contract는 행으로 남긴다
     (공식픽이 성적표에서 조용히 사라지지 않게 — freshness가 미선택과 구분).
     """
@@ -1022,7 +1023,8 @@ def _run_daily_backtest(days: list, ohlc_df: pd.DataFrame, legacy_picker,
     trades = []
     daily_picks_log = []
     days_dict_seq = [(d[0], d[2]) for d in days]
-    calendar = _market_calendar(ohlc_df)
+    if calendar is None:
+        calendar = _market_calendar(ohlc_df)
     n_nodata = 0
 
     # 루프 종료점: horizon 뺀 만큼이 아니라 전체 (OHLC로 커버됨), 0번째(=hist base) 제외
@@ -1074,20 +1076,23 @@ def _run_daily_backtest(days: list, ohlc_df: pd.DataFrame, legacy_picker,
 def daily_top1_backtest(days: list, ohlc_df: pd.DataFrame,
                          thresholds: Optional[dict] = None,
                          min_rank: float = 40.0,
-                         selector: str = SELECTOR_LEGACY) -> dict:
+                         selector: str = SELECTOR_LEGACY,
+                         calendar: Optional[np.ndarray] = None) -> dict:
     """[v3.7.11] 매일 Top1만 추적. 백테스트 검증용 메인 루프.
 
     selector='legacy'  : pick_top1_codes(🏆 최강 rank 1위) — 예전과 동일.
     selector='contract': [v85] 그날 기록된 PRODUCTION_BUY==1 중 엔진 축 1위.
+    calendar: [v85] 같은 ohlc_df의 _market_calendar (None이면 내부 계산).
     """
     return _run_daily_backtest(days, ohlc_df, pick_top1_codes, thresholds,
-                               min_rank, selector, max_n=1)
+                               min_rank, selector, max_n=1, calendar=calendar)
 
 
 def daily_top3_backtest(days: list, ohlc_df: pd.DataFrame,
                         thresholds: Optional[dict] = None,
                         min_rank: float = 40.0,
-                        selector: str = SELECTOR_LEGACY) -> dict:
+                        selector: str = SELECTOR_LEGACY,
+                        calendar: Optional[np.ndarray] = None) -> dict:
     """매일 pick_top3이 뽑은 3종목을 horizon일 추적.
 
     루프 조건 (v3.7.6):
@@ -1097,9 +1102,10 @@ def daily_top3_backtest(days: list, ohlc_df: pd.DataFrame,
     selector='contract'면 공식픽 집합을 최대 3개까지 (PRODUCTION_BUY는 구조상
     하루 1건이라 계약 시대엔 Top1과 같다 — capital_portfolio는 '공식 매수를
     최대 3개 겹쳐 보유하며 전부 따른 경우'가 된다).
+    calendar: [v85] 같은 ohlc_df의 _market_calendar (None이면 내부 계산).
     """
     return _run_daily_backtest(days, ohlc_df, pick_top3_codes, thresholds,
-                               min_rank, selector, max_n=3)
+                               min_rank, selector, max_n=3, calendar=calendar)
 
 
 def simulate_capital_portfolio(trades: list, initial_capital: float = 10_000_000,
@@ -1417,11 +1423,16 @@ def _load_recommend_features(days: list) -> dict:
 
 
 def compute_entry_mode_shadow(trades: list, ohlc_df: pd.DataFrame,
-                              days: list) -> dict:
+                              days: list,
+                              calendar: Optional[np.ndarray] = None) -> dict:
     """NOT_FILLED 종목에 chase-entry를 적용했을 때의 shadow 성과 계산.
 
     [중요] 이 함수는 baseline trades를 변경하지 않는다. 읽기만 한다.
     반환된 dict는 out["entry_mode_shadow"]에만 저장된다.
+
+    [v85] 기준선과 같은 성숙도 규칙 — chase 후 터치 없이 시장 봉이 HORIZON개
+    쌓이기 전이면 부분 horizon을 OPEN으로 확정하지 않고 측정중(n_pending)으로
+    빼 둔다 (calendar = 같은 ohlc_df의 _market_calendar, None이면 내부 계산).
 
     Returns
     -------
@@ -1442,9 +1453,12 @@ def compute_entry_mode_shadow(trades: list, ohlc_df: pd.DataFrame,
 
     feat_map = _load_recommend_features(days)
     not_filled = [t for t in trades if t.get("outcome") == "NOT_FILLED"]
+    if calendar is None:
+        calendar = _market_calendar(ohlc_df)
 
     shadow_trades = []
     n_eligible = 0
+    n_pending = 0
     for t in not_filled:
         ymd = str(t.get("date", ""))
         code = str(t.get("code", "")).zfill(6)
@@ -1531,6 +1545,10 @@ def compute_entry_mode_shadow(trades: list, ohlc_df: pd.DataFrame,
                     outcome, exit_price, days_held = "WIN", tp1, day_n
                     break
         else:
+            # [v85] 터치 없이 시장 봉이 HORIZON개 쌓이기 전 → 아직 결과 아님 (측정중)
+            if _market_bars_after(calendar, entry_date, 0) < HORIZON and len(future) < HORIZON:
+                n_pending += 1
+                continue
             # horizon 마감 = OPEN
             last_close = _fnum(future.iloc[-1]["종가"])
             if last_close > 0:
@@ -1573,6 +1591,7 @@ def compute_entry_mode_shadow(trades: list, ohlc_df: pd.DataFrame,
         "rule": rule_str,
         "n_not_filled_total": len(not_filled),
         "n_shadow_eligible": n_eligible,       # rule 게이트 통과 (chase 체결 전)
+        "n_pending": n_pending,                # [v85] chase 후 horizon 미완료 (집계 제외)
         "extra_fills": extra_fills,            # 실제 chase 체결된 수
         "extra_wins": extra_wins,
         "extra_losses": extra_losses,
@@ -1698,16 +1717,55 @@ def _summarize_shadow_trades(trades: list) -> dict:
     }
 
 
+def _simulate_shadow_pick(ymd: str, i: int, pick: dict, entry_date: pd.Timestamp,
+                          mba: int, ohlc_df: pd.DataFrame,
+                          days_dict_seq: list) -> Optional[dict]:
+    """[v85] shadow 픽 1건 시뮬 — 기준선(_run_daily_backtest legacy)과 같은 규칙.
+
+    · simulate_ohlc → NODATA면 종가 폴백, 둘 다 NODATA면 버림 (기준선 legacy와 동일)
+    · market_bars_after를 넘겨 성숙도 적용 — 미성숙은 PENDING 행(ret_pct=None)으로
+      남기고 _summarize_shadow_trades가 분모에서 뺀다 (기준선 PENDING과 대칭).
+    · NOT_FILLED는 ret_pct 0.0 (예전과 동일 — 요약은 filled만 쓰므로 영향 없음).
+    """
+    code = pick["code"]
+    result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
+                           pick["stop"], HORIZON, ohlc_df,
+                           tp2=pick.get("tp2", 0.0), tp3=pick.get("tp3", 0.0),
+                           market_bars_after=mba)
+    if result["outcome"] == "NODATA":
+        result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
+                                     pick["stop"], HORIZON, days_dict_seq,
+                                     tp2=pick.get("tp2", 0.0),
+                                     tp3=pick.get("tp3", 0.0),
+                                     market_bars_after=mba)
+    outcome = result["outcome"]
+    if outcome == "NODATA":
+        return None
+    if outcome == "PENDING":
+        return {"date": ymd, "code": code, "outcome": "PENDING", "ret_pct": None}
+    if outcome == "NOT_FILLED":
+        return {"date": ymd, "code": code, "outcome": "NOT_FILLED", "ret_pct": 0.0}
+    ret_pct = (result["exit_price"] / pick["entry"] - 1) * 100
+    return {"date": ymd, "code": code, "outcome": outcome,
+            "ret_pct": round(ret_pct, 2)}
+
+
 def compute_struct_risk_shadow(days: list, ohlc_df: pd.DataFrame,
                                baseline_trades: list,
                                thresholds: Optional[dict] = None,
-                               min_rank: float = 40.0) -> dict:
+                               min_rank: float = 40.0,
+                               calendar: Optional[np.ndarray] = None) -> dict:
     """STRUCT 70~85 제외 shadow 백테스트.
 
     [중요] baseline_trades 는 읽기 전용 — 변경하지 않는다.
     shadow Top3를 자체적으로 다시 뽑아 동일 OHLC로 백테스트한 뒤,
     baseline 대비 ΔEV / Δnon_win / 구성변경률 등을 계산해 dict로 반환.
     반환값은 out["struct_risk_shadow"]에만 저장된다.
+
+    [v85] 성숙도 규칙을 기준선과 같게 — 기준선(daily_top3_backtest legacy)은
+    market_bars_after로 미성숙 거래를 PENDING 처리하므로 shadow 재현도 같은
+    시장 달력으로 market_bars_after를 넘긴다 (한쪽만 부분 horizon OPEN·1~2봉
+    NOT_FILLED를 '확정'으로 세면 라벨 신호가 재개될 때 ΔEV가 조용히 기운다).
 
     measurement-only: ranking / picks / buy price / production 추천에
     어떤 영향도 주지 않는다.
@@ -1724,6 +1782,8 @@ def compute_struct_risk_shadow(days: list, ohlc_df: pd.DataFrame,
     shadow_trades = []
     shadow_picks_by_day = {}
     days_dict_seq = [(d[0], d[2]) for d in days]
+    if calendar is None:
+        calendar = _market_calendar(ohlc_df)
 
     for i in range(1, len(days)):
         ymd, rows_list, _ = days[i]
@@ -1732,29 +1792,12 @@ def compute_struct_risk_shadow(days: list, ohlc_df: pd.DataFrame,
         if not top3:
             continue
         entry_date = pd.Timestamp(ymd[:4] + "-" + ymd[4:6] + "-" + ymd[6:])
+        mba = _market_bars_after(calendar, entry_date, len(days) - 1 - i)
         for pick in top3:
-            code = pick["code"]
-            result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
-                                   pick["stop"], HORIZON, ohlc_df,
-                                   tp2=pick.get("tp2", 0.0), tp3=pick.get("tp3", 0.0))
-            if result["outcome"] == "NODATA":
-                result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
-                                             pick["stop"], HORIZON, days_dict_seq,
-                                             tp2=pick.get("tp2", 0.0),
-                                             tp3=pick.get("tp3", 0.0))
-            if result["outcome"] == "NODATA":
-                continue
-            if result["outcome"] == "NOT_FILLED":
-                shadow_trades.append({
-                    "date": ymd, "code": code, "outcome": "NOT_FILLED",
-                    "ret_pct": 0.0,
-                })
-                continue
-            ret_pct = (result["exit_price"] / pick["entry"] - 1) * 100
-            shadow_trades.append({
-                "date": ymd, "code": code, "outcome": result["outcome"],
-                "ret_pct": round(ret_pct, 2),
-            })
+            row = _simulate_shadow_pick(ymd, i, pick, entry_date, mba,
+                                        ohlc_df, days_dict_seq)
+            if row is not None:
+                shadow_trades.append(row)
 
     # ── baseline trades 요약 (읽기 전용) ──
     base_summ = _summarize_shadow_trades(baseline_trades)
@@ -1961,11 +2004,17 @@ def _pick_top3_with_risk_exclude(day_csv_rows: list, exclude_fn,
 
 def _run_shadow_top3(days: list, ohlc_df: pd.DataFrame, exclude_fn,
                      thresholds: Optional[dict] = None,
-                     min_rank: float = 40.0) -> tuple:
-    """한 룰에 대해 shadow Top3 백테스트. returns (trades, picks_by_day)."""
+                     min_rank: float = 40.0,
+                     calendar: Optional[np.ndarray] = None) -> tuple:
+    """한 룰에 대해 shadow Top3 백테스트. returns (trades, picks_by_day).
+
+    [v85] 기준선과 같은 성숙도 규칙 (market_bars_after) — _simulate_shadow_pick 참조.
+    """
     trades = []
     picks_by_day = {}
     days_dict_seq = [(d[0], d[2]) for d in days]
+    if calendar is None:
+        calendar = _market_calendar(ohlc_df)
     for i in range(1, len(days)):
         ymd, rows_list, _ = days[i]
         top3 = _pick_top3_with_risk_exclude(rows_list, exclude_fn,
@@ -1974,38 +2023,25 @@ def _run_shadow_top3(days: list, ohlc_df: pd.DataFrame, exclude_fn,
         if not top3:
             continue
         entry_date = pd.Timestamp(ymd[:4] + "-" + ymd[4:6] + "-" + ymd[6:])
+        mba = _market_bars_after(calendar, entry_date, len(days) - 1 - i)
         for pick in top3:
-            code = pick["code"]
-            result = simulate_ohlc(code, entry_date, pick["entry"], pick["tp1"],
-                                   pick["stop"], HORIZON, ohlc_df,
-                                   tp2=pick.get("tp2", 0.0),
-                                   tp3=pick.get("tp3", 0.0))
-            if result["outcome"] == "NODATA":
-                result = simulate_close_only(code, i, pick["entry"], pick["tp1"],
-                                             pick["stop"], HORIZON, days_dict_seq,
-                                             tp2=pick.get("tp2", 0.0),
-                                             tp3=pick.get("tp3", 0.0))
-            if result["outcome"] == "NODATA":
-                continue
-            if result["outcome"] == "NOT_FILLED":
-                trades.append({"date": ymd, "code": code,
-                               "outcome": "NOT_FILLED", "ret_pct": 0.0})
-                continue
-            ret_pct = (result["exit_price"] / pick["entry"] - 1) * 100
-            trades.append({"date": ymd, "code": code,
-                           "outcome": result["outcome"],
-                           "ret_pct": round(ret_pct, 2)})
+            row = _simulate_shadow_pick(ymd, i, pick, entry_date, mba,
+                                        ohlc_df, days_dict_seq)
+            if row is not None:
+                trades.append(row)
     return trades, picks_by_day
 
 
 def compute_pre_entry_risk_shadow(days: list, ohlc_df: pd.DataFrame,
                                   baseline_trades: list,
                                   thresholds: Optional[dict] = None,
-                                  min_rank: float = 40.0) -> dict:
+                                  min_rank: float = 40.0,
+                                  calendar: Optional[np.ndarray] = None) -> dict:
     """4개 위험 제외 룰 비교 shadow 백테스트.
     
     [중요] baseline_trades 는 읽기 전용. shadow Top3를 룰마다 다시 뽑아
     백테스트한 뒤 baseline 대비 ΔEV / 구성변경률 비교.
+    [v85] shadow 재현도 기준선과 같은 성숙도 규칙 (calendar → market_bars_after).
     
     measurement-only: ranking / picks / buy price / production 추천에
     어떤 영향도 주지 않는다.
@@ -2030,11 +2066,13 @@ def compute_pre_entry_risk_shadow(days: list, ohlc_df: pd.DataFrame,
         base_picks_by_day.setdefault(str(t.get("date", "")), set()).add(
             str(t.get("code", "")).zfill(6))
 
+    if calendar is None:
+        calendar = _market_calendar(ohlc_df)
     results_by_rule = {}
     for rule in rules:
         ex_fn = _make_risk_exclude_fn(rule)
         shadow_trades, shadow_picks = _run_shadow_top3(
-            days, ohlc_df, ex_fn, thresholds, min_rank)
+            days, ohlc_df, ex_fn, thresholds, min_rank, calendar=calendar)
         shadow_summ = _summarize_shadow_trades(shadow_trades)
 
         if shadow_summ.get("n_filled", 0) == 0:
@@ -2259,9 +2297,13 @@ def summarize_trades(trades: list) -> dict:
 #  [핵심 #2] 최강 임계값 튜닝 그리드서치
 # ═══════════════════════════════════════════════════
 
-def tune_strong_thresholds(days: list, ohlc_df: pd.DataFrame) -> list:
+def tune_strong_thresholds(days: list, ohlc_df: pd.DataFrame,
+                           calendar: Optional[np.ndarray] = None) -> list:
     results = []
     grid = []
+    # [v85] 시장 달력은 그리드 전체에서 한 번만 (144조합 × np.unique 반복 방지)
+    if calendar is None:
+        calendar = _market_calendar(ohlc_df)
     for sm in [65, 70, 75, 80]:
         for sb in [70, 75, 80]:
             for sg in [3, 5, 7, 10]:
@@ -2277,7 +2319,7 @@ def tune_strong_thresholds(days: list, ohlc_df: pd.DataFrame) -> list:
     for idx, th in enumerate(grid):
         # [v85] 임계값 그리드는 라벨 경로에만 의미 — selector='legacy' 명시
         result = daily_top3_backtest(days, ohlc_df, thresholds=th, min_rank=40.0,
-                                     selector=SELECTOR_LEGACY)
+                                     selector=SELECTOR_LEGACY, calendar=calendar)
         summary = summarize_trades(result["trades"])
         if summary.get("n", 0) < 20:
             continue
@@ -2330,7 +2372,8 @@ def walk_forward_validate(days: list, ohlc_df: pd.DataFrame,
         print(f"    OOS: {oos_days[0][0]} ~ {oos_days[-1][0]} ({len(oos_days)}일)")
 
         print(f"    IS 튜닝 그리드서치...")
-        is_tuning = tune_strong_thresholds(is_days, ohlc_df)
+        calendar = _market_calendar(ohlc_df)   # [v85] IS/OOS 공용 — 한 번만
+        is_tuning = tune_strong_thresholds(is_days, ohlc_df, calendar=calendar)
         if not is_tuning:
             return {"error": "IS 튜닝 결과 없음 (샘플 부족)",
                     "is_period": f"{is_days[0][0]} ~ {is_days[-1][0]}",
@@ -2348,7 +2391,8 @@ def walk_forward_validate(days: list, ohlc_df: pd.DataFrame,
             }
             oos_result = daily_top3_backtest(oos_days, ohlc_df,
                                               thresholds=full_th, min_rank=40.0,
-                                              selector=SELECTOR_LEGACY)  # [v85]
+                                              selector=SELECTOR_LEGACY,  # [v85]
+                                              calendar=calendar)
             oos_summary = summarize_trades(oos_result["trades"])
             is_ev = candidate["top3_summary"].get("ev", 0)
             oos_ev = oos_summary.get("ev", 0)
@@ -2456,6 +2500,7 @@ def rolling_walk_forward(days: list, ohlc_df: pd.DataFrame,
             })
 
         print(f"    rolling folds: {len(folds)}개 (horizon={HORIZON})")
+        calendar = _market_calendar(ohlc_df)   # [v85] 폴드 공용 — 한 번만
         fold_results = []
         for f in folds:
             is_days = days[f["is_range"][0]:f["is_range"][1]]
@@ -2466,7 +2511,7 @@ def rolling_walk_forward(days: list, ohlc_df: pd.DataFrame,
 
             # 이 폴드에서는 그리드서치 대신 '현재 기본 threshold' 또는 
             # 간이 튜닝 Top 1만 사용 (속도 위해)
-            is_tuning = tune_strong_thresholds(is_days, ohlc_df)
+            is_tuning = tune_strong_thresholds(is_days, ohlc_df, calendar=calendar)
             if not is_tuning:
                 fold_results.append({
                     "fold": f["fold"],
@@ -2485,7 +2530,8 @@ def rolling_walk_forward(days: list, ohlc_df: pd.DataFrame,
             }
             oos_result = daily_top3_backtest(oos_days, ohlc_df,
                                               thresholds=full_th, min_rank=40.0,
-                                              selector=SELECTOR_LEGACY)  # [v85]
+                                              selector=SELECTOR_LEGACY,  # [v85]
+                                              calendar=calendar)
             oos_summary = summarize_trades(oos_result["trades"])
             is_ev = best["top3_summary"].get("ev", 0)
             oos_ev = oos_summary.get("ev", 0)
@@ -2789,9 +2835,13 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
         },
     }
 
+    # [v85] 시장 달력 — 같은 ohlc_df로 한 번만 만들어 모든 백테스트·shadow·freshness에
+    #   넘긴다 (모듈 캐시 없음: id 재사용·제자리 변경으로 남의 달력이 섞이지 않게).
+    calendar = _market_calendar(ohlc_df)
+
     print("  ▶ [v85] 공식 매수(기록된 PRODUCTION_BUY) Top3 백테스트...")
     bt = daily_top3_backtest(days, ohlc_df, thresholds=None, min_rank=40.0,
-                             selector=SELECTOR_CONTRACT)
+                             selector=SELECTOR_CONTRACT, calendar=calendar)
     out["daily_top3_backtest"] = summarize_trades(bt["trades"])
     out["daily_picks_log"] = bt["daily_picks"]
     out["all_trades"] = bt["trades"]
@@ -2802,7 +2852,7 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     #   레거시로 고정하고, 그 기준선이 멈췄는지(baseline_frozen)를 함께 기록한다.
     print("  ▶ [v85] shadow 기준선 — 레거시 라벨 Top3 백테스트...")
     bt_legacy = daily_top3_backtest(days, ohlc_df, thresholds=None, min_rank=40.0,
-                                    selector=SELECTOR_LEGACY)
+                                    selector=SELECTOR_LEGACY, calendar=calendar)
     legacy_last = max((t["date"] for t in bt_legacy["trades"]), default=None)
     legacy_gap = sum(1 for d in days[1:] if legacy_last is None or d[0] > legacy_last)
     legacy_tag = {
@@ -2827,7 +2877,7 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     print("  ▶ [v3.9.0] ENTRY_MODE shadow 백테스트 (NOT_FILLED chase 시뮬)...")
     try:
         out["entry_mode_shadow"] = compute_entry_mode_shadow(
-            bt_legacy["trades"], ohlc_df, days)
+            bt_legacy["trades"], ohlc_df, days, calendar=calendar)
         _sh = out["entry_mode_shadow"]
         if _sh.get("enabled"):
             print(f"     shadow: eligible {_sh['n_shadow_eligible']} → "
@@ -2843,7 +2893,8 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     print("  ▶ [v3.9.1] STRUCT risk shadow 백테스트 (STRUCT 70~85 제외 시뮬)...")
     try:
         out["struct_risk_shadow"] = compute_struct_risk_shadow(
-            days, ohlc_df, bt_legacy["trades"], thresholds=None, min_rank=40.0)
+            days, ohlc_df, bt_legacy["trades"], thresholds=None, min_rank=40.0,
+            calendar=calendar)
         _sr = out["struct_risk_shadow"]
         if _sr.get("enabled") and "delta_ev" in _sr:
             print(f"     shadow: ΔEV {_sr['delta_ev']:+.2f} "
@@ -2860,7 +2911,8 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     print("  ▶ [v3.9.2] PRE_ENTRY_RISK shadow 백테스트 (4개 룰 비교)...")
     try:
         out["pre_entry_risk_shadow"] = compute_pre_entry_risk_shadow(
-            days, ohlc_df, bt_legacy["trades"], thresholds=None, min_rank=40.0)
+            days, ohlc_df, bt_legacy["trades"], thresholds=None, min_rank=40.0,
+            calendar=calendar)
         _pr = out["pre_entry_risk_shadow"]
         if _pr.get("enabled") and "rules" in _pr:
             print(f"     baseline EV: {_pr['baseline_ev']:+.2f}")
@@ -2896,7 +2948,7 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     # capital_top1 = "실전 운용 가능성" (simulate_capital_portfolio 기준)
     print("  ▶ [Top1] 공식 매수 신호 성과 백테스트 (기록된 PRODUCTION_BUY)...")
     bt1 = daily_top1_backtest(days, ohlc_df, thresholds=None, min_rank=40.0,
-                              selector=SELECTOR_CONTRACT)
+                              selector=SELECTOR_CONTRACT, calendar=calendar)
 
     # 기존 키도 유지 (하위호환)
     out["daily_top1_backtest"] = summarize_trades(bt1["trades"])
@@ -2936,7 +2988,7 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
 
     # [v85] 신선도 — 백테스트가 실제 공식픽을 따라가고 있는지
     out["freshness"] = compute_freshness(days, bt1["trades"],
-                                         calendar=_market_calendar(ohlc_df),
+                                         calendar=calendar,
                                          n_nodata=bt1.get("n_nodata", 0))
     fr = out["freshness"]
     out["methodology"]["contract_date_range"] = [
@@ -2957,7 +3009,7 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
 
     if tune:
         print("  ▶ 최강 임계값 튜닝 그리드서치...")
-        tuning = tune_strong_thresholds(days, ohlc_df)
+        tuning = tune_strong_thresholds(days, ohlc_df, calendar=calendar)
         out["tuning_results"] = tuning[:20]
         out["tuning_best"] = tuning[0] if tuning else None
 

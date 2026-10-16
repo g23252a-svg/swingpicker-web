@@ -305,11 +305,22 @@ def build_official_buy_validation(data_dir: str | Path, out_dir: str | Path) -> 
         "asof": asof,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "summary": summary,
+        # [v85] 결과 숫자의 채점 정의 — backtest trades 파일(지정가 모델)을 조인한 값이다.
+        #   종목탭 헤드라인(official_ssot: 다음날 시가 · -8% · 5일)과 같은 공식픽이라도
+        #   정의가 달라 숫자가 다르다 — 성과탭 카드가 이 라벨을 그대로 보여준다.
+        "result_model": {
+            "name": "limit_fill",
+            "label": "제시가 지정가 모델",
+            "definition": "제시가 3일 체결창 · 1차 목표/손절 첫 터치 · 최장 10영업일 · "
+                          "왕복 비용 0.22% 차감 (backtest_top1/top3_trades)",
+        },
         "notes": [
             "official_buy_signal = TOP_PICK + BUY_NOW_ELIGIBLE "
             "(PRODUCTION_BUY 컬럼이 있으면 기록된 PRODUCTION_BUY)",
             "results = 체결되고 확정된 거래만 (NOT_FILLED·PENDING은 결과 아님, 0.0 미집계)",
             "dedup = 확정 결과 → 최신 trades 파일 → top1 우선",
+            "result model = 제시가 지정가 모델(3일 체결창 · TP1/손절 · 10일 · 비용 차감) — "
+            "종목탭 헤드라인 official_ssot(다음날 시가 · -8% · 5일)과 정의가 다름",
             "top_pick_holdout = TOP_PICK=1 and BUY_NOW_ELIGIBLE=0",
             "cash_vs_top_pick_pct = 0% cash return - holdout TOP_PICK net_pct",
             "measurement-only: recommendation formulas are not modified",
@@ -329,12 +340,27 @@ def build_official_buy_validation(data_dir: str | Path, out_dir: str | Path) -> 
     return result, payload
 
 
+def _no_result_verdict(row) -> str:
+    """[v85] net_pct가 빈 행의 판정 — 결과가 없는 '이유'를 구분한다.
+
+    NOT_FILLED는 '측정중'이 아니라 확정된 미체결, NODATA는 가격 없음.
+    그 외(PENDING·조인 실패)만 측정중이다. 공식/보류 판정이 같은 규칙을 쓴다.
+    """
+    outcome = str(row.get("outcome", "") or "").strip().upper()
+    if outcome == "NOT_FILLED":
+        return "NOT_FILLED"
+    if outcome == "NODATA":
+        return "NO_DATA"
+    return "PENDING"
+
+
 def _cash_verdict(row) -> str:
     if not bool(row.get("top_pick_holdout")):
         return "NOT_HOLDOUT"
     net = row.get("net_pct")
     if pd.isna(net):
-        return "PENDING"
+        # [v85] 체결 못 한 보류 TOP_PICK은 PENDING이 아니다 (공식 판정과 같은 규칙)
+        return _no_result_verdict(row)
     if float(net) < 0:
         return "CASH_AVOIDED_LOSS"
     if float(net) > 0:
@@ -348,12 +374,7 @@ def _official_verdict(row) -> str:
     net = row.get("net_pct")
     if pd.isna(net):
         # [v85] 체결 못 한 공식 매수는 '측정중'이 아니라 확정된 미체결이다
-        outcome = str(row.get("outcome", "") or "").strip().upper()
-        if outcome == "NOT_FILLED":
-            return "NOT_FILLED"
-        if outcome == "NODATA":
-            return "NO_DATA"
-        return "PENDING"
+        return _no_result_verdict(row)
     return "WIN" if float(net) > 0 else "LOSS_OR_FLAT"
 
 
