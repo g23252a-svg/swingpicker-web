@@ -103,28 +103,39 @@ def test_carry_from_date_preserved():
 
 
 def test_aftermarket_sidecar_preserves_original(tmp_path):
-    """recommend CSV는 불변, sidecar만 바뀌어야 함."""
+    """recommend CSV는 불변, sidecar만 바뀌어야 함.
+
+    [v85] fetch_after_market_price 는 원값 dict(status/naver_close/ah_price_raw…)를
+    돌려준다 — 예전 {close, after, final} 의 final=closePrice 폴백은 없어졌다.
+    sidecar 는 날짜별 보관본(aftermarket_prices_{기준일}.csv)도 같이 쓴다.
+    """
     orig = pd.DataFrame({
         "LDY_RANK": [1], "종목코드": ["005930"], "종목명": ["삼성전자"],
         "시장": ["KOSPI"], "업종_대분류": ["IT"], "종가": ["60000"],
+        "기준일": ["20260409"],
     })
     csv_path = str(tmp_path / "recommend_latest.csv")
     sidecar_path = str(tmp_path / "aftermarket_prices_latest.csv")
     orig.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    before_bytes = open(csv_path, "rb").read()
 
     from naver_aftermarket import fetch_after_market_prices_sidecar
 
     with patch("naver_aftermarket.fetch_after_market_price",
-               return_value={"close": 61000, "after": 61500, "final": 61500}):
+               return_value={"status": "OK", "naver_close": 61000,
+                             "ah_price_raw": 61500}):
         count = fetch_after_market_prices_sidecar(csv_path, sidecar_path)
 
     after = pd.read_csv(csv_path, dtype=str, encoding="utf-8-sig")
     assert after.iloc[0]["종가"] == "60000", \
         f"원본 CSV 종가 변경됨: {after.iloc[0]['종가']}"
+    assert open(csv_path, "rb").read() == before_bytes, "원본 CSV 바이트가 바뀜"
     assert count > 0
     import os; assert os.path.exists(sidecar_path)
+    assert os.path.exists(str(tmp_path / "aftermarket_prices_20260409.csv"))
     sidecar = pd.read_csv(sidecar_path)
     assert sidecar.iloc[0]["시간외종가"] == 61500
+    assert sidecar.iloc[0]["AH_STATUS"] == "OK"
 
 
 def test_rsi_calculation_parity():
