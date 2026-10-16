@@ -479,7 +479,7 @@ _YEAR_HEAD_GLOB = re.compile(r"(?:^|\{\})_?20\d[^\s'\"]*?[*?\[]")
 #: (파일, 문자열) 정확 쌍만 예외 — 같은 파일에 새로 생기는 연도 고정 글롭은 그대로 잡힌다.
 #: v85-1(백테스트 재구성) 브랜치가 소유·수정한다. 두 브랜치가 머지되면 이 문자열이 사라지므로
 #: test_owned_elsewhere_exemptions_not_stale 가 실패한다(의도된 트립와이어) → 그때 이 항목을 지운다.
-_OWNED_ELSEWHERE = {("backtest_validation.py", "recommend_2026*.csv")}
+_OWNED_ELSEWHERE: set = set()   # [v85] v85/backtest 머지로 backtest_validation.py 글롭도 연도 무관 — 예외 없음
 #: 이 파일 자신은 가드 회귀 테스트용 위반 샘플 문자열을 담고 있어 스캔에서 뺀다.
 _SELF = Path(__file__).resolve().relative_to(ROOT).as_posix()
 
