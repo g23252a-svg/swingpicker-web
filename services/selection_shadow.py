@@ -29,7 +29,8 @@ import numpy as np
 import pandas as pd
 
 from services.pick_history import _realized          # SSOT — 복제 금지
-from services.winner_profile import _hac_p, _load_code_history, _load_universe_ohlcv
+from services.winner_profile import (_hac_p, _load_code_history, _load_universe_ohlcv,
+                                     _realized_full_window)
 
 logger = logging.getLogger("selection_shadow")
 
@@ -230,14 +231,23 @@ def build(data_dir: str) -> dict:
     # [v85] '날짜' 버그 수정으로 ext_lowtv 가 레인(601~1200위) 종목을 고르게 됐다 — 레인은 하루
     #   ~30%씩 바뀌므로 최신 파일에 없는 픽 종목은 그 종목을 담은 가장 최근 날짜 파일에서 잰다.
     #   변형 간 같은 잣대를 쓰려고 모든 변형에 적용한다(현재 로그 57행에서는 측정 수 변화 0).
+    #   폴백 시리즈는 _realized_full_window 로 잰다 — 밴드 이탈로 잘린 시리즈에 _realized 를 쓰면
+    #   손절(-8%)만 잡히고 나머지는 영영 미측정이라, 레인 종목을 고르는 ext_lowtv 만 손실 쪽으로
+    #   기운 채 live(배치 캐시 종목)와 페어 비교된다.
+    hist: Dict[str, pd.DataFrame] = {}
     if len(log):
         missing = set(log["종목코드"].astype(str).str.zfill(6)) - set(by_code)
         if missing:
-            by_code.update(_load_code_history(data_dir, missing, since=str(log["ymd"].astype(str).min())))
+            hist = _load_code_history(data_dir, missing, since=str(log["ymd"].astype(str).min()))
     rets = []
     for _, r in log.iterrows():
-        g = by_code.get(str(r["종목코드"]).zfill(6))
-        v = _realized(g, str(r["ymd"])) if g is not None else None
+        c = str(r["종목코드"]).zfill(6)
+        if c in by_code:
+            v = _realized(by_code[c], str(r["ymd"]))
+        elif c in hist:
+            v = _realized_full_window(hist[c], str(r["ymd"]))
+        else:
+            v = None
         rets.append(None if v is None else float(v))
     log = log.assign(ret=rets)
     out: dict = {"live_from": LIVE_FROM, "target_days": TARGET_DAYS,

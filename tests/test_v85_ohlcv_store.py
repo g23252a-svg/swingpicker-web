@@ -373,6 +373,11 @@ class TestNamingAndWorkflow:
         assert "steps.collect.outputs.holiday != 'true'" in step
         assert "steps.guard.outputs.skip != 'true'" in step
         assert "--log data/ohlcv_store/verify_log.jsonl" in step
+        # [v85 리뷰] 대상 밤 = 이번 배치 대상 세션(가드가 batch_target.sh 로 정한 값)
+        guard = WF_SRC[WF_SRC.index("id: guard"):WF_SRC.index("- name: Set up Python")]
+        assert 'echo "target=${BATCH_TARGET}" >> "$GITHUB_OUTPUT"' in guard
+        assert "${{ steps.guard.outputs.target }}" in step
+        assert '${BATCH_TARGET:+--ymd "$BATCH_TARGET"}' in step
         commit = WF_SRC[i_commit:]
         assert "if [ -d data/ohlcv_store ]; then git add -f data/ohlcv_store" in commit
         assert "git add -f data/*.parquet" in commit                   # 날짜 파일은 그대로 커밋(그림자)
@@ -412,11 +417,55 @@ class TestCliAndShadow:
         _write_main(d, "20261007", u3)
         rc = OS.main(["shadow", "--data-dir", str(d), "--log", str(log)])
         last = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()][-2:]
-        assert rc == 0
         assert last[0]["ok"] and last[0]["ingested"] == 1 and last[0]["n_new"] == 3
-        assert last[0]["n_rev"] == 0
-        # 레인은 '최신 레인 파일' 기준 — 레인 10/07 파일이 없으면 10/06 을 다시 확인할 뿐
-        assert last[1]["ymd"] == "20261006" and last[1]["ok"] and last[1]["ingested"] == 0
+        assert last[0]["n_rev"] == 0 and last[0]["target_from"] == "newest"
+        # [v85 리뷰] 대상 미지정이면 레인은 '최신 레인 파일'(10/06)을 다시 검증한다 — 복원은 정확하지만
+        #   main 최신(10/07)보다 오래된 밤이므로 깨끗한 밤으로 세지 않는다(stale · ok=false · rc=1).
+        assert last[1]["ymd"] == "20261006" and last[1]["ingested"] == 0
+        assert last[1]["verified_exact"] is True and last[1]["ok"] is False and "20261007" in last[1]["stale"]
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "오래된 밤" in out and "::warning" in out
+
+    def test_shadow_target_night_missing_is_not_ok(self, tmp_path):
+        """[v85 리뷰] 워크플로는 이번 배치 대상(--ymd)을 넘긴다 — 그 밤 레인 파일이 없으면 ok=false."""
+        d = tmp_path
+        u = _universe("2026-10-05")
+        _write_main(d, "20261005", u)
+        _write_lane(d, "20261005", u)
+        u2 = {c: _bars("2026-10-06", 41, base=1000 + 500 * i, seed=i) for i, c in enumerate(u)}
+        _write_main(d, "20261006", u2)                                   # 레인 10/06 은 안 써졌다
+        log = d / "ohlcv_store" / "verify_log.jsonl"
+        rc = OS.main(["shadow", "--data-dir", str(d), "--log", str(log), "--ymd", "20261006"])
+        main_l, lane_l = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
+        assert main_l["ymd"] == "20261006" and main_l["ok"] is True and main_l["target_from"] == "arg"
+        assert lane_l["ymd"] == "20261006" and lane_l["ok"] is False and lane_l["target_missing"] is True
+        assert lane_l["ingested"] == 1                                   # 10/05 레인은 그래도 적재
+        assert rc == 1
+        # 둘 다 있으면 둘 다 ok
+        _write_lane(d, "20261006", u2)
+        assert OS.main(["shadow", "--data-dir", str(d), "--log", str(log), "--ymd", "20261006"]) == 0
+        last = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()][-2:]
+        assert all(x["ok"] and x["ymd"] == "20261006" for x in last)
+
+    def test_verify_explicit_night_must_be_checked(self, tmp_path):
+        """[v85 리뷰] 저장소에도 파일에도 없는 밤(오타·휴장)을 요청하면 ok=True(0건 검증)가 아니다."""
+        d = tmp_path
+        assert not OS.verify(str(d), "newest", kind="main")["ok"]           # 빈 저장소
+        _write_main(d, "20261005", _universe("2026-10-05"))
+        OS.ingest(str(d), kind="main")
+        v = OS.verify(str(d), "20991231", kind="main")
+        assert not v["ok"] and v["main"]["checked"] == 0 and v["main"]["missing_both"] == ["20991231"]
+        assert not OS.verify(str(d), ["20261005", "20991231"], kind="main")["ok"]
+        assert OS.verify(str(d), "20261005", kind="main")["ok"]
+        assert OS.verify(str(d), "newest", kind="main")["ok"]
+        assert OS.verify(str(d), "all", kind="main")["ok"]
+        # 저장소에는 있는데 날짜 파일이 없는 밤 — 'all' 은 전환 후 정상 상태라 ok, 명시 요청은 검증 못 했으니 실패
+        os.remove(d / "ohlcv_cache_20261005.parquet")
+        assert OS.verify(str(d), "all", kind="main")["ok"]
+        v = OS.verify(str(d), "20261005", kind="main")
+        assert not v["ok"] and v["main"]["unverified"] == ["20261005"]
+        assert OS.main(["verify", "--data-dir", str(d), "--kind", "main", "--ymd", "20991231"]) == 1
 
     def test_shadow_reports_mismatch_without_raising(self, tmp_path, monkeypatch):
         d = tmp_path

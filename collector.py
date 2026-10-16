@@ -553,9 +553,15 @@ def prepare_ohlcv_data(
     # 4) 캐시 저장
     #    [v85] 휴장일 판정('holiday')이면 저장하지 않는다 — v84 가드(finalize_outputs)는 이 저장
     #    **뒤에** 돌아서 전일 봉 복제본(팬텀 캐시)이 계속 커밋됐다(10/09). 판정 보류·실패는 저장한다.
+    #    가드가 import·판정 어디서든 깨지면 저장한다(v85 이전 동작) — 실험 모듈이 배치를 멈추면 안 된다.
     if collected_count > 0:
-        from services.ohlcv_store import cache_write_allowed
-        if cache_write_allowed(ohlcv_map, trade_ymd)[0]:
+        try:
+            from services.ohlcv_store import cache_write_allowed
+            _cache_ok = cache_write_allowed(ohlcv_map, trade_ymd)[0]
+        except Exception as e:
+            logging.getLogger("collector").warning("[v85] 휴장일 캐시 가드 실패 — 캐시는 저장한다: %s", e)
+            _cache_ok = True
+        if _cache_ok:
             save_ohlcv_cache(trade_ymd, ohlcv_map)
 
     # [v3.2 #2] 병렬 수집 완료 후 메모리 정리 — 워커 잔여 참조 해제

@@ -51,10 +51,15 @@ API(`services/ohlcv_store.py`): `ingest` · `snapshot` · `verify` · `hydrate` 
 
 `OHLCV Store Shadow Ingest (v85)` 스텝 — Show outputs 뒤, Commit & Push 앞.
 - 조건: 다른 후속 스텝과 같은 `skip != 'true' && holiday != 'true'`, `continue-on-error: true`, 15분 제한.
-- `python -m services.ohlcv_store shadow --data-dir data --log data/ohlcv_store/verify_log.jsonl`
-  - 증분 ingest(첫 밤은 부트스트랩 ~1~2분) → 대상 밤(종류별 최신 날짜 파일)은 deep 검증, 함께 적힌 밤은
+- `python -m services.ohlcv_store shadow --data-dir data --log data/ohlcv_store/verify_log.jsonl --ymd "$BATCH_TARGET"`
+  - 대상 밤 = **이번 배치의 대상 세션**(가드 스텝이 `scripts/batch_target.sh` 로 정해 `steps.guard.outputs.target`
+    으로 넘긴다). 그 밤의 main/lane 날짜 파일이 없으면 그 종류는 `ok: false, target_missing: true` —
+    예전 밤을 다시 검증해 깨끗한 밤으로 찍지 않는다(레인 캐시가 안 써진 밤: 실데이터에 0909·0910·1001 이 있다).
+    대상이 비면(장중·주말 수동 dispatch) 종류별 최신 파일을 검증하되 main 최신보다 오래된 밤은
+    `stale` · `ok: false`. 복원 대조 결과 자체는 `verified_exact` 에 따로 남는다.
+  - 증분 ingest(첫 밤은 부트스트랩 ~1~2분) → 대상 밤은 deep 검증, 함께 적힌 밤은
     arrow 수준 검증 → `verify_log.jsonl` 에 `ymd, kind, ok, rows, n_new, n_rev, mismatch, seconds…` 한 줄.
-  - 잡 로그에 요약 3줄, 불일치면 `::warning::`.
+  - 잡 로그에 요약 3줄, 불일치·대상 누락·오래됨이면 `::warning::`.
 - 커밋: `if [ -d data/ohlcv_store ]; then git add -f data/ohlcv_store; fi` 추가.
   **날짜 파일은 지금처럼 그대로 커밋**(그림자) — 읽는 쪽은 아무것도 바뀌지 않는다.
 - `.dockerignore` 에 `data/ohlcv_store/` (Railway 이미지 제외 — 기존 `data/*.parquet` 패턴은 하위 폴더에 안 걸림).
@@ -62,7 +67,10 @@ API(`services/ohlcv_store.py`): `ingest` · `snapshot` · `verify` · `hydrate` 
 
 ## 4. 전환 (별도 PR — 깨끗한 검증 ≥ 5밤 뒤)
 
-게이트: `verify_log.jsonl` 의 연속 ≥ 5밤 × 두 종류가 `ok: true`, 그리고 `verify --ymd all` 전수 정확.
+게이트: `verify_log.jsonl` 의 연속 ≥ 5밤 × 두 종류가 `ok: true` 이고 `target_from: "arg"`(배치 대상 밤을
+검증한 줄 — 대상 없는 수동 실행 줄은 세지 않는다), 그리고 `verify --ymd all --deep` 전수 정확.
+`verify` 는 명시 요청한 밤(YYYYMMDD·목록·newest)이 하나라도 검증되지 못하면(저장소·파일 어느 쪽에도
+없거나 파일이 없으면) 실패한다 — 오타 날짜로 0건 검증 후 통과하는 일은 없다.
 
 1. **hydrate 를 먼저 연결**한다 — auto_collect(Run Collector 앞), prefetch_flow(`investor_flow_kis.universe_codes`
    가 최신 main/lane 파일 코드를 읽는다), backfill_flow, ci.yml(실데이터 테스트 전). hydrate 가 실패하면
@@ -87,10 +95,19 @@ API(`services/ohlcv_store.py`): `ingest` · `snapshot` · `verify` · `hydrate` 
 
 - **레인 캐시 '날짜' 인덱스** — `winner_profile._load_universe_ohlcv` 가 레인 행 전부를 버렸다.
   `_with_date_col` 로 맞추고, 최신 파일에 없는 픽 종목은 그 종목을 담은 가장 최근 날짜 파일에서 잰다
-  (`_load_code_history`). quiet_lane_track 측정 2일/2픽 → 20일/46픽(5일 창이 닫힌 105픽 중 — 나머지는
-  t+6 이전에 밴드 밖으로 밀려나 어느 파일에도 시세가 없다). ext_lowtv 유니버스 ≈600 → ≈1,190,
-  10/06~10/16 7일 모두 다른 종목(전부 레인 종목)이 뽑힌다 — 기존 기록은 고치지 않는다.
+  (`_load_code_history`). 그 시리즈는 밴드 이탈 직전 파일에서 끝나므로 **5일 창 전체가 시리즈 안에
+  있을 때만** 잰다(`_realized_full_window`). SSOT `_realized` 를 그대로 쓰면 '창이 덜 찼어도 손절이면 확정'
+  규칙 때문에 잘린 시리즈에서 손절(-8%)만 잡히고 나머지는 영영 미측정이다(리뷰 실측: 손절 전용 7행 →
+  비용후 일평균 -0.57%가 -2.47%로, 손절률 56%가 63%로). selection_shadow.build 도 같은 규칙.
+  quiet_lane_track 측정 2일/2픽 → **18일/39픽**(비용후 일평균 -0.57% · 승률 31% · 손절 56%). 5일 창이 닫힌
+  105픽 중 36픽(34%)만 측정된다 — 나머지는 t+6 이전에 밴드 밖으로 밀려나 어느 파일에도 창 전체 시세가 없다.
+  그래서 요약에 커버리지(`picks_closed`·`picks_closed_measured`·`coverage_closed`·일별 `n_measured/n_picks`)와
+  `days_majority`(픽 과반이 측정된 날, 현재 6일)를 남기고, '표본 충족 — 판정 가능'은 과반 측정일이 20일을
+  채울 때만 낸다. 측정일만 20일이면 '판정 보류 — … 생존 편향'이다(화면 decision_center 의 레인 판정 줄).
+  ext_lowtv 유니버스 ≈600 → ≈1,190, 10/06~10/16 7일 모두 다른 종목(전부 레인 종목)이 뽑힌다 — 기존 기록은
+  고치지 않는다.
 - **휴장일 팬텀 캐시** — v84 가드보다 먼저 저장돼 10/09 에도 전일 복제 캐시가 커밋됐다. collector 저장
   지점에서 같은 판정(`ohlcv_store.cache_write_allowed`)을 하고 'holiday' 면 저장하지 않는다(판정 보류·실패는
-  저장). 같은 실행의 CARRY 재수집도 기억된 판정으로 막는다. 기존 팬텀 파일(main 11: 0302·0501·0505·0525·
+  저장). 같은 실행의 CARRY 재수집도 기억된 판정으로 막는다. 가드의 import·호출이 어디서든 깨지면 경고만 남기고
+  저장한다(v85 이전 동작) — 실험 모듈이 야간 배치 1단계를 멈추면 안 된다. 기존 팬텀 파일(main 11: 0302·0501·0505·0525·
   0603·0717·0817·0924·0925·1005·1009 / lane 3: 0924·0925·1005)은 이번에 옮기지 않는다.

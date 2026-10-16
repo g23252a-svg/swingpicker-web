@@ -54,6 +54,7 @@ import numpy as np
 import pandas as pd
 
 from services.pick_history import _realized  # SSOT 실현수익 — 복제 금지
+from services.pick_history import HOLD_DAYS as _SSOT_HOLD_DAYS  # [v85] _realized_full_window 창 길이
 
 logger = logging.getLogger("winner_profile")
 
@@ -151,6 +152,8 @@ def _load_code_history(data_dir: str, codes, since: Optional[str] = None) -> Dic
     그 종목의 시세가 남아 있으므로, 최신 → 과거 순으로 훑어 처음 만나는 파일의 시리즈를 쓴다.
     같은 날짜면 배치 캐시를 먼저 본다(_load_universe_ohlcv 의 우선순위와 같다).
     한 파일의 시리즈를 통째로 쓰므로 수정주가 기준이 섞이지 않는다.
+    이 시리즈로 수익을 잴 때는 _realized 가 아니라 _realized_full_window 를 쓴다(손절만 잡히는
+    중도절단 편향 — 그쪽 docstring 참고).
 
     since: 이 날짜(YYYYMMDD)보다 오래된 파일은 보지 않는다(픽일 이전 파일로는 창을 못 잰다).
     """
@@ -187,6 +190,26 @@ def _load_code_history(data_dir: str, codes, since: Optional[str] = None) -> Dic
         for c, g in d.groupby("종목코드", sort=False):
             out[c] = g.sort_values("Date").reset_index(drop=True)
     return out
+
+
+def _realized_full_window(g: Optional[pd.DataFrame], ymd: str) -> Optional[float]:
+    """[v85] _load_code_history 시리즈용 SSOT 실현수익 — 5일 창 전체가 시리즈 안에 있을 때만 잰다.
+
+    폴백 시리즈는 그 종목이 밴드에서 밀려나기 직전 파일에서 끝난다(최신 파일에 없으니 폴백이다).
+    거기에 _realized 를 그대로 쓰면 '창이 덜 찼어도 손절이 터졌으면 확정' 규칙 때문에 **손절(-8%)
+    만 측정되고 나머지는 영영 미측정** — 정보성 중도절단으로 손실 쪽 편향이 생긴다(실측
+    quiet_lane_track: 손절 전용 7행이 끼어 비용후 일평균 -0.57% → -2.47%, 손절률 56% → 63%).
+    최신 파일의 시리즈는 창이 시간이 지나면 닫히므로(양쪽 결과가 다 잡힌다) _realized 그대로 쓴다.
+    여기서는 진입 t+1 … 청산 t+1+HOLD_DAYS 가 시리즈 안에 다 있을 때만 재고, 아니면 None(미측정).
+    """
+    if g is None or not len(g):
+        return None
+    dts = pd.to_datetime(g["Date"], errors="coerce").dropna().sort_values().to_numpy()
+    t = np.datetime64(pd.Timestamp(ymd))
+    i = int(np.searchsorted(dts, t))
+    if i >= len(dts) or dts[i] != t or (len(dts) - 1 - i) < 1 + _SSOT_HOLD_DAYS:
+        return None
+    return _realized(g, ymd)
 
 
 def _load_flow(data_dir: str, ymd: str) -> Optional[pd.DataFrame]:

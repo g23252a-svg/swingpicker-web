@@ -63,6 +63,8 @@ jobs:
           #   보면 이미 있는 배치는 다시 돌지 않고, 빠진 배치는 새벽 cron(05~07시 KST
           #   발화가 흔하다)이 회수한다.
           eval "$(bash scripts/batch_target.sh)"
+          # [v85] 대상 세션을 후속 스텝(OHLCV store 그림자 검증)에 넘긴다 — 잡 도중 시각이 창 경계를 넘어도 같은 값.
+          echo "target=${BATCH_TARGET}" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "manual dispatch — 강제 실행"
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -205,7 +207,12 @@ jobs:
         timeout-minutes: 15
         run: |
           echo ">>> OHLCV store shadow 시작: $(date +'%Y-%m-%d %H:%M:%S %Z')"
-          python -m services.ohlcv_store shadow --data-dir data --log data/ohlcv_store/verify_log.jsonl
+          # 대상 밤 = 이번 배치의 대상 세션(가드와 같은 batch_target.sh). 그 밤의 날짜 파일이 없으면
+          #   ok=false 로 남는다 — 예전 밤을 다시 검증해 깨끗한 밤으로 찍지 않는다. 대상이 비면
+          #   (장중·주말 수동 dispatch) 종류별 최신 파일 + main 보다 오래된 밤은 stale 표시.
+          BATCH_TARGET="${{ steps.guard.outputs.target }}"
+          echo "대상 세션: ${BATCH_TARGET:-없음 — 종류별 최신 날짜 파일}"
+          python -m services.ohlcv_store shadow --data-dir data --log data/ohlcv_store/verify_log.jsonl ${BATCH_TARGET:+--ymd "$BATCH_TARGET"}
           echo ">>> OHLCV store shadow 완료: $(date +'%Y-%m-%d %H:%M:%S %Z')"
 
       - name: Commit & Push CSV

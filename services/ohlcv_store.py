@@ -49,7 +49,7 @@ CLI:
     python -m services.ohlcv_store verify  --data-dir data [--ymd all|newest|YYYYMMDD]
     python -m services.ohlcv_store hydrate --data-dir data --target-dir DIR [--ymd ...]
     python -m services.ohlcv_store stats   --data-dir data
-    python -m services.ohlcv_store shadow  --data-dir data --log data/ohlcv_store/verify_log.jsonl
+    python -m services.ohlcv_store shadow  --data-dir data --log data/ohlcv_store/verify_log.jsonl [--ymd 배치대상]
 """
 from __future__ import annotations
 
@@ -804,18 +804,23 @@ def verify(data_dir: str, ymd="all", kind: str = "all", store_dir: Optional[str]
     """
     store = store_path(data_dir, store_dir)
     out = {"store": store, "ok": True}
+    # [v85] 명시 요청(YYYYMMDD · 목록 · newest)은 요청한 밤이 **전부 검증돼야** ok 다. 전에는 저장소에도
+    #   날짜 파일에도 없는 밤(오타·휴장일)을 조용히 빼고 checked=0 인 채 ok=True 를 돌려줬다.
+    explicit = ymd not in (None, "all")
     for k in _kinds(kind):
         t0 = time.time()
         files = dated_files(data_dir, k)
         want = _resolve_nights(store, k, data_dir, ymd)
         stored = set(nights("", k, store_dir=store))
         r = {"checked": 0, "exact": 0, "mismatched": [], "missing_file": [], "missing_store": [],
-             "rows": {}}
+             "missing_both": [], "rows": {}}
         for n in want:
             if n not in stored and n in files:
                 r["missing_store"].append(n)
             elif n not in files and n in stored:
                 r["missing_file"].append(n)
+            elif n not in files and n not in stored:
+                r["missing_both"].append(n)
         check = [n for n in want if n in stored and n in files]
         try:
             for n, st in _iter_states(store, k, check):
@@ -832,7 +837,10 @@ def verify(data_dir: str, ymd="all", kind: str = "all", store_dir: Optional[str]
             logger.warning("[v85] %s 검증 중단: %s", k, e)
             r["error"] = f"{type(e).__name__}: {e}"[:300]
         r["seconds"] = round(time.time() - t0, 2)
-        r["ok"] = not (r["mismatched"] or r["missing_store"] or r.get("error"))
+        r["ok"] = not (r["mismatched"] or r["missing_store"] or r["missing_both"] or r.get("error"))
+        if explicit and (not want or r["checked"] < len(want)):
+            r["ok"] = False
+            r["unverified"] = sorted(set(want) - set(check)) if want else [f"요청한 밤 없음: {ymd}"]
         out[k] = r
         out["ok"] = out["ok"] and r["ok"]
     return out
@@ -975,16 +983,26 @@ def shadow(data_dir: str, ymd: Optional[str] = None, store_dir: Optional[str] = 
            log_path: Optional[str] = None) -> dict:
     """ingest(증분) → 이번에 적은 밤 + 대상 밤 검증 → verify_log.jsonl 한 줄(종류별).
 
-    대상 밤: ymd 가 주어지면 그 밤, 아니면 종류별 가장 최근 날짜 파일.
+    대상 밤: ymd 가 주어지면 그 밤 — 야간 워크플로는 이번 배치의 대상 세션(batch_target.sh 의
+    BATCH_TARGET)을 넘긴다. 그 밤의 날짜 파일이 없으면(오늘 캐시 미작성) ok=false · target_missing.
+    ymd 가 없으면 종류별 가장 최근 날짜 파일이되, 그 밤이 main 최신 밤보다 오래됐으면(오늘 레인
+    캐시 미작성 등) stale · ok=false — 예전 밤을 다시 검증해 '깨끗한 밤'으로 찍지 않는다
+    (전환 게이트는 ok=true 밤 수를 센다). 복원 대조 결과 자체는 verified_exact 에 따로 남긴다.
     대상 밤은 deep(pd.read_parquet 프레임까지), 부트스트랩·따라잡기로 함께 적힌 밤은
     arrow 수준으로 대조한다.
     """
     store = store_path(data_dir, store_dir)
     out = {"ok": True, "lines": []}
+    newest_main = None
+    if not ymd:
+        try:
+            newest_main = next(reversed(list(dated_files(data_dir, "main"))), None)
+        except OSError as e:
+            logger.warning("[v85] main 최신 밤 확인 실패 — 오래됨 판정 생략: %s", e)
     for k in KINDS:
         t0 = time.time()
         line = {"ts": pd.Timestamp.now(tz="Asia/Seoul").strftime("%Y-%m-%dT%H:%M:%S%z"),
-                "kind": k, "ymd": None, "ok": False}
+                "kind": k, "ymd": None, "ok": False, "target_from": "arg" if ymd else "newest"}
         try:
             files = dated_files(data_dir, k)
             target = ymd or (list(files)[-1] if files else None)
@@ -996,7 +1014,8 @@ def shadow(data_dir: str, ymd: Optional[str] = None, store_dir: Optional[str] = 
                         failed=ing["failed"], skipped_older=ing["skipped_older"],
                         seconds_ingest=round(t1 - t0, 2))
             if target is None or target not in files:
-                line.update(ok=False, mismatch=f"대상 날짜 파일 없음: {target}")
+                line.update(ok=False, target_missing=True,
+                            mismatch=f"대상 날짜 파일 없음: {target} (이번 배치가 {k} 캐시를 쓰지 않았다)")
             else:
                 tv = verify(data_dir, target, kind=k, store_dir=store_dir, deep=True)[k]
                 others = [n for n in written if n != target]
@@ -1006,13 +1025,17 @@ def shadow(data_dir: str, ymd: Optional[str] = None, store_dir: Optional[str] = 
                             n_rev_codes=meta.get("rev_codes_total"))
                 mism = tv["mismatched"] + (ov["mismatched"] if ov else [])
                 miss = tv["missing_store"] + (ov["missing_store"] if ov else [])
-                line["ok"] = bool(tv["ok"] and (ov is None or ov["ok"]) and not ing["failed"])
+                line["verified_exact"] = bool(tv["ok"] and (ov is None or ov["ok"]) and not ing["failed"])
+                line["ok"] = line["verified_exact"]
                 if others:
                     line["also_verified"] = ov["checked"]
                     line["also_exact"] = ov["exact"]
                 if mism or miss or ing["failed"] or tv.get("error"):
                     line["mismatch"] = {"mismatched": mism[:5], "missing_store": miss[:10],
                                         "failed": ing["failed"][:5], "error": tv.get("error")}
+                if newest_main and target < newest_main:
+                    line["ok"] = False
+                    line["stale"] = f"대상 {target} < main 최신 {newest_main} — 오늘 {k} 캐시 미작성?"
             line["seconds"] = round(time.time() - t0, 2)
         except Exception as e:
             logger.warning("[v85] %s 그림자 검증 실패: %s", k, e)
@@ -1041,11 +1064,15 @@ def _summary_lines(sh: dict) -> List[str]:
     for ln in sh["lines"]:
         k = ln["kind"]
         head = f"[v85 ohlcv_store] {k}: 대상 {ln.get('ymd')} "
-        if ln.get("ok"):
+        if ln.get("ok") or (ln.get("stale") and ln.get("verified_exact")):
             body = (f"✅ 정확 복원 {ln.get('rows')}행 · 신규 {ln.get('n_new')} · 개정 {ln.get('n_rev')}"
                     f" · 이번 실행 적재 {ln.get('ingested', 0)}밤")
             if ln.get("also_verified"):
                 body += f" (함께 검증 {ln.get('also_exact')}/{ln.get('also_verified')})"
+            if ln.get("stale"):
+                body = f"⚠️ 오래된 밤 — {ln['stale']} · " + body
+        elif ln.get("target_missing"):
+            body = f"❌ {ln.get('mismatch')}"
         else:
             body = f"❌ 불일치/실패 — {json.dumps(ln.get('mismatch'), ensure_ascii=False, default=str)[:400]}"
         out.append(head + body + f" · {ln.get('seconds')}s")
@@ -1092,7 +1119,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             x = r[k]
             print(f"[v85 ohlcv_store] verify {k}: 정확 {x['exact']}/{x['checked']} · 불일치 "
                   f"{len(x['mismatched'])} · 저장소 누락 {len(x['missing_store'])} · 파일 없음 "
-                  f"{len(x['missing_file'])} · {x['seconds']}s")
+                  f"{len(x['missing_file'])} · 둘 다 없음 {len(x['missing_both'])} · {x['seconds']}s")
+            if x.get("unverified"):
+                print(f"  ✗ 요청했지만 검증 못 한 밤: {', '.join(map(str, x['unverified'][:10]))}")
             for mm in x["mismatched"][:10]:
                 print(f"  ✗ {mm['ymd']}: {mm['detail'][:300]}")
     elif a.cmd == "hydrate":
@@ -1115,7 +1144,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for s in _summary_lines(r):
             print(s)
         if bad:
-            print("::warning title=ohlcv_store 그림자 검증::저장소 복원이 날짜 파일과 다르다 — "
+            print("::warning title=ohlcv_store 그림자 검증::복원 불일치 또는 대상 밤 누락/오래됨 — "
                   "verify_log.jsonl 확인 (날짜 파일은 그대로 커밋된다)")
     if a.json:
         print(json.dumps(r, ensure_ascii=False, default=str, indent=1))

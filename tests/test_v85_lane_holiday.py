@@ -6,10 +6,13 @@
   winner_profile._load_universe_ohlcv 는 reset_index() 뒤 'Date' 만 읽어 레인 행의 날짜가
   전부 NaT → 결측 방어 필터에서 **레인 전체가 버려졌다**. 영향:
     - selection_shadow.ext_lowtv: '≈1,200종목' 이 실제로는 배치 캐시 ≈600 (실측 599~609 → 수정 후 ~1,190)
-    - quiet_lane_track: 레인 픽 130개 중 2개만 측정 (수정 + 최근 파일 폴백 후 46개, 20일)
+    - quiet_lane_track: 레인 픽 130개 중 2개만 측정 (수정 + 최근 파일 폴백 후 39개, 18일)
     - winner_profile.build_day: 코호트가 ≈600
   레인은 하루 ~30%씩 바뀌므로, 최신 파일에 없는 픽 종목은 그 종목을 담은 가장 최근 날짜
-  파일에서 잰다(_load_code_history).
+  파일에서 잰다(_load_code_history). 그 시리즈는 밴드 이탈 직전에 끝나므로 5일 창 전체가
+  시리즈 안에 있을 때만 잰다(_realized_full_window) — 그냥 _realized 를 쓰면 손절(-8%)만
+  측정되는 중도절단 편향이 생긴다(리뷰 실측: 손절 전용 7행, 비용후 일평균 -0.57% → -2.47%).
+  레인 '표본 충족' 판정은 픽 과반이 측정된 날 수로만 낸다(측정 커버리지 34%).
 
 ■ 휴장일 팬텀 캐시
   v84 가드(finalize_outputs)는 collector 가 ohlcv_cache_{ymd} 를 저장한 **뒤에** 돈다 →
@@ -156,6 +159,103 @@ class TestHistoryFallback:
         assert s["variants"]["ext_lowtv"]["days"] == 1 and s["variants"]["live"]["days"] == 1
 
 
+class TestChurnCensoring:
+    """[v85 리뷰] 밴드 이탈로 잘린 폴백 시리즈 — 손절만 잡히면 안 된다(양쪽 다 미측정)."""
+
+    @staticmethod
+    def _setup(tmp_path):
+        days = pd.bdate_range(end="2026-10-16", periods=40)
+        sig = days[-12]
+        _write_main(tmp_path, "20261016", {f"1{i:05d}": _series("2026-10-16", 40, 10_000, 0.0, 300_000, i)
+                                           for i in range(3)})
+        cut = days[-9]                                  # t+3 에서 밴드 이탈 — 창(t+1…t+6) 미완
+        stop = _series(cut.strftime("%Y-%m-%d"), 31, 5_000, 0.0, 80_000, 9)
+        stop.loc[days[-10], ["시가", "고가", "저가", "종가"]] = (4_000, 4_000, 3_900, 3_950)   # t+2 폭락 → 손절
+        flat = _series(cut.strftime("%Y-%m-%d"), 31, 5_000, 0.0, 80_000, 10)
+        _write_lane(tmp_path, cut.strftime("%Y%m%d"), {"200009": stop, "200010": flat})
+        # 최신 레인 파일에는 두 종목이 없다 — 이후 밴드 밖
+        _write_lane(tmp_path, "20261016", {"200008": _series("2026-10-16", 40, 5_000, 0.0, 80_000, 8)})
+        return sig.strftime("%Y%m%d"), cut.strftime("%Y%m%d")
+
+    def test_realized_full_window(self):
+        from services.pick_history import _realized
+        days = pd.bdate_range(end="2026-10-16", periods=40)
+        g = _series("2026-10-16", 40, 5_000, 0.0, 1, 3).reset_index().rename(columns={"날짜": "Date"})
+        sig = days[-12].strftime("%Y%m%d")
+        assert WP._realized_full_window(g, sig) == _realized(g, sig)
+        g2 = g[g["Date"] <= days[-9]].copy()
+        g2.loc[g2["Date"] == days[-10], "저가"] = 1                          # 창 안 손절
+        assert _realized(g2, sig) == pytest.approx(-0.08)                    # SSOT 는 확정으로 본다
+        assert WP._realized_full_window(g2, sig) is None                     # 폴백에서는 미측정
+        g3 = g[g["Date"] <= days[-6]]                                        # 정확히 t+6 까지 — 창 완성
+        assert WP._realized_full_window(g3, sig) == _realized(g3, sig) is not None
+        assert WP._realized_full_window(g[g["Date"] <= days[-7]], sig) is None
+        assert WP._realized_full_window(g, "20260101") is None
+        assert WP._realized_full_window(None, sig) is None
+
+    def test_lane_track_ignores_truncated_churn_stop(self, tmp_path):
+        sig, cut = self._setup(tmp_path)
+        _lane_json(tmp_path, sig, ["200009", "200010"])
+        from services.pick_history import _realized
+        g = WP._with_date_col(pd.read_parquet(tmp_path / f"quiet_lane_ohlcv_{cut}.parquet").reset_index())
+        g["Date"] = pd.to_datetime(g["Date"])
+        assert _realized(g[g["종목코드"] == "200009"].reset_index(drop=True), sig) == pytest.approx(-0.08)
+        assert _realized(g[g["종목코드"] == "200010"].reset_index(drop=True), sig) is None
+        _, rows = QT.measure(str(tmp_path))
+        assert set(rows["src"]) == {"history"} and rows["ret"].isna().all()   # 수정 전: 200009 만 -8% 로 측정
+        s = QT.build(str(tmp_path))
+        assert s["picks_measured"] == 0 and s["days_measured"] == 0
+        assert s["picks_closed"] == 2 and s["picks_closed_measured"] == 0 and s["coverage_closed"] == 0.0
+
+    def test_shadow_build_ignores_truncated_churn_stop(self, tmp_path):
+        sig, _ = self._setup(tmp_path)
+        log = pd.DataFrame([{"ymd": sig, "variant": "ext_lowtv", "종목코드": "200009", "종목명": "A"},
+                            {"ymd": sig, "variant": "live", "종목코드": "100001", "종목명": "B"}])
+        log.to_parquet(tmp_path / SS.LOG_NAME, index=False)
+        s = SS.build(str(tmp_path))
+        assert s["variants"]["ext_lowtv"]["days"] == 0                       # 수정 전: 1일 · -8%
+        assert s["variants"]["live"]["days"] == 1
+
+
+class TestLaneVerdictCoverage:
+    """[v85 리뷰] 측정일 20일을 픽 1개짜리 날로 채우면 '표본 충족'이 아니다."""
+
+    @staticmethod
+    def _mk(tmp_path, n_measured: int):
+        idx = pd.bdate_range(end="2026-10-16", periods=80)
+        _write_main(tmp_path, "20261016", {f"1{i:05d}": _series("2026-10-16", 80, 10_000, 0.0, 300_000, i)
+                                           for i in range(5)})
+        days = [d.strftime("%Y%m%d") for d in idx if d.strftime("%Y%m%d") >= QT.LIVE_FROM][:QT.TARGET_DAYS]
+        assert len(days) == QT.TARGET_DAYS
+        for y in days:
+            codes = [f"1{i:05d}" for i in range(n_measured)] + [f"9{i:05d}" for i in range(5 - n_measured)]
+            _lane_json(tmp_path, y, codes)
+        return days
+
+    def test_one_of_five_is_not_sufficient(self, tmp_path):
+        self._mk(tmp_path, 1)
+        s = QT.build(str(tmp_path))
+        assert s["days_measured"] == QT.TARGET_DAYS and s["days_majority"] == 0
+        assert s["picks_closed"] == 5 * QT.TARGET_DAYS and s["picks_closed_measured"] == QT.TARGET_DAYS
+        assert s["coverage_closed"] == pytest.approx(0.2)
+        assert "판정 가능" not in s["verdict"] and s["verdict"].startswith("판정 보류")
+        assert all(d["n_measured"] == 1 and d["n_picks"] == 5 for d in s["daily"])
+        ln = QT.line(s)
+        assert f"측정 {QT.TARGET_DAYS}/{QT.TARGET_DAYS}일" in ln and "과반 측정일 0" in ln
+        assert f"창 닫힌 픽 {QT.TARGET_DAYS}/{5 * QT.TARGET_DAYS} 측정" in ln
+
+    def test_majority_measured_days_are_sufficient(self, tmp_path):
+        self._mk(tmp_path, 3)
+        s = QT.build(str(tmp_path))
+        assert s["days_majority"] == QT.TARGET_DAYS
+        assert "판정 가능" in s["verdict"] and "승격하지 않는다" in s["verdict"]
+
+    def test_line_tolerates_old_summary(self):
+        old = {"days_measured": 2, "target_days": 20, "days_total": 29, "avg_ret_pct_after_cost": -1.0,
+               "win_rate": 0.5, "stop_rate": 0.5, "positive_days": 1, "backtest_ref": {"ret_pct": 3.05}}
+        assert "과반" not in QT.line(old) and "측정 2/20일" in QT.line(old)
+
+
 class TestRealLane:
     def test_real_lane_rows_loaded(self, real_data_mirror):
         lanes = sorted(p for p in DATA.glob("quiet_lane_ohlcv_2*.parquet"))
@@ -197,6 +297,51 @@ class TestRealLane:
             pytest.skip("현재 데이터에 최신 레인 파일로 잴 수 있는 레인 전용 픽이 없다")
         s = QT.build(d)
         assert s["picks_measured"] >= n                                     # 수정 전: 레인 전용 픽 0개 측정
+
+
+    def test_real_history_rows_have_full_window(self, real_data_mirror):
+        """폴백으로 측정된 레인 픽은 전부 5일 창이 시리즈 안에 있다 — 날짜 파일에서 직접 확인."""
+        import re as _re
+        lanes = sorted(DATA.glob("quiet_lane_ohlcv_2*.parquet"))
+        mains = sorted(DATA.glob("ohlcv_cache_2*.parquet"))
+        if not lanes or not mains or not list(DATA.glob("quiet_breakout_2*.json")):
+            pytest.skip("실데이터 레인 없음")
+        d = real_data_mirror("ohlcv_cache_2*.parquet", "quiet_lane_ohlcv_2*.parquet", "quiet_breakout_2*.json")
+        days, rows = QT.measure(d)
+        if not days:
+            pytest.skip("레인 실전 기록 없음")
+        hist = rows[rows["src"] == "history"]
+        need = set(hist["종목코드"])
+        if not need:
+            pytest.skip("폴백 대상 픽 없음")
+        files = []
+        for pat, pri in (("ohlcv_cache_2*.parquet", 1), ("quiet_lane_ohlcv_2*.parquet", 0)):
+            for f in DATA.glob(pat):
+                m = _re.search(r"_(\d{8})\.parquet$", f.name)
+                if m and m.group(1) >= days[0]:
+                    files.append((m.group(1), pri, f))
+        dates = {}
+        for _, _, f in sorted(files, reverse=True):
+            left = need - set(dates)
+            if not left:
+                break
+            x = pd.read_parquet(f, columns=["종목코드"]).reset_index()
+            x = x.rename(columns={x.columns[0]: "Date"})
+            x["종목코드"] = x["종목코드"].astype(str).str.zfill(6)
+            for c, g in x[x["종목코드"].isin(left)].groupby("종목코드"):
+                dates[c] = sorted(pd.to_datetime(g["Date"]).dt.strftime("%Y%m%d"))
+        n_full = 0
+        for _, r in hist.iterrows():
+            dts = dates.get(r["종목코드"], [])
+            full = r["ymd"] in dts and len(dts) - 1 - dts.index(r["ymd"]) >= 6
+            n_full += int(full)
+            if pd.notna(r["ret"]):
+                assert full, (r["ymd"], r["종목코드"], r["ret"])               # 수정 전: 잘린 창의 -8% 7행
+        s = QT.build(d)
+        assert s["picks_measured_history"] == int(hist["ret"].notna().sum()) <= n_full
+        closed = rows[rows["closed"]]
+        assert s["picks_closed"] == len(closed)
+        assert s["picks_closed_measured"] == int(closed["ret"].notna().sum())
 
 
 # ══ 휴장일 팬텀 캐시 ═════════════════════════════════════════════════════════
@@ -266,6 +411,24 @@ class TestCollectorSaveSite:
         assert saved == [("20261008", 40)]
         collector.prepare_ohlcv_data(["000001", "000002"], "20250101", "20261013", "20261013")
         assert saved[-1] == ("20261013", 2)                                  # insufficient → 저장
+
+    def test_guard_import_failure_still_saves(self, col, monkeypatch):
+        """[v85 리뷰] 실험 모듈(ohlcv_store)이 import 단계에서 깨져도 배치는 캐시를 저장한다(v85 이전 동작)."""
+        collector, saved = col
+        monkeypatch.setattr(collector, "safe_ohlcv_by_date", self._fetch("2026-10-08"))
+        monkeypatch.setitem(sys.modules, "services.ohlcv_store", None)       # import → ImportError
+        collector.prepare_ohlcv_data([f"{i:06d}" for i in range(40)], "20250101", "20261009", "20261009")
+        assert saved == [("20261009", 40)]
+
+    def test_guard_exception_still_saves(self, col, monkeypatch):
+        collector, saved = col
+        monkeypatch.setattr(collector, "safe_ohlcv_by_date", self._fetch("2026-10-08"))
+
+        def boom(*a, **k):
+            raise RuntimeError("가드 고장")
+        monkeypatch.setattr(OS, "cache_write_allowed", boom)
+        collector.prepare_ohlcv_data([f"{i:06d}" for i in range(40)], "20250101", "20261009", "20261009")
+        assert saved == [("20261009", 40)]
 
     def test_guard_sits_at_the_save_site(self):
         src = (ROOT / "collector.py").read_text(encoding="utf-8")
