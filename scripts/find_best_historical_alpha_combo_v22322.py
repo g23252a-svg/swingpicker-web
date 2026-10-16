@@ -23,6 +23,11 @@ import numpy as np
 import pandas as pd
 
 OUT_DIR = "data"
+
+# [v85] 연도 무관 배치 파일 글롭 — 예전 '_2026*' 연도 고정 글롭은 2027년 파일을 못 봐 조용히 동결된다.
+#   정확히 8자리 날짜(YYYYMMDD)만 매칭: *_latest.csv·태그 파일(recommend_YYYYMMDD_tag.csv)은 제외.
+_YMD8_GLOB = "[0-9]" * 8
+
 ALPHA_MAX_PICKS = 3
 TP_PCT, SL_PCT, HORIZON = 8.0, 4.0, 5
 BASELINE_MARGIN = 3.0        # train에서 baseline 승률 + 이만큼 넘어야 후보
@@ -70,7 +75,7 @@ def _rule_mask(d: pd.DataFrame, timing, frg_pos, poc_max, struct_min, breadth_ma
 
 # ---------- OHLC 기반 내일진입 성과 ----------
 def _load_ohlc(data_dir: str):
-    cands = sorted(Path(data_dir).glob("ohlcv_cache_2026*.parquet"))
+    cands = sorted(Path(data_dir).glob(f"ohlcv_cache_{_YMD8_GLOB}.parquet"))
     if not cands:
         return None, None
     o = pd.read_parquet(cands[-1]).reset_index()
@@ -111,7 +116,7 @@ def _trade(oby, code, ymd, av_index):
 
 def _load_labeled(data_dir, dates, oby, av):
     rows = []
-    for f in sorted(Path(data_dir).glob("recommend_2026*.csv")):
+    for f in sorted(Path(data_dir).glob(f"recommend_{_YMD8_GLOB}.csv")):
         ymd = f.name[10:18]
         if ymd not in dates:
             continue
@@ -138,7 +143,7 @@ def discover_oos_rules(data_dir: str = OUT_DIR) -> dict:
     if oby is None:
         return {"rules": [], "reason": "no_ohlc"}
     avset = set(av)
-    recs = sorted(Path(data_dir).glob("recommend_2026*.csv"))
+    recs = sorted(Path(data_dir).glob(f"recommend_{_YMD8_GLOB}.csv"))
     meas = [f.name[10:18] for f in recs
             if f.name[10:18] in avset and av.index(f.name[10:18]) + HORIZON + 1 < len(av)]
     if len(meas) < 20:
@@ -285,7 +290,7 @@ def build(data_dir: str = OUT_DIR, out_dir: str = OUT_DIR) -> dict:
     base = Path(data_dir)
     latest = base / "recommend_latest.csv"
     if not latest.exists():
-        cands = sorted(base.glob("recommend_2026*.csv"))
+        cands = sorted(base.glob(f"recommend_{_YMD8_GLOB}.csv"))
         latest = cands[-1] if cands else None
     if latest is None:
         raise FileNotFoundError("recommend CSV 없음")

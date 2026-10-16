@@ -213,7 +213,7 @@ class TestRealBatch:
         import glob
         zeroed = 0
         checked = 0
-        for f in sorted(glob.glob(str(ROOT / "data" / "recommend_2026*.csv")))[-40:]:
+        for f in sorted(glob.glob(str(ROOT / "data" / ("recommend_" + "[0-9]" * 8 + ".csv"))))[-40:]:
             d = pd.read_csv(f, dtype={"종목코드": str}, low_memory=False)
             if not {"TOP_PICK", "ret_1d_%"} <= set(d.columns):
                 continue
