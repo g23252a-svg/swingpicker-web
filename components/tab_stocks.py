@@ -1695,14 +1695,23 @@ def _validation_scorecard_title(bt: dict, fresh: Optional[dict] = None) -> str:
             f"{days}개 배치{stale_tag}{tail}")
 
 
+#: official_ssot 왕복 비용(%) — backtest_validation.COST_PCT 와 같은 값 (mean_net_pct 없는 판본 대비).
+_SSOT_COST_PCT = 0.22
+
+
 def _headline_metrics(bt: dict) -> dict:
     """[v85] 종목탭 헤드라인 숫자의 단일 출처 (회원 카드·보수 접근 뱃지·안내문·성적표).
 
     기대값(ev)은 official_ssot 평균(픽 이력 SSOT: 다음날 시가 진입 · -8% 손절 ·
-    5일 종가)을 우선 쓴다 — 오늘탭(alpha_live_report)·픽 이력과 **같은 정의**라야
-    같은 공식픽에 탭마다 다른 숫자가 나오지 않는다. SSOT가 없는 옛 JSON에서만
-    signal_top1(지정가 모델) → daily_top1 순으로 대체한다.
-    1차 목표 도달률(tp1_rate)은 TP 사다리가 있는 지정가 모델에만 있으므로 그대로.
+    진입 후 5거래일 종가)을 우선 쓴다 — 픽 이력과 **같은 정의**라야 같은 공식픽에
+    탭마다 다른 숫자가 나오지 않는다. (오늘탭 알파 실측 줄은 t+5 종가 청산이라 다르다.)
+    SSOT가 없는 옛 JSON에서만 signal_top1(지정가 모델) → daily_top1 순으로 대체한다.
+
+    [v85 통합 리뷰] ev는 언제나 **비용 차감(net)** — 옛 지정가 모델 ev_net_pct와 같은
+    기준이어야 '보수 접근' 뱃지·회원 카드 게이트(ev<0)가 기준 전환만으로 꺼지지 않는다.
+    '양호' 판정의 품질 조건(quality_ok)도 ev와 **같은 모델**에서 가져온다:
+    SSOT 기준이면 SSOT 승률 ≥ 50%, 모델 기준이면 1차 목표 도달률 ≥ 35%.
+    1차 목표 도달률(tp1_rate)은 TP 사다리가 있는 지정가 모델에만 있어 표시용으로 남긴다.
     """
     bt = bt or {}
     ssot = bt.get("official_ssot") or {}
@@ -1717,15 +1726,27 @@ def _headline_metrics(bt: dict) -> dict:
         n_measured = int(ssot.get("n_measured") or 0)
     except (TypeError, ValueError):
         n_measured = 0
+    ssot_win = None
     if n_measured > 0 and ssot.get("mean_pct") is not None:
-        ev = float(ssot["mean_pct"])
+        if ssot.get("mean_net_pct") is not None:
+            ev = float(ssot["mean_net_pct"])
+        else:                                   # mean_net_pct 이전 판본 — 같은 비용 차감
+            ev = float(ssot["mean_pct"]) - float(ssot.get("cost_pct", _SSOT_COST_PCT) or 0)
         basis = "official_ssot"
+        try:
+            ssot_win = float(ssot.get("win_rate")) if ssot.get("win_rate") is not None else None
+        except (TypeError, ValueError):
+            ssot_win = None
+        quality_ok = ssot_win is not None and ssot_win >= 0.50
     else:
         ev = float(ev_model or 0)
         basis = "signal_top1" if sig else ("daily_top1" if d1 else "none")
+        quality_ok = float(tp1 or 0) >= 0.35
     return {
         "ev": ev,
         "tp1_rate": float(tp1 or 0),
+        "ssot_win_rate": ssot_win,
+        "quality_ok": bool(quality_ok),
         "cap_ret": (cap1.get("total_return_pct", 0) or 0) if cap1 else 0,
         "cap_n": (cap1.get("n_trades_filled", 0) or 0) if cap1 else 0,
         "basis": basis,
@@ -1757,6 +1778,7 @@ def _resolve_member_summary_action(
     struct_delta_ev: float = 0.0,
     extra_risk_signals: list[str] | None = None,
     official_decision: dict | None = None,
+    quality_ok: bool | None = None,
 ) -> dict:
     """[v22.3.18] 회원 요약 카드의 최종 행동 문구를 결정한다.
 
@@ -1803,7 +1825,9 @@ def _resolve_member_summary_action(
             "bg_class": "bg-amber-900/20 border-amber-500/40",
         }
 
-    if ev > 0 and tp1_rate >= 0.35 and not shadow_warning:
+    # [v85] quality_ok = ev와 같은 모델의 품질 조건 (_headline_metrics). 미지정이면 옛 규칙.
+    _quality = (tp1_rate >= 0.35) if quality_ok is None else bool(quality_ok)
+    if ev > 0 and _quality and not shadow_warning:
         return {
             "status_icon": "✅",
             "status_txt": "추천 신뢰 양호",
@@ -1973,6 +1997,7 @@ def _render_member_summary(capital_top1: dict, signal_top1: dict,
         struct_delta_ev=struct_delta_ev,
         extra_risk_signals=extra_risk_signals,
         official_decision=official_decision,
+        quality_ok=hm["quality_ok"],
     )
     status_icon = _summary_action["status_icon"]
     status_txt = _summary_action["status_txt"]
@@ -2019,10 +2044,13 @@ def _render_member_summary(capital_top1: dict, signal_top1: dict,
         with ui.row().classes("w-full gap-2 flex-wrap"):
             _member_stat_box("1차 목표 도달률", f"{tp1_rate*100:.1f}%",
                              good=tp1_rate >= 0.35,
-                             bad=tp1_rate < 0.20)
+                             bad=tp1_rate < 0.20,
+                             sub=("지정가 모델(3일 체결·10일)"
+                                  if hm["basis"] == "official_ssot" else ""))
             _member_stat_box("기대값", f"{ev:+.2f}%",
                              good=ev > 0, bad=ev < 0,
-                             sub=(f"공식 매수 {hm['n_measured']}건 · 다음날 시가→5일"
+                             sub=(f"공식 매수 {hm['n_measured']}건 · 다음날 시가→5거래일 · "
+                                  f"비용 {_SSOT_COST_PCT}% 차감"
                                   if hm["basis"] == "official_ssot" else ""))
             if cap_n > 0:
                 _member_stat_box("실전 운용 결과", f"{cap_ret:+.2f}%",
@@ -2091,7 +2119,7 @@ def _render_candidate_context_notice(official_decision: dict | None = None) -> N
         )
         bg_class = "bg-amber-900/15 border-amber-500/30"
         text_class = "text-amber-200"
-    elif ev > 0 and tp1_rate >= 0.35:
+    elif ev > 0 and hm["quality_ok"]:
         icon = "📌"
         msg = (
             "오늘의 후보 — 최근 추천이 양호한 성과를 보이고 있습니다. "
@@ -3768,7 +3796,7 @@ def _render_validation_scorecard(bt: dict, fresh: Optional[dict] = None) -> None
     사람 말로 다시 쓴다. 숫자는 하나도 빼지 않고 번역만 한다.
 
     [v85] 헤드라인(Q1)은 official_ssot — 배치가 기록한 공식 매수를 픽 이력과 같은
-    정의(다음날 시가 · -8% 손절 · 5일)로 채점한 숫자. 지정가 모델(signal_top1)은
+    정의(다음날 시가 · -8% 손절 · 진입 후 5거래일)로 채점한 숫자. 지정가 모델(signal_top1)은
     참고 줄로 내린다. 성적표가 멈췄으면(freshness.stale 또는 옛 JSON의 신호 공백)
     맨 위에 호박색 경고를 띄운다 — 0709에 멈춘 숫자를 '현재'처럼 보이지 않게.
     fresh를 안 주면 data/의 recommend CSV 파일명으로 직접 판정한다.
@@ -3825,6 +3853,9 @@ def _render_validation_scorecard(bt: dict, fresh: Optional[dict] = None) -> None
         n_off = int(ssot.get("n_official", n_measured) or n_measured)
         n_pend = int(ssot.get("n_pending", 0) or 0)
         n_unm = int(ssot.get("n_unmeasurable", 0) or 0)
+        n_trunc = int(ssot.get("n_truncated", 0) or 0)
+        _net = ssot.get("mean_net_pct")
+        _net = float(_net) if _net is not None else mean - _SSOT_COST_PCT
         _judge = "아직 마이너스 구간입니다" if mean <= 0 else "플러스 구간입니다"
         lines = [
             f"배치가 기록한 공식 매수 <b>{n_off}번</b> 중 결과가 나온 <b>{n_measured}번</b>의 "
@@ -3833,9 +3864,12 @@ def _render_validation_scorecard(bt: dict, fresh: Optional[dict] = None) -> None
             + f" — {_judge}.",
             f"플러스로 끝난 비율 <b>{win:.0f}%</b> · -8% 손절에 걸린 비율 <b>{stp:.0f}%</b>"
             + (f" · 측정중 {n_pend}건" if n_pend else "")
-            + (f" · 가격 없음 {n_unm}건" if n_unm else "") + ".",
-            "기준: 다음날 시가에 사서 -8% 손절 · 5일째 종가 청산 "
-            "(픽 이력·오늘탭과 같은 정의, 수수료 미차감).",
+            + (f" · 가격 없음 {n_unm}건" if n_unm else "")
+            + (f" · 시세가 중간에 끊겨 제외 {n_trunc}건" if n_trunc else "") + ".",
+            f"기준: 다음날 시가에 사서 -8% 손절 · 진입 후 5거래일째 종가 청산 "
+            f"(픽 이력과 같은 정의 · 수수료 미차감, 왕복 비용 {_SSOT_COST_PCT}% 빼면 "
+            f"<b>{_net:+.2f}%</b>). 오늘탭 '알파 실측' 줄은 5거래일째가 아닌 4거래일째 "
+            "종가·일평균으로 재서 숫자가 조금 다를 수 있습니다.",
         ]
         if model_line:
             lines.append(model_line)
@@ -3880,23 +3914,30 @@ def _render_validation_scorecard(bt: dict, fresh: Optional[dict] = None) -> None
 
     # ── Q3. 3종목 분산이었다면 ──
     # [v85] 공식 매수는 하루 최대 1종목 — 계약 기준에선 '3종목 분산'이 아니라
-    #       '공식 매수를 최대 3개까지 겹쳐 보유하며 전부 따른 경우'다.
+    #       '공식 매수를 최대 3개까지 겹쳐 보유하며 따른 경우'다. 슬롯이 차 있거나
+    #       이미 보유한 종목이면 그 신호는 건너뛴다 — '빠짐없이'가 아니다 (v85 통합 리뷰).
     if capital_stats and capital_stats.get("n_trades_filled", 0) > 0:
         ret3 = capital_stats.get("total_return_pct", 0)
         mdd3 = capital_stats.get("max_drawdown_pct", 0)
         n3 = capital_stats["n_trades_filled"]
+        n_skip3 = (int(capital_stats.get("n_skipped_slot_full", 0) or 0)
+                   + int(capital_stats.get("n_skipped_duplicate", 0) or 0))
         extra = ""
         if port_stats and port_stats.get("n_days", 0) >= 5:
             pos = port_stats.get("positive_rate", 0) * 100
-            extra = (f" 매수한 날 기준으로 <b>{pos:.0f}%</b>가 플러스로 끝났습니다."
+            extra = (f" 체결된 공식 매수 {int(port_stats.get('n_days', 0))}일로 보면 "
+                     f"<b>{pos:.0f}%</b>가 플러스로 끝났습니다 (시뮬에서 건너뛴 날 포함)."
                      if is_contract else
                      f" 하루 단위로는 <b>{pos:.0f}%</b>의 날이 플러스로 마감했습니다.")
+        _skip_txt = (f" · 자리가 차 있거나 이미 보유해 {n_skip3}건 건너뜀"
+                     if is_contract and n_skip3 else "")
         blocks.append((
             "#10B981" if ret3 > 0 else "#EF4444",
-            ("공식 매수를 빠짐없이(최대 3종목 동시 보유) 따랐다면?" if is_contract
+            ("공식 매수를 최대 3종목까지 겹쳐 보유하며 따랐다면?" if is_contract
              else "3종목에 나눠 담았다면?"),
             [
-                f"기간 수익률 <b>{ret3:+.1f}%</b> ({n3}건 · 최대 하락 <b>-{abs(mdd3):.0f}%</b>).{extra}",
+                f"기간 수익률 <b>{ret3:+.1f}%</b> ({n3}건 체결{_skip_txt} · "
+                f"최대 하락 <b>-{abs(mdd3):.0f}%</b>).{extra}",
             ],
         ))
 

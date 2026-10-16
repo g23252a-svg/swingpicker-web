@@ -2594,12 +2594,16 @@ LEGACY_FROZEN_BATCHES = 20
 
 def compute_freshness(days: list, trades: list,
                       calendar: Optional[np.ndarray] = None,
-                      n_nodata: int = 0) -> dict:
+                      n_nodata: int = 0,
+                      ssot_price_last: Optional[str] = None) -> dict:
     """[v85] 성적표 신선도 — '이 숫자가 지금도 갱신되고 있나'를 리포트에 박는다.
 
     days     : load_all_days 결과 (전체 배치)
     trades   : contract 모드 all_trades_top1 (PENDING·NOT_FILLED·NODATA 포함)
     calendar : OHLC 거래일 달력 (가격 갱신 정지 감지용)
+    ssot_price_last : official_ssot가 채점에 쓴 가격(ohlcv_union_hl)의 마지막 거래일.
+               헤드라인은 이 가격으로 채점하므로, 날짜별 캐시는 최신인데 합집합만
+               멈춘 경우도 ④로 잡는다 (v85 통합 리뷰 — 캐시 달력만 보면 못 잡았다).
 
     공식픽 일수는 백테스트 로그가 아니라 CSV에서 **독립적으로** 다시 센다 —
     선택기가 고장 나도(0713 이후 라벨 경로처럼) 그 고장이 여기서 드러나야 한다.
@@ -2654,6 +2658,8 @@ def compute_freshness(days: list, trades: list,
     if calendar is not None and len(calendar):
         price_last = pd.Timestamp(calendar[-1]).strftime("%Y%m%d")
         price_lag = sum(1 for d in batch_dates if d > price_last)
+    ssot_lag = (sum(1 for d in batch_dates if d > str(ssot_price_last))
+                if ssot_price_last else 0)
 
     reasons = []
     if unselected:
@@ -2666,6 +2672,9 @@ def compute_freshness(days: list, trades: list,
         reasons.append(f"최근 {trailing_undet}개 배치에 PRODUCTION_BUY 기록 없음 (판정 불가)")
     if price_lag > STALE_MAX_PRICE_LAG_BATCHES:
         reasons.append(f"가격 데이터가 {_ymd_iso(price_last)} 이후 {price_lag}개 배치째 갱신 안 됨")
+    if ssot_lag > STALE_MAX_PRICE_LAG_BATCHES:
+        reasons.append(f"헤드라인 채점 가격(합집합)이 {_ymd_iso(ssot_price_last)} 이후 "
+                       f"{ssot_lag}개 배치째 갱신 안 됨")
 
     return {
         "basis": "recorded_production_buy",
@@ -2689,11 +2698,13 @@ def compute_freshness(days: list, trades: list,
         "trailing_undeterminable_batches": trailing_undet,
         "price_last_date": price_last,
         "price_lag_batches": price_lag,
+        "ssot_price_last_date": ssot_price_last,
+        "ssot_price_lag_batches": ssot_lag,
         "stale": bool(reasons),
         "stale_reason": " · ".join(reasons),
         "stale_rule": (
             f"공식픽 미반영일>0 · 마지막 신호가 최신 공식픽보다 {STALE_MAX_LAG_BATCHES}배치 초과 지연 · "
-            f"최근 배치 판정 불가 · 가격 {STALE_MAX_PRICE_LAG_BATCHES}배치 초과 미갱신"
+            f"최근 배치 판정 불가 · 가격(캐시·헤드라인 합집합) {STALE_MAX_PRICE_LAG_BATCHES}배치 초과 미갱신"
         ),
     }
 
@@ -2708,11 +2719,17 @@ def compute_official_ssot(picks_log: list, trades: list,
 
     진입 t+1 시가 · 장중 저가 -8% 손절 · t+1+5 종가 청산 · 거래정지일 제외 ·
     비용 미차감. 픽 이력(오늘탭 재추천 줄)·winner_profile·selection_shadow가
-    같은 함수를 쓰므로, 종목탭 헤드라인을 이 블록으로 맞추면 탭 간 숫자가 같다.
+    같은 함수를 쓰므로, 종목탭 헤드라인을 이 블록으로 맞추면 픽 이력과 숫자가 같다.
+    (오늘탭 알파 실측 줄 alpha_live_report 는 t+5 종가 청산이라 다르다.)
 
     · measured     : 결과 확정 (손절 터짐 또는 5일 창 완료)
     · pending      : 창이 아직 안 참 (신호 뒤 시장 봉 < 1+HOLD_DAYS)
     · unmeasurable : 창은 지났는데 가격이 없음 (신호일 봉 없음·정지 등)
+    · truncated    : 시장은 창 끝까지 왔는데 이 종목 시계열이 그 전에 끊김
+                     (~600종목 캐시 유니버스 이탈). 손절이 창 안에서 먼저 터졌어도
+                     **제외**한다 — 끊긴 픽 중 손절만 측정되고 나머지는 영영 미측정이면
+                     헤드라인이 손실 쪽으로 기운다 (winner_profile._realized_full_window와
+                     같은 검열 편향, v85 통합 리뷰). 손절이었던 수는 n_truncated_stop.
     """
     from services.pick_history import HOLD_DAYS, STOP_PCT, _realized
 
@@ -2738,11 +2755,30 @@ def compute_official_ssot(picks_log: list, trades: list,
         by_code = {c: g for c, g in sub.groupby("종목코드")}
         calendar = np.unique(pd.to_datetime(px["Date"]).to_numpy(dtype="datetime64[ns]"))
 
+    def _truncated(g: pd.DataFrame, ymd: str) -> bool:
+        """시장 달력은 창 끝(신호 +1+HOLD_DAYS 세션)을 지났는데 종목 시계열이 그 전에 끝남."""
+        if g is None or not len(calendar):
+            return False
+        sig = np.datetime64(pd.Timestamp(ymd))
+        pos = int(np.searchsorted(calendar, sig))
+        if pos >= len(calendar) or calendar[pos] != sig:
+            return False
+        need = pos + 1 + HOLD_DAYS
+        if need >= len(calendar):
+            return False                 # 시장도 아직 창 안 — pending 경로
+        return np.datetime64(pd.Timestamp(g["Date"].max())) < calendar[need]
+
     rows = []
+    n_trunc_stop = 0
+    stop_line = STOP_PCT * 100.0 + 1e-6
     for ymd, code in picks:
         g = by_code.get(code)
         ret = _realized(g, ymd) if g is not None else None
-        if ret is not None:
+        if _truncated(g, ymd):
+            status = "truncated"
+            if ret is not None and ret * 100.0 <= stop_line:
+                n_trunc_stop += 1
+        elif ret is not None:
             status = "measured"
         else:
             n_after = _market_bars_after(calendar, pd.Timestamp(ymd)) if len(calendar) else 0
@@ -2755,13 +2791,13 @@ def compute_official_ssot(picks_log: list, trades: list,
 
     vals = [r["ret_pct"] for r in rows if r["status"] == "measured"]
     n = len(vals)
-    stop_line = STOP_PCT * 100.0 + 1e-6
     return {
         "label": "공식 매수 실현 성과 (픽 이력 SSOT)",
         "definition": (
             f"기록된 PRODUCTION_BUY 픽 · 진입 t+1 시가 · 장중 저가 {STOP_PCT*100:.0f}% 손절 · "
-            f"t+1+{HOLD_DAYS} 종가 청산 · 거래정지일 제외 · 비용 미차감 "
-            "(services.pick_history._realized)"
+            f"t+1+{HOLD_DAYS} 종가 청산(진입 후 {HOLD_DAYS}거래일) · 거래정지일 제외 · "
+            "창 도중 시계열이 끊긴 픽 제외 · mean_pct 비용 미차감 / mean_net_pct 왕복 "
+            f"{COST_PCT}% 차감 (services.pick_history._realized)"
         ),
         "basis": "recorded_production_buy",
         "hold_days": HOLD_DAYS,
@@ -2770,7 +2806,11 @@ def compute_official_ssot(picks_log: list, trades: list,
         "n_measured": n,
         "n_pending": sum(1 for r in rows if r["status"] == "pending"),
         "n_unmeasurable": sum(1 for r in rows if r["status"] == "unmeasurable"),
+        "n_truncated": sum(1 for r in rows if r["status"] == "truncated"),
+        "n_truncated_stop": n_trunc_stop,
         "mean_pct": round(float(np.mean(vals)), 2) if n else None,
+        "cost_pct": COST_PCT,
+        "mean_net_pct": round(float(np.mean(vals)) - COST_PCT, 2) if n else None,
         "median_pct": round(float(np.median(vals)), 2) if n else None,
         "win_rate": round(sum(1 for v in vals if v > 0) / n, 4) if n else None,
         "stop_rate": round(sum(1 for v in vals if v <= stop_line) / n, 4) if n else None,
@@ -2989,7 +3029,9 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     # [v85] 신선도 — 백테스트가 실제 공식픽을 따라가고 있는지
     out["freshness"] = compute_freshness(days, bt1["trades"],
                                          calendar=calendar,
-                                         n_nodata=bt1.get("n_nodata", 0))
+                                         n_nodata=bt1.get("n_nodata", 0),
+                                         ssot_price_last=(out.get("official_ssot") or {})
+                                         .get("price_last_date"))
     fr = out["freshness"]
     out["methodology"]["contract_date_range"] = [
         _ymd_iso(fr.get("first_determinable_date")), _ymd_iso(fr.get("latest_batch_date"))]
@@ -2997,14 +3039,17 @@ def build_report(days: list, ohlc_df: pd.DataFrame, tune: bool = False,
     out["methodology"]["undeterminable_days"] = fr.get("undeterminable_days", 0)
 
     # [v85] 헤드라인 기준 — UI(종목탭 성적표·회원 카드)는 official_ssot를 우선 쓴다.
-    #   이유: 같은 공식픽인데 오늘탭(alpha_live_report)·픽 이력은 t+1 시가/−8%/5일로
+    #   이유: 픽 이력(services.pick_history)은 t+1 시가/−8%/진입 후 5거래일 종가로
     #   채점한다. 지정가 모델(signal_top1)은 3일 체결창·CSV 손절·TP1·10일이라
-    #   숫자가 다르다(실측 -4.2% vs -2.5%) — 헤드라인을 SSOT로 맞춰 탭 간 모순 제거.
+    #   숫자가 다르다(실측 -4.2% vs -2.5%) — 헤드라인을 픽 이력 정의로 맞춘다.
+    #   주의: 오늘탭 알파 실측 줄(alpha_live_report, h=5)은 t+5 종가 청산·가격
+    #   스냅샷·일평균이라 같은 픽이어도 숫자가 다르다 — '오늘탭과 같은 정의'가 아니다.
     #   signal_top1·capital_portfolio*는 보조 모델로 그대로 유지 (1차 목표 도달률·자본 시뮬).
     out["headline_basis"] = {
         "block": "official_ssot",
         "fallback": "signal_top1",
-        "reason": "픽 이력·오늘탭과 같은 실현 정의(t+1 시가 · -8% 손절 · 5일) — 탭 간 숫자 일치",
+        "reason": ("픽 이력과 같은 실현 정의(t+1 시가 · -8% 손절 · 진입 후 5거래일 종가). "
+                   "오늘탭 알파 실측 줄(t+5 종가·가격 스냅샷·일평균)과는 정의가 달라 숫자가 다를 수 있음"),
     }
 
     if tune:
@@ -3262,6 +3307,7 @@ def build_report_outputs(report: dict, today: str) -> tuple:
                 "max_drawdown_pct": cap_sim["max_drawdown_pct"],
                 "n_trades_filled": cap_sim["n_filled"],
                 "n_skipped_duplicate": cap_sim["n_skipped_duplicate"],
+                "n_skipped_slot_full": cap_sim.get("n_skipped_slot_full", 0),
                 "n_skipped_not_filled": cap_sim["n_skipped_not_filled"],
                 "n_skipped_pending": cap_sim.get("n_skipped_pending", 0),
                 "positive_day_rate": cap_sim["positive_day_rate"],

@@ -1034,7 +1034,7 @@ def _official_card_basis_lines(j: dict | None, bt: dict | None) -> tuple:
     """[v85] 공식 신규매수 카드의 '채점 기준' 문구 (순수 함수 — 테스트용).
 
     카드 숫자는 backtest trades 파일(지정가 모델)을 조인한 값이고, 종목탭 헤드라인은
-    같은 공식픽을 official_ssot(픽 이력 정의: 다음날 시가 · -8% 손절 · 5일)로 채점한다.
+    같은 공식픽을 official_ssot(픽 이력 정의: 다음날 시가 · -8% 손절 · 진입 후 5거래일)로 채점한다.
     정의가 달라 같은 픽에 승률·평균이 다르게 나오므로(실측 14% vs 34%) 카드에 기준을
     명시하고, backtest_validation_latest.json에 SSOT가 있으면 나란히 보여준다.
 
@@ -1042,8 +1042,14 @@ def _official_card_basis_lines(j: dict | None, bt: dict | None) -> tuple:
     """
     j = j if isinstance(j, dict) else {}
     rm = j.get("result_model") if isinstance(j.get("result_model"), dict) else {}
+    summ = j.get("summary") if isinstance(j.get("summary"), dict) else {}
     if rm.get("label") and rm.get("definition"):
         model_line = f"채점 기준: {rm['label']} — {rm['definition']}"
+    elif j and "official_buy_not_filled" not in summ and "official_buy_pending" not in summ:
+        # [v85 통합 리뷰] v85 이전 스크립트가 만든 JSON — 미체결을 0.0으로 세고 가장 이른
+        #   스냅샷을 채택했다. 그 숫자 위에 v85 채점 정의를 붙이면 거짓 설명이 된다.
+        model_line = ("채점 기준: 이전 집계 방식(미체결 0.0% 포함 · 가장 이른 스냅샷) — "
+                      "다음 야간 배치에서 새 기준(미체결·측정중 제외, 성숙한 최신 기록)으로 다시 계산됩니다")
     else:
         model_line = f"채점 기준: {_LIMIT_FILL_MODEL_DEFAULT}"
 
@@ -1062,7 +1068,7 @@ def _official_card_basis_lines(j: dict | None, bt: dict | None) -> tuple:
         _logger.warning("official_ssot 비교 문구 생성 실패: %s", exc)
         return model_line, None
     ssot_line = (
-        f"같은 공식 매수를 종목탭 헤드라인 기준(다음날 시가 진입 · -8% 손절 · 5일)으로 "
+        f"같은 공식 매수를 종목탭 헤드라인 기준(다음날 시가 진입 · -8% 손절 · 진입 후 5거래일)으로 "
         f"채점하면 {n_measured}건 평균 {mean:+.2f}%{win_txt} — 채점 정의가 달라 숫자가 다릅니다"
     )
     return model_line, ssot_line
@@ -2380,7 +2386,8 @@ def _render_validation_basis_card() -> None:
             #   예전 문구('Top1 실전 검증'·'데이터 준비 중')는 동결된 라벨 전략 시절 것.
             ui.label(
                 "• 종목탭 성적표 — 배치가 기록한 공식 매수(PRODUCTION_BUY=1)만 채점. "
-                "헤드라인은 픽 이력과 같은 정의(다음날 시가 진입 · -8% 손절 · 5일), "
+                "헤드라인은 픽 이력과 같은 정의(다음날 시가 진입 · -8% 손절 · 진입 후 5거래일 · "
+                "비용 차감 수치 병기), "
                 "보조로 제시가 지정가 모델(3일 체결창 · 10영업일)"
             ).classes("text-xs text-gray-300")
             ui.label(

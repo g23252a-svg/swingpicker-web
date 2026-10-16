@@ -494,7 +494,9 @@ def test_title_and_freshness_new_json():
 def test_headline_uses_official_ssot_then_falls_back():
     import components.tab_stocks as ts
     hm = ts._headline_metrics(_NEW_JSON)
-    assert hm["basis"] == "official_ssot" and hm["ev"] == -2.51 and hm["tp1_rate"] == 0.029
+    # [v85 통합 리뷰] ev는 비용 차감(net) — mean_net_pct 없는 판본은 0.22% 빼서 맞춘다
+    assert hm["basis"] == "official_ssot" and hm["ev"] == pytest.approx(-2.73)
+    assert hm["tp1_rate"] == 0.029 and hm["quality_ok"] is False      # SSOT 승률 34% < 50%
     hm_old = ts._headline_metrics(_OLD_JSON)
     assert hm_old["basis"] == "signal_top1" and hm_old["ev"] == -0.46
     assert ts._headline_metrics({})["basis"] == "none"
@@ -801,7 +803,11 @@ def test_tab_perf_official_card_labels_model_and_shows_ssot(monkeypatch):
     assert "38건" in ssot and "-2.51%" in ssot and "34.2%" in ssot
     # 옛 official JSON(result_model 없음)·옛 backtest JSON(official_ssot 없음)
     model0, ssot0 = tp._official_card_basis_lines({"summary": {}}, {})
-    assert "지정가 모델" in model0 and ssot0 is None
+    # [v85 통합 리뷰] v85 이전 스크립트 JSON(not_filled/pending 키 없음)에 새 정의를 붙이지 않는다
+    assert "이전 집계 방식" in model0 and "지정가 모델" not in model0 and ssot0 is None
+    model1, _ = tp._official_card_basis_lines(
+        {"summary": {"official_buy_not_filled": 3, "official_buy_pending": 0}}, {})
+    assert "지정가 모델" in model1                    # 새 형식인데 result_model만 빠짐 → 기본 정의
     assert tp._official_card_basis_lines(None, None)[1] is None
     assert tp._official_card_basis_lines(j, {"official_ssot": {"n_measured": 0}})[1] is None
     # 스텁 ui로 카드 렌더 (새/옛/빈 JSON 모두 예외 없이)
@@ -809,3 +815,82 @@ def test_tab_perf_official_card_labels_model_and_shows_ssot(monkeypatch):
         monkeypatch.setattr(tp, "_load_official_buy_validation", lambda jj=jj: jj)
         monkeypatch.setattr(tp, "_load_backtest_validation", lambda bb=bb: bb)
         tp._render_official_buy_validation_card()
+
+
+# ─────────────────── 10. v85 통합 리뷰 후속 ───────────────────
+
+def test_official_ssot_excludes_truncated_series_both_stop_and_nonstop():
+    """유니버스 이탈로 창 도중 끊긴 시계열 — 손절만 측정되는 검열 편향을 막는다."""
+    d = _bdays("2026-08-03", 14)
+    full = [(x, 100, 101, 99, 100) for x in d]                      # 시장 달력 담당
+    cut_stop = [(x, 100, 101, 91, 95) if i == 1 else (x, 100, 101, 99, 100)
+                for i, x in enumerate(d[:3])]                       # t+1 손절 후 t+2에 끊김
+    cut_flat = [(x, 100, 101, 99, 100) for x in d[:4]]              # 무손절, t+3에 끊김
+    px = pd.concat([_ohlc("000009", full), _ohlc("000001", cut_stop),
+                    _ohlc("000002", cut_flat)], ignore_index=True)
+    log = [{"date": "20260803", "codes": ["000001"], "day_status": "pick"},
+           {"date": "20260804", "codes": ["000002"], "day_status": "pick"},
+           {"date": "20260805", "codes": ["000009"], "day_status": "pick"}]
+    out = bv.compute_official_ssot(log, [], px)
+    st = {p["code"]: p["status"] for p in out["picks"]}
+    assert st == {"000001": "truncated", "000002": "truncated", "000009": "measured"}
+    assert out["n_truncated"] == 2 and out["n_truncated_stop"] == 1
+    assert out["n_measured"] == 1 and out["stop_rate"] == 0.0         # 끊긴 손절은 통계 밖
+    assert out["mean_net_pct"] == pytest.approx(out["mean_pct"] - bv.COST_PCT)
+    # 시장도 아직 창 안이면 truncated가 아니라 pending
+    short = pd.concat([_ohlc("000009", full[:4]), _ohlc("000002", cut_flat[:3])], ignore_index=True)
+    o2 = bv.compute_official_ssot([log[1]], [], short)
+    assert o2["picks"][0]["status"] == "pending" and o2["n_truncated"] == 0
+
+
+def test_freshness_flags_stale_union_prices_used_by_headline():
+    """날짜별 캐시는 최신인데 헤드라인 채점 가격(합집합)만 멈춘 경우도 stale."""
+    days = _contract_days()
+    batch_dates = [d[0] for d in days[1:]]
+    fr = bv.compute_freshness(days, [], ssot_price_last=batch_dates[-1])
+    assert fr["ssot_price_lag_batches"] == 0
+    assert "합집합" not in fr["stale_reason"]
+    old = batch_dates[-(bv.STALE_MAX_PRICE_LAG_BATCHES + 2)]
+    fr2 = bv.compute_freshness(days, [], ssot_price_last=old)
+    assert fr2["stale"] is True and "헤드라인 채점 가격(합집합)" in fr2["stale_reason"]
+    assert fr2["ssot_price_lag_batches"] == bv.STALE_MAX_PRICE_LAG_BATCHES + 1
+
+
+def test_member_good_status_uses_same_model_quality():
+    import components.tab_stocks as ts
+    kw = dict(cap_ret=1.0, official_decision={"official_count": 1})
+    # ev>0인데 품질 조건(같은 모델) 미달 → '양호' 아님 (옛 지정가 tp1_rate로 섞어 판정하지 않음)
+    a = ts._resolve_member_summary_action(ev=0.5, tp1_rate=0.9, quality_ok=False, **kw)
+    assert a["status_txt"] != "추천 신뢰 양호"
+    b = ts._resolve_member_summary_action(ev=0.5, tp1_rate=0.0, quality_ok=True, **kw)
+    assert b["status_txt"] == "추천 신뢰 양호"
+    # quality_ok 미지정 = 옛 규칙(tp1_rate ≥ 0.35) 그대로
+    c = ts._resolve_member_summary_action(ev=0.5, tp1_rate=0.4, **kw)
+    assert c["status_txt"] == "추천 신뢰 양호"
+    hm = ts._headline_metrics({"official_ssot": {"n_measured": 10, "mean_pct": 1.0,
+                                                 "mean_net_pct": 0.78, "win_rate": 0.6}})
+    assert hm["ev"] == 0.78 and hm["quality_ok"] is True
+
+
+def test_scorecard_copy_matches_simulation_and_definitions(monkeypatch):
+    import components.tab_stocks as ts
+    seen = []
+    real_html = ts.ui.html
+
+    def _cap(content="", *a, **k):
+        seen.append(str(content))
+        return real_html(content, *a, **k)
+
+    monkeypatch.setattr(ts.ui, "html", _cap)
+    bt = dict(_NEW_JSON,
+              official_ssot=dict(_NEW_JSON["official_ssot"], mean_net_pct=-2.73, n_truncated=1),
+              capital_portfolio={"n_trades_filled": 29, "total_return_pct": -35.76,
+                                 "max_drawdown_pct": 35.76, "n_skipped_slot_full": 5,
+                                 "n_skipped_duplicate": 1},
+              daily_portfolio_summary={"n_days": 35, "positive_rate": 0.1429})
+    ts._render_validation_scorecard(bt)
+    txt = " ".join(seen)
+    assert "빠짐없이" not in txt and "6건 건너뜀" in txt and "29건 체결" in txt
+    assert "체결된 공식 매수 35일" in txt
+    assert "오늘탭과 같은 정의" not in txt and "진입 후 5거래일째" in txt
+    assert "-2.73%" in txt and "끊겨 제외 1건" in txt
