@@ -384,9 +384,20 @@ class TestCollectorSaveSite:
     """collector.prepare_ohlcv_data 저장 지점 — 네트워크 없이 수집 함수를 바꿔 끼운다."""
 
     @pytest.fixture
-    def col(self, monkeypatch):
+    def live_os(self):
+        """collector 가 호출 시점에 import 하는 바로 그 모듈 객체.
+
+        전체 스위트에서는 다른 테스트가 sys.modules 의 프로젝트 모듈을 지우기도 해서(raw del),
+        이 파일 맨 위의 OS 가 collector 가 다시 import 하는 모듈과 다른 객체일 수 있다.
+        """
+        import importlib
+        return importlib.import_module("services.ohlcv_store")
+
+    @pytest.fixture
+    def col(self, monkeypatch, live_os):
         import collector
         monkeypatch.setattr(OS, "_HOLIDAY_YMDS", set())
+        monkeypatch.setattr(live_os, "_HOLIDAY_YMDS", set())
         saved = []
         monkeypatch.setattr(collector, "load_ohlcv_cache", lambda ymd: {})
         monkeypatch.setattr(collector, "save_ohlcv_cache", lambda ymd, m: saved.append((ymd, len(m))))
@@ -420,13 +431,13 @@ class TestCollectorSaveSite:
         collector.prepare_ohlcv_data([f"{i:06d}" for i in range(40)], "20250101", "20261009", "20261009")
         assert saved == [("20261009", 40)]
 
-    def test_guard_exception_still_saves(self, col, monkeypatch):
+    def test_guard_exception_still_saves(self, col, monkeypatch, live_os):
         collector, saved = col
         monkeypatch.setattr(collector, "safe_ohlcv_by_date", self._fetch("2026-10-08"))
 
         def boom(*a, **k):
             raise RuntimeError("가드 고장")
-        monkeypatch.setattr(OS, "cache_write_allowed", boom)
+        monkeypatch.setattr(live_os, "cache_write_allowed", boom)
         collector.prepare_ohlcv_data([f"{i:06d}" for i in range(40)], "20250101", "20261009", "20261009")
         assert saved == [("20261009", 40)]
 
