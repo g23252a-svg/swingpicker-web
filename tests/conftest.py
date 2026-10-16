@@ -223,6 +223,17 @@ def _scan_data() -> dict:
                 out[e.name] = (st.st_mtime_ns, st.st_size)
     except OSError:
         return {}
+    # [v85] data/ohlcv_store/ (OHLCV 버전 저장소 — 하위 폴더)도 본다. 위 스캔은 최상위 파일만
+    #   보므로, 테스트가 진짜 저장소에 조각을 쓰면 안 잡히고 다음 야간 배치가 그걸 커밋한다.
+    for sub in ("main/v", "main/m", "lane/v", "lane/m", ""):
+        d = _DATA_DIR / "ohlcv_store" / sub if sub else _DATA_DIR / "ohlcv_store"
+        if not d.is_dir():
+            continue
+        with os.scandir(d) as it:
+            for e in it:
+                if e.is_file(follow_symlinks=False):
+                    st = e.stat()
+                    out[f"ohlcv_store/{sub + '/' if sub else ''}{e.name}"] = (st.st_mtime_ns, st.st_size)
     return out
 
 
