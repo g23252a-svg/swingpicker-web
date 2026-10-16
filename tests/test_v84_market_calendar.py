@@ -125,7 +125,8 @@ class TestWiring:
 
     def test_workflow_gates_post_steps_on_holiday(self):
         assert 'echo "holiday=true" >> "$GITHUB_OUTPUT"' in WF_SRC
-        assert WF_SRC.count("steps.collect.outputs.holiday != 'true'") == 6
+        # [v85] +1: OHLCV Store Shadow Ingest 도 휴장일엔 건너뛴다 (6 → 7)
+        assert WF_SRC.count("steps.collect.outputs.holiday != 'true'") == 7
         # 커밋 스텝은 게이트하지 않는다 — 마커·캐시는 남겨야 다음 날 추적이 맞다
         i_commit = WF_SRC.index("- name: Commit & Push CSV")
         assert "steps.collect.outputs.holiday" not in WF_SRC[i_commit:i_commit + 200]

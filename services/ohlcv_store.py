@@ -178,10 +178,14 @@ def _atomic_write_part(table, path: str, kv: Optional[dict] = None) -> None:
     tmp = _tmp_path(path)
     try:
         t = table.replace_schema_metadata(None)
-        with pq.ParquetWriter(tmp, t.schema, compression="zstd", store_schema=False) as w:
-            w.write_table(t)
-            if kv:
-                w.add_key_value_metadata(kv)
+        if kv and not hasattr(pq.ParquetWriter, "add_key_value_metadata"):
+            # 구버전 pyarrow — 스키마 메타데이터로 싣는다(ARROW:schema 에 중복되지만 읽기는 같다)
+            pq.write_table(t.replace_schema_metadata(kv), tmp, compression="zstd")
+        else:
+            with pq.ParquetWriter(tmp, t.schema, compression="zstd", store_schema=False) as w:
+                w.write_table(t)
+                if kv:
+                    w.add_key_value_metadata(kv)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):

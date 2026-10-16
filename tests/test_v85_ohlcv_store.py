@@ -245,6 +245,14 @@ class TestRerunAndMarkers:
         assert r["main"]["ingested"] == ["20261006"]
         assert OS.verify(str(d), "all", kind="main", deep=True)["ok"]
 
+    def test_old_pyarrow_metadata_fallback(self, tmp_path, monkeypatch):
+        """ParquetWriter.add_key_value_metadata 가 없는 pyarrow 에서도 m 메타데이터가 읽힌다."""
+        monkeypatch.delattr(pq.ParquetWriter, "add_key_value_metadata")
+        p = _write_main(tmp_path, "20261005", _universe("2026-10-05"))
+        OS.ingest(str(tmp_path), kind="main")
+        _assert_exact(str(tmp_path), "20261005", "main", p)
+        assert _meta(tmp_path, "main", "20261005")["rows"] == 120
+
     def test_stray_tmp_files_are_cleaned(self, tmp_path):
         d = tmp_path
         _write_main(d, "20261005", _universe("2026-10-05"))
