@@ -2035,7 +2035,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     #  [v85] price_snapshot_latest.csv 도 더 이상 덮어쓰지 않는다 — 그 파일은 KRX 일봉
     #    그대로 남아 portfolio/validation/position_tracker 가격 폴백으로 읽힌다.
     #    recommend 전 종목을 AH_STATUS(OK/NO_PRINT/FETCH_FAIL)·AH_FINAL 과 함께 기록하고
-    #    aftermarket_prices_{ymd}.csv 로 날짜별 보관(latest 는 같은 사본).
+    #    aftermarket_prices_{ymd}.csv 로 날짜별 보관(latest 는 같은 사본 — 단 기존 날짜별
+    #    파일의 확정 행이 더 많으면 날짜별은 보존하고 latest 만 갱신).
     #    연구용 수집만 — 선정/가드에는 쓰지 않는다. 실패해도 배치는 계속.
     # ══════════════════════════════════════════════════════════
     try:
@@ -2048,7 +2049,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
             log(f"🌙 [v85] 시간외 보관 {_am.get('n_rows', 0)}종목 — OK {_amc.get('OK', 0)} · "
                 f"NO_PRINT {_amc.get('NO_PRINT', 0)} · FETCH_FAIL {_amc.get('FETCH_FAIL', 0)} · "
                 f"확정 {_am.get('n_final', 0)} · KRX 기준 {_am.get('krx_snap_src')} "
-                f"({_am.get('elapsed_sec', 0)}s) → {_am.get('dated_path')}")
+                f"({_am.get('elapsed_sec', 0)}s) → {_am.get('dated_path')}"
+                f"{'' if _am.get('dated_written', True) else ' (기존 확정본 유지, latest 만 갱신)'}")
     except ImportError:
         # sidecar 함수 없으면 시간외 업데이트 스킵 (원본 보존 원칙)
         log('After-market: sidecar 함수 없음 — 스킵 (recommend 원본 보존)')

@@ -34,6 +34,24 @@ KST = timezone(timedelta(hours=9))
 DATA = ROOT / "data"
 
 
+@pytest.fixture(autouse=True)
+def _no_real_network(monkeypatch):
+    """[v85] 이 파일의 어떤 테스트도 실제 Naver 로 나가면 안 된다(샌드박스 프록시 403, CI 는 실서버).
+
+    requests.get / Session.get 은 모두 Session.request 를 거친다. 막힌 호출은 모듈이 예외를
+    삼켜 FETCH_FAIL 로 적으므로 테스트가 그냥 통과할 수 있다 — 그래서 시도 자체를 기록해 끝에 검사한다.
+    """
+    attempts = []
+
+    def _blocked(self, method, url, *a, **kw):
+        attempts.append((method, url))
+        raise requests.exceptions.ConnectionError(f"[test] 네트워크 차단: {method} {url}")
+
+    monkeypatch.setattr(requests.Session, "request", _blocked)
+    yield
+    assert not attempts, f"테스트가 실제 네트워크 호출을 시도함: {attempts[:3]}"
+
+
 def _kst(y, mo, d, h, mi=0, s=0):
     return datetime(y, mo, d, h, mi, s, tzinfo=KST)
 
@@ -284,8 +302,9 @@ def _fetch_table():
 def _run(d, rec_path, now=_kst(2026, 10, 16, 21, 5), **kw):
     table = _fetch_table()
     kw.setdefault("fetch_fn", lambda c: dict(table[c]))
+    kw.setdefault("sleep_fn", lambda s: None)
     return NA.build_aftermarket_archive(
-        str(rec_path), YMD, str(d), now_fn=lambda: now, sleep_fn=lambda s: None, **kw)
+        str(rec_path), YMD, str(d), now_fn=lambda: now, **kw)
 
 
 def _read(p):
@@ -368,8 +387,14 @@ class TestArchive:
         snd = tmp_path / f"price_snapshot_{YMD}.csv"
         before = (rec_path.read_bytes(), snl.read_bytes(), snd.read_bytes())
         _run(tmp_path, rec_path)
-        NA.fetch_after_market_prices_sidecar(
-            str(rec_path), str(tmp_path / "aftermarket_prices_latest.csv"), str(snl))
+        from unittest.mock import patch
+        table = _fetch_table()
+        # [v85 fix] 레거시 래퍼도 모의 — 예전엔 실제 m.stock.naver.com 으로 나갔다
+        with patch("naver_aftermarket.fetch_after_market_price",
+                   side_effect=lambda c, **kw: dict(table[c])) as m:
+            NA.fetch_after_market_prices_sidecar(
+                str(rec_path), str(tmp_path / "aftermarket_prices_latest.csv"), str(snl))
+        assert m.call_count == 5
         assert (rec_path.read_bytes(), snl.read_bytes(), snd.read_bytes()) == before
 
     def test_missing_dated_snapshot(self, tmp_path):
@@ -423,7 +448,8 @@ class TestArchive:
         def fail(code):
             calls.append(code)
             return {"status": "FETCH_FAIL", "fail_reason": "TIMEOUT"}
-        s = _run(tmp_path, rec_path, fetch_fn=fail, max_consec_fail=2)
+        # 시험 요청 0회 = 예전처럼 바로 중단
+        s = _run(tmp_path, rec_path, fetch_fn=fail, max_consec_fail=2, max_circuit_trips=0)
         assert len(calls) == 2
         out = _read(tmp_path / "aftermarket_prices_latest.csv")
         assert len(out) == 5, "중단돼도 모든 행은 기록된다"
@@ -495,6 +521,267 @@ class TestArchive:
         assert n == 2
         out = _read(tmp_path / f"aftermarket_prices_{YMD}.csv")
         assert len(out) == 5 and out["KRX_CLOSE"].notna().sum() == 4
+
+
+# ─────────────────────────────────────────────────────────────
+#  [v85 리뷰 수정] 원문 보존 · 체결 날짜 대조 · 반개방 차단기 · 확정 보관본 보호 · JSON 상한
+# ─────────────────────────────────────────────────────────────
+
+def _one_row_env(d: Path, code="005930", close="61000"):
+    rec = pd.DataFrame({"종목코드": [code], "종목명": ["삼성전자"], "종가": [close], "기준일": [YMD]})
+    p = d / "recommend_latest.csv"
+    rec.to_csv(p, index=False, encoding="utf-8-sig")
+    pd.DataFrame({"종목코드": [code], "시장": ["KOSPI"], "종가": [int(close)]}).to_csv(
+        d / f"price_snapshot_{YMD}.csv", index=False, encoding="utf-8-sig")
+    return p
+
+
+def _run_payload(d, payload, now=_kst(2026, 10, 16, 21, 5)):
+    p = _one_row_env(d)
+    NA.build_aftermarket_archive(str(p), YMD, str(d), fetch_fn=lambda c: NA.parse_basic_payload(payload),
+                                 now_fn=lambda: now, sleep_fn=lambda s: None)
+    return pd.read_csv(d / f"aftermarket_prices_{YMD}.csv", dtype=str,
+                       keep_default_na=False, encoding="utf-8-sig").iloc[0]
+
+
+class TestRawStringKept:
+    @pytest.mark.parametrize("op", ["61,500원", "+61,500", " 61 500 ", "61.500,00", "1,23,456"])
+    def test_unparseable_over_price_is_parse_fail_with_raw(self, op):
+        r = NA.parse_basic_payload(_payload(over_price=op))
+        assert r["status"] == "FETCH_FAIL" and r["fail_reason"] == "PARSE", op
+        assert math.isnan(r["ah_price_raw"])
+        assert r["ah_price_str"] == op, "원문 문자열이 남아야 한다"
+
+    @pytest.mark.parametrize("op", [None, "", "-", "N/A", "0", 0])
+    def test_placeholders_stay_no_print(self, op):
+        r = NA.parse_basic_payload(_payload(over_price=op))
+        assert r["status"] == "NO_PRINT", op
+
+    def test_known_formats_still_parse(self):
+        for op, v in (("61,500", 61500.0), ("61500", 61500.0), ("1,234,567", 1234567.0),
+                      (" 61,500 ", 61500.0), ("61500.0", 61500.0), (61500, 61500.0)):
+            r = NA.parse_basic_payload(_payload(over_price=op))
+            assert r["status"] == "OK" and r["ah_price_raw"] == v, op
+            assert r["ah_price_str"] == str(op)
+
+    def test_parse_fail_row_in_archive_not_final_and_raw_in_file(self, tmp_path):
+        row = _run_payload(tmp_path, _payload(over_price="61,500원"))
+        assert row["AH_STATUS"] == "FETCH_FAIL" and row["AH_FAIL_REASON"] == "PARSE"
+        assert row["AH_FINAL"] == "False", "형식 변화가 '확정 체결 없음'으로 둔갑하면 안 된다"
+        assert row["AH_PRICE_STR"] == "61,500원"
+        assert row["시간외종가"] == "" and row["AH_PRICE_RAW"] == ""
+        assert row["NAVER_CLOSE"] == "61000" and row["NAVER_CLOSE_STR"] == "61,000"
+
+    def test_parse_fail_does_not_trip_circuit(self, tmp_path):
+        rec_path = _write_env(tmp_path)
+        calls = []
+
+        def f(c):
+            calls.append(c)
+            return NA.parse_basic_payload(_payload(over_price="??"))
+        _run(tmp_path, rec_path, fetch_fn=f, max_consec_fail=1, max_circuit_trips=0)
+        assert len(calls) == 5, "PARSE 는 종목 단위 실패 — 차단기를 열면 원문까지 잃는다"
+
+    def test_close_price_unparseable_keeps_raw(self, tmp_path):
+        row = _run_payload(tmp_path, _payload(close="61,000원", over_price="61,500"))
+        assert row["NAVER_CLOSE"] == "" and row["NAVER_CLOSE_STR"] == "61,000원"
+        assert row["AH_STATUS"] == "OK" and row["CLOSE_MATCH"] == ""
+
+    def test_trade_stop_type_kept(self, tmp_path):
+        d = _payload(over_price="61,500",
+                     tradeStopType={"code": "1", "text": "운영.Trading", "name": "TRADING"})
+        d["tradeStopType"] = {"code": "1", "text": "운영.Trading", "name": "TRADING"}
+        row = _run_payload(tmp_path, d)
+        assert row["NAVER_TRADE_STOP"] == "TRADING" and row["AH_TRADE_STOP"] == "TRADING"
+        assert row["AH_EXTRA"] == ""
+        r = NA.parse_basic_payload({"closePrice": "1", "tradeStopType": {"text": "x"}})
+        assert json.loads(r["naver_trade_stop"]) == {"text": "x"}
+        assert NA.parse_basic_payload({"closePrice": "1", "tradeStopType": "HALT"})["naver_trade_stop"] == "HALT"
+
+
+class TestPrintDate:
+    @pytest.mark.parametrize("raw,exp", [
+        ("2026-10-16T18:00:00+09:00", "20261016"),
+        ("2026-10-16T19:59:59.123+09:00", "20261016"),
+        ("20261016180000", "20261016"),
+        ("2026.10.16", "20261016"),
+        ("2026-10-16", "20261016"),
+        ("2026-10-16T09:00:00Z", "20261016"),        # 18:00 KST
+        ("2026-10-15T23:30:00Z", "20261016"),        # 08:30 KST 다음날
+        ("2026-10-16T23:30:00+0900", "20261016"),
+        ("2026-10-14T18:00:00+09:00", "20261014"),
+        ("", ""), (None, ""), ("CLOSE", ""), ("1760000000000", ""), ("2026-13-45", ""),
+        ({"a": 1}, ""),
+        # epoch(ms/s) 를 날짜로 오인하지 않는다 — 1712010100000 은 '17120101' 처럼 보인다
+        ("1712010100000", ""), (1712010100000, ""), ("1712010100", ""), ("17120101", ""),
+        ("202610161800", "20261016"),
+    ])
+    def test_print_date_kst(self, raw, exp):
+        assert NA.print_date_kst(raw) == exp
+
+    def test_stale_print_is_not_ok_not_final_raw_kept(self, tmp_path):
+        """리뷰 재현: 10/14 체결가가 10/16 행에 OK+확정으로 적히던 문제."""
+        p = _payload(close="12,940", over_price="13,300")
+        p["overMarketPriceInfo"]["localTradedAt"] = "2026-10-14T18:00:00+09:00"
+        row = _run_payload(tmp_path, p)
+        assert row["AH_STATUS"] == "NO_PRINT"
+        assert row["AH_FINAL"] == "False"
+        assert row["AH_PRINT_DATE_MATCH"] == "False"
+        assert row["시간외종가"] == "" and row["변동률"] == ""
+        assert row["AH_CHG_VS_KRX"] == "" and row["AH_CHG_VS_ANALYSIS"] == ""
+        assert row["AH_PRICE_RAW"] == "13300" and row["AH_PRICE_STR"] == "13,300"
+        assert row["AH_TRADED_AT"] == "2026-10-14T18:00:00+09:00"
+
+    def test_next_day_block_on_no_print_not_final(self, tmp_path):
+        """새벽 회수 때 Naver 가 블록을 다음 날로 넘겼으면 NO_PRINT 도 확정이 아니다."""
+        p = _payload(over_price="")
+        p["overMarketPriceInfo"]["localTradedAt"] = "2026-10-17T00:10:00+09:00"
+        row = _run_payload(tmp_path, p, now=_kst(2026, 10, 17, 0, 30))
+        assert row["AH_STATUS"] == "NO_PRINT" and row["AH_FINAL"] == "False"
+        assert row["FETCH_WINDOW"] == "FINAL_OVERNIGHT"
+
+    def test_same_day_print_ok_final(self, tmp_path):
+        row = _run_payload(tmp_path, _payload(over_price="61,500"))
+        assert row["AH_STATUS"] == "OK" and row["AH_FINAL"] == "True"
+        assert row["AH_PRINT_DATE_MATCH"] == "True" and row["시간외종가"] == "61500"
+
+    def test_unreadable_timestamp_leaves_behaviour(self, tmp_path):
+        p = _payload(over_price="61,500")
+        p["overMarketPriceInfo"]["localTradedAt"] = "어제 저녁"
+        row = _run_payload(tmp_path, p)
+        assert row["AH_STATUS"] == "OK" and row["AH_FINAL"] == "True"
+        assert row["AH_PRINT_DATE_MATCH"] == ""
+
+
+class TestExtraJson:
+    def test_extra_truncated_is_valid_json(self):
+        big = {"closePrice": "100", "overMarketPriceInfo": {"overPrice": "101"}}
+        for i in range(40):
+            big["overMarketPriceInfo"][f"unknownField{i}"] = "x" * 10
+        r = NA.parse_basic_payload(big)
+        assert len(r["extra"]) <= NA._EXTRA_MAX_LEN
+        ex = json.loads(r["extra"])
+        assert ex["_truncated"] > 0
+        assert len(ex) - 1 + ex["_truncated"] == 40
+        assert ex["over.unknownField0"] == "x" * 10
+
+    def test_json_capped_shapes(self):
+        assert NA._json_capped({"a": 1}) == '{"a":1}'
+        s = NA._json_capped(list(range(500)), 60)
+        assert len(s) <= 60 and json.loads(s)[-1].startswith("…(+")
+        s = NA._json_capped({"k": "y" * 1000}, 50)
+        assert json.loads(s) == {"_truncated": 1}
+        s = NA._json_capped("z" * 1000, 50)
+        assert json.loads(s) == {"_truncated": 1002}
+        # 큰 dict 원문 필드도 올바른 JSON
+        r = NA.parse_basic_payload({"closePrice": "1", "marketStatus": {f"k{i}": "v" * 20 for i in range(30)}})
+        assert json.loads(r["naver_market_status"])["_truncated"] > 0
+
+
+class TestHalfOpenCircuit:
+    def test_transient_burst_recovers_after_cooldown(self, tmp_path):
+        rec = pd.DataFrame({"종목코드": [f"{i:06d}" for i in range(1, 11)], "종가": ["1000"] * 10,
+                            "기준일": [YMD] * 10})
+        p = tmp_path / "recommend_latest.csv"
+        rec.to_csv(p, index=False, encoding="utf-8-sig")
+        calls, sleeps = [], []
+
+        def f(c):
+            calls.append(c)
+            if len(calls) <= 3:          # 429 버스트 3건 후 회복
+                return {"status": "FETCH_FAIL", "fail_reason": "HTTP_429"}
+            return {"status": "OK", "naver_close": 1000, "ah_price_raw": 1010}
+        s = NA.build_aftermarket_archive(
+            str(p), YMD, str(tmp_path), fetch_fn=f, now_fn=lambda: _kst(2026, 10, 16, 21),
+            sleep_fn=sleeps.append, max_consec_fail=3, circuit_cooldown_sec=7.0)
+        assert len(calls) == 10, "시험 요청이 성공하면 나머지도 수집해야 한다"
+        assert sleeps == [7.0]
+        assert s["counts"] == {"OK": 7, "NO_PRINT": 0, "FETCH_FAIL": 3}
+
+    def test_persistent_outage_stops_after_trips(self, tmp_path):
+        rec = pd.DataFrame({"종목코드": [f"{i:06d}" for i in range(1, 11)], "종가": ["1000"] * 10,
+                            "기준일": [YMD] * 10})
+        p = tmp_path / "recommend_latest.csv"
+        rec.to_csv(p, index=False, encoding="utf-8-sig")
+        calls, sleeps = [], []
+
+        def f(c):
+            calls.append(c)
+            return {"status": "FETCH_FAIL", "fail_reason": "TIMEOUT"}
+        NA.build_aftermarket_archive(
+            str(p), YMD, str(tmp_path), fetch_fn=f, now_fn=lambda: _kst(2026, 10, 16, 21),
+            sleep_fn=sleeps.append, max_consec_fail=3, circuit_cooldown_sec=7.0, max_circuit_trips=2)
+        assert len(calls) == 3 + 2, "연속 실패 3 + 시험 요청 2"
+        assert sleeps == [7.0, 7.0]
+        out = _read(tmp_path / "aftermarket_prices_latest.csv")
+        assert out["AH_FAIL_REASON"].tolist() == ["TIMEOUT"] * 5 + ["CIRCUIT"] * 5
+
+    def test_cooldown_counts_against_budget(self, tmp_path):
+        rec_path = _write_env(tmp_path)
+        clock = {"t": 0.0}
+
+        def f(c):
+            return {"status": "FETCH_FAIL", "fail_reason": "TIMEOUT"}
+        _run(tmp_path, rec_path, fetch_fn=f, max_consec_fail=2, circuit_cooldown_sec=100.0,
+             time_budget_sec=50.0, monotonic_fn=lambda: clock["t"],
+             sleep_fn=lambda s: clock.__setitem__("t", clock["t"] + s))
+        out = _read(tmp_path / "aftermarket_prices_latest.csv")
+        assert out["AH_FAIL_REASON"].tolist() == ["TIMEOUT", "TIMEOUT", "BUDGET", "BUDGET", "BUDGET"]
+
+    def test_default_worst_case_bounded(self):
+        # 기본값: 15건 × (3.05+5)s + 3 × (30 + 8.05)s 안팎 → 예산 600s 안
+        worst = NA.MAX_CONSEC_FAIL * sum(NA.REQUEST_TIMEOUT) + \
+            NA.MAX_CIRCUIT_TRIPS * (NA.CIRCUIT_COOLDOWN_SEC + sum(NA.REQUEST_TIMEOUT))
+        assert worst < NA.TIME_BUDGET_SEC
+
+
+class TestDatedArchiveProtection:
+    def test_rerun_next_morning_does_not_replace_final_archive(self, tmp_path):
+        rec_path = _write_env(tmp_path)
+        s1 = _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 21, 5))
+        dated = tmp_path / f"aftermarket_prices_{YMD}.csv"
+        latest = tmp_path / "aftermarket_prices_latest.csv"
+        b1 = dated.read_bytes()
+        assert s1["dated_written"] and s1["n_final"] == 4
+        s2 = _run(tmp_path, rec_path, now=_kst(2026, 10, 19, 9, 0))   # 월 장중 수동 재실행
+        assert s2["n_final"] == 0 and not s2["dated_written"]
+        assert dated.read_bytes() == b1, "확정 보관본이 덮이면 안 된다"
+        assert (_read(latest)["FETCH_WINDOW"] == "NEXT_SESSION").all(), "latest 는 이번 실행"
+        assert s2["dated_path"] == str(dated)
+
+    def test_outage_run_does_not_replace_final_archive(self, tmp_path):
+        rec_path = _write_env(tmp_path)
+        _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 21, 5))
+        dated = tmp_path / f"aftermarket_prices_{YMD}.csv"
+        b1 = dated.read_bytes()
+
+        def boom(c):
+            raise requests.exceptions.ConnectionError("naver down")
+        s2 = _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 22, 40), fetch_fn=boom)
+        assert not s2["dated_written"] and dated.read_bytes() == b1
+
+    def test_final_run_replaces_earlier_non_final(self, tmp_path):
+        rec_path = _write_env(tmp_path)
+        _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 17, 0))
+        s2 = _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 21, 5))
+        assert s2["dated_written"]
+        out = _read(tmp_path / f"aftermarket_prices_{YMD}.csv")
+        assert (out["FETCH_WINDOW"] == "FINAL_EVENING").all()
+
+    def test_equal_final_count_overwrites(self, tmp_path):
+        rec_path = _write_env(tmp_path)
+        _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 21, 5))
+        s2 = _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 22, 40))
+        assert s2["dated_written"]
+        out = _read(tmp_path / f"aftermarket_prices_{YMD}.csv")
+        assert (out["FETCHED_AT_KST"] == "2026-10-16 22:40:00").all()
+
+    def test_unreadable_or_legacy_existing_is_overwritten(self, tmp_path):
+        rec_path = _write_env(tmp_path)
+        dated = tmp_path / f"aftermarket_prices_{YMD}.csv"
+        dated.write_text("종목코드,시간외종가\n005930,1\n", encoding="utf-8-sig")   # 옛 형식(AH_FINAL 없음)
+        s = _run(tmp_path, rec_path, now=_kst(2026, 10, 16, 17, 0))
+        assert s["dated_written"] and "AH_FINAL" in _read(dated).columns
 
 
 # ─────────────────────────────────────────────────────────────
