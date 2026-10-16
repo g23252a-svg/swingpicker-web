@@ -12,7 +12,11 @@ tests/test_v85_cleanup.py — [v85-4] 정리 회귀 가드.
      ※ "silent 0건"은 check_silent_exceptions 의 좁은 정의(pass뿐/print뿐) 기준이다.
        return 폴백만 하는 핸들러(get_market_sets 등)는 이 게이트 밖이다 — 완전 무결 주장이 아님.
   4. 2027 시한폭탄 — 'recommend_2026*.csv' 같은 연도 고정 글롭이 코드에 남지 않는다.
-     (backtest_validation.py 는 v85-1 담당 — 그 브랜치에서 처리하므로 여기서 제외)
+     [v85 리뷰] '_2026*' 한 형태만이 아니라 'recommend_20260*'·'_2026??'·'_2026[01]'·'_202*'(10년 고정),
+     분리 결합("recommend_" + "2026*.csv")·f-string 까지 잡는다 (가드 자체 회귀 테스트 포함).
+     backtest_validation.py 의 기존 1건은 v85-1 소유 — (파일, 문자열) 정확 쌍만 예외로 두고,
+     v85-1 머지로 그 문자열이 사라지면 stale 예외 테스트가 실패해 예외 삭제를 강제한다.
+  ※ AST 가드는 파싱 실패 파일을 조용히 건너뛰지 않는다 — 실패 목록 자체를 assert 한다.
 
 ■ 격리
   collector 테스트는 collector.OUT_DIR 를 tmp_path 로 바꾸고 PYKRX_OK/stock/네트워크 함수를
@@ -52,8 +56,8 @@ _SKIP_DIRS = {".git", ".claude", "data", "__pycache__", ".pytest_cache", "node_m
               ".venv", "venv", "env", ".mypy_cache"}
 
 
-def _iter_files(suffixes: tuple[str, ...]):
-    for dp, dns, fns in os.walk(ROOT):
+def _iter_files(suffixes: tuple[str, ...], root: Path = ROOT):
+    for dp, dns, fns in os.walk(root):
         dns[:] = [d for d in dns if d not in _SKIP_DIRS and not d.startswith(("backup_", "legacy_"))]
         for fn in fns:
             if fn.endswith(suffixes):
@@ -61,10 +65,44 @@ def _iter_files(suffixes: tuple[str, ...]):
 
 
 def _parse(path: Path):
-    try:
-        return ast.parse(path.read_text(encoding="utf-8"))
-    except (SyntaxError, UnicodeDecodeError):
-        return None
+    """[v85 리뷰] 파싱 실패를 삼키지 않는다 — SyntaxError/UnicodeDecodeError 는 그대로 올린다."""
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _parse_tree(root: Path = ROOT):
+    """(상대경로, AST) 목록 + 파싱 실패 목록.
+
+    [v85 리뷰] 예전 _parse 는 실패 시 None 을 돌려 AST 가드(import·연도 글롭)가 그 파일을
+    흔적 없이 건너뛰었다(cp949 파일, 다른 파이썬 버전 문법 등). 실패는 목록으로 모아
+    호출부가 assert 한다 — 가드를 조용히 빠져나가는 파일이 없다.
+    """
+    parsed, unparsed = [], []
+    for py in _iter_files((".py",), root):
+        rel = py.relative_to(root).as_posix()
+        try:
+            parsed.append((rel, _parse(py)))
+        except (SyntaxError, UnicodeDecodeError) as e:
+            unparsed.append(f"{rel}: {type(e).__name__}: {e}")
+    return parsed, unparsed
+
+
+@pytest.fixture(scope="module")
+def py_trees():
+    """레포 전체 .py AST — 모듈 안에서 한 번만 파싱한다 (가드 두 개 + stale 예외 검사 공용)."""
+    return _parse_tree(ROOT)
+
+
+def test_parse_tree_reports_unparseable_files(tmp_path):
+    """파싱 불가 파일(문법 오류·비 UTF-8)은 건너뛰지 않고 실패 목록에 남는다."""
+    (tmp_path / "ok.py").write_text("import os\n", encoding="utf-8")
+    (tmp_path / "bad_syntax.py").write_text("def f(:\n", encoding="utf-8")
+    (tmp_path / "cp949.py").write_bytes("# 한글 주석\nx = 1\n".encode("cp949"))
+
+    parsed, unparsed = _parse_tree(tmp_path)
+
+    assert [rel for rel, _ in parsed] == ["ok.py"]
+    assert sorted(u.split(":", 1)[0] for u in unparsed) == ["bad_syntax.py", "cp949.py"]
+    assert any("SyntaxError" in u for u in unparsed) and any("UnicodeDecodeError" in u for u in unparsed)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -76,14 +114,13 @@ class TestLegacyFilesRemoved:
     def test_absent(self, name):
         assert not (ROOT / name).exists(), f"{name} 이(가) 다시 생겼다 (v85 삭제 대상)"
 
-    def test_no_python_imports_deleted_modules(self):
+    def test_no_python_imports_deleted_modules(self, py_trees):
         """dashboard / backup 패키지 / fix4 를 import·import_module·__import__ 하는 .py 가 없다."""
         banned = {"dashboard", "backup_v205c_20260310", "fix4_silent_exceptions"}
+        trees, unparsed = py_trees
+        assert not unparsed, "파싱 불가 .py — import 가드가 검사하지 못한다:\n" + "\n".join(unparsed)
         offenders = []
-        for py in _iter_files((".py",)):
-            tree = _parse(py)
-            if tree is None:
-                continue
+        for rel, tree in trees:
             for node in ast.walk(tree):
                 mods: list[str] = []
                 if isinstance(node, ast.Import):
@@ -98,7 +135,7 @@ class TestLegacyFilesRemoved:
                         mods = [node.args[0].value]
                 for m in mods:
                     if m.split(".")[0] in banned:
-                        offenders.append(f"{py.relative_to(ROOT)}:{node.lineno} → {m}")
+                        offenders.append(f"{rel}:{node.lineno} → {m}")
         assert not offenders, "삭제된 모듈을 import 하는 코드:\n" + "\n".join(offenders)
 
     def test_no_deploy_or_ci_references(self):
@@ -319,19 +356,63 @@ class TestCollectorHandlersLog:
         assert codes == {"005930", "000660"}
         assert not _v85_records(caplog, "LDY_Collector", "[v85] Naver 종목명 조회 실패")   # WARNING 홍수 없음
 
-    def test_secrets_loader_failure_uses_named_logger(self, collector_mod, monkeypatch, caplog):
-        """secrets.toml 파싱 실패 → print 대신 "LDY_Collector" WARNING (루트 logging.warning 금지)."""
-        import tomllib
-        real_exists = os.path.exists
-        monkeypatch.setattr(os.path, "exists",
-                            lambda p: True if str(p).endswith("secrets.toml") else real_exists(p))
-        monkeypatch.setattr(tomllib, "load", lambda f: (_ for _ in ()).throw(ValueError("bad toml")))
+    @staticmethod
+    def _fake_secrets(collector_mod, monkeypatch, payload: bytes) -> list[str]:
+        """collector 가 여는 .streamlit/secrets.toml 만 메모리 바이트로 대체한다.
+
+        [v85 리뷰] secrets.toml 은 gitignore 라 CI·워크트리에 없다 — exists 만 속이면 open() 이
+        FileNotFoundError 를 내서 tomllib 파싱 경로에 닿지 못했다. open 을 collector 모듈
+        전역으로만 가린다(builtins 는 그대로) — 다른 파일 open 은 실제 open 으로 통과.
+        """
+        import builtins
+        import io
+        opened: list[str] = []
+        real_exists, real_open = os.path.exists, builtins.open
+
+        def _is_secrets(p) -> bool:
+            return str(p).replace("\\", "/").endswith(".streamlit/secrets.toml")
+
+        def _open(p, mode="r", *a, **k):
+            if _is_secrets(p):
+                opened.append(mode)
+                return io.BytesIO(payload)
+            return real_open(p, mode, *a, **k)
+
+        monkeypatch.setattr(os.path, "exists", lambda p: True if _is_secrets(p) else real_exists(p))
+        monkeypatch.setattr(collector_mod, "open", _open, raising=False)
+        return opened
+
+    def test_secrets_loader_parse_failure_uses_named_logger(self, collector_mod, monkeypatch, caplog):
+        """secrets.toml TOML 파싱 실패(실제 tomllib) → print 대신 "LDY_Collector" WARNING (루트 금지)."""
+        pytest.importorskip("tomllib", reason="py3.11+ tomllib 경로 전용", exc_type=ImportError)
+        opened = self._fake_secrets(collector_mod, monkeypatch, b'V85_CLEANUP_PROBE = [\n')
+        monkeypatch.setenv("V85_CLEANUP_PROBE", "untouched")
         caplog.set_level(logging.WARNING, logger="LDY_Collector")
 
         collector_mod.load_secrets_to_env()
 
-        assert _v85_records(caplog, "LDY_Collector", "[v85] Secrets 로드 실패")
+        assert opened == ["rb"], "tomllib 경로(open(..., 'rb'))에 닿지 못했다"
+        recs = _v85_records(caplog, "LDY_Collector", "[v85] Secrets 로드 실패")
+        assert len(recs) == 1 and "TOMLDecodeError" in recs[0].getMessage(), caplog.text
         assert not [r for r in caplog.records if r.name == "root" and "Secrets" in r.getMessage()]
+        assert os.environ["V85_CLEANUP_PROBE"] == "untouched"     # 실패 시 환경변수 미주입(기존 동작)
+
+    def test_secrets_loader_valid_toml_still_injects_env(self, collector_mod, monkeypatch, caplog):
+        """정상 TOML 은 예전처럼 주입되고 경고가 없다 — 핸들러 변경이 성공 경로를 건드리지 않았다."""
+        pytest.importorskip("tomllib", reason="py3.11+ tomllib 경로 전용", exc_type=ImportError)
+        opened = self._fake_secrets(collector_mod, monkeypatch,
+                                    b'V85_CLEANUP_PROBE = "ok"\n[sec]\nV85_CLEANUP_SUB = 7\n')
+        for key in ("V85_CLEANUP_PROBE", "V85_CLEANUP_SUB", "SEC_V85_CLEANUP_SUB"):
+            monkeypatch.setenv(key, "placeholder")     # teardown 이 원상(미설정)으로 되돌린다
+        monkeypatch.delenv("V85_CLEANUP_SUB")
+        caplog.set_level(logging.WARNING, logger="LDY_Collector")
+
+        collector_mod.load_secrets_to_env()
+
+        assert opened == ["rb"]
+        assert os.environ["V85_CLEANUP_PROBE"] == "ok"
+        assert os.environ["V85_CLEANUP_SUB"] == "7" and os.environ["SEC_V85_CLEANUP_SUB"] == "7"
+        assert not _v85_records(caplog, "LDY_Collector", "[v85] Secrets 로드 실패")
 
     def test_secrets_handler_never_calls_root_logging(self):
         """루트 함수 logging.warning() 은 shared_log 의 basicConfig(INFO) 를 무력화한다 — 금지."""
@@ -386,36 +467,116 @@ class TestScoringSidecarLogs:
 # ═══════════════════════════════════════════════════════════════════
 # 4. 2027 시한폭탄 — 연도 고정 글롭 금지
 # ═══════════════════════════════════════════════════════════════════
-#: 'recommend_2026*.csv' / 'price_snapshot_2026*.csv' / 'ohlcv_cache_2026*.parquet' 류.
-_YEAR_FIXED_GLOB = re.compile(r"_20\d\d\*")
-#: v85-1(백테스트 재구성) 브랜치가 소유 — 그쪽에서 고친다. 머지 후 이 예외는 지워도 된다.
-_OWNED_ELSEWHERE = {"backtest_validation.py"}
+#: 배치 파일 접두어 (recommend_ / price_snapshot_ / ohlcv_cache_ …).
+_BATCH_PREFIX = r"(?:recommend|price_snapshot|snapshot|ohlcv_cache|ohlcv)"
+#: [v85 리뷰] 접두어 + 최소 10년 단위 연도('_202') 고정 + 같은 토큰 안 어딘가의 글롭 메타문자(* ? [).
+#:   'recommend_2026*' 뿐 아니라 '_20260*'(1~9월)·'_2026??0*'·'_2026[01][0-9]*'·'_202*'(10년 고정)도 잡는다.
+#:   'recommend_2*.csv'·'recommend_[0-9]…'(연도 무관)·'recommend_20261016.csv'(정확 파일명)는 통과.
+_YEAR_FIXED_GLOB = re.compile(_BATCH_PREFIX + r"\w*?_20\d[^\s'\"]*?[*?\[]")
+#: [v85 리뷰] 분리 결합형 — PREFIX + "2026*.csv" 처럼 연도로 시작하는 조각 + 글롭 메타문자.
+#:   ('{}' 는 _static_str 이 비상수 조각 자리에 넣는 표시)
+_YEAR_HEAD_GLOB = re.compile(r"(?:^|\{\})_?20\d[^\s'\"]*?[*?\[]")
+#: (파일, 문자열) 정확 쌍만 예외 — 같은 파일에 새로 생기는 연도 고정 글롭은 그대로 잡힌다.
+#: v85-1(백테스트 재구성) 브랜치가 소유·수정한다. 두 브랜치가 머지되면 이 문자열이 사라지므로
+#: test_owned_elsewhere_exemptions_not_stale 가 실패한다(의도된 트립와이어) → 그때 이 항목을 지운다.
+_OWNED_ELSEWHERE = {("backtest_validation.py", "recommend_2026*.csv")}
+#: 이 파일 자신은 가드 회귀 테스트용 위반 샘플 문자열을 담고 있어 스캔에서 뺀다.
+_SELF = Path(__file__).resolve().relative_to(ROOT).as_posix()
 
 
-def _string_constants(tree):
-    """코드에서 쓰이는 문자열 상수 — docstring·단독 문자열 문(설명문)은 제외."""
+def _static_str(node):
+    """문자열 상수 · f-string · '+' 결합을 정적으로 펼친다 — 비상수 조각은 '{}' 자리표시.
+
+    "data/recommend_" + "2026*.csv" 처럼 연도와 접두어가 서로 다른 상수에 나뉘어도
+    결합 결과("data/recommend_2026*.csv")로 검사하기 위함.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.JoinedStr):
+        return "".join(v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else "{}"
+                       for v in node.values)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _static_str(node.left), _static_str(node.right)
+        if left is None and right is None:
+            return None
+        return (left if left is not None else "{}") + (right if right is not None else "{}")
+    return None
+
+
+def _year_fixed_hits(tree) -> list[tuple[int, str]]:
+    """코드(docstring·단독 문자열 문 제외)의 연도 고정 배치 글롭 (lineno, 문자열) 목록."""
     doc_ids = {id(n.value) for n in ast.walk(tree)
-               if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+               if isinstance(n, ast.Expr) and isinstance(n.value, (ast.Constant, ast.JoinedStr))}
+    hits: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in doc_ids:
-            yield node.lineno, node.value
+        if id(node) in doc_ids:
+            continue
+        s = _static_str(node)
+        if s is None:
+            continue
+        if _YEAR_FIXED_GLOB.search(s) or _YEAR_HEAD_GLOB.search(s):
+            hit = (node.lineno, s)
+            if hit not in hits:
+                hits.append(hit)
+    return hits
 
 
 class TestNoYearFixedGlob:
 
-    def test_no_year_fixed_batch_glob_in_code(self):
+    def test_no_year_fixed_batch_glob_in_code(self, py_trees):
+        trees, unparsed = py_trees
+        assert not unparsed, "파싱 불가 .py — 연도 글롭 가드가 검사하지 못한다:\n" + "\n".join(unparsed)
         offenders = []
-        for py in _iter_files((".py",)):
-            rel = py.relative_to(ROOT).as_posix()
-            if rel in _OWNED_ELSEWHERE:
+        for rel, tree in trees:
+            if rel == _SELF:
                 continue
-            tree = _parse(py)
-            if tree is None:
-                continue
-            for lineno, s in _string_constants(tree):
-                if _YEAR_FIXED_GLOB.search(s) and ("recommend" in s or "snapshot" in s or "ohlcv" in s):
-                    offenders.append(f"{rel}:{lineno} {s!r}")
+            for lineno, s in _year_fixed_hits(tree):
+                if (rel, s) in _OWNED_ELSEWHERE:
+                    continue
+                offenders.append(f"{rel}:{lineno} {s!r}")
         assert not offenders, "연도 고정 글롭 (2027년부터 새 파일을 못 본다):\n" + "\n".join(offenders)
+
+    def test_owned_elsewhere_exemptions_not_stale(self, py_trees):
+        """예외 쌍이 실제로 아직 코드에 있어야 한다 — 소유 브랜치(v85-1)가 고치면 예외를 지우게 강제.
+
+        이 테스트가 실패하면 _OWNED_ELSEWHERE 에서 해당 항목을 지운다 (가드가 그 파일을 다시 전부 본다).
+        """
+        trees, _ = py_trees
+        present = {(rel, s) for rel, tree in trees for _, s in _year_fixed_hits(tree)}
+        stale = sorted(_OWNED_ELSEWHERE - present)
+        assert not stale, ("소유 브랜치가 이미 고친 예외 — tests/test_v85_cleanup.py 의 _OWNED_ELSEWHERE 에서 "
+                           "지워라 (남겨 두면 같은 문자열이 다시 들어와도 가드가 못 잡는다): " + repr(stale))
+
+    @pytest.mark.parametrize("src", [
+        'glob.glob("data/recommend_2026*.csv")',
+        'glob.glob("data/price_snapshot_2027*.csv")',
+        'glob.glob(os.path.join(d, "ohlcv_cache_2026*.parquet"))',
+        'glob.glob("recommend_20260*.csv")',                  # 2026년 1~9월에 고정
+        'glob.glob("recommend_2026??0*.csv")',
+        'glob.glob("recommend_2026[01][0-9]*.csv")',
+        'glob.glob("recommend_202*.csv")',                    # 2020년대에 고정
+        'glob.glob("data/recommend_" + "2026*.csv")',          # 분리 결합 — 상수 하나씩은 무해해 보임
+        'glob.glob(PREFIX + "2026*.csv")',
+        'glob.glob(f"{d}/recommend_2026*.csv")',
+        'glob.glob(f"{d}/recommend_" + "2026" + "*.csv")',
+    ])
+    def test_guard_catches_year_fixed_variants(self, src):
+        """[v85 리뷰] 가드 자체 회귀 — '_2026*' 한 형태만 잡던 예전 정규식이 놓치던 변형들."""
+        assert _year_fixed_hits(ast.parse(src)), f"가드가 놓친 연도 고정 글롭: {src}"
+
+    @pytest.mark.parametrize("src", [
+        'glob.glob(f"recommend_{_YMD8_GLOB}.csv")',
+        'glob.glob(os.path.join(d, "recommend_" + "[0-9]" * 8 + ".csv"))',
+        'glob.glob("recommend_2*.csv")',                       # 연도 무관 (v85-1 방식)
+        'glob.glob("recommend_20*.csv")',                      # 세기 고정 — 2100년까지 무해
+        'p = "data/recommend_20261016.csv"',                  # 정확 파일명 (글롭 아님)
+        'p = "recommend_latest.csv"',
+        'msg = "recommend_20261016.csv 없음 [skip]"',          # 공백 뒤 '[' 는 같은 토큰 아님
+        'RE = re.compile(r"^recommend_(2\\d{7})\\.csv$")',
+        'def f():\n    """예전엔 recommend_2026*.csv 를 글롭했다."""\n    return 1',   # docstring
+    ])
+    def test_guard_allows_year_agnostic_forms(self, src):
+        assert not _year_fixed_hits(ast.parse(src)), f"오탐: {src}"
 
     def test_year_agnostic_glob_semantics(self, tmp_path):
         """새 글롭: 2026·2027 날짜 파일은 모두, *_latest·태그 파일은 제외."""
