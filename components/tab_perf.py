@@ -1024,6 +1024,50 @@ def _pct_or_dash(value, digits: int = 2, signed: bool = False) -> str:
     return f"{v:{sign}.{digits}f}%"
 
 
+_LIMIT_FILL_MODEL_DEFAULT = (
+    "제시가 지정가 모델 — 제시가 3일 체결창 · 1차 목표/손절 첫 터치 · "
+    "최장 10영업일 · 왕복 비용 0.22% 차감"
+)
+
+
+def _official_card_basis_lines(j: dict | None, bt: dict | None) -> tuple:
+    """[v85] 공식 신규매수 카드의 '채점 기준' 문구 (순수 함수 — 테스트용).
+
+    카드 숫자는 backtest trades 파일(지정가 모델)을 조인한 값이고, 종목탭 헤드라인은
+    같은 공식픽을 official_ssot(픽 이력 정의: 다음날 시가 · -8% 손절 · 5일)로 채점한다.
+    정의가 달라 같은 픽에 승률·평균이 다르게 나오므로(실측 14% vs 34%) 카드에 기준을
+    명시하고, backtest_validation_latest.json에 SSOT가 있으면 나란히 보여준다.
+
+    Returns: (model_line, ssot_line | None)
+    """
+    j = j if isinstance(j, dict) else {}
+    rm = j.get("result_model") if isinstance(j.get("result_model"), dict) else {}
+    if rm.get("label") and rm.get("definition"):
+        model_line = f"채점 기준: {rm['label']} — {rm['definition']}"
+    else:
+        model_line = f"채점 기준: {_LIMIT_FILL_MODEL_DEFAULT}"
+
+    ssot = (bt or {}).get("official_ssot") if isinstance(bt, dict) else None
+    if not isinstance(ssot, dict):
+        return model_line, None
+    try:
+        n_measured = int(ssot.get("n_measured") or 0)
+        mean = ssot.get("mean_pct")
+        if n_measured <= 0 or mean is None:
+            return model_line, None
+        mean = float(mean)
+        win = ssot.get("win_rate")
+        win_txt = f" · 승률 {float(win) * 100:.1f}%" if win is not None else ""
+    except (TypeError, ValueError) as exc:
+        _logger.warning("official_ssot 비교 문구 생성 실패: %s", exc)
+        return model_line, None
+    ssot_line = (
+        f"같은 공식 매수를 종목탭 헤드라인 기준(다음날 시가 진입 · -8% 손절 · 5일)으로 "
+        f"채점하면 {n_measured}건 평균 {mean:+.2f}%{win_txt} — 채점 정의가 달라 숫자가 다릅니다"
+    )
+    return model_line, ssot_line
+
+
 def _render_official_buy_validation_card() -> None:
     """[v22.3.12] 공식 신규매수 성과 누적 카드.
 
@@ -1031,6 +1075,10 @@ def _render_official_buy_validation_card() -> None:
     - TOP_PICK + BUY_NOW_ELIGIBLE 실제 결과
     - BUY_NOW_ELIGIBLE=0으로 보류한 TOP_PICK의 이후 결과
     - 보류/현금 유지가 손실을 피했는지, 기회비용을 냈는지
+
+    [v85] 공식 매수는 기록된 PRODUCTION_BUY (컬럼 없는 옛 CSV만 TOP_PICK+ELIGIBLE).
+    숫자는 지정가 모델 채점 — 카드에 기준을 명시하고 종목탭 헤드라인(official_ssot)
+    숫자를 나란히 보여준다 (_official_card_basis_lines).
     """
     j = _load_official_buy_validation()
 
@@ -1044,8 +1092,9 @@ def _render_official_buy_validation_card() -> None:
                     "text-lg font-bold text-emerald-300"
                 )
                 ui.label(
-                    "TOP_PICK + BUY_NOW_ELIGIBLE 기준의 실제 성과와, "
-                    "ELIGIBLE=0으로 보류한 TOP_PICK의 현금 유지 효과를 별도로 측정합니다."
+                    "배치가 기록한 공식 매수(PRODUCTION_BUY — 옛 CSV는 TOP_PICK + "
+                    "BUY_NOW_ELIGIBLE)의 실제 성과와, 보류한 TOP_PICK의 현금 유지 효과를 "
+                    "별도로 측정합니다."
                 ).classes("text-xs text-gray-400 leading-relaxed")
 
         if not j:
@@ -1062,6 +1111,13 @@ def _render_official_buy_validation_card() -> None:
             _shadow_stat("검증일", f"{int(s.get('signal_days', 0)):,}일")
             _shadow_stat("공식 신호", f"{int(s.get('official_buy_signals', 0)):,}건")
             _shadow_stat("공식 결과", f"{int(s.get('official_buy_results', 0)):,}건")
+            # [v85] 결과에서 뺀 공식 매수 — 체결 못 함(0.0으로 세지 않음) / 아직 측정중
+            if "official_buy_not_filled" in s or "official_buy_pending" in s:
+                _shadow_stat(
+                    "미체결·측정중",
+                    f"{int(s.get('official_buy_not_filled', 0) or 0):,} · "
+                    f"{int(s.get('official_buy_pending', 0) or 0):,}건",
+                )
             _shadow_stat(
                 "공식 승률",
                 _pct_or_dash(s.get("official_buy_win_rate"), digits=1),
@@ -1073,6 +1129,13 @@ def _render_official_buy_validation_card() -> None:
                 good=(s.get("official_buy_avg_net_pct") or 0) > 0,
                 bad=(s.get("official_buy_avg_net_pct") or 0) < 0,
             )
+
+        # [v85] 채점 기준 명시 + 종목탭 헤드라인(official_ssot) 숫자 병기 —
+        #   같은 공식픽인데 탭마다 승률/평균이 다른 이유를 카드 안에서 설명한다.
+        _model_line, _ssot_line = _official_card_basis_lines(j, _load_backtest_validation())
+        ui.label(_model_line).classes("text-[11px] text-gray-400 mt-1 leading-relaxed")
+        if _ssot_line:
+            ui.label(_ssot_line).classes("text-[11px] text-sky-200 leading-relaxed")
 
         with ui.row().classes("w-full flex-wrap gap-x-6 gap-y-1 mt-2"):
             _shadow_stat("공식매수 없음", f"{int(s.get('no_official_buy_days', 0)):,}일")
@@ -1574,6 +1637,51 @@ def _code6_top1(x):
     return s.zfill(6)
 
 
+_CONTRACT_SOURCE = "PRODUCTION_BUY"   # backtest_validation.SOURCE_PRODUCTION_BUY
+
+
+def _keep_contract_rows(trades: pd.DataFrame) -> pd.DataFrame:
+    """[v85] 공식 매수 행이 하나라도 있으면 공식 매수 행만 남긴다.
+
+    최근 15개 dated 파일 중 v85 이전 파일은 동결된 레거시 라벨 거래(0227~0709)만
+    담고 selection_source 컬럼이 없다. 그대로 섞으면 배포 후 약 15일 동안 수익/손실
+    기여·GREEN 손절 카드의 '최근' Top5가 2~7월 라벨 픽으로 채워진다 — 검증 기준 카드는
+    '공식 매수(PRODUCTION_BUY) 채점'이라고 말하는데. 공식 매수 행이 하나도 없으면
+    (예전 파일만 있는 경우) 예전처럼 전부 쓴다.
+    """
+    if trades is None or trades.empty or "selection_source" not in trades.columns:
+        return trades
+    src = trades["selection_source"].astype(str).str.strip().str.upper()
+    is_contract = src == _CONTRACT_SOURCE
+    if not bool(is_contract.any()):
+        return trades
+    return trades[is_contract].copy()
+
+
+def _prefer_newest_matured(trades: pd.DataFrame) -> pd.DataFrame:
+    """[v85] (date, code)별 한 행 — 확정 결과(matured) 우선, 그다음 최신 파일.
+
+    matured 컬럼이 없는 예전 파일은 outcome이 PENDING이 아니면 확정으로 본다
+    (예전 엔진엔 PENDING이 없었다). _file_rank(클수록 최신)가 없으면 행 순서를 쓴다.
+    """
+    if trades is None or trades.empty or not {"date", "code"} <= set(trades.columns):
+        return trades
+    t = trades.copy()
+    if "_file_rank" not in t.columns:
+        t["_file_rank"] = range(len(t))
+    outcome = t.get("outcome", pd.Series("", index=t.index)).astype(str).str.strip().str.upper()
+    matured = (outcome != "PENDING")
+    if "matured" in t.columns:
+        raw = t["matured"]
+        has = raw.notna() & (raw.astype(str).str.strip() != "")
+        explicit = raw.astype(str).str.strip().str.lower().isin({"1", "1.0", "true", "t", "yes", "y"})
+        matured = matured.where(~has, explicit)
+    t["_matured_rank"] = matured.astype(int)
+    t = t.sort_values(["_matured_rank", "_file_rank"], ascending=[False, False], kind="mergesort")
+    t = t.drop_duplicates(subset=["date", "code"], keep="first")
+    return t.drop(columns=["_matured_rank", "_file_rank"]).sort_index()
+
+
 def _load_top1_trades() -> pd.DataFrame:
     """[v3.9.14d + v3.9.22c-1] backtest_top1_trades 최근 15일치 로딩 + 정규화.
 
@@ -1590,6 +1698,13 @@ def _load_top1_trades() -> pd.DataFrame:
     컬럼 추가:
       - fill_date(datetime), net_pct_num(float), outcome_norm(upper str)
       - DATA_QUALITY_FLAG(str): "OK" / "EXIT_ZERO" / ""
+
+    [v85] 같은 (date, code)가 누적 dated 파일마다 반복된다. 예전엔 오래된 파일부터
+    concat 후 keep='first' → **가장 미성숙한 첫 스냅샷**(D+1 밤 봉 1개)이 이겼다.
+    이제 (확정 결과 우선 → 최신 파일 우선) 안정 정렬 뒤 keep='first'.
+    NOT_FILLED·PENDING은 net_pct가 공란(새 엔진) — 0.0 결과로 세지 않는다.
+    공식 매수(selection_source=PRODUCTION_BUY) 행이 있으면 그것만 쓴다
+    (예전 파일의 동결 레거시 라벨 거래와 섞지 않음 — _keep_contract_rows).
     """
     import glob as _g
     try:
@@ -1597,12 +1712,15 @@ def _load_top1_trades() -> pd.DataFrame:
         trade_files = [f for f in trade_files if "latest" not in os.path.basename(f)]
         if len(trade_files) < 3:
             return pd.DataFrame()
-        trades = pd.concat(
-            [pd.read_csv(f) for f in trade_files[-15:]],
-            ignore_index=True,
-        )
+        _frames = []
+        for _rank, _f in enumerate(trade_files[-15:]):
+            _df = pd.read_csv(_f)
+            _df["_file_rank"] = _rank          # 클수록 최신 파일
+            _frames.append(_df)
+        trades = pd.concat(_frames, ignore_index=True)
         trades.columns = [c.lstrip("\ufeff") for c in trades.columns]
-        trades = trades.drop_duplicates(subset=["date", "code"])
+        trades = _keep_contract_rows(trades)
+        trades = _prefer_newest_matured(trades)
 
         if "fill_date" not in trades.columns or "outcome" not in trades.columns:
             return pd.DataFrame()
@@ -1613,6 +1731,9 @@ def _load_top1_trades() -> pd.DataFrame:
         trades["net_pct_num"] = pd.to_numeric(trades["net_pct"], errors="coerce")
         # [v3.9.14b 보정 3] outcome 대소문자/공백 정규화
         trades["outcome_norm"] = trades["outcome"].astype(str).str.strip().str.upper()
+        # [v85] 미체결·측정중·가격없음은 결과가 아니다 — 예전 파일의 net 0.0도 통계에서 뺀다
+        trades.loc[trades["outcome_norm"].isin({"NOT_FILLED", "PENDING", "NODATA"}),
+                   "net_pct_num"] = pd.NA
 
         # ─── [v3.9.22c-1 DATA_AUDIT] 데이터 결손 태깅 + 필터 ───
         exit_price_num = pd.to_numeric(
@@ -2255,14 +2376,22 @@ def _render_validation_basis_card() -> None:
             ui.label(
                 "• 상단 성과 요약 — Top5 후보를 5영업일 보유했을 때의 평균 검증"
             ).classes("text-xs text-gray-300")
+            # [v85] 종목탭 성적표는 배치가 기록한 공식 매수(PRODUCTION_BUY)만 채점한다.
+            #   예전 문구('Top1 실전 검증'·'데이터 준비 중')는 동결된 라벨 전략 시절 것.
             ui.label(
-                "• 종목탭 Top Pick — 실제 하루 1종목 운용에 가까운 Top1 실전 검증 (10영업일)"
+                "• 종목탭 성적표 — 배치가 기록한 공식 매수(PRODUCTION_BUY=1)만 채점. "
+                "헤드라인은 픽 이력과 같은 정의(다음날 시가 진입 · -8% 손절 · 5일), "
+                "보조로 제시가 지정가 모델(3일 체결창 · 10영업일)"
             ).classes("text-xs text-gray-300")
             ui.label(
-                "• Shadow 실험실 — 추천 로직을 바꾸지 않고 \"바꿨다면 어땠을지\"를 측정한 실험 결과"
+                "• Shadow 실험실 — 추천 로직을 바꾸지 않고 \"바꿨다면 어땠을지\"를 측정한 실험 결과 "
+                "(기준선은 레거시 라벨 Top3 — 공식 매수 성적과 다른 기준)"
             ).classes("text-xs text-gray-300")
             ui.label(
-                "• 공식 신규매수 — TOP_PICK + BUY_NOW_ELIGIBLE 기준. 현재는 별도 누적 전이라 데이터 준비 중"
+                "• 공식 신규매수 — 기록된 공식 매수(PRODUCTION_BUY, 없으면 TOP_PICK + "
+                "BUY_NOW_ELIGIBLE)의 결과 누적. 제시가 지정가 모델(3일 체결창 · "
+                "1차 목표/손절 · 10영업일 · 비용 차감)로 채점 — 종목탭 헤드라인과 "
+                "정의가 달라 숫자가 다름. 체결 못 한 건·측정중인 건은 성과에서 제외"
             ).classes("text-xs text-amber-200")
         ui.label(
             "※ 각 영역의 숫자가 다른 이유는 \"검증 기준\"이 다르기 때문이며, "
