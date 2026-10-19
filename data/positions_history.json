@@ -7794,5 +7794,28 @@
     "alerted_events": [
       "319660_20261014_STOP_HIT_20261015"
     ]
+  },
+  {
+    "code": "229640",
+    "name": "LS에코에너지",
+    "entry_ymd": "20261015",
+    "entry_px": 64100.0,
+    "qty": 0,
+    "stop_px": 58900.0,
+    "stop_px_initial": 58900.0,
+    "take_px1": 76100.0,
+    "take_px2": 86800.0,
+    "trailing_high": 71600.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261019",
+    "last_close_px": 58700.0,
+    "unrealized_pnl_pct": -8.42,
+    "realized_pnl_pct": -8.42,
+    "close_ymd": "20261019",
+    "close_px": 58700.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "229640_20261015_STOP_HIT_20261019"
+    ]
   }
 ]

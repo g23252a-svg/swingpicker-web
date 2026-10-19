@@ -1,0 +1,53 @@
+{
+ "ok": true,
+ "horizon_bdays": 5,
+ "lookback_days": 60,
+ "n_days_used": 55,
+ "axes": {
+  "STRUCT_SCORE": {
+   "n_days": 55,
+   "mean_ic": -0.0361,
+   "t_stat": -1.69,
+   "orientation": 1,
+   "pct_positive": 0.436,
+   "verdict": "무신호"
+  },
+  "TIMING_SCORE": {
+   "n_days": 55,
+   "mean_ic": -0.0283,
+   "t_stat": -1.2,
+   "orientation": 1,
+   "pct_positive": 0.491,
+   "verdict": "무신호"
+  },
+  "AI_SCORE": {
+   "n_days": 0,
+   "verdict": "표본부족"
+  },
+  "FINAL_SCORE": {
+   "n_days": 55,
+   "mean_ic": -0.0379,
+   "t_stat": -1.55,
+   "orientation": 1,
+   "pct_positive": 0.491,
+   "verdict": "무신호"
+  },
+  "ELITE_SCORE": {
+   "n_days": 55,
+   "mean_ic": -0.0299,
+   "t_stat": -1.86,
+   "orientation": 1,
+   "pct_positive": 0.455,
+   "verdict": "무신호"
+  },
+  "POC_GAP": {
+   "n_days": 55,
+   "mean_ic": -0.0912,
+   "t_stat": -3.82,
+   "orientation": -1,
+   "pct_positive": 0.327,
+   "verdict": "유효"
+  }
+ },
+ "warnings": []
+}
