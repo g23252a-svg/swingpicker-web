@@ -1,5 +1,5 @@
 {
-  "trade_ymd": "20261019",
+  "trade_ymd": "20261020",
   "status": "DEGRADED",
   "reasons": [
     "NEWS_OFF"
@@ -16,8 +16,8 @@
   },
   "confidence_score": 90.0,
   "max_allowed_route": "ARMED",
-  "macro_risk": "CAUTION",
-  "market_breadth": 79.1,
+  "macro_risk": "NORMAL",
+  "market_breadth": 9.6,
   "axis_status": {
     "MCAP": "OK",
     "BENCH": "OK",

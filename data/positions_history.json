@@ -7817,5 +7817,101 @@
     "alerted_events": [
       "229640_20261015_STOP_HIT_20261019"
     ]
+  },
+  {
+    "code": "073240",
+    "name": "금호타이어",
+    "entry_ymd": "20260716",
+    "entry_px": 5850.0,
+    "qty": 0,
+    "stop_px": 5380.0,
+    "stop_px_initial": 5380.0,
+    "take_px1": 7840.0,
+    "take_px2": 8880.0,
+    "trailing_high": 8850.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261020",
+    "last_close_px": 5380.0,
+    "unrealized_pnl_pct": -8.03,
+    "realized_pnl_pct": -8.03,
+    "close_ymd": "20261020",
+    "close_px": 5380.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "073240_20260716_TP1_HIT_20260806",
+      "073240_20260716_TP1_HIT_20260813",
+      "073240_20260716_TP1_HIT_20260814",
+      "073240_20260716_TP1_HIT_20260817",
+      "073240_20260716_STOP_HIT_20261020"
+    ]
+  },
+  {
+    "code": "072950",
+    "name": "빛샘전자",
+    "entry_ymd": "20261015",
+    "entry_px": 15370.0,
+    "qty": 0,
+    "stop_px": 14140.0,
+    "stop_px_initial": 14140.0,
+    "take_px1": 18210.0,
+    "take_px2": 19230.0,
+    "trailing_high": 16700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261020",
+    "last_close_px": 13620.0,
+    "unrealized_pnl_pct": -11.39,
+    "realized_pnl_pct": -11.39,
+    "close_ymd": "20261020",
+    "close_px": 13620.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "072950_20261015_STOP_HIT_20261020"
+    ]
+  },
+  {
+    "code": "131290",
+    "name": "티에스이",
+    "entry_ymd": "20261016",
+    "entry_px": 290000.0,
+    "qty": 0,
+    "stop_px": 266500.0,
+    "stop_px_initial": 266500.0,
+    "take_px1": 345000.0,
+    "take_px2": 394500.0,
+    "trailing_high": 301000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261020",
+    "last_close_px": 259000.0,
+    "unrealized_pnl_pct": -10.69,
+    "realized_pnl_pct": -10.69,
+    "close_ymd": "20261020",
+    "close_px": 259000.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "131290_20261016_STOP_HIT_20261020"
+    ]
+  },
+  {
+    "code": "033790",
+    "name": "피노",
+    "entry_ymd": "20261019",
+    "entry_px": 9030.0,
+    "qty": 0,
+    "stop_px": 8300.0,
+    "stop_px_initial": 8300.0,
+    "take_px1": 11600.0,
+    "take_px2": 12470.0,
+    "trailing_high": 9220.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261020",
+    "last_close_px": 7510.0,
+    "unrealized_pnl_pct": -16.83,
+    "realized_pnl_pct": -16.83,
+    "close_ymd": "20261020",
+    "close_px": 7510.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "033790_20261019_STOP_HIT_20261020"
+    ]
   }
 ]

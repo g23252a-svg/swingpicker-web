@@ -1,7 +1,7 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 21,
+ "days_total": 22,
  "variants": {
   "legacy": {
    "days": 16,
@@ -62,7 +62,7 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20261019",
+   "ymd": "20261020",
    "variant": "ext_lowtv",
    "종목코드": "475830",
    "종목명": "오름테라퓨틱",
@@ -70,8 +70,8 @@
    "rr": NaN,
    "atr_pct": NaN,
    "vol_pctl": NaN,
-   "ext_score": 0.04165170556552963,
-   "tv_eok": 20.9725824
+   "ext_score": 0.04508050089445439,
+   "tv_eok": 20.8437624
   }
  ],
  "added": true
