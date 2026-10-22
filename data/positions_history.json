@@ -7913,5 +7913,106 @@
     "alerted_events": [
       "033790_20261019_STOP_HIT_20261020"
     ]
+  },
+  {
+    "code": "086790",
+    "name": "하나금융지주",
+    "entry_ymd": "20260723",
+    "entry_px": 130500.0,
+    "qty": 0,
+    "stop_px": 120000.0,
+    "stop_px_initial": 120000.0,
+    "take_px1": 142500.0,
+    "take_px2": 154600.0,
+    "trailing_high": 141900.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261022",
+    "last_close_px": 119800.0,
+    "unrealized_pnl_pct": -8.2,
+    "realized_pnl_pct": -8.2,
+    "close_ymd": "20261022",
+    "close_px": 119800.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "086790_20260723_WARN_DRAWDOWN_20260728",
+      "086790_20260723_WARN_DRAWDOWN_20260729",
+      "086790_20260723_WARN_DRAWDOWN_20260820",
+      "086790_20260723_WARN_DRAWDOWN_20261014",
+      "086790_20260723_WARN_DRAWDOWN_20261015",
+      "086790_20260723_WARN_DRAWDOWN_20261016",
+      "086790_20260723_WARN_DRAWDOWN_20261019",
+      "086790_20260723_WARN_DRAWDOWN_20261020",
+      "086790_20260723_WARN_DRAWDOWN_20261021",
+      "086790_20260723_STOP_HIT_20261022"
+    ]
+  },
+  {
+    "code": "161000",
+    "name": "애경케미칼",
+    "entry_ymd": "20261021",
+    "entry_px": 12110.0,
+    "qty": 0,
+    "stop_px": 11140.0,
+    "stop_px_initial": 11140.0,
+    "take_px1": 13450.0,
+    "take_px2": 13990.0,
+    "trailing_high": 12490.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261022",
+    "last_close_px": 10870.0,
+    "unrealized_pnl_pct": -10.24,
+    "realized_pnl_pct": -10.24,
+    "close_ymd": "20261022",
+    "close_px": 10870.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "161000_20261021_STOP_HIT_20261022"
+    ]
+  },
+  {
+    "code": "217590",
+    "name": "티엠씨",
+    "entry_ymd": "20261021",
+    "entry_px": 12810.0,
+    "qty": 0,
+    "stop_px": 11970.0,
+    "stop_px_initial": 11970.0,
+    "take_px1": 16050.0,
+    "take_px2": 20300.0,
+    "trailing_high": 13150.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261022",
+    "last_close_px": 11550.0,
+    "unrealized_pnl_pct": -9.84,
+    "realized_pnl_pct": -9.84,
+    "close_ymd": "20261022",
+    "close_px": 11550.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "217590_20261021_STOP_HIT_20261022"
+    ]
+  },
+  {
+    "code": "002710",
+    "name": "TCC스틸",
+    "entry_ymd": "20261021",
+    "entry_px": 12720.0,
+    "qty": 0,
+    "stop_px": 12020.0,
+    "stop_px_initial": 12020.0,
+    "take_px1": 15820.0,
+    "take_px2": 18090.0,
+    "trailing_high": 13560.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261022",
+    "last_close_px": 11630.0,
+    "unrealized_pnl_pct": -8.57,
+    "realized_pnl_pct": -8.57,
+    "close_ymd": "20261022",
+    "close_px": 11630.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "002710_20261021_STOP_HIT_20261022"
+    ]
   }
 ]

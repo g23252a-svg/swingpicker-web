@@ -1,7 +1,7 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 23,
+ "days_total": 24,
  "variants": {
   "legacy": {
    "days": 16,
@@ -62,7 +62,7 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20261021",
+   "ymd": "20261022",
    "variant": "ext_lowtv",
    "종목코드": "439960",
    "종목명": "코스모로보틱스",
@@ -70,8 +70,8 @@
    "rr": NaN,
    "atr_pct": NaN,
    "vol_pctl": NaN,
-   "ext_score": 0.07864768683274022,
-   "tv_eok": 33.7276224
+   "ext_score": 0.06999999999999999,
+   "tv_eok": 26.9891544
   }
  ],
  "added": true
