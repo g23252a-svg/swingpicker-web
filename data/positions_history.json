@@ -8014,5 +8014,90 @@
     "alerted_events": [
       "002710_20261021_STOP_HIT_20261022"
     ]
+  },
+  {
+    "code": "010950",
+    "name": "S-Oil",
+    "entry_ymd": "20260825",
+    "entry_px": 139900.0,
+    "qty": 0,
+    "stop_px": 132300.0,
+    "stop_px_initial": 132300.0,
+    "take_px1": 157300.0,
+    "take_px2": 171900.0,
+    "trailing_high": 173700.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261023",
+    "last_close_px": 131800.0,
+    "unrealized_pnl_pct": -5.79,
+    "realized_pnl_pct": -5.79,
+    "close_ymd": "20261023",
+    "close_px": 131800.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "010950_20260825_TP1_HIT_20260907",
+      "010950_20260825_TP1_HIT_20260909",
+      "010950_20260825_TP1_HIT_20260928",
+      "010950_20260825_TP1_HIT_20260929",
+      "010950_20260825_TP1_HIT_20260930",
+      "010950_20260825_TP1_HIT_20261001",
+      "010950_20260825_TP1_HIT_20261002",
+      "010950_20260825_TP1_HIT_20261005",
+      "010950_20260825_TP1_HIT_20261006",
+      "010950_20260825_TP1_HIT_20261007",
+      "010950_20260825_TP1_HIT_20261008",
+      "010950_20260825_TP1_HIT_20261013",
+      "010950_20260825_TP1_HIT_20261014",
+      "010950_20260825_TP1_HIT_20261015",
+      "010950_20260825_STOP_HIT_20261023"
+    ]
+  },
+  {
+    "code": "006400",
+    "name": "삼성SDI",
+    "entry_ymd": "20260902",
+    "entry_px": 538000.0,
+    "qty": 0,
+    "stop_px": 494500.0,
+    "stop_px_initial": 494500.0,
+    "take_px1": 600000.0,
+    "take_px2": 650000.0,
+    "trailing_high": 600000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261023",
+    "last_close_px": 486500.0,
+    "unrealized_pnl_pct": -9.57,
+    "realized_pnl_pct": -9.57,
+    "close_ymd": "20261023",
+    "close_px": 486500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "006400_20260902_WARN_DRAWDOWN_20261022",
+      "006400_20260902_STOP_HIT_20261023"
+    ]
+  },
+  {
+    "code": "441270",
+    "name": "파인엠텍",
+    "entry_ymd": "20261020",
+    "entry_px": 9350.0,
+    "qty": 0,
+    "stop_px": 8600.0,
+    "stop_px_initial": 8600.0,
+    "take_px1": 10260.0,
+    "take_px2": 10770.0,
+    "trailing_high": 11280.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261023",
+    "last_close_px": 11350.0,
+    "unrealized_pnl_pct": 21.39,
+    "realized_pnl_pct": 21.39,
+    "close_ymd": "20261023",
+    "close_px": 11350.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "441270_20261020_TP1_HIT_20261023",
+      "441270_20261020_TP2_HIT_20261023"
+    ]
   }
 ]
