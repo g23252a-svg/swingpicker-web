@@ -1,9 +1,9 @@
 {
  "live_from": "20260828",
  "target_days": 20,
- "days_total": 34,
+ "days_total": 35,
  "days_measured": 3,
- "picks_total": 155,
+ "picks_total": 160,
  "picks_measured": 3,
  "avg_ret_pct_after_cost": -4.903185217427911,
  "win_rate": 0.3333333333333333,
@@ -11,16 +11,16 @@
  "positive_days": 0,
  "daily": [
   {
+   "ymd": "20260831",
+   "ret_pct": -8.51
+  },
+  {
    "ymd": "20260917",
    "ret_pct": -6.107
   },
   {
    "ymd": "20260921",
    "ret_pct": -0.093
-  },
-  {
-   "ymd": "20261002",
-   "ret_pct": -8.51
   }
  ],
  "backtest_ref": {
