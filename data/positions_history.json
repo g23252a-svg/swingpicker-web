@@ -8275,5 +8275,79 @@
     "alerted_events": [
       "006110_20261023_STOP_HIT_20261026"
     ]
+  },
+  {
+    "code": "328130",
+    "name": "루닛",
+    "entry_ymd": "20261002",
+    "entry_px": 10570.0,
+    "qty": 0,
+    "stop_px": 9720.0,
+    "stop_px_initial": 9720.0,
+    "take_px1": 12490.0,
+    "take_px2": 13520.0,
+    "trailing_high": 15800.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261027",
+    "last_close_px": 14710.0,
+    "unrealized_pnl_pct": 39.17,
+    "realized_pnl_pct": 39.17,
+    "close_ymd": "20261027",
+    "close_px": 14710.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "328130_20261002_TP1_HIT_20261019",
+      "328130_20261002_TP1_HIT_20261020",
+      "328130_20261002_CORPORATE_ACTION_20261026",
+      "328130_20261002_TP1_HIT_20261027",
+      "328130_20261002_TP2_HIT_20261027"
+    ]
+  },
+  {
+    "code": "340450",
+    "name": "지씨지놈",
+    "entry_ymd": "20261019",
+    "entry_px": 9350.0,
+    "qty": 0,
+    "stop_px": 8600.0,
+    "stop_px_initial": 8600.0,
+    "take_px1": 10500.0,
+    "take_px2": 10940.0,
+    "trailing_high": 10350.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261027",
+    "last_close_px": 8230.0,
+    "unrealized_pnl_pct": -11.98,
+    "realized_pnl_pct": -11.98,
+    "close_ymd": "20261027",
+    "close_px": 8230.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "340450_20261019_STOP_HIT_20261027"
+    ]
+  },
+  {
+    "code": "253590",
+    "name": "네오셈",
+    "entry_ymd": "20261020",
+    "entry_px": 14860.0,
+    "qty": 0,
+    "stop_px": 13670.0,
+    "stop_px_initial": 13670.0,
+    "take_px1": 16690.0,
+    "take_px2": 17110.0,
+    "trailing_high": 17990.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261027",
+    "last_close_px": 17340.0,
+    "unrealized_pnl_pct": 16.69,
+    "realized_pnl_pct": 16.69,
+    "close_ymd": "20261027",
+    "close_px": 17340.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "253590_20261020_TP1_HIT_20261027",
+      "253590_20261020_TP2_HIT_20261027"
+    ]
   }
 ]
