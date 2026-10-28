@@ -8349,5 +8349,30 @@
       "253590_20261020_TP1_HIT_20261027",
       "253590_20261020_TP2_HIT_20261027"
     ]
+  },
+  {
+    "code": "053800",
+    "name": "안랩",
+    "entry_ymd": "20261026",
+    "entry_px": 79700.0,
+    "qty": 0,
+    "stop_px": 73300.0,
+    "stop_px_initial": 73300.0,
+    "take_px1": 94800.0,
+    "take_px2": 97900.0,
+    "trailing_high": 119400.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261028",
+    "last_close_px": 110700.0,
+    "unrealized_pnl_pct": 38.9,
+    "realized_pnl_pct": 38.9,
+    "close_ymd": "20261028",
+    "close_px": 110700.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "053800_20261026_TP1_HIT_20261027",
+      "053800_20261026_TP1_HIT_20261028",
+      "053800_20261026_TP2_HIT_20261028"
+    ]
   }
 ]

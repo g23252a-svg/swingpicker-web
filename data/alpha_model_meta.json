@@ -1,5 +1,5 @@
 {
- "trained_ymd": "20261027",
+ "trained_ymd": "20261028",
  "n_features": 103,
  "features": [
   "거래대금(억원)",
@@ -108,12 +108,12 @@
  ],
  "ok": true,
  "validated": true,
- "oos_days": 109,
- "oos_rows": 36806,
- "mean_ic": 0.0653,
+ "oos_days": 110,
+ "oos_rows": 37096,
+ "mean_ic": 0.0662,
  "ic_t": 3.04,
- "auc": 0.5342,
- "q5q1_spread_pct": 1.145,
+ "auc": 0.5341,
+ "q5q1_spread_pct": 1.152,
  "gate": {
   "min_ic_t": 2.0,
   "min_auc": 0.52,
@@ -122,63 +122,63 @@
  "calibration": [
   {
    "decile": 0,
-   "n": 3624,
-   "win_rate": 0.3411,
-   "avg_fwd_pct": -4.146
+   "n": 3653,
+   "win_rate": 0.3427,
+   "avg_fwd_pct": -4.074
   },
   {
    "decile": 1,
-   "n": 3672,
-   "win_rate": 0.3521,
-   "avg_fwd_pct": -3.106
+   "n": 3701,
+   "win_rate": 0.3572,
+   "avg_fwd_pct": -3.013
   },
   {
    "decile": 2,
-   "n": 3687,
-   "win_rate": 0.3575,
-   "avg_fwd_pct": -2.81
+   "n": 3714,
+   "win_rate": 0.3597,
+   "avg_fwd_pct": -2.74
   },
   {
    "decile": 3,
-   "n": 3674,
-   "win_rate": 0.3519,
-   "avg_fwd_pct": -2.932
+   "n": 3707,
+   "win_rate": 0.3464,
+   "avg_fwd_pct": -3.078
   },
   {
    "decile": 4,
-   "n": 3665,
-   "win_rate": 0.3653,
-   "avg_fwd_pct": -2.647
+   "n": 3690,
+   "win_rate": 0.3637,
+   "avg_fwd_pct": -2.676
   },
   {
    "decile": 5,
-   "n": 3698,
-   "win_rate": 0.3583,
-   "avg_fwd_pct": -2.564
+   "n": 3726,
+   "win_rate": 0.3516,
+   "avg_fwd_pct": -2.667
   },
   {
    "decile": 6,
-   "n": 3685,
-   "win_rate": 0.3615,
+   "n": 3717,
+   "win_rate": 0.3648,
    "avg_fwd_pct": -2.579
   },
   {
    "decile": 7,
-   "n": 3676,
-   "win_rate": 0.3702,
-   "avg_fwd_pct": -2.251
+   "n": 3704,
+   "win_rate": 0.3661,
+   "avg_fwd_pct": -2.256
   },
   {
    "decile": 8,
-   "n": 3683,
-   "win_rate": 0.3807,
-   "avg_fwd_pct": -2.11
+   "n": 3711,
+   "win_rate": 0.3775,
+   "avg_fwd_pct": -2.105
   },
   {
    "decile": 9,
-   "n": 3742,
-   "win_rate": 0.3693,
-   "avg_fwd_pct": -2.296
+   "n": 3773,
+   "win_rate": 0.3766,
+   "avg_fwd_pct": -2.166
   }
  ],
  "validation_scheme": "purged_label_end_v1",
