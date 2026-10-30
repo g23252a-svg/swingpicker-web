@@ -8374,5 +8374,105 @@
       "053800_20261026_TP1_HIT_20261028",
       "053800_20261026_TP2_HIT_20261028"
     ]
+  },
+  {
+    "code": "003350",
+    "name": "한국화장품제조",
+    "entry_ymd": "20260902",
+    "entry_px": 13300.0,
+    "qty": 0,
+    "stop_px": 12230.0,
+    "stop_px_initial": 12230.0,
+    "take_px1": 15690.0,
+    "take_px2": 18040.0,
+    "trailing_high": 17910.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261030",
+    "last_close_px": 11690.0,
+    "unrealized_pnl_pct": -12.11,
+    "realized_pnl_pct": -12.11,
+    "close_ymd": "20261030",
+    "close_px": 11690.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "003350_20260902_TP1_HIT_20260911",
+      "003350_20260902_TP1_HIT_20260923",
+      "003350_20260902_TP1_HIT_20260924",
+      "003350_20260902_TP1_HIT_20260925",
+      "003350_20260902_TP1_HIT_20261007",
+      "003350_20260902_TP1_HIT_20261008",
+      "003350_20260902_STOP_HIT_20261030"
+    ]
+  },
+  {
+    "code": "000650",
+    "name": "천일고속",
+    "entry_ymd": "20261022",
+    "entry_px": 203000.0,
+    "qty": 0,
+    "stop_px": 186700.0,
+    "stop_px_initial": 186700.0,
+    "take_px1": 269000.0,
+    "take_px2": 279000.0,
+    "trailing_high": 251500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261030",
+    "last_close_px": 182800.0,
+    "unrealized_pnl_pct": -9.95,
+    "realized_pnl_pct": -9.95,
+    "close_ymd": "20261030",
+    "close_px": 182800.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "000650_20261022_STOP_HIT_20261030"
+    ]
+  },
+  {
+    "code": "419050",
+    "name": "삼기에너지솔루션즈",
+    "entry_ymd": "20261023",
+    "entry_px": 2240.0,
+    "qty": 0,
+    "stop_px": 2060.0,
+    "stop_px_initial": 2060.0,
+    "take_px1": 2755.0,
+    "take_px2": 3130.0,
+    "trailing_high": 2965.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261030",
+    "last_close_px": 1846.0,
+    "unrealized_pnl_pct": -17.59,
+    "realized_pnl_pct": -17.59,
+    "close_ymd": "20261030",
+    "close_px": 1846.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "419050_20261023_WARN_DRAWDOWN_20261029",
+      "419050_20261023_STOP_HIT_20261030"
+    ]
+  },
+  {
+    "code": "009900",
+    "name": "명신산업",
+    "entry_ymd": "20261026",
+    "entry_px": 8730.0,
+    "qty": 0,
+    "stop_px": 8030.0,
+    "stop_px_initial": 8030.0,
+    "take_px1": 10460.0,
+    "take_px2": 11670.0,
+    "trailing_high": 9410.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261030",
+    "last_close_px": 7580.0,
+    "unrealized_pnl_pct": -13.17,
+    "realized_pnl_pct": -13.17,
+    "close_ymd": "20261030",
+    "close_px": 7580.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "009900_20261026_WARN_DRAWDOWN_20261029",
+      "009900_20261026_STOP_HIT_20261030"
+    ]
   }
 ]

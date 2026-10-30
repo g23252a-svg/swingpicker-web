@@ -1,0 +1,163 @@
+{
+ "ok": true,
+ "asof": "20261023",
+ "n_days": 65,
+ "universe_mean_pct": -0.197,
+ "depth": 1,
+ "robust_depth": 1,
+ "curve": [
+  {
+   "n": 1,
+   "days": 65,
+   "mean_pct": -1.18,
+   "excess_pct": -0.983,
+   "t": -1.457,
+   "p": 0.1501,
+   "excess_drop_top2": -1.555,
+   "win_rate": 0.3692
+  },
+  {
+   "n": 2,
+   "days": 65,
+   "mean_pct": -0.834,
+   "excess_pct": -0.637,
+   "t": -1.243,
+   "p": 0.2183,
+   "excess_drop_top2": -0.991,
+   "win_rate": 0.4154
+  },
+  {
+   "n": 3,
+   "days": 65,
+   "mean_pct": -1.247,
+   "excess_pct": -1.05,
+   "t": -2.263,
+   "p": 0.027,
+   "excess_drop_top2": -1.396,
+   "win_rate": 0.3385
+  },
+  {
+   "n": 4,
+   "days": 65,
+   "mean_pct": -1.362,
+   "excess_pct": -1.165,
+   "t": -2.65,
+   "p": 0.0101,
+   "excess_drop_top2": -1.55,
+   "win_rate": 0.3538
+  },
+  {
+   "n": 5,
+   "days": 65,
+   "mean_pct": -1.224,
+   "excess_pct": -1.027,
+   "t": -2.452,
+   "p": 0.0169,
+   "excess_drop_top2": -1.375,
+   "win_rate": 0.3385
+  },
+  {
+   "n": 6,
+   "days": 65,
+   "mean_pct": -1.183,
+   "excess_pct": -0.986,
+   "t": -2.823,
+   "p": 0.0063,
+   "excess_drop_top2": -1.259,
+   "win_rate": 0.3231
+  },
+  {
+   "n": 7,
+   "days": 65,
+   "mean_pct": -1.16,
+   "excess_pct": -0.963,
+   "t": -2.81,
+   "p": 0.0066,
+   "excess_drop_top2": -1.211,
+   "win_rate": 0.3231
+  },
+  {
+   "n": 8,
+   "days": 65,
+   "mean_pct": -1.068,
+   "excess_pct": -0.871,
+   "t": -2.556,
+   "p": 0.013,
+   "excess_drop_top2": -1.133,
+   "win_rate": 0.3846
+  },
+  {
+   "n": 9,
+   "days": 65,
+   "mean_pct": -1.0,
+   "excess_pct": -0.803,
+   "t": -2.492,
+   "p": 0.0153,
+   "excess_drop_top2": -1.018,
+   "win_rate": 0.3538
+  },
+  {
+   "n": 10,
+   "days": 65,
+   "mean_pct": -0.975,
+   "excess_pct": -0.778,
+   "t": -2.525,
+   "p": 0.0141,
+   "excess_drop_top2": -0.957,
+   "win_rate": 0.3385
+  },
+  {
+   "n": 11,
+   "days": 65,
+   "mean_pct": -1.011,
+   "excess_pct": -0.815,
+   "t": -2.719,
+   "p": 0.0084,
+   "excess_drop_top2": -0.968,
+   "win_rate": 0.3231
+  },
+  {
+   "n": 12,
+   "days": 65,
+   "mean_pct": -1.12,
+   "excess_pct": -0.924,
+   "t": -3.185,
+   "p": 0.0022,
+   "excess_drop_top2": -1.06,
+   "win_rate": 0.3231
+  },
+  {
+   "n": 13,
+   "days": 65,
+   "mean_pct": -1.068,
+   "excess_pct": -0.871,
+   "t": -3.029,
+   "p": 0.0035,
+   "excess_drop_top2": -1.009,
+   "win_rate": 0.3385
+  },
+  {
+   "n": 14,
+   "days": 65,
+   "mean_pct": -1.013,
+   "excess_pct": -0.816,
+   "t": -2.807,
+   "p": 0.0066,
+   "excess_drop_top2": -0.961,
+   "win_rate": 0.3385
+  },
+  {
+   "n": 15,
+   "days": 65,
+   "mean_pct": -0.98,
+   "excess_pct": -0.783,
+   "t": -2.658,
+   "p": 0.0099,
+   "excess_drop_top2": -0.924,
+   "win_rate": 0.3385
+  }
+ ],
+ "rule": "초과가 1~N 전 구간 양수인 최대 N (바닥 1·천장 10) · robust는 상위2 제거 후에도 양수",
+ "caveat": "어떤 N도 통계적으로 검증되지 않았다(최선 p≈0.14). 이 깊이는 '최적'이 아니라 '이 아래는 실측상 유니버스보다 낫지 않다'는 선이다.",
+ "best_p": 0.1501
+}

@@ -6,18 +6,18 @@
  "axes": {
   "STRUCT_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0575,
-   "t_stat": -2.7,
+   "mean_ic": -0.0491,
+   "t_stat": -2.3,
    "orientation": 1,
-   "pct_positive": 0.364,
+   "pct_positive": 0.382,
    "verdict": "역주행"
   },
   "TIMING_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0318,
-   "t_stat": -1.43,
+   "mean_ic": -0.0234,
+   "t_stat": -1.08,
    "orientation": 1,
-   "pct_positive": 0.473,
+   "pct_positive": 0.527,
    "verdict": "무신호"
   },
   "AI_SCORE": {
@@ -26,31 +26,30 @@
   },
   "FINAL_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0538,
-   "t_stat": -2.3,
+   "mean_ic": -0.0443,
+   "t_stat": -1.93,
    "orientation": 1,
-   "pct_positive": 0.455,
-   "verdict": "역주행"
+   "pct_positive": 0.473,
+   "verdict": "무신호"
   },
   "ELITE_SCORE": {
    "n_days": 55,
-   "mean_ic": -0.0299,
-   "t_stat": -1.93,
+   "mean_ic": -0.0179,
+   "t_stat": -1.19,
    "orientation": 1,
-   "pct_positive": 0.491,
+   "pct_positive": 0.527,
    "verdict": "무신호"
   },
   "POC_GAP": {
    "n_days": 55,
-   "mean_ic": -0.072,
-   "t_stat": -3.1,
+   "mean_ic": -0.0575,
+   "t_stat": -2.57,
    "orientation": -1,
-   "pct_positive": 0.382,
+   "pct_positive": 0.418,
    "verdict": "유효"
   }
  },
  "warnings": [
-  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0575 (t=-2.7, 55일) — 점수가 높을수록 수익률 낮음",
-  "⚠️ 축 역주행: FINAL_SCORE IC -0.0538 (t=-2.3, 55일) — 점수가 높을수록 수익률 낮음"
+  "⚠️ 축 역주행: STRUCT_SCORE IC -0.0491 (t=-2.3, 55일) — 점수가 높을수록 수익률 낮음"
  ]
 }
