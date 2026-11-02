@@ -8474,5 +8474,32 @@
       "009900_20261026_WARN_DRAWDOWN_20261029",
       "009900_20261026_STOP_HIT_20261030"
     ]
+  },
+  {
+    "code": "105740",
+    "name": "디케이락",
+    "entry_ymd": "20261015",
+    "entry_px": 10620.0,
+    "qty": 0,
+    "stop_px": 9770.0,
+    "stop_px_initial": 9770.0,
+    "take_px1": 12240.0,
+    "take_px2": 12940.0,
+    "trailing_high": 13400.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261102",
+    "last_close_px": 13300.0,
+    "unrealized_pnl_pct": 25.24,
+    "realized_pnl_pct": 25.24,
+    "close_ymd": "20261102",
+    "close_px": 13300.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "105740_20261015_TP1_HIT_20261028",
+      "105740_20261015_TP1_HIT_20261029",
+      "105740_20261015_TP1_HIT_20261030",
+      "105740_20261015_TP1_HIT_20261102",
+      "105740_20261015_TP2_HIT_20261102"
+    ]
   }
 ]
