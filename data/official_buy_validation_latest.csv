@@ -691,3 +691,17 @@
 20261030,319400,현대무벡스,True,False,True,False,BUY,80.0,3.1,3.1,2.7,WAIT,4.82,0.0,-29.34,-30.09,GREEN,recommend_20261030.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20261030,323410,카카오뱅크,True,False,True,False,AVOID,0.0,15.7,15.7,13.0,ARMED,1.02,0.0,-5.6,-10.58,GREEN,recommend_20261030.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
 20261030,030200,KT,True,False,True,False,AVOID,0.0,15.6,15.6,12.9,WAIT,1.04,0.0,-10.23,-13.09,GREEN,recommend_20261030.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,035420,NAVER,True,True,False,True,BUY,90.0,6.2,6.2,5.4,WAIT,3.05,0.0,-15.68,-14.16,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,NOT_HOLDOUT,PENDING
+20261103,323410,카카오뱅크,True,False,True,False,BUY,90.0,20.5,20.5,16.6,ARMED,1.72,0.0,-7.65,-12.24,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,097950,CJ제일제당,True,False,True,False,BUY,90.0,9.4,9.4,8.1,WAIT,1.25,0.0,-3.38,-4.83,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,005930,삼성전자,True,False,True,False,BUY,90.0,4.1,4.1,3.6,WAIT,2.69,0.0,-11.67,-14.2,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,088980,맥쿼리인프라,True,False,True,False,BUY,90.0,19.8,19.8,16.1,ARMED,1.1,0.0,-1.3,-3.28,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,028670,팬오션,True,False,True,False,BUY,90.0,0.2,0.2,0.1,WAIT,2.11,0.0,-9.07,-4.51,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,003550,LG,True,False,True,False,BUY,90.0,9.9,9.9,8.5,WAIT,1.44,0.0,-13.23,-18.91,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,024110,기업은행,True,False,True,False,BUY,90.0,9.1,9.1,7.8,WAIT,1.79,0.0,-6.2,-7.05,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,030520,한컴,True,False,True,False,BUY,90.0,11.8,11.8,10.0,CARRY,2.05,0.0,-12.34,-11.17,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,000660,SK하이닉스,True,False,True,False,BUY,90.0,4.7,4.7,4.1,WAIT,3.1,0.0,-11.37,-22.21,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,035720,카카오,True,False,True,False,BUY,90.0,3.8,3.8,3.4,WAIT,1.72,0.0,-17.76,-17.82,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,064260,다날,True,False,True,False,BUY,90.0,11.6,11.6,9.8,CARRY,1.8,0.0,-25.69,-15.73,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,055550,신한지주,True,False,True,False,BUY,80.0,6.4,6.4,5.6,WAIT,1.13,0.0,-16.9,-20.65,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY
+20261103,090360,로보스타,True,False,True,False,BUY,70.0,1.6,1.6,1.5,CARRY,2.9,0.0,-28.94,-38.77,GREEN,recommend_20261103.csv,,,,,,,,,,False,False,,PENDING,NOT_OFFICIAL_BUY

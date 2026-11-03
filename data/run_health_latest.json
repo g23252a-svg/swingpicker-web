@@ -1,5 +1,5 @@
 {
-  "trade_ymd": "20261102",
+  "trade_ymd": "20261103",
   "status": "DEGRADED",
   "reasons": [
     "NEWS_OFF"
@@ -16,8 +16,8 @@
   },
   "confidence_score": 90.0,
   "max_allowed_route": "ARMED",
-  "macro_risk": "CRITICAL",
-  "market_breadth": 85.9,
+  "macro_risk": "NORMAL",
+  "market_breadth": 21.1,
   "axis_status": {
     "MCAP": "OK",
     "BENCH": "OK",
