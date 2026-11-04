@@ -8501,5 +8501,55 @@
       "105740_20261015_TP1_HIT_20261102",
       "105740_20261015_TP2_HIT_20261102"
     ]
+  },
+  {
+    "code": "028300",
+    "name": "HLB",
+    "entry_ymd": "20261020",
+    "entry_px": 42600.0,
+    "qty": 0,
+    "stop_px": 39150.0,
+    "stop_px_initial": 39150.0,
+    "take_px1": 50700.0,
+    "take_px2": 55300.0,
+    "trailing_high": 43650.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261104",
+    "last_close_px": 33500.0,
+    "unrealized_pnl_pct": -21.36,
+    "realized_pnl_pct": -21.36,
+    "close_ymd": "20261104",
+    "close_px": 33500.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "028300_20261020_WARN_DRAWDOWN_20261026",
+      "028300_20261020_WARN_DRAWDOWN_20261027",
+      "028300_20261020_WARN_DRAWDOWN_20261029",
+      "028300_20261020_STOP_HIT_20261104"
+    ]
+  },
+  {
+    "code": "411080",
+    "name": "샌즈랩",
+    "entry_ymd": "20261102",
+    "entry_px": 7380.0,
+    "qty": 0,
+    "stop_px": 6780.0,
+    "stop_px_initial": 6780.0,
+    "take_px1": 9780.0,
+    "take_px2": 10880.0,
+    "trailing_high": 8480.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261104",
+    "last_close_px": 6330.0,
+    "unrealized_pnl_pct": -14.23,
+    "realized_pnl_pct": -14.23,
+    "close_ymd": "20261104",
+    "close_px": 6330.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "411080_20261102_WARN_DRAWDOWN_20261103",
+      "411080_20261102_STOP_HIT_20261104"
+    ]
   }
 ]
