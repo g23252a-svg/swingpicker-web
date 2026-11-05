@@ -8551,5 +8551,101 @@
       "411080_20261102_WARN_DRAWDOWN_20261103",
       "411080_20261102_STOP_HIT_20261104"
     ]
+  },
+  {
+    "code": "080580",
+    "name": "오킨스전자",
+    "entry_ymd": "20261022",
+    "entry_px": 23600.0,
+    "qty": 0,
+    "stop_px": 22200.0,
+    "stop_px_initial": 22200.0,
+    "take_px1": 30950.0,
+    "take_px2": 34450.0,
+    "trailing_high": 31500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261105",
+    "last_close_px": 20750.0,
+    "unrealized_pnl_pct": -12.08,
+    "realized_pnl_pct": -12.08,
+    "close_ymd": "20261105",
+    "close_px": 20750.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "080580_20261022_STOP_HIT_20261105"
+    ]
+  },
+  {
+    "code": "234690",
+    "name": "녹십자웰빙",
+    "entry_ymd": "20261027",
+    "entry_px": 10920.0,
+    "qty": 0,
+    "stop_px": 10040.0,
+    "stop_px_initial": 10040.0,
+    "take_px1": 12550.0,
+    "take_px2": 13890.0,
+    "trailing_high": 12550.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261105",
+    "last_close_px": 9980.0,
+    "unrealized_pnl_pct": -8.61,
+    "realized_pnl_pct": -8.61,
+    "close_ymd": "20261105",
+    "close_px": 9980.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "234690_20261027_WARN_DRAWDOWN_20261030",
+      "234690_20261027_WARN_DRAWDOWN_20261103",
+      "234690_20261027_STOP_HIT_20261105"
+    ]
+  },
+  {
+    "code": "059090",
+    "name": "미코",
+    "entry_ymd": "20261030",
+    "entry_px": 23000.0,
+    "qty": 0,
+    "stop_px": 21150.0,
+    "stop_px_initial": 21150.0,
+    "take_px1": 26500.0,
+    "take_px2": 28000.0,
+    "trailing_high": 25000.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261105",
+    "last_close_px": 20050.0,
+    "unrealized_pnl_pct": -12.83,
+    "realized_pnl_pct": -12.83,
+    "close_ymd": "20261105",
+    "close_px": 20050.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "059090_20261030_WARN_DRAWDOWN_20261103",
+      "059090_20261030_STOP_HIT_20261105"
+    ]
+  },
+  {
+    "code": "079650",
+    "name": "서산",
+    "entry_ymd": "20261030",
+    "entry_px": 7150.0,
+    "qty": 0,
+    "stop_px": 6570.0,
+    "stop_px_initial": 6570.0,
+    "take_px1": 9680.0,
+    "take_px2": 10300.0,
+    "trailing_high": 8130.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261105",
+    "last_close_px": 5880.0,
+    "unrealized_pnl_pct": -17.76,
+    "realized_pnl_pct": -17.76,
+    "close_ymd": "20261105",
+    "close_px": 5880.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "079650_20261030_WARN_DRAWDOWN_20261104",
+      "079650_20261030_STOP_HIT_20261105"
+    ]
   }
 ]
