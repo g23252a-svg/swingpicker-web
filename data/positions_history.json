@@ -8647,5 +8647,64 @@
       "079650_20261030_WARN_DRAWDOWN_20261104",
       "079650_20261030_STOP_HIT_20261105"
     ]
+  },
+  {
+    "code": "108860",
+    "name": "셀바스AI",
+    "entry_ymd": "20260730",
+    "entry_px": 7530.0,
+    "qty": 0,
+    "stop_px": 6920.0,
+    "stop_px_initial": 6920.0,
+    "take_px1": 9670.0,
+    "take_px2": 12670.0,
+    "trailing_high": 11920.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261106",
+    "last_close_px": 6600.0,
+    "unrealized_pnl_pct": -12.35,
+    "realized_pnl_pct": -12.35,
+    "close_ymd": "20261106",
+    "close_px": 6600.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "108860_20260730_TP1_HIT_20260803",
+      "108860_20260730_TP1_HIT_20260804",
+      "108860_20260730_TP1_HIT_20260805",
+      "108860_20260730_TP1_HIT_20260806",
+      "108860_20260730_TP1_HIT_20260807",
+      "108860_20260730_TP1_HIT_20260810",
+      "108860_20260730_TP1_HIT_20260811",
+      "108860_20260730_TP1_HIT_20260812",
+      "108860_20260730_TP1_HIT_20260813",
+      "108860_20260730_TP1_HIT_20260814",
+      "108860_20260730_TP1_HIT_20260817",
+      "108860_20260730_WARN_DRAWDOWN_20261103",
+      "108860_20260730_WARN_DRAWDOWN_20261105",
+      "108860_20260730_STOP_HIT_20261106"
+    ]
+  },
+  {
+    "code": "107640",
+    "name": "한중엔시에스",
+    "entry_ymd": "20261105",
+    "entry_px": 47950.0,
+    "qty": 0,
+    "stop_px": 44100.0,
+    "stop_px_initial": 44100.0,
+    "take_px1": 53000.0,
+    "take_px2": 58400.0,
+    "trailing_high": 52800.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261106",
+    "last_close_px": 42550.0,
+    "unrealized_pnl_pct": -11.26,
+    "realized_pnl_pct": -11.26,
+    "close_ymd": "20261106",
+    "close_px": 42550.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "107640_20261105_STOP_HIT_20261106"
+    ]
   }
 ]
