@@ -942,7 +942,7 @@ def _validation_payload(df: pd.DataFrame, data_dir: str = "data") -> dict[str, A
     """검증 중인 것들의 현재 상태. 전부 표시 전용이며 하나가 깨져도 나머지는 산다."""
     out: dict[str, Any] = {"lane_line": "", "lane_picks": [], "lane_verdict": "",
                            "winner_line": "", "budget_line": "", "stop_lines": [],
-                           "shadow_line": ""}
+                           "shadow_line": "", "shadow_status": ""}
     try:
         from services import quiet_breakout as _qb
         from services import quiet_lane_track as _qt
@@ -985,9 +985,12 @@ def _validation_payload(df: pd.DataFrame, data_dir: str = "data") -> dict[str, A
     except Exception as e:
         logger.warning(f"[v80] 손절 실체 생략: {e}")
     # [v83] 선별 그림자 3종(구엔진·현행·저변동) — 랭킹 축 판정은 발견 이후 표본으로만.
+    # [v86] 🪞 줄에 선등록 상태(탐색 / 측정 중 n/40 / 승격 후보 / 기각)가 묶여 나오고,
+    #   승격 후보가 생기면 아래 렌더에서 따로 알린다(자동 반영 없음).
     try:
         from services import selection_shadow as _ss
         out["shadow_line"] = _ss.line(_ss.load(data_dir))
+        out["shadow_status"] = _ss.status_line(_ss.load(data_dir))
     except Exception as e:
         logger.warning(f"[v83] 선별 그림자 상태 생략: {e}")
     return out
@@ -1018,6 +1021,9 @@ def _render_validation_loops(payload: dict[str, Any]) -> None:
         if payload.get("shadow_line"):
             ui.label("🪞 " + payload["shadow_line"]).classes(
                 "text-xs text-amber-200 leading-relaxed mt-2")
+            if payload.get("shadow_status") and "승격 후보" in payload["shadow_status"]:
+                ui.label("✅ 선등록 규칙을 통과한 변형이 있습니다 — 자동 반영 없음, 사용자 판정").classes(
+                    "text-[11px] text-emerald-300 leading-relaxed")
         if payload.get("budget_line"):
             ui.label("🧮 " + payload["budget_line"]).classes(
                 "text-xs text-emerald-200 leading-relaxed mt-2")
