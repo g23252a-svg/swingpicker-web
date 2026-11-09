@@ -26,7 +26,8 @@ v86 점검(랭킹·손실 원인 연구, 독립 재현 완료)의 결론은 "프
 
   · 판정은 REGISTERED_FROM(20261109) **이후** 새 배치만 센다. 그 전 기록은 전부 '탐색'
     (lowvol·ext_lowtv 의 기존 18~22일 포함 — 그 표본이 가설을 만들었으므로 재사용 금지).
-  · 후보 vs live 페어드, risk_off 아닌 정상일·양쪽 모두 실현된 날만, **처음 40일 고정창**.
+  · 후보 vs live 페어드, risk_off 아닌 정상일·양쪽 모두 픽이 기록된 날의 **처음 40일 고정창**
+    (실현 여부로 창을 고르지 않는다 — 40일 전부 실현될 때까지 '측정 중'). 내려진 판정은 동결.
   · 승격 후보 = 40일 HAC(5) p < 0.05 · 차이 > 0 · 앞/뒤 20일 반기 부호 같음 ·
     후보 평균(매매일 0.25% 비용 차감) > 0. 하나라도 못 넘으면 기각. 40일 전은 '측정 중 n/40'.
   · risk_off 차단일에도 모든 변형의 반사실 픽을 blocked=True 로 기록한다 — 같은 날끼리
@@ -160,7 +161,7 @@ def _sizable(route: pd.Series, entry_ok: pd.Series) -> pd.Series:
 def _pools(df: pd.DataFrame, counterfactual: bool = False) -> Dict[str, pd.Series]:
     """[v86] 현행 퍼널을 기록 컬럼으로 재구성한 풀.
 
-    counterfactual=True(차단일)면 NEW_ENTRY_BLOCKED 를 무시하고 ROUTE_PRE_BLOCK 을 쓴다.
+    counterfactual=True(차단일)면 NEW_ENTRY_BLOCKED·MACRO_RISK 를 무시하고 ROUTE_PRE_BLOCK 을 쓴다.
     7월방어·회복방어 플래그는 그대로 둔다(행 단위 차단이라 risk_off 와 별개).
 
       alpha    : 알파 게이트(=TOP_PICK 재구성) — 리스크가드·알파≥문턱·저점추세·급등·v83 변동성
@@ -180,7 +181,12 @@ def _pools(df: pd.DataFrame, counterfactual: bool = False) -> Dict[str, pd.Serie
     rr = _num(df, "RR_NOW_TP1"); poc = _num(df, "POC_GAP")
     macro = (df["MACRO_RISK"].astype(str).str.upper().str.strip() if "MACRO_RISK" in df.columns
              else pd.Series("NORMAL", index=df.index))
-    common = (~macro.isin(["WARNING", "CRITICAL"])
+    # [v86] 반사실(차단일)에서는 매크로 경보도 무시한다 — MACRO_RISK=CRITICAL 은 그날 전 행에
+    #   걸리는 시장 전체 신호(=risk_off 의 원인)라, 남겨 두면 live·no_alpha·thin_skip 만 그날
+    #   빈 픽이 돼 차단일 요약이 변형마다 다른 날짜를 평균하게 된다(실측: 15 차단일 중 3일).
+    macro_bad = (pd.Series(False, index=df.index) if counterfactual
+                 else macro.isin(["WARNING", "CRITICAL"]))
+    common = (~macro_bad
               & ~_flag(df, "ABNORMAL_HISTORY_GUARD_FLAG", False) & ~rec & ~july
               & _flag(df, "DATA_FRESHNESS_OK", True) & _flag(df, "INPUT_INTEGRITY_OK", True)
               & (poc.isna() | (poc <= 20.0)) & (rr >= 1.30).fillna(False))
@@ -429,23 +435,41 @@ def _paired(dd: pd.Series) -> dict:
             "hac_p": (None if not np.isfinite(p) else float(p))}
 
 
-def prereg_verdict(cand: pd.Series, live: pd.Series, traded: Optional[pd.Series] = None) -> dict:
+def prereg_verdict(cand: pd.Series, live: pd.Series, traded: Optional[pd.Series] = None,
+                   cand_days=None, live_days=None) -> dict:
     """[v86] 선등록 판정 — 순수 함수. 입력은 REGISTERED_FROM 이후 **정상일**의 일별 수익(%).
 
-    cand·live: ymd 인덱스 Series. traded: 후보가 실제 매매한 날 True(없으면 전부 매매).
-    양쪽이 모두 있는 날만 쓰고, 날짜순 처음 PREREG_DAYS 일로 고정해 판정한다.
+    cand·live: ymd 인덱스 Series(미실현 날은 빠지거나 NaN). traded: 후보가 실제 매매한 날 True.
+    cand_days·live_days: 각 변형이 **픽을 기록한** 정상일(실현 여부 무관). 없으면 실현일로 대신한다.
+
+    창은 '양쪽 모두 픽이 기록된 날'의 날짜순 처음 PREREG_DAYS 일로 고정한다 — 실현 여부로
+    고르면 손절(-8%)은 즉시, 나머지는 t+6 에 확정되므로 미확정 앞날을 건너뛰고 일찍 손절된
+    뒷날을 끌어와 손실 쪽으로 기운 창이 되고, 앞날이 확정되면 창이 움직여 판정이 뒤집힌다.
+    창 안의 모든 날이 양쪽 실현될 때까지는 '측정 중 (실현 수)/40' 이다.
     """
-    j = pd.concat({"c": cand, "l": live}, axis=1).dropna().sort_index()
+    c_ok, l_ok = cand.dropna(), live.dropna()
+    cd = set(map(str, cand_days if cand_days is not None else c_ok.index))
+    ld = set(map(str, live_days if live_days is not None else l_ok.index))
+    window = sorted(cd & ld)[:PREREG_DAYS]
+    j = pd.concat({"c": c_ok, "l": l_ok}, axis=1)
+    j.index = j.index.map(str)
+    j = j.reindex(window).dropna()
     n = int(len(j))
-    if n < PREREG_DAYS:
-        return {"status": f"측정 중 {n}/{PREREG_DAYS}", "n": n, "decided": False}
-    j = j.iloc[:PREREG_DAYS]
+    if len(window) < PREREG_DAYS or n < PREREG_DAYS:
+        res = {"status": f"측정 중 {n}/{PREREG_DAYS}", "n": n, "decided": False,
+               "logged": int(len(window))}
+        if window:
+            res["window"] = [window[0], window[-1]]
+        return res
     dd = j["c"] - j["l"]
     t, p = _hac_p(dd.values.astype(float), lag=PREREG_HAC_LAG)
     h = PREREG_DAYS // 2
     h1, h2 = float(dd.iloc[:h].mean()), float(dd.iloc[h:].mean())
-    tr = (traded.reindex(j.index).fillna(True).astype(bool) if traded is not None
-          else pd.Series(True, index=j.index))
+    if traded is not None:
+        tr0 = traded.copy(); tr0.index = tr0.index.map(str)
+        tr = tr0.reindex(j.index).fillna(True).astype(bool)
+    else:
+        tr = pd.Series(True, index=j.index)
     net = float((j["c"] - PREREG_COST_PCT * tr.astype(float)).mean())
     diff = float(dd.mean())
     checks = {"diff_pos": diff > 0,
@@ -454,10 +478,21 @@ def prereg_verdict(cand: pd.Series, live: pd.Series, traded: Optional[pd.Series]
               "net_after_cost_pos": net > 0}
     ok = all(checks.values())
     return {"status": STATUS_PROMOTE if ok else STATUS_REJECT, "n": n, "decided": True,
-            "window": [str(j.index[0]), str(j.index[-1])],
+            "logged": int(len(window)), "window": [str(j.index[0]), str(j.index[-1])],
             "diff_pct": diff, "hac_t": (float(t) if np.isfinite(t) else None),
             "hac_p": (float(p) if np.isfinite(p) else None),
             "half1_pct": h1, "half2_pct": h2, "cand_net_pct": net, "checks": checks}
+
+
+def _frozen_verdict(prev: Optional[dict], c: str) -> Optional[dict]:
+    """[v86] 한 번 내려진 판정은 동결 — 같은 PREREG_VERSION 이면 이전 판정을 그대로 쓴다
+    (이후 시세 캐시 보정으로 창 안 수익이 바뀌어도 판정이 뒤집히지 않게)."""
+    if not prev or prev.get("prereg_version") != PREREG_VERSION:
+        return None
+    v = (prev.get("verdicts") or {}).get(c)
+    if isinstance(v, dict) and v.get("decided") and v.get("status") in (STATUS_PROMOTE, STATUS_REJECT):
+        return {**v, "frozen": True}
+    return None
 
 
 def build(data_dir: str) -> dict:
@@ -539,11 +574,17 @@ def build(data_dir: str) -> dict:
                 pr[f"{sk}_{bk}"] = _paired(daily[(a, sk, bk)] - daily[(b, sk, bk)])
         nl = pr["exploratory_normal"]                  # 호환 필드 = 탐색기 정상일
         out["paired"][f"{a}-{b}"] = {**nl, "segments": pr}
+    # [v86] 판정 창은 '픽이 기록된' 등록 후 정상일로 정한다(실현 여부 무관) — prereg_verdict 참고
+    reg_log = (log[(log["ymd"] >= REGISTERED_FROM) & (log["blocked"] < 0.5)]
+               if len(log) else log)
+    logged = {v: sorted(reg_log.loc[reg_log["variant"] == v, "ymd"].unique()) if len(reg_log) else []
+              for v in VARIANTS}
+    prev = load(data_dir)
     verdicts = {}
     for c in CANDIDATES:
-        verdicts[c] = prereg_verdict(daily[(c, "registered", "normal")],
-                                     daily[("live", "registered", "normal")],
-                                     traded[(c, "registered", "normal")])
+        verdicts[c] = _frozen_verdict(prev, c) or prereg_verdict(
+            daily[(c, "registered", "normal")], daily[("live", "registered", "normal")],
+            traded[(c, "registered", "normal")], cand_days=logged[c], live_days=logged["live"])
         out["statuses"][c] = verdicts[c]["status"]
     out["statuses"]["legacy"] = STATUS_EXPLORE
     out["verdicts"] = verdicts
