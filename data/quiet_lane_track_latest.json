@@ -1,9 +1,9 @@
 {
  "live_from": "20260828",
  "target_days": 20,
- "days_total": 44,
+ "days_total": 45,
  "days_measured": 3,
- "picks_total": 205,
+ "picks_total": 210,
  "picks_measured": 3,
  "avg_ret_pct_after_cost": -1.613122877860621,
  "win_rate": 0.6666666666666666,
