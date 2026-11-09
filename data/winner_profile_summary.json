@@ -1,9 +1,9 @@
 {
  "registry": "v1-20260831",
- "trade_ymd": "20261016",
- "logged_ymd": "20261007",
+ "trade_ymd": "20261106",
+ "logged_ymd": "20261029",
  "added": true,
- "days_total": 27,
+ "days_total": 42,
  "protocol": {
   "min_days": 40,
   "fdr_q": 0.05,
@@ -13,109 +13,109 @@
  "features": [
   {
    "feature": "tv_eok",
-   "days": 27,
-   "ic_mean": -0.22251399558943646,
-   "t": -19.89560907924858,
-   "p": 2.957164305369554e-17,
+   "days": 42,
+   "ic_mean": -0.18956229315982523,
+   "t": -9.713453610002443,
+   "p": 3.420316492528421e-12,
    "sign_stable": true,
-   "stage1": false
+   "stage1": true
   },
   {
    "feature": "tv_rank_pctl",
-   "days": 27,
-   "ic_mean": -0.22251399558943646,
-   "t": -19.89560907924858,
-   "p": 2.957164305369554e-17,
+   "days": 42,
+   "ic_mean": -0.18956229315982523,
+   "t": -9.713453610002443,
+   "p": 3.420316492528421e-12,
    "sign_stable": true,
-   "stage1": false
-  },
-  {
-   "feature": "ret_20d",
-   "days": 27,
-   "ic_mean": -0.08848342670630867,
-   "t": -2.4671982831443655,
-   "p": 0.02052168294279441,
-   "sign_stable": true,
-   "stage1": false
+   "stage1": true
   },
   {
    "feature": "volat_20d",
-   "days": 27,
-   "ic_mean": -0.07222790187807906,
-   "t": -1.768977882615761,
-   "p": 0.08862884990592897,
+   "days": 42,
+   "ic_mean": -0.16957078593641062,
+   "t": -2.8820894742876586,
+   "p": 0.00626125755101412,
    "sign_stable": true,
-   "stage1": false
-  },
-  {
-   "feature": "hi60_gap",
-   "days": 27,
-   "ic_mean": -0.08903180401656394,
-   "t": -1.7143739347329026,
-   "p": 0.09835861989458675,
-   "sign_stable": true,
-   "stage1": false
-  },
-  {
-   "feature": "vol_ratio",
-   "days": 27,
-   "ic_mean": -0.03532043036034222,
-   "t": -1.5786285424624713,
-   "p": 0.1265119242537587,
-   "sign_stable": true,
-   "stage1": false
+   "stage1": true
   },
   {
    "feature": "rsi14",
-   "days": 27,
-   "ic_mean": -0.04620977297515666,
-   "t": -1.410503701612059,
-   "p": 0.1702437838923473,
+   "days": 42,
+   "ic_mean": -0.07420306129719419,
+   "t": -2.716829352640775,
+   "p": 0.009609123927692956,
    "sign_stable": true,
-   "stage1": false
+   "stage1": true
   },
   {
-   "feature": "flow_inst_str",
-   "days": 24,
-   "ic_mean": -0.015245172319346084,
-   "t": -1.0567161095227022,
-   "p": 0.3016146718772261,
+   "feature": "ret_20d",
+   "days": 42,
+   "ic_mean": -0.0715033583581843,
+   "t": -2.4015946180464542,
+   "p": 0.02094059613409515,
    "sign_stable": true,
-   "stage1": false
+   "stage1": true
   },
   {
-   "feature": "ret_1d",
-   "days": 27,
-   "ic_mean": -0.018881815323411016,
-   "t": -0.662663222155852,
-   "p": 0.5133783500844832,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "ma20_gap",
-   "days": 27,
-   "ic_mean": -0.02482003979381209,
-   "t": -0.6317822713788006,
-   "p": 0.5330453560319184,
-   "sign_stable": false,
-   "stage1": false
-  },
-  {
-   "feature": "flow_frg_str",
-   "days": 24,
-   "ic_mean": -0.011600329282057809,
-   "t": -0.6129459629278393,
-   "p": 0.5459258701962278,
+   "feature": "hi60_gap",
+   "days": 42,
+   "ic_mean": -0.030906911803550038,
+   "t": -0.6706478803367903,
+   "p": 0.5062053828870111,
    "sign_stable": false,
    "stage1": false
   },
   {
    "feature": "ret_5d",
-   "days": 27,
-   "ic_mean": 0.004677372675851229,
-   "t": 0.09909281839703604,
-   "p": 0.9218246455376446,
+   "days": 42,
+   "ic_mean": 0.02180284406075181,
+   "t": 0.6513893532268601,
+   "p": 0.5184298562585259,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "vol_ratio",
+   "days": 42,
+   "ic_mean": -0.005402497324523401,
+   "t": -0.2654720231664504,
+   "p": 0.7919761659338096,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "ma20_gap",
+   "days": 42,
+   "ic_mean": -0.005538762441936232,
+   "t": -0.1815588159663548,
+   "p": 0.8568236025942507,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "flow_frg_str",
+   "days": 39,
+   "ic_mean": 0.0011464326265221846,
+   "t": 0.08160737398121677,
+   "p": 0.9353872672528427,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "flow_inst_str",
+   "days": 39,
+   "ic_mean": 0.0005934287284814449,
+   "t": 0.03822399190181835,
+   "p": 0.9697092027636395,
+   "sign_stable": false,
+   "stage1": false
+  },
+  {
+   "feature": "ret_1d",
+   "days": 42,
+   "ic_mean": -0.0005242100684337955,
+   "t": -0.019357691129322303,
+   "p": 0.9846496614281929,
    "sign_stable": false,
    "stage1": false
   }
