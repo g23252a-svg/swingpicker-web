@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """pipeline_data.py — Stage 1: 참조 데이터 로딩 [v20.2]"""
+import logging
 import os, numpy as np, pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional
 from pipeline_context import PipelineContext
 from shared_log import log, OUT_DIR, TOP_N, LOOKBACK_DAYS, MIN_MCAP_EOK, PYKRX_OK
+
+logger = logging.getLogger(__name__)
 
 def ensure_ml_ready():
     from collector import ml_engine
@@ -86,6 +89,12 @@ def load_reference_data(trade_date: Optional[str] = None, top_n: Optional[int] =
         from investor_flow import fetch_investor_net_buying as _fib  # [v20.6.5] 직접 import
         map_frg, map_inst, map_ant = _fib(ctx.trade_ymd)
         ctx.inv_maps = {"frg": map_frg, "inst": map_inst, "ant": map_ant}
+        # [v86] 출처 메타(캐시 날짜 불일치 여부) — run_health FLOW 판정에 쓴다
+        try:
+            from investor_flow import last_fetch_meta as _lfm
+            ctx.flow_meta = _lfm()
+        except ImportError as _me:
+            logger.warning(f"[v86] 수급 메타 조회 실패: {_me}")
         log(f"📊 [수급] 조기 로드 완료: 외인 {len(map_frg)}건, 기관 {len(map_inst)}건")
     except Exception as e:
         log(f"⚠️ [수급] 조기 로드 실패: {e} → 수급 보정 없이 진행")

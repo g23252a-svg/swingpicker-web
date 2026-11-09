@@ -18,6 +18,9 @@ scripts/collect_kospi_daily.py
 실행:
     python scripts/collect_kospi_daily.py [--start YYYYMMDD] [--end YYYYMMDD]
 
+[v86] 야간 배치(auto_collect.yml)가 collector 직전에 --end <대상 세션>으로 부른다 —
+  risk_off가 그날 종가로 판정하게(예전엔 배치 뒤에 갱신돼 33/33 배치가 하루 묵은 종가였다).
+
 크론 권장 (매일 장마감 후):
     20 16 * * 1-5 cd /path/to/swingpicker && python scripts/collect_kospi_daily.py
 """
@@ -71,6 +74,21 @@ def collect_kospi_daily(start: str, end: str, output_path: str) -> bool:
 
     _logger.info(f"📥 KOSPI 수집 성공 ({src}) — {len(df)}일 ({df['date'].iloc[0]} ~ {df['date'].iloc[-1]})")
 
+    # [v86] end 이후 행은 버린다 — 배치(auto_collect)는 --end <대상 세션>으로 부른다.
+    df = df[df["date"].astype(str) <= str(end)].reset_index(drop=True)
+    if df.empty:
+        _logger.error(f"KOSPI 수집 결과가 end={end} 이전에 없음")
+        return False
+
+    # [v86] 기존 파일보다 묵은 결과로 덮어쓰지 않는다. 9/18~10/13엔 수집이 조용히
+    #   20260917에서 멈췄는데도 매일 '성공'으로 커밋됐다. 새 결과의 마지막 날짜가 기존보다
+    #   이르면 기존 파일을 유지하고 실패로 알린다(워크플로가 신선도 검사로 잡는다).
+    prev_last = _existing_last_date(output_path)
+    new_last = str(df["date"].iloc[-1])
+    if prev_last and new_last < prev_last:
+        _logger.error(f"KOSPI 수집 결과가 기존보다 묵음 (새 {new_last} < 기존 {prev_last}) — 덮어쓰지 않음")
+        return False
+
     # 보유기간별 수익률 계산 (t행에 t→t+n 수익률 기록)
     for n in _HOLD_PERIODS:
         df[f"ret_{n}d_%"] = df["close"].pct_change(n).shift(-n) * 100
@@ -91,6 +109,19 @@ def collect_kospi_daily(start: str, end: str, output_path: str) -> bool:
         valid = df[col].notna().sum()
         print(f"  {col}: {valid}일 유효 ({df[col].mean():+.2f}% 평균)")
     return True
+
+
+def _existing_last_date(path: str):
+    """[v86] 기존 kospi_daily.csv의 마지막 date(YYYYMMDD). 없거나 못 읽으면 None."""
+    if not os.path.exists(path):
+        return None
+    try:
+        import pandas as pd
+        d = pd.read_csv(path, usecols=["date"], dtype={"date": str})["date"].dropna()
+        return str(d.str.replace("-", "").str[:8].max()) if len(d) else None
+    except Exception as e:
+        _logger.warning(f"기존 kospi_daily 읽기 실패: {e}")
+        return None
 
 
 def _fetch_pykrx(start: str, end: str):
@@ -142,7 +173,8 @@ def _fetch_yfinance(start: str, end: str):
         return None
     try:
         s = datetime.strptime(start, "%Y%m%d").strftime("%Y-%m-%d")
-        e = datetime.strptime(end, "%Y%m%d").strftime("%Y-%m-%d")
+        # [v86] yfinance의 end는 미포함 — end 당일 종가를 받으려면 하루 뒤로 넘긴다.
+        e = (datetime.strptime(end, "%Y%m%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         df = yf.download("^KS11", start=s, end=e, progress=False)
         if df is None or df.empty:
             return None
@@ -170,7 +202,8 @@ def main():
 
     today = datetime.now()
     end = args.end or today.strftime("%Y%m%d")
-    start = args.start or (today - timedelta(days=365 * 5)).strftime("%Y%m%d")
+    # [v86] 기본 시작일은 end 기준 5년 전(같은 창 — --end로 과거를 다시 받아도 길이 동일)
+    start = args.start or (datetime.strptime(end, "%Y%m%d") - timedelta(days=365 * 5)).strftime("%Y%m%d")
 
     ok = collect_kospi_daily(start, end, args.output)
     sys.exit(0 if ok else 1)

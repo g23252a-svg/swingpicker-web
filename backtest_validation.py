@@ -3449,14 +3449,40 @@ def build_report_outputs(report: dict, today: str) -> tuple:
     return light, outputs, notes
 
 
-def save_report(report: dict, data_dir: Path, today: Optional[str] = None) -> dict:
+def batch_date_label(data_dir: Path) -> str:
+    """[v86] 산출물 파일 날짜 = 배치 거래일. 시계(datetime.now)가 아니다.
+
+    자정 넘긴 배치(11/02 배치 → 11/03 02:05 실행)가 backtest_*_20261103을 쓰고 같은 날
+    밤 11/03 배치에 덮어써져 _20261102/_20261104 세트가 사라졌다.
+      1) 환경변수 BATCH_TARGET(auto_collect 가드가 넘김, YYYYMMDD)
+      2) data_dir의 가장 최근 recommend_YYYYMMDD.csv
+      3) 둘 다 없으면 오늘(시계) — 독립 실행 호환
+    """
+    env = os.environ.get("BATCH_TARGET", "").strip()
+    if re.fullmatch(r"\d{8}", env):
+        return env
+    try:
+        days = sorted(m.group(1) for m in
+                      (re.fullmatch(r"recommend_(\d{8})\.csv", p.name)
+                       for p in Path(data_dir).glob("recommend_*.csv")) if m)
+    except OSError as e:
+        logger.warning("[v86] recommend 목록 실패 — 시계 날짜 사용: %s", e)
+        days = []
+    if days:
+        return days[-1]
+    return datetime.now().strftime("%Y%m%d")
+
+
+def save_report(report: dict, data_dir: Path, today: Optional[str] = None,
+                batch_dir: Optional[Path] = None) -> dict:
     """[v85] 원자적 저장 — build_report_outputs가 끝까지 성공해야 파일을 쓴다.
 
     계산 단계에서 예외 → 어떤 파일도 바뀌지 않음 (이전 latest JSON 유지).
     쓰기 단계는 파일마다 임시파일 + os.replace, latest JSON은 맨 마지막.
+    [v86] today 기본값 = batch_date_label(batch_dir 또는 data_dir) — 배치 거래일.
     """
     data_dir = Path(data_dir)
-    today = today or datetime.now().strftime("%Y%m%d")
+    today = today or batch_date_label(Path(batch_dir) if batch_dir else data_dir)
     light, outputs, notes = build_report_outputs(report, today)
     data_dir.mkdir(parents=True, exist_ok=True)
     for name, text in outputs:
@@ -3538,7 +3564,7 @@ def main():
                           walkforward=args.walkforward,
                           rolling=args.rolling, price_df=price_df)
     print(f"  · 리포트 저장 ({out_dir})")
-    save_report(report, out_dir)
+    save_report(report, out_dir, batch_dir=data_dir)
 
     # [v85] 신선도 · SSOT 요약
     fr = report.get("freshness") or {}

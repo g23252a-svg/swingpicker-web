@@ -65,6 +65,12 @@ jobs:
           eval "$(bash scripts/batch_target.sh)"
           # [v85] 대상 세션을 후속 스텝(OHLCV store 그림자 검증)에 넘긴다 — 잡 도중 시각이 창 경계를 넘어도 같은 값.
           echo "target=${BATCH_TARGET}" >> "$GITHUB_OUTPUT"
+          # [v86] 후속 스텝 전체에 환경변수로도 넘긴다 — backtest_validation 등이 산출물
+          #   날짜를 시계(datetime.now)가 아니라 대상 세션으로 붙인다. 자정 넘긴 배치
+          #   (11/02 배치 11/03 02:05 실행)가 backtest_*_20261103을 쓰고 다음 배치에
+          #   덮어써지던 문제(…_20261102/_20261104 소실) 방지. 비어 있으면(장중·주말
+          #   수동 dispatch) 각 스크립트가 최신 recommend_YYYYMMDD로 폴백한다.
+          echo "BATCH_TARGET=${BATCH_TARGET}" >> "$GITHUB_ENV"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "manual dispatch — 강제 실행"
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -114,6 +120,30 @@ jobs:
           echo "LDY_KEY_PRIME  length: ${#LDY_KEY_PRIME}"
           echo "LDY_ADMIN_KEY  length: ${#LDY_ADMIN_KEY}"
           echo "MASTER_ADMIN_PW length: ${#MASTER_ADMIN_PW}"
+
+      # [v86] risk_off가 배치 당일 종가로 판정하도록 KOSPI/US 일봉을 collector 직전에 받는다.
+      #   예전엔 collect_kospi_daily.yml(16:30 KST 예정)이 실제로는 배치 푸시 12~40분 뒤에야
+      #   돌아 33/33 배치가 하루 묵은 kospi_daily.csv로 판정했다(10/30·11/03 차단 누락,
+      #   10/28·11/02 과차단). 실패해도 배치는 진행한다 — 지연은 momentum_lane이
+      #   KOSPI_STALE로 드러내고 run_health가 DEGRADED 사유로 남긴다(판정은 막지 않는다).
+      #   커밋은 아래 'Commit & Push CSV'가 CSV와 함께 담는다.
+      - name: Refresh KOSPI/US daily (v86 — risk_off same-day close)
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          if [ -z "${BATCH_TARGET}" ]; then
+            echo "대상 세션 없음(장중·주말 수동 실행) — 장중 시세가 섞이지 않게 KOSPI 갱신 생략"
+            exit 0
+          fi
+          echo ">>> KOSPI daily (end=${BATCH_TARGET})"
+          python scripts/collect_kospi_daily.py --end "${BATCH_TARGET}" || echo "⚠️ KOSPI 수집 실패 — 기존 파일로 진행"
+          tail -n 1 data/kospi_daily.csv || true
+          # 미국 지수는 한국 d일 배치가 us_date < d만 쓴다 — 자정 넘긴 실행(미국 장중)에
+          #   미완성 행이 끼지 않게 end = 대상 세션 전날.
+          US_END=$(date -d "${BATCH_TARGET} -1 day" +%Y%m%d)
+          echo ">>> US daily (end=${US_END})"
+          python scripts/collect_us_daily.py --end "${US_END}" || true
 
       - name: Run Collector
         id: collect
@@ -222,7 +252,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
           # .gitignore가 data/*를 막고 있으므로 -f(force)로 우회
+          # [v86] data/*.csv 에 kospi_daily.csv·us_daily.csv(위 Refresh 스텝 산출)도 포함 — 명시적으로도 담는다.
           git add -f data/*.csv data/*.json data/*.pkl data/*.pth || true
+          git add -f data/kospi_daily.csv data/us_daily.csv 2>/dev/null || true
           git add -f data/*.parquet || true
           git add -f data/*.duckdb || true
           # [v85] OHLCV 버전 저장소(하위 폴더 — 위 data/*.parquet 글롭에 안 걸린다). 있을 때만.
@@ -232,7 +264,8 @@ jobs:
           git add -A
           
           git diff --staged --quiet || {
-            git commit -m "chore: add CSV $(date +'%Y-%m-%d %H:%M:%S %Z')"
+            # [v86] 메시지에 대상 세션(거래일)을 먼저 — 자정 넘긴 실행도 어느 배치인지 보이게.
+            git commit -m "chore: add CSV ${BATCH_TARGET:-manual} (written $(date +'%Y-%m-%d %H:%M:%S %Z'))"
             
             # 원격 변경사항 가져오기 (충돌 시 collector 결과물 우선)
             git fetch origin main
