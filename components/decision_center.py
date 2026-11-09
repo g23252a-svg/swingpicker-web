@@ -182,6 +182,39 @@ def _risk_off_state(df: pd.DataFrame) -> dict[str, Any]:
     return out
 
 
+def _align_risk_off_line(risk_off: dict[str, Any]) -> None:
+    """[v86] 해제선 줄·진행률을 판정 기준일(RISK_OFF_ASOF) 수치로 맞춘다.
+
+    _risk_off_state는 kospi_daily의 최신 행을 읽는다. 16:30 일봉 수집이 다음 배치보다
+    먼저 커밋되므로, 매일 저녁 같은 띠 안에서 '판정(어제 종가)'과 '해제선(오늘 종가)'이
+    서로 다른 날짜를 말하게 된다. 시장 판정(market)이 있으면 그 수치로 다시 쓴다.
+    판정 날짜를 모르면(asof_unknown) 진행률·수치를 빼고 일반 안내만 남긴다.
+    """
+    mkt = risk_off.get("market")
+    if not risk_off.get("active") or not isinstance(mkt, dict):
+        return
+    if mkt.get("asof_unknown"):
+        risk_off["line"] = "코스피가 하락 중인 20일선을 회복하면 자동 해제됩니다"
+        risk_off["progress"] = None
+        return
+    if not mkt.get("ok"):
+        return
+    try:
+        close, ma20 = float(mkt["close"]), float(mkt["ma20"])
+        dev_pct = float(mkt["deviation_pct"])
+    except (KeyError, TypeError, ValueError):
+        return
+    if not (ma20 > 0):
+        return
+    unlock = ma20 * 0.97
+    prog = (dev_pct - (-15.0)) / ((-3.0) - (-15.0)) * 100.0
+    risk_off["progress"] = max(0.0, min(100.0, prog))
+    risk_off["line"] = (
+        f"코스피 {close:,.0f} · 해제선 {unlock:,.0f}"
+        f" (20일선 -3% 이내) · 판정일 20일선 대비 {dev_pct:+.1f}%"
+    )
+
+
 def _alpha_gate_on(df: pd.DataFrame) -> bool:
     """[v34] 이 배치가 알파 전면 게이트(v32)로 생성됐는지."""
     if df is None or df.empty or "ALPHA_GATE_ACTIVE" not in df.columns:
@@ -490,6 +523,7 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("[v55] 차단 상태 계산 실패 (표시 생략): %s", exc)
         risk_off["market"] = None
+    _align_risk_off_line(risk_off)
     breadth_ready = market_breadth is None or market_breadth >= MARKET_BREADTH_FLOOR
     market_ready = (
         breadth_ready

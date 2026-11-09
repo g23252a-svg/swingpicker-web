@@ -132,7 +132,11 @@ jobs:
           exp_s = f'{exp:%Y%m%d}'
           end_in = (os.environ.get('END_INPUT') or '').strip()
           if end_in and end_in < exp_s:
-              exp_s = end_in
+              # 수동 백필 end가 주말·휴장일이면 그 이전 거래일까지만 기대한다
+              e = dt.datetime.strptime(end_in[:8], '%Y%m%d').date()
+              while skip(e):
+                  e -= dt.timedelta(days=1)
+              exp_s = min(exp_s, f'{e:%Y%m%d}')
           print(f'kospi_daily 마지막 {last} · 기대 최소 {exp_s}')
           if last < exp_s:
               print(f'::error::kospi_daily.csv 지연 — 마지막 {last} < 기대 {exp_s} (수집 소스 점검 필요)')

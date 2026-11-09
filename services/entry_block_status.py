@@ -238,6 +238,10 @@ def compute_entry_block_status(data_dir: str = "data", df: Optional[pd.DataFrame
     if kk.empty:
         kk = k
     last = kk.iloc[-1]
+    # [v86] 화면 쪽 kospi_daily가 배치가 판정한 날짜보다 묵었으면(배포 앱은 recommend_latest만
+    #   갱신) 수치는 더 이전 종가 기준이다 — 기록된 판정일은 보존하고 그 사실을 표시한다.
+    rec_asof = (rec or {}).get("risk_off_asof")
+    kospi_behind_record = bool(rec_asof and last["date"].strftime("%Y%m%d") < str(rec_asof))
     if not np.isfinite(last["ma"]) or last["ma"] <= 0:
         out["reason"] = "MA20 미형성 — 차단 없음으로 취급"
         return out
@@ -280,7 +284,9 @@ def compute_entry_block_status(data_dir: str = "data", df: Optional[pd.DataFrame
         "asof": last["date"].strftime("%Y-%m-%d"),
         "source": ("batch_csv" if rec is not None else
                    ("recompute_batch" if b_ymd else "recompute_latest")),
-        "risk_off_asof": last["date"].strftime("%Y%m%d"),
+        "risk_off_asof": (str(rec_asof) if kospi_behind_record
+                          else last["date"].strftime("%Y%m%d")),
+        "kospi_behind_record": kospi_behind_record,
         "asof_inferred": inferred,
         "stale": (True if asof_unknown else
                   rec.get("stale") if rec is not None and rec.get("stale") is not None
@@ -309,7 +315,10 @@ def block_reason_line(st: Optional[dict]) -> str:
         return ""
     # [v86] 판정에 쓴 코스피가 배치일보다 묵었으면 그 사실을 같이 말한다
     _stale_note = ""
-    if st.get("stale") and st.get("asof"):
+    if st.get("kospi_behind_record") and st.get("asof"):
+        _stale_note = (f" · 화면 수치는 코스피 {st['asof']} 기준"
+                       f" (판정일 {st.get('risk_off_asof')} 종가 미반영)")
+    elif st.get("stale") and st.get("asof"):
         _stale_note = f" · 판정 기준 코스피 {st['asof']} (배치일보다 이전 종가)"
     if not st.get("risk_off"):
         return (f"신규진입 차단 없음 (코스피 {st['close']:,.0f} · "
