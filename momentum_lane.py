@@ -128,6 +128,7 @@ def compute_market_risk_off(
         if df_kospi is None:
             if not kospi_daily_path or not os.path.exists(kospi_daily_path):
                 info["reason"] = "kospi_daily 없음 → 레인 ON(디폴트)"
+                _mark_no_kospi(info, asof, "file missing")
                 return False, info
             df_kospi = pd.read_csv(kospi_daily_path)
         k = df_kospi.copy()
@@ -146,15 +147,19 @@ def compute_market_risk_off(
                     info["stale"] = True
                     _stale_note = (f"KOSPI_STALE(last={_last} < asof={asof}, "
                                    f"{_behind}영업일 지연) · ")
+        elif asof is not None:
+            # [v86] asof 이하 행이 하나도 없다 — 종가 없이 디폴트(레인 ON)로 가는 최악의 경우
+            _mark_no_kospi(info, asof, f"no row <= {asof}")
+            _stale_note = info["reason"]
         if len(k) < (REGIME_MA_WINDOW // 2 + REGIME_MA_SLOPE_LOOKBACK):
-            info["reason"] = "표본 부족 → 레인 ON(디폴트)"
+            info["reason"] = _stale_note + "표본 부족 → 레인 ON(디폴트)"
             return False, info
         close = pd.to_numeric(k["close"], errors="coerce")
         ma = close.rolling(REGIME_MA_WINDOW, min_periods=REGIME_MA_WINDOW // 2).mean()
         c = float(close.iloc[-1])
         m = float(ma.iloc[-1]) if not pd.isna(ma.iloc[-1]) else None
         if m is None or m <= 0:
-            info["reason"] = "MA20 미형성 → 레인 ON(디폴트)"
+            info["reason"] = _stale_note + "MA20 미형성 → 레인 ON(디폴트)"
             return False, info
         m_prev = ma.iloc[-1 - REGIME_MA_SLOPE_LOOKBACK] if len(ma) > REGIME_MA_SLOPE_LOOKBACK else np.nan
         slope_down = bool(not pd.isna(m_prev) and m < float(m_prev))
@@ -173,7 +178,26 @@ def compute_market_risk_off(
         return risk_off, info
     except Exception as e:  # 어떤 에러든 레인을 끄지 않는다(보수적이지 않게)
         info["reason"] = f"판정 실패({e}) → 레인 ON(디폴트)"
+        if not info.get("kospi_last"):
+            _mark_no_kospi(info, asof, "read error")
+        logger.warning("[v86] risk_off 판정 실패: %s", info["reason"])
         return False, info
+
+
+def _mark_no_kospi(info: dict, asof: Optional[str], why: str) -> None:
+    """[v86] asof가 주어졌는데 쓸 수 있는 KOSPI 종가가 하나도 없으면 stale로 표시.
+
+    파일 없음/읽기 실패/asof 이하 행 없음은 '하루 묵은 종가'보다 나쁜 경우인데,
+    예전엔 stale=False·kospi_last=None으로 남아 CSV·run_health 어디에도 드러나지 않았다.
+    판정(레인 ON 디폴트)은 바꾸지 않는다. sessions_behind=None = 지연 폭 모름.
+    """
+    if asof is None:
+        return
+    info["stale"] = True
+    info["sessions_behind"] = None
+    _note = f"KOSPI_STALE(no data: {why}, asof={asof}) · "
+    if not str(info.get("reason", "")).startswith("KOSPI_STALE"):
+        info["reason"] = _note + str(info.get("reason", ""))
 
 
 # ───────────────────────── 설정 해석 ─────────────────────────

@@ -134,6 +134,28 @@ def _read_state_cols(path: str) -> Optional[pd.DataFrame]:
         return None
 
 
+def _latest_snapshot(data_dir: str) -> tuple[Optional[pd.DataFrame], Optional[str]]:
+    """[v86] recommend_latest.csv의 상태 컬럼과 그 기준일(snapshot_date).
+
+    배포 앱(services/data_store._refresh)은 원격에서 recommend_latest.csv만 받아 갱신하고
+    recommend_YYYYMMDD.csv는 받지 않는다. 날짜 파일만 보면 배포 때 실려 온 묵은 배치의
+    판정을 화면에 띄우게 되므로, 화면이 실제로 보여 주는 recommend_latest를 우선 본다.
+    """
+    path = os.path.join(data_dir, "recommend_latest.csv")
+    if not os.path.exists(path):
+        return None, None
+    try:
+        from services.snapshot_integrity import DATE_COLUMNS, snapshot_date
+        cols = set(_STATE_COLS) | set(DATE_COLUMNS)
+        d = pd.read_csv(path, encoding="utf-8-sig", usecols=lambda c: c in cols,
+                        dtype=str, low_memory=False)
+        ymd = snapshot_date(d) or None
+    except Exception as e:
+        logger.warning(f"[v86] recommend_latest 상태 읽기 실패({path}): {e}")
+        return None, None
+    return d, ymd
+
+
 def _signal_table(k: pd.DataFrame) -> pd.DataFrame:
     k = k.copy()
     k["ma"] = k["close"].rolling(MA_WINDOW, min_periods=MA_WINDOW // 2).mean()
@@ -171,9 +193,21 @@ def compute_entry_block_status(data_dir: str = "data", df: Optional[pd.DataFrame
         rec = recorded_block_state(df)
     else:
         path, b = _latest_batch_csv(data_dir, b_ymd)
-        b_ymd = b_ymd or b
-        if path:
-            rec = recorded_block_state(_read_state_cols(path))
+        # [v86] 화면이 실제로 보여 주는 recommend_latest가 날짜 파일보다 같거나 새로우면 그쪽을
+        #   쓴다(배포 앱은 latest만 갱신 — 묵은 날짜 파일의 '차단'이 새 배치 화면에 남지 않게).
+        lat_df, lat_ymd = _latest_snapshot(data_dir)
+        use_latest = bool(lat_ymd) and (
+            (b_ymd is not None and lat_ymd == b_ymd and not path)
+            or (b_ymd is None and (b is None or lat_ymd >= b)))
+        if use_latest:
+            b_ymd = lat_ymd
+            rec = recorded_block_state(lat_df)
+            out["source_file"] = "recommend_latest.csv"
+        else:
+            b_ymd = b_ymd or b
+            if path:
+                rec = recorded_block_state(_read_state_cols(path))
+                out["source_file"] = os.path.basename(path)
     out["batch_ymd"] = b_ymd
 
     k = _load_kospi(data_dir)
@@ -220,8 +254,14 @@ def compute_entry_block_status(data_dir: str = "data", df: Optional[pd.DataFrame
             streak += 1
         else:
             break
-    if ro and streak == 0:
-        streak = 1  # 기록된 차단인데 재계산이 다르면 최소 1일로 말한다
+    disagrees = bool(rec is not None and ro_calc != rec["risk_off"])
+    # [v86] 기록된 판정 날짜(RISK_OFF_ASOF)가 없고 추정(배치일/직전 세션)으로도 재계산이
+    #   기록과 맞지 않으면, 배치는 날짜를 알 수 없는 더 묵은 종가로 판정한 것이다
+    #   (예: 20261013 배치 — kospi가 20260917에 멈춘 채 판정). 이때 재계산 수치(연속일·이탈%)는
+    #   기록과 모순되므로 말하지 않는다. 연속일을 0/1로 끼워 맞추지도 않는다.
+    asof_unknown = bool(disagrees and not (rec or {}).get("risk_off_asof"))
+    if asof_unknown:
+        streak = None
     last60 = flags.tail(60)
     open_days = kk.loc[~flags, "date"]
     kospi_last = k["date"].iloc[-1].strftime("%Y%m%d")
@@ -233,7 +273,7 @@ def compute_entry_block_status(data_dir: str = "data", df: Optional[pd.DataFrame
         "ma20_falling": bool(last["ma"] < last["ma_prev"]) if np.isfinite(last["ma_prev"]) else None,
         "deviation_pct": round(dev * 100, 2),
         "unlock_gap_pct": round(max(unlock_gap, 0.0), 2) if ro else 0.0,
-        "streak_days": int(streak),
+        "streak_days": (int(streak) if streak is not None else None),
         "block_rate_60d_pct": round(float(last60.mean()) * 100, 0) if len(last60) else None,
         "last_open_date": (open_days.iloc[-1].strftime("%Y-%m-%d")
                            if len(open_days) else None),
@@ -242,17 +282,29 @@ def compute_entry_block_status(data_dir: str = "data", df: Optional[pd.DataFrame
                    ("recompute_batch" if b_ymd else "recompute_latest")),
         "risk_off_asof": last["date"].strftime("%Y%m%d"),
         "asof_inferred": inferred,
-        "stale": (rec.get("stale") if rec is not None and rec.get("stale") is not None
+        "stale": (True if asof_unknown else
+                  rec.get("stale") if rec is not None and rec.get("stale") is not None
                   else (bool(b_ymd) and last["date"].strftime("%Y%m%d") < b_ymd)),
-        "recompute_disagrees": bool(rec is not None and ro_calc != rec["risk_off"]),
+        "recompute_disagrees": disagrees,
+        "asof_unknown": asof_unknown,
         "kospi_newer_than_batch": bool(b_ymd and kospi_last > b_ymd),
     })
+    if asof_unknown:
+        # [v86] 수치가 기록된 판정과 모순 — 소비자(decision_center의 해제 안내, 배치 로그)가
+        #   연속일·해제거리를 숫자로 쓰지 않게 ok=False로 둔다. 판정(risk_off)과 사유는 남긴다.
+        out["ok"] = False
     out["reason"] = block_reason_line(out)
     return out
 
 
 def block_reason_line(st: Optional[dict]) -> str:
     """사용자용 한 줄 — 추상적 경고 대신 숫자와 해제 조건."""
+    if st and st.get("asof_unknown"):
+        # [v86] 기록된 판정이 어느 날 종가로 내려졌는지 모른다 — 모순되는 수치는 빼고 판정만 말한다
+        _note = " · 판정 기준 코스피 날짜 미상(배치일보다 이전 종가로 판정된 것으로 보임)"
+        if not st.get("risk_off"):
+            return "신규진입 차단 없음" + _note
+        return "폭락 방어로 전 종목 신규진입 차단" + _note
     if not st or not st.get("ok"):
         return ""
     # [v86] 판정에 쓴 코스피가 배치일보다 묵었으면 그 사실을 같이 말한다

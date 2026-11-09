@@ -38,13 +38,16 @@ _logger = logging.getLogger(__name__)
 _HOLD_PERIODS = [1, 3, 5, 10, 20, 60]
 
 
-def collect_kospi_daily(start: str, end: str, output_path: str) -> bool:
+def collect_kospi_daily(start: str, end: str, output_path: str,
+                        allow_older: bool = False) -> bool:
     """KOSPI 일자별 수익률 수집.
     
     Args:
         start: 시작일 YYYYMMDD
         end:   종료일 YYYYMMDD
         output_path: 저장 경로
+        allow_older: [v86] True면 기존 파일보다 묵은 결과로도 덮어쓴다(수동 과거 백필 전용 —
+                     collect_kospi_daily.yml이 dispatch 입력 end가 있을 때만 넘긴다)
     
     Returns: 성공 여부
     """
@@ -85,7 +88,9 @@ def collect_kospi_daily(start: str, end: str, output_path: str) -> bool:
     #   이르면 기존 파일을 유지하고 실패로 알린다(워크플로가 신선도 검사로 잡는다).
     prev_last = _existing_last_date(output_path)
     new_last = str(df["date"].iloc[-1])
-    if prev_last and new_last < prev_last:
+    if prev_last and new_last < prev_last and allow_older:
+        _logger.warning(f"[v86] --allow-older: 기존({prev_last})보다 묵은 결과({new_last})로 덮어씀(수동 백필)")
+    elif prev_last and new_last < prev_last:
         _logger.error(f"KOSPI 수집 결과가 기존보다 묵음 (새 {new_last} < 기존 {prev_last}) — 덮어쓰지 않음")
         return False
 
@@ -198,6 +203,8 @@ def main():
         default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "kospi_daily.csv"),
         help="출력 경로",
     )
+    p.add_argument("--allow-older", action="store_true",
+                   help="[v86] 기존 파일보다 묵은 결과로도 덮어씀(수동 과거 백필 전용)")
     args = p.parse_args()
 
     today = datetime.now()
@@ -205,7 +212,7 @@ def main():
     # [v86] 기본 시작일은 end 기준 5년 전(같은 창 — --end로 과거를 다시 받아도 길이 동일)
     start = args.start or (datetime.strptime(end, "%Y%m%d") - timedelta(days=365 * 5)).strftime("%Y%m%d")
 
-    ok = collect_kospi_daily(start, end, args.output)
+    ok = collect_kospi_daily(start, end, args.output, allow_older=args.allow_older)
     sys.exit(0 if ok else 1)
 
 

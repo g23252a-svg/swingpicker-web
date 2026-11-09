@@ -247,7 +247,10 @@ def check_run_health(
 
     # ── 3c. [v86] risk_off 판정 KOSPI 신선도 ──
     #   판정은 그대로 두되(지연이어도 막지 않는다) 사실을 DEGRADED 사유로 드러낸다.
-    if risk_off_info and risk_off_info.get("stale"):
+    #   asof가 있는데 kospi_last가 없으면(파일 없음·읽기 실패) 종가 없이 판정된 것 — 역시 STALE.
+    _ro_no_close = bool(risk_off_info and risk_off_info.get("asof")
+                        and not risk_off_info.get("kospi_last"))
+    if risk_off_info and (risk_off_info.get("stale") or _ro_no_close):
         h.add_issue("KOSPI_STALE")
         h.warnings.append(
             f"KOSPI_STALE(last={risk_off_info.get('kospi_last')}<"
