@@ -1489,7 +1489,10 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     try:
         from run_health import check_run_health, save_health
         _health = check_run_health(df_out, mcap_map=ctx.mcap_map, bench_map=ctx.bench_map,
-            inv_maps=ctx.inv_maps, trade_ymd=trade_ymd)
+            inv_maps=ctx.inv_maps, trade_ymd=trade_ymd,
+            # [v86] KOSPI_STALE · 수급 캐시 날짜 불일치를 보고
+            risk_off_info=getattr(ctx, "risk_off_info", None),
+            flow_meta=getattr(ctx, "flow_meta", None))
         _health.macro_risk = ctx.macro_risk
         _health.market_breadth = ctx.breadth.get("ALL", 50.0)
         df_out = _health.inject_columns(df_out); save_health(_health, OUT_DIR, trade_ymd)
@@ -1914,7 +1917,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         try:
             from services.entry_block_status import compute_entry_block_status
 
-            _blk = compute_entry_block_status(OUT_DIR)
+            # [v86] 이번 배치 df_out에 기록된 판정을 읽는다(디스크의 어제 CSV가 아니라).
+            _blk = compute_entry_block_status(OUT_DIR, df=df_out, batch_ymd=trade_ymd)
             _nb = int(pd.to_numeric(df_out.get("NEW_ENTRY_BLOCKED", 0),
                                     errors="coerce").fillna(0).astype(bool).sum())
             _tp = int(pd.to_numeric(df_out.get("TOP_PICK", 0),

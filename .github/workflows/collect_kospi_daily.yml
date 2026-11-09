@@ -68,7 +68,9 @@ jobs:
         run: |
           ARGS=""
           if [ -n "${{ inputs.start }}" ]; then ARGS="$ARGS --start ${{ inputs.start }}"; fi
-          if [ -n "${{ inputs.end }}" ]; then ARGS="$ARGS --end ${{ inputs.end }}"; fi
+          # [v86] 수동 dispatch에 end가 있으면 과거 백필 — 기존보다 묵은 결과로 덮어쓰기 허용
+          #   (없으면 수집기가 '묵은 결과 거부'로 exit 1 → 검증·커밋(US 포함)까지 건너뛴다)
+          if [ -n "${{ inputs.end }}" ]; then ARGS="$ARGS --end ${{ inputs.end }} --allow-older"; fi
           python scripts/collect_kospi_daily.py $ARGS
 
       # [v36] 미국 지수(나스닥100·S&P500) 수집 — 알파 오버나이트 피처용.
@@ -77,10 +79,11 @@ jobs:
         run: |
           ARGS=""
           if [ -n "${{ inputs.start }}" ]; then ARGS="$ARGS --start ${{ inputs.start }}"; fi
-          if [ -n "${{ inputs.end }}" ]; then ARGS="$ARGS --end ${{ inputs.end }}"; fi
+          if [ -n "${{ inputs.end }}" ]; then ARGS="$ARGS --end ${{ inputs.end }} --allow-older"; fi
           python scripts/collect_us_daily.py $ARGS || true
 
       - name: 산출물 검증
+        id: verify
         run: |
           if [ ! -f data/kospi_daily.csv ]; then
             echo "::error::data/kospi_daily.csv 생성 실패"
@@ -105,7 +108,40 @@ jobs:
           print(f'✅ 검증 OK: {len(df)}일, 컬럼 {len(df.columns)}개')
           "
 
+      # [v86] 신선도 검사 — 9/18~10/13 kospi_daily.csv가 20260917에서 멈춘 채로 매일
+      #   '성공'했다(us_daily만 갱신돼 커밋이 계속 생겼다). 마지막 행이 '지금(KST) 이전의
+      #   마지막 평일'보다 이르면 잡을 실패시킨다. 휴장일은 data/holiday_skip_YYYYMMDD.json
+      #   마커가 있으면 건너뛴다. 수동 dispatch에 end가 있으면 그 날짜를 넘지 않는다.
+      #   커밋 스텝은 이 검사가 실패해도 돈다(조금이라도 전진했으면 담는다) — 잡만 빨간불.
+      - name: 신선도 검사 (v86)
+        id: fresh
+        env:
+          END_INPUT: ${{ inputs.end }}
+        run: |
+          python -c "
+          import os, datetime as dt
+          import pandas as pd
+          d = pd.read_csv('data/kospi_daily.csv', usecols=['date'], dtype={'date': str})['date']
+          last = str(d.dropna().str.replace('-', '').str[:8].max())
+          now = dt.datetime.now()  # 잡 환경 TZ=Asia/Seoul
+          exp = now.date() - dt.timedelta(days=1)
+          def skip(x):
+              return x.weekday() >= 5 or os.path.exists(f'data/holiday_skip_{x:%Y%m%d}.json')
+          while skip(exp):
+              exp -= dt.timedelta(days=1)
+          exp_s = f'{exp:%Y%m%d}'
+          end_in = (os.environ.get('END_INPUT') or '').strip()
+          if end_in and end_in < exp_s:
+              exp_s = end_in
+          print(f'kospi_daily 마지막 {last} · 기대 최소 {exp_s}')
+          if last < exp_s:
+              print(f'::error::kospi_daily.csv 지연 — 마지막 {last} < 기대 {exp_s} (수집 소스 점검 필요)')
+              raise SystemExit(1)
+          print('✅ 신선도 OK')
+          "
+
       - name: 변경사항 커밋 & 푸시
+        if: always() && steps.verify.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -115,6 +151,33 @@ jobs:
           if git diff --staged --quiet; then
             echo "변경 없음 — 커밋 스킵"
           else
-            git commit -m "data: KOSPI/US daily 갱신 ($(date +%Y-%m-%d))"
-            git push
+            # [v86] 메시지에는 시계 날짜가 아니라 데이터 날짜(마지막 행)를 쓴다 —
+            #   금요일 데이터를 토요일 0시에 커밋하면 '(2026-11-07)'로 찍혀 헷갈렸다.
+            DATA_DATE=$(python -c "import pandas as pd; print(pd.read_csv('data/kospi_daily.csv', usecols=['date'], dtype={'date': str})['date'].max())")
+            git commit -m "data: KOSPI/US daily 갱신 (data ${DATA_DATE}, written $(date +'%Y-%m-%d %H:%M %Z'))"
+            # [v86] 야간 배치(auto_collect)도 이제 같은 파일을 커밋한다 — 밀렸으면 다시 얹는다.
+            #   rebase가 충돌하면(auto_collect가 같은 파일을 먼저 푸시) 커밋을 버리고 초록불로 끝내지
+            #   않는다: 새 base에서 한 번 다시 얹되, 원격보다 묵은 파일은 덮지 않는다. 그래도 안 되면 빨간불.
+            if ! git pull --rebase origin main; then
+              git rebase --abort || true
+              echo "::warning::rebase 충돌 — 최신 main 위에서 한 번 재시도"
+              mkdir -p "$RUNNER_TEMP/v86_daily"
+              cp data/kospi_daily.csv "$RUNNER_TEMP/v86_daily/"
+              if [ -f data/us_daily.csv ]; then cp data/us_daily.csv "$RUNNER_TEMP/v86_daily/"; fi
+              git fetch origin main
+              git reset --hard origin/main
+              for f in kospi_daily.csv us_daily.csv; do
+                [ -f "$RUNNER_TEMP/v86_daily/$f" ] || continue
+                if python scripts/daily_csv_newer.py "$RUNNER_TEMP/v86_daily/$f" "data/$f"; then
+                  cp "$RUNNER_TEMP/v86_daily/$f" "data/$f"
+                  git add -f "data/$f"
+                fi
+              done
+              if git diff --staged --quiet; then
+                echo "원격이 이미 같거나 더 새로움 — 커밋 스킵"
+                exit 0
+              fi
+              git commit -m "data: KOSPI/US daily 갱신 (data ${DATA_DATE}, written $(date +'%Y-%m-%d %H:%M %Z'))"
+            fi
+            git push || { echo "::error::KOSPI/US daily 푸시 실패 — 갱신 유실"; exit 1; }
           fi

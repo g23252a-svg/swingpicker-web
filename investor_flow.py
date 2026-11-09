@@ -29,6 +29,21 @@ except ImportError:
     PYKRX_OK = False
 
 
+# [v86] 마지막 호출의 출처 메타 — run_health가 FLOW를 정직하게 보고하게 한다.
+#   source: kis_cache(flow_{ymd}.json) | kis_cache_latest(같은 날짜의 latest) | pykrx | none
+#   cache_ymd_mismatch: flow_cache_latest.json이 있었지만 날짜가 달라 쓰지 않았음
+_LAST_FETCH_META: Dict[str, object] = {}
+
+
+def last_fetch_meta() -> Dict[str, object]:
+    """[v86] 직전 fetch_investor_net_buying 호출의 출처 메타(복사본)."""
+    return dict(_LAST_FETCH_META)
+
+
+def _cache_ymd(raw: dict) -> str:
+    return str(raw.get("ymd") or "").replace("-", "")[:8]
+
+
 def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
     """
     해당 일자의 외국인, 기관, 개인 순매수금액(원)을 가져옵니다.
@@ -39,19 +54,53 @@ def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int],
       2. pykrx 실시간 조회
     """
     # ── KIS 캐시 우선 로드 ──
+    # [v86] flow_cache_latest.json은 그 안의 ymd가 요청일과 같을 때만 쓴다.
+    #   11/02 배치는 flow_20261102.json이 없자 다른 날짜의 latest를 조용히 읽고도
+    #   run_health FLOW=OK였다. 날짜가 다르면 경고를 남기고 pykrx 폴백으로 간다.
+    ymd = str(ymd)
+    meta: Dict[str, object] = {"ymd": ymd, "source": "none", "cache_ymd": None,
+                               "cache_ymd_mismatch": False}
+    _LAST_FETCH_META.clear()
+    _LAST_FETCH_META.update(meta)
     _cp = pathlib.Path(f"data/flow_{ymd}.json")
+    _src = "kis_cache"
     if not _cp.exists():
         _cp = pathlib.Path("data/flow_cache_latest.json")
+        _src = "kis_cache_latest"
+    _raw = None
     if _cp.exists():
         try:
             _raw = json.loads(_cp.read_text(encoding="utf-8"))
-            _mf = {k: int(v) for k, v in _raw.get("frg", {}).items()}
-            _mi = {k: int(v) for k, v in _raw.get("inst", {}).items()}
-            _ma = {k: int(v) for k, v in _raw.get("ant", {}).items()}
-            logger.info(f"📊 [수급] 캐시 로드: 외인 {len(_mf)}건 기관 {len(_mi)}건")
-            return _mf, _mi, _ma
         except Exception as _e:
             logger.warning(f"flow 캐시 로드 실패: {_e}")
+            _raw = None
+    if isinstance(_raw, dict):
+        _cy = _cache_ymd(_raw)
+        meta["cache_ymd"] = _cy or None
+        _usable = True
+        if _cy and _cy != ymd:
+            # 날짜가 박힌 캐시가 다른 날짜를 담고 있으면 쓰지 않는다
+            _usable = False
+            logger.warning(f"⚠️ [v86] 수급 캐시 날짜 불일치 — {_cp.name} ymd={_cy} ≠ 요청 {ymd} "
+                           f"→ 캐시 미사용, pykrx 폴백")
+        elif not _cy and _src == "kis_cache_latest":
+            _usable = False
+            logger.warning(f"⚠️ [v86] flow_cache_latest.json에 ymd 없음 — 요청 {ymd}와 "
+                           f"같은 날짜인지 확인 불가 → 캐시 미사용, pykrx 폴백")
+        if not _usable:
+            meta["cache_ymd_mismatch"] = True
+            _LAST_FETCH_META.update(meta)
+        else:
+            try:
+                _mf = {k: int(v) for k, v in _raw.get("frg", {}).items()}
+                _mi = {k: int(v) for k, v in _raw.get("inst", {}).items()}
+                _ma = {k: int(v) for k, v in _raw.get("ant", {}).items()}
+                logger.info(f"📊 [수급] 캐시 로드({_cp.name}): 외인 {len(_mf)}건 기관 {len(_mi)}건")
+                meta["source"] = _src
+                _LAST_FETCH_META.update(meta)
+                return _mf, _mi, _ma
+            except Exception as _e:
+                logger.warning(f"flow 캐시 해석 실패: {_e}")
 
     # ── pykrx 폴백 ──
     if not PYKRX_OK or stock is None:
@@ -85,4 +134,6 @@ def fetch_investor_net_buying(ymd: str) -> Tuple[Dict[str, int], Dict[str, int],
     except Exception as e:
         logger.warning(f"⚠️ 수급 데이터 수집 실패: {e}")
 
+    if frg or inst or ant:
+        _LAST_FETCH_META["source"] = "pykrx"
     return frg, inst, ant

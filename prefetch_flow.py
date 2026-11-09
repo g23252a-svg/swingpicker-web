@@ -16,6 +16,36 @@ def _last_weekday(d):
         d -= timedelta(days=1)
     return d.strftime("%Y%m%d")
 
+def batch_target(now=None):
+    """[v86] scripts/batch_target.sh와 같은 창 규칙으로 수급 파일 날짜(거래일)를 정한다.
+
+    예전엔 _last_weekday(now)(시계 날짜)를 써서, 11/02 prefetch가 11/03 01:27에 돌며
+    flow_20261103.json을 썼고 다음 날 11/03 prefetch가 그것을 덮어써 flow_20261102.json이
+    영영 생기지 않았다(11/02 배치는 다른 날짜의 latest 캐시로 조용히 폴백).
+      16:00~24:00 평일  → ("evening", 오늘)
+      00:00~08:00       → ("overnight", 직전 평일)
+      15:30~16:00 평일  → ("postclose", 오늘)  ← cron 35 6(15:35 KST)이 제때 돌 때. 장 마감 뒤라
+                           그날 수급이다. batch_target.sh는 이 구간을 market으로 보지만
+                           거기선 auto_collect 가드용이라 수급 선수집과 목적이 다르다.
+      그 밖(장중·주말 저녁) → (window, None)  — 수집하지 않는다.
+    반환: (window, ymd 또는 None)
+    """
+    now = now or datetime.now()  # 워크플로 TZ=Asia/Seoul
+    h, dow = now.hour, now.weekday()
+    if h >= 16:
+        if dow >= 5:
+            return "weekend", None
+        return "evening", now.strftime("%Y%m%d")
+    if h < 8:
+        d = now - timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+        return "overnight", d.strftime("%Y%m%d")
+    if dow < 5 and (h, now.minute) >= (15, 30):
+        return "postclose", now.strftime("%Y%m%d")
+    return ("weekend" if dow >= 5 else "market"), None
+
+
 def _kis_get_token(app_key, app_secret):
     import requests
     try:
@@ -145,7 +175,15 @@ def _collect_full_universe(token):
 
 
 if __name__=="__main__":
-    ymd = sys.argv[1] if len(sys.argv)>1 else _last_weekday(datetime.now())
+    # [v86] 인자 > BATCH_TARGET 환경변수 > 창 규칙(batch_target). 시계 날짜는 쓰지 않는다.
+    ymd = (sys.argv[1].strip() if len(sys.argv) > 1 and sys.argv[1].strip() else "") \
+        or os.environ.get("BATCH_TARGET", "").strip()
+    if not ymd:
+        _win, ymd = batch_target()
+        if not ymd:
+            log.info(f"[v86] {_win} 창 — 대상 세션 없음, 수급 선수집 생략")
+            sys.exit(0)
+        log.info(f"[v86] 창 {_win} → 수급 기준일 {ymd}")
     _tok = None
     if os.environ.get("KIS_APP_KEY") and os.environ.get("KIS_APP_SECRET"):
         _tok = _kis_get_token(os.environ["KIS_APP_KEY"], os.environ["KIS_APP_SECRET"])

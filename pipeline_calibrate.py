@@ -770,7 +770,9 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
         import os as _os
 
         _kospi_path = _os.path.join(getattr(_MCFG, "out_dir", "data"), "kospi_daily.csv")
-        _risk_off, _regime = compute_market_risk_off(_kospi_path)
+        # [v86] asof=trade_ymd — 배치 기준일의 종가로 판정(연구 백테스트와 같은 규칙).
+        #   kospi_daily가 그날 종가를 아직 못 받았으면 info['stale']로 드러난다(판정은 유지).
+        _risk_off, _regime = compute_market_risk_off(_kospi_path, asof=ctx.trade_ymd or None)
         df_out = apply_momentum_lane(df_out, market_risk_off=_risk_off, config=_MCFG)
 
         _ms = momentum_summary(df_out)
@@ -791,8 +793,15 @@ def run_calibration(ctx: PipelineContext) -> PipelineContext:
         import os as _os2
 
         _kp2 = _os2.path.join(getattr(_SCFG, "out_dir", "data"), "kospi_daily.csv")
-        _ro2, _ = _cmro2(_kp2)
-        df_out = apply_stop_override(df_out, market_risk_off=_ro2, config=_SCFG)
+        _ro2, _ro2_info = _cmro2(_kp2, asof=ctx.trade_ymd or None)
+        # [v86] 판정 시점(RISK_OFF_ASOF/STALE)을 행에 남기고, run_health가 KOSPI_STALE을
+        #   보고할 수 있게 ctx에도 둔다.
+        ctx.risk_off_info = dict(_ro2_info)
+        ctx.risk_off_info["risk_off"] = bool(_ro2)
+        df_out = apply_stop_override(df_out, market_risk_off=_ro2, config=_SCFG,
+                                     risk_off_info=_ro2_info)
+        if _ro2_info.get("stale"):
+            log(f"⚠️ [v86] risk_off 판정 KOSPI 지연 — {_ro2_info.get('reason')}")
 
         _ss = stop_override_summary(df_out)
         log(

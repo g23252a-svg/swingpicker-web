@@ -41,6 +41,14 @@ STOP_OVERRIDE_COLS = [
     "STOP_OVERRIDE_REASON",   # 사람이 읽는 사유
 ]
 
+# [v86] risk_off 판정의 시점 기록 — 화면(services/entry_block_status)이 다시 계산하지 않고
+#   배치가 실제로 쓴 판정을 그대로 읽게 한다(재계산하면 kospi 갱신 뒤 화면과 CSV가 어긋난다).
+#   risk_off_info를 넘긴 호출에서만 붙는다(계약 컬럼 STOP_OVERRIDE_COLS와 분리).
+RISK_OFF_STATE_COLS = [
+    "RISK_OFF_ASOF",          # 판정에 실제로 쓴 KOSPI 날짜 YYYYMMDD ("" = 모름)
+    "RISK_OFF_STALE",         # 그 날짜가 배치 기준일보다 1영업일 이상 늦으면 True
+]
+
 
 # ───────────────────────── 안전한 컬럼 접근 ─────────────────────────
 def _num(df: pd.DataFrame, col: str, default: float = 0.0) -> pd.Series:
@@ -84,8 +92,12 @@ def apply_stop_override(
     df: pd.DataFrame,
     market_risk_off: bool = False,
     config=None,
+    risk_off_info: dict | None = None,
 ) -> pd.DataFrame:
     """공식 신호의 손절가를 진입가 -stop_pct로 교정. read-only(STOP_OVERRIDE_* 추가).
+
+    [v86] risk_off_info(compute_market_risk_off의 info)를 주면 RISK_OFF_ASOF/RISK_OFF_STALE을
+    전 행에 기록한다. 판정 자체는 market_risk_off 그대로다(지연이어도 막지 않는다).
 
     · 강세/중립: TOP_PICK/BUY_NOW_ELIGIBLE 행에 STOP_OVERRIDE_PRICE = 추천매수가×(1-stop_pct)
     · 베어(market_risk_off): override 미적용(추천손절 복귀) + NEW_ENTRY_BLOCKED=True
@@ -101,6 +113,9 @@ def apply_stop_override(
     out["STOP_OVERRIDE_PCT"] = 0.0
     out["NEW_ENTRY_BLOCKED"] = False
     out["STOP_OVERRIDE_REASON"] = ""
+    if risk_off_info is not None:
+        out["RISK_OFF_ASOF"] = str(risk_off_info.get("kospi_last") or "")
+        out["RISK_OFF_STALE"] = bool(risk_off_info.get("stale", False))
 
     if n == 0 or not bool(getattr(cfg, "enabled", True)):
         return out

@@ -160,6 +160,8 @@ def check_run_health(
     bench_map: Optional[Dict] = None,
     inv_maps: Optional[Dict] = None,
     trade_ymd: str = "",
+    risk_off_info: Optional[Dict] = None,
+    flow_meta: Optional[Dict] = None,
 ) -> RunHealth:
     """
     파이프라인 결과물 건강 진단
@@ -170,6 +172,8 @@ def check_run_health(
         bench_map: 벤치마크 수익률 맵
         inv_maps: 수급 데이터 맵
         trade_ymd: 기준일
+        risk_off_info: [v86] compute_market_risk_off의 info — stale이면 KOSPI_STALE
+        flow_meta: [v86] investor_flow.last_fetch_meta() — 다른 날짜 캐시를 건너뛴 경우 FLOW 비정상
 
     Returns:
         RunHealth 인스턴스
@@ -224,6 +228,36 @@ def check_run_health(
             h.add_issue("FLOW_ZERO")
             h.set_axis("FLOW", "FAILED_ZERO_FILLED")
             logger.warning("⚠️ [Health] 수급 데이터 0건 → 수급 보정 비활성")
+
+    # ── 3b. [v86] 수급 날짜 정합 ──
+    #   11/02 배치는 flow_20261102.json이 없자 flow_cache_latest.json(다른 날짜)을 읽고도
+    #   FLOW=OK로 보고했다. 이제 investor_flow는 날짜가 다른 캐시를 쓰지 않고, 그 사실을
+    #   메타로 남긴다 — 여기서 OK를 거둔다(뒤늦게 pykrx로 같은 날 수급을 받았으면 OK 유지).
+    if flow_meta and flow_meta.get("cache_ymd_mismatch"):
+        _fmsg = (f"FLOW_CACHE_STALE(cache={flow_meta.get('cache_ymd')}"
+                 f"≠{flow_meta.get('ymd')})")
+        h.warnings.append(_fmsg)
+        _same_day_live = flow_meta.get("source") == "pykrx" and h.axis_status.get("FLOW") == "OK"
+        if not _same_day_live and h.axis_status.get("FLOW") == "OK":
+            # 같은 날 수급을 확인하지 못했는데 OK로 남는 경로를 막는다
+            h.checks["FLOW"] = False
+            h.set_axis("FLOW", "FALLBACK_USED")
+            h.add_issue("FLOW_STALE")
+        logger.warning(f"⚠️ [Health] {_fmsg}")
+
+    # ── 3c. [v86] risk_off 판정 KOSPI 신선도 ──
+    #   판정은 그대로 두되(지연이어도 막지 않는다) 사실을 DEGRADED 사유로 드러낸다.
+    #   asof가 있는데 kospi_last가 없으면(파일 없음·읽기 실패) 종가 없이 판정된 것 — 역시 STALE.
+    _ro_no_close = bool(risk_off_info and risk_off_info.get("asof")
+                        and not risk_off_info.get("kospi_last"))
+    if risk_off_info and (risk_off_info.get("stale") or _ro_no_close):
+        h.add_issue("KOSPI_STALE")
+        h.warnings.append(
+            f"KOSPI_STALE(last={risk_off_info.get('kospi_last')}<"
+            f"asof={risk_off_info.get('asof')})")
+        logger.warning(f"⚠️ [Health] risk_off가 지연 KOSPI로 판정됨: {risk_off_info.get('reason')}")
+    elif risk_off_info and risk_off_info.get("kospi_last"):
+        h.add_ok("KOSPI_FRESH")
 
     # ── 4. 뉴스 ──
     if "NEWS_SCORE" in df.columns:
