@@ -2,6 +2,7 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20260813,445680,큐리옥스바이오시스템즈,🟢 공식 매수,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260917,402340,SK스퀘어,🟢 공식 매수,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
 20260930,079550,LIG디펜스앤에어로스페이스,🟢 공식 매수,SKIP,NOT_FILLED,추천매수가 gap-up으로 체결 불가,,0,
+20261103,035420,NAVER,🟢 공식 매수,SKIP,PENDING,결과 미확정 (측정중),2026-11-04,0,
 20260805,024060,흥구석유,🟢 공식 매수,EXECUTE,EXECUTED,,2026-08-06,0,
 20260811,458870,씨어스,🟢 공식 매수,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-08-12,1,024060
 20260812,000250,삼천당제약,🟢 공식 매수,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-08-13,1,024060
@@ -37,3 +38,5 @@ signal_date,code,name,label,action,skip_reason,skip_reason_detail,fill_date,open
 20261007,000660,SK하이닉스,🟢 공식 매수,SKIP,SLOT_FULL,최대 1포지션 다 찼음,2026-10-08,1,005935
 20261008,090710,휴림로봇,🟢 공식 매수,EXECUTE,EXECUTED,,2026-10-12,0,
 20261013,160980,싸이맥스,🟢 공식 매수,EXECUTE,EXECUTED,,2026-10-14,0,
+20261029,257720,실리콘투,🟢 공식 매수,EXECUTE,EXECUTED,,2026-10-30,0,
+20261030,050890,쏠리드,🟢 공식 매수,EXECUTE,EXECUTED,,2026-11-02,0,
