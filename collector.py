@@ -125,7 +125,12 @@ def load_secrets_to_env():
                         os.environ[ns_key] = sv
 
     except Exception as e:
-        print(f"⚠️ Secrets 로드 실패: {e}")
+        # [v85] print → 로거. shared_log.logger는 아직 import 전이라 같은 이름("LDY_Collector")으로 얻는다.
+        #   logging.warning()(루트 함수)은 금지 — 루트에 basicConfig(WARNING)를 먼저 걸어
+        #   shared_log의 basicConfig(INFO)를 무력화하고 log() INFO 줄이 전부 사라진다.
+        _secrets_logger = logging.getLogger("LDY_Collector")
+        _secrets_logger.warning(
+            f"⚠️ [v85] Secrets 로드 실패 (.streamlit/secrets.toml) — 로컬 키 미주입: {e!r}")
 
 # 실행 초기화 시점에 키 로드
 load_secrets_to_env()
@@ -551,8 +556,18 @@ def prepare_ohlcv_data(
                 ohlcv_map[code] = pd.DataFrame()
 
     # 4) 캐시 저장
+    #    [v85] 휴장일 판정('holiday')이면 저장하지 않는다 — v84 가드(finalize_outputs)는 이 저장
+    #    **뒤에** 돌아서 전일 봉 복제본(팬텀 캐시)이 계속 커밋됐다(10/09). 판정 보류·실패는 저장한다.
+    #    가드가 import·판정 어디서든 깨지면 저장한다(v85 이전 동작) — 실험 모듈이 배치를 멈추면 안 된다.
     if collected_count > 0:
-        save_ohlcv_cache(trade_ymd, ohlcv_map)
+        try:
+            from services.ohlcv_store import cache_write_allowed
+            _cache_ok = cache_write_allowed(ohlcv_map, trade_ymd)[0]
+        except Exception as e:
+            logging.getLogger("collector").warning("[v85] 휴장일 캐시 가드 실패 — 캐시는 저장한다: %s", e)
+            _cache_ok = True
+        if _cache_ok:
+            save_ohlcv_cache(trade_ymd, ohlcv_map)
 
     # [v3.2 #2] 병렬 수집 완료 후 메모리 정리 — 워커 잔여 참조 해제
     del future_to_code
@@ -1237,8 +1252,8 @@ def _load_mcap_cache(out_dir: str) -> Dict[str, float]:
                 data = json.load(f)
             if data:
                 return data
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"⚠️ [v85] 시총 캐시 mcap_cache_latest.json 로드 실패 → recommend CSV 폴백: {e!r}")
 
     # 2순위: 이전 recommend CSV에서 시총 컬럼 복구
     try:
@@ -1252,8 +1267,8 @@ def _load_mcap_cache(out_dir: str) -> Dict[str, float]:
                 mcap = dict(zip(_valid["종목코드"], _valid["시가총액(억원)"]))
                 log(f"📂 [폴백] recommend CSV에서 시총 복구: {len(mcap)}개")
                 return mcap
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"⚠️ [v85] recommend_latest.csv 시총 복구 실패 → 거래대금 추정 폴백: {e!r}")
 
     # 3순위: [v20.0] 거래대금 기반 시총 추정 (API 전면 차단 시 최후 수단)
     # 거래대금은 OHLCV 캐시에서 항상 사용 가능
@@ -1285,8 +1300,8 @@ def _load_mcap_cache(out_dir: str) -> Dict[str, float]:
                 if mcap:
                     log(f"📂 [폴백] 거래대금 기반 시총 추정: {len(mcap)}개 (정확도 낮음, API 복구 필요)")
                     return mcap
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"⚠️ [v85] 거래대금 기반 시총 추정 실패 → 빈 시총 맵: {e!r}")
 
     return {}
 
@@ -1708,8 +1723,10 @@ def pick_top_by_trading_value(date_yyyymmdd: str, top_n: int) -> pd.DataFrame:
                         _snap = pd.read_csv(_snap_path, dtype={"종목코드": str}, usecols=["종목코드", "시장"])
                         _snap_map = dict(zip(_snap["종목코드"].str.zfill(6), _snap["시장"]))
                         df_prev["시장"] = df_prev["종목코드"].map(_snap_map).fillna(df_prev.get("시장", "KOSPI"))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            f"⚠️ [v85] price_snapshot_latest.csv 시장 보강 실패 — 전일 '시장' 라벨 유지"
+                            f"(KOSPI/KOSDAQ 벤치마크 오배정 가능): {e!r}")
 
             df_fallback = df_prev[["종목코드", "시장", "거래대금(원)"]].copy()
             _mkt_dist = dict(df_fallback["시장"].value_counts())
@@ -1847,8 +1864,8 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
                     else:
                         name_map[code] = code
                     time.sleep(0.001) 
-            except Exception:  # [v20.6.4] bare except → typed
-                pass
+            except Exception as e:  # [v20.6.4] bare except → typed
+                logger.warning(f"⚠️ [v85] pykrx 종목명 조회 중단 ({m}, 누적 {len(name_map)}개 확보): {e!r}")
 
     # 3-1. 전부 실패 시 Naver API 병렬 조회 (최종 폴백)
     if not name_map:
@@ -1860,14 +1877,14 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
             try:
                 _prev = pd.read_csv(_prev_path, dtype={"종목코드": str}, usecols=["종목코드"])
                 _target_codes.update(_prev["종목코드"].astype(str).str.zfill(6).tolist())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"⚠️ [v85] Naver 폴백 대상 코드 로드 실패 (recommend_latest.csv): {e!r}")
         if not _target_codes and PYKRX_OK and stock is not None:
             for _m in ["KOSPI", "KOSDAQ"]:
                 try:
                     _target_codes.update(str(t).zfill(6) for t in safe_ticker_list(d, market=_m))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"⚠️ [v85] Naver 폴백 대상 코드 로드 실패 (pykrx {_m}): {e!r}")
 
         if _target_codes:
             def _fetch_name_naver(code):
@@ -1880,8 +1897,9 @@ def get_name_map_cached(d: str) -> Dict[str, str]:
                         nm = r.json().get("stockName", "")
                         if nm and nm != code:
                             return code, nm
-                except Exception:
-                    pass
+                except Exception as e:
+                    # [v85] 종목당 1줄이면 최대 수천 줄 — debug로 남기고 집계는 아래 성공 로그(N건 중)가 맡는다
+                    logger.debug(f"[v85] Naver 종목명 조회 실패 {code}: {e!r}")
                 return code, None
 
             with ThreadPoolExecutor(max_workers=20) as pool:

@@ -1489,7 +1489,10 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     try:
         from run_health import check_run_health, save_health
         _health = check_run_health(df_out, mcap_map=ctx.mcap_map, bench_map=ctx.bench_map,
-            inv_maps=ctx.inv_maps, trade_ymd=trade_ymd)
+            inv_maps=ctx.inv_maps, trade_ymd=trade_ymd,
+            # [v86] KOSPI_STALE · 수급 캐시 날짜 불일치를 보고
+            risk_off_info=getattr(ctx, "risk_off_info", None),
+            flow_meta=getattr(ctx, "flow_meta", None))
         _health.macro_risk = ctx.macro_risk
         _health.market_breadth = ctx.breadth.get("ALL", 50.0)
         df_out = _health.inject_columns(df_out); save_health(_health, OUT_DIR, trade_ymd)
@@ -1914,7 +1917,8 @@ def finalize_outputs(ctx: PipelineContext) -> None:
         try:
             from services.entry_block_status import compute_entry_block_status
 
-            _blk = compute_entry_block_status(OUT_DIR)
+            # [v86] 이번 배치 df_out에 기록된 판정을 읽는다(디스크의 어제 CSV가 아니라).
+            _blk = compute_entry_block_status(OUT_DIR, df=df_out, batch_ymd=trade_ymd)
             _nb = int(pd.to_numeric(df_out.get("NEW_ENTRY_BLOCKED", 0),
                                     errors="coerce").fillna(0).astype(bool).sum())
             _tp = int(pd.to_numeric(df_out.get("TOP_PICK", 0),
@@ -2032,20 +2036,30 @@ def finalize_outputs(ctx: PipelineContext) -> None:
     # ══════════════════════════════════════════════════════════
     #  [v20.6.4] After-market → sidecar 파일로 분리
     #  recommend_latest.csv는 절대 수정하지 않음 (원본 보존)
+    #  [v85] price_snapshot_latest.csv 도 더 이상 덮어쓰지 않는다 — 그 파일은 KRX 일봉
+    #    그대로 남아 portfolio/validation/position_tracker 가격 폴백으로 읽힌다.
+    #    recommend 전 종목을 AH_STATUS(OK/NO_PRINT/FETCH_FAIL)·AH_FINAL 과 함께 기록하고
+    #    aftermarket_prices_{ymd}.csv 로 날짜별 보관(latest 는 같은 사본 — 단 기존 날짜별
+    #    파일의 확정 행이 더 많으면 날짜별은 보존하고 latest 만 갱신).
+    #    연구용 수집만 — 선정/가드에는 쓰지 않는다. 실패해도 배치는 계속.
     # ══════════════════════════════════════════════════════════
     try:
-        from naver_aftermarket import fetch_after_market_prices_sidecar
-        _snl = os.path.join(OUT_DIR, 'price_snapshot_latest.csv')
-        _sidecar_path = os.path.join(OUT_DIR, 'aftermarket_prices_latest.csv')
-        _ac = fetch_after_market_prices_sidecar(op_l, _sidecar_path, _snl)
-        if _ac > 0:
-            log(f'After-market sidecar: {_ac} stocks → {_sidecar_path}')
+        from naver_aftermarket import build_aftermarket_archive
+        _am = build_aftermarket_archive(op_l, trade_ymd, OUT_DIR, tag=ctx.tag)
+        if _am.get("error"):
+            log(f"⚠️ [v85] 시간외 보관 실패 (무해): {_am['error']}")
         else:
-            log('After-market: no changes')
+            _amc = _am.get("counts", {})
+            log(f"🌙 [v85] 시간외 보관 {_am.get('n_rows', 0)}종목 — OK {_amc.get('OK', 0)} · "
+                f"NO_PRINT {_amc.get('NO_PRINT', 0)} · FETCH_FAIL {_amc.get('FETCH_FAIL', 0)} · "
+                f"확정 {_am.get('n_final', 0)} · KRX 기준 {_am.get('krx_snap_src')} "
+                f"({_am.get('elapsed_sec', 0)}s) → {_am.get('dated_path')}"
+                f"{'' if _am.get('dated_written', True) else ' (기존 확정본 유지, latest 만 갱신)'}")
     except ImportError:
         # sidecar 함수 없으면 시간외 업데이트 스킵 (원본 보존 원칙)
         log('After-market: sidecar 함수 없음 — 스킵 (recommend 원본 보존)')
     except Exception as e:
+        logger.warning(f"[v85] After-market archive failed (무해): {e}")
         log(f'After-market sidecar failed: {e}')
 
     # 종목명 매핑

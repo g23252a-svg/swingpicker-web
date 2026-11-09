@@ -26,7 +26,7 @@ LDY Pro Trader를 Streamlit Cloud에서 NiceGUI + Railway로 전환하는 가이
 ├── data/                    ← CSV, 모델 파일 그대로
 
 Phase 3에서 삭제:
-├── dashboard.py             ← Streamlit 버전 (참조용 보관 후 삭제)
+├── dashboard.py             ← Streamlit 버전 — [v85] 삭제 완료 (아래 "레거시 Streamlit 대시보드 제거" 참고)
 ├── .streamlit/              ← Streamlit 설정
 ├── requirements.txt         ← requirements_nicegui.txt로 대체
 ```
@@ -74,6 +74,27 @@ Phase 3 완료 후:
   Railway만 운영 → Streamlit Cloud 비활성화
 ```
 
+### [v85] 레거시 Streamlit 대시보드 제거
+
+- v85에서 구 Streamlit 진입점 `dashboard.py`와 백업 폴더 `backup_v205c_20260310/`
+  (dashboard.py·ml_engine.py·scoring_engine.py·version_info.py 사본)를 저장소에서 **삭제**했습니다.
+  라이브 앱은 Railway의 `main.py`(NiceGUI) 하나뿐이며, Dockerfile·CI·테스트 어디에서도 이 파일들을 쓰지 않았습니다.
+- ⚠️ **운영자 확인 필요:** 위 "전환 기간 안전망"대로 Streamlit Community Cloud 앱이 아직
+  `main` 브랜치의 `dashboard.py`를 가리키고 있다면, 다음 재부팅/재배포 때 파일을 찾지 못해 깨집니다.
+  저장소만으로는 외부 Cloud 앱의 활성 여부를 확인할 수 없으니 Streamlit Cloud 콘솔에서 앱을 비활성화(삭제)하세요.
+- 복구가 필요하면 git 이력에서 꺼내면 됩니다 (삭제 직전 버전 = 삭제 커밋의 부모):
+
+  ```bash
+  # 삭제 커밋 찾기
+  git log --oneline --diff-filter=D -- dashboard.py
+  # 그 커밋의 부모(^)에서 파일 복원
+  git checkout <삭제커밋>^ -- dashboard.py
+  git checkout <삭제커밋>^ -- backup_v205c_20260310/   # 백업 폴더가 필요할 때만
+  ```
+
+  복원한 dashboard.py를 실행하려면 `requirements.txt`(streamlit 포함), `auth_user.py`, `.streamlit/config.toml`이
+  필요합니다 — 이 셋은 v85에서도 그대로 남아 있습니다.
+
 ## Streamlit → NiceGUI 변환 패턴 요약
 
 | Streamlit                      | NiceGUI                                    |
@@ -119,5 +140,5 @@ Phase 3 완료 후:
 ### Phase 3 (1~2일)
 - [ ] Tab4~8 나머지 탭 변환
 - [ ] Streamlit Cloud 비활성화
-- [ ] dashboard.py → 아카이브
+- [x] dashboard.py → 삭제 (v85, git 이력으로 복구 가능)
 - [ ] requirements.txt → requirements_nicegui.txt로 교체

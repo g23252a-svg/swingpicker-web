@@ -32,8 +32,13 @@ except Exception as e:  # pragma: no cover
     raise SystemExit(f"guard_system/collector_config import 실패: {e}")
 
 
+# [v85] 연도 무관 배치 파일 글롭 — 예전 '_2026*' 연도 고정 글롭은 2027년 파일을 못 봐 조용히 동결된다.
+#   정확히 8자리 날짜(YYYYMMDD)만 매칭: *_latest.csv·태그 파일(recommend_YYYYMMDD_tag.csv)은 제외.
+_YMD8_GLOB = "[0-9]" * 8
+
+
 def _snap_dates(data_dir: str):
-    snap_files = sorted(glob.glob(os.path.join(data_dir, "price_snapshot_2026*.csv")))
+    snap_files = sorted(glob.glob(os.path.join(data_dir, f"price_snapshot_{_YMD8_GLOB}.csv")))
     dates = [
         os.path.basename(f).replace("price_snapshot_", "").replace(".csv", "")
         for f in snap_files
@@ -44,7 +49,7 @@ def _snap_dates(data_dir: str):
 def build_guarded_trade_rows(data_dir: str, horizon: int,
                              routes: List[str]) -> pd.DataFrame:
     """recommend × (T+horizon) snapshot 매칭 + GUARD 적용 → 거래행 DataFrame."""
-    rec_files = sorted(glob.glob(os.path.join(data_dir, "recommend_2026*.csv")))
+    rec_files = sorted(glob.glob(os.path.join(data_dir, f"recommend_{_YMD8_GLOB}.csv")))
     snap_dates = _snap_dates(data_dir)
     rows = []
     matched_days = 0

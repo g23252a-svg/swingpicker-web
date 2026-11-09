@@ -21,9 +21,13 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# [v85] 연도 무관 배치 파일 글롭 — 예전 '_2026*' 연도 고정 글롭은 2027년 파일을 못 봐 조용히 동결된다.
+#   정확히 8자리 날짜(YYYYMMDD)만 매칭: *_latest.csv·태그 파일(recommend_YYYYMMDD_tag.csv)은 제외.
+_YMD8_GLOB = "[0-9]" * 8
+
 
 def _snap_dates(data_dir):
-    files = sorted(glob.glob(os.path.join(data_dir, "price_snapshot_2026*.csv")))
+    files = sorted(glob.glob(os.path.join(data_dir, f"price_snapshot_{_YMD8_GLOB}.csv")))
     dates = [os.path.basename(f).replace("price_snapshot_", "").replace(".csv", "")
              for f in files]
     return dates
@@ -52,7 +56,7 @@ def build_rows(data_dir, horizon):
 
     snap_dates = _snap_dates(data_dir)
     d2i = {d: i for i, d in enumerate(snap_dates)}
-    rec_files = sorted(glob.glob(os.path.join(data_dir, "recommend_2026*.csv")))
+    rec_files = sorted(glob.glob(os.path.join(data_dir, f"recommend_{_YMD8_GLOB}.csv")))
 
     rows = []
     risk_off_days = 0

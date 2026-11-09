@@ -40,5 +40,8 @@ class PipelineContext:
 
     # ── 실행 메타 ──
     run_health: Optional[Any] = None
+    # [v86] 시점·신선도 메타 — run_health가 KOSPI_STALE / FLOW 캐시 날짜 불일치를 보고한다.
+    risk_off_info: Optional[Dict[str, Any]] = None
+    flow_meta: Optional[Dict[str, Any]] = None
     enable_telegram: bool = True
     tag: Optional[str] = None

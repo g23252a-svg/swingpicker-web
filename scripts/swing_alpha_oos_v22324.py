@@ -20,6 +20,10 @@ from find_best_historical_alpha_combo_v22322 import (
 
 OUT_DIR = "data"
 
+# [v85] 연도 무관 배치 파일 글롭 — 예전 '_2026*' 연도 고정 글롭은 2027년 파일을 못 봐 조용히 동결된다.
+#   정확히 8자리 날짜(YYYYMMDD)만 매칭: *_latest.csv·태그 파일(recommend_YYYYMMDD_tag.csv)은 제외.
+_YMD8_GLOB = "[0-9]" * 8
+
 SWING_TOPK = 3
 SWING_RR_TP1_MIN = 1.2
 SWING_RR_TP2_MIN = 1.5
@@ -153,7 +157,7 @@ def discover_swing_oos_profile(data_dir: str = OUT_DIR) -> dict:
         return {"oos_pass": False, "reason": "no_ohlc", "desc": "OHLC 없음"}
 
     avset = set(av)
-    recs = sorted(Path(data_dir).glob("recommend_2026*.csv"))
+    recs = sorted(Path(data_dir).glob(f"recommend_{_YMD8_GLOB}.csv"))
     meas = [
         f.name[10:18]
         for f in recs

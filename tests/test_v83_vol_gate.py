@@ -155,7 +155,8 @@ def _shadow_df():
 class TestShadowPicks:
     def test_three_variants_pick_different_rows(self):
         p = {x["variant"]: x["종목명"] for x in SS.pick_today(_shadow_df(), "20260914")}
-        assert p == {"legacy": "A", "live": "B", "lowvol": "C"}
+        # [v86] comp_lowvol·no_alpha·thin_skip 이 추가돼 v83 3종만 비교한다
+        assert {k: p[k] for k in ("legacy", "live", "lowvol")} == {"legacy": "A", "live": "B", "lowvol": "C"}
 
     def test_risk_gate_failure_excluded_everywhere(self):
         df = _shadow_df(); df.loc[df["종목명"] == "D", "V23_ATR_Pct"] = 0.001
@@ -172,14 +173,16 @@ class TestShadowPicks:
         assert SS.append_log(str(tmp_path), rows) is False
         assert SS.append_log(str(tmp_path), SS.pick_today(_shadow_df(), "20260915")) is True
         log = SS.load_log(str(tmp_path))
-        assert len(log) == 6 and log["ymd"].nunique() == 2
+        v83 = log[log["variant"].isin(["legacy", "live", "lowvol"])]   # [v86] 변형 추가
+        assert len(v83) == 6 and log["ymd"].nunique() == 2
 
     def test_build_without_prices_reports_zero_measured(self, tmp_path):
         SS.append_log(str(tmp_path), SS.pick_today(_shadow_df(), "20260914"))
         s = SS.build(str(tmp_path))
         assert s["days_total"] == 1
         assert s["variants"]["live"]["days"] == 0
-        assert "판정 전" in s["verdict"]
+        assert "선등록" in s["verdict"]                     # [v86] TARGET_DAYS=20 문구 대체
+        assert s["statuses"]["lowvol"] == "측정 중 0/40"
         assert SS.line({**s, "today": SS.pick_today(_shadow_df(), "20260914")}).startswith("선별 그림자")
 
     def test_build_measures_realized_and_pairs(self, tmp_path, monkeypatch):
@@ -198,7 +201,7 @@ class TestShadowPicks:
         assert v["legacy"]["days"] == 1 and v["legacy"]["avg_ret_pct"] == pytest.approx(-8.0)
         assert v["live"]["avg_ret_pct"] > 0 and v["lowvol"]["avg_ret_pct"] > 0
         assert s["paired"]["live-legacy"]["diff_pct"] > 0
-        assert "현행−구엔진" in SS.line(s)
+        assert "탐색기" in SS.line(s) and "현행 +" in SS.line(s)   # [v86] 선등록 전 기록은 탐색
 
 
 class TestWiring:

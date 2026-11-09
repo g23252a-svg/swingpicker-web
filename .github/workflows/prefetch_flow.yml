@@ -51,8 +51,18 @@ jobs:
 
       - name: Prefetch investor flow
         id: prefetch
+        env:
+          TRADE_DATE_INPUT: ${{ github.event.inputs.trade_date || '' }}
         run: |
-          python prefetch_flow.py ${{ github.event.inputs.trade_date || '' }}
+          # [v86] 수급 파일 날짜 = 거래일(batch_target.sh 창 규칙), 시계 날짜가 아니다.
+          #   11/02 prefetch가 11/03 01:27에 돌며 flow_20261103.json을 쓰고 다음 날 덮어써져
+          #   flow_20261102.json이 사라졌다. 입력이 없으면 batch_target.sh의 대상 세션을 넘기고,
+          #   그것도 비면(장중·주말) prefetch_flow.py가 같은 규칙으로 판단한다
+          #   (15:30~16:00 장 마감 직후는 당일, 그 밖은 수집 생략).
+          eval "$(bash scripts/batch_target.sh)"
+          echo "창=${BATCH_WINDOW} 대상=${BATCH_TARGET:-없음} 입력=${TRADE_DATE_INPUT:-없음}"
+          export BATCH_TARGET
+          python prefetch_flow.py ${TRADE_DATE_INPUT}
           echo "status=$?" >> $GITHUB_OUTPUT
         continue-on-error: true   # 수급 실패해도 collector는 진행
 
@@ -67,7 +77,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f data/flow_cache_latest.json data/flow_*.json data/flow_full_*.parquet || true
           git diff --staged --quiet || {
-            git commit -m "chore: prefetch flow cache $(date +'%Y-%m-%d %H:%M:%S %Z')"
+            # [v86] 메시지에 수급 기준일(캐시의 ymd)을 먼저 적는다.
+            FLOW_YMD=$(python -c "import json; print(json.load(open('data/flow_cache_latest.json')).get('ymd',''))" 2>/dev/null || echo "")
+            git commit -m "chore: prefetch flow cache ${FLOW_YMD:-unknown} (written $(date +'%Y-%m-%d %H:%M:%S %Z'))"
             git fetch origin main
             git merge origin/main --no-edit -X ours --allow-unrelated-histories || true
             git push origin main

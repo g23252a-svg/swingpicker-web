@@ -47,7 +47,7 @@ def test_missing_final_falls_back_to_display():
 
 def test_real_csv_carry_zero_scores_become_holding():
     files = sorted(glob.glob(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "recommend_2026*.csv")))
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "recommend_" + "[0-9]" * 8 + ".csv")))
     if not files:
         import pytest; pytest.skip("recommend CSV 없음")
     df = pd.read_csv(files[-1], dtype={"종목코드": str})

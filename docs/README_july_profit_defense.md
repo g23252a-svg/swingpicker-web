@@ -1,5 +1,7 @@
 # SwingPicker v3.9.28 July Profit Defense Patch
 
+> [v85] 저장소 루트 → `docs/`로 이동(내용 불변). 아래 명령은 저장소 루트에서 실행합니다. 원본 `july_profit_defense.patch`는 이미 `pipeline_finalize.py`에 반영되어 삭제했습니다(git 이력에 보존).
+
 ## 목적
 최근 손실이 큰 구간에서 `점수 상위`보다 `손실 차단`을 우선하도록 Stage 6 최종 저장 직전에 방어 레이어를 추가했습니다.
 

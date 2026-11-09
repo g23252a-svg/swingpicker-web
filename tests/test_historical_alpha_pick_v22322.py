@@ -86,7 +86,7 @@ def test_oos_discovery_runs_on_real_data():
     # 실데이터 기반 OOS 탐색은 최신 장세/데이터에 따라 통과 룰이 0개일 수 있다.
     # 이 경우 엔진은 fallback으로 동작하는 것이 정상이며, 테스트 실패가 아니라 환경 의존 skip이 맞다.
     data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-    if not glob.glob(os.path.join(data_dir, "ohlcv_cache_2026*.parquet")):
+    if not glob.glob(os.path.join(data_dir, "ohlcv_cache_" + "[0-9]" * 8 + ".parquet")):
         import pytest; pytest.skip("OHLC 없음")
     disc = discover_oos_rules(data_dir)
     rules = disc.get("rules", [])
@@ -103,7 +103,7 @@ def test_oos_discovery_runs_on_real_data():
 def test_honest_stats_not_70pct():
     # 정직성: 채택 룰 승률이 70% 거짓이 아님 (진입일 포함 OOS 실측 37% 내외)
     data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-    if not glob.glob(os.path.join(data_dir, "ohlcv_cache_2026*.parquet")):
+    if not glob.glob(os.path.join(data_dir, "ohlcv_cache_" + "[0-9]" * 8 + ".parquet")):
         import pytest; pytest.skip("OHLC 없음")
     disc = discover_oos_rules(data_dir)
     oos = [r for r in disc.get("rules", []) if r["oos_pass"]]

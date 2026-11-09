@@ -44,3 +44,12 @@ python scripts/analyze_realized_edge.py --data-dir data
 `Dockerfile`과 `railway.toml`을 사용합니다. Railway 서비스에는 최소한 `STORAGE_SECRET`을 설정해야 합니다. No-Buy Breaker는 기본적으로 꺼져 있으며, 손실방어 정책상 `ENABLE_NO_BUY_BREAKER`를 설정하지 않는 것을 권장합니다.
 
 자세한 변경 내용은 [docs/LOSS_DEFENSE_V26.md](docs/LOSS_DEFENSE_V26.md)를 참고하세요.
+
+## 방어 레이어 문서
+
+아직 `pipeline_finalize.py`에서 동작 중인 방어 룰의 사양·운영 기준입니다 (v85에서 저장소 루트 → `docs/`로 이동).
+
+- [docs/README_july_profit_defense.md](docs/README_july_profit_defense.md) — v3.9.28 July Profit Defense (`JULY_PROFIT_*` 차단 조건)
+- [docs/README_profit_recovery_suite_v3929.md](docs/README_profit_recovery_suite_v3929.md) — v3.9.29 Profit Recovery Suite (`PROFIT_RECOVERY_*` 티어·SIZE_MULT ≤ 0.70, 리포트 스크립트)
+
+레거시 Streamlit `dashboard.py`는 v85에서 삭제되었습니다. 복구 방법은 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)를 참고하세요.

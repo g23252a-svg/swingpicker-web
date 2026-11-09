@@ -182,6 +182,39 @@ def _risk_off_state(df: pd.DataFrame) -> dict[str, Any]:
     return out
 
 
+def _align_risk_off_line(risk_off: dict[str, Any]) -> None:
+    """[v86] 해제선 줄·진행률을 판정 기준일(RISK_OFF_ASOF) 수치로 맞춘다.
+
+    _risk_off_state는 kospi_daily의 최신 행을 읽는다. 16:30 일봉 수집이 다음 배치보다
+    먼저 커밋되므로, 매일 저녁 같은 띠 안에서 '판정(어제 종가)'과 '해제선(오늘 종가)'이
+    서로 다른 날짜를 말하게 된다. 시장 판정(market)이 있으면 그 수치로 다시 쓴다.
+    판정 날짜를 모르면(asof_unknown) 진행률·수치를 빼고 일반 안내만 남긴다.
+    """
+    mkt = risk_off.get("market")
+    if not risk_off.get("active") or not isinstance(mkt, dict):
+        return
+    if mkt.get("asof_unknown"):
+        risk_off["line"] = "코스피가 하락 중인 20일선을 회복하면 자동 해제됩니다"
+        risk_off["progress"] = None
+        return
+    if not mkt.get("ok"):
+        return
+    try:
+        close, ma20 = float(mkt["close"]), float(mkt["ma20"])
+        dev_pct = float(mkt["deviation_pct"])
+    except (KeyError, TypeError, ValueError):
+        return
+    if not (ma20 > 0):
+        return
+    unlock = ma20 * 0.97
+    prog = (dev_pct - (-15.0)) / ((-3.0) - (-15.0)) * 100.0
+    risk_off["progress"] = max(0.0, min(100.0, prog))
+    risk_off["line"] = (
+        f"코스피 {close:,.0f} · 해제선 {unlock:,.0f}"
+        f" (20일선 -3% 이내) · 판정일 20일선 대비 {dev_pct:+.1f}%"
+    )
+
+
 def _alpha_gate_on(df: pd.DataFrame) -> bool:
     """[v34] 이 배치가 알파 전면 게이트(v32)로 생성됐는지."""
     if df is None or df.empty or "ALPHA_GATE_ACTIVE" not in df.columns:
@@ -490,6 +523,7 @@ def build_decision_summary(df: pd.DataFrame) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("[v55] 차단 상태 계산 실패 (표시 생략): %s", exc)
         risk_off["market"] = None
+    _align_risk_off_line(risk_off)
     breadth_ready = market_breadth is None or market_breadth >= MARKET_BREADTH_FLOOR
     market_ready = (
         breadth_ready
@@ -942,7 +976,7 @@ def _validation_payload(df: pd.DataFrame, data_dir: str = "data") -> dict[str, A
     """검증 중인 것들의 현재 상태. 전부 표시 전용이며 하나가 깨져도 나머지는 산다."""
     out: dict[str, Any] = {"lane_line": "", "lane_picks": [], "lane_verdict": "",
                            "winner_line": "", "budget_line": "", "stop_lines": [],
-                           "shadow_line": ""}
+                           "shadow_line": "", "shadow_status": ""}
     try:
         from services import quiet_breakout as _qb
         from services import quiet_lane_track as _qt
@@ -985,9 +1019,12 @@ def _validation_payload(df: pd.DataFrame, data_dir: str = "data") -> dict[str, A
     except Exception as e:
         logger.warning(f"[v80] 손절 실체 생략: {e}")
     # [v83] 선별 그림자 3종(구엔진·현행·저변동) — 랭킹 축 판정은 발견 이후 표본으로만.
+    # [v86] 🪞 줄에 선등록 상태(탐색 / 측정 중 n/40 / 승격 후보 / 기각)가 묶여 나오고,
+    #   승격 후보가 생기면 아래 렌더에서 따로 알린다(자동 반영 없음).
     try:
         from services import selection_shadow as _ss
         out["shadow_line"] = _ss.line(_ss.load(data_dir))
+        out["shadow_status"] = _ss.status_line(_ss.load(data_dir))
     except Exception as e:
         logger.warning(f"[v83] 선별 그림자 상태 생략: {e}")
     return out
@@ -1018,6 +1055,9 @@ def _render_validation_loops(payload: dict[str, Any]) -> None:
         if payload.get("shadow_line"):
             ui.label("🪞 " + payload["shadow_line"]).classes(
                 "text-xs text-amber-200 leading-relaxed mt-2")
+            if payload.get("shadow_status") and "승격 후보" in payload["shadow_status"]:
+                ui.label("✅ 선등록 규칙을 통과한 변형이 있습니다 — 자동 반영 없음, 사용자 판정").classes(
+                    "text-[11px] text-emerald-300 leading-relaxed")
         if payload.get("budget_line"):
             ui.label("🧮 " + payload["budget_line"]).classes(
                 "text-xs text-emerald-200 leading-relaxed mt-2")

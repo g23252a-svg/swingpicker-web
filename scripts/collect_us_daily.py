@@ -66,7 +66,8 @@ def _fetch_yfinance(ticker: str, start: str, end: str):
         return None
     try:
         s = datetime.strptime(start, "%Y%m%d").strftime("%Y-%m-%d")
-        e = datetime.strptime(end, "%Y%m%d").strftime("%Y-%m-%d")
+        # [v86] yfinance의 end는 미포함 — end 당일을 받으려면 하루 뒤로 넘긴다.
+        e = (datetime.strptime(end, "%Y%m%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         df = yf.download(ticker, start=s, end=e, progress=False)
         if df is None or df.empty:
             return None
@@ -142,7 +143,9 @@ def merge_us_frames(frames: dict) -> "object":
     return out.sort_values("date").reset_index(drop=True)
 
 
-def collect_us_daily(start: str, end: str, output_path: str) -> bool:
+def collect_us_daily(start: str, end: str, output_path: str,
+                     allow_older: bool = False) -> bool:
+    """[v86] allow_older=True면 기존보다 묵은 결과로도 덮어쓴다(수동 과거 백필 전용)."""
     frames = {}
     for col, (fdr_t, yf_t, stooq_t) in _SYMBOLS.items():
         frames[col] = _fetch_symbol(fdr_t, yf_t, stooq_t, start, end)
@@ -151,6 +154,27 @@ def collect_us_daily(start: str, end: str, output_path: str) -> bool:
     if merged is None or merged.empty:
         _logger.error("미국 지수 수집 실패 — FDR/yfinance/stooq 모두 실패")
         return False
+    # [v86] end 이후 행은 버린다 — 야간 배치는 --end <대상 세션 전날>로 불러
+    #   아직 장중인 미국 날짜(한국 01시 = 미국 장중) 행이 섞이지 않게 한다.
+    merged = merged[merged["date"].astype(str) <= str(end)].reset_index(drop=True)
+    if merged.empty:
+        _logger.error(f"미국 지수 수집 결과가 end={end} 이전에 없음")
+        return False
+    # [v86] 기존 파일보다 묵은 결과로 덮어쓰지 않는다
+    if os.path.exists(output_path):
+        try:
+            import pandas as pd
+            _prev = pd.read_csv(output_path, usecols=["date"], dtype={"date": str})["date"].dropna()
+            _prev_last = str(_prev.max()) if len(_prev) else ""
+        except Exception as e:
+            _logger.warning(f"기존 us_daily 읽기 실패: {e}")
+            _prev_last = ""
+        if _prev_last and str(merged["date"].iloc[-1]) < _prev_last and allow_older:
+            _logger.warning(f"[v86] --allow-older: 기존({_prev_last})보다 묵은 결과로 덮어씀(수동 백필)")
+        elif _prev_last and str(merged["date"].iloc[-1]) < _prev_last:
+            _logger.error(f"미국 지수 수집 결과가 기존보다 묵음 "
+                          f"(새 {merged['date'].iloc[-1]} < 기존 {_prev_last}) — 덮어쓰지 않음")
+            return False
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     merged.to_csv(output_path, index=False, encoding="utf-8-sig")
@@ -174,13 +198,15 @@ def main():
             "data", "us_daily.csv"),
         help="출력 경로",
     )
+    p.add_argument("--allow-older", action="store_true",
+                   help="[v86] 기존 파일보다 묵은 결과로도 덮어씀(수동 과거 백필 전용)")
     args = p.parse_args()
 
     today = datetime.now()
     end = args.end or today.strftime("%Y%m%d")
     start = args.start or (today - timedelta(days=365 * 5)).strftime("%Y%m%d")
 
-    ok = collect_us_daily(start, end, args.output)
+    ok = collect_us_daily(start, end, args.output, allow_older=args.allow_older)
     if not ok:
         # 배치를 깨지 않는다 — 기존 us_daily.csv가 있으면 그대로 사용됨.
         _logger.warning("US daily 수집 실패 — 기존 파일 유지, exit 0")

@@ -11,11 +11,14 @@ scoring_engine.py — 종목 스코어링 + 상태 머신 엔진 (v6.0 Vectorize
   - _vec_determine_state_dynamic(): ROUTE 벡터 판정 (단건 함수 100% 일치)
   - generate_score_reasons(macro_risk): 장세 연동 임계치, numpy argsort 벡터화
 """
+import logging
 import numpy as np
 import pandas as pd
 from shared_utils import nz_num, safe_float
 
 from collector_config import DEFAULT_CONFIG, CollectorConfig
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -1285,7 +1288,8 @@ def compute_elite_score(df: pd.DataFrame,
             with open(sidecar_path, "w", encoding="utf-8") as f:
                 json.dump(sidecar, f, indent=2, ensure_ascii=False, default=str)
             meta["sidecar_path"] = sidecar_path
-        except Exception:
-            pass   # sidecar 실패는 무해
+        except Exception as e:
+            # [v85] 점수엔 무해하지만 daily_briefing의 top_pick_funnel이 그날 비게 된다
+            logger.warning(f"⚠️ [v85] top_pick_funnel_{trade_ymd}.json 저장 실패 ({out_dir}): {e!r}")
 
     return x, meta
