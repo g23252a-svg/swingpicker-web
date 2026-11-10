@@ -1,6 +1,6 @@
 {
-  "asof_ymd": "20261109",
-  "generated_at": "2026-11-10T02:01:19.509666",
+  "asof_ymd": "20261110",
+  "generated_at": "2026-11-11T03:57:17.312577",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
@@ -14,11 +14,11 @@
       {
         "score_lo": 0,
         "score_hi": 50.0,
-        "n_raw": 466,
-        "p_win": 0.3643,
-        "p_win_lcb": 0.3224,
-        "avg_ret_net_pct": -1.5482,
-        "avg_ret_excess_pct": -1.3643
+        "n_raw": 486,
+        "p_win": 0.3694,
+        "p_win_lcb": 0.3286,
+        "avg_ret_net_pct": -1.5584,
+        "avg_ret_excess_pct": -0.8086
       },
       {
         "score_lo": 50,
@@ -32,11 +32,11 @@
       {
         "score_lo": 60,
         "score_hi": 70.0,
-        "n_raw": 16,
-        "p_win": 0.7778,
-        "p_win_lcb": 0.505,
-        "avg_ret_net_pct": 5.0449,
-        "avg_ret_excess_pct": -0.0688
+        "n_raw": 17,
+        "p_win": 0.7895,
+        "p_win_lcb": 0.5274,
+        "avg_ret_net_pct": 4.9467,
+        "avg_ret_excess_pct": 0.8979
       },
       {
         "score_lo": 70,
@@ -70,7 +70,7 @@
     "monotone_avg_ret": false,
     "monotone_avg_ret_excess": false
   },
-  "realized_wr": 0.3643,
+  "realized_wr": 0.3694,
   "realized_wr_top_pick": null,
   "realized_wr_top_pick_n": 0,
   "realized_wr_active": null,
@@ -78,14 +78,14 @@
   "declared_vs_realized_gap_active": null,
   "declared_vs_realized_gap_top_pick": null,
   "declared_vs_realized_gap": null,
-  "avg_ret_excess_pct": -1.7715,
+  "avg_ret_excess_pct": -1.2356,
   "top_pick_funnel": {
-    "trade_ymd": "20261109",
-    "total": 288,
+    "trade_ymd": "20261110",
+    "total": 334,
     "aggressive_funnel": {
-      "total": 288,
+      "total": 334,
       "route_active": 0,
-      "hard_gate": 207,
+      "hard_gate": 233,
       "elite_75": 0,
       "struct_80": 0,
       "timing_70": 0,
@@ -93,9 +93,9 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 288,
+      "total": 334,
       "route_active": 0,
-      "hard_gate": 207,
+      "hard_gate": 233,
       "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
@@ -151,7 +151,7 @@
     {
       "gate": "avg_ret_excess_positive",
       "status": "WARN",
-      "detail": "avg_ret_excess=-1.77%"
+      "detail": "avg_ret_excess=-1.24%"
     },
     {
       "gate": "market_map_coverage_95",
