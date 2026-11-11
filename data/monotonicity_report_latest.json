@@ -1,6 +1,6 @@
 {
-  "asof_ymd": "20261110",
-  "generated_at": "2026-11-11T03:57:17.312577",
+  "asof_ymd": "20261111",
+  "generated_at": "2026-11-12T00:05:10.684009",
   "market_map_coverage": 1.0,
   "market_unknown_count": 0,
   "market_unknown_samples": [],
@@ -80,12 +80,12 @@
   "declared_vs_realized_gap": null,
   "avg_ret_excess_pct": -1.2356,
   "top_pick_funnel": {
-    "trade_ymd": "20261110",
-    "total": 334,
+    "trade_ymd": "20261111",
+    "total": 356,
     "aggressive_funnel": {
-      "total": 334,
+      "total": 356,
       "route_active": 0,
-      "hard_gate": 233,
+      "hard_gate": 187,
       "elite_75": 0,
       "struct_80": 0,
       "timing_70": 0,
@@ -93,9 +93,9 @@
       "final": 0
     },
     "stable_funnel": {
-      "total": 334,
+      "total": 356,
       "route_active": 0,
-      "hard_gate": 233,
+      "hard_gate": 187,
       "elite_70": 0,
       "tp1_7_15": 0,
       "balance_70": 0,
