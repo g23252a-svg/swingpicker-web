@@ -8796,5 +8796,31 @@
       "468530_20261103_TP1_HIT_20261109",
       "468530_20261103_TP2_HIT_20261109"
     ]
+  },
+  {
+    "code": "101360",
+    "name": "에코앤드림",
+    "entry_ymd": "20261105",
+    "entry_px": 9770.0,
+    "qty": 0,
+    "stop_px": 8980.0,
+    "stop_px_initial": 8980.0,
+    "take_px1": 12040.0,
+    "take_px2": 13740.0,
+    "trailing_high": 10190.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261112",
+    "last_close_px": 8720.0,
+    "unrealized_pnl_pct": -10.75,
+    "realized_pnl_pct": -10.75,
+    "close_ymd": "20261112",
+    "close_px": 8720.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "101360_20261105_WARN_DRAWDOWN_20261109",
+      "101360_20261105_WARN_DRAWDOWN_20261110",
+      "101360_20261105_WARN_DRAWDOWN_20261111",
+      "101360_20261105_STOP_HIT_20261112"
+    ]
   }
 ]
