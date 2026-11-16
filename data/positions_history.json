@@ -8822,5 +8822,28 @@
       "101360_20261105_WARN_DRAWDOWN_20261111",
       "101360_20261105_STOP_HIT_20261112"
     ]
+  },
+  {
+    "code": "112610",
+    "name": "씨에스윈드",
+    "entry_ymd": "20261112",
+    "entry_px": 46200.0,
+    "qty": 0,
+    "stop_px": 42500.0,
+    "stop_px_initial": 42500.0,
+    "take_px1": 54800.0,
+    "take_px2": 58100.0,
+    "trailing_high": 49400.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261116",
+    "last_close_px": 42100.0,
+    "unrealized_pnl_pct": -8.87,
+    "realized_pnl_pct": -8.87,
+    "close_ymd": "20261116",
+    "close_px": 42100.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "112610_20261112_STOP_HIT_20261116"
+    ]
   }
 ]
