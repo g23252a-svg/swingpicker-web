@@ -8845,5 +8845,52 @@
     "alerted_events": [
       "112610_20261112_STOP_HIT_20261116"
     ]
+  },
+  {
+    "code": "263860",
+    "name": "지니언스",
+    "entry_ymd": "20261105",
+    "entry_px": 23250.0,
+    "qty": 0,
+    "stop_px": 21350.0,
+    "stop_px_initial": 21350.0,
+    "take_px1": 35200.0,
+    "take_px2": 35950.0,
+    "trailing_high": 38400.0,
+    "status": "CLOSED_TP",
+    "last_check_ymd": "20261117",
+    "last_close_px": 36500.0,
+    "unrealized_pnl_pct": 56.99,
+    "realized_pnl_pct": 56.99,
+    "close_ymd": "20261117",
+    "close_px": 36500.0,
+    "close_reason": "TP2_HIT",
+    "alerted_events": [
+      "263860_20261105_TP1_HIT_20261117",
+      "263860_20261105_TP2_HIT_20261117"
+    ]
+  },
+  {
+    "code": "443670",
+    "name": "에스피소프트",
+    "entry_ymd": "20261116",
+    "entry_px": 5070.0,
+    "qty": 0,
+    "stop_px": 4660.0,
+    "stop_px_initial": 4660.0,
+    "take_px1": 6550.0,
+    "take_px2": 6830.0,
+    "trailing_high": 5730.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261117",
+    "last_close_px": 4660.0,
+    "unrealized_pnl_pct": -8.09,
+    "realized_pnl_pct": -8.09,
+    "close_ymd": "20261117",
+    "close_px": 4660.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "443670_20261116_STOP_HIT_20261117"
+    ]
   }
 ]
