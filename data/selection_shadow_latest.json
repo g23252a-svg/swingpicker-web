@@ -1,7 +1,7 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 42,
+ "days_total": 43,
  "variants": {
   "legacy": {
    "days": 18,
@@ -28,12 +28,12 @@
    "hac_p": 0.6649467339739112
   },
   "ext_lowtv": {
-   "days": 6,
-   "avg_ret_pct": -0.4060913705583751,
-   "win_rate": 0.16666666666666666,
-   "stop_rate": 0.8333333333333334,
-   "hac_t": null,
-   "hac_p": null
+   "days": 19,
+   "avg_ret_pct": -3.8149579207145807,
+   "win_rate": 0.15789473684210525,
+   "stop_rate": 0.7894736842105263,
+   "hac_t": -2.1588214626575537,
+   "hac_p": 0.044611788255827116
   }
  },
  "paired": {
@@ -52,9 +52,9 @@
    "hac_p": 0.08443695592049573
   },
   "ext_lowtv-live": {
-   "days": 3,
-   "diff_pct": 15.18781725888325,
-   "positive_days": 1,
+   "days": 6,
+   "diff_pct": 6.967169303282998,
+   "positive_days": 2,
    "hac_t": null,
    "hac_p": null
   }
@@ -62,7 +62,7 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20261117",
+   "ymd": "20261118",
    "variant": "ext_lowtv",
    "종목코드": "217590",
    "종목명": "티엠씨",
@@ -70,8 +70,8 @@
    "rr": NaN,
    "atr_pct": NaN,
    "vol_pctl": NaN,
-   "ext_score": 0.10590405904059039,
-   "tv_eok": 15.603585
+   "ext_score": 0.0946969696969697,
+   "tv_eok": 16.052595
   }
  ],
  "added": true
