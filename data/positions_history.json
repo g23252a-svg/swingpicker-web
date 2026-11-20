@@ -8892,5 +8892,104 @@
     "alerted_events": [
       "443670_20261116_STOP_HIT_20261117"
     ]
+  },
+  {
+    "code": "002150",
+    "name": "도화엔지니어링",
+    "entry_ymd": "20261026",
+    "entry_px": 5210.0,
+    "qty": 0,
+    "stop_px": 4850.0,
+    "stop_px_initial": 4850.0,
+    "take_px1": 6080.0,
+    "take_px2": 6680.0,
+    "trailing_high": 5500.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261120",
+    "last_close_px": 4845.0,
+    "unrealized_pnl_pct": -7.01,
+    "realized_pnl_pct": -7.01,
+    "close_ymd": "20261120",
+    "close_px": 4845.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "002150_20261026_WARN_DRAWDOWN_20261117",
+      "002150_20261026_WARN_DRAWDOWN_20261118",
+      "002150_20261026_STOP_HIT_20261120"
+    ]
+  },
+  {
+    "code": "0088M0",
+    "name": "메쥬",
+    "entry_ymd": "20261106",
+    "entry_px": 15070.0,
+    "qty": 0,
+    "stop_px": 13860.0,
+    "stop_px_initial": 13860.0,
+    "take_px1": 16760.0,
+    "take_px2": 18300.0,
+    "trailing_high": 17670.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261120",
+    "last_close_px": 13460.0,
+    "unrealized_pnl_pct": -10.68,
+    "realized_pnl_pct": -10.68,
+    "close_ymd": "20261120",
+    "close_px": 13460.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "0088M0_20261106_TP1_HIT_20261111",
+      "0088M0_20261106_WARN_DRAWDOWN_20261117",
+      "0088M0_20261106_WARN_DRAWDOWN_20261118",
+      "0088M0_20261106_STOP_HIT_20261120"
+    ]
+  },
+  {
+    "code": "008830",
+    "name": "대동기어",
+    "entry_ymd": "20261116",
+    "entry_px": 6330.0,
+    "qty": 0,
+    "stop_px": 5820.0,
+    "stop_px_initial": 5820.0,
+    "take_px1": 7620.0,
+    "take_px2": 7880.0,
+    "trailing_high": 6950.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261120",
+    "last_close_px": 5560.0,
+    "unrealized_pnl_pct": -12.16,
+    "realized_pnl_pct": -12.16,
+    "close_ymd": "20261120",
+    "close_px": 5560.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "008830_20261116_WARN_DRAWDOWN_20261118",
+      "008830_20261116_STOP_HIT_20261120"
+    ]
+  },
+  {
+    "code": "077500",
+    "name": "유니퀘스트",
+    "entry_ymd": "20261118",
+    "entry_px": 11400.0,
+    "qty": 0,
+    "stop_px": 10480.0,
+    "stop_px_initial": 10480.0,
+    "take_px1": 14250.0,
+    "take_px2": 16400.0,
+    "trailing_high": 11980.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261120",
+    "last_close_px": 10180.0,
+    "unrealized_pnl_pct": -10.7,
+    "realized_pnl_pct": -10.7,
+    "close_ymd": "20261120",
+    "close_px": 10180.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "077500_20261118_WARN_DRAWDOWN_20261119",
+      "077500_20261118_STOP_HIT_20261120"
+    ]
   }
 ]
