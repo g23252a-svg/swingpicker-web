@@ -1,0 +1,16 @@
+{
+  "trade_ymd": "20261123",
+  "macro_risk": "CRITICAL",
+  "macro_msg": "나스닥 -5.3% [11/20] (CRITICAL)",
+  "market_breadth": 36.8,
+  "pass_ebs": 6,
+  "rec_limit": 3,
+  "n_stocks": 301,
+  "run_status": "DEGRADED",
+  "confidence_score": 90.0,
+  "max_allowed_route": "ARMED",
+  "scoring_axes": "STRUCT+TIMING+SECTOR",
+  "w_struct": 0.688,
+  "w_timing": 0.312,
+  "w_ai": 0.0
+}
