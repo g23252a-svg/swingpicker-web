@@ -8991,5 +8991,31 @@
       "077500_20261118_WARN_DRAWDOWN_20261119",
       "077500_20261118_STOP_HIT_20261120"
     ]
+  },
+  {
+    "code": "002990",
+    "name": "금호건설",
+    "entry_ymd": "20261119",
+    "entry_px": 10190.0,
+    "qty": 0,
+    "stop_px": 9370.0,
+    "stop_px_initial": 9370.0,
+    "take_px1": 12600.0,
+    "take_px2": 13960.0,
+    "trailing_high": 10400.0,
+    "status": "CLOSED_STOP",
+    "last_check_ymd": "20261125",
+    "last_close_px": 8960.0,
+    "unrealized_pnl_pct": -12.07,
+    "realized_pnl_pct": -12.07,
+    "close_ymd": "20261125",
+    "close_px": 8960.0,
+    "close_reason": "STOP_HIT",
+    "alerted_events": [
+      "002990_20261119_WARN_DRAWDOWN_20261120",
+      "002990_20261119_WARN_DRAWDOWN_20261123",
+      "002990_20261119_WARN_DRAWDOWN_20261124",
+      "002990_20261119_STOP_HIT_20261125"
+    ]
   }
 ]

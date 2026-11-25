@@ -1,7 +1,7 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 47,
+ "days_total": 48,
  "variants": {
   "legacy": {
    "days": 19,
@@ -62,16 +62,16 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20261124",
+   "ymd": "20261125",
    "variant": "ext_lowtv",
-   "종목코드": "047920",
-   "종목명": "HLB제약",
+   "종목코드": "006110",
+   "종목명": "삼아알미늄",
    "alpha": NaN,
    "rr": NaN,
    "atr_pct": NaN,
    "vol_pctl": NaN,
-   "ext_score": 0.08743169398907105,
-   "tv_eok": 13.3178325
+   "ext_score": 0.10504672897196261,
+   "tv_eok": 28.527472
   }
  ],
  "added": true
