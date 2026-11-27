@@ -1,7 +1,7 @@
 {
  "live_from": "20260914",
  "target_days": 20,
- "days_total": 49,
+ "days_total": 50,
  "variants": {
   "legacy": {
    "days": 19,
@@ -29,11 +29,11 @@
   },
   "ext_lowtv": {
    "days": 29,
-   "avg_ret_pct": -3.038813912539951,
-   "win_rate": 0.1724137931034483,
-   "stop_rate": 0.6551724137931034,
-   "hac_t": -2.0100417933220993,
-   "hac_p": 0.054150121966377765
+   "avg_ret_pct": -3.672152745515808,
+   "win_rate": 0.13793103448275862,
+   "stop_rate": 0.6896551724137931,
+   "hac_t": -2.175047879044467,
+   "hac_p": 0.03822837407546455
   }
  },
  "paired": {
@@ -52,9 +52,9 @@
    "hac_p": 0.08443695592049573
   },
   "ext_lowtv-live": {
-   "days": 7,
-   "diff_pct": 5.971859402813998,
-   "positive_days": 2,
+   "days": 6,
+   "diff_pct": 3.9060316105663575,
+   "positive_days": 1,
    "hac_t": null,
    "hac_p": null
   }
@@ -62,16 +62,16 @@
  "verdict": "판정 전 — 20 거래일 후 사용자 판정",
  "today": [
   {
-   "ymd": "20261126",
+   "ymd": "20261127",
    "variant": "ext_lowtv",
-   "종목코드": "388210",
-   "종목명": "씨엠티엑스",
+   "종목코드": "000155",
+   "종목명": "두산우",
    "alpha": NaN,
    "rr": NaN,
    "atr_pct": NaN,
    "vol_pctl": NaN,
-   "ext_score": 0.09205175600739371,
-   "tv_eok": 22.708315
+   "ext_score": 0.07921146953405019,
+   "tv_eok": 19.36429
   }
  ],
  "added": true
